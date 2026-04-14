@@ -9,13 +9,13 @@ DB_PORT="${DB_PORT:-5432}"
 POSTGRES_SERVICE="${POSTGRES_SERVICE:-postgresql}"
 
 if [[ "${EUID}" -ne 0 ]]; then
-  echo "Ce script doit etre execute en root. / This script must be run as root." >&2
+  echo "This script must be run as root." >&2
   exit 1
 fi
 
 export DEBIAN_FRONTEND=noninteractive
 
-if ! command -v psql >/dev/null 2>&1; then
+if ! command -v psql >/dev/null 2>&1 || ! systemctl list-unit-files "${POSTGRES_SERVICE}.service" >/dev/null 2>&1; then
   apt-get update
   apt-get install -y --no-install-recommends postgresql postgresql-client
 fi
@@ -24,7 +24,7 @@ systemctl enable "${POSTGRES_SERVICE}" >/dev/null 2>&1 || true
 systemctl start "${POSTGRES_SERVICE}"
 
 if ! id -u postgres >/dev/null 2>&1; then
-  echo "Utilisateur postgres introuvable. / postgres user not found." >&2
+  echo "postgres user not found." >&2
   exit 1
 fi
 
@@ -50,5 +50,5 @@ SQL
 run_as_postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" | grep -q 1 || \
   run_as_postgres createdb --owner="${DB_USER}" "${DB_NAME}"
 
-echo "Initialisation PostgreSQL terminee. / PostgreSQL bootstrap complete."
-echo "Chaine de connexion / Connection string: postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+echo "PostgreSQL bootstrap complete."
+echo "Connection string: postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
