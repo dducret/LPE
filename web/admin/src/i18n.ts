@@ -10,152 +10,21 @@ export const localeLabels: Record<Locale, string> = {
   es: "Espanol"
 };
 
-export const messages = {
-  en: {
-    eyebrow: "La Poste ELectronique",
-    title: "Administration Console",
-    body: "Initial back-office entry point to manage accounts, domains, quotas, and policies.",
-    languageLabel: "Language",
-    apiStatusTitle: "API status",
-    apiStatusBody: "The administration console is served by nginx and consumes the local Rust API through /api/.",
-    serviceHealthy: "Service healthy",
-    serviceUnhealthy: "Service degraded",
-    localAiTitle: "Local AI readiness",
-    localAiBody: "The backend already exposes a local-only AI health probe and a bootstrap summary payload.",
-    adminAccountTitle: "Bootstrap administrator",
-    adminAccountBody: "Default bootstrap identity returned by the current API surface.",
-    attachmentTitle: "Indexed attachment formats",
-    attachmentBody: "Formats currently exposed by the attachment capability endpoint.",
-    loading: "Loading live status...",
-    failed: "Unable to reach the administration API through nginx.",
-    providerLabel: "Provider",
-    modelsLabel: "Models",
-    endpointLabel: "Endpoint",
-    openApiLabel: "Open API health endpoint"
-  },
-  fr: {
-    eyebrow: "La Poste ELectronique",
-    title: "Console d'administration",
-    body: "Point d'entree initial du back office pour piloter comptes, domaines, quotas et politiques.",
-    languageLabel: "Langue",
-    apiStatusTitle: "Etat de l'API",
-    apiStatusBody: "La console d'administration est servie par nginx et consomme l'API Rust locale via /api/.",
-    serviceHealthy: "Service operationnel",
-    serviceUnhealthy: "Service degrade",
-    localAiTitle: "Preparation IA locale",
-    localAiBody: "Le backend expose deja une sonde d'etat IA locale et une charge utile de resume d'amorcage.",
-    adminAccountTitle: "Administrateur d'amorcage",
-    adminAccountBody: "Identite d'amorcage par defaut renvoyee par la surface API actuelle.",
-    attachmentTitle: "Formats de pieces jointes indexes",
-    attachmentBody: "Formats actuellement exposes par le endpoint de capacites des pieces jointes.",
-    loading: "Chargement de l'etat en direct...",
-    failed: "Impossible de joindre l'API d'administration via nginx.",
-    providerLabel: "Fournisseur",
-    modelsLabel: "Modeles",
-    endpointLabel: "Endpoint",
-    openApiLabel: "Ouvrir le endpoint de sante API"
-  },
-  de: {
-    eyebrow: "La Poste ELectronique",
-    title: "Administrationskonsole",
-    body: "Erster Backoffice-Einstiegspunkt zur Verwaltung von Konten, Domains, Quoten und Richtlinien.",
-    languageLabel: "Sprache",
-    apiStatusTitle: "API-Status",
-    apiStatusBody: "Die Administrationskonsole wird von nginx ausgeliefert und nutzt die lokale Rust-API ueber /api/.",
-    serviceHealthy: "Dienst verfuegbar",
-    serviceUnhealthy: "Dienst beeintraechtigt",
-    localAiTitle: "Lokale KI-Bereitschaft",
-    localAiBody: "Das Backend bietet bereits einen lokalen KI-Health-Check und eine Bootstrap-Zusammenfassung.",
-    adminAccountTitle: "Bootstrap-Administrator",
-    adminAccountBody: "Standard-Bootstrap-Identitaet der aktuellen API-Oberflaeche.",
-    attachmentTitle: "Indizierte Anhangsformate",
-    attachmentBody: "Formate, die aktuell ueber den Attachment-Capability-Endpunkt gemeldet werden.",
-    loading: "Live-Status wird geladen...",
-    failed: "Die Administrations-API ist ueber nginx nicht erreichbar.",
-    providerLabel: "Provider",
-    modelsLabel: "Modelle",
-    endpointLabel: "Endpunkt",
-    openApiLabel: "API-Health-Endpunkt oeffnen"
-  },
-  it: {
-    eyebrow: "La Poste ELectronique",
-    title: "Console di amministrazione",
-    body: "Punto di accesso iniziale del back office per gestire account, domini, quote e criteri.",
-    languageLabel: "Lingua",
-    apiStatusTitle: "Stato API",
-    apiStatusBody: "La console di amministrazione e servita da nginx e usa l'API Rust locale tramite /api/.",
-    serviceHealthy: "Servizio operativo",
-    serviceUnhealthy: "Servizio degradato",
-    localAiTitle: "Prontezza IA locale",
-    localAiBody: "Il backend espone gia un controllo di salute IA locale e un payload di riepilogo bootstrap.",
-    adminAccountTitle: "Amministratore bootstrap",
-    adminAccountBody: "Identita bootstrap predefinita restituita dall'attuale superficie API.",
-    attachmentTitle: "Formati allegati indicizzati",
-    attachmentBody: "Formati attualmente esposti dall'endpoint delle capacita allegati.",
-    loading: "Caricamento dello stato in tempo reale...",
-    failed: "Impossibile raggiungere l'API di amministrazione tramite nginx.",
-    providerLabel: "Provider",
-    modelsLabel: "Modelli",
-    endpointLabel: "Endpoint",
-    openApiLabel: "Apri endpoint salute API"
-  },
-  es: {
-    eyebrow: "La Poste ELectronique",
-    title: "Consola de administracion",
-    body: "Punto de entrada inicial del back office para gestionar cuentas, dominios, cuotas y politicas.",
-    languageLabel: "Idioma",
-    apiStatusTitle: "Estado de la API",
-    apiStatusBody: "La consola de administracion se sirve con nginx y consume la API Rust local a traves de /api/.",
-    serviceHealthy: "Servicio operativo",
-    serviceUnhealthy: "Servicio degradado",
-    localAiTitle: "Preparacion IA local",
-    localAiBody: "El backend ya expone una sonda de salud de IA local y una carga util de resumen de bootstrap.",
-    adminAccountTitle: "Administrador bootstrap",
-    adminAccountBody: "Identidad bootstrap predeterminada devuelta por la superficie actual de la API.",
-    attachmentTitle: "Formatos de adjuntos indexados",
-    attachmentBody: "Formatos expuestos actualmente por el endpoint de capacidades de adjuntos.",
-    loading: "Cargando estado en vivo...",
-    failed: "No se puede acceder a la API de administracion a traves de nginx.",
-    providerLabel: "Proveedor",
-    modelsLabel: "Modelos",
-    endpointLabel: "Endpoint",
-    openApiLabel: "Abrir endpoint de salud API"
-  }
-} satisfies Record<
-  Locale,
-  {
-    eyebrow: string;
-    title: string;
-    body: string;
-    languageLabel: string;
-    apiStatusTitle: string;
-    apiStatusBody: string;
-    serviceHealthy: string;
-    serviceUnhealthy: string;
-    localAiTitle: string;
-    localAiBody: string;
-    adminAccountTitle: string;
-    adminAccountBody: string;
-    attachmentTitle: string;
-    attachmentBody: string;
-    loading: string;
-    failed: string;
-    providerLabel: string;
-    modelsLabel: string;
-    endpointLabel: string;
-    openApiLabel: string;
-  }
->;
+type MessageSet = {
+  eyebrow: string; title: string; subtitle: string; languageLabel: string; refresh: string; serviceHealthy: string; serviceUnhealthy: string; bannerBody: string; openApiLabel: string; loading: string; failed: string; accountsTitle: string; accountsDetail: string; domainsTitle: string; aliasesDetail: string; storageTitle: string; storageDetail: string; queueTitle: string; aiEnabled: string; aiDisabled: string; identitySectionTitle: string; routingSectionTitle: string; platformSectionTitle: string; operationsTitle: string; operationsSectionTitle: string; settingsTitle: string; auditTitle: string; auditSectionTitle: string; create: string; save: string; createAccount: string; createMailbox: string; createDomain: string; createAlias: string; accountCreated: string; mailboxCreated: string; domainCreated: string; aliasCreated: string; serverSaved: string; securitySaved: string; localAiSaved: string; emailLabel: string; nameLabel: string; quotaLabel: string; accountLabel: string; mailboxLabel: string; roleLabel: string; retentionLabel: string; domainLabel: string; defaultQuotaLabel: string; inboundLabel: string; outboundLabel: string; sourceLabel: string; targetLabel: string; kindLabel: string; statusLabel: string; enabledLabel: string; disabledLabel: string; serverSettingsTitle: string; hostnameLabel: string; localeDefaultLabel: string; adminBindLabel: string; smtpBindLabel: string; imapBindLabel: string; jmapBindLabel: string; maxMessageLabel: string; tlsModeLabel: string; securityTitle: string; passwordLoginLabel: string; mfaLabel: string; sessionTimeoutLabel: string; auditRetentionLabel: string; localAiTitle: string; localAiEnabledLabel: string; offlineOnlyLabel: string; indexingLabel: string; providerLabel: string; modelLabel: string; primaryStoreLabel: string; searchLabel: string; replicationLabel: string; messagesLabel: string; daysLabel: string;
+};
+
+export const messages: Record<Locale, MessageSet> = {
+  en: { eyebrow: "La Poste ELectronique", title: "Administration Console", subtitle: "Unified control plane for mailboxes, identities, routing, protocols, and local AI readiness.", languageLabel: "Language", refresh: "Refresh", serviceHealthy: "Control plane healthy", serviceUnhealthy: "Control plane degraded", bannerBody: "The console uses the Rust administration API behind nginx and exposes a broader operational surface than the initial smoke test.", openApiLabel: "Open dashboard API", loading: "Loading administration workspace...", failed: "Unable to reach the administration API.", accountsTitle: "Accounts", accountsDetail: "{count} managed mailboxes", domainsTitle: "Domains", aliasesDetail: "{count} aliases configured", storageTitle: "Storage", storageDetail: "{count} indexed attachment formats", queueTitle: "Queues", aiEnabled: "Local AI enabled", aiDisabled: "Local AI disabled", identitySectionTitle: "Accounts and mailboxes", routingSectionTitle: "Domains and aliases", platformSectionTitle: "Server policies", operationsTitle: "Operations", operationsSectionTitle: "Protocols and storage posture", settingsTitle: "Settings", auditTitle: "Audit", auditSectionTitle: "Recent control plane activity", create: "Create", save: "Save", createAccount: "Create account", createMailbox: "Create mailbox", createDomain: "Create domain", createAlias: "Create alias", accountCreated: "Account created.", mailboxCreated: "Mailbox created.", domainCreated: "Domain created.", aliasCreated: "Alias created.", serverSaved: "Server settings updated.", securitySaved: "Security settings updated.", localAiSaved: "Local AI settings updated.", emailLabel: "Email", nameLabel: "Display name", quotaLabel: "Quota (MB)", accountLabel: "Account", mailboxLabel: "Mailbox", roleLabel: "Role", retentionLabel: "Retention (days)", domainLabel: "Domain", defaultQuotaLabel: "Default quota (MB)", inboundLabel: "Inbound mail", outboundLabel: "Outbound mail", sourceLabel: "Source", targetLabel: "Target", kindLabel: "Kind", statusLabel: "Status", enabledLabel: "Enabled", disabledLabel: "Disabled", serverSettingsTitle: "Server bindings", hostnameLabel: "Primary hostname", localeDefaultLabel: "Default locale", adminBindLabel: "Admin API bind", smtpBindLabel: "SMTP bind", imapBindLabel: "IMAP bind", jmapBindLabel: "JMAP bind", maxMessageLabel: "Max message size (MB)", tlsModeLabel: "TLS mode", securityTitle: "Security policies", passwordLoginLabel: "Password login enabled", mfaLabel: "MFA required for admins", sessionTimeoutLabel: "Session timeout (minutes)", auditRetentionLabel: "Audit retention (days)", localAiTitle: "Local AI policies", localAiEnabledLabel: "Local AI enabled", offlineOnlyLabel: "Offline only", indexingLabel: "Attachment indexing enabled", providerLabel: "Provider", modelLabel: "Model", primaryStoreLabel: "Primary store", searchLabel: "Search engine", replicationLabel: "Replication mode", messagesLabel: "Messages", daysLabel: "Days" },
+  fr: { eyebrow: "La Poste ELectronique", title: "Console d'administration", subtitle: "Plan de controle unifie pour les boites aux lettres, les identites, le routage, les protocoles et la preparation IA locale.", languageLabel: "Langue", refresh: "Actualiser", serviceHealthy: "Plan de controle operationnel", serviceUnhealthy: "Plan de controle degrade", bannerBody: "La console utilise l'API d'administration Rust via nginx et expose une surface plus complete que le test initial.", openApiLabel: "Ouvrir l'API du tableau de bord", loading: "Chargement de l'espace d'administration...", failed: "Impossible de joindre l'API d'administration.", accountsTitle: "Comptes", accountsDetail: "{count} boites gerees", domainsTitle: "Domaines", aliasesDetail: "{count} alias configures", storageTitle: "Stockage", storageDetail: "{count} formats de pieces jointes indexes", queueTitle: "Files", aiEnabled: "IA locale activee", aiDisabled: "IA locale desactivee", identitySectionTitle: "Comptes et boites aux lettres", routingSectionTitle: "Domaines et alias", platformSectionTitle: "Politiques serveur", operationsTitle: "Exploitation", operationsSectionTitle: "Protocoles et posture de stockage", settingsTitle: "Parametres", auditTitle: "Audit", auditSectionTitle: "Activite recente du plan de controle", create: "Creer", save: "Enregistrer", createAccount: "Creer un compte", createMailbox: "Creer une boite", createDomain: "Creer un domaine", createAlias: "Creer un alias", accountCreated: "Compte cree.", mailboxCreated: "Boite creee.", domainCreated: "Domaine cree.", aliasCreated: "Alias cree.", serverSaved: "Parametres serveur mis a jour.", securitySaved: "Parametres de securite mis a jour.", localAiSaved: "Parametres IA locale mis a jour.", emailLabel: "Email", nameLabel: "Nom affiche", quotaLabel: "Quota (MB)", accountLabel: "Compte", mailboxLabel: "Boite", roleLabel: "Role", retentionLabel: "Retention (jours)", domainLabel: "Domaine", defaultQuotaLabel: "Quota par defaut (MB)", inboundLabel: "Courrier entrant", outboundLabel: "Courrier sortant", sourceLabel: "Source", targetLabel: "Cible", kindLabel: "Type", statusLabel: "Etat", enabledLabel: "Active", disabledLabel: "Desactive", serverSettingsTitle: "Liaisons serveur", hostnameLabel: "Nom d'hote principal", localeDefaultLabel: "Langue par defaut", adminBindLabel: "Ecoute API admin", smtpBindLabel: "Ecoute SMTP", imapBindLabel: "Ecoute IMAP", jmapBindLabel: "Ecoute JMAP", maxMessageLabel: "Taille max message (MB)", tlsModeLabel: "Mode TLS", securityTitle: "Politiques de securite", passwordLoginLabel: "Connexion mot de passe activee", mfaLabel: "MFA obligatoire pour les admins", sessionTimeoutLabel: "Expiration de session (minutes)", auditRetentionLabel: "Retention audit (jours)", localAiTitle: "Politiques IA locale", localAiEnabledLabel: "IA locale activee", offlineOnlyLabel: "Mode hors ligne uniquement", indexingLabel: "Indexation des pieces jointes activee", providerLabel: "Fournisseur", modelLabel: "Modele", primaryStoreLabel: "Stockage primaire", searchLabel: "Moteur de recherche", replicationLabel: "Mode de replication", messagesLabel: "Messages", daysLabel: "Jours" },
+  de: { eyebrow: "La Poste ELectronique", title: "Administrationskonsole", subtitle: "Zentrale Steuerung fuer Postfaecher, Identitaeten, Routing, Protokolle und lokale KI-Bereitschaft.", languageLabel: "Sprache", refresh: "Aktualisieren", serviceHealthy: "Steuerung verfuegbar", serviceUnhealthy: "Steuerung beeintraechtigt", bannerBody: "Die Konsole nutzt die Rust-Administrations-API hinter nginx und bietet mehr als den urspruenglichen Rauchtest.", openApiLabel: "Dashboard-API oeffnen", loading: "Administrationsbereich wird geladen...", failed: "Die Administrations-API ist nicht erreichbar.", accountsTitle: "Konten", accountsDetail: "{count} verwaltete Postfaecher", domainsTitle: "Domains", aliasesDetail: "{count} Aliasnamen konfiguriert", storageTitle: "Speicher", storageDetail: "{count} indizierte Anhangsformate", queueTitle: "Warteschlangen", aiEnabled: "Lokale KI aktiviert", aiDisabled: "Lokale KI deaktiviert", identitySectionTitle: "Konten und Postfaecher", routingSectionTitle: "Domains und Aliasnamen", platformSectionTitle: "Serverrichtlinien", operationsTitle: "Betrieb", operationsSectionTitle: "Protokolle und Speicherlage", settingsTitle: "Einstellungen", auditTitle: "Audit", auditSectionTitle: "Letzte Aktivitaet der Steuerung", create: "Erstellen", save: "Speichern", createAccount: "Konto erstellen", createMailbox: "Postfach erstellen", createDomain: "Domain erstellen", createAlias: "Alias erstellen", accountCreated: "Konto erstellt.", mailboxCreated: "Postfach erstellt.", domainCreated: "Domain erstellt.", aliasCreated: "Alias erstellt.", serverSaved: "Servereinstellungen aktualisiert.", securitySaved: "Sicherheitseinstellungen aktualisiert.", localAiSaved: "Lokale KI-Einstellungen aktualisiert.", emailLabel: "E-Mail", nameLabel: "Anzeigename", quotaLabel: "Quota (MB)", accountLabel: "Konto", mailboxLabel: "Postfach", roleLabel: "Rolle", retentionLabel: "Aufbewahrung (Tage)", domainLabel: "Domain", defaultQuotaLabel: "Standardquota (MB)", inboundLabel: "Eingehende Mail", outboundLabel: "Ausgehende Mail", sourceLabel: "Quelle", targetLabel: "Ziel", kindLabel: "Typ", statusLabel: "Status", enabledLabel: "Aktiv", disabledLabel: "Inaktiv", serverSettingsTitle: "Serverbindungen", hostnameLabel: "Primaerer Hostname", localeDefaultLabel: "Standardsprache", adminBindLabel: "Admin-API Bindung", smtpBindLabel: "SMTP Bindung", imapBindLabel: "IMAP Bindung", jmapBindLabel: "JMAP Bindung", maxMessageLabel: "Max. Nachrichtengroesse (MB)", tlsModeLabel: "TLS-Modus", securityTitle: "Sicherheitsrichtlinien", passwordLoginLabel: "Passwort-Login aktiviert", mfaLabel: "MFA fuer Admins erforderlich", sessionTimeoutLabel: "Sitzungszeitlimit (Minuten)", auditRetentionLabel: "Audit-Aufbewahrung (Tage)", localAiTitle: "Lokale KI-Richtlinien", localAiEnabledLabel: "Lokale KI aktiviert", offlineOnlyLabel: "Nur offline", indexingLabel: "Anhangsindexierung aktiviert", providerLabel: "Provider", modelLabel: "Modell", primaryStoreLabel: "Primaerspeicher", searchLabel: "Suchmaschine", replicationLabel: "Replikationsmodus", messagesLabel: "Nachrichten", daysLabel: "Tage" },
+  it: { eyebrow: "La Poste ELectronique", title: "Console di amministrazione", subtitle: "Piano di controllo unificato per caselle, identita, instradamento, protocolli e preparazione IA locale.", languageLabel: "Lingua", refresh: "Aggiorna", serviceHealthy: "Piano di controllo operativo", serviceUnhealthy: "Piano di controllo degradato", bannerBody: "La console usa l'API di amministrazione Rust dietro nginx ed espone piu funzioni del test iniziale.", openApiLabel: "Apri API dashboard", loading: "Caricamento area di amministrazione...", failed: "Impossibile raggiungere l'API di amministrazione.", accountsTitle: "Account", accountsDetail: "{count} caselle gestite", domainsTitle: "Domini", aliasesDetail: "{count} alias configurati", storageTitle: "Storage", storageDetail: "{count} formati allegati indicizzati", queueTitle: "Code", aiEnabled: "IA locale attiva", aiDisabled: "IA locale disattiva", identitySectionTitle: "Account e caselle", routingSectionTitle: "Domini e alias", platformSectionTitle: "Politiche server", operationsTitle: "Operazioni", operationsSectionTitle: "Protocolli e postura storage", settingsTitle: "Impostazioni", auditTitle: "Audit", auditSectionTitle: "Attivita recenti del piano di controllo", create: "Crea", save: "Salva", createAccount: "Crea account", createMailbox: "Crea casella", createDomain: "Crea dominio", createAlias: "Crea alias", accountCreated: "Account creato.", mailboxCreated: "Casella creata.", domainCreated: "Dominio creato.", aliasCreated: "Alias creato.", serverSaved: "Impostazioni server aggiornate.", securitySaved: "Impostazioni di sicurezza aggiornate.", localAiSaved: "Impostazioni IA locale aggiornate.", emailLabel: "Email", nameLabel: "Nome visualizzato", quotaLabel: "Quota (MB)", accountLabel: "Account", mailboxLabel: "Casella", roleLabel: "Ruolo", retentionLabel: "Retenzione (giorni)", domainLabel: "Dominio", defaultQuotaLabel: "Quota predefinita (MB)", inboundLabel: "Posta in ingresso", outboundLabel: "Posta in uscita", sourceLabel: "Sorgente", targetLabel: "Destinazione", kindLabel: "Tipo", statusLabel: "Stato", enabledLabel: "Attivo", disabledLabel: "Disattivo", serverSettingsTitle: "Binding server", hostnameLabel: "Hostname principale", localeDefaultLabel: "Lingua predefinita", adminBindLabel: "Bind API admin", smtpBindLabel: "Bind SMTP", imapBindLabel: "Bind IMAP", jmapBindLabel: "Bind JMAP", maxMessageLabel: "Dimensione max messaggio (MB)", tlsModeLabel: "Modalita TLS", securityTitle: "Politiche di sicurezza", passwordLoginLabel: "Login con password abilitato", mfaLabel: "MFA obbligatoria per gli admin", sessionTimeoutLabel: "Timeout sessione (minuti)", auditRetentionLabel: "Retenzione audit (giorni)", localAiTitle: "Politiche IA locale", localAiEnabledLabel: "IA locale attiva", offlineOnlyLabel: "Solo offline", indexingLabel: "Indicizzazione allegati attiva", providerLabel: "Provider", modelLabel: "Modello", primaryStoreLabel: "Storage primario", searchLabel: "Motore di ricerca", replicationLabel: "Modalita replica", messagesLabel: "Messaggi", daysLabel: "Giorni" },
+  es: { eyebrow: "La Poste ELectronique", title: "Consola de administracion", subtitle: "Plano de control unificado para buzones, identidades, enrutamiento, protocolos y preparacion de IA local.", languageLabel: "Idioma", refresh: "Actualizar", serviceHealthy: "Plano de control operativo", serviceUnhealthy: "Plano de control degradado", bannerBody: "La consola usa la API de administracion Rust detras de nginx y expone mas capacidades que la prueba inicial.", openApiLabel: "Abrir API del panel", loading: "Cargando espacio de administracion...", failed: "No se puede acceder a la API de administracion.", accountsTitle: "Cuentas", accountsDetail: "{count} buzones gestionados", domainsTitle: "Dominios", aliasesDetail: "{count} alias configurados", storageTitle: "Almacenamiento", storageDetail: "{count} formatos de adjuntos indexados", queueTitle: "Colas", aiEnabled: "IA local activada", aiDisabled: "IA local desactivada", identitySectionTitle: "Cuentas y buzones", routingSectionTitle: "Dominios y alias", platformSectionTitle: "Politicas del servidor", operationsTitle: "Operaciones", operationsSectionTitle: "Protocolos y postura de almacenamiento", settingsTitle: "Configuracion", auditTitle: "Auditoria", auditSectionTitle: "Actividad reciente del plano de control", create: "Crear", save: "Guardar", createAccount: "Crear cuenta", createMailbox: "Crear buzon", createDomain: "Crear dominio", createAlias: "Crear alias", accountCreated: "Cuenta creada.", mailboxCreated: "Buzon creado.", domainCreated: "Dominio creado.", aliasCreated: "Alias creado.", serverSaved: "Configuracion del servidor actualizada.", securitySaved: "Configuracion de seguridad actualizada.", localAiSaved: "Configuracion de IA local actualizada.", emailLabel: "Correo", nameLabel: "Nombre visible", quotaLabel: "Cuota (MB)", accountLabel: "Cuenta", mailboxLabel: "Buzon", roleLabel: "Rol", retentionLabel: "Retencion (dias)", domainLabel: "Dominio", defaultQuotaLabel: "Cuota por defecto (MB)", inboundLabel: "Correo entrante", outboundLabel: "Correo saliente", sourceLabel: "Origen", targetLabel: "Destino", kindLabel: "Tipo", statusLabel: "Estado", enabledLabel: "Activo", disabledLabel: "Inactivo", serverSettingsTitle: "Bindings del servidor", hostnameLabel: "Nombre de host principal", localeDefaultLabel: "Idioma por defecto", adminBindLabel: "Bind API admin", smtpBindLabel: "Bind SMTP", imapBindLabel: "Bind IMAP", jmapBindLabel: "Bind JMAP", maxMessageLabel: "Tamano maximo del mensaje (MB)", tlsModeLabel: "Modo TLS", securityTitle: "Politicas de seguridad", passwordLoginLabel: "Inicio con contrasena habilitado", mfaLabel: "MFA obligatoria para admins", sessionTimeoutLabel: "Tiempo de sesion (minutos)", auditRetentionLabel: "Retencion de auditoria (dias)", localAiTitle: "Politicas de IA local", localAiEnabledLabel: "IA local activada", offlineOnlyLabel: "Solo sin conexion", indexingLabel: "Indexacion de adjuntos activada", providerLabel: "Proveedor", modelLabel: "Modelo", primaryStoreLabel: "Almacen principal", searchLabel: "Motor de busqueda", replicationLabel: "Modo de replicacion", messagesLabel: "Mensajes", daysLabel: "Dias" }
+};
 
 export function getInitialLocale(): Locale {
-  if (typeof window === "undefined") {
-    return "en";
-  }
-
+  if (typeof window === "undefined") return "en";
   const stored = window.localStorage.getItem("lpe.locale");
-  if (stored && supportedLocales.includes(stored as Locale)) {
-    return stored as Locale;
-  }
-
+  if (stored && supportedLocales.includes(stored as Locale)) return stored as Locale;
   return "en";
 }

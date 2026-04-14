@@ -12,4 +12,3 @@ pub fn default_capabilities() -> SessionCapabilities {
         mail: false,
     }
 }
-

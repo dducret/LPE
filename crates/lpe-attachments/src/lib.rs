@@ -96,8 +96,10 @@ fn extract_odt_content_xml(xml: &str) -> Result<String> {
                 append_text(&mut output, &decoded);
             }
             Ok(Event::End(end)) => {
-                if matches!(local_name(end.name().as_ref()), b"p" | b"h" | b"list-item" | b"table-row")
-                {
+                if matches!(
+                    local_name(end.name().as_ref()),
+                    b"p" | b"h" | b"list-item" | b"table-row"
+                ) {
                     ensure_paragraph_break(&mut output);
                 }
             }

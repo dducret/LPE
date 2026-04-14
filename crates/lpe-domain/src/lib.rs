@@ -67,4 +67,3 @@ pub struct DocumentAnnotation {
     pub payload_json: String,
     pub model_name: Option<String>,
 }
-

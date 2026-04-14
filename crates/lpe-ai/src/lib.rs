@@ -92,4 +92,3 @@ pub fn summarize_projection(
         model_name: Some(response.model_id),
     })
 }
-

@@ -1,9 +1,7 @@
 use anyhow::Result;
 use lpe_ai::{summarize_projection, LocalModelProvider};
 use lpe_attachments::AttachmentFormat;
-use lpe_domain::{
-    AccessScope, Account, DocumentChunk, DocumentKind, DocumentProjection,
-};
+use lpe_domain::{AccessScope, Account, DocumentChunk, DocumentKind, DocumentProjection};
 use uuid::Uuid;
 
 #[derive(Debug, Default)]
@@ -38,7 +36,9 @@ impl CoreService {
             id: Uuid::new_v4(),
             document_id,
             ordinal: 0,
-            chunk_text: "LPE prepares normalized message projections for search and future local AI.".to_string(),
+            chunk_text:
+                "LPE prepares normalized message projections for search and future local AI."
+                    .to_string(),
             token_estimate: 16,
         }]
     }

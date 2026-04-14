@@ -67,6 +67,7 @@ Fichiers:
 - `bootstrap-postgresql.sh` installe aussi PostgreSQL serveur si necessaire puis le demarre
 - les scripts d'installation utilisent le binaire `rustup` disponible dans le systeme puis initialisent le toolchain `stable` avant compilation
 - `run-migrations.sh` applique les migrations SQL PostgreSQL du projet
+- `run-migrations.sh` applique aussi le schema persistant de la console d'administration
 - `check-lpe.sh` verifie l'installation, PostgreSQL, le service et les endpoints HTTP
 - `lpe.service` decrit le service systemd initial
 - `lpe.nginx.conf` sert de template pour le site `nginx` de la console d'administration
@@ -80,6 +81,8 @@ Ordre recommande:
 4. executer `run-migrations.sh`
 5. verifier le service avec `systemctl status lpe.service`
 6. ouvrir `http://adresse-du-serveur/` pour acceder a la console d'administration via `nginx`
+
+La console d'administration enregistre desormais ses comptes, boites, domaines, alias, parametres et evenements d'audit dans `PostgreSQL`. L'execution des migrations n'est donc plus optionnelle apres deploiement ou mise a jour du schema.
 
 Exemple complet:
 
@@ -189,6 +192,7 @@ Files:
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
 - `run-migrations.sh` applies the project's PostgreSQL SQL migrations
+- `run-migrations.sh` also applies the persistent schema for the administration console
 - `check-lpe.sh` verifies the installation, PostgreSQL, the service, and the HTTP endpoints
 - `lpe.service` describes the initial systemd service
 - `lpe.nginx.conf` is the template used to generate the administration `nginx` site
@@ -202,6 +206,8 @@ Recommended order:
 4. run `run-migrations.sh`
 5. verify the service with `systemctl status lpe.service`
 6. open `http://server-address/` to reach the administration console through `nginx`
+
+The administration console now stores its accounts, mailboxes, domains, aliases, settings, and audit events in `PostgreSQL`. Running migrations is therefore mandatory after deployment or any schema update.
 
 Complete example:
 

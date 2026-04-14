@@ -30,7 +30,18 @@ Le squelette actuel permet de compiler les crates Rust du workspace.
 cargo check
 ```
 
-Sur `Debian Trixie`, les scripts d'installation deploient aussi une premiere console d'administration statique via `nginx`, avec reverse proxy `/api/` vers le service Rust local.
+Sur `Debian Trixie`, les scripts d'installation deploient aussi une console d'administration statique via `nginx`, avec reverse proxy `/api/` vers le service Rust local.
+
+La console d'administration actuelle couvre deja une V1 de pilotage du plan de controle:
+
+- creation de comptes et de boites aux lettres
+- gestion des domaines et alias
+- parametrage du serveur et des liaisons protocolaire
+- politiques de securite administrateur
+- configuration IA locale et indexation
+- visibilite sur protocoles, stockage et journal d'audit recent
+
+Cette console est maintenant persistante dans `PostgreSQL` via `lpe-storage` et les migrations SQL du projet.
 
 ### Axe IA locale
 
@@ -84,7 +95,18 @@ The current skeleton compiles the Rust workspace crates.
 cargo check
 ```
 
-On `Debian Trixie`, the installation scripts also deploy a first static administration console through `nginx`, with `/api/` reverse-proxied to the local Rust service.
+On `Debian Trixie`, the installation scripts also deploy a static administration console through `nginx`, with `/api/` reverse-proxied to the local Rust service.
+
+The current administration console already exposes a first control-plane V1:
+
+- account and mailbox creation
+- domain and alias management
+- server and protocol binding configuration
+- administrator security policies
+- local AI and indexing configuration
+- visibility into protocols, storage, and recent audit activity
+
+This console is now persisted in `PostgreSQL` through `lpe-storage` and the project's SQL migrations.
 
 ### Local AI direction
 

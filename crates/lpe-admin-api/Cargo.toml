@@ -5,10 +5,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+anyhow.workspace = true
 axum.workspace = true
 lpe-ai = { path = "../lpe-ai" }
 lpe-attachments = { path = "../lpe-attachments" }
 lpe-core = { path = "../lpe-core" }
+lpe-storage = { path = "../lpe-storage" }
 serde.workspace = true
 tokio.workspace = true
 tracing.workspace = true
