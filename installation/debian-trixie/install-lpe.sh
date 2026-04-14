@@ -41,6 +41,12 @@ install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${DATA_DIR}"
 
 git config --global --add safe.directory "${SRC_DIR}" || true
 
+RUSTUP_BIN="$(command -v rustup || true)"
+if [[ -z "${RUSTUP_BIN}" ]]; then
+  echo "rustup executable not found after package installation." >&2
+  exit 1
+fi
+
 if [[ ! -d "${SRC_DIR}/.git" ]]; then
   git clone --branch "${BRANCH}" "${REPO_URL}" "${SRC_DIR}"
 else
@@ -49,15 +55,17 @@ else
   git -C "${SRC_DIR}" pull --ff-only
 fi
 
-if [[ ! -x /root/.cargo/bin/rustup ]]; then
-  echo "rustup executable not found after package installation." >&2
+"${RUSTUP_BIN}" default stable
+export PATH="/root/.cargo/bin:${PATH}"
+
+CARGO_BIN="$(command -v cargo || true)"
+if [[ -z "${CARGO_BIN}" ]]; then
+  echo "cargo executable not found after rustup toolchain initialization." >&2
   exit 1
 fi
 
-/root/.cargo/bin/rustup default stable
-
 cd "${SRC_DIR}"
-/root/.cargo/bin/cargo build --release -p lpe-cli
+"${CARGO_BIN}" build --release -p lpe-cli
 
 if [[ ! -x "target/release/lpe-cli" ]]; then
   echo "lpe-cli binary not found after build." >&2

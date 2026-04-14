@@ -62,6 +62,7 @@ Fichiers:
 - `update-lpe.sh` met a jour le depot, recompile `lpe-cli` et redemarre le service
 - `bootstrap-postgresql.sh` cree un role et une base PostgreSQL
 - `bootstrap-postgresql.sh` installe aussi PostgreSQL serveur si necessaire puis le demarre
+- les scripts d'installation utilisent le binaire `rustup` disponible dans le systeme puis initialisent le toolchain `stable` avant compilation
 - `run-migrations.sh` applique les migrations SQL PostgreSQL du projet
 - `check-lpe.sh` verifie l'installation, PostgreSQL, le service et les endpoints HTTP
 - `lpe.service` decrit le service systemd initial
@@ -170,6 +171,7 @@ Files:
 - `update-lpe.sh` updates the repository, rebuilds `lpe-cli`, and restarts the service
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
+- the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
 - `run-migrations.sh` applies the project's PostgreSQL SQL migrations
 - `check-lpe.sh` verifies the installation, PostgreSQL, the service, and the HTTP endpoints
 - `lpe.service` describes the initial systemd service
