@@ -41,6 +41,7 @@ check_http_json_field() {
 check_command curl
 check_command psql
 check_command systemctl
+check_file "/etc/systemd/system/${SERVICE_NAME}"
 
 check_file "$SRC_DIR"
 check_file "$BIN_PATH"

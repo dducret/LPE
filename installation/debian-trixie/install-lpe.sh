@@ -57,6 +57,11 @@ fi
 cd "${SRC_DIR}"
 /root/.cargo/bin/cargo build --release -p lpe-cli
 
+if [[ ! -x "target/release/lpe-cli" ]]; then
+  echo "Binaire lpe-cli introuvable apres compilation. / lpe-cli binary not found after build." >&2
+  exit 1
+fi
+
 install -m 0755 "target/release/lpe-cli" "${BIN_DIR}/lpe-cli"
 install -m 0644 "${SRC_DIR}/installation/debian-trixie/lpe.service" "${SYSTEMD_DIR}/lpe.service"
 
