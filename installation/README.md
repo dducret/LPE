@@ -1,6 +1,8 @@
 # Installation
 
-## Debian Trixie
+## Francais
+
+### Debian Trixie
 
 Le repertoire `debian-trixie` prepare une installation source de `LPE` depuis:
 
@@ -33,3 +35,39 @@ Pour les mises a jour ulterieures:
 Pour valider l'installation:
 
 1. executer `check-lpe.sh`
+
+## English
+
+### Debian Trixie
+
+The `debian-trixie` directory prepares a source installation of `LPE` from:
+
+- `https://github.com/dducret/LPE`
+
+Files:
+
+- `install-lpe.sh` installs prerequisites, clones the repository, builds `lpe-cli`, and installs the systemd service
+- `update-lpe.sh` updates the repository, rebuilds `lpe-cli`, and restarts the service
+- `bootstrap-postgresql.sh` creates a PostgreSQL role and database
+- `run-migrations.sh` applies the project's PostgreSQL SQL migrations
+- `check-lpe.sh` verifies the installation, PostgreSQL, the service, and the HTTP endpoints
+- `lpe.service` describes the initial systemd service
+- `lpe.env.example` provides a base configuration
+
+Recommended order:
+
+1. run `bootstrap-postgresql.sh`
+2. run `install-lpe.sh`
+3. adjust `/etc/lpe/lpe.env`
+4. run `run-migrations.sh`
+5. start `systemctl start lpe.service`
+
+For later updates:
+
+1. push the desired commit to `https://github.com/dducret/LPE`
+2. run `update-lpe.sh`
+3. run `run-migrations.sh` if the PostgreSQL schema changed
+
+To validate the installation:
+
+1. run `check-lpe.sh`

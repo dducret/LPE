@@ -54,6 +54,13 @@ nav a {
   padding: 48px 32px;
 }
 
+.content-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
 .eyebrow {
   margin: 0 0 10px;
   color: var(--accent);
@@ -65,6 +72,22 @@ nav a {
 h1 {
   margin: 0 0 28px;
   font-size: clamp(2rem, 4vw, 3.3rem);
+}
+
+.locale-picker {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.locale-picker select {
+  min-width: 150px;
+  border: 1px solid rgba(29, 35, 40, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+  padding: 10px 12px;
 }
 
 .message-card {
@@ -93,5 +116,9 @@ h1 {
 
   .sidebar {
     padding-bottom: 16px;
+  }
+
+  .content-header {
+    flex-direction: column;
   }
 }
