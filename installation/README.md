@@ -12,6 +12,7 @@ Fichiers:
 - `update-lpe.sh` met a jour le depot, recompile `lpe-cli` et redemarre le service
 - `bootstrap-postgresql.sh` cree un role et une base PostgreSQL
 - `run-migrations.sh` applique les migrations SQL PostgreSQL du projet
+- `check-lpe.sh` verifie l'installation, PostgreSQL, le service et les endpoints HTTP
 - `lpe.service` decrit le service systemd initial
 - `lpe.env.example` fournit une base de configuration
 
@@ -28,3 +29,7 @@ Pour les mises a jour ulterieures:
 1. pousser le commit voulu dans `https://github.com/dducret/LPE`
 2. executer `update-lpe.sh`
 3. executer `run-migrations.sh` si le schema PostgreSQL a change
+
+Pour valider l'installation:
+
+1. executer `check-lpe.sh`
