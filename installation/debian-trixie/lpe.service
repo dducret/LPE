@@ -1,0 +1,23 @@
+[Unit]
+Description=LPE Admin API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lpe
+Group=lpe
+WorkingDirectory=/opt/lpe/src
+EnvironmentFile=/etc/lpe/lpe.env
+ExecStart=/opt/lpe/bin/lpe-cli
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/lpe /var/lib/lpe
+
+[Install]
+WantedBy=multi-user.target
+

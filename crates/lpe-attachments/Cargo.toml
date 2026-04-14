@@ -1,0 +1,13 @@
+[package]
+name = "lpe-attachments"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+docx_lite.workspace = true
+pdf_oxide.workspace = true
+quick-xml.workspace = true
+zip.workspace = true
+

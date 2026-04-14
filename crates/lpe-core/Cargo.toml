@@ -1,0 +1,12 @@
+[package]
+name = "lpe-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+lpe-ai = { path = "../lpe-ai" }
+lpe-attachments = { path = "../lpe-attachments" }
+lpe-domain = { path = "../lpe-domain" }
+uuid.workspace = true

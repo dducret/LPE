@@ -1,0 +1,35 @@
+[workspace]
+members = [
+    "crates/lpe-domain",
+    "crates/lpe-core",
+    "crates/lpe-ai",
+    "crates/lpe-attachments",
+    "crates/lpe-storage",
+    "crates/lpe-jmap",
+    "crates/lpe-admin-api",
+    "crates/lpe-cli",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+version = "0.1.0"
+authors = ["LPE Contributors"]
+repository = "https://example.com/lpe"
+
+[workspace.dependencies]
+anyhow = "1.0"
+axum = "0.8"
+docx_lite = { package = "docx-lite", version = "0.2" }
+pdf_oxide = "0.3"
+quick-xml = "0.39"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio-rustls", "macros", "uuid", "chrono"] }
+thiserror = "2.0"
+tokio = { version = "1.48", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1.18", features = ["serde", "v4"] }
+zip = { version = "4.6", default-features = false, features = ["deflate"] }

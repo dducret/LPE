@@ -1,0 +1,97 @@
+:root {
+  --bg: #f2f0ea;
+  --sidebar: #20303a;
+  --panel: rgba(255, 255, 255, 0.76);
+  --text: #1d2328;
+  --muted: #52606b;
+  --accent: #c7522a;
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at bottom right, rgba(199, 82, 42, 0.16), transparent 35%),
+    linear-gradient(180deg, #f8f6f2 0%, var(--bg) 100%);
+  color: var(--text);
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+}
+
+.sidebar {
+  padding: 32px 24px;
+  background: linear-gradient(180deg, #21333d 0%, #162129 100%);
+  color: #f7efe6;
+}
+
+.brand {
+  margin-bottom: 32px;
+  font-size: 1.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+nav {
+  display: grid;
+  gap: 12px;
+}
+
+nav a {
+  color: rgba(247, 239, 230, 0.88);
+  text-decoration: none;
+}
+
+.content {
+  padding: 48px 32px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.75rem;
+}
+
+h1 {
+  margin: 0 0 28px;
+  font-size: clamp(2rem, 4vw, 3.3rem);
+}
+
+.message-card {
+  max-width: 760px;
+  padding: 28px;
+  border-radius: 22px;
+  background: var(--panel);
+  box-shadow: 0 24px 48px rgba(29, 35, 40, 0.08);
+  backdrop-filter: blur(8px);
+}
+
+.message-card h2 {
+  margin-top: 0;
+}
+
+.message-card p {
+  margin-bottom: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+@media (max-width: 860px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    padding-bottom: 16px;
+  }
+}
