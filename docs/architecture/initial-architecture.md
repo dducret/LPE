@@ -38,6 +38,9 @@ Plan de controle pour le back office.
 7. `lpe-cli`
 Executable de demarrage local du serveur.
 
+8. `nginx` sur Debian
+Serveur frontal HTTP pour exposer l'interface d'administration statique et reverse-proxy `/api/` vers `lpe-admin-api`.
+
 ### Priorites MVP
 
 - comptes, domaines, alias, quotas
@@ -87,6 +90,9 @@ Control plane for the back office.
 
 7. `lpe-cli`
 Local server executable.
+
+8. `nginx` on Debian
+HTTP front end used to expose the static administration UI and reverse-proxy `/api/` to `lpe-admin-api`.
 
 ### MVP priorities
 

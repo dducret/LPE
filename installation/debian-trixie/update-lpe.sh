@@ -6,7 +6,12 @@ BRANCH="${BRANCH:-main}"
 INSTALL_ROOT="${INSTALL_ROOT:-/opt/lpe}"
 SRC_DIR="${SRC_DIR:-$INSTALL_ROOT/src}"
 BIN_DIR="${BIN_DIR:-$INSTALL_ROOT/bin}"
+WEB_ROOT="${WEB_ROOT:-$INSTALL_ROOT/www/admin}"
 SERVICE_NAME="${SERVICE_NAME:-lpe.service}"
+ENV_FILE="${ENV_FILE:-/etc/lpe/lpe.env}"
+NGINX_AVAILABLE_DIR="${NGINX_AVAILABLE_DIR:-/etc/nginx/sites-available}"
+NGINX_ENABLED_DIR="${NGINX_ENABLED_DIR:-/etc/nginx/sites-enabled}"
+NGINX_SITE_NAME="${NGINX_SITE_NAME:-lpe.conf}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "This script must be run as root." >&2
@@ -15,6 +20,11 @@ fi
 
 if [[ ! -d "${SRC_DIR}/.git" ]]; then
   echo "Source repository not found in ${SRC_DIR}. Run install-lpe.sh first." >&2
+  exit 1
+fi
+
+if [[ ! -f "${ENV_FILE}" ]]; then
+  echo "Environment file not found in ${ENV_FILE}. Run install-lpe.sh first." >&2
   exit 1
 fi
 
@@ -40,13 +50,35 @@ if [[ -z "${CARGO_BIN}" ]]; then
   exit 1
 fi
 
+set -a
+source "${ENV_FILE}"
+set +a
+
+LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
+LPE_SERVER_NAME="${LPE_SERVER_NAME:-_}"
+
 cd "${SRC_DIR}"
 "${CARGO_BIN}" build --release -p lpe-cli
+cd "${SRC_DIR}/web/admin"
+npm ci
+npm run build
 
-install -m 0755 "target/release/lpe-cli" "${BIN_DIR}/lpe-cli"
+install -m 0755 "${SRC_DIR}/target/release/lpe-cli" "${BIN_DIR}/lpe-cli"
+install -d -o root -g root "${WEB_ROOT}"
+cp -a "${SRC_DIR}/web/admin/dist/." "${WEB_ROOT}/"
 install -m 0644 "${SRC_DIR}/installation/debian-trixie/lpe.service" "/etc/systemd/system/lpe.service"
+sed \
+  -e "s/__LPE_BIND_ADDRESS__/${LPE_BIND_ADDRESS//\//\\/}/g" \
+  -e "s/__LPE_SERVER_NAME__/${LPE_SERVER_NAME//\//\\/}/g" \
+  "${SRC_DIR}/installation/debian-trixie/lpe.nginx.conf" \
+  > "${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}"
+
+ln -sfn "${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}" "${NGINX_ENABLED_DIR}/${NGINX_SITE_NAME}"
+rm -f "${NGINX_ENABLED_DIR}/default"
+nginx -t
 
 systemctl daemon-reload
 systemctl restart "${SERVICE_NAME}"
+systemctl restart nginx
 
 echo "LPE updated from ${REPO_URL} (${BRANCH})."

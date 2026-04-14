@@ -60,13 +60,16 @@ Fichiers:
 
 - `install-lpe.sh` installe les prerequis, clone le depot, compile `lpe-cli` et installe le service systemd
 - `install-lpe.sh` demarre aussi `lpe.service` a la fin de l'installation
+- `install-lpe.sh` installe aussi `nodejs`, `npm` et `nginx`, build `web/admin`, deploie l'interface statique et active le site `nginx`
 - `update-lpe.sh` met a jour le depot, recompile `lpe-cli` et redemarre le service
+- `update-lpe.sh` rebuild aussi `web/admin`, redeploie les assets statiques et recharge `nginx`
 - `bootstrap-postgresql.sh` cree un role et une base PostgreSQL
 - `bootstrap-postgresql.sh` installe aussi PostgreSQL serveur si necessaire puis le demarre
 - les scripts d'installation utilisent le binaire `rustup` disponible dans le systeme puis initialisent le toolchain `stable` avant compilation
 - `run-migrations.sh` applique les migrations SQL PostgreSQL du projet
 - `check-lpe.sh` verifie l'installation, PostgreSQL, le service et les endpoints HTTP
 - `lpe.service` decrit le service systemd initial
+- `lpe.nginx.conf` sert de template pour le site `nginx` de la console d'administration
 - `lpe.env.example` fournit une base de configuration
 
 Ordre recommande:
@@ -76,6 +79,7 @@ Ordre recommande:
 3. ajuster `/etc/lpe/lpe.env`
 4. executer `run-migrations.sh`
 5. verifier le service avec `systemctl status lpe.service`
+6. ouvrir `http://adresse-du-serveur/` pour acceder a la console d'administration via `nginx`
 
 Exemple complet:
 
@@ -88,6 +92,14 @@ nano /etc/lpe/lpe.env
 systemctl status lpe.service
 ./check-lpe.sh
 ```
+
+Par defaut:
+
+- `lpe.service` ecoute sur `127.0.0.1:8080`
+- `nginx` expose la console d'administration sur le port `80`
+- `nginx` reverse-proxy `/api/` vers le service Rust local
+
+Si `LPE_BIND_ADDRESS` ou `LPE_SERVER_NAME` changent dans `/etc/lpe/lpe.env`, relancer `update-lpe.sh` pour regenerer la configuration `nginx`.
 
 Pour les mises a jour ulterieures:
 
@@ -170,13 +182,16 @@ Files:
 
 - `install-lpe.sh` installs prerequisites, clones the repository, builds `lpe-cli`, and installs the systemd service
 - `install-lpe.sh` also starts `lpe.service` at the end of the installation
+- `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin`, deploys the static admin UI, and enables the `nginx` site
 - `update-lpe.sh` updates the repository, rebuilds `lpe-cli`, and restarts the service
+- `update-lpe.sh` also rebuilds `web/admin`, redeploys static assets, and reloads `nginx`
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
 - `run-migrations.sh` applies the project's PostgreSQL SQL migrations
 - `check-lpe.sh` verifies the installation, PostgreSQL, the service, and the HTTP endpoints
 - `lpe.service` describes the initial systemd service
+- `lpe.nginx.conf` is the template used to generate the administration `nginx` site
 - `lpe.env.example` provides a base configuration
 
 Recommended order:
@@ -186,6 +201,7 @@ Recommended order:
 3. adjust `/etc/lpe/lpe.env`
 4. run `run-migrations.sh`
 5. verify the service with `systemctl status lpe.service`
+6. open `http://server-address/` to reach the administration console through `nginx`
 
 Complete example:
 
@@ -198,6 +214,14 @@ nano /etc/lpe/lpe.env
 systemctl status lpe.service
 ./check-lpe.sh
 ```
+
+By default:
+
+- `lpe.service` listens on `127.0.0.1:8080`
+- `nginx` exposes the administration console on port `80`
+- `nginx` reverse-proxies `/api/` to the local Rust service
+
+If `LPE_BIND_ADDRESS` or `LPE_SERVER_NAME` changes in `/etc/lpe/lpe.env`, run `update-lpe.sh` again to regenerate the `nginx` configuration.
 
 For later updates:
 

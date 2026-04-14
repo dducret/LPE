@@ -4,8 +4,11 @@ set -euo pipefail
 INSTALL_ROOT="${INSTALL_ROOT:-/opt/lpe}"
 SRC_DIR="${SRC_DIR:-$INSTALL_ROOT/src}"
 BIN_PATH="${BIN_PATH:-$INSTALL_ROOT/bin/lpe-cli}"
+ADMIN_WEB_ROOT="${ADMIN_WEB_ROOT:-$INSTALL_ROOT/www/admin}"
 ENV_FILE="${ENV_FILE:-/etc/lpe/lpe.env}"
 SERVICE_NAME="${SERVICE_NAME:-lpe.service}"
+NGINX_SERVICE_NAME="${NGINX_SERVICE_NAME:-nginx}"
+NGINX_SITE_PATH="${NGINX_SITE_PATH:-/etc/nginx/sites-available/lpe.conf}"
 EXPECTED_FORMATS="${EXPECTED_FORMATS:-pdf docx odt}"
 
 fail() {
@@ -39,9 +42,12 @@ check_http_json_field() {
 }
 
 check_command curl
+check_command nginx
 check_command psql
 check_command systemctl
 check_file "/etc/systemd/system/${SERVICE_NAME}"
+check_file "${NGINX_SITE_PATH}"
+check_file "${ADMIN_WEB_ROOT}/index.html"
 
 check_file "$SRC_DIR"
 check_file "$BIN_PATH"
@@ -63,6 +69,12 @@ pass "Service enabled: $SERVICE_NAME"
 systemctl is-active "$SERVICE_NAME" >/dev/null 2>&1 || fail "Service is not active: $SERVICE_NAME"
 pass "Service active: $SERVICE_NAME"
 
+systemctl is-enabled "$NGINX_SERVICE_NAME" >/dev/null 2>&1 || fail "Service is not enabled: $NGINX_SERVICE_NAME"
+pass "Service enabled: $NGINX_SERVICE_NAME"
+
+systemctl is-active "$NGINX_SERVICE_NAME" >/dev/null 2>&1 || fail "Service is not active: $NGINX_SERVICE_NAME"
+pass "Service active: $NGINX_SERVICE_NAME"
+
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.accounts');" | grep -qx 'accounts' \
   || fail "Table public.accounts is missing. Run /opt/lpe/src/installation/debian-trixie/run-migrations.sh"
 pass "Found table public.accounts"
@@ -74,6 +86,13 @@ pass "Found view public.searchable_mail_documents"
 check_http_json_field "$HTTP_BASE/health" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/bootstrap/admin" '"email":"admin@example.test"'
 check_http_json_field "$HTTP_BASE/health/local-ai" '"provider":"stub-local"'
+check_http_json_field "http://127.0.0.1/api/health" '"status":"ok"'
+check_http_json_field "http://127.0.0.1/api/bootstrap/admin" '"email":"admin@example.test"'
+
+admin_index="$(curl --silent --show-error --fail "http://127.0.0.1/")" \
+  || fail "HTTP request failed: http://127.0.0.1/"
+[[ "$admin_index" == *"LPE Administration Console"* ]] || fail "Unexpected admin index content from nginx"
+pass "Admin console is served by nginx"
 
 attachment_body="$(curl --silent --show-error --fail "$HTTP_BASE/capabilities/attachments")" \
   || fail "HTTP request failed: $HTTP_BASE/capabilities/attachments"

@@ -30,7 +30,7 @@ body {
 }
 
 .panel {
-  width: min(720px, 100%);
+  width: min(1080px, 100%);
   padding: 40px;
   border: 1px solid var(--border);
   border-radius: 24px;
@@ -44,7 +44,7 @@ body {
   justify-content: space-between;
   gap: 16px;
   align-items: flex-start;
-  margin-bottom: 8px;
+  margin-bottom: 16px;
 }
 
 .locale-picker {
@@ -72,21 +72,130 @@ body {
 }
 
 h1 {
-  margin: 0 0 16px;
+  margin: 0;
   font-size: clamp(2.2rem, 5vw, 3.4rem);
   line-height: 1;
 }
 
-p {
+.intro,
+.card p,
+.loading,
+.error {
   margin: 0;
   color: var(--muted);
   font-size: 1.05rem;
   line-height: 1.6;
 }
 
+.status-strip {
+  margin-top: 24px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(255, 252, 247, 0.9);
+}
+
+.status-strip a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.status-strip a:hover {
+  text-decoration: underline;
+}
+
+.loading,
+.error {
+  margin-top: 18px;
+}
+
+.error {
+  color: #7a1c18;
+}
+
+.grid {
+  margin-top: 28px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.card {
+  padding: 22px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.card h2 {
+  margin: 0 0 10px;
+  font-size: 1.15rem;
+}
+
+.card p {
+  margin-bottom: 18px;
+}
+
+.card dl {
+  margin: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.card dl div {
+  display: grid;
+  gap: 4px;
+}
+
+.card dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.card dd {
+  margin: 0;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.formats {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.formats li {
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(139, 47, 31, 0.1);
+  color: var(--accent);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.82rem;
+}
+
 @media (max-width: 640px) {
   .toolbar {
     flex-direction: column;
+  }
+
+  .status-strip {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
   }
 }
 

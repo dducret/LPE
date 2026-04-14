@@ -30,6 +30,8 @@ Le squelette actuel permet de compiler les crates Rust du workspace.
 cargo check
 ```
 
+Sur `Debian Trixie`, les scripts d'installation deploient aussi une premiere console d'administration statique via `nginx`, avec reverse proxy `/api/` vers le service Rust local.
+
 ### Axe IA locale
 
 `LPE` prepare des projections documentaires canoniques, des chunks et des annotations qui serviront plus tard a une integration LLM locale type Gemma, sans rendre le moteur IA dependance du coeur metier.
@@ -81,6 +83,8 @@ The current skeleton compiles the Rust workspace crates.
 ```powershell
 cargo check
 ```
+
+On `Debian Trixie`, the installation scripts also deploy a first static administration console through `nginx`, with `/api/` reverse-proxied to the local Rust service.
 
 ### Local AI direction
 
