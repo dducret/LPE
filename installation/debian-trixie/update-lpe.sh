@@ -9,12 +9,12 @@ BIN_DIR="${BIN_DIR:-$INSTALL_ROOT/bin}"
 SERVICE_NAME="${SERVICE_NAME:-lpe.service}"
 
 if [[ "${EUID}" -ne 0 ]]; then
-  echo "This script must be run as root." >&2
+  echo "Ce script doit etre execute en root. / This script must be run as root." >&2
   exit 1
 fi
 
 if [[ ! -d "${SRC_DIR}/.git" ]]; then
-  echo "Source repository not found in ${SRC_DIR}. Run install-lpe.sh first." >&2
+  echo "Depot source introuvable dans ${SRC_DIR}. Executer install-lpe.sh d'abord. / Source repository not found in ${SRC_DIR}. Run install-lpe.sh first." >&2
   exit 1
 fi
 
@@ -34,5 +34,5 @@ install -m 0644 "${SRC_DIR}/installation/debian-trixie/lpe.service" "/etc/system
 systemctl daemon-reload
 systemctl restart "${SERVICE_NAME}"
 
-echo "LPE updated from ${REPO_URL} (${BRANCH})."
+echo "LPE mis a jour depuis ${REPO_URL} (${BRANCH}). / LPE updated from ${REPO_URL} (${BRANCH})."
 

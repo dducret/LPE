@@ -8,6 +8,10 @@ Le repertoire `debian-trixie` prepare une installation source de `LPE` depuis:
 
 - `https://github.com/dducret/LPE`
 
+Repertoire produit par defaut:
+
+- `/opt/lpe`
+
 Fichiers:
 
 - `install-lpe.sh` installe les prerequis, clone le depot, compile `lpe-cli` et installe le service systemd
@@ -43,6 +47,10 @@ Pour valider l'installation:
 The `debian-trixie` directory prepares a source installation of `LPE` from:
 
 - `https://github.com/dducret/LPE`
+
+Default product directory:
+
+- `/opt/lpe`
 
 Files:
 

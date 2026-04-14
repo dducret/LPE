@@ -13,7 +13,7 @@ SERVICE_USER="${SERVICE_USER:-lpe}"
 SERVICE_GROUP="${SERVICE_GROUP:-lpe}"
 
 if [[ "${EUID}" -ne 0 ]]; then
-  echo "This script must be run as root." >&2
+  echo "Ce script doit etre execute en root. / This script must be run as root." >&2
   exit 1
 fi
 
@@ -48,7 +48,7 @@ else
 fi
 
 if [[ ! -x /root/.cargo/bin/rustup ]]; then
-  echo "rustup executable not found after package installation." >&2
+  echo "Executable rustup introuvable apres installation des paquets. / rustup executable not found after package installation." >&2
   exit 1
 fi
 
@@ -67,5 +67,5 @@ fi
 systemctl daemon-reload
 systemctl enable lpe.service
 
-echo "LPE installed in ${INSTALL_ROOT}."
-echo "Review ${ENV_DIR}/lpe.env, then run: systemctl start lpe.service"
+echo "LPE installe dans ${INSTALL_ROOT}. / LPE installed in ${INSTALL_ROOT}."
+echo "Verifier ${ENV_DIR}/lpe.env, puis lancer 'systemctl start lpe.service'. / Review ${ENV_DIR}/lpe.env, then run 'systemctl start lpe.service'."

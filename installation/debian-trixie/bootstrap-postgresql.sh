@@ -8,7 +8,7 @@ DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-5432}"
 
 if [[ "${EUID}" -ne 0 ]]; then
-  echo "This script must be run as root." >&2
+  echo "Ce script doit etre execute en root. / This script must be run as root." >&2
   exit 1
 fi
 
@@ -25,6 +25,6 @@ SQL
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" | grep -q 1 || \
   sudo -u postgres createdb --owner="${DB_USER}" "${DB_NAME}"
 
-echo "Database bootstrap complete."
-echo "Connection string: postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+echo "Initialisation PostgreSQL terminee. / PostgreSQL bootstrap complete."
+echo "Chaine de connexion / Connection string: postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
 
