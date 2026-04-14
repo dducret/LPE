@@ -54,6 +54,8 @@ chmod +x *.sh
 
 Ce clonage initial dans `~/LPE-bootstrap` est un bootstrap documentaire et operatoire limite aux scripts Debian. Le produit final n'est pas execute depuis ce repertoire.
 
+Les scripts `install-lpe.sh` et `update-lpe.sh` enregistrent automatiquement `/opt/lpe/src` comme `safe.directory` Git lorsqu'ils sont executes en root.
+
 Fichiers:
 
 - `install-lpe.sh` installe les prerequis, clone le depot, compile `lpe-cli` et installe le service systemd
@@ -159,6 +161,8 @@ chmod +x *.sh
 ```
 
 This initial clone into `~/LPE-bootstrap` is only a bootstrap step for documentation and operations and is limited to the Debian scripts. The final product does not run from that directory.
+
+The install and update scripts automatically register `/opt/lpe/src` as a Git `safe.directory` when they run as root.
 
 Files:
 

@@ -18,6 +18,8 @@ if [[ ! -d "${SRC_DIR}/.git" ]]; then
   exit 1
 fi
 
+git config --global --add safe.directory "${SRC_DIR}" || true
+
 git -C "${SRC_DIR}" remote set-url origin "${REPO_URL}" || true
 git -C "${SRC_DIR}" fetch --all --tags
 git -C "${SRC_DIR}" checkout "${BRANCH}"

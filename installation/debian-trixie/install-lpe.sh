@@ -39,6 +39,8 @@ install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${INSTALL_ROOT}" "${SRC_D
 install -d -o root -g root "${ENV_DIR}"
 install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${DATA_DIR}"
 
+git config --global --add safe.directory "${SRC_DIR}" || true
+
 if [[ ! -d "${SRC_DIR}/.git" ]]; then
   git clone --branch "${BRANCH}" "${REPO_URL}" "${SRC_DIR}"
 else
