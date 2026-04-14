@@ -81,6 +81,8 @@ fi
 
 systemctl daemon-reload
 systemctl enable lpe.service
+systemctl restart lpe.service
 
 echo "LPE installed in ${INSTALL_ROOT}."
-echo "Review ${ENV_DIR}/lpe.env, then run 'systemctl start lpe.service'."
+echo "Service lpe.service has been started."
+echo "Review ${ENV_DIR}/lpe.env and run the migrations script if the database schema is not initialized yet."

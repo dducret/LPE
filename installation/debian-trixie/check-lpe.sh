@@ -64,11 +64,11 @@ systemctl is-active "$SERVICE_NAME" >/dev/null 2>&1 || fail "Service is not acti
 pass "Service active: $SERVICE_NAME"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.accounts');" | grep -qx 'accounts' \
-  || fail "Table public.accounts is missing"
+  || fail "Table public.accounts is missing. Run /opt/lpe/src/installation/debian-trixie/run-migrations.sh"
 pass "Found table public.accounts"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.searchable_mail_documents');" | grep -qx 'searchable_mail_documents' \
-  || fail "View public.searchable_mail_documents is missing"
+  || fail "View public.searchable_mail_documents is missing. Run /opt/lpe/src/installation/debian-trixie/run-migrations.sh"
 pass "Found view public.searchable_mail_documents"
 
 check_http_json_field "$HTTP_BASE/health" '"status":"ok"'

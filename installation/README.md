@@ -59,6 +59,7 @@ Les scripts `install-lpe.sh` et `update-lpe.sh` enregistrent automatiquement `/o
 Fichiers:
 
 - `install-lpe.sh` installe les prerequis, clone le depot, compile `lpe-cli` et installe le service systemd
+- `install-lpe.sh` demarre aussi `lpe.service` a la fin de l'installation
 - `update-lpe.sh` met a jour le depot, recompile `lpe-cli` et redemarre le service
 - `bootstrap-postgresql.sh` cree un role et une base PostgreSQL
 - `bootstrap-postgresql.sh` installe aussi PostgreSQL serveur si necessaire puis le demarre
@@ -74,7 +75,7 @@ Ordre recommande:
 2. executer `install-lpe.sh`
 3. ajuster `/etc/lpe/lpe.env`
 4. executer `run-migrations.sh`
-5. lancer `systemctl start lpe.service`
+5. verifier le service avec `systemctl status lpe.service`
 
 Exemple complet:
 
@@ -84,7 +85,7 @@ cd ~/LPE-bootstrap/installation/debian-trixie
 ./install-lpe.sh
 nano /etc/lpe/lpe.env
 ./run-migrations.sh
-systemctl start lpe.service
+systemctl status lpe.service
 ./check-lpe.sh
 ```
 
@@ -168,6 +169,7 @@ The install and update scripts automatically register `/opt/lpe/src` as a Git `s
 Files:
 
 - `install-lpe.sh` installs prerequisites, clones the repository, builds `lpe-cli`, and installs the systemd service
+- `install-lpe.sh` also starts `lpe.service` at the end of the installation
 - `update-lpe.sh` updates the repository, rebuilds `lpe-cli`, and restarts the service
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
@@ -183,7 +185,7 @@ Recommended order:
 2. run `install-lpe.sh`
 3. adjust `/etc/lpe/lpe.env`
 4. run `run-migrations.sh`
-5. start `systemctl start lpe.service`
+5. verify the service with `systemctl status lpe.service`
 
 Complete example:
 
@@ -193,7 +195,7 @@ cd ~/LPE-bootstrap/installation/debian-trixie
 ./install-lpe.sh
 nano /etc/lpe/lpe.env
 ./run-migrations.sh
-systemctl start lpe.service
+systemctl status lpe.service
 ./check-lpe.sh
 ```
 
