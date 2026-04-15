@@ -15,54 +15,89 @@ export function Sidebar(props: {
   onCompose: () => void;
   onCloseComposer: () => void;
 }) {
+  const mailFolders: Array<{ id: Folder | null; label: string; count?: number }> = [
+    { id: "inbox", label: props.copy.folders.inbox, count: props.counts.inbox },
+    { id: "drafts", label: props.copy.folders.drafts, count: props.counts.drafts },
+    { id: "sent", label: props.copy.folders.sent, count: props.counts.sent },
+    { id: "archive", label: props.copy.folders.archive, count: props.counts.archive },
+    ...props.copy.customFolders.map((label, index) => ({ id: null, label, count: index === 1 ? 7 : undefined }))
+  ];
+
   return (
     <aside className="rail">
-      <div className="brand-lockup">
-        <div className="brand-mark">LPE</div>
-        <div>
-          <h1>{props.copy.productTitle}</h1>
-          <p className="brand-subtitle">{props.copy.productSubtitle}</p>
-        </div>
-      </div>
-
-      <button className="compose-button" type="button" onClick={props.onCompose}>
-        <span className="compose-plus">+</span>
-        <span>{props.copy.compose}</span>
-      </button>
-
-      <nav className="section-nav" aria-label={props.copy.sectionLabel}>
+      <div className="app-rail">
+        <div className="app-rail-brand">☰</div>
         {(["mail", "calendar", "contacts"] as Section[]).map((value) => (
-          <button key={value} className={props.section === value ? "nav-button is-active" : "nav-button"} type="button" onClick={() => props.setSection(value)}>
-            <span className="nav-icon">{props.copy.sectionIcons[value]}</span>
-            <span>{props.copy.sections[value]}</span>
+          <button key={value} className={props.section === value ? "app-rail-button is-active" : "app-rail-button"} type="button" onClick={() => props.setSection(value)}>
+            {props.copy.sectionIcons[value]}
           </button>
         ))}
-      </nav>
-
-      <div className="folder-panel">
-        <p className="panel-title">{props.copy.mailboxLabel}</p>
-        {(["focused", "inbox", "drafts", "sent", "archive"] as Folder[]).map((value) => (
-          <button
-            key={value}
-            className={props.folder === value ? "folder-button is-active" : "folder-button"}
-            type="button"
-            onClick={() => {
-              props.setSection("mail");
-              props.setFolder(value);
-              props.onCloseComposer();
-            }}
-          >
-            <span>{props.copy.folders[value]}</span>
-            <span>{props.counts[value]}</span>
-          </button>
-        ))}
+        <button className="app-rail-button" type="button">✓</button>
+        <button className="app-rail-button" type="button">☁</button>
       </div>
 
-      <div className="rail-summary">
-        <p className="panel-title">{props.copy.workspaceSummary}</p>
-        <div className="summary-card"><strong>{props.copy.summaryInbox}</strong><span>{props.copy.summaryUnread.replace("{count}", String(props.unreadCount))}</span></div>
-        <div className="summary-card"><strong>{props.copy.summaryAgenda}</strong><span>{props.copy.summaryAgendaCount.replace("{count}", String(props.eventCount))}</span></div>
-        <div className="summary-card"><strong>{props.copy.summaryDrafts}</strong><span>{props.copy.summaryDraftsCount.replace("{count}", String(props.draftCount))}</span></div>
+      <div className="sidebar-column">
+        <div className="brand-lockup">
+          <div className="brand-mark">LPE</div>
+          <div>
+            <h1>{props.copy.productTitle}</h1>
+            <p className="brand-subtitle">{props.copy.productSubtitle}</p>
+          </div>
+        </div>
+
+        <button className="compose-button" type="button" onClick={props.onCompose}>
+          <span className="compose-plus">+</span>
+          <span>{props.copy.compose}</span>
+        </button>
+
+        <div className="folder-panel is-tight">
+          <p className="panel-title">{props.copy.favoritesLabel}</p>
+          <button className="tree-item" type="button" onClick={() => { props.setSection("mail"); props.setFolder("focused"); props.onCloseComposer(); }}>
+            <span>{props.copy.folders.focused}</span>
+          </button>
+          <button className="tree-item" type="button" onClick={() => { props.setSection("mail"); props.setFolder("inbox"); props.onCloseComposer(); }}>
+            <span>{props.copy.folders.inbox}</span>
+            <span>{props.counts.inbox}</span>
+          </button>
+        </div>
+
+        <div className="mailbox-header">
+          <strong>{props.copy.mailboxOwner}</strong>
+        </div>
+
+        <div className="folder-panel is-tree">
+          {mailFolders.map((item, index) => {
+            const isActive = item.id ? props.folder === item.id : false;
+            return (
+              <button
+                key={`${item.label}-${index}`}
+                className={isActive ? "tree-item is-active" : "tree-item"}
+                type="button"
+                onClick={() => {
+                  if (item.id) {
+                    props.setSection("mail");
+                    props.setFolder(item.id);
+                    props.onCloseComposer();
+                  }
+                }}
+              >
+                <span>{item.label}</span>
+                <span>{item.count ?? ""}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="folder-panel is-tight">
+          {props.copy.folderGroups.map((group) => <button key={group} className="tree-group" type="button">{group}</button>)}
+        </div>
+
+        <div className="rail-summary">
+          <p className="panel-title">{props.copy.workspaceSummary}</p>
+          <div className="summary-card"><strong>{props.copy.summaryInbox}</strong><span>{props.copy.summaryUnread.replace("{count}", String(props.unreadCount))}</span></div>
+          <div className="summary-card"><strong>{props.copy.summaryAgenda}</strong><span>{props.copy.summaryAgendaCount.replace("{count}", String(props.eventCount))}</span></div>
+          <div className="summary-card"><strong>{props.copy.summaryDrafts}</strong><span>{props.copy.summaryDraftsCount.replace("{count}", String(props.draftCount))}</span></div>
+        </div>
       </div>
     </aside>
   );

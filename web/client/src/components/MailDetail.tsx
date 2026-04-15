@@ -22,6 +22,7 @@ export function MailDetail(props: {
 
   return (
     <>
+      <div className="reading-titlebar">{props.copy.rightPaneTitle}</div>
       <div className="detail-header">
         <div><p className="detail-label">{props.copy.readingPane}</p><h3>{props.current.subject}</h3></div>
         <div className="detail-actions">
@@ -33,7 +34,16 @@ export function MailDetail(props: {
 
       <div className="sender-card"><div className="sender-avatar">{props.current.from.slice(0, 2).toUpperCase()}</div><div><strong>{props.current.from}</strong><p>{props.current.fromAddress}</p><span>{props.copy.fields.to}: {props.current.to}</span></div><span>{props.current.receivedAt}</span></div>
       <div className="tag-row">{props.current.tags.map((tag) => <span className="tag-pill" key={tag}>{tag}</span>)}</div>
-      <article className="message-body">{props.current.body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}</article>
+      <article className="message-body">
+        {props.current.body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+        <div className="message-card-preview">
+          <div className="message-card-image" />
+          <div className="message-card-meta">
+            <strong>{props.current.timeLabel}</strong>
+            <span>{props.current.from}</span>
+          </div>
+        </div>
+      </article>
       <section className="attachment-panel"><div className="pane-header compact"><div><p className="pane-kicker">{props.copy.attachmentsTitle}</p><h4>{props.copy.attachmentsSubtitle}</h4></div></div><div className="attachment-list">{props.current.attachments.length > 0 ? props.current.attachments.map((item) => <article className="attachment-card" key={item.id}><span className="attachment-kind">{item.kind}</span><div><strong>{item.name}</strong><p>{item.size}</p></div></article>) : <div className="empty-state compact">{props.copy.noAttachments}</div>}</div></section>
     </>
   );
