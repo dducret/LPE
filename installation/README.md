@@ -31,6 +31,8 @@ Hypothese d'exploitation:
 - shell root ou compte avec `sudo`
 - aucune dependance locale supposee au depart sauf l'acces reseau
 
+Pour un serveur de tri separe en `DMZ`, utiliser plutot `LPE-CT/installation/debian-trixie`. Ce sous-repertoire installe un composant distinct dans `/opt/lpe-ct` avec sa propre interface de management et sans exposer le back office coeur sur le serveur DMZ.
+
 ### Preparation initiale sur un serveur Debian nu
 
 Mettre a jour l'index APT et installer les outils minimaux pour recuperer le depot:
@@ -155,6 +157,8 @@ Operating assumptions:
 - no desktop environment
 - root shell or an account with `sudo`
 - no local dependency assumed at the start except network access
+
+For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI and without exposing the core back office on the DMZ server.
 
 ### Initial preparation on a bare Debian server
 

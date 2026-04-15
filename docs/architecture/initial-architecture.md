@@ -10,6 +10,7 @@
 - code LPE : `Apache-2.0`
 - dependances : `Apache-2.0` d'abord, `MIT` uniquement par exception justifiee
 - architecture de donnees preparee pour une IA locale future
+- possibilite de deporter le centre de tri sur un serveur `DMZ` distinct sans deplacer le coeur metier
 
 ### Vision
 
@@ -41,6 +42,9 @@ Executable de demarrage local du serveur.
 8. `nginx` sur Debian
 Serveur frontal HTTP pour exposer l'interface d'administration statique et reverse-proxy `/api/` vers `lpe-admin-api`.
 
+9. `LPE-CT` en option pour la DMZ
+Centre de tri distinct pour l'entree SMTP exposee, le filtrage perimetrique, la quarantaine et le relais controle vers le coeur `LPE` dans le `LAN`.
+
 ### Priorites MVP
 
 - comptes, domaines, alias, quotas
@@ -63,6 +67,7 @@ Serveur frontal HTTP pour exposer l'interface d'administration statique et rever
 - LPE code: `Apache-2.0`
 - dependencies: prefer `Apache-2.0`, allow `MIT` only with a documented exception
 - data architecture prepared for future local AI
+- ability to move the sorting center onto a distinct `DMZ` server without moving the business core
 
 ### Vision
 
@@ -93,6 +98,9 @@ Local server executable.
 
 8. `nginx` on Debian
 HTTP front end used to expose the static administration UI and reverse-proxy `/api/` to `lpe-admin-api`.
+
+9. optional `LPE-CT` in the DMZ
+Separate sorting center for exposed SMTP ingress, perimeter filtering, quarantine, and controlled relay toward the core `LPE` services on the `LAN`.
 
 ### MVP priorities
 

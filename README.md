@@ -18,6 +18,7 @@
 - `crates/` services et bibliotheques Rust
 - `web/admin` back office React/TypeScript
 - `web/client` client web type Outlook Web avec shell mail, liste de messages et panneau de lecture
+- `LPE-CT/` centre de tri DMZ separe avec sa propre documentation et ses scripts Debian
 - `docs/architecture` decisions techniques initiales
 - `docs/licensing` politique de licences et garde-fous CI
 - `installation` scripts et documentation de deploiement
@@ -31,6 +32,12 @@ cargo check
 ```
 
 Sur `Debian Trixie`, les scripts d'installation deploient aussi une console d'administration statique via `nginx`, avec reverse proxy `/api/` vers le service Rust local.
+
+Pour un serveur de tri distinct en `DMZ`, le sous-repertoire `LPE-CT/` fournit un composant autonome avec:
+
+- une API Rust de management
+- une interface statique dediee
+- des scripts `Debian Trixie` d'installation et de mise a jour dans `LPE-CT/installation/debian-trixie`
 
 La console d'administration actuelle couvre deja une V1 de pilotage du plan de controle:
 
@@ -83,6 +90,7 @@ Les interfaces web supportent en v1:
 - `crates/` Rust services and libraries
 - `web/admin` React/TypeScript back office
 - `web/client` Outlook Web style client with a mail shell, message list, and reading pane
+- `LPE-CT/` separate DMZ sorting center with its own documentation and Debian scripts
 - `docs/architecture` initial technical decisions
 - `docs/licensing` license policy and CI guardrails
 - `installation` deployment scripts and documentation
@@ -96,6 +104,12 @@ cargo check
 ```
 
 On `Debian Trixie`, the installation scripts also deploy a static administration console through `nginx`, with `/api/` reverse-proxied to the local Rust service.
+
+For a separate sorting server placed in a `DMZ`, the `LPE-CT/` subdirectory provides an autonomous component with:
+
+- a Rust management API
+- a dedicated static interface
+- `Debian Trixie` install and update scripts in `LPE-CT/installation/debian-trixie`
 
 The current administration console already exposes a first control-plane V1:
 

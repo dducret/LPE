@@ -1,0 +1,22 @@
+[Unit]
+Description=LPE-CT DMZ Management API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lpe-ct
+Group=lpe-ct
+WorkingDirectory=/opt/lpe-ct/src/LPE-CT
+EnvironmentFile=/etc/lpe-ct/lpe-ct.env
+ExecStart=/opt/lpe-ct/bin/lpe-ct
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/lpe-ct /var/lib/lpe-ct
+
+[Install]
+WantedBy=multi-user.target
