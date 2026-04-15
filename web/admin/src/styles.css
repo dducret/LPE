@@ -42,6 +42,9 @@ input, select { min-height: 44px; border-radius: 12px; border: 1px solid var(--l
 .list-block { padding: 12px 0; border-bottom: 1px solid rgba(31,26,23,.08); }
 .list-block:last-child { border-bottom: 0; }
 .sublist { margin-top: 8px; display: flex; flex-wrap: wrap; }
+.mailbox-card { width: 100%; padding: 14px; border-radius: 14px; border: 1px solid rgba(31,26,23,.08); background: rgba(255,255,255,.72); }
+.mailbox-transfer-form { margin-top: 10px; }
+.mailbox-history { gap: 8px; }
 .pill { display: inline-flex; align-items: center; padding: 6px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: .82rem; font-weight: 700; }
 .pill.ok { background: rgba(47,109,71,.12); color: var(--ok); }
 .pill.warn { background: rgba(147,90,31,.12); color: var(--warn); }

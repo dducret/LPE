@@ -61,6 +61,18 @@ pub struct MailboxRecord {
     pub role: String,
     pub message_count: u32,
     pub retention_days: u16,
+    pub pst_jobs: Vec<PstTransferJobRecord>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PstTransferJobRecord {
+    pub id: Uuid,
+    pub direction: String,
+    pub server_path: String,
+    pub status: String,
+    pub requested_by: String,
+    pub created_at: String,
+    pub completed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -194,6 +206,14 @@ pub struct NewMailbox {
 }
 
 #[derive(Debug, Clone)]
+pub struct NewPstTransferJob {
+    pub mailbox_id: Uuid,
+    pub direction: String,
+    pub server_path: String,
+    pub requested_by: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct NewDomain {
     pub name: String,
     pub default_quota_mb: u32,
@@ -274,6 +294,18 @@ struct MailboxRow {
     role: String,
     message_count: i64,
     retention_days: i32,
+}
+
+#[derive(Debug, FromRow)]
+struct PstTransferJobRow {
+    id: Uuid,
+    mailbox_id: Uuid,
+    direction: String,
+    server_path: String,
+    status: String,
+    requested_by: String,
+    created_at: String,
+    completed_at: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -394,6 +426,29 @@ impl Storage {
         .fetch_all(&self.pool)
         .await?;
 
+        let pst_job_rows = sqlx::query_as::<_, PstTransferJobRow>(
+            r#"
+            SELECT
+                id,
+                mailbox_id,
+                direction,
+                server_path,
+                status,
+                requested_by,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                CASE
+                    WHEN completed_at IS NULL THEN NULL
+                    ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS completed_at
+            FROM mailbox_pst_jobs
+            WHERE tenant_id = $1
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(tenant_id)
+        .fetch_all(&self.pool)
+        .await?;
+
         let mut accounts = Vec::with_capacity(account_rows.len());
         for row in account_rows {
             let mailboxes = mailbox_rows
@@ -405,6 +460,19 @@ impl Storage {
                     role: mailbox.role.clone(),
                     message_count: mailbox.message_count as u32,
                     retention_days: mailbox.retention_days as u16,
+                    pst_jobs: pst_job_rows
+                        .iter()
+                        .filter(|job| job.mailbox_id == mailbox.id)
+                        .map(|job| PstTransferJobRecord {
+                            id: job.id,
+                            direction: job.direction.clone(),
+                            server_path: job.server_path.clone(),
+                            status: job.status.clone(),
+                            requested_by: job.requested_by.clone(),
+                            created_at: job.created_at.clone(),
+                            completed_at: job.completed_at.clone(),
+                        })
+                        .collect(),
                 })
                 .collect::<Vec<_>>();
 
@@ -660,6 +728,58 @@ impl Storage {
             .bind(input.display_name.trim())
             .bind(sort_order)
             .bind(input.retention_days as i32)
+            .execute(&mut *tx)
+            .await?;
+
+            self.insert_audit(&mut tx, audit).await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn create_pst_transfer_job(
+        &self,
+        input: NewPstTransferJob,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let direction = input.direction.trim().to_lowercase();
+        let server_path = input.server_path.trim();
+        let requested_by = input.requested_by.trim().to_lowercase();
+
+        let mailbox_exists = sqlx::query(
+            r#"
+            SELECT 1
+            FROM mailboxes
+            WHERE tenant_id = $1 AND id = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(input.mailbox_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if mailbox_exists.is_some()
+            && !server_path.is_empty()
+            && !requested_by.is_empty()
+            && (direction == "import" || direction == "export")
+        {
+            sqlx::query(
+                r#"
+                INSERT INTO mailbox_pst_jobs (
+                    id, tenant_id, mailbox_id, direction, server_path, status, requested_by
+                )
+                VALUES ($1, $2, $3, $4, $5, 'requested', $6)
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(DEFAULT_TENANT_ID)
+            .bind(input.mailbox_id)
+            .bind(direction)
+            .bind(server_path)
+            .bind(requested_by)
             .execute(&mut *tx)
             .await?;
 

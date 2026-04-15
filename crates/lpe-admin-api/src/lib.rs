@@ -9,7 +9,7 @@ use lpe_core::CoreService;
 use lpe_storage::{
     AdminDashboard, AuditEntryInput, DashboardUpdate, EmailTraceResult, EmailTraceSearchInput,
     HealthResponse, LocalAiSettings, NewAccount, NewAlias, NewDomain, NewFilterRule, NewMailbox,
-    NewServerAdministrator, SecuritySettings, ServerSettings, Storage,
+    NewPstTransferJob, NewServerAdministrator, SecuritySettings, ServerSettings, Storage,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -47,6 +47,14 @@ struct CreateMailboxRequest {
     display_name: String,
     role: String,
     retention_days: u16,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreatePstTransferJobRequest {
+    mailbox_id: Uuid,
+    direction: String,
+    server_path: String,
+    requested_by: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,6 +142,7 @@ pub fn router(storage: Storage) -> Router {
         .route("/console/dashboard", get(dashboard))
         .route("/console/accounts", post(create_account))
         .route("/console/mailboxes", post(create_mailbox))
+        .route("/console/mailboxes/pst-jobs", post(create_pst_transfer_job))
         .route("/console/domains", post(create_domain))
         .route("/console/aliases", post(create_alias))
         .route("/console/admins", post(create_server_administrator))
@@ -256,6 +265,37 @@ async fn create_mailbox(
                 actor: "admin@example.test".to_string(),
                 action: "create-mailbox".to_string(),
                 subject: format!("{} for {}", request.display_name, request.account_id),
+            },
+        )
+        .await
+        .map_err(internal_error)?;
+
+    dashboard(State(storage)).await
+}
+
+async fn create_pst_transfer_job(
+    State(storage): State<Storage>,
+    Json(request): Json<CreatePstTransferJobRequest>,
+) -> ApiResult<AdminDashboard> {
+    let direction = request.direction.trim().to_lowercase();
+    let action = if direction == "export" {
+        "request-pst-export"
+    } else {
+        "request-pst-import"
+    };
+
+    storage
+        .create_pst_transfer_job(
+            NewPstTransferJob {
+                mailbox_id: request.mailbox_id,
+                direction,
+                server_path: request.server_path.clone(),
+                requested_by: request.requested_by.clone(),
+            },
+            AuditEntryInput {
+                actor: "admin@example.test".to_string(),
+                action: action.to_string(),
+                subject: format!("{} {}", request.mailbox_id, request.server_path),
             },
         )
         .await

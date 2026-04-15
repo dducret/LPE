@@ -36,6 +36,7 @@ La console d'administration actuelle couvre deja une V1 de pilotage du plan de c
 
 - page serveur avec etat, politiques, domaines et administrateurs
 - page domaine orientee gestion des comptes, alias et delegations
+- actions d'import et d'export `PST` au niveau des boites aux lettres depuis la page domaine
 - page antispam avec moteur, regles et quarantaine
 - page audit et compliance avec journal et recherche de trace email
 - page operations pour protocoles et stockage

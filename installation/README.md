@@ -82,7 +82,7 @@ Ordre recommande:
 5. verifier le service avec `systemctl status lpe.service`
 6. ouvrir `http://adresse-du-serveur/` pour acceder a la console d'administration via `nginx`
 
-La console d'administration enregistre desormais ses comptes, boites, domaines, alias, parametres, administrateurs delegues, objets antispam et evenements d'audit dans `PostgreSQL`. L'execution des migrations n'est donc plus optionnelle apres deploiement ou mise a jour du schema.
+La console d'administration enregistre desormais ses comptes, boites, demandes d'import/export `PST`, domaines, alias, parametres, administrateurs delegues, objets antispam et evenements d'audit dans `PostgreSQL`. L'execution des migrations n'est donc plus optionnelle apres deploiement ou mise a jour du schema.
 
 Exemple complet:
 
@@ -108,7 +108,7 @@ Pour les mises a jour ulterieures:
 
 1. pousser le commit voulu dans `https://github.com/dducret/LPE`
 2. executer `update-lpe.sh`
-3. executer `run-migrations.sh` si le schema PostgreSQL a change
+3. executer `run-migrations.sh` si le schema PostgreSQL a change, notamment pour les migrations de console d'administration comme `0004_mailbox_pst_jobs.sql`
 
 Si tu veux d'abord recuperer les derniers scripts avant une mise a jour:
 
