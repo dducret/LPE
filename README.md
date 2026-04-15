@@ -17,7 +17,7 @@
 
 - `crates/` services et bibliotheques Rust
 - `web/admin` back office React/TypeScript
-- `web/client` client web type Outlook Web
+- `web/client` client web type Outlook Web avec shell mail, liste de messages et panneau de lecture
 - `docs/architecture` decisions techniques initiales
 - `docs/licensing` politique de licences et garde-fous CI
 - `installation` scripts et documentation de deploiement
@@ -82,7 +82,7 @@ Les interfaces web supportent en v1:
 
 - `crates/` Rust services and libraries
 - `web/admin` React/TypeScript back office
-- `web/client` Outlook Web style client
+- `web/client` Outlook Web style client with a mail shell, message list, and reading pane
 - `docs/architecture` initial technical decisions
 - `docs/licensing` license policy and CI guardrails
 - `installation` deployment scripts and documentation
