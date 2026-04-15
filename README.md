@@ -11,6 +11,7 @@
 - `PostgreSQL` comme stockage primaire de metadonnees
 - `JMAP` comme axe principal du produit moderne
 - `IMAP` et `SMTP` comme couches de compatibilite
+- compatibilite client native visee via `IMAP` puis potentiellement `ActiveSync` ou `EWS`, sans casser la coherence des messages envoyes dans `LPE`
 - architecture preparee pour une IA locale future sans sortie de donnees hors serveur
 
 ### Structure
@@ -50,6 +51,8 @@ La console d'administration actuelle couvre deja une V1 de pilotage du plan de c
 
 Cette console est maintenant persistante dans `PostgreSQL` via `lpe-storage` et les migrations SQL du projet.
 
+Le protocole moderne principal reste `JMAP`, mais `LPE` doit aussi rester compatible avec des clients natifs. Cela vise en particulier les usages de type application Mail sur iPhone ou clients Outlook relies par couches de compatibilite. Dans tous les cas, un message envoye depuis un client externe doit etre enregistre dans `LPE` et rester visible dans la vue `Sent` de maniere coherente sur tous les acces.
+
 ### Axe IA locale
 
 `LPE` prepare des projections documentaires canoniques, des chunks et des annotations qui serviront plus tard a une integration LLM locale type Gemma, sans rendre le moteur IA dependance du coeur metier.
@@ -83,6 +86,7 @@ Les interfaces web supportent en v1:
 - `PostgreSQL` is the primary metadata store
 - `JMAP` is the main protocol axis for the modern product
 - `IMAP` and `SMTP` are compatibility layers
+- native client compatibility is a target through `IMAP` first and potentially `ActiveSync` or `EWS` later, without breaking sent-message consistency inside `LPE`
 - the architecture is prepared for future local AI without data leaving the server
 
 ### Structure
@@ -120,6 +124,8 @@ The current administration console already exposes a first control-plane V1:
 - operations page for protocols and storage
 
 This console is now persisted in `PostgreSQL` through `lpe-storage` and the project's SQL migrations.
+
+The main modern protocol remains `JMAP`, but `LPE` must also stay compatible with native clients. This especially targets use cases such as the iPhone Mail application or Outlook-compatible access layers. In every case, a message sent from an external client must be recorded in `LPE` and remain visible in the authoritative `Sent` view across access paths.
 
 ### Local AI direction
 

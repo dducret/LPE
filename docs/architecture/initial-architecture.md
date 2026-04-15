@@ -16,6 +16,10 @@
 
 `LPE` est un serveur de messagerie et de collaboration moderne. Le coeur metier ne depend pas de `IMAP` ni de `SMTP`. Les protocoles externes sont des adaptateurs autour d'un modele interne stable.
 
+Les clients natifs restent un objectif important. Un utilisateur doit pouvoir connecter sa boite `LPE` depuis un client mobile ou desktop compatible, par exemple l'application Mail de l'iPhone, sans perdre la coherence de sa boite entre protocoles.
+
+Cela implique que tout envoi realise via `SMTP` submission, `IMAP`, `ActiveSync`, `EWS` ou `JMAP` alimente la meme representation canonique du message dans `LPE`, y compris la copie du message envoye dans la vue `Sent`.
+
 ### Blocs principaux
 
 1. `lpe-domain`
@@ -50,6 +54,7 @@ Centre de tri distinct pour l'entree SMTP exposee, le filtrage perimetrique, la 
 - comptes, domaines, alias, quotas
 - SMTP entrant et submission
 - IMAP
+- coherence des messages envoyes entre protocoles clients et vue `Sent`
 - webmail HTTPS
 - recherche
 - administration web
@@ -72,6 +77,10 @@ Centre de tri distinct pour l'entree SMTP exposee, le filtrage perimetrique, la 
 ### Vision
 
 `LPE` is a modern mail and collaboration server. The business core must not depend on `IMAP` or `SMTP`. External protocols are adapters around a stable internal model.
+
+Native clients remain an important goal. A user must be able to connect an `LPE` mailbox from a compatible mobile or desktop client, for example the iPhone Mail application, without losing mailbox consistency across protocols.
+
+This implies that every submission path through `SMTP` submission, `IMAP`, `ActiveSync`, `EWS`, or `JMAP` feeds the same canonical message representation in `LPE`, including the authoritative `Sent` mailbox view.
 
 ### Main building blocks
 
@@ -107,6 +116,7 @@ Separate sorting center for exposed SMTP ingress, perimeter filtering, quarantin
 - accounts, domains, aliases, quotas
 - inbound SMTP and submission
 - IMAP
+- sent-message consistency across client protocols and the `Sent` view
 - HTTPS webmail
 - search
 - web administration
