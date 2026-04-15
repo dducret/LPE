@@ -34,12 +34,11 @@ Sur `Debian Trixie`, les scripts d'installation deploient aussi une console d'ad
 
 La console d'administration actuelle couvre deja une V1 de pilotage du plan de controle:
 
-- creation de comptes et de boites aux lettres
-- gestion des domaines et alias
-- parametrage du serveur et des liaisons protocolaire
-- politiques de securite administrateur
-- configuration IA locale et indexation
-- visibilite sur protocoles, stockage et journal d'audit recent
+- page serveur avec etat, politiques, domaines et administrateurs
+- page domaine orientee gestion des comptes, alias et delegations
+- page antispam avec moteur, regles et quarantaine
+- page audit et compliance avec journal et recherche de trace email
+- page operations pour protocoles et stockage
 
 Cette console est maintenant persistante dans `PostgreSQL` via `lpe-storage` et les migrations SQL du projet.
 
@@ -99,12 +98,11 @@ On `Debian Trixie`, the installation scripts also deploy a static administration
 
 The current administration console already exposes a first control-plane V1:
 
-- account and mailbox creation
-- domain and alias management
-- server and protocol binding configuration
-- administrator security policies
-- local AI and indexing configuration
-- visibility into protocols, storage, and recent audit activity
+- server page with status, policies, domains, and administrators
+- domain-oriented page for accounts, aliases, and delegated administration
+- anti-spam page with engine, rules, and quarantine
+- audit and compliance page with journal and email trace search
+- operations page for protocols and storage
 
 This console is now persisted in `PostgreSQL` through `lpe-storage` and the project's SQL migrations.
 

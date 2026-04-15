@@ -18,9 +18,13 @@ pub struct AdminDashboard {
     pub accounts: Vec<AccountRecord>,
     pub domains: Vec<DomainRecord>,
     pub aliases: Vec<AliasRecord>,
+    pub server_admins: Vec<ServerAdministrator>,
     pub server_settings: ServerSettings,
     pub security_settings: SecuritySettings,
     pub local_ai_settings: LocalAiSettings,
+    pub antispam_settings: AntispamSettings,
+    pub antispam_rules: Vec<FilterRule>,
+    pub quarantine_items: Vec<QuarantineItem>,
     pub storage: StorageOverview,
     pub audit_log: Vec<AuditEvent>,
 }
@@ -90,6 +94,17 @@ pub struct AliasRecord {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ServerAdministrator {
+    pub id: Uuid,
+    pub domain_id: Option<Uuid>,
+    pub domain_name: String,
+    pub email: String,
+    pub display_name: String,
+    pub role: String,
+    pub rights_summary: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ServerSettings {
     pub primary_hostname: String,
     pub admin_bind_address: String,
@@ -116,6 +131,34 @@ pub struct LocalAiSettings {
     pub model: String,
     pub offline_only: bool,
     pub indexing_enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AntispamSettings {
+    pub content_filtering_enabled: bool,
+    pub spam_engine: String,
+    pub quarantine_enabled: bool,
+    pub quarantine_retention_days: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FilterRule {
+    pub id: Uuid,
+    pub name: String,
+    pub scope: String,
+    pub action: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct QuarantineItem {
+    pub id: Uuid,
+    pub message_ref: String,
+    pub sender: String,
+    pub recipient: String,
+    pub reason: String,
+    pub status: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -177,6 +220,40 @@ pub struct DashboardUpdate {
     pub server_settings: ServerSettings,
     pub security_settings: SecuritySettings,
     pub local_ai_settings: LocalAiSettings,
+    pub antispam_settings: AntispamSettings,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewServerAdministrator {
+    pub domain_id: Option<Uuid>,
+    pub email: String,
+    pub display_name: String,
+    pub role: String,
+    pub rights_summary: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewFilterRule {
+    pub name: String,
+    pub scope: String,
+    pub action: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct EmailTraceSearchInput {
+    pub query: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EmailTraceResult {
+    pub message_id: Uuid,
+    pub internet_message_id: Option<String>,
+    pub subject: String,
+    pub sender: String,
+    pub account_email: String,
+    pub mailbox: String,
+    pub received_at: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -225,6 +302,48 @@ struct AuditRow {
     actor: String,
     action: String,
     subject: String,
+}
+
+#[derive(Debug, FromRow)]
+struct ServerAdministratorRow {
+    id: Uuid,
+    domain_id: Option<Uuid>,
+    domain_name: Option<String>,
+    email: String,
+    display_name: String,
+    role: String,
+    rights_summary: String,
+}
+
+#[derive(Debug, FromRow)]
+struct FilterRuleRow {
+    id: Uuid,
+    name: String,
+    scope: String,
+    action: String,
+    status: String,
+}
+
+#[derive(Debug, FromRow)]
+struct QuarantineRow {
+    id: Uuid,
+    message_ref: String,
+    sender: String,
+    recipient: String,
+    reason: String,
+    status: String,
+    created_at: String,
+}
+
+#[derive(Debug, FromRow)]
+struct EmailTraceRow {
+    message_id: Uuid,
+    internet_message_id: Option<String>,
+    subject: String,
+    sender: String,
+    account_email: String,
+    mailbox: String,
+    received_at: String,
 }
 
 impl Storage {
@@ -346,6 +465,10 @@ impl Storage {
         let server_settings = self.fetch_server_settings().await?;
         let security_settings = self.fetch_security_settings().await?;
         let local_ai_settings = self.fetch_local_ai_settings().await?;
+        let antispam_settings = self.fetch_antispam_settings().await?;
+        let server_admins = self.fetch_server_administrators().await?;
+        let antispam_rules = self.fetch_antispam_rules().await?;
+        let quarantine_items = self.fetch_quarantine_items().await?;
 
         let audit_log = sqlx::query_as::<_, AuditRow>(
             r#"
@@ -437,9 +560,13 @@ impl Storage {
             accounts,
             domains,
             aliases,
+            server_admins,
             server_settings,
             security_settings,
             local_ai_settings,
+            antispam_settings,
+            antispam_rules,
+            quarantine_items,
             storage: StorageOverview {
                 primary_store: "PostgreSQL".to_string(),
                 search_engine: "PostgreSQL FTS + pg_trgm".to_string(),
@@ -594,6 +721,61 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn create_server_administrator(
+        &self,
+        input: NewServerAdministrator,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            r#"
+            INSERT INTO server_administrators (
+                id, tenant_id, domain_id, email, display_name, role, rights_summary
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(DEFAULT_TENANT_ID)
+        .bind(input.domain_id)
+        .bind(input.email.trim().to_lowercase())
+        .bind(input.display_name.trim())
+        .bind(input.role.trim())
+        .bind(input.rights_summary.trim())
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, audit).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn create_filter_rule(
+        &self,
+        input: NewFilterRule,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            r#"
+            INSERT INTO antispam_filter_rules (id, tenant_id, name, scope, action, status)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(DEFAULT_TENANT_ID)
+        .bind(input.name.trim())
+        .bind(input.scope.trim())
+        .bind(input.action.trim())
+        .bind(input.status.trim())
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, audit).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn update_settings(
         &self,
         update: DashboardUpdate,
@@ -679,9 +861,80 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
+        sqlx::query(
+            r#"
+            INSERT INTO antispam_settings (
+                tenant_id, content_filtering_enabled, spam_engine,
+                quarantine_enabled, quarantine_retention_days
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (tenant_id) DO UPDATE SET
+                content_filtering_enabled = EXCLUDED.content_filtering_enabled,
+                spam_engine = EXCLUDED.spam_engine,
+                quarantine_enabled = EXCLUDED.quarantine_enabled,
+                quarantine_retention_days = EXCLUDED.quarantine_retention_days,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(update.antispam_settings.content_filtering_enabled)
+        .bind(update.antispam_settings.spam_engine)
+        .bind(update.antispam_settings.quarantine_enabled)
+        .bind(update.antispam_settings.quarantine_retention_days as i32)
+        .execute(&mut *tx)
+        .await?;
+
         self.insert_audit(&mut tx, audit).await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    pub async fn search_email_trace(
+        &self,
+        input: EmailTraceSearchInput,
+    ) -> Result<Vec<EmailTraceResult>> {
+        let like_query = format!("%{}%", input.query.trim().to_lowercase());
+        let rows = sqlx::query_as::<_, EmailTraceRow>(
+            r#"
+            SELECT
+                m.id AS message_id,
+                m.internet_message_id,
+                m.subject_normalized AS subject,
+                m.from_address AS sender,
+                a.primary_email AS account_email,
+                mb.display_name AS mailbox,
+                to_char(m.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at
+            FROM messages m
+            JOIN accounts a ON a.id = m.account_id
+            JOIN mailboxes mb ON mb.id = m.mailbox_id
+            WHERE m.tenant_id = $1
+              AND (
+                lower(m.from_address) LIKE $2
+                OR lower(m.subject_normalized) LIKE $2
+                OR lower(COALESCE(m.internet_message_id, '')) LIKE $2
+                OR lower(a.primary_email) LIKE $2
+              )
+            ORDER BY m.received_at DESC
+            LIMIT 50
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(like_query)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| EmailTraceResult {
+                message_id: row.message_id,
+                internet_message_id: row.internet_message_id,
+                subject: row.subject,
+                sender: row.sender,
+                account_email: row.account_email,
+                mailbox: row.mailbox,
+                received_at: row.received_at,
+            })
+            .collect())
     }
 
     async fn fetch_server_settings(&self) -> Result<ServerSettings> {
@@ -777,6 +1030,130 @@ impl Storage {
                 indexing_enabled: true,
             },
         })
+    }
+
+    async fn fetch_antispam_settings(&self) -> Result<AntispamSettings> {
+        let row = sqlx::query(
+            r#"
+            SELECT content_filtering_enabled, spam_engine, quarantine_enabled, quarantine_retention_days
+            FROM antispam_settings
+            WHERE tenant_id = $1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(match row {
+            Some(row) => AntispamSettings {
+                content_filtering_enabled: row.try_get("content_filtering_enabled")?,
+                spam_engine: row.try_get("spam_engine")?,
+                quarantine_enabled: row.try_get("quarantine_enabled")?,
+                quarantine_retention_days: row.try_get::<i32, _>("quarantine_retention_days")?
+                    as u32,
+            },
+            None => AntispamSettings {
+                content_filtering_enabled: true,
+                spam_engine: "rspamd-ready".to_string(),
+                quarantine_enabled: true,
+                quarantine_retention_days: 30,
+            },
+        })
+    }
+
+    async fn fetch_server_administrators(&self) -> Result<Vec<ServerAdministrator>> {
+        let rows = sqlx::query_as::<_, ServerAdministratorRow>(
+            r#"
+            SELECT
+                sa.id,
+                sa.domain_id,
+                d.name AS domain_name,
+                sa.email,
+                sa.display_name,
+                sa.role,
+                sa.rights_summary
+            FROM server_administrators sa
+            LEFT JOIN domains d ON d.id = sa.domain_id
+            WHERE sa.tenant_id = $1
+            ORDER BY sa.created_at ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| ServerAdministrator {
+                id: row.id,
+                domain_id: row.domain_id,
+                domain_name: row.domain_name.unwrap_or_else(|| "All domains".to_string()),
+                email: row.email,
+                display_name: row.display_name,
+                role: row.role,
+                rights_summary: row.rights_summary,
+            })
+            .collect())
+    }
+
+    async fn fetch_antispam_rules(&self) -> Result<Vec<FilterRule>> {
+        let rows = sqlx::query_as::<_, FilterRuleRow>(
+            r#"
+            SELECT id, name, scope, action, status
+            FROM antispam_filter_rules
+            WHERE tenant_id = $1
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| FilterRule {
+                id: row.id,
+                name: row.name,
+                scope: row.scope,
+                action: row.action,
+                status: row.status,
+            })
+            .collect())
+    }
+
+    async fn fetch_quarantine_items(&self) -> Result<Vec<QuarantineItem>> {
+        let rows = sqlx::query_as::<_, QuarantineRow>(
+            r#"
+            SELECT
+                id,
+                message_ref,
+                sender,
+                recipient,
+                reason,
+                status,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at
+            FROM antispam_quarantine
+            WHERE tenant_id = $1
+            ORDER BY created_at DESC
+            LIMIT 50
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| QuarantineItem {
+                id: row.id,
+                message_ref: row.message_ref,
+                sender: row.sender,
+                recipient: row.recipient,
+                reason: row.reason,
+                status: row.status,
+                created_at: row.created_at,
+            })
+            .collect())
     }
 
     async fn insert_audit(

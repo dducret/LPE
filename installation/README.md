@@ -82,7 +82,7 @@ Ordre recommande:
 5. verifier le service avec `systemctl status lpe.service`
 6. ouvrir `http://adresse-du-serveur/` pour acceder a la console d'administration via `nginx`
 
-La console d'administration enregistre desormais ses comptes, boites, domaines, alias, parametres et evenements d'audit dans `PostgreSQL`. L'execution des migrations n'est donc plus optionnelle apres deploiement ou mise a jour du schema.
+La console d'administration enregistre desormais ses comptes, boites, domaines, alias, parametres, administrateurs delegues, objets antispam et evenements d'audit dans `PostgreSQL`. L'execution des migrations n'est donc plus optionnelle apres deploiement ou mise a jour du schema.
 
 Exemple complet:
 
@@ -207,7 +207,7 @@ Recommended order:
 5. verify the service with `systemctl status lpe.service`
 6. open `http://server-address/` to reach the administration console through `nginx`
 
-The administration console now stores its accounts, mailboxes, domains, aliases, settings, and audit events in `PostgreSQL`. Running migrations is therefore mandatory after deployment or any schema update.
+The administration console now stores its accounts, mailboxes, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Running migrations is therefore mandatory after deployment or any schema update.
 
 Complete example:
 

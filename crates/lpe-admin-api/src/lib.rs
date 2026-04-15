@@ -7,8 +7,9 @@ use axum::{
 use lpe_ai::{LocalModelProvider, StubLocalModelProvider};
 use lpe_core::CoreService;
 use lpe_storage::{
-    AdminDashboard, AuditEntryInput, DashboardUpdate, HealthResponse, LocalAiSettings, NewAccount,
-    NewAlias, NewDomain, NewMailbox, SecuritySettings, ServerSettings, Storage,
+    AdminDashboard, AuditEntryInput, DashboardUpdate, EmailTraceResult, EmailTraceSearchInput,
+    HealthResponse, LocalAiSettings, NewAccount, NewAlias, NewDomain, NewFilterRule, NewMailbox,
+    NewServerAdministrator, SecuritySettings, ServerSettings, Storage,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -92,6 +93,36 @@ struct UpdateLocalAiSettingsRequest {
     indexing_enabled: bool,
 }
 
+#[derive(Debug, Deserialize)]
+struct UpdateAntispamSettingsRequest {
+    content_filtering_enabled: bool,
+    spam_engine: String,
+    quarantine_enabled: bool,
+    quarantine_retention_days: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateServerAdministratorRequest {
+    domain_id: Option<Uuid>,
+    email: String,
+    display_name: String,
+    role: String,
+    rights_summary: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateFilterRuleRequest {
+    name: String,
+    scope: String,
+    action: String,
+    status: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct EmailTraceSearchRequest {
+    query: String,
+}
+
 type ApiResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 
 pub fn router(storage: Storage) -> Router {
@@ -105,9 +136,16 @@ pub fn router(storage: Storage) -> Router {
         .route("/console/mailboxes", post(create_mailbox))
         .route("/console/domains", post(create_domain))
         .route("/console/aliases", post(create_alias))
+        .route("/console/admins", post(create_server_administrator))
+        .route("/console/antispam/rules", post(create_filter_rule))
+        .route(
+            "/console/audit/email-trace-search",
+            post(search_email_trace),
+        )
         .route("/console/settings/server", put(update_server_settings))
         .route("/console/settings/security", put(update_security_settings))
         .route("/console/settings/local-ai", put(update_local_ai_settings))
+        .route("/console/settings/antispam", put(update_antispam_settings))
         .with_state(storage)
 }
 
@@ -296,6 +334,7 @@ async fn update_server_settings(
                 },
                 security_settings: existing.security_settings,
                 local_ai_settings: existing.local_ai_settings,
+                antispam_settings: existing.antispam_settings,
             },
             AuditEntryInput {
                 actor: "admin@example.test".to_string(),
@@ -328,6 +367,7 @@ async fn update_security_settings(
                     audit_retention_days: request.audit_retention_days.max(30),
                 },
                 local_ai_settings: existing.local_ai_settings,
+                antispam_settings: existing.antispam_settings,
             },
             AuditEntryInput {
                 actor: "admin@example.test".to_string(),
@@ -361,6 +401,7 @@ async fn update_local_ai_settings(
                     offline_only: request.offline_only,
                     indexing_enabled: request.indexing_enabled,
                 },
+                antispam_settings: existing.antispam_settings,
             },
             AuditEntryInput {
                 actor: "admin@example.test".to_string(),
@@ -372,6 +413,102 @@ async fn update_local_ai_settings(
         .map_err(internal_error)?;
 
     dashboard(State(storage)).await
+}
+
+async fn update_antispam_settings(
+    State(storage): State<Storage>,
+    Json(request): Json<UpdateAntispamSettingsRequest>,
+) -> ApiResult<AdminDashboard> {
+    let existing = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?;
+    storage
+        .update_settings(
+            DashboardUpdate {
+                server_settings: existing.server_settings,
+                security_settings: existing.security_settings,
+                local_ai_settings: existing.local_ai_settings,
+                antispam_settings: lpe_storage::AntispamSettings {
+                    content_filtering_enabled: request.content_filtering_enabled,
+                    spam_engine: request.spam_engine.clone(),
+                    quarantine_enabled: request.quarantine_enabled,
+                    quarantine_retention_days: request.quarantine_retention_days.max(1),
+                },
+            },
+            AuditEntryInput {
+                actor: "admin@example.test".to_string(),
+                action: "update-antispam-settings".to_string(),
+                subject: request.spam_engine,
+            },
+        )
+        .await
+        .map_err(internal_error)?;
+
+    dashboard(State(storage)).await
+}
+
+async fn create_server_administrator(
+    State(storage): State<Storage>,
+    Json(request): Json<CreateServerAdministratorRequest>,
+) -> ApiResult<AdminDashboard> {
+    storage
+        .create_server_administrator(
+            NewServerAdministrator {
+                domain_id: request.domain_id,
+                email: request.email,
+                display_name: request.display_name,
+                role: request.role,
+                rights_summary: request.rights_summary,
+            },
+            AuditEntryInput {
+                actor: "admin@example.test".to_string(),
+                action: "create-server-administrator".to_string(),
+                subject: "domain delegation".to_string(),
+            },
+        )
+        .await
+        .map_err(internal_error)?;
+
+    dashboard(State(storage)).await
+}
+
+async fn create_filter_rule(
+    State(storage): State<Storage>,
+    Json(request): Json<CreateFilterRuleRequest>,
+) -> ApiResult<AdminDashboard> {
+    storage
+        .create_filter_rule(
+            NewFilterRule {
+                name: request.name.clone(),
+                scope: request.scope,
+                action: request.action,
+                status: request.status,
+            },
+            AuditEntryInput {
+                actor: "admin@example.test".to_string(),
+                action: "create-antispam-rule".to_string(),
+                subject: request.name,
+            },
+        )
+        .await
+        .map_err(internal_error)?;
+
+    dashboard(State(storage)).await
+}
+
+async fn search_email_trace(
+    State(storage): State<Storage>,
+    Json(request): Json<EmailTraceSearchRequest>,
+) -> ApiResult<Vec<EmailTraceResult>> {
+    Ok(Json(
+        storage
+            .search_email_trace(EmailTraceSearchInput {
+                query: request.query,
+            })
+            .await
+            .map_err(internal_error)?,
+    ))
 }
 
 fn internal_error(error: impl ToString) -> (StatusCode, String) {
