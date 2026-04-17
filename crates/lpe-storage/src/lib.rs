@@ -292,6 +292,23 @@ pub struct AdminLogin {
     pub rights_summary: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct AccountLogin {
+    pub account_id: Uuid,
+    pub email: String,
+    pub password_hash: String,
+    pub status: String,
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AuthenticatedAccount {
+    pub account_id: Uuid,
+    pub email: String,
+    pub display_name: String,
+    pub expires_at: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct PstJobExecutionSummary {
     pub processed_jobs: u32,
@@ -441,6 +458,15 @@ struct AdminLoginRow {
 }
 
 #[derive(Debug, FromRow)]
+struct AccountLoginRow {
+    account_id: Uuid,
+    email: String,
+    password_hash: String,
+    status: String,
+    display_name: String,
+}
+
+#[derive(Debug, FromRow)]
 struct AuthenticatedAdminRow {
     email: String,
     display_name: Option<String>,
@@ -448,6 +474,14 @@ struct AuthenticatedAdminRow {
     domain_id: Option<Uuid>,
     domain_name: Option<String>,
     rights_summary: Option<String>,
+    expires_at: String,
+}
+
+#[derive(Debug, FromRow)]
+struct AuthenticatedAccountRow {
+    account_id: Uuid,
+    email: String,
+    display_name: String,
     expires_at: String,
 }
 
@@ -1135,6 +1169,61 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn fetch_account_login(&self, email: &str) -> Result<Option<AccountLogin>> {
+        let email = normalize_email(email);
+        let row = sqlx::query_as::<_, AccountLoginRow>(
+            r#"
+            SELECT
+                a.id AS account_id,
+                ac.account_email AS email,
+                ac.password_hash,
+                ac.status,
+                a.display_name
+            FROM account_credentials ac
+            JOIN accounts a
+              ON a.tenant_id = ac.tenant_id
+             AND lower(a.primary_email) = lower(ac.account_email)
+            WHERE ac.tenant_id = $1 AND lower(ac.account_email) = lower($2)
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(email)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| AccountLogin {
+            account_id: row.account_id,
+            email: row.email,
+            password_hash: row.password_hash,
+            status: row.status,
+            display_name: row.display_name,
+        }))
+    }
+
+    pub async fn create_account_session(
+        &self,
+        token: &str,
+        account_email: &str,
+        session_timeout_minutes: u32,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO account_sessions (id, tenant_id, token, account_email, expires_at)
+            VALUES ($1, $2, $3, $4, NOW() + ($5::TEXT || ' minutes')::INTERVAL)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(DEFAULT_TENANT_ID)
+        .bind(token)
+        .bind(normalize_email(account_email))
+        .bind(session_timeout_minutes.max(5) as i32)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn fetch_admin_session(&self, token: &str) -> Result<Option<AuthenticatedAdmin>> {
         let row = sqlx::query_as::<_, AuthenticatedAdminRow>(
             r#"
@@ -1183,6 +1272,54 @@ impl Storage {
         sqlx::query(
             r#"
             DELETE FROM admin_sessions
+            WHERE tenant_id = $1 AND token = $2
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(token)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn fetch_account_session(&self, token: &str) -> Result<Option<AuthenticatedAccount>> {
+        let row = sqlx::query_as::<_, AuthenticatedAccountRow>(
+            r#"
+            SELECT
+                a.id AS account_id,
+                ac.account_email AS email,
+                a.display_name,
+                to_char(s.expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS expires_at
+            FROM account_sessions s
+            JOIN account_credentials ac ON ac.account_email = s.account_email
+            JOIN accounts a
+              ON a.tenant_id = s.tenant_id
+             AND lower(a.primary_email) = lower(s.account_email)
+            WHERE s.tenant_id = $1
+              AND s.token = $2
+              AND s.expires_at > NOW()
+              AND ac.status = 'active'
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(token)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| AuthenticatedAccount {
+            account_id: row.account_id,
+            email: row.email,
+            display_name: row.display_name,
+            expires_at: row.expires_at,
+        }))
+    }
+
+    pub async fn delete_account_session(&self, token: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            DELETE FROM account_sessions
             WHERE tenant_id = $1 AND token = $2
             "#,
         )

@@ -12,10 +12,11 @@ use lpe_ai::{LocalModelProvider, StubLocalModelProvider};
 use lpe_core::CoreService;
 use lpe_storage::{
     AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput,
-    AuthenticatedAdmin, DashboardUpdate, EmailTraceResult, EmailTraceSearchInput, HealthResponse,
-    LocalAiSettings, NewAccount, NewAlias, NewDomain, NewFilterRule, NewMailbox, NewPstTransferJob,
-    NewServerAdministrator, PstJobExecutionSummary, SecuritySettings, ServerSettings, Storage,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    AuthenticatedAccount, AuthenticatedAdmin, DashboardUpdate, EmailTraceResult,
+    EmailTraceSearchInput, HealthResponse, LocalAiSettings, NewAccount, NewAlias, NewDomain,
+    NewFilterRule, NewMailbox, NewPstTransferJob, NewServerAdministrator, PstJobExecutionSummary,
+    SecuritySettings, ServerSettings, Storage, SubmitMessageInput, SubmittedMessage,
+    SubmittedRecipientInput,
 };
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -45,6 +46,12 @@ struct AttachmentSupportResponse {
 struct LoginResponse {
     token: String,
     admin: AuthenticatedAdmin,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ClientLoginResponse {
+    token: String,
+    account: AuthenticatedAccount,
 }
 
 #[derive(Debug, Deserialize)]
@@ -183,6 +190,9 @@ pub fn router(storage: Storage) -> Router {
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(me))
+        .route("/mail/auth/login", post(client_login))
+        .route("/mail/auth/logout", post(client_logout))
+        .route("/mail/auth/me", get(client_me))
         .route("/bootstrap/admin", get(bootstrap_admin))
         .route("/health/local-ai", get(local_ai_health))
         .route("/capabilities/attachments", get(attachment_support))
@@ -269,6 +279,62 @@ async fn logout(State(storage): State<Storage>, headers: HeaderMap) -> ApiResult
 
 async fn me(State(storage): State<Storage>, headers: HeaderMap) -> ApiResult<AuthenticatedAdmin> {
     Ok(Json(require_admin(&storage, &headers, "dashboard").await?))
+}
+
+async fn client_login(
+    State(storage): State<Storage>,
+    Json(request): Json<LoginRequest>,
+) -> ApiResult<ClientLoginResponse> {
+    let email = request.email.trim().to_lowercase();
+    let candidate = storage
+        .fetch_account_login(&email)
+        .await
+        .map_err(internal_error)?
+        .ok_or((StatusCode::UNAUTHORIZED, "invalid credentials".to_string()))?;
+
+    if candidate.status != "active" || !verify_password(&candidate.password_hash, &request.password)
+    {
+        return Err((StatusCode::UNAUTHORIZED, "invalid credentials".to_string()));
+    }
+
+    let token = Uuid::new_v4().to_string();
+    storage
+        .create_account_session(&token, &candidate.email, client_session_minutes())
+        .await
+        .map_err(internal_error)?;
+    let account = storage
+        .fetch_account_session(&token)
+        .await
+        .map_err(internal_error)?
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            "session creation failed".to_string(),
+        ))?;
+
+    Ok(Json(ClientLoginResponse { token, account }))
+}
+
+async fn client_logout(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<HealthResponse> {
+    if let Some(token) = bearer_token(&headers) {
+        storage
+            .delete_account_session(&token)
+            .await
+            .map_err(internal_error)?;
+    }
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+async fn client_me(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<AuthenticatedAccount> {
+    Ok(Json(require_account(&storage, &headers).await?))
 }
 
 async fn bootstrap_admin(
@@ -750,7 +816,15 @@ async fn submit_message(
     headers: HeaderMap,
     Json(request): Json<SubmitMessageRequest>,
 ) -> ApiResult<SubmittedMessage> {
-    let admin = require_admin(&storage, &headers, "mail").await?;
+    let account = require_account(&storage, &headers).await?;
+    if account.account_id != request.account_id
+        || account.email.to_lowercase() != request.from_address.trim().to_lowercase()
+    {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "authenticated account cannot submit this message".to_string(),
+        ));
+    }
     let subject_for_audit = request.subject.clone();
     let submitted = storage
         .submit_message(
@@ -770,7 +844,7 @@ async fn submit_message(
                 size_octets: request.size_octets.unwrap_or(0),
             },
             AuditEntryInput {
-                actor: admin.email,
+                actor: account.email,
                 action: "submit-message".to_string(),
                 subject: subject_for_audit,
             },
@@ -819,6 +893,22 @@ async fn require_admin(
             "insufficient admin rights".to_string(),
         ))
     }
+}
+
+async fn require_account(
+    storage: &Storage,
+    headers: &HeaderMap,
+) -> std::result::Result<AuthenticatedAccount, (StatusCode, String)> {
+    let token = bearer_token(headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "missing bearer token".to_string()))?;
+    storage
+        .fetch_account_session(&token)
+        .await
+        .map_err(internal_error)?
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            "invalid or expired session".to_string(),
+        ))
 }
 
 fn bearer_token(headers: &HeaderMap) -> Option<String> {
@@ -912,6 +1002,13 @@ fn admin_session_minutes() -> u32 {
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(45)
+}
+
+fn client_session_minutes() -> u32 {
+    env::var("LPE_CLIENT_SESSION_MINUTES")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(720)
 }
 
 fn hash_password(password: &str) -> anyhow::Result<String> {

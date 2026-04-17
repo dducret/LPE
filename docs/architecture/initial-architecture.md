@@ -36,6 +36,8 @@ Cette sequence donne a `Sent` le statut de source autoritative avant meme la rem
 
 Toutes les couches clientes doivent utiliser ce modele canonique de soumission et de synchronisation. Aucune couche cliente ne doit ecrire une logique `Sent` ou `Outbox` parallele.
 
+Le webmail utilise une authentification de compte distincte de l'administration. Le formulaire `/mail/` appelle `/api/mail/auth/login`, qui verifie le hash `argon2` stocke dans `account_credentials`, cree une session dans `account_sessions`, puis expose l'identite via `/api/mail/auth/me`.
+
 ### Blocs principaux
 
 1. `lpe-domain`
@@ -115,6 +117,8 @@ The initial submission model is transactional in the `LPE` core and exposed by `
 This sequence makes `Sent` authoritative before the sorting center performs the actual SMTP delivery.
 
 All client layers must use this canonical submission and synchronization model. No client layer may write its own parallel `Sent` or `Outbox` logic.
+
+The webmail uses account authentication separate from administration. The `/mail/` form calls `/api/mail/auth/login`, which verifies the `argon2` hash stored in `account_credentials`, creates a session in `account_sessions`, and exposes the identity through `/api/mail/auth/me`.
 
 ### Main building blocks
 

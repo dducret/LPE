@@ -24,6 +24,13 @@ button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; color: var(--text); background: rgba(255,255,255,0.94); }
 textarea { resize: vertical; }
+.client-login-shell { min-height: 100vh; display: grid; place-items: center; padding: 32px; background: radial-gradient(circle at 15% 15%, rgba(15,108,189,0.18), transparent 24rem), linear-gradient(135deg, #f7fbff 0%, #e9f2fb 100%); }
+.client-login-card { width: min(460px, 100%); display: grid; gap: 24px; padding: 30px; border: 1px solid #d2d0ce; border-radius: 18px; background: #ffffff; box-shadow: 0 24px 80px rgba(16,46,82,0.16); }
+.client-login-card h2 { margin: 8px 0 10px; font-size: 1.65rem; }
+.client-login-card p { margin: 0; color: #605e5c; line-height: 1.55; }
+.client-login-form { display: grid; gap: 14px; }
+.login-error { padding: 10px 12px; border-radius: 8px; background: #fde7e9; color: #a4262c !important; }
+.header-account { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.82rem; color: rgba(255,255,255,0.9); }
 .app-shell { min-height: 100vh; display: grid; grid-template-rows: 46px 1fr; background: #f3f2f1; }
 .app-header { display: grid; grid-template-columns: 220px 1fr 220px; align-items: center; gap: 16px; padding: 0 14px; background: #0f6cbd; color: white; }
 .app-header-left, .app-header-right { display: flex; align-items: center; gap: 14px; }

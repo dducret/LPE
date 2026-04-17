@@ -61,6 +61,8 @@ Le backend expose un premier modele de soumission canonique via `/api/mail/messa
 
 Toutes les couches clientes doivent utiliser le modele canonique `LPE` de soumission et de synchronisation. Aucune couche cliente ne doit ecrire une logique `Sent` ou `Outbox` parallele.
 
+Le client web `/mail/` exige une authentification utilisateur. Les identifiants sont ceux du compte cree dans l'administration; le mot de passe est hache cote serveur avec `argon2`, stocke dans `account_credentials`, puis valide via `/api/mail/auth/login` avant d'ouvrir l'interface.
+
 ### Axe IA locale
 
 `LPE` prepare des projections documentaires canoniques, des chunks et des annotations qui serviront plus tard a une integration LLM locale type Gemma, sans rendre le moteur IA dependance du coeur metier.
@@ -143,6 +145,8 @@ The main modern protocol remains `JMAP`, but `LPE` must also stay compatible wit
 The backend now exposes an initial canonical submission model through `/api/mail/messages/submit`: a submitted message is stored in `messages`, recipients are stored in `message_recipients`, the authoritative copy is placed in the `Sent` mailbox, and an `outbound_message_queue` entry prepares outbound handoff through the `LPE-CT` sorting center.
 
 All client layers must use the canonical `LPE` submission and synchronization model. No client layer may write its own parallel `Sent` or `Outbox` logic.
+
+The `/mail/` web client requires user authentication. Credentials are the mailbox account credentials created in the administration console; the password is hashed server-side with `argon2`, stored in `account_credentials`, and validated through `/api/mail/auth/login` before the interface opens.
 
 ### Local AI direction
 

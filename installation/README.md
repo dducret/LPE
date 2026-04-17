@@ -91,6 +91,8 @@ Ordre recommande:
 6. ouvrir `http://adresse-du-serveur/` pour acceder a la console d'administration via `nginx`
 7. ouvrir `http://adresse-du-serveur/mail/` pour acceder au client web
 
+Le client web demande une authentification utilisateur. Creer d'abord un compte et son mot de passe depuis la page domaine de l'administration, puis se connecter a `/mail/` avec l'adresse email complete et ce mot de passe.
+
 La console d'administration enregistre desormais ses comptes, mots de passe de comptes, boites, demandes d'import/export `PST`, domaines, alias, parametres, administrateurs delegues, objets antispam et evenements d'audit dans `PostgreSQL`. L'execution des migrations n'est donc plus optionnelle apres deploiement ou mise a jour du schema.
 
 La premiere connexion cree automatiquement un administrateur de bootstrap si aucun identifiant n'existe encore. Les variables `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD` et `LPE_ADMIN_SESSION_MINUTES` doivent etre ajustees dans `/etc/lpe/lpe.env` avant exposition de la console.
@@ -227,6 +229,8 @@ Recommended order:
 5. verify the service with `systemctl status lpe.service`
 6. open `http://server-address/` to reach the administration console through `nginx`
 7. open `http://server-address/mail/` to reach the web client
+
+The web client requires user authentication. First create an account and its password from the administration domain page, then sign in to `/mail/` with the full email address and that password.
 
 The administration console now stores its accounts, account passwords, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Running migrations is therefore mandatory after deployment or any schema update.
 
