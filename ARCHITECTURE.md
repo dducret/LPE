@@ -33,7 +33,7 @@ The following differences are mandatory:
 - Stalwart's `AGPL-3.0` and proprietary enterprise licensing model is not compatible with the `LPE` source-code policy
 - `LPE` must keep a distinct DMZ sorting-center layer for inbound and outbound mail transport
 - the mailbox and collaboration core must remain separated from the Internet-facing transport gateway
-- native Outlook compatibility is adoption-critical and must be treated as a first-class architecture concern
+- native Outlook and mobile compatibility is adoption-critical, with `ActiveSync` as the first targeted compatibility layer and `EWS` kept as a future extension
 
 Stalwart can therefore be used as a product and architecture benchmark, but not as a codebase to copy from unless each reused element is explicitly verified as license-compatible.
 
@@ -57,7 +57,8 @@ The protocol split should follow the architectural boundary between the mailbox 
 
 - `LPE` should implement `JMAP` as the primary modern mailbox and collaboration protocol
 - `LPE` should implement `IMAP` as a mailbox-access compatibility layer
-- `LPE` may support additional mailbox-access compatibility protocols such as `EWS` or `ActiveSync`
+- `LPE` should target `ActiveSync` as the first native Outlook and mobile compatibility layer
+- `EWS` remains a future extension to evaluate after the canonical submission and synchronization model is stabilized
 - `LPE` should expose collaboration compatibility through standards-based protocols when appropriate, including `CalDAV`, `CardDAV`, and potentially `WebDAV`
 - Internet-facing `SMTP` ingress should be handled by the sorting-center layer, not by `LPE`
 - outgoing `SMTP` relay responsibilities should also remain in the sorting-center layer
@@ -66,11 +67,13 @@ This keeps transport and edge-security logic concentrated in the sorting centers
 
 ### Client compatibility and sent-message consistency
 
-Compatibility protocols such as `IMAP`, `EWS`, and `ActiveSync` are important because users may rely on native client applications, including mobile clients such as the iPhone Mail application.
+Compatibility protocols such as `IMAP` and `ActiveSync` are important because users may rely on native client applications, including mobile clients such as the iPhone Mail application.
 
 Native Outlook compatibility is especially important for adoption.
 
-`LPE` should not assume that `IMAP` plus `SMTP` plus automatic account discovery is sufficient for Outlook users. The architecture must keep room for first-class Outlook-compatible access, such as `EWS`, `ActiveSync`, or another explicitly selected compatibility layer that preserves mailbox, calendar, contact, and sent-message consistency.
+`LPE` should not assume that `IMAP` plus `SMTP` plus automatic account discovery is sufficient for Outlook users. The first targeted native Outlook and mobile compatibility layer is `ActiveSync` because it can cover mailbox, calendar, contact, synchronization, and mobile-client adoption needs through one coherent access model.
+
+`EWS` remains a future extension. It should be evaluated after the canonical `LPE` submission and synchronization model is stabilized, not implemented as an early parallel model.
 
 The architecture must therefore ensure that:
 
@@ -78,8 +81,12 @@ The architecture must therefore ensure that:
 - message submission performed through compatibility workflows is still reflected correctly in the mailbox state maintained by `LPE`
 - sent messages are recorded in `LPE` so that the mailbox remains consistent across devices and protocols
 - Outlook-compatible access is treated as a strategic adoption requirement, not as a later cosmetic add-on
+- every client layer uses the canonical `LPE` submission and synchronization model
+- no client compatibility layer writes its own parallel `Sent` or `Outbox` logic
 
 This means protocol compatibility must not be implemented as a transport bypass that would cause sent messages to exist only in the client view or only in the sorting-center relay path.
+
+All client-facing protocols must converge on the same canonical mailbox state, including `Sent`, draft, pending-send, and outbound-queue transitions.
 
 ### Autoconfiguration and autodiscovery
 
@@ -733,7 +740,8 @@ The current architectural direction for the first product phases is:
 - traceability and quarantine as first-class capabilities
 - `JMAP` as the main modern API surface
 - `IMAP` as a mailbox-access compatibility layer
-- Outlook-compatible access through `EWS`, `ActiveSync`, or another explicitly selected equivalent layer as an adoption-critical target
+- `ActiveSync` as the first targeted native Outlook and mobile compatibility layer
+- `EWS` as a future extension after stabilization of the canonical submission and synchronization model
 - `PST` mailbox import and export for migration and interoperability
 - collaboration services for contacts, calendars, and to-do lists
 - mailbox growth management through storage tiers, dedicated databases, split-capable large mailbox handling, and online archive support

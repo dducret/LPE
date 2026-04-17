@@ -18,7 +18,23 @@
 
 Les clients natifs restent un objectif important. Un utilisateur doit pouvoir connecter sa boite `LPE` depuis un client mobile ou desktop compatible, par exemple l'application Mail de l'iPhone, sans perdre la coherence de sa boite entre protocoles.
 
-Cela implique que tout envoi realise via un protocole client supporte, notamment `JMAP`, `IMAP`, `ActiveSync` ou `EWS`, alimente la meme representation canonique du message dans `LPE`, y compris la copie du message envoye dans la vue `Sent`. L'execution du transport `SMTP` entrant et sortant reste une responsabilite du centre de tri.
+Cela implique que tout envoi realise via un protocole client supporte, notamment `JMAP`, `IMAP` ou `ActiveSync`, alimente la meme representation canonique du message dans `LPE`, y compris la copie du message envoye dans la vue `Sent`. L'execution du transport `SMTP` entrant et sortant reste une responsabilite du centre de tri.
+
+`ActiveSync` est la premiere couche de compatibilite native Outlook/mobile visee. `EWS` reste une extension future, a evaluer apres stabilisation du modele canonique de soumission et de synchronisation.
+
+Le modele de soumission initial est transactionnel cote coeur `LPE` et expose par l'API `/api/mail/messages/submit`:
+
+1. verifier le compte emetteur
+2. garantir l'existence de la mailbox `Sent`
+3. creer le message canonique dans `messages`
+4. enregistrer les destinataires dans `message_recipients`
+5. indexer le corps dans `message_bodies`
+6. ajouter une entree `outbound_message_queue` pour remise via `LPE-CT`
+7. journaliser l'action dans `audit_events`
+
+Cette sequence donne a `Sent` le statut de source autoritative avant meme la remise SMTP effective par le centre de tri.
+
+Toutes les couches clientes doivent utiliser ce modele canonique de soumission et de synchronisation. Aucune couche cliente ne doit ecrire une logique `Sent` ou `Outbox` parallele.
 
 ### Blocs principaux
 
@@ -54,7 +70,8 @@ Centre de tri distinct pour l'entree `SMTP` exposee, le relais sortant, le filtr
 - comptes, domaines, alias, quotas
 - IMAP
 - transport `SMTP` entrant et sortant via `LPE-CT`
-- compatibilite Outlook native via `EWS`, `ActiveSync` ou couche equivalente choisie explicitement
+- compatibilite Outlook/mobile native via `ActiveSync` en premiere cible
+- `EWS` comme extension future apres stabilisation du modele canonique de soumission et de synchronisation
 - coherence des messages envoyes entre protocoles clients et vue `Sent`
 - webmail HTTPS
 - recherche
@@ -81,7 +98,23 @@ Centre de tri distinct pour l'entree `SMTP` exposee, le relais sortant, le filtr
 
 Native clients remain an important goal. A user must be able to connect an `LPE` mailbox from a compatible mobile or desktop client, for example the iPhone Mail application, without losing mailbox consistency across protocols.
 
-This implies that every supported client submission path, especially `JMAP`, `IMAP`, `ActiveSync`, or `EWS`, feeds the same canonical message representation in `LPE`, including the authoritative `Sent` mailbox view. Inbound and outbound `SMTP` transport execution remains a sorting-center responsibility.
+This implies that every supported client submission path, especially `JMAP`, `IMAP`, or `ActiveSync`, feeds the same canonical message representation in `LPE`, including the authoritative `Sent` mailbox view. Inbound and outbound `SMTP` transport execution remains a sorting-center responsibility.
+
+`ActiveSync` is the first targeted native Outlook and mobile compatibility layer. `EWS` remains a future extension to evaluate after the canonical submission and synchronization model is stabilized.
+
+The initial submission model is transactional in the `LPE` core and exposed by `/api/mail/messages/submit`:
+
+1. verify the submitting account
+2. ensure the `Sent` mailbox exists
+3. create the canonical message in `messages`
+4. store recipients in `message_recipients`
+5. index the body in `message_bodies`
+6. add an `outbound_message_queue` entry for handoff through `LPE-CT`
+7. record the action in `audit_events`
+
+This sequence makes `Sent` authoritative before the sorting center performs the actual SMTP delivery.
+
+All client layers must use this canonical submission and synchronization model. No client layer may write its own parallel `Sent` or `Outbox` logic.
 
 ### Main building blocks
 
@@ -117,7 +150,8 @@ Separate sorting center for exposed `SMTP` ingress, outbound relay, perimeter fi
 - accounts, domains, aliases, quotas
 - IMAP
 - inbound and outbound `SMTP` transport through `LPE-CT`
-- native Outlook compatibility through `EWS`, `ActiveSync`, or another explicitly selected equivalent layer
+- native Outlook and mobile compatibility through `ActiveSync` as the first target
+- `EWS` as a future extension after stabilization of the canonical submission and synchronization model
 - sent-message consistency across client protocols and the `Sent` view
 - HTTPS webmail
 - search

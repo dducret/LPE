@@ -12,7 +12,9 @@
 - `JMAP` comme axe principal du produit moderne
 - `IMAP` comme couche de compatibilite mailbox
 - transport `SMTP` entrant et sortant porte par le centre de tri `LPE-CT`
-- compatibilite client native visee via `IMAP` et compatibilite Outlook native critique via `ActiveSync`, `EWS` ou couche equivalente, sans casser la coherence des messages envoyes dans `LPE`
+- compatibilite client native visee via `IMAP`
+- `ActiveSync` cible comme premiere couche de compatibilite native Outlook/mobile
+- `EWS` reserve comme extension future apres stabilisation du modele canonique de soumission et de synchronisation
 - architecture preparee pour une IA locale future sans sortie de donnees hors serveur
 
 ### Structure
@@ -33,7 +35,7 @@ Le squelette actuel permet de compiler les crates Rust du workspace.
 cargo check
 ```
 
-Sur `Debian Trixie`, les scripts d'installation deploient aussi une console d'administration statique via `nginx`, avec reverse proxy `/api/` vers le service Rust local.
+Sur `Debian Trixie`, les scripts d'installation deploient aussi la console d'administration statique via `nginx` sur `/`, le client web sur `/mail/`, avec reverse proxy `/api/` vers le service Rust local.
 
 Pour un serveur de tri distinct en `DMZ`, le sous-repertoire `LPE-CT/` fournit un composant autonome avec:
 
@@ -43,16 +45,21 @@ Pour un serveur de tri distinct en `DMZ`, le sous-repertoire `LPE-CT/` fournit u
 
 La console d'administration actuelle couvre deja une V1 de pilotage du plan de controle:
 
+- authentification administrateur avec sessions persistantes et controle des droits cote API
 - page serveur avec etat, politiques, domaines et administrateurs
 - page domaine orientee gestion des comptes, alias et delegations
-- actions d'import et d'export `PST` au niveau des boites aux lettres depuis la page domaine
+- demandes et execution testable d'import/export `PST` au niveau des boites aux lettres depuis la page domaine
 - page antispam avec moteur, regles et quarantaine
 - page audit et compliance avec journal et recherche de trace email
 - page operations pour protocoles et stockage
 
 Cette console est maintenant persistante dans `PostgreSQL` via `lpe-storage` et les migrations SQL du projet.
 
-Le protocole moderne principal reste `JMAP`, mais `LPE` doit aussi rester compatible avec des clients natifs. Cela vise en particulier les usages de type application Mail sur iPhone et les clients Outlook. Le support Outlook natif est critique pour l'adoption et ne doit pas etre reduit a `IMAP` + `SMTP` + autodiscover. Dans tous les cas, un message envoye depuis un client externe doit etre enregistre dans `LPE` et rester visible dans la vue `Sent` de maniere coherente sur tous les acces.
+Le protocole moderne principal reste `JMAP`, mais `LPE` doit aussi rester compatible avec des clients natifs. Cela vise en particulier les usages de type application Mail sur iPhone et les clients Outlook. Le support Outlook natif est critique pour l'adoption et ne doit pas etre reduit a `IMAP` + `SMTP` + autodiscover. `ActiveSync` est la premiere couche de compatibilite native Outlook/mobile visee. `EWS` reste une extension future, a evaluer apres stabilisation du modele canonique de soumission et de synchronisation. Dans tous les cas, un message envoye depuis un client externe doit etre enregistre dans `LPE` et rester visible dans la vue `Sent` de maniere coherente sur tous les acces.
+
+Le backend expose un premier modele de soumission canonique via `/api/mail/messages/submit`: un message soumis est stocke dans `messages`, ses destinataires dans `message_recipients`, sa copie autoritative est placee dans la mailbox `Sent`, puis une entree `outbound_message_queue` prepare la remise sortante via le centre de tri `LPE-CT`.
+
+Toutes les couches clientes doivent utiliser le modele canonique `LPE` de soumission et de synchronisation. Aucune couche cliente ne doit ecrire une logique `Sent` ou `Outbox` parallele.
 
 ### Axe IA locale
 
@@ -88,7 +95,9 @@ Les interfaces web supportent en v1:
 - `JMAP` is the main protocol axis for the modern product
 - `IMAP` is a mailbox compatibility layer
 - inbound and outbound `SMTP` transport is handled by the `LPE-CT` sorting center
-- native client compatibility is a target through `IMAP`, and native Outlook compatibility is adoption-critical through `ActiveSync`, `EWS`, or an equivalent layer, without breaking sent-message consistency inside `LPE`
+- native client compatibility is a target through `IMAP`
+- `ActiveSync` is the first targeted native Outlook and mobile compatibility layer
+- `EWS` is reserved as a future extension after the canonical submission and synchronization model is stabilized
 - the architecture is prepared for future local AI without data leaving the server
 
 ### Structure
@@ -109,7 +118,7 @@ The current skeleton compiles the Rust workspace crates.
 cargo check
 ```
 
-On `Debian Trixie`, the installation scripts also deploy a static administration console through `nginx`, with `/api/` reverse-proxied to the local Rust service.
+On `Debian Trixie`, the installation scripts also deploy the static administration console through `nginx` on `/`, the web client on `/mail/`, with `/api/` reverse-proxied to the local Rust service.
 
 For a separate sorting server placed in a `DMZ`, the `LPE-CT/` subdirectory provides an autonomous component with:
 
@@ -119,16 +128,21 @@ For a separate sorting server placed in a `DMZ`, the `LPE-CT/` subdirectory prov
 
 The current administration console already exposes a first control-plane V1:
 
+- administrator authentication with persistent sessions and API-side rights checks
 - server page with status, policies, domains, and administrators
 - domain-oriented page for accounts, aliases, and delegated administration
-- mailbox-level `PST` import and export actions from the domain page
+- mailbox-level `PST` import/export requests and testable execution from the domain page
 - anti-spam page with engine, rules, and quarantine
 - audit and compliance page with journal and email trace search
 - operations page for protocols and storage
 
 This console is now persisted in `PostgreSQL` through `lpe-storage` and the project's SQL migrations.
 
-The main modern protocol remains `JMAP`, but `LPE` must also stay compatible with native clients. This especially targets use cases such as the iPhone Mail application and Outlook clients. Native Outlook support is critical for adoption and must not be reduced to `IMAP` + `SMTP` + autodiscover. In every case, a message sent from an external client must be recorded in `LPE` and remain visible in the authoritative `Sent` view across access paths.
+The main modern protocol remains `JMAP`, but `LPE` must also stay compatible with native clients. This especially targets use cases such as the iPhone Mail application and Outlook clients. Native Outlook support is critical for adoption and must not be reduced to `IMAP` + `SMTP` + autodiscover. `ActiveSync` is the first targeted native Outlook and mobile compatibility layer. `EWS` remains a future extension to evaluate after the canonical submission and synchronization model is stabilized. In every case, a message sent from an external client must be recorded in `LPE` and remain visible in the authoritative `Sent` view across access paths.
+
+The backend now exposes an initial canonical submission model through `/api/mail/messages/submit`: a submitted message is stored in `messages`, recipients are stored in `message_recipients`, the authoritative copy is placed in the `Sent` mailbox, and an `outbound_message_queue` entry prepares outbound handoff through the `LPE-CT` sorting center.
+
+All client layers must use the canonical `LPE` submission and synchronization model. No client layer may write its own parallel `Sent` or `Outbox` logic.
 
 ### Local AI direction
 

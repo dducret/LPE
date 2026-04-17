@@ -90,19 +90,19 @@ The core `LPE` server remains responsible for the canonical sent-message copy in
 
 ### Outlook and adoption
 
-Native Outlook support is critical for `LPE` adoption.
+Native Outlook and mobile support is critical for `LPE` adoption.
 
 The agent must therefore treat Outlook compatibility as a first-class requirement, not as an optional later enhancement.
 
-`LPE` must keep an architecture compatible with:
+`LPE` targets `ActiveSync` as the first native Outlook and mobile compatibility layer.
 
-- `EWS`
-- `ActiveSync`
-- or another explicitly selected layer providing equivalent native Outlook compatibility
+`EWS` remains a future extension and must be evaluated only after the canonical `LPE` submission and synchronization model is stabilized.
 
 Plain `IMAP` + `SMTP` + autodiscover must not be assumed sufficient for Outlook adoption.
 
 Any message sent from Outlook, iPhone Mail, or another native client must be correctly recorded in `LPE` and visible in the `Sent` view.
+
+Every client layer must use the canonical `LPE` submission and synchronization model. No client layer may write its own parallel `Sent` or `Outbox` logic.
 
 ### Storage and data constraints
 
@@ -265,19 +265,19 @@ Le coeur `LPE` reste responsable de la copie canonique du message envoye dans la
 
 ### Outlook et adoption
 
-Le support Outlook natif est un point critique pour l'adoption de `LPE`.
+Le support Outlook/mobile natif est un point critique pour l'adoption de `LPE`.
 
 L'agent doit donc traiter la compatibilite Outlook comme une exigence de premier plan, pas comme une amelioration optionnelle.
 
-`LPE` doit garder une architecture compatible avec:
+`LPE` cible `ActiveSync` comme premiere couche de compatibilite native Outlook/mobile.
 
-- `EWS`
-- `ActiveSync`
-- ou une autre couche explicitement choisie pour une compatibilite Outlook native equivalente
+`EWS` reste une extension future et doit etre evalue uniquement apres stabilisation du modele canonique `LPE` de soumission et de synchronisation.
 
 Une simple combinaison `IMAP` + `SMTP` + autodiscover ne doit pas etre supposee suffisante pour l'adoption Outlook.
 
 Tout envoi effectue depuis un client Outlook, iPhone Mail ou autre client natif doit etre enregistre correctement dans `LPE` et visible dans la vue `Sent`.
+
+Toutes les couches clientes doivent utiliser le modele canonique `LPE` de soumission et de synchronisation. Aucune couche cliente ne doit ecrire une logique `Sent` ou `Outbox` parallele.
 
 ### Contraintes de stockage et donnees
 
