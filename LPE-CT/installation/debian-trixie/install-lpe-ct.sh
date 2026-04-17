@@ -9,6 +9,7 @@ BIN_DIR="${BIN_DIR:-$INSTALL_ROOT/bin}"
 WEB_ROOT="${WEB_ROOT:-$INSTALL_ROOT/www/management}"
 ENV_DIR="${ENV_DIR:-/etc/lpe-ct}"
 STATE_DIR="${STATE_DIR:-/var/lib/lpe-ct}"
+SPOOL_DIR="${SPOOL_DIR:-/var/spool/lpe-ct}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 SERVICE_USER="${SERVICE_USER:-lpe-ct}"
 SERVICE_GROUP="${SERVICE_GROUP:-lpe-ct}"
@@ -38,7 +39,8 @@ if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
   useradd --system --home-dir "${INSTALL_ROOT}" --create-home --shell /usr/sbin/nologin "${SERVICE_USER}"
 fi
 
-install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${INSTALL_ROOT}" "${SRC_DIR}" "${BIN_DIR}" "${STATE_DIR}"
+install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${INSTALL_ROOT}" "${SRC_DIR}" "${BIN_DIR}" "${STATE_DIR}" "${SPOOL_DIR}"
+install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${SPOOL_DIR}/incoming" "${SPOOL_DIR}/deferred" "${SPOOL_DIR}/quarantine" "${SPOOL_DIR}/held" "${SPOOL_DIR}/sent"
 install -d -o root -g root "${WEB_ROOT}" "${ENV_DIR}"
 
 git config --global --add safe.directory "${SRC_DIR}" || true
@@ -96,6 +98,7 @@ rm -f "${NGINX_ENABLED_DIR}/default"
 nginx -t
 
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${STATE_DIR}"
+chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${SPOOL_DIR}"
 systemctl daemon-reload
 systemctl enable lpe-ct.service
 systemctl enable nginx

@@ -7,6 +7,7 @@ BIN_PATH="${BIN_PATH:-$INSTALL_ROOT/bin/lpe-ct}"
 WEB_ROOT="${WEB_ROOT:-$INSTALL_ROOT/www/management}"
 ENV_FILE="${ENV_FILE:-/etc/lpe-ct/lpe-ct.env}"
 STATE_FILE="${STATE_FILE:-/var/lib/lpe-ct/state.json}"
+SPOOL_DIR="${SPOOL_DIR:-/var/spool/lpe-ct}"
 SERVICE_NAME="${SERVICE_NAME:-lpe-ct.service}"
 NGINX_SITE_PATH="${NGINX_SITE_PATH:-/etc/nginx/sites-available/lpe-ct.conf}"
 
@@ -39,6 +40,7 @@ check_file "$BIN_PATH"
 check_file "$WEB_ROOT/index.html"
 check_file "$ENV_FILE"
 check_file "$STATE_FILE"
+check_file "$SPOOL_DIR"
 check_file "/etc/systemd/system/$SERVICE_NAME"
 check_file "$NGINX_SITE_PATH"
 
@@ -48,6 +50,8 @@ set +a
 
 API_HEALTH_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/health"
 API_DASHBOARD_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/api/v1/dashboard"
+SMTP_HOST="${LPE_CT_SMTP_TEST_HOST:-127.0.0.1}"
+SMTP_PORT="${LPE_CT_SMTP_TEST_PORT:-${LPE_CT_SMTP_BIND_ADDRESS##*:}}"
 
 systemctl is-enabled "$SERVICE_NAME" >/dev/null 2>&1 || fail "Service is not enabled: $SERVICE_NAME"
 pass "Service enabled: $SERVICE_NAME"
@@ -65,6 +69,22 @@ pass "Management API health endpoint responded correctly"
 dashboard_body="$(curl --silent --show-error --fail "$API_DASHBOARD_URL")" || fail "Dashboard request failed: $API_DASHBOARD_URL"
 [[ "$dashboard_body" == *"dmz-sorting-center"* ]] || fail "Unexpected dashboard response: $dashboard_body"
 pass "Dashboard endpoint responded correctly"
+
+smtp_response="$({
+  printf 'EHLO check-lpe-ct.local\r\n'
+  printf 'MAIL FROM:<check@lpe-ct.local>\r\n'
+  printf 'RCPT TO:<postmaster@example.test>\r\n'
+  printf 'DATA\r\n'
+  printf 'Subject: LPE-CT local installation check\r\n'
+  printf '\r\n'
+  printf 'check-lpe-ct generated message\r\n'
+  printf '.\r\n'
+  printf 'QUIT\r\n'
+} | timeout 10 bash -c "cat < /dev/stdin > /dev/tcp/${SMTP_HOST}/${SMTP_PORT}" 2>&1 || true)"
+sleep 1
+dashboard_after_smtp="$(curl --silent --show-error --fail "$API_DASHBOARD_URL")" || fail "Dashboard request failed after SMTP test"
+[[ "$dashboard_after_smtp" == *"deferred_messages"* ]] || fail "Dashboard missing queue metrics after SMTP test"
+pass "SMTP listener accepted an installation-check message"
 
 console_body="$(curl --silent --show-error --fail "http://127.0.0.1/")" || fail "Console request failed"
 [[ "$console_body" == *"Centre de Tri"* ]] || fail "Unexpected management index content"

@@ -16,6 +16,8 @@ use tokio::net::TcpListener;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
+mod smtp;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SiteProfile {
     node_name: String,
@@ -111,6 +113,7 @@ struct HealthResponse {
 struct AppState {
     store: Arc<Mutex<DashboardState>>,
     state_file: Arc<PathBuf>,
+    spool_dir: Arc<PathBuf>,
 }
 
 #[tokio::main]
@@ -121,18 +124,46 @@ async fn main() -> Result<()> {
 
     let bind_address =
         env::var("LPE_CT_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8380".to_string());
+    let smtp_bind_address =
+        env::var("LPE_CT_SMTP_BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:25".to_string());
     let state_file = PathBuf::from(
         env::var("LPE_CT_STATE_FILE").unwrap_or_else(|_| "/var/lib/lpe-ct/state.json".to_string()),
     );
+    let spool_dir = PathBuf::from(
+        env::var("LPE_CT_SPOOL_DIR").unwrap_or_else(|_| "/var/spool/lpe-ct".to_string()),
+    );
+    smtp::initialize_spool(&spool_dir)?;
+
+    let mut dashboard = load_or_initialize_state(&state_file)?;
+    apply_env_overrides(&mut dashboard);
+    dashboard.site.management_bind = bind_address.clone();
+    dashboard.site.public_smtp_bind = smtp_bind_address.clone();
+    persist_state(&state_file, &dashboard)?;
 
     let state = AppState {
-        store: Arc::new(Mutex::new(load_or_initialize_state(&state_file)?)),
+        store: Arc::new(Mutex::new(dashboard)),
         state_file: Arc::new(state_file),
+        spool_dir: Arc::new(spool_dir),
     };
 
-    let listener = TcpListener::bind(&bind_address).await?;
-    info!("lpe-ct management api listening on http://{bind_address}");
-    axum::serve(listener, router(state)).await?;
+    let api_state = state.clone();
+    let smtp_state_file = state.state_file.as_ref().clone();
+    let smtp_spool_dir = state.spool_dir.as_ref().clone();
+    let api_task = tokio::spawn(async move {
+        let listener = TcpListener::bind(&bind_address).await?;
+        info!("lpe-ct management api listening on http://{bind_address}");
+        axum::serve(listener, router(api_state)).await?;
+        Result::<()>::Ok(())
+    });
+    let smtp_task = tokio::spawn(async move {
+        smtp::run_smtp_listener(smtp_bind_address, smtp_state_file, smtp_spool_dir).await
+    });
+
+    tokio::select! {
+        result = api_task => result??,
+        result = smtp_task => result??,
+    }
+
     Ok(())
 }
 
@@ -159,7 +190,10 @@ async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse>, A
 }
 
 async fn dashboard(State(state): State<AppState>) -> Result<Json<DashboardState>, ApiError> {
-    Ok(Json(read_state(&state)?))
+    let mut snapshot = read_state(&state)?;
+    snapshot.queues = smtp::queue_metrics(&state.spool_dir, snapshot.queues.upstream_reachable)
+        .map_err(ApiError::from)?;
+    Ok(Json(snapshot))
 }
 
 async fn update_site(
@@ -272,6 +306,36 @@ fn persist_state(path: &Path, state: &DashboardState) -> Result<()> {
     Ok(())
 }
 
+fn apply_env_overrides(state: &mut DashboardState) {
+    if let Ok(value) = env::var("LPE_CT_NODE_NAME") {
+        state.site.node_name = value;
+    }
+    if let Ok(value) = env::var("LPE_CT_RELAY_PRIMARY") {
+        state.relay.primary_upstream = value;
+    }
+    if let Ok(value) = env::var("LPE_CT_RELAY_SECONDARY") {
+        state.relay.secondary_upstream = value;
+    }
+    if let Ok(value) = env::var("LPE_CT_MUTUAL_TLS_REQUIRED") {
+        state.relay.mutual_tls_required = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_FALLBACK_TO_HOLD_QUEUE") {
+        state.relay.fallback_to_hold_queue = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_DRAIN_MODE") {
+        state.policies.drain_mode = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_MAX_MESSAGE_SIZE_MB") {
+        if let Ok(parsed) = value.parse::<u32>() {
+            state.policies.max_message_size_mb = parsed.max(1);
+        }
+    }
+}
+
+fn parse_bool(value: &str) -> bool {
+    matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+}
+
 fn default_state() -> DashboardState {
     DashboardState {
         site: SiteProfile {
@@ -287,8 +351,8 @@ fn default_state() -> DashboardState {
         relay: RelaySettings {
             primary_upstream: "smtp://10.20.0.12:2525".to_string(),
             secondary_upstream: "smtp://10.20.0.13:2525".to_string(),
-            mutual_tls_required: true,
-            fallback_to_hold_queue: true,
+            mutual_tls_required: false,
+            fallback_to_hold_queue: false,
             sync_interval_seconds: 30,
             lan_dependency_note: "Only relay and management flows to the LAN are allowed.".to_string(),
         },
@@ -307,10 +371,10 @@ fn default_state() -> DashboardState {
         policies: PolicySettings {
             drain_mode: false,
             quarantine_enabled: true,
-            greylisting_enabled: true,
-            require_spf: true,
-            require_dkim_alignment: true,
-            require_dmarc_enforcement: true,
+            greylisting_enabled: false,
+            require_spf: false,
+            require_dkim_alignment: false,
+            require_dmarc_enforcement: false,
             attachment_text_scan_enabled: true,
             max_message_size_mb: 64,
         },
@@ -322,11 +386,11 @@ fn default_state() -> DashboardState {
             update_source: "https://github.com/dducret/LPE".to_string(),
         },
         queues: QueueMetrics {
-            inbound_messages: 1428,
-            deferred_messages: 12,
-            quarantined_messages: 4,
+            inbound_messages: 0,
+            deferred_messages: 0,
+            quarantined_messages: 0,
             held_messages: 0,
-            delivery_attempts_last_hour: 381,
+            delivery_attempts_last_hour: 0,
             upstream_reachable: true,
         },
         audit: vec![

@@ -13,7 +13,7 @@
 
 ### Contenu
 
-- `src/` API de management Rust pour le centre de tri
+- `src/` API de management Rust et listener SMTP pour le centre de tri
 - `web/` interface statique de management servie par `nginx`
 - `installation/debian-trixie/` scripts d'installation, mise a jour et verification
 - `docs/architecture/center-de-tri.md` architecture et perimetre DMZ
@@ -24,7 +24,57 @@
 cargo run --manifest-path LPE-CT/Cargo.toml
 ```
 
-Par defaut, l'API ecoute sur `127.0.0.1:8380` et persiste son etat operatoire dans `LPE_CT_STATE_FILE`.
+### Fonctions v1 deployables
+
+- listener SMTP minimal `EHLO` / `MAIL FROM` / `RCPT TO` / `DATA` / `QUIT`
+- spool local dans `incoming`, `deferred`, `quarantine`, `held` et `sent`
+- relais SMTP simple vers un upstream LAN primaire puis secondaire
+- quarantaine de test via l'en-tete `X-LPE-CT-Quarantine: yes` ou un sujet contenant `[quarantine]`
+- mode drainage qui accepte les messages et les place en `held`
+- metriques de files exposees dans le dashboard de management
+
+Par defaut, l'API ecoute sur `127.0.0.1:8380`, le SMTP ecoute sur `0.0.0.0:25`, l'etat est persiste dans `LPE_CT_STATE_FILE` et le spool dans `LPE_CT_SPOOL_DIR`.
+
+Pour un test sans privilege port 25:
+
+```powershell
+$env:LPE_CT_SMTP_BIND_ADDRESS="127.0.0.1:2525"
+cargo run --manifest-path LPE-CT/Cargo.toml
+```
+
+### Installation Debian Trixie
+
+Depuis un bootstrap Git sparse ou depuis le checkout complet:
+
+```bash
+cd LPE-CT/installation/debian-trixie
+chmod +x *.sh
+./install-lpe-ct.sh
+nano /etc/lpe-ct/lpe-ct.env
+systemctl restart lpe-ct.service
+./check-lpe-ct.sh
+```
+
+Configurer au minimum:
+
+- `LPE_CT_SMTP_BIND_ADDRESS`, par defaut `0.0.0.0:25`
+- `LPE_CT_RELAY_PRIMARY`, par exemple `smtp://10.20.0.12:2525`
+- `LPE_CT_RELAY_SECONDARY` si un second relais LAN existe
+- `LPE_CT_MUTUAL_TLS_REQUIRED=false` pour la v1 fonctionnelle actuelle
+
+### Jeux de tests
+
+- `test-local-lpe-ct.sh` se lance sur le serveur `LPE-CT`
+- `test-from-lpe.sh` se lance depuis une machine du LAN ou le serveur coeur `LPE`
+- `test-from-internet.sh` se lance depuis une machine externe, avec verification optionnelle que le management n'est pas expose publiquement
+
+Exemples:
+
+```bash
+./test-local-lpe-ct.sh
+CT_HOST=mx1.example.test ./test-from-lpe.sh
+CT_PUBLIC_HOST=mx1.example.test ./test-from-internet.sh
+```
 
 ## English
 
@@ -39,7 +89,7 @@ Par defaut, l'API ecoute sur `127.0.0.1:8380` et persiste son etat operatoire da
 
 ### Contents
 
-- `src/` Rust management API for the sorting center
+- `src/` Rust management API and SMTP listener for the sorting center
 - `web/` static management interface served by `nginx`
 - `installation/debian-trixie/` install, update, and verification scripts
 - `docs/architecture/center-de-tri.md` DMZ architecture and scope
@@ -50,4 +100,54 @@ Par defaut, l'API ecoute sur `127.0.0.1:8380` et persiste son etat operatoire da
 cargo run --manifest-path LPE-CT/Cargo.toml
 ```
 
-By default, the API listens on `127.0.0.1:8380` and persists its operating state in `LPE_CT_STATE_FILE`.
+### Deployable v1 functions
+
+- minimal SMTP listener for `EHLO` / `MAIL FROM` / `RCPT TO` / `DATA` / `QUIT`
+- local spool in `incoming`, `deferred`, `quarantine`, `held`, and `sent`
+- simple SMTP relay to a primary then secondary LAN upstream
+- test quarantine through the `X-LPE-CT-Quarantine: yes` header or a subject containing `[quarantine]`
+- drain mode that accepts messages and places them in `held`
+- queue metrics exposed in the management dashboard
+
+By default, the API listens on `127.0.0.1:8380`, SMTP listens on `0.0.0.0:25`, state is persisted in `LPE_CT_STATE_FILE`, and the spool is stored in `LPE_CT_SPOOL_DIR`.
+
+For a non-privileged port 25 test:
+
+```powershell
+$env:LPE_CT_SMTP_BIND_ADDRESS="127.0.0.1:2525"
+cargo run --manifest-path LPE-CT/Cargo.toml
+```
+
+### Debian Trixie installation
+
+From a sparse Git bootstrap or from the full checkout:
+
+```bash
+cd LPE-CT/installation/debian-trixie
+chmod +x *.sh
+./install-lpe-ct.sh
+nano /etc/lpe-ct/lpe-ct.env
+systemctl restart lpe-ct.service
+./check-lpe-ct.sh
+```
+
+Configure at least:
+
+- `LPE_CT_SMTP_BIND_ADDRESS`, default `0.0.0.0:25`
+- `LPE_CT_RELAY_PRIMARY`, for example `smtp://10.20.0.12:2525`
+- `LPE_CT_RELAY_SECONDARY` if a second LAN relay exists
+- `LPE_CT_MUTUAL_TLS_REQUIRED=false` for the current functional v1
+
+### Test suites
+
+- `test-local-lpe-ct.sh` runs on the `LPE-CT` server
+- `test-from-lpe.sh` runs from a LAN host or the core `LPE` server
+- `test-from-internet.sh` runs from an external machine, with optional verification that management is not publicly exposed
+
+Examples:
+
+```bash
+./test-local-lpe-ct.sh
+CT_HOST=mx1.example.test ./test-from-lpe.sh
+CT_PUBLIC_HOST=mx1.example.test ./test-from-internet.sh
+```

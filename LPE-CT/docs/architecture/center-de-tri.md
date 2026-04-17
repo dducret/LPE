@@ -13,6 +13,8 @@ Le centre de tri:
 - relaie les messages acceptes vers le coeur `LPE` cote `LAN`
 - expose une interface de management via `nginx` et une API locale Rust
 
+La v1 fonctionnelle inclut un listener SMTP minimal, un spool local, une quarantaine simple, un mode drainage et un relais SMTP vers un upstream LAN. Le `mTLS` est conserve comme politique de configuration mais n'est pas active par defaut dans cette v1 tant que le choix TLS conforme aux licences n'est pas documente.
+
 ### Positionnement d'architecture
 
 `LPE-CT` ne remplace pas le coeur `LPE`:
@@ -57,8 +59,11 @@ Les scripts `Debian Trixie` de `LPE-CT`:
 - installent les prerequis systeme
 - clonent le depot Git dans `/opt/lpe-ct/src`
 - compilent le binaire `lpe-ct`
+- creent le spool `/var/spool/lpe-ct`
 - deploient l'interface statique et la configuration `nginx`
 - installent et redemarrent `lpe-ct.service`
+
+Le service systemd donne au binaire la capacite `CAP_NET_BIND_SERVICE` afin d'ecouter sur le port SMTP `25` sans executer le service en root.
 
 ### Coherence produit
 
@@ -80,6 +85,8 @@ The sorting center:
 - applies filtering, quarantine, and drain policies
 - relays accepted messages to the core `LPE` services on the `LAN`
 - exposes a management interface through `nginx` and a local Rust API
+
+The functional v1 includes a minimal SMTP listener, local spool, simple quarantine, drain mode, and SMTP relay to a LAN upstream. `mTLS` remains a configuration policy but is not enabled by default in this v1 until the license-compliant TLS choice is documented.
 
 ### Architecture position
 
@@ -125,8 +132,11 @@ The `Debian Trixie` scripts for `LPE-CT`:
 - install system prerequisites
 - clone the Git repository into `/opt/lpe-ct/src`
 - build the `lpe-ct` binary
+- create the `/var/spool/lpe-ct` spool
 - deploy the static interface and `nginx` configuration
 - install and restart `lpe-ct.service`
+
+The systemd service grants `CAP_NET_BIND_SERVICE` so the binary can listen on SMTP port `25` without running the service as root.
 
 ### Product coherence
 
