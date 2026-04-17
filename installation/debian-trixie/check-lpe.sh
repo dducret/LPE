@@ -5,6 +5,7 @@ INSTALL_ROOT="${INSTALL_ROOT:-/opt/lpe}"
 SRC_DIR="${SRC_DIR:-$INSTALL_ROOT/src}"
 BIN_PATH="${BIN_PATH:-$INSTALL_ROOT/bin/lpe-cli}"
 ADMIN_WEB_ROOT="${ADMIN_WEB_ROOT:-$INSTALL_ROOT/www/admin}"
+CLIENT_WEB_ROOT="${CLIENT_WEB_ROOT:-$INSTALL_ROOT/www/client}"
 ENV_FILE="${ENV_FILE:-/etc/lpe/lpe.env}"
 SERVICE_NAME="${SERVICE_NAME:-lpe.service}"
 NGINX_SERVICE_NAME="${NGINX_SERVICE_NAME:-nginx}"
@@ -48,6 +49,7 @@ check_command systemctl
 check_file "/etc/systemd/system/${SERVICE_NAME}"
 check_file "${NGINX_SITE_PATH}"
 check_file "${ADMIN_WEB_ROOT}/index.html"
+check_file "${CLIENT_WEB_ROOT}/index.html"
 
 check_file "$SRC_DIR"
 check_file "$BIN_PATH"
@@ -93,6 +95,11 @@ admin_index="$(curl --silent --show-error --fail "http://127.0.0.1/")" \
   || fail "HTTP request failed: http://127.0.0.1/"
 [[ "$admin_index" == *"LPE Administration Console"* ]] || fail "Unexpected admin index content from nginx"
 pass "Admin console is served by nginx"
+
+client_index="$(curl --silent --show-error --fail "http://127.0.0.1/mail/")" \
+  || fail "HTTP request failed: http://127.0.0.1/mail/"
+[[ "$client_index" == *"/mail/assets/"* ]] || fail "Unexpected web client index content from nginx"
+pass "Web client is served by nginx on /mail/"
 
 attachment_body="$(curl --silent --show-error --fail "$HTTP_BASE/capabilities/attachments")" \
   || fail "HTTP request failed: $HTTP_BASE/capabilities/attachments"

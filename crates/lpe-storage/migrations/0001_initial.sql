@@ -1,6 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
-CREATE TABLE accounts (
+CREATE TABLE IF NOT EXISTS accounts (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
     primary_email TEXT NOT NULL,
@@ -8,10 +8,10 @@ CREATE TABLE accounts (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX accounts_tenant_primary_email_idx
+CREATE UNIQUE INDEX IF NOT EXISTS accounts_tenant_primary_email_idx
     ON accounts (tenant_id, primary_email);
 
-CREATE TABLE mailboxes (
+CREATE TABLE IF NOT EXISTS mailboxes (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
     account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -21,10 +21,10 @@ CREATE TABLE mailboxes (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX mailboxes_account_role_idx
+CREATE INDEX IF NOT EXISTS mailboxes_account_role_idx
     ON mailboxes (account_id, role);
 
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
     account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -45,21 +45,21 @@ CREATE TABLE messages (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX messages_mailbox_received_idx
+CREATE INDEX IF NOT EXISTS messages_mailbox_received_idx
     ON messages (account_id, mailbox_id, received_at DESC);
 
-CREATE INDEX messages_account_thread_idx
+CREATE INDEX IF NOT EXISTS messages_account_thread_idx
     ON messages (account_id, thread_id);
 
-CREATE INDEX messages_unread_partial_idx
+CREATE INDEX IF NOT EXISTS messages_unread_partial_idx
     ON messages (account_id, mailbox_id, received_at DESC)
     WHERE unread = TRUE;
 
-CREATE INDEX messages_flagged_partial_idx
+CREATE INDEX IF NOT EXISTS messages_flagged_partial_idx
     ON messages (account_id, mailbox_id, received_at DESC)
     WHERE flagged = TRUE;
 
-CREATE TABLE message_bodies (
+CREATE TABLE IF NOT EXISTS message_bodies (
     message_id UUID PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
     body_text TEXT NOT NULL,
     body_html_sanitized TEXT,
@@ -69,13 +69,13 @@ CREATE TABLE message_bodies (
     search_vector TSVECTOR NOT NULL
 );
 
-CREATE INDEX message_bodies_search_vector_idx
+CREATE INDEX IF NOT EXISTS message_bodies_search_vector_idx
     ON message_bodies USING GIN (search_vector);
 
-CREATE INDEX message_bodies_body_text_trgm_idx
+CREATE INDEX IF NOT EXISTS message_bodies_body_text_trgm_idx
     ON message_bodies USING GIN (body_text gin_trgm_ops);
 
-CREATE TABLE attachments (
+CREATE TABLE IF NOT EXISTS attachments (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
     message_id UUID NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -87,13 +87,13 @@ CREATE TABLE attachments (
     extracted_text_tsv TSVECTOR
 );
 
-CREATE INDEX attachments_message_idx
+CREATE INDEX IF NOT EXISTS attachments_message_idx
     ON attachments (message_id);
 
-CREATE INDEX attachments_extracted_text_tsv_idx
+CREATE INDEX IF NOT EXISTS attachments_extracted_text_tsv_idx
     ON attachments USING GIN (extracted_text_tsv);
 
-CREATE TABLE document_projections (
+CREATE TABLE IF NOT EXISTS document_projections (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
     source_object_id UUID NOT NULL,
@@ -111,13 +111,13 @@ CREATE TABLE document_projections (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX document_projections_owner_kind_idx
+CREATE INDEX IF NOT EXISTS document_projections_owner_kind_idx
     ON document_projections (owner_account_id, source_kind, updated_at DESC);
 
-CREATE INDEX document_projections_search_vector_idx
+CREATE INDEX IF NOT EXISTS document_projections_search_vector_idx
     ON document_projections USING GIN (search_vector);
 
-CREATE TABLE document_chunks (
+CREATE TABLE IF NOT EXISTS document_chunks (
     id UUID PRIMARY KEY,
     document_id UUID NOT NULL REFERENCES document_projections(id) ON DELETE CASCADE,
     ordinal INTEGER NOT NULL,
@@ -126,10 +126,10 @@ CREATE TABLE document_chunks (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX document_chunks_document_ordinal_idx
+CREATE UNIQUE INDEX IF NOT EXISTS document_chunks_document_ordinal_idx
     ON document_chunks (document_id, ordinal);
 
-CREATE TABLE document_annotations (
+CREATE TABLE IF NOT EXISTS document_annotations (
     id UUID PRIMARY KEY,
     document_id UUID NOT NULL REFERENCES document_projections(id) ON DELETE CASCADE,
     annotation_type TEXT NOT NULL,
@@ -139,10 +139,10 @@ CREATE TABLE document_annotations (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX document_annotations_document_type_idx
+CREATE INDEX IF NOT EXISTS document_annotations_document_type_idx
     ON document_annotations (document_id, annotation_type, created_at DESC);
 
-CREATE TABLE inference_runs (
+CREATE TABLE IF NOT EXISTS inference_runs (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL,
     principal_account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
@@ -154,16 +154,16 @@ CREATE TABLE inference_runs (
     completed_at TIMESTAMPTZ
 );
 
-CREATE INDEX inference_runs_tenant_started_idx
+CREATE INDEX IF NOT EXISTS inference_runs_tenant_started_idx
     ON inference_runs (tenant_id, started_at DESC);
 
-CREATE TABLE inference_run_chunks (
+CREATE TABLE IF NOT EXISTS inference_run_chunks (
     inference_run_id UUID NOT NULL REFERENCES inference_runs(id) ON DELETE CASCADE,
     chunk_id UUID NOT NULL REFERENCES document_chunks(id) ON DELETE CASCADE,
     PRIMARY KEY (inference_run_id, chunk_id)
 );
 
-CREATE VIEW searchable_mail_documents AS
+CREATE OR REPLACE VIEW searchable_mail_documents AS
 SELECT
     m.id AS message_id,
     m.account_id,

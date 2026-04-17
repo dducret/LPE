@@ -6,7 +6,9 @@ BRANCH="${BRANCH:-main}"
 INSTALL_ROOT="${INSTALL_ROOT:-/opt/lpe}"
 SRC_DIR="${SRC_DIR:-$INSTALL_ROOT/src}"
 BIN_DIR="${BIN_DIR:-$INSTALL_ROOT/bin}"
-WEB_ROOT="${WEB_ROOT:-$INSTALL_ROOT/www/admin}"
+WEB_ROOT="${WEB_ROOT:-$INSTALL_ROOT/www}"
+ADMIN_WEB_ROOT="${ADMIN_WEB_ROOT:-$WEB_ROOT/admin}"
+CLIENT_WEB_ROOT="${CLIENT_WEB_ROOT:-$WEB_ROOT/client}"
 SERVICE_NAME="${SERVICE_NAME:-lpe.service}"
 ENV_FILE="${ENV_FILE:-/etc/lpe/lpe.env}"
 NGINX_AVAILABLE_DIR="${NGINX_AVAILABLE_DIR:-/etc/nginx/sites-available}"
@@ -62,10 +64,14 @@ cd "${SRC_DIR}"
 cd "${SRC_DIR}/web/admin"
 npm ci
 npm run build
+cd "${SRC_DIR}/web/client"
+npm ci
+npm run build
 
 install -m 0755 "${SRC_DIR}/target/release/lpe-cli" "${BIN_DIR}/lpe-cli"
-install -d -o root -g root "${WEB_ROOT}"
-cp -a "${SRC_DIR}/web/admin/dist/." "${WEB_ROOT}/"
+install -d -o root -g root "${ADMIN_WEB_ROOT}" "${CLIENT_WEB_ROOT}"
+cp -a "${SRC_DIR}/web/admin/dist/." "${ADMIN_WEB_ROOT}/"
+cp -a "${SRC_DIR}/web/client/dist/." "${CLIENT_WEB_ROOT}/"
 install -m 0644 "${SRC_DIR}/installation/debian-trixie/lpe.service" "/etc/systemd/system/lpe.service"
 sed \
   -e "s/__LPE_BIND_ADDRESS__/${LPE_BIND_ADDRESS//\//\\/}/g" \

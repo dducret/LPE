@@ -6,7 +6,9 @@ BRANCH="${BRANCH:-main}"
 INSTALL_ROOT="${INSTALL_ROOT:-/opt/lpe}"
 SRC_DIR="${SRC_DIR:-$INSTALL_ROOT/src}"
 BIN_DIR="${BIN_DIR:-$INSTALL_ROOT/bin}"
-WEB_ROOT="${WEB_ROOT:-$INSTALL_ROOT/www/admin}"
+WEB_ROOT="${WEB_ROOT:-$INSTALL_ROOT/www}"
+ADMIN_WEB_ROOT="${ADMIN_WEB_ROOT:-$WEB_ROOT/admin}"
+CLIENT_WEB_ROOT="${CLIENT_WEB_ROOT:-$WEB_ROOT/client}"
 ENV_DIR="${ENV_DIR:-/etc/lpe}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 DATA_DIR="${DATA_DIR:-/var/lib/lpe}"
@@ -43,7 +45,7 @@ if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
 fi
 
 install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${INSTALL_ROOT}" "${SRC_DIR}" "${BIN_DIR}"
-install -d -o root -g root "${WEB_ROOT}"
+install -d -o root -g root "${ADMIN_WEB_ROOT}" "${CLIENT_WEB_ROOT}"
 install -d -o root -g root "${ENV_DIR}"
 install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${DATA_DIR}"
 
@@ -98,7 +100,12 @@ cd "${SRC_DIR}/web/admin"
 npm ci
 npm run build
 
-cp -a "${SRC_DIR}/web/admin/dist/." "${WEB_ROOT}/"
+cd "${SRC_DIR}/web/client"
+npm ci
+npm run build
+
+cp -a "${SRC_DIR}/web/admin/dist/." "${ADMIN_WEB_ROOT}/"
+cp -a "${SRC_DIR}/web/client/dist/." "${CLIENT_WEB_ROOT}/"
 
 sed \
   -e "s/__LPE_BIND_ADDRESS__/${LPE_BIND_ADDRESS//\//\\/}/g" \
@@ -118,5 +125,5 @@ systemctl restart nginx
 
 echo "LPE installed in ${INSTALL_ROOT}."
 echo "Service lpe.service has been started."
-echo "nginx now serves the admin console on port 80."
+echo "nginx now serves the admin console on / and the web client on /mail/."
 echo "Review ${ENV_DIR}/lpe.env and run the migrations script if the database schema is not initialized yet."
