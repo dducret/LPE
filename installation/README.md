@@ -33,6 +33,12 @@ Hypothese d'exploitation:
 
 Pour un serveur de tri separe en `DMZ`, utiliser plutot `LPE-CT/installation/debian-trixie`. Ce sous-repertoire installe un composant distinct dans `/opt/lpe-ct` avec sa propre interface de management et sans exposer le back office coeur sur le serveur DMZ.
 
+Les scripts `LPE-CT` installent aussi un listener SMTP, un spool local dans `/var/spool/lpe-ct`, et trois jeux de tests:
+
+- `test-local-lpe-ct.sh` depuis le serveur `LPE-CT`
+- `test-from-lpe.sh` depuis le LAN ou le serveur coeur
+- `test-from-internet.sh` depuis une machine externe
+
 ### Preparation initiale sur un serveur Debian nu
 
 Mettre a jour l'index APT et installer les outils minimaux pour recuperer le depot:
@@ -62,9 +68,9 @@ Fichiers:
 
 - `install-lpe.sh` installe les prerequis, clone le depot, compile `lpe-cli` et installe le service systemd
 - `install-lpe.sh` demarre aussi `lpe.service` a la fin de l'installation
-- `install-lpe.sh` installe aussi `nodejs`, `npm` et `nginx`, build `web/admin`, deploie l'interface statique et active le site `nginx`
+- `install-lpe.sh` installe aussi `nodejs`, `npm` et `nginx`, build `web/admin` et `web/client`, deploie les interfaces statiques et active le site `nginx`
 - `update-lpe.sh` met a jour le depot, recompile `lpe-cli` et redemarre le service
-- `update-lpe.sh` rebuild aussi `web/admin`, redeploie les assets statiques et recharge `nginx`
+- `update-lpe.sh` rebuild aussi `web/admin` et `web/client`, redeploie les assets statiques et recharge `nginx`
 - `bootstrap-postgresql.sh` cree un role et une base PostgreSQL
 - `bootstrap-postgresql.sh` installe aussi PostgreSQL serveur si necessaire puis le demarre
 - les scripts d'installation utilisent le binaire `rustup` disponible dans le systeme puis initialisent le toolchain `stable` avant compilation
@@ -83,8 +89,11 @@ Ordre recommande:
 4. executer `run-migrations.sh`
 5. verifier le service avec `systemctl status lpe.service`
 6. ouvrir `http://adresse-du-serveur/` pour acceder a la console d'administration via `nginx`
+7. ouvrir `http://adresse-du-serveur/mail/` pour acceder au client web
 
 La console d'administration enregistre desormais ses comptes, boites, demandes d'import/export `PST`, domaines, alias, parametres, administrateurs delegues, objets antispam et evenements d'audit dans `PostgreSQL`. L'execution des migrations n'est donc plus optionnelle apres deploiement ou mise a jour du schema.
+
+La premiere connexion cree automatiquement un administrateur de bootstrap si aucun identifiant n'existe encore. Les variables `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD` et `LPE_ADMIN_SESSION_MINUTES` doivent etre ajustees dans `/etc/lpe/lpe.env` avant exposition de la console.
 
 Exemple complet:
 
@@ -102,6 +111,7 @@ Par defaut:
 
 - `lpe.service` ecoute sur `127.0.0.1:8080`
 - `nginx` expose la console d'administration sur le port `80`
+- `nginx` expose le client web sur `/mail/`
 - `nginx` reverse-proxy `/api/` vers le service Rust local
 
 Si `LPE_BIND_ADDRESS` ou `LPE_SERVER_NAME` changent dans `/etc/lpe/lpe.env`, relancer `update-lpe.sh` pour regenerer la configuration `nginx`.
@@ -110,7 +120,7 @@ Pour les mises a jour ulterieures:
 
 1. pousser le commit voulu dans `https://github.com/dducret/LPE`
 2. executer `update-lpe.sh`
-3. executer `run-migrations.sh` si le schema PostgreSQL a change, notamment pour les migrations de console d'administration comme `0004_mailbox_pst_jobs.sql`
+3. executer `run-migrations.sh` si le schema PostgreSQL a change, notamment pour les migrations de console d'administration comme `0006_admin_auth.sql` et `0007_pst_job_execution.sql`
 
 Si tu veux d'abord recuperer les derniers scripts avant une mise a jour:
 
@@ -160,6 +170,12 @@ Operating assumptions:
 
 For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI and without exposing the core back office on the DMZ server.
 
+The `LPE-CT` scripts also install an SMTP listener, a local spool in `/var/spool/lpe-ct`, and three test suites:
+
+- `test-local-lpe-ct.sh` from the `LPE-CT` server
+- `test-from-lpe.sh` from the LAN or core server
+- `test-from-internet.sh` from an external machine
+
 ### Initial preparation on a bare Debian server
 
 Update the APT index and install the minimal tools required to fetch the repository:
@@ -189,9 +205,9 @@ Files:
 
 - `install-lpe.sh` installs prerequisites, clones the repository, builds `lpe-cli`, and installs the systemd service
 - `install-lpe.sh` also starts `lpe.service` at the end of the installation
-- `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin`, deploys the static admin UI, and enables the `nginx` site
+- `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
 - `update-lpe.sh` updates the repository, rebuilds `lpe-cli`, and restarts the service
-- `update-lpe.sh` also rebuilds `web/admin`, redeploys static assets, and reloads `nginx`
+- `update-lpe.sh` also rebuilds `web/admin` and `web/client`, redeploys static assets, and reloads `nginx`
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
@@ -210,8 +226,11 @@ Recommended order:
 4. run `run-migrations.sh`
 5. verify the service with `systemctl status lpe.service`
 6. open `http://server-address/` to reach the administration console through `nginx`
+7. open `http://server-address/mail/` to reach the web client
 
 The administration console now stores its accounts, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Running migrations is therefore mandatory after deployment or any schema update.
+
+The first sign-in automatically creates a bootstrap administrator if no credential exists yet. `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD`, and `LPE_ADMIN_SESSION_MINUTES` must be adjusted in `/etc/lpe/lpe.env` before exposing the console.
 
 Complete example:
 
@@ -229,6 +248,7 @@ By default:
 
 - `lpe.service` listens on `127.0.0.1:8080`
 - `nginx` exposes the administration console on port `80`
+- `nginx` exposes the web client on `/mail/`
 - `nginx` reverse-proxies `/api/` to the local Rust service
 
 If `LPE_BIND_ADDRESS` or `LPE_SERVER_NAME` changes in `/etc/lpe/lpe.env`, run `update-lpe.sh` again to regenerate the `nginx` configuration.
@@ -237,7 +257,7 @@ For later updates:
 
 1. push the desired commit to `https://github.com/dducret/LPE`
 2. run `update-lpe.sh`
-3. run `run-migrations.sh` if the PostgreSQL schema changed, especially for administration console migrations such as `0004_mailbox_pst_jobs.sql`
+3. run `run-migrations.sh` if the PostgreSQL schema changed, especially for administration console migrations such as `0006_admin_auth.sql` and `0007_pst_job_execution.sql`
 
 If you want to fetch the latest scripts first before an update:
 

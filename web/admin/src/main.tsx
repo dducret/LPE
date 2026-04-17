@@ -7,7 +7,7 @@ type DashboardState = {
   health: { service: string; status: string };
   overview: { total_accounts: number; total_mailboxes: number; total_domains: number; total_aliases: number; pending_queue_items: number; local_ai_enabled: boolean };
   protocols: { name: string; enabled: boolean; bind_address: string; state: string }[];
-  accounts: { id: string; email: string; display_name: string; quota_mb: number; used_mb: number; status: string; mailboxes: { id: string; display_name: string; role: string; message_count: number; retention_days: number; pst_jobs: { id: string; direction: string; server_path: string; status: string; requested_by: string; created_at: string; completed_at: string | null }[] }[] }[];
+  accounts: { id: string; email: string; display_name: string; quota_mb: number; used_mb: number; status: string; mailboxes: { id: string; display_name: string; role: string; message_count: number; retention_days: number; pst_jobs: { id: string; direction: string; server_path: string; status: string; requested_by: string; created_at: string; completed_at: string | null; processed_messages: number; error_message: string | null }[] }[] }[];
   domains: { id: string; name: string; status: string; inbound_enabled: boolean; outbound_enabled: boolean; default_quota_mb: number }[];
   aliases: { id: string; source: string; target: string; kind: string; status: string }[];
   server_admins: { id: string; domain_id: string | null; domain_name: string; email: string; display_name: string; role: string; rights_summary: string }[];
@@ -23,6 +23,7 @@ type DashboardState = {
 
 type TraceResult = { message_id: string; internet_message_id: string | null; subject: string; sender: string; account_email: string; mailbox: string; received_at: string };
 type PstFormState = { direction: "import" | "export"; server_path: string; requested_by: string };
+type LoginResponse = { token: string; admin: { email: string; display_name: string; role: string } };
 type PageKey = "server" | "domain" | "antispam" | "audit" | "operations";
 type ServerTab = "status" | "server" | "security" | "ai" | "domains" | "admins";
 type DomainTab = "overview" | "accounts" | "aliases" | "admins";
@@ -30,9 +31,10 @@ type AntispamTab = "content" | "engines" | "rules" | "quarantine";
 type AuditTab = "journal" | "trace";
 type OperationsTab = "protocols" | "storage";
 
-async function fetchJson<T>(path: string): Promise<T> { const response = await fetch(`/api/${path}`); if (!response.ok) throw new Error(`Request failed for ${path}: ${response.status}`); return (await response.json()) as T; }
-async function sendJson<T>(path: string, method: "POST" | "PUT", payload: unknown): Promise<T> { const response = await fetch(`/api/${path}`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); if (!response.ok) throw new Error(`Request failed for ${path}: ${response.status}`); return (await response.json()) as T; }
-function Field(props: { label: string; value: string; onChange: (value: string) => void; type?: "text" | "number"; placeholder?: string }) { return <label className="field"><span>{props.label}</span><input type={props.type ?? "text"} value={props.value} placeholder={props.placeholder} onChange={(event) => props.onChange(event.target.value)} /></label>; }
+function authHeaders(token: string | null): Record<string, string> { return token ? { Authorization: `Bearer ${token}` } : {}; }
+async function fetchJson<T>(path: string, token: string | null): Promise<T> { const response = await fetch(`/api/${path}`, { headers: authHeaders(token) }); if (!response.ok) throw new Error(`Request failed for ${path}: ${response.status}`); return (await response.json()) as T; }
+async function sendJson<T>(path: string, method: "POST" | "PUT", payload: unknown, token: string | null): Promise<T> { const response = await fetch(`/api/${path}`, { method, headers: { "Content-Type": "application/json", ...authHeaders(token) }, body: JSON.stringify(payload) }); if (!response.ok) throw new Error(`Request failed for ${path}: ${response.status}`); return (await response.json()) as T; }
+function Field(props: { label: string; value: string; onChange: (value: string) => void; type?: "text" | "number" | "password"; placeholder?: string }) { return <label className="field"><span>{props.label}</span><input type={props.type ?? "text"} value={props.value} placeholder={props.placeholder} onChange={(event) => props.onChange(event.target.value)} /></label>; }
 function ToggleField(props: { label: string; checked: boolean; onChange: (checked: boolean) => void }) { return <label className="toggle-field"><span>{props.label}</span><input type="checkbox" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} /></label>; }
 function TabButton(props: { active: boolean; onClick: () => void; label: string }) { return <button className={props.active ? "tab-button is-active" : "tab-button"} type="button" onClick={props.onClick}>{props.label}</button>; }
 
@@ -42,6 +44,9 @@ function App() {
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
+  const [token, setToken] = React.useState<string | null>(() => window.localStorage.getItem("lpe.admin.token"));
+  const [loginForm, setLoginForm] = React.useState({ email: "admin@example.test", password: "" });
+  const [adminIdentity, setAdminIdentity] = React.useState<LoginResponse["admin"] | null>(null);
   const [page, setPage] = React.useState<PageKey>("server");
   const [serverTab, setServerTab] = React.useState<ServerTab>("status");
   const [domainTab, setDomainTab] = React.useState<DomainTab>("overview");
@@ -58,7 +63,7 @@ function App() {
   const [accountDisplayName, setAccountDisplayName] = React.useState("");
   const [accountQuota, setAccountQuota] = React.useState("4096");
   const [aliasForm, setAliasForm] = React.useState({ source: "", target: "", kind: "forward" });
-  const [adminForm, setAdminForm] = React.useState({ email: "", display_name: "", role: "domain-admin", rights_summary: "accounts, aliases, policies" });
+  const [adminForm, setAdminForm] = React.useState({ email: "", display_name: "", role: "domain-admin", rights_summary: "accounts, aliases, policies", password: "" });
   const [ruleForm, setRuleForm] = React.useState({ name: "", scope: "domain", action: "quarantine", status: "enabled" });
   const [serverForm, setServerForm] = React.useState<DashboardState["server_settings"] | null>(null);
   const [securityForm, setSecurityForm] = React.useState<DashboardState["security_settings"] | null>(null);
@@ -67,6 +72,7 @@ function App() {
   const copy = messages[locale];
 
   React.useEffect(() => { document.documentElement.lang = locale; window.localStorage.setItem("lpe.locale", locale); }, [locale]);
+  React.useEffect(() => { token ? window.localStorage.setItem("lpe.admin.token", token) : window.localStorage.removeItem("lpe.admin.token"); }, [token]);
 
   const syncState = React.useCallback((dashboard: DashboardState) => {
     React.startTransition(() => {
@@ -76,24 +82,39 @@ function App() {
   }, []);
 
   const load = React.useCallback(async () => {
+    if (!token) return;
     setBusy("load");
-    try { const dashboard = await fetchJson<DashboardState>("console/dashboard"); syncState(dashboard); setError(null); }
+    try { const dashboard = await fetchJson<DashboardState>("console/dashboard", token); syncState(dashboard); setError(null); }
+    catch (e) { setError(e instanceof Error ? e.message : "Unknown error"); if (e instanceof Error && e.message.includes("401")) setToken(null); }
+    finally { setBusy(null); }
+  }, [syncState, token]);
+  React.useEffect(() => { void load(); }, [load]);
+
+  async function loginAdmin() {
+    setBusy("login");
+    try { const response = await sendJson<LoginResponse>("auth/login", "POST", loginForm, null); setToken(response.token); setAdminIdentity(response.admin); setError(null); setNotice(copy.saved); }
     catch (e) { setError(e instanceof Error ? e.message : "Unknown error"); }
     finally { setBusy(null); }
-  }, [syncState]);
-  React.useEffect(() => { void load(); }, [load]);
+  }
 
   async function mutate(action: string, path: string, method: "POST" | "PUT", payload: unknown, success: string, afterSuccess?: () => void) {
     setBusy(action);
-    try { const dashboard = await sendJson<DashboardState>(path, method, payload); syncState(dashboard); setNotice(success); setError(null); afterSuccess?.(); }
-    catch (e) { setError(e instanceof Error ? e.message : "Unknown error"); }
+    try { const dashboard = await sendJson<DashboardState>(path, method, payload, token); syncState(dashboard); setNotice(success); setError(null); afterSuccess?.(); }
+    catch (e) { setError(e instanceof Error ? e.message : "Unknown error"); if (e instanceof Error && e.message.includes("401")) setToken(null); }
     finally { setBusy(null); }
   }
 
   async function searchTrace() {
     setBusy("trace");
-    try { setTraceResults(await sendJson<TraceResult[]>("console/audit/email-trace-search", "POST", { query: traceQuery })); setError(null); }
+    try { setTraceResults(await sendJson<TraceResult[]>("console/audit/email-trace-search", "POST", { query: traceQuery }, token)); setError(null); }
     catch (e) { setError(e instanceof Error ? e.message : "Unknown error"); }
+    finally { setBusy(null); }
+  }
+
+  async function runPstJobs() {
+    setBusy("pst-run");
+    try { await sendJson("console/mailboxes/pst-jobs/run-pending", "POST", {}, token); await load(); setNotice(copy.saved); setError(null); }
+    catch (e) { setError(e instanceof Error ? e.message : "Unknown error"); if (e instanceof Error && e.message.includes("401")) setToken(null); }
     finally { setBusy(null); }
   }
 
@@ -113,6 +134,22 @@ function App() {
     { key: "operations", label: copy.pageOperations, icon: "05" }
   ];
 
+  if (!token) {
+    return <main className="console-shell login-shell">
+      <section className="login-card card form-stack">
+        <p className="eyebrow">{copy.eyebrow}</p>
+        <h1>{copy.loginTitle}</h1>
+        <p>{copy.loginHelp}</p>
+        {error ? <p className="feedback error">{error}</p> : null}
+        <form className="form-stack" onSubmit={(event)=>{event.preventDefault(); void loginAdmin();}}>
+          <Field label={copy.adminEmail} value={loginForm.email} onChange={(value)=>setLoginForm((current)=>({...current,email:value}))} />
+          <Field label={copy.password} type="password" value={loginForm.password} onChange={(value)=>setLoginForm((current)=>({...current,password:value}))} />
+          <button className="primary-button" type="submit" disabled={busy==="login"}>{copy.login}</button>
+        </form>
+      </section>
+    </main>;
+  }
+
   return <main className="console-shell">
     <aside className="sidebar">
       <div><p className="eyebrow">{copy.eyebrow}</p><h1>{copy.title}</h1><p className="sidebar-text">{copy.subtitle}</p></div>
@@ -120,7 +157,7 @@ function App() {
       <label className="locale-picker"><span>{copy.languageLabel}</span><select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>{supportedLocales.map((entry) => <option key={entry} value={entry}>{localeLabels[entry]}</option>)}</select></label>
     </aside>
     <section className="workspace">
-      <header className="topbar"><div><h2>{sidebarPages.find((entry) => entry.key === page)?.label}</h2><p>{copy.banner}</p></div><button className="secondary-button" type="button" onClick={() => void load()}>{copy.refresh}</button></header>
+      <header className="topbar"><div><h2>{sidebarPages.find((entry) => entry.key === page)?.label}</h2><p>{adminIdentity ? `${copy.banner} · ${adminIdentity.email}` : copy.banner}</p></div><div className="inline-form"><button className="secondary-button" type="button" onClick={() => void load()}>{copy.refresh}</button><button className="secondary-button" type="button" onClick={() => { setToken(null); setState(null); }}>{copy.logout}</button></div></header>
       {error ? <p className="feedback error">{error}</p> : null}
       {notice ? <p className="feedback notice">{notice}</p> : null}
       {!state ? <p className="feedback muted">{busy === "load" ? copy.loading : copy.noData}</p> : null}
@@ -132,14 +169,14 @@ function App() {
           {serverTab === "security" && securityForm ? <form className="card form-stack" onSubmit={(e)=>{e.preventDefault(); void mutate("security","console/settings/security","PUT",securityForm,copy.saved);}}><h3>{copy.securityPolicies}</h3><div className="grid two"><ToggleField label={copy.passwordLogin} checked={securityForm.password_login_enabled} onChange={(checked)=>setSecurityForm((c)=>c?{...c,password_login_enabled:checked}:c)} /><ToggleField label={copy.mfa} checked={securityForm.mfa_required_for_admins} onChange={(checked)=>setSecurityForm((c)=>c?{...c,mfa_required_for_admins:checked}:c)} /><Field label={copy.sessionTimeout} type="number" value={String(securityForm.session_timeout_minutes)} onChange={(value)=>setSecurityForm((c)=>c?{...c,session_timeout_minutes:Number(value)||0}:c)} /><Field label={copy.auditRetention} type="number" value={String(securityForm.audit_retention_days)} onChange={(value)=>setSecurityForm((c)=>c?{...c,audit_retention_days:Number(value)||0}:c)} /></div><button className="primary-button" disabled={busy==="security"} type="submit">{copy.save}</button></form> : null}
           {serverTab === "ai" && localAiForm ? <form className="card form-stack" onSubmit={(e)=>{e.preventDefault(); void mutate("ai","console/settings/local-ai","PUT",localAiForm,copy.saved);}}><h3>{copy.localAiPolicies}</h3><div className="grid two"><ToggleField label={copy.aiEnabled} checked={localAiForm.enabled} onChange={(checked)=>setLocalAiForm((c)=>c?{...c,enabled:checked}:c)} /><ToggleField label={copy.offlineOnly} checked={localAiForm.offline_only} onChange={(checked)=>setLocalAiForm((c)=>c?{...c,offline_only:checked}:c)} /><ToggleField label={copy.indexing} checked={localAiForm.indexing_enabled} onChange={(checked)=>setLocalAiForm((c)=>c?{...c,indexing_enabled:checked}:c)} /><Field label={copy.provider} value={localAiForm.provider} onChange={(value)=>setLocalAiForm((c)=>c?{...c,provider:value}:c)} /><Field label={copy.model} value={localAiForm.model} onChange={(value)=>setLocalAiForm((c)=>c?{...c,model:value}:c)} /></div><button className="primary-button" disabled={busy==="ai"} type="submit">{copy.save}</button></form> : null}
           {serverTab === "domains" ? <div className="grid two"><form className="card form-stack" onSubmit={(e)=>{e.preventDefault(); void mutate("domain","console/domains","POST",{ name: domainForm.name, default_quota_mb: Number(domainForm.default_quota_mb), inbound_enabled: domainForm.inbound_enabled, outbound_enabled: domainForm.outbound_enabled },copy.saved,()=>setDomainForm({ name:"", default_quota_mb:"4096", inbound_enabled:true, outbound_enabled:true }));}}><h3>{copy.manageDomains}</h3><Field label={copy.domainName} value={domainForm.name} onChange={(value)=>setDomainForm((c)=>({...c,name:value}))} placeholder="example.com" /><Field label={copy.defaultQuota} type="number" value={domainForm.default_quota_mb} onChange={(value)=>setDomainForm((c)=>({...c,default_quota_mb:value}))} /><ToggleField label={copy.inbound} checked={domainForm.inbound_enabled} onChange={(checked)=>setDomainForm((c)=>({...c,inbound_enabled:checked}))} /><ToggleField label={copy.outbound} checked={domainForm.outbound_enabled} onChange={(checked)=>setDomainForm((c)=>({...c,outbound_enabled:checked}))} /><button className="primary-button" disabled={busy==="domain"} type="submit">{copy.create}</button></form><article className="card"><h3>{copy.domainList}</h3><div className="list">{state.domains.map((domain)=><button key={domain.id} type="button" className={selectedDomainId===domain.id?"list-button is-active":"list-button"} onClick={()=>{setSelectedDomainId(domain.id); setPage("domain");}}><strong>{domain.name}</strong><span>{domain.status}</span><span>{domain.default_quota_mb} MB</span></button>)}</div></article></div> : null}
-          {serverTab === "admins" ? <div className="grid two"><form className="card form-stack" onSubmit={(e)=>{e.preventDefault(); void mutate("admin","console/admins","POST",{ domain_id: selectedDomain?.id ?? null, ...adminForm },copy.saved,()=>setAdminForm({ email:"", display_name:"", role:"domain-admin", rights_summary:"accounts, aliases, policies" }));}}><h3>{copy.administrators}</h3><Field label={copy.adminEmail} value={adminForm.email} onChange={(value)=>setAdminForm((c)=>({...c,email:value}))} placeholder="admin@example.com" /><Field label={copy.displayName} value={adminForm.display_name} onChange={(value)=>setAdminForm((c)=>({...c,display_name:value}))} /><Field label={copy.role} value={adminForm.role} onChange={(value)=>setAdminForm((c)=>({...c,role:value}))} /><Field label={copy.rights} value={adminForm.rights_summary} onChange={(value)=>setAdminForm((c)=>({...c,rights_summary:value}))} /><button className="primary-button" disabled={busy==="admin"} type="submit">{copy.create}</button></form><article className="card"><h3>{copy.adminMatrix}</h3><div className="list">{state.server_admins.map((admin)=><div className="row" key={admin.id}><strong>{admin.display_name}</strong><span>{admin.email}</span><span>{admin.domain_name}</span><span className="pill">{admin.role}</span></div>)}</div></article></div> : null}
+          {serverTab === "admins" ? <div className="grid two"><form className="card form-stack" onSubmit={(e)=>{e.preventDefault(); void mutate("admin","console/admins","POST",{ domain_id: selectedDomain?.id ?? null, ...adminForm },copy.saved,()=>setAdminForm({ email:"", display_name:"", role:"domain-admin", rights_summary:"accounts, aliases, policies", password:"" }));}}><h3>{copy.administrators}</h3><Field label={copy.adminEmail} value={adminForm.email} onChange={(value)=>setAdminForm((c)=>({...c,email:value}))} placeholder="admin@example.com" /><Field label={copy.displayName} value={adminForm.display_name} onChange={(value)=>setAdminForm((c)=>({...c,display_name:value}))} /><Field label={copy.role} value={adminForm.role} onChange={(value)=>setAdminForm((c)=>({...c,role:value}))} /><Field label={copy.rights} value={adminForm.rights_summary} onChange={(value)=>setAdminForm((c)=>({...c,rights_summary:value}))} /><Field label={copy.password} type="password" value={adminForm.password} onChange={(value)=>setAdminForm((c)=>({...c,password:value}))} /><button className="primary-button" disabled={busy==="admin"} type="submit">{copy.create}</button></form><article className="card"><h3>{copy.adminMatrix}</h3><div className="list">{state.server_admins.map((admin)=><div className="row" key={admin.id}><strong>{admin.display_name}</strong><span>{admin.email}</span><span>{admin.domain_name}</span><span className="pill">{admin.role}</span></div>)}</div></article></div> : null}
         </section> : null}
 
         {page === "domain" ? <section className="page-card">
           <div className="toolbar-row"><label className="field compact"><span>{copy.selectedDomain}</span><select value={selectedDomain?.id ?? ""} onChange={(event)=>setSelectedDomainId(event.target.value)}>{state.domains.map((domain)=><option key={domain.id} value={domain.id}>{domain.name}</option>)}</select></label><div className="tabs">{(["overview","accounts","aliases","admins"] as DomainTab[]).map((tab)=><TabButton key={tab} active={domainTab===tab} onClick={()=>setDomainTab(tab)} label={copy.domainTabs[tab]} />)}</div></div>
           {selectedDomain ? <>
             {domainTab === "overview" ? <div className="grid two"><article className="card"><h3>{selectedDomain.name}</h3><div className="list"><div className="row"><strong>{copy.status}</strong><span>{selectedDomain.status}</span></div><div className="row"><strong>{copy.accounts}</strong><span>{domainAccounts.length}</span></div><div className="row"><strong>{copy.aliases}</strong><span>{domainAliases.length}</span></div><div className="row"><strong>{copy.administrators}</strong><span>{domainAdmins.length}</span></div></div></article><article className="card"><h3>{copy.domainPolicySnapshot}</h3><div className="list"><div className="row"><strong>{copy.defaultQuota}</strong><span>{selectedDomain.default_quota_mb} MB</span></div><div className="row"><strong>{copy.inbound}</strong><span>{selectedDomain.inbound_enabled ? copy.enabled : copy.disabled}</span></div><div className="row"><strong>{copy.outbound}</strong><span>{selectedDomain.outbound_enabled ? copy.enabled : copy.disabled}</span></div></div></article></div> : null}
-            {domainTab === "accounts" ? <div className="grid two"><form className="card form-stack" onSubmit={(e)=>{e.preventDefault(); const email = `${accountLocalPart}@${selectedDomain.name}`; void mutate("account","console/accounts","POST",{ email, display_name: accountDisplayName || accountLocalPart, quota_mb: Number(accountQuota) },copy.saved,()=>{setAccountLocalPart(""); setAccountDisplayName(""); setAccountQuota("4096");});}}><h3>{copy.accounts}</h3><Field label={copy.localPart} value={accountLocalPart} onChange={setAccountLocalPart} placeholder="alice" /><Field label={copy.displayName} value={accountDisplayName} onChange={setAccountDisplayName} placeholder="Alice" /><Field label={copy.quota} type="number" value={accountQuota} onChange={setAccountQuota} /><button className="primary-button" disabled={busy==="account"} type="submit">{copy.create}</button></form><article className="card"><h3>{copy.domainAccounts}</h3><div className="list">{domainAccounts.map((account)=><div className="list-block" key={account.id}><div className="row multi"><strong>{account.display_name}</strong><span>{account.email}</span><span>{account.used_mb}/{account.quota_mb} MB</span></div><div className="sublist">{account.mailboxes.map((mailbox)=>{ const pstForm = pstFormFor(mailbox.id); return <div className="mailbox-card" key={mailbox.id}><div className="row multi"><strong>{mailbox.display_name}</strong><span>{mailbox.role}</span><span>{mailbox.message_count} messages</span><span>{mailbox.retention_days} days</span></div><form className="form-stack mailbox-transfer-form" onSubmit={(e)=>{e.preventDefault(); if (!pstForm.server_path.trim()) { setError(copy.pstPath); return; } void mutate(`pst-${mailbox.id}`,"console/mailboxes/pst-jobs","POST",{ mailbox_id: mailbox.id, direction: pstForm.direction, server_path: pstForm.server_path, requested_by: pstForm.requested_by },copy.saved,()=>setPstForms((current)=>({ ...current, [mailbox.id]: { ...pstFormFor(mailbox.id), server_path: "" } }))); }}><div className="grid two"><label className="field"><span>{copy.action}</span><select value={pstForm.direction} onChange={(event)=>setPstForms((current)=>({ ...current, [mailbox.id]: { ...pstFormFor(mailbox.id), direction: event.target.value as "import" | "export" } }))}><option value="import">{copy.pstImport}</option><option value="export">{copy.pstExport}</option></select></label><Field label={copy.requestedBy} value={pstForm.requested_by} onChange={(value)=>setPstForms((current)=>({ ...current, [mailbox.id]: { ...pstFormFor(mailbox.id), requested_by: value } }))} /></div><Field label={copy.pstPath} value={pstForm.server_path} onChange={(value)=>setPstForms((current)=>({ ...current, [mailbox.id]: { ...pstFormFor(mailbox.id), server_path: value } }))} placeholder={pstForm.direction === "import" ? "/srv/lpe/imports/account.pst" : "/srv/lpe/exports/account.pst"} /><button className="secondary-button" disabled={busy===`pst-${mailbox.id}`} type="submit">{pstForm.direction === "import" ? copy.pstImport : copy.pstExport}</button></form><div className="sublist mailbox-history"><span className="pill">{copy.mailboxName}: {mailbox.display_name}</span>{mailbox.pst_jobs.length === 0 ? <span className="pill">{copy.noTransfers}</span> : mailbox.pst_jobs.map((job)=><span className="pill" key={job.id}>{job.direction} · {job.status} · {job.server_path}</span>)}</div></div>; })}</div></div>)}</div></article></div> : null}
+            {domainTab === "accounts" ? <div className="grid two"><form className="card form-stack" onSubmit={(e)=>{e.preventDefault(); const email = `${accountLocalPart}@${selectedDomain.name}`; void mutate("account","console/accounts","POST",{ email, display_name: accountDisplayName || accountLocalPart, quota_mb: Number(accountQuota) },copy.saved,()=>{setAccountLocalPart(""); setAccountDisplayName(""); setAccountQuota("4096");});}}><h3>{copy.accounts}</h3><Field label={copy.localPart} value={accountLocalPart} onChange={setAccountLocalPart} placeholder="alice" /><Field label={copy.displayName} value={accountDisplayName} onChange={setAccountDisplayName} placeholder="Alice" /><Field label={copy.quota} type="number" value={accountQuota} onChange={setAccountQuota} /><button className="primary-button" disabled={busy==="account"} type="submit">{copy.create}</button><button className="secondary-button" type="button" disabled={busy==="pst-run"} onClick={()=>void runPstJobs()}>{copy.runPstJobs}</button></form><article className="card"><h3>{copy.domainAccounts}</h3><div className="list">{domainAccounts.map((account)=><div className="list-block" key={account.id}><div className="row multi"><strong>{account.display_name}</strong><span>{account.email}</span><span>{account.used_mb}/{account.quota_mb} MB</span></div><div className="sublist">{account.mailboxes.map((mailbox)=>{ const pstForm = pstFormFor(mailbox.id); return <div className="mailbox-card" key={mailbox.id}><div className="row multi"><strong>{mailbox.display_name}</strong><span>{mailbox.role}</span><span>{mailbox.message_count} messages</span><span>{mailbox.retention_days} days</span></div><form className="form-stack mailbox-transfer-form" onSubmit={(e)=>{e.preventDefault(); if (!pstForm.server_path.trim()) { setError(copy.pstPath); return; } void mutate(`pst-${mailbox.id}`,"console/mailboxes/pst-jobs","POST",{ mailbox_id: mailbox.id, direction: pstForm.direction, server_path: pstForm.server_path, requested_by: pstForm.requested_by },copy.saved,()=>setPstForms((current)=>({ ...current, [mailbox.id]: { ...pstFormFor(mailbox.id), server_path: "" } }))); }}><div className="grid two"><label className="field"><span>{copy.action}</span><select value={pstForm.direction} onChange={(event)=>setPstForms((current)=>({ ...current, [mailbox.id]: { ...pstFormFor(mailbox.id), direction: event.target.value as "import" | "export" } }))}><option value="import">{copy.pstImport}</option><option value="export">{copy.pstExport}</option></select></label><Field label={copy.requestedBy} value={pstForm.requested_by} onChange={(value)=>setPstForms((current)=>({ ...current, [mailbox.id]: { ...pstFormFor(mailbox.id), requested_by: value } }))} /></div><Field label={copy.pstPath} value={pstForm.server_path} onChange={(value)=>setPstForms((current)=>({ ...current, [mailbox.id]: { ...pstFormFor(mailbox.id), server_path: value } }))} placeholder={pstForm.direction === "import" ? "/var/lib/lpe/imports/account.pst" : "/var/lib/lpe/exports/account.pst"} /><button className="secondary-button" disabled={busy===`pst-${mailbox.id}`} type="submit">{pstForm.direction === "import" ? copy.pstImport : copy.pstExport}</button></form><div className="sublist mailbox-history"><span className="pill">{copy.mailboxName}: {mailbox.display_name}</span>{mailbox.pst_jobs.length === 0 ? <span className="pill">{copy.noTransfers}</span> : mailbox.pst_jobs.map((job)=><span className={job.status === "completed" ? "pill ok" : job.status === "failed" ? "pill warn" : "pill"} key={job.id}>{job.direction} · {job.status} · {job.processed_messages} · {job.error_message ?? job.server_path}</span>)}</div></div>; })}</div></div>)}</div></article></div> : null}
             {domainTab === "aliases" ? <div className="grid two"><form className="card form-stack" onSubmit={(e)=>{e.preventDefault(); const source = aliasForm.source.includes("@") ? aliasForm.source : `${aliasForm.source}@${selectedDomain.name}`; void mutate("alias","console/aliases","POST",{ source, target: aliasForm.target, kind: aliasForm.kind },copy.saved,()=>setAliasForm({ source:"", target:"", kind:"forward" }));}}><h3>{copy.aliases}</h3><Field label={copy.source} value={aliasForm.source} onChange={(value)=>setAliasForm((c)=>({...c,source:value}))} placeholder="support" /><Field label={copy.target} value={aliasForm.target} onChange={(value)=>setAliasForm((c)=>({...c,target:value}))} placeholder="team@example.com" /><Field label={copy.kind} value={aliasForm.kind} onChange={(value)=>setAliasForm((c)=>({...c,kind:value}))} /><button className="primary-button" disabled={busy==="alias"} type="submit">{copy.create}</button></form><article className="card"><h3>{copy.domainAliases}</h3><div className="list">{domainAliases.map((alias)=><div className="row" key={alias.id}><strong>{alias.source}</strong><span>{alias.target}</span><span className="pill">{alias.kind}</span></div>)}</div></article></div> : null}
             {domainTab === "admins" ? <article className="card"><h3>{copy.domainAdmins}</h3><div className="list">{domainAdmins.map((admin)=><div className="row" key={admin.id}><strong>{admin.display_name}</strong><span>{admin.email}</span><span>{admin.rights_summary}</span></div>)}</div></article> : null}
           </> : null}

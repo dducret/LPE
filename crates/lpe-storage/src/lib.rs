@@ -1,6 +1,9 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use serde::Serialize;
 use sqlx::{FromRow, Pool, Postgres, Row};
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
 use uuid::Uuid;
 
 const DEFAULT_TENANT_ID: &str = "default";
@@ -73,6 +76,8 @@ pub struct PstTransferJobRecord {
     pub requested_by: String,
     pub created_at: String,
     pub completed_at: Option<String>,
+    pub processed_messages: u32,
+    pub error_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -114,6 +119,17 @@ pub struct ServerAdministrator {
     pub display_name: String,
     pub role: String,
     pub rights_summary: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AuthenticatedAdmin {
+    pub email: String,
+    pub display_name: String,
+    pub role: String,
+    pub domain_id: Option<Uuid>,
+    pub domain_name: String,
+    pub rights_summary: String,
+    pub expires_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -253,6 +269,31 @@ pub struct NewServerAdministrator {
 }
 
 #[derive(Debug, Clone)]
+pub struct AdminCredentialInput {
+    pub email: String,
+    pub password_hash: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AdminLogin {
+    pub email: String,
+    pub password_hash: String,
+    pub status: String,
+    pub display_name: String,
+    pub role: String,
+    pub domain_id: Option<Uuid>,
+    pub domain_name: String,
+    pub rights_summary: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PstJobExecutionSummary {
+    pub processed_jobs: u32,
+    pub completed_jobs: u32,
+    pub failed_jobs: u32,
+}
+
+#[derive(Debug, Clone)]
 pub struct NewFilterRule {
     pub name: String,
     pub scope: String,
@@ -274,6 +315,38 @@ pub struct EmailTraceResult {
     pub account_email: String,
     pub mailbox: String,
     pub received_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SubmitMessageInput {
+    pub account_id: Uuid,
+    pub source: String,
+    pub from_display: Option<String>,
+    pub from_address: String,
+    pub to: Vec<SubmittedRecipientInput>,
+    pub cc: Vec<SubmittedRecipientInput>,
+    pub bcc: Vec<SubmittedRecipientInput>,
+    pub subject: String,
+    pub body_text: String,
+    pub body_html_sanitized: Option<String>,
+    pub internet_message_id: Option<String>,
+    pub mime_blob_ref: Option<String>,
+    pub size_octets: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SubmittedRecipientInput {
+    pub address: String,
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SubmittedMessage {
+    pub message_id: Uuid,
+    pub account_id: Uuid,
+    pub sent_mailbox_id: Uuid,
+    pub outbound_queue_id: Uuid,
+    pub delivery_status: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -306,6 +379,8 @@ struct PstTransferJobRow {
     requested_by: String,
     created_at: String,
     completed_at: Option<String>,
+    processed_messages: i32,
+    error_message: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -345,6 +420,39 @@ struct ServerAdministratorRow {
     display_name: String,
     role: String,
     rights_summary: String,
+}
+
+#[derive(Debug, FromRow)]
+struct AdminLoginRow {
+    email: String,
+    password_hash: String,
+    status: String,
+    display_name: Option<String>,
+    role: Option<String>,
+    domain_id: Option<Uuid>,
+    domain_name: Option<String>,
+    rights_summary: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct AuthenticatedAdminRow {
+    email: String,
+    display_name: Option<String>,
+    role: Option<String>,
+    domain_id: Option<Uuid>,
+    domain_name: Option<String>,
+    rights_summary: Option<String>,
+    expires_at: String,
+}
+
+#[derive(Debug, FromRow)]
+struct PendingPstJobRow {
+    id: Uuid,
+    mailbox_id: Uuid,
+    account_id: Uuid,
+    direction: String,
+    server_path: String,
+    requested_by: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -439,7 +547,9 @@ impl Storage {
                 CASE
                     WHEN completed_at IS NULL THEN NULL
                     ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
-                END AS completed_at
+                END AS completed_at,
+                processed_messages,
+                error_message
             FROM mailbox_pst_jobs
             WHERE tenant_id = $1
             ORDER BY created_at DESC
@@ -471,6 +581,8 @@ impl Storage {
                             requested_by: job.requested_by.clone(),
                             created_at: job.created_at.clone(),
                             completed_at: job.completed_at.clone(),
+                            processed_messages: job.processed_messages.max(0) as u32,
+                            error_message: job.error_message.clone(),
                         })
                         .collect(),
                 })
@@ -870,6 +982,163 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn upsert_admin_credential(
+        &self,
+        input: AdminCredentialInput,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let email = normalize_email(&input.email);
+        if email.is_empty() || input.password_hash.trim().is_empty() {
+            bail!("admin credential email and password hash are required");
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO admin_credentials (email, tenant_id, password_hash, status)
+            VALUES ($1, $2, $3, 'active')
+            ON CONFLICT (email) DO UPDATE SET
+                password_hash = EXCLUDED.password_hash,
+                status = 'active',
+                updated_at = NOW()
+            "#,
+        )
+        .bind(email)
+        .bind(DEFAULT_TENANT_ID)
+        .bind(input.password_hash)
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, audit).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn fetch_admin_login(&self, email: &str) -> Result<Option<AdminLogin>> {
+        let email = normalize_email(email);
+        let row = sqlx::query_as::<_, AdminLoginRow>(
+            r#"
+            SELECT
+                ac.email,
+                ac.password_hash,
+                ac.status,
+                sa.display_name,
+                sa.role,
+                sa.domain_id,
+                d.name AS domain_name,
+                sa.rights_summary
+            FROM admin_credentials ac
+            LEFT JOIN server_administrators sa
+                ON sa.tenant_id = ac.tenant_id AND lower(sa.email) = lower(ac.email)
+            LEFT JOIN domains d ON d.id = sa.domain_id
+            WHERE ac.tenant_id = $1 AND lower(ac.email) = lower($2)
+            ORDER BY sa.created_at ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(email)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| AdminLogin {
+            email: row.email,
+            password_hash: row.password_hash,
+            status: row.status,
+            display_name: row
+                .display_name
+                .unwrap_or_else(|| "LPE Administrator".to_string()),
+            role: row.role.unwrap_or_else(|| "server-admin".to_string()),
+            domain_id: row.domain_id,
+            domain_name: row.domain_name.unwrap_or_else(|| "All domains".to_string()),
+            rights_summary: row.rights_summary.unwrap_or_else(|| {
+                "server, domains, accounts, aliases, policies, antispam, pst, audit".to_string()
+            }),
+        }))
+    }
+
+    pub async fn create_admin_session(
+        &self,
+        token: &str,
+        email: &str,
+        session_timeout_minutes: u32,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO admin_sessions (id, tenant_id, token, admin_email, expires_at)
+            VALUES ($1, $2, $3, $4, NOW() + ($5::TEXT || ' minutes')::INTERVAL)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(DEFAULT_TENANT_ID)
+        .bind(token)
+        .bind(normalize_email(email))
+        .bind(session_timeout_minutes.max(5) as i32)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn fetch_admin_session(&self, token: &str) -> Result<Option<AuthenticatedAdmin>> {
+        let row = sqlx::query_as::<_, AuthenticatedAdminRow>(
+            r#"
+            SELECT
+                ac.email,
+                sa.display_name,
+                sa.role,
+                sa.domain_id,
+                d.name AS domain_name,
+                sa.rights_summary,
+                to_char(s.expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS expires_at
+            FROM admin_sessions s
+            JOIN admin_credentials ac ON ac.email = s.admin_email
+            LEFT JOIN server_administrators sa
+                ON sa.tenant_id = s.tenant_id AND lower(sa.email) = lower(s.admin_email)
+            LEFT JOIN domains d ON d.id = sa.domain_id
+            WHERE s.tenant_id = $1
+              AND s.token = $2
+              AND s.expires_at > NOW()
+              AND ac.status = 'active'
+            ORDER BY sa.created_at ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(token)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| AuthenticatedAdmin {
+            email: row.email,
+            display_name: row
+                .display_name
+                .unwrap_or_else(|| "LPE Administrator".to_string()),
+            role: row.role.unwrap_or_else(|| "server-admin".to_string()),
+            domain_id: row.domain_id,
+            domain_name: row.domain_name.unwrap_or_else(|| "All domains".to_string()),
+            rights_summary: row.rights_summary.unwrap_or_else(|| {
+                "server, domains, accounts, aliases, policies, antispam, pst, audit".to_string()
+            }),
+            expires_at: row.expires_at,
+        }))
+    }
+
+    pub async fn delete_admin_session(&self, token: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            DELETE FROM admin_sessions
+            WHERE tenant_id = $1 AND token = $2
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(token)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn create_filter_rule(
         &self,
         input: NewFilterRule,
@@ -1009,6 +1278,157 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn submit_message(
+        &self,
+        input: SubmitMessageInput,
+        audit: AuditEntryInput,
+    ) -> Result<SubmittedMessage> {
+        let from_address = normalize_email(&input.from_address);
+        let subject = normalize_subject(&input.subject);
+        let body_text = input.body_text.trim().to_string();
+        let recipients = normalize_submitted_recipients(&input);
+
+        if from_address.is_empty() {
+            bail!("from_address is required");
+        }
+        if recipients.is_empty() {
+            bail!("at least one recipient is required");
+        }
+        if subject.is_empty() && body_text.is_empty() {
+            bail!("subject or body_text is required");
+        }
+
+        let mut tx = self.pool.begin().await?;
+
+        let account_exists = sqlx::query(
+            r#"
+            SELECT 1
+            FROM accounts
+            WHERE tenant_id = $1 AND id = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(input.account_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if account_exists.is_none() {
+            bail!("account not found");
+        }
+
+        let sent_mailbox_id = self
+            .ensure_mailbox(&mut tx, input.account_id, "sent", "Sent", 20, 365)
+            .await?;
+
+        let message_id = Uuid::new_v4();
+        let thread_id = Uuid::new_v4();
+        let outbound_queue_id = Uuid::new_v4();
+        let preview_text = preview_text(&body_text);
+        let participants_normalized = participants_normalized(&from_address, &recipients);
+        let mime_blob_ref = input
+            .mime_blob_ref
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| format!("canonical-message:{message_id}"));
+        let content_hash = format!("message:{message_id}");
+
+        sqlx::query(
+            r#"
+            INSERT INTO messages (
+                id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
+                received_at, sent_at, from_display, from_address, subject_normalized,
+                preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
+                submission_source, delivery_status
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, $6,
+                NOW(), NOW(), $7, $8, $9,
+                $10, FALSE, FALSE, FALSE, $11, $12,
+                $13, 'queued'
+            )
+            "#,
+        )
+        .bind(message_id)
+        .bind(DEFAULT_TENANT_ID)
+        .bind(input.account_id)
+        .bind(sent_mailbox_id)
+        .bind(thread_id)
+        .bind(input.internet_message_id)
+        .bind(input.from_display.map(|value| value.trim().to_string()))
+        .bind(&from_address)
+        .bind(&subject)
+        .bind(&preview_text)
+        .bind(input.size_octets.max(0))
+        .bind(&mime_blob_ref)
+        .bind(input.source.trim().to_lowercase())
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO message_bodies (
+                message_id, body_text, body_html_sanitized, participants_normalized,
+                language_code, content_hash, search_vector
+            )
+            VALUES ($1, $2, $3, $4, NULL, $5, to_tsvector('simple', $6))
+            "#,
+        )
+        .bind(message_id)
+        .bind(&body_text)
+        .bind(input.body_html_sanitized)
+        .bind(&participants_normalized)
+        .bind(content_hash)
+        .bind(format!("{subject} {body_text} {participants_normalized}"))
+        .execute(&mut *tx)
+        .await?;
+
+        for (ordinal, (kind, recipient)) in recipients.iter().enumerate() {
+            sqlx::query(
+                r#"
+                INSERT INTO message_recipients (
+                    id, tenant_id, message_id, kind, address, display_name, ordinal
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(DEFAULT_TENANT_ID)
+            .bind(message_id)
+            .bind(kind)
+            .bind(&recipient.address)
+            .bind(recipient.display_name.as_deref())
+            .bind(ordinal as i32)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO outbound_message_queue (
+                id, tenant_id, message_id, account_id, transport, status
+            )
+            VALUES ($1, $2, $3, $4, 'lpe-ct-smtp', 'queued')
+            "#,
+        )
+        .bind(outbound_queue_id)
+        .bind(DEFAULT_TENANT_ID)
+        .bind(message_id)
+        .bind(input.account_id)
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, audit).await?;
+        tx.commit().await?;
+
+        Ok(SubmittedMessage {
+            message_id,
+            account_id: input.account_id,
+            sent_mailbox_id,
+            outbound_queue_id,
+            delivery_status: "queued".to_string(),
+        })
+    }
+
     pub async fn search_email_trace(
         &self,
         input: EmailTraceSearchInput,
@@ -1055,6 +1475,246 @@ impl Storage {
                 received_at: row.received_at,
             })
             .collect())
+    }
+
+    pub async fn process_pending_pst_jobs(&self) -> Result<PstJobExecutionSummary> {
+        let jobs = sqlx::query_as::<_, PendingPstJobRow>(
+            r#"
+            SELECT
+                j.id,
+                j.mailbox_id,
+                mb.account_id,
+                j.direction,
+                j.server_path,
+                j.requested_by
+            FROM mailbox_pst_jobs j
+            JOIN mailboxes mb ON mb.id = j.mailbox_id
+            WHERE j.tenant_id = $1 AND j.status IN ('requested', 'failed')
+            ORDER BY j.created_at ASC
+            LIMIT 10
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut summary = PstJobExecutionSummary {
+            processed_jobs: 0,
+            completed_jobs: 0,
+            failed_jobs: 0,
+        };
+
+        for job in jobs {
+            summary.processed_jobs += 1;
+            if let Err(error) = self.mark_pst_job_running(job.id).await {
+                summary.failed_jobs += 1;
+                let _ = self
+                    .mark_pst_job_failed(job.id, &format!("cannot start job: {error}"))
+                    .await;
+                continue;
+            }
+
+            let result = if job.direction == "export" {
+                self.export_mailbox_to_pst(&job).await
+            } else {
+                self.import_mailbox_from_pst(&job).await
+            };
+
+            match result {
+                Ok(processed_messages) => {
+                    self.mark_pst_job_completed(job.id, processed_messages)
+                        .await?;
+                    summary.completed_jobs += 1;
+                }
+                Err(error) => {
+                    self.mark_pst_job_failed(job.id, &error.to_string()).await?;
+                    summary.failed_jobs += 1;
+                }
+            }
+        }
+
+        Ok(summary)
+    }
+
+    async fn mark_pst_job_running(&self, job_id: Uuid) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE mailbox_pst_jobs
+            SET status = 'running', error_message = NULL
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(job_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn mark_pst_job_completed(&self, job_id: Uuid, processed_messages: u32) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE mailbox_pst_jobs
+            SET status = 'completed',
+                processed_messages = $3,
+                error_message = NULL,
+                completed_at = NOW()
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(job_id)
+        .bind(processed_messages as i32)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn mark_pst_job_failed(&self, job_id: Uuid, error_message: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE mailbox_pst_jobs
+            SET status = 'failed',
+                error_message = $3,
+                completed_at = NOW()
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(job_id)
+        .bind(error_message.chars().take(1000).collect::<String>())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn export_mailbox_to_pst(&self, job: &PendingPstJobRow) -> Result<u32> {
+        ensure_parent_directory(&job.server_path)?;
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                m.internet_message_id,
+                m.from_address,
+                m.subject_normalized,
+                COALESCE(mb.body_text, '') AS body_text
+            FROM messages m
+            LEFT JOIN message_bodies mb ON mb.message_id = m.id
+            WHERE m.tenant_id = $1 AND m.mailbox_id = $2
+            ORDER BY m.received_at ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(job.mailbox_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut file = File::create(&job.server_path)?;
+        writeln!(file, "LPE-PST-V1")?;
+        writeln!(file, "mailbox_id={}", job.mailbox_id)?;
+        writeln!(file, "requested_by={}", job.requested_by)?;
+
+        for row in &rows {
+            let internet_message_id = row
+                .try_get::<Option<String>, _>("internet_message_id")?
+                .unwrap_or_default();
+            let from_address: String = row.try_get("from_address")?;
+            let subject: String = row.try_get("subject_normalized")?;
+            let body_text: String = row.try_get("body_text")?;
+            writeln!(
+                file,
+                "MESSAGE\t{}\t{}\t{}\t{}",
+                encode_pst_field(&internet_message_id),
+                encode_pst_field(&from_address),
+                encode_pst_field(&subject),
+                encode_pst_field(&body_text)
+            )?;
+        }
+
+        Ok(rows.len() as u32)
+    }
+
+    async fn import_mailbox_from_pst(&self, job: &PendingPstJobRow) -> Result<u32> {
+        let file = File::open(&job.server_path)?;
+        let mut reader = BufReader::new(file);
+        let mut header = String::new();
+        reader.read_line(&mut header)?;
+        if header.trim() != "LPE-PST-V1" {
+            bail!("unsupported PST file for this bootstrap engine");
+        }
+
+        let mut processed_messages = 0;
+        let mut tx = self.pool.begin().await?;
+        for line in reader.lines() {
+            let line = line?;
+            if !line.starts_with("MESSAGE\t") {
+                continue;
+            }
+            let parts = line.split('\t').collect::<Vec<_>>();
+            if parts.len() != 5 {
+                continue;
+            }
+
+            let message_id = Uuid::new_v4();
+            let body_text = decode_pst_field(parts[4]);
+            let subject = decode_pst_field(parts[3]);
+            let from_address = decode_pst_field(parts[2]);
+            let internet_message_id = decode_pst_field(parts[1]);
+            let preview_text = preview_text(&body_text);
+
+            sqlx::query(
+                r#"
+                INSERT INTO messages (
+                    id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
+                    received_at, sent_at, from_display, from_address, subject_normalized,
+                    preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
+                    submission_source, delivery_status
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5, NULLIF($6, ''),
+                    NOW(), NULL, NULL, $7, $8,
+                    $9, TRUE, FALSE, FALSE, $10, $11,
+                    'pst-import', 'stored'
+                )
+                "#,
+            )
+            .bind(message_id)
+            .bind(DEFAULT_TENANT_ID)
+            .bind(job.account_id)
+            .bind(job.mailbox_id)
+            .bind(Uuid::new_v4())
+            .bind(internet_message_id)
+            .bind(from_address)
+            .bind(subject.clone())
+            .bind(preview_text)
+            .bind(body_text.len() as i64)
+            .bind(format!("pst-import:{message_id}"))
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query(
+                r#"
+                INSERT INTO message_bodies (
+                    message_id, body_text, body_html_sanitized, participants_normalized,
+                    language_code, content_hash, search_vector
+                )
+                VALUES ($1, $2, NULL, '', NULL, $3, to_tsvector('simple', $4))
+                "#,
+            )
+            .bind(message_id)
+            .bind(body_text.clone())
+            .bind(format!("pst-import:{message_id}"))
+            .bind(format!("{subject} {body_text}"))
+            .execute(&mut *tx)
+            .await?;
+
+            processed_messages += 1;
+        }
+
+        tx.commit().await?;
+        Ok(processed_messages)
     }
 
     async fn fetch_server_settings(&self) -> Result<ServerSettings> {
@@ -1276,6 +1936,55 @@ impl Storage {
             .collect())
     }
 
+    async fn ensure_mailbox(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        account_id: Uuid,
+        role: &str,
+        display_name: &str,
+        sort_order: i32,
+        retention_days: i32,
+    ) -> Result<Uuid> {
+        if let Some(row) = sqlx::query(
+            r#"
+            SELECT id
+            FROM mailboxes
+            WHERE tenant_id = $1 AND account_id = $2 AND role = $3
+            ORDER BY created_at ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(role)
+        .fetch_optional(&mut **tx)
+        .await?
+        {
+            return row.try_get("id").map_err(Into::into);
+        }
+
+        let mailbox_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO mailboxes (
+                id, tenant_id, account_id, role, display_name, sort_order, retention_days
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            "#,
+        )
+        .bind(mailbox_id)
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(role)
+        .bind(display_name)
+        .bind(sort_order)
+        .bind(retention_days)
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(mailbox_id)
+    }
+
     async fn insert_audit(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
@@ -1297,4 +2006,117 @@ impl Storage {
 
         Ok(())
     }
+}
+
+fn normalize_email(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
+fn normalize_subject(value: &str) -> String {
+    value.trim().to_string()
+}
+
+fn preview_text(body_text: &str) -> String {
+    let preview = body_text
+        .split_whitespace()
+        .take(28)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if preview.is_empty() {
+        "(no preview)".to_string()
+    } else {
+        preview
+    }
+}
+
+fn normalize_submitted_recipients(
+    input: &SubmitMessageInput,
+) -> Vec<(&'static str, SubmittedRecipientInput)> {
+    let mut recipients = Vec::new();
+    push_recipients(&mut recipients, "to", &input.to);
+    push_recipients(&mut recipients, "cc", &input.cc);
+    push_recipients(&mut recipients, "bcc", &input.bcc);
+    recipients
+}
+
+fn push_recipients(
+    output: &mut Vec<(&'static str, SubmittedRecipientInput)>,
+    kind: &'static str,
+    input: &[SubmittedRecipientInput],
+) {
+    for recipient in input {
+        let address = normalize_email(&recipient.address);
+        if address.is_empty() {
+            continue;
+        }
+
+        output.push((
+            kind,
+            SubmittedRecipientInput {
+                address,
+                display_name: recipient
+                    .display_name
+                    .as_ref()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty()),
+            },
+        ));
+    }
+}
+
+fn participants_normalized(
+    from_address: &str,
+    recipients: &[(&'static str, SubmittedRecipientInput)],
+) -> String {
+    let mut participants = Vec::with_capacity(recipients.len() + 1);
+    participants.push(from_address.to_string());
+    participants.extend(
+        recipients
+            .iter()
+            .map(|(_, recipient)| recipient.address.clone()),
+    );
+    participants.join(" ")
+}
+
+fn ensure_parent_directory(path: &str) -> Result<()> {
+    let path = Path::new(path);
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+    Ok(())
+}
+
+fn encode_pst_field(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('\t', "\\t")
+        .replace('\r', "\\r")
+        .replace('\n', "\\n")
+}
+
+fn decode_pst_field(value: &str) -> String {
+    let mut output = String::new();
+    let mut chars = value.chars();
+    while let Some(char) = chars.next() {
+        if char != '\\' {
+            output.push(char);
+            continue;
+        }
+
+        match chars.next() {
+            Some('t') => output.push('\t'),
+            Some('r') => output.push('\r'),
+            Some('n') => output.push('\n'),
+            Some('\\') => output.push('\\'),
+            Some(other) => {
+                output.push('\\');
+                output.push(other);
+            }
+            None => output.push('\\'),
+        }
+    }
+    output
 }

@@ -24,6 +24,8 @@
 
 Ces dependances sont courantes dans l'ecosysteme Rust et retenues provisoirement pour accelerer le demarrage. Une revue documentaire devra etre maintenue pour chaque exception.
 
+`argon2` est retenu pour le hachage des mots de passe administrateur; la crate RustCrypto est disponible sous double licence `Apache-2.0 OR MIT`, donc compatible avec la preference `Apache-2.0`.
+
 ## English
 
 ### Base rule
@@ -47,4 +49,6 @@ Ces dependances sont courantes dans l'ecosysteme Rust et retenues provisoirement
 - `docx-lite`
 
 These dependencies are common in the Rust ecosystem and are kept provisionally to accelerate the bootstrap. A documented review must be maintained for each exception.
+
+`argon2` is used for administrator password hashing; the RustCrypto crate is available under `Apache-2.0 OR MIT`, which is compatible with the `Apache-2.0` preference.
 
