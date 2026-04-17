@@ -96,6 +96,11 @@ admin_index="$(curl --silent --show-error --fail "http://127.0.0.1/")" \
 [[ "$admin_index" == *"LPE Administration Console"* ]] || fail "Unexpected admin index content from nginx"
 pass "Admin console is served by nginx"
 
+mail_redirect="$(curl --silent --show-error --head --location-trusted --write-out '%{url_effective}' --output /dev/null "http://127.0.0.1/mail")" \
+  || fail "HTTP request failed: http://127.0.0.1/mail"
+[[ "$mail_redirect" == "http://127.0.0.1/mail/" ]] || fail "Unexpected /mail redirect target: $mail_redirect"
+pass "Web client shortcut redirects from /mail to /mail/"
+
 client_index="$(curl --silent --show-error --fail "http://127.0.0.1/mail/")" \
   || fail "HTTP request failed: http://127.0.0.1/mail/"
 [[ "$client_index" == *"/mail/assets/"* ]] || fail "Unexpected web client index content from nginx"
