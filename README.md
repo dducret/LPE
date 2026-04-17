@@ -47,7 +47,7 @@ La console d'administration actuelle couvre deja une V1 de pilotage du plan de c
 
 - authentification administrateur avec sessions persistantes et controle des droits cote API
 - page serveur avec etat, politiques, domaines et administrateurs
-- page domaine orientee gestion des comptes, alias et delegations
+- page domaine orientee gestion des comptes avec mot de passe, alias et delegations
 - demandes et execution testable d'import/export `PST` au niveau des boites aux lettres depuis la page domaine
 - page antispam avec moteur, regles et quarantaine
 - page audit et compliance avec journal et recherche de trace email
@@ -130,7 +130,7 @@ The current administration console already exposes a first control-plane V1:
 
 - administrator authentication with persistent sessions and API-side rights checks
 - server page with status, policies, domains, and administrators
-- domain-oriented page for accounts, aliases, and delegated administration
+- domain-oriented page for accounts with passwords, aliases, and delegated administration
 - mailbox-level `PST` import/export requests and testable execution from the domain page
 - anti-spam page with engine, rules, and quarantine
 - audit and compliance page with journal and email trace search

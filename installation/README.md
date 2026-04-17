@@ -91,7 +91,7 @@ Ordre recommande:
 6. ouvrir `http://adresse-du-serveur/` pour acceder a la console d'administration via `nginx`
 7. ouvrir `http://adresse-du-serveur/mail/` pour acceder au client web
 
-La console d'administration enregistre desormais ses comptes, boites, demandes d'import/export `PST`, domaines, alias, parametres, administrateurs delegues, objets antispam et evenements d'audit dans `PostgreSQL`. L'execution des migrations n'est donc plus optionnelle apres deploiement ou mise a jour du schema.
+La console d'administration enregistre desormais ses comptes, mots de passe de comptes, boites, demandes d'import/export `PST`, domaines, alias, parametres, administrateurs delegues, objets antispam et evenements d'audit dans `PostgreSQL`. L'execution des migrations n'est donc plus optionnelle apres deploiement ou mise a jour du schema.
 
 La premiere connexion cree automatiquement un administrateur de bootstrap si aucun identifiant n'existe encore. Les variables `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD` et `LPE_ADMIN_SESSION_MINUTES` doivent etre ajustees dans `/etc/lpe/lpe.env` avant exposition de la console.
 
@@ -120,7 +120,7 @@ Pour les mises a jour ulterieures:
 
 1. pousser le commit voulu dans `https://github.com/dducret/LPE`
 2. executer `update-lpe.sh`
-3. executer `run-migrations.sh` si le schema PostgreSQL a change, notamment pour les migrations de console d'administration comme `0006_admin_auth.sql` et `0007_pst_job_execution.sql`
+3. executer `run-migrations.sh` si le schema PostgreSQL a change, notamment pour les migrations de console d'administration comme `0006_admin_auth.sql`, `0007_pst_job_execution.sql` et `0008_account_credentials.sql`
 
 Si tu veux d'abord recuperer les derniers scripts avant une mise a jour:
 
@@ -228,7 +228,7 @@ Recommended order:
 6. open `http://server-address/` to reach the administration console through `nginx`
 7. open `http://server-address/mail/` to reach the web client
 
-The administration console now stores its accounts, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Running migrations is therefore mandatory after deployment or any schema update.
+The administration console now stores its accounts, account passwords, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Running migrations is therefore mandatory after deployment or any schema update.
 
 The first sign-in automatically creates a bootstrap administrator if no credential exists yet. `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD`, and `LPE_ADMIN_SESSION_MINUTES` must be adjusted in `/etc/lpe/lpe.env` before exposing the console.
 
@@ -257,7 +257,7 @@ For later updates:
 
 1. push the desired commit to `https://github.com/dducret/LPE`
 2. run `update-lpe.sh`
-3. run `run-migrations.sh` if the PostgreSQL schema changed, especially for administration console migrations such as `0006_admin_auth.sql` and `0007_pst_job_execution.sql`
+3. run `run-migrations.sh` if the PostgreSQL schema changed, especially for administration console migrations such as `0006_admin_auth.sql`, `0007_pst_job_execution.sql`, and `0008_account_credentials.sql`
 
 If you want to fetch the latest scripts first before an update:
 

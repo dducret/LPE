@@ -11,11 +11,11 @@ use axum::{
 use lpe_ai::{LocalModelProvider, StubLocalModelProvider};
 use lpe_core::CoreService;
 use lpe_storage::{
-    AdminCredentialInput, AdminDashboard, AuditEntryInput, AuthenticatedAdmin, DashboardUpdate,
-    EmailTraceResult, EmailTraceSearchInput, HealthResponse, LocalAiSettings, NewAccount, NewAlias,
-    NewDomain, NewFilterRule, NewMailbox, NewPstTransferJob, NewServerAdministrator,
-    PstJobExecutionSummary, SecuritySettings, ServerSettings, Storage, SubmitMessageInput,
-    SubmittedMessage, SubmittedRecipientInput,
+    AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput,
+    AuthenticatedAdmin, DashboardUpdate, EmailTraceResult, EmailTraceSearchInput, HealthResponse,
+    LocalAiSettings, NewAccount, NewAlias, NewDomain, NewFilterRule, NewMailbox, NewPstTransferJob,
+    NewServerAdministrator, PstJobExecutionSummary, SecuritySettings, ServerSettings, Storage,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
 };
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -58,6 +58,7 @@ struct CreateAccountRequest {
     email: String,
     display_name: String,
     quota_mb: u32,
+    password: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -345,17 +346,39 @@ async fn create_account(
 ) -> ApiResult<AdminDashboard> {
     let admin = require_admin(&storage, &headers, "accounts").await?;
     ensure_admin_can_manage_email(&admin, &request.email)?;
+    if request.password.trim().len() < 8 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "account password must contain at least 8 characters".to_string(),
+        ));
+    }
+    let account_email = request.email.clone();
     storage
         .create_account(
             NewAccount {
-                email: request.email,
+                email: request.email.clone(),
                 display_name: request.display_name,
                 quota_mb: request.quota_mb.max(256),
             },
             AuditEntryInput {
-                actor: admin.email,
+                actor: admin.email.clone(),
                 action: "create-account".to_string(),
                 subject: "account created from admin console".to_string(),
+            },
+        )
+        .await
+        .map_err(internal_error)?;
+
+    storage
+        .upsert_account_credential(
+            AccountCredentialInput {
+                email: account_email.clone(),
+                password_hash: hash_password(&request.password).map_err(internal_error)?,
+            },
+            AuditEntryInput {
+                actor: admin.email,
+                action: "set-account-password".to_string(),
+                subject: account_email,
             },
         )
         .await

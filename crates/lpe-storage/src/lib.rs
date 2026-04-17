@@ -275,6 +275,12 @@ pub struct AdminCredentialInput {
 }
 
 #[derive(Debug, Clone)]
+pub struct AccountCredentialInput {
+    pub email: String,
+    pub password_hash: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct AdminLogin {
     pub email: String,
     pub password_hash: String,
@@ -998,6 +1004,55 @@ impl Storage {
             INSERT INTO admin_credentials (email, tenant_id, password_hash, status)
             VALUES ($1, $2, $3, 'active')
             ON CONFLICT (email) DO UPDATE SET
+                password_hash = EXCLUDED.password_hash,
+                status = 'active',
+                updated_at = NOW()
+            "#,
+        )
+        .bind(email)
+        .bind(DEFAULT_TENANT_ID)
+        .bind(input.password_hash)
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, audit).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn upsert_account_credential(
+        &self,
+        input: AccountCredentialInput,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let email = normalize_email(&input.email);
+        if email.is_empty() || input.password_hash.trim().is_empty() {
+            bail!("account credential email and password hash are required");
+        }
+
+        let account_exists = sqlx::query(
+            r#"
+            SELECT 1
+            FROM accounts
+            WHERE tenant_id = $1 AND lower(primary_email) = lower($2)
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(&email)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if account_exists.is_none() {
+            bail!("account not found");
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO account_credentials (account_email, tenant_id, password_hash, status)
+            VALUES ($1, $2, $3, 'active')
+            ON CONFLICT (account_email) DO UPDATE SET
                 password_hash = EXCLUDED.password_hash,
                 status = 'active',
                 updated_at = NOW()
