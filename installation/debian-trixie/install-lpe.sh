@@ -95,6 +95,9 @@ set +a
 
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
 LPE_SERVER_NAME="${LPE_SERVER_NAME:-_}"
+LPE_NGINX_CLIENT_MAX_BODY_SIZE="${LPE_NGINX_CLIENT_MAX_BODY_SIZE:-20g}"
+LPE_PST_IMPORT_DIR="${LPE_PST_IMPORT_DIR:-${DATA_DIR}/imports}"
+install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${LPE_PST_IMPORT_DIR}"
 
 cd "${SRC_DIR}/web/admin"
 npm ci
@@ -110,6 +113,7 @@ cp -a "${SRC_DIR}/web/client/dist/." "${CLIENT_WEB_ROOT}/"
 sed \
   -e "s/__LPE_BIND_ADDRESS__/${LPE_BIND_ADDRESS//\//\\/}/g" \
   -e "s/__LPE_SERVER_NAME__/${LPE_SERVER_NAME//\//\\/}/g" \
+  -e "s/__LPE_NGINX_CLIENT_MAX_BODY_SIZE__/${LPE_NGINX_CLIENT_MAX_BODY_SIZE//\//\\/}/g" \
   "${SRC_DIR}/installation/debian-trixie/lpe.nginx.conf" \
   > "${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}"
 

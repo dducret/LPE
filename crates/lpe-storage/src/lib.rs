@@ -214,6 +214,15 @@ pub struct NewAccount {
 }
 
 #[derive(Debug, Clone)]
+pub struct UpdateAccount {
+    pub account_id: Uuid,
+    pub display_name: String,
+    pub quota_mb: u32,
+    pub status: String,
+    pub password_hash: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct NewMailbox {
     pub account_id: Uuid,
     pub display_name: String,
@@ -834,6 +843,66 @@ impl Storage {
             self.insert_audit(&mut tx, audit).await?;
         }
 
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn update_account(&self, input: UpdateAccount, audit: AuditEntryInput) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let display_name = input.display_name.trim();
+        let status = input.status.trim().to_lowercase();
+
+        if display_name.is_empty() {
+            bail!("account display name is required");
+        }
+
+        if !matches!(status.as_str(), "active" | "disabled" | "suspended") {
+            bail!("unsupported account status");
+        }
+
+        let account_email = sqlx::query_scalar::<_, String>(
+            r#"
+            UPDATE accounts
+            SET display_name = $1, quota_mb = $2, status = $3
+            WHERE tenant_id = $4 AND id = $5
+            RETURNING primary_email
+            "#,
+        )
+        .bind(display_name)
+        .bind(input.quota_mb.max(256) as i32)
+        .bind(&status)
+        .bind(DEFAULT_TENANT_ID)
+        .bind(input.account_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let Some(account_email) = account_email else {
+            bail!("account not found");
+        };
+
+        if let Some(password_hash) = input.password_hash {
+            if password_hash.trim().is_empty() {
+                bail!("account password hash is required");
+            }
+
+            sqlx::query(
+                r#"
+                INSERT INTO account_credentials (account_email, tenant_id, password_hash, status)
+                VALUES ($1, $2, $3, 'active')
+                ON CONFLICT (account_email) DO UPDATE SET
+                    password_hash = EXCLUDED.password_hash,
+                    status = 'active',
+                    updated_at = NOW()
+                "#,
+            )
+            .bind(normalize_email(&account_email))
+            .bind(DEFAULT_TENANT_ID)
+            .bind(password_hash)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        self.insert_audit(&mut tx, audit).await?;
         tx.commit().await?;
         Ok(())
     }

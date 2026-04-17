@@ -3,7 +3,7 @@ use argon2::{
     Argon2,
 };
 use axum::{
-    extract::State,
+    extract::{DefaultBodyLimit, Multipart, Path as AxumPath, State},
     http::{HeaderMap, StatusCode},
     routing::{get, post, put},
     Json, Router,
@@ -16,10 +16,12 @@ use lpe_storage::{
     EmailTraceSearchInput, HealthResponse, LocalAiSettings, NewAccount, NewAlias, NewDomain,
     NewFilterRule, NewMailbox, NewPstTransferJob, NewServerAdministrator, PstJobExecutionSummary,
     SecuritySettings, ServerSettings, Storage, SubmitMessageInput, SubmittedMessage,
-    SubmittedRecipientInput,
+    SubmittedRecipientInput, UpdateAccount,
 };
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::path::{Path, PathBuf};
+use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize)]
@@ -66,6 +68,14 @@ struct CreateAccountRequest {
     display_name: String,
     quota_mb: u32,
     password: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateAccountRequest {
+    display_name: String,
+    quota_mb: u32,
+    status: String,
+    password: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -198,8 +208,13 @@ pub fn router(storage: Storage) -> Router {
         .route("/capabilities/attachments", get(attachment_support))
         .route("/console/dashboard", get(dashboard))
         .route("/console/accounts", post(create_account))
+        .route("/console/accounts/{account_id}", put(update_account))
         .route("/console/mailboxes", post(create_mailbox))
         .route("/console/mailboxes/pst-jobs", post(create_pst_transfer_job))
+        .route(
+            "/console/mailboxes/{mailbox_id}/pst-upload",
+            post(upload_pst_import),
+        )
         .route("/console/domains", post(create_domain))
         .route("/console/aliases", post(create_alias))
         .route("/console/admins", post(create_server_administrator))
@@ -217,6 +232,7 @@ pub fn router(storage: Storage) -> Router {
         .route("/console/settings/security", put(update_security_settings))
         .route("/console/settings/local-ai", put(update_local_ai_settings))
         .route("/console/settings/antispam", put(update_antispam_settings))
+        .layer(DefaultBodyLimit::max(pst_upload_max_bytes()))
         .with_state(storage)
 }
 
@@ -453,6 +469,56 @@ async fn create_account(
     dashboard(State(storage), headers).await
 }
 
+async fn update_account(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(account_id): AxumPath<Uuid>,
+    Json(request): Json<UpdateAccountRequest>,
+) -> ApiResult<AdminDashboard> {
+    let admin = require_admin(&storage, &headers, "accounts").await?;
+    let dashboard_snapshot = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?;
+    let account = dashboard_snapshot
+        .accounts
+        .iter()
+        .find(|account| account.id == account_id)
+        .ok_or((StatusCode::NOT_FOUND, "account not found".to_string()))?;
+    ensure_admin_can_manage_email(&admin, &account.email)?;
+
+    let password_hash = match request.password.as_deref().map(str::trim) {
+        Some("") | None => None,
+        Some(password) if password.len() < 8 => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "account password must contain at least 8 characters".to_string(),
+            ));
+        }
+        Some(password) => Some(hash_password(password).map_err(internal_error)?),
+    };
+
+    storage
+        .update_account(
+            UpdateAccount {
+                account_id,
+                display_name: request.display_name,
+                quota_mb: request.quota_mb.max(256),
+                status: request.status,
+                password_hash,
+            },
+            AuditEntryInput {
+                actor: admin.email,
+                action: "update-account".to_string(),
+                subject: account.email.clone(),
+            },
+        )
+        .await
+        .map_err(internal_error)?;
+
+    dashboard(State(storage), headers).await
+}
+
 async fn create_mailbox(
     State(storage): State<Storage>,
     headers: HeaderMap,
@@ -485,6 +551,13 @@ async fn create_pst_transfer_job(
     Json(request): Json<CreatePstTransferJobRequest>,
 ) -> ApiResult<AdminDashboard> {
     let admin = require_admin(&storage, &headers, "pst").await?;
+    let dashboard_snapshot = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?;
+    let account_email = mailbox_account_email(&dashboard_snapshot, request.mailbox_id)
+        .ok_or((StatusCode::NOT_FOUND, "mailbox not found".to_string()))?;
+    ensure_admin_can_manage_email(&admin, &account_email)?;
     let direction = request.direction.trim().to_lowercase();
     let action = if direction == "export" {
         "request-pst-export"
@@ -504,6 +577,92 @@ async fn create_pst_transfer_job(
                 actor: admin.email,
                 action: action.to_string(),
                 subject: format!("{} {}", request.mailbox_id, request.server_path),
+            },
+        )
+        .await
+        .map_err(internal_error)?;
+
+    dashboard(State(storage), headers).await
+}
+
+async fn upload_pst_import(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(mailbox_id): AxumPath<Uuid>,
+    mut multipart: Multipart,
+) -> ApiResult<AdminDashboard> {
+    let admin = require_admin(&storage, &headers, "pst").await?;
+    let dashboard_snapshot = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?;
+    let account_email = mailbox_account_email(&dashboard_snapshot, mailbox_id)
+        .ok_or((StatusCode::NOT_FOUND, "mailbox not found".to_string()))?;
+    ensure_admin_can_manage_email(&admin, &account_email)?;
+
+    let mut requested_by = admin.email.clone();
+    let mut uploaded_path: Option<PathBuf> = None;
+
+    while let Some(mut field) = multipart.next_field().await.map_err(bad_request_error)? {
+        let field_name = field.name().unwrap_or_default().to_string();
+        if field_name == "requested_by" {
+            requested_by = field.text().await.map_err(bad_request_error)?;
+            continue;
+        }
+
+        if field_name != "file" {
+            continue;
+        }
+
+        let file_name = field.file_name().unwrap_or("mailbox.pst").to_string();
+        if !file_name.to_lowercase().ends_with(".pst") {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "uploaded mailbox import file must use the .pst extension".to_string(),
+            ));
+        }
+
+        let upload_dir = pst_import_dir();
+        tokio::fs::create_dir_all(&upload_dir)
+            .await
+            .map_err(internal_error)?;
+        let target_path = upload_dir.join(format!(
+            "{}-{}",
+            Uuid::new_v4(),
+            sanitize_upload_filename(&file_name)
+        ));
+        let mut target_file = tokio::fs::File::create(&target_path)
+            .await
+            .map_err(internal_error)?;
+
+        while let Some(chunk) = field.chunk().await.map_err(bad_request_error)? {
+            target_file
+                .write_all(&chunk)
+                .await
+                .map_err(internal_error)?;
+        }
+        target_file.flush().await.map_err(internal_error)?;
+        uploaded_path = Some(target_path);
+    }
+
+    let uploaded_path = uploaded_path.ok_or((
+        StatusCode::BAD_REQUEST,
+        "missing PST upload file".to_string(),
+    ))?;
+    let server_path = uploaded_path.to_string_lossy().to_string();
+
+    storage
+        .create_pst_transfer_job(
+            NewPstTransferJob {
+                mailbox_id,
+                direction: "import".to_string(),
+                server_path: server_path.clone(),
+                requested_by: requested_by.clone(),
+            },
+            AuditEntryInput {
+                actor: admin.email,
+                action: "upload-pst-import".to_string(),
+                subject: format!("{requested_by} uploaded {server_path}"),
             },
         )
         .await
@@ -869,6 +1028,10 @@ fn internal_error(error: impl ToString) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
 }
 
+fn bad_request_error(error: impl ToString) -> (StatusCode, String) {
+    (StatusCode::BAD_REQUEST, error.to_string())
+}
+
 async fn require_admin(
     storage: &Storage,
     headers: &HeaderMap,
@@ -948,6 +1111,55 @@ fn ensure_admin_can_manage_email(
             StatusCode::FORBIDDEN,
             "domain admin cannot manage this domain".to_string(),
         ))
+    }
+}
+
+fn mailbox_account_email(dashboard: &AdminDashboard, mailbox_id: Uuid) -> Option<String> {
+    dashboard
+        .accounts
+        .iter()
+        .find(|account| {
+            account
+                .mailboxes
+                .iter()
+                .any(|mailbox| mailbox.id == mailbox_id)
+        })
+        .map(|account| account.email.clone())
+}
+
+fn pst_import_dir() -> PathBuf {
+    env::var("LPE_PST_IMPORT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/var/lib/lpe/imports"))
+}
+
+fn pst_upload_max_bytes() -> usize {
+    env::var("LPE_PST_UPLOAD_MAX_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(20 * 1024 * 1024 * 1024)
+}
+
+fn sanitize_upload_filename(file_name: &str) -> String {
+    let basename = Path::new(file_name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("mailbox.pst");
+    let sanitized: String = basename
+        .chars()
+        .map(|value| {
+            if value.is_ascii_alphanumeric() || matches!(value, '.' | '-' | '_') {
+                value
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    if sanitized.is_empty() {
+        "mailbox.pst".to_string()
+    } else {
+        sanitized
     }
 }
 

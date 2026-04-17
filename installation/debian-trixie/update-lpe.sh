@@ -58,6 +58,9 @@ set +a
 
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
 LPE_SERVER_NAME="${LPE_SERVER_NAME:-_}"
+LPE_NGINX_CLIENT_MAX_BODY_SIZE="${LPE_NGINX_CLIENT_MAX_BODY_SIZE:-20g}"
+LPE_PST_IMPORT_DIR="${LPE_PST_IMPORT_DIR:-/var/lib/lpe/imports}"
+install -d -o lpe -g lpe "${LPE_PST_IMPORT_DIR}"
 
 cd "${SRC_DIR}"
 "${CARGO_BIN}" build --release -p lpe-cli
@@ -76,6 +79,7 @@ install -m 0644 "${SRC_DIR}/installation/debian-trixie/lpe.service" "/etc/system
 sed \
   -e "s/__LPE_BIND_ADDRESS__/${LPE_BIND_ADDRESS//\//\\/}/g" \
   -e "s/__LPE_SERVER_NAME__/${LPE_SERVER_NAME//\//\\/}/g" \
+  -e "s/__LPE_NGINX_CLIENT_MAX_BODY_SIZE__/${LPE_NGINX_CLIENT_MAX_BODY_SIZE//\//\\/}/g" \
   "${SRC_DIR}/installation/debian-trixie/lpe.nginx.conf" \
   > "${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}"
 

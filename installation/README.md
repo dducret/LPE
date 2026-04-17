@@ -95,6 +95,8 @@ Le client web demande une authentification utilisateur. Creer d'abord un compte 
 
 La console d'administration enregistre desormais ses comptes, mots de passe de comptes, boites, demandes d'import/export `PST`, domaines, alias, parametres, administrateurs delegues, objets antispam et evenements d'audit dans `PostgreSQL`. L'execution des migrations n'est donc plus optionnelle apres deploiement ou mise a jour du schema.
 
+Les imports `PST` peuvent etre envoyes depuis le navigateur. Le service stocke les fichiers recus dans `LPE_PST_IMPORT_DIR`, par defaut `/var/lib/lpe/imports`, puis cree la demande d'import `PST` avec le chemin serveur obtenu. La taille maximale acceptee par l'API est configuree par `LPE_PST_UPLOAD_MAX_BYTES`, par defaut `21474836480` octets. Le reverse proxy `nginx` est aligne avec `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, par defaut `20g`.
+
 La premiere connexion cree automatiquement un administrateur de bootstrap si aucun identifiant n'existe encore. Les variables `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD` et `LPE_ADMIN_SESSION_MINUTES` doivent etre ajustees dans `/etc/lpe/lpe.env` avant exposition de la console.
 
 Exemple complet:
@@ -233,6 +235,8 @@ Recommended order:
 The web client requires user authentication. First create an account and its password from the administration domain page, then sign in to `/mail/` with the full email address and that password.
 
 The administration console now stores its accounts, account passwords, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Running migrations is therefore mandatory after deployment or any schema update.
+
+`PST` imports can be uploaded from the browser. The service stores received files in `LPE_PST_IMPORT_DIR`, defaulting to `/var/lib/lpe/imports`, then creates the `PST` import request with the resulting server path. The maximum accepted API upload size is configured through `LPE_PST_UPLOAD_MAX_BYTES`, defaulting to `21474836480` bytes. The `nginx` reverse proxy is aligned through `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, defaulting to `20g`.
 
 The first sign-in automatically creates a bootstrap administrator if no credential exists yet. `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD`, and `LPE_ADMIN_SESSION_MINUTES` must be adjusted in `/etc/lpe/lpe.env` before exposing the console.
 

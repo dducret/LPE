@@ -19,6 +19,7 @@
 
 - `tokio`
 - `axum`
+- `multer` (transitive dependency enabled by `axum` multipart upload support)
 - `tracing`
 - `docx-lite`
 
@@ -45,6 +46,7 @@ Ces dependances sont courantes dans l'ecosysteme Rust et retenues provisoirement
 
 - `tokio`
 - `axum`
+- `multer` (transitive dependency enabled by `axum` multipart upload support)
 - `tracing`
 - `docx-lite`
 
