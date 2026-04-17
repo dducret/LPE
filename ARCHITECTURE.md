@@ -12,10 +12,30 @@ The product architecture must remain consistent with the following core constrai
 - all project source code is licensed under `Apache-2.0`
 - `PostgreSQL` is the primary persistent store
 - `JMAP` is the primary modern protocol axis
-- `IMAP` and `SMTP` remain compatibility layers
+- `IMAP` remains a mailbox-access compatibility layer
+- inbound and outbound `SMTP` transport is handled by the sorting-center layer
 - the architecture must remain compatible with future local AI capabilities without sending data outside the server perimeter
 
 ## Architectural Model
+
+### Stalwart-inspired reference, with mandatory LPE divergences
+
+Stalwart is a strong functional reference for `LPE`.
+
+Its all-in-one mail and collaboration approach is aligned with the target product direction: a Rust-based server exposing modern mail and collaboration protocols, strong security, multi-tenancy, flexible storage, search, administration, and observability.
+
+However, `LPE` must not be treated as a Stalwart clone or as a derivative implementation.
+
+The following differences are mandatory:
+
+- `LPE` source code must remain under `Apache-2.0`
+- dependencies and reused code must comply with the project license policy
+- Stalwart's `AGPL-3.0` and proprietary enterprise licensing model is not compatible with the `LPE` source-code policy
+- `LPE` must keep a distinct DMZ sorting-center layer for inbound and outbound mail transport
+- the mailbox and collaboration core must remain separated from the Internet-facing transport gateway
+- native Outlook compatibility is adoption-critical and must be treated as a first-class architecture concern
+
+Stalwart can therefore be used as a product and architecture benchmark, but not as a codebase to copy from unless each reused element is explicitly verified as license-compatible.
 
 ### Internal model first
 
@@ -25,9 +45,49 @@ The business core is centered on a stable internal mail and collaboration model.
 
 - `JMAP` is the primary modern access layer for mail and collaboration data
 - `IMAP` is a compatibility access layer for existing mail clients
-- `SMTP` is a transport and interoperability layer for message submission and message exchange
+- `SMTP` is a transport and interoperability concern owned by the sorting-center layer for exposed ingress and outbound relay
 
 In addition to online protocols, `LPE` supports mailbox import and export in `PST` format for migration and interoperability scenarios.
+
+### Protocol responsibility split
+
+`LPE` does not need to implement every external protocol as an Internet-facing service.
+
+The protocol split should follow the architectural boundary between the mailbox platform and the sorting-center transport layer:
+
+- `LPE` should implement `JMAP` as the primary modern mailbox and collaboration protocol
+- `LPE` should implement `IMAP` as a mailbox-access compatibility layer
+- `LPE` may support additional mailbox-access compatibility protocols such as `EWS` or `ActiveSync`
+- `LPE` should expose collaboration compatibility through standards-based protocols when appropriate, including `CalDAV`, `CardDAV`, and potentially `WebDAV`
+- Internet-facing `SMTP` ingress should be handled by the sorting-center layer, not by `LPE`
+- outgoing `SMTP` relay responsibilities should also remain in the sorting-center layer
+
+This keeps transport and edge-security logic concentrated in the sorting centers while keeping mailbox and collaboration logic concentrated in `LPE`.
+
+### Client compatibility and sent-message consistency
+
+Compatibility protocols such as `IMAP`, `EWS`, and `ActiveSync` are important because users may rely on native client applications, including mobile clients such as the iPhone Mail application.
+
+Native Outlook compatibility is especially important for adoption.
+
+`LPE` should not assume that `IMAP` plus `SMTP` plus automatic account discovery is sufficient for Outlook users. The architecture must keep room for first-class Outlook-compatible access, such as `EWS`, `ActiveSync`, or another explicitly selected compatibility layer that preserves mailbox, calendar, contact, and sent-message consistency.
+
+The architecture must therefore ensure that:
+
+- users can connect supported clients to their `LPE` mailbox through an appropriate access protocol
+- message submission performed through compatibility workflows is still reflected correctly in the mailbox state maintained by `LPE`
+- sent messages are recorded in `LPE` so that the mailbox remains consistent across devices and protocols
+- Outlook-compatible access is treated as a strategic adoption requirement, not as a later cosmetic add-on
+
+This means protocol compatibility must not be implemented as a transport bypass that would cause sent messages to exist only in the client view or only in the sorting-center relay path.
+
+### Autoconfiguration and autodiscovery
+
+`LPE` should support client auto-configuration and autodiscovery workflows where they improve adoption and reduce setup errors.
+
+This includes standards or de facto standards used by desktop and mobile clients to discover the correct access and submission endpoints.
+
+Autodiscovery must describe the selected `LPE` access protocols and the sorting-center submission or relay path without weakening the architectural separation between mailbox access and SMTP transport.
 
 ### Physical mail analogy
 
@@ -280,7 +340,7 @@ The core `LPE` platform is responsible for:
 - mailbox persistence for hosted domains
 - end-user access through `JMAP`
 - compatibility access through `IMAP`
-- message submission and interoperability through `SMTP`
+- canonical sent-message persistence for supported client submission workflows
 - contacts, calendars, and to-do list management
 - long-term business data consistency in `PostgreSQL`
 
@@ -300,6 +360,15 @@ The sorting center is responsible for:
 - bounce and `DSN` handling
 
 This keeps mail transport responsibilities concentrated in the same controlled edge layer that already handles inbound security, traceability, and routing.
+
+`LPE` remains responsible for the authoritative mailbox-side representation of sent mail.
+
+The architectural principle is:
+
+- `LPE` owns the mailbox state
+- the sorting center owns SMTP transport execution
+
+This separation must still guarantee that user-submitted outbound messages are recorded in the appropriate sent-mail view inside `LPE`.
 
 ## Data and Storage Principles
 
@@ -407,7 +476,11 @@ The purpose of this tier is to:
 
 Once a mailbox grows beyond `50 GB`, the architecture should support a split strategy.
 
-This means the mailbox is no longer treated as a single monolithic storage unit for all operational concerns. The exact implementation remains open, but the architecture should allow one or more of the following:
+This split is a technical partitioning mechanism that remains invisible to the end user.
+
+Users must continue to experience a single logical mailbox even when the underlying storage is partitioned internally for operational reasons.
+
+This means the mailbox is no longer treated as a single monolithic storage unit for all operational concerns. The architecture should allow one or more of the following:
 
 - partitioning mailbox data into multiple logical or physical segments
 - separating active and less-active message ranges
@@ -442,12 +515,6 @@ The architecture should make it possible to:
 - restore a mailbox or mailbox group with limited blast radius
 
 This is one of the reasons the architecture should not assume a single `PostgreSQL` database for every mailbox and every platform concern.
-
-### Split model
-
-For mailboxes above `50 GB`, the split strategy is a technical partitioning mechanism that remains invisible to the end user.
-
-Users must continue to experience a single logical mailbox even when the underlying storage is partitioned internally for operational reasons.
 
 ### Mailbox import and export
 
@@ -662,9 +729,11 @@ The current architectural direction for the first product phases is:
 
 - hosted mailbox management for controlled domains
 - inbound mail intake through DMZ sorting centers
+- outbound mail relay through DMZ sorting centers
 - traceability and quarantine as first-class capabilities
 - `JMAP` as the main modern API surface
-- `IMAP` and `SMTP` as interoperability layers
+- `IMAP` as a mailbox-access compatibility layer
+- Outlook-compatible access through `EWS`, `ActiveSync`, or another explicitly selected equivalent layer as an adoption-critical target
 - `PST` mailbox import and export for migration and interoperability
 - collaboration services for contacts, calendars, and to-do lists
 - mailbox growth management through storage tiers, dedicated databases, split-capable large mailbox handling, and online archive support

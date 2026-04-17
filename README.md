@@ -1,4 +1,4 @@
-# La Poste ELectronique
+# La Poste Electronique
 
 ## Francais
 
@@ -10,8 +10,9 @@
 - dependances `MIT` autorisees uniquement si aucune alternative `Apache-2.0` raisonnable n'existe
 - `PostgreSQL` comme stockage primaire de metadonnees
 - `JMAP` comme axe principal du produit moderne
-- `IMAP` et `SMTP` comme couches de compatibilite
-- compatibilite client native visee via `IMAP` puis potentiellement `ActiveSync` ou `EWS`, sans casser la coherence des messages envoyes dans `LPE`
+- `IMAP` comme couche de compatibilite mailbox
+- transport `SMTP` entrant et sortant porte par le centre de tri `LPE-CT`
+- compatibilite client native visee via `IMAP` et compatibilite Outlook native critique via `ActiveSync`, `EWS` ou couche equivalente, sans casser la coherence des messages envoyes dans `LPE`
 - architecture preparee pour une IA locale future sans sortie de donnees hors serveur
 
 ### Structure
@@ -51,7 +52,7 @@ La console d'administration actuelle couvre deja une V1 de pilotage du plan de c
 
 Cette console est maintenant persistante dans `PostgreSQL` via `lpe-storage` et les migrations SQL du projet.
 
-Le protocole moderne principal reste `JMAP`, mais `LPE` doit aussi rester compatible avec des clients natifs. Cela vise en particulier les usages de type application Mail sur iPhone ou clients Outlook relies par couches de compatibilite. Dans tous les cas, un message envoye depuis un client externe doit etre enregistre dans `LPE` et rester visible dans la vue `Sent` de maniere coherente sur tous les acces.
+Le protocole moderne principal reste `JMAP`, mais `LPE` doit aussi rester compatible avec des clients natifs. Cela vise en particulier les usages de type application Mail sur iPhone et les clients Outlook. Le support Outlook natif est critique pour l'adoption et ne doit pas etre reduit a `IMAP` + `SMTP` + autodiscover. Dans tous les cas, un message envoye depuis un client externe doit etre enregistre dans `LPE` et rester visible dans la vue `Sent` de maniere coherente sur tous les acces.
 
 ### Axe IA locale
 
@@ -85,8 +86,9 @@ Les interfaces web supportent en v1:
 - `MIT` dependencies are allowed only when no reasonable `Apache-2.0` alternative exists
 - `PostgreSQL` is the primary metadata store
 - `JMAP` is the main protocol axis for the modern product
-- `IMAP` and `SMTP` are compatibility layers
-- native client compatibility is a target through `IMAP` first and potentially `ActiveSync` or `EWS` later, without breaking sent-message consistency inside `LPE`
+- `IMAP` is a mailbox compatibility layer
+- inbound and outbound `SMTP` transport is handled by the `LPE-CT` sorting center
+- native client compatibility is a target through `IMAP`, and native Outlook compatibility is adoption-critical through `ActiveSync`, `EWS`, or an equivalent layer, without breaking sent-message consistency inside `LPE`
 - the architecture is prepared for future local AI without data leaving the server
 
 ### Structure
@@ -119,13 +121,14 @@ The current administration console already exposes a first control-plane V1:
 
 - server page with status, policies, domains, and administrators
 - domain-oriented page for accounts, aliases, and delegated administration
+- mailbox-level `PST` import and export actions from the domain page
 - anti-spam page with engine, rules, and quarantine
 - audit and compliance page with journal and email trace search
 - operations page for protocols and storage
 
 This console is now persisted in `PostgreSQL` through `lpe-storage` and the project's SQL migrations.
 
-The main modern protocol remains `JMAP`, but `LPE` must also stay compatible with native clients. This especially targets use cases such as the iPhone Mail application or Outlook-compatible access layers. In every case, a message sent from an external client must be recorded in `LPE` and remain visible in the authoritative `Sent` view across access paths.
+The main modern protocol remains `JMAP`, but `LPE` must also stay compatible with native clients. This especially targets use cases such as the iPhone Mail application and Outlook clients. Native Outlook support is critical for adoption and must not be reduced to `IMAP` + `SMTP` + autodiscover. In every case, a message sent from an external client must be recorded in `LPE` and remain visible in the authoritative `Sent` view across access paths.
 
 ### Local AI direction
 

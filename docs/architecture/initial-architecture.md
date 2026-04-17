@@ -6,11 +6,11 @@
 
 - stockage primaire : `PostgreSQL`
 - axe protocolaire moderne : `JMAP`
-- compatibilite initiale : `SMTP`, `IMAP`
+- compatibilite initiale : `IMAP`; transport `SMTP` expose par le centre de tri `LPE-CT`
 - code LPE : `Apache-2.0`
 - dependances : `Apache-2.0` d'abord, `MIT` uniquement par exception justifiee
 - architecture de donnees preparee pour une IA locale future
-- possibilite de deporter le centre de tri sur un serveur `DMZ` distinct sans deplacer le coeur metier
+- centre de tri `LPE-CT` distinct pour le transport `SMTP` entrant et sortant expose, deployable en `DMZ` sans deplacer le coeur metier
 
 ### Vision
 
@@ -18,7 +18,7 @@
 
 Les clients natifs restent un objectif important. Un utilisateur doit pouvoir connecter sa boite `LPE` depuis un client mobile ou desktop compatible, par exemple l'application Mail de l'iPhone, sans perdre la coherence de sa boite entre protocoles.
 
-Cela implique que tout envoi realise via `SMTP` submission, `IMAP`, `ActiveSync`, `EWS` ou `JMAP` alimente la meme representation canonique du message dans `LPE`, y compris la copie du message envoye dans la vue `Sent`.
+Cela implique que tout envoi realise via un protocole client supporte, notamment `JMAP`, `IMAP`, `ActiveSync` ou `EWS`, alimente la meme representation canonique du message dans `LPE`, y compris la copie du message envoye dans la vue `Sent`. L'execution du transport `SMTP` entrant et sortant reste une responsabilite du centre de tri.
 
 ### Blocs principaux
 
@@ -46,14 +46,15 @@ Executable de demarrage local du serveur.
 8. `nginx` sur Debian
 Serveur frontal HTTP pour exposer l'interface d'administration statique et reverse-proxy `/api/` vers `lpe-admin-api`.
 
-9. `LPE-CT` en option pour la DMZ
-Centre de tri distinct pour l'entree SMTP exposee, le filtrage perimetrique, la quarantaine et le relais controle vers le coeur `LPE` dans le `LAN`.
+9. `LPE-CT` pour la DMZ
+Centre de tri distinct pour l'entree `SMTP` exposee, le relais sortant, le filtrage perimetrique, la quarantaine et le relais controle vers le coeur `LPE` dans le `LAN`.
 
 ### Priorites MVP
 
 - comptes, domaines, alias, quotas
-- SMTP entrant et submission
 - IMAP
+- transport `SMTP` entrant et sortant via `LPE-CT`
+- compatibilite Outlook native via `EWS`, `ActiveSync` ou couche equivalente choisie explicitement
 - coherence des messages envoyes entre protocoles clients et vue `Sent`
 - webmail HTTPS
 - recherche
@@ -68,11 +69,11 @@ Centre de tri distinct pour l'entree SMTP exposee, le filtrage perimetrique, la 
 
 - primary store: `PostgreSQL`
 - modern protocol axis: `JMAP`
-- initial compatibility: `SMTP`, `IMAP`
+- initial compatibility: `IMAP`; exposed `SMTP` transport handled by the `LPE-CT` sorting center
 - LPE code: `Apache-2.0`
 - dependencies: prefer `Apache-2.0`, allow `MIT` only with a documented exception
 - data architecture prepared for future local AI
-- ability to move the sorting center onto a distinct `DMZ` server without moving the business core
+- distinct `LPE-CT` sorting center for exposed inbound and outbound `SMTP` transport, deployable in the `DMZ` without moving the business core
 
 ### Vision
 
@@ -80,7 +81,7 @@ Centre de tri distinct pour l'entree SMTP exposee, le filtrage perimetrique, la 
 
 Native clients remain an important goal. A user must be able to connect an `LPE` mailbox from a compatible mobile or desktop client, for example the iPhone Mail application, without losing mailbox consistency across protocols.
 
-This implies that every submission path through `SMTP` submission, `IMAP`, `ActiveSync`, `EWS`, or `JMAP` feeds the same canonical message representation in `LPE`, including the authoritative `Sent` mailbox view.
+This implies that every supported client submission path, especially `JMAP`, `IMAP`, `ActiveSync`, or `EWS`, feeds the same canonical message representation in `LPE`, including the authoritative `Sent` mailbox view. Inbound and outbound `SMTP` transport execution remains a sorting-center responsibility.
 
 ### Main building blocks
 
@@ -108,14 +109,15 @@ Local server executable.
 8. `nginx` on Debian
 HTTP front end used to expose the static administration UI and reverse-proxy `/api/` to `lpe-admin-api`.
 
-9. optional `LPE-CT` in the DMZ
-Separate sorting center for exposed SMTP ingress, perimeter filtering, quarantine, and controlled relay toward the core `LPE` services on the `LAN`.
+9. `LPE-CT` in the DMZ
+Separate sorting center for exposed `SMTP` ingress, outbound relay, perimeter filtering, quarantine, and controlled relay toward the core `LPE` services on the `LAN`.
 
 ### MVP priorities
 
 - accounts, domains, aliases, quotas
-- inbound SMTP and submission
 - IMAP
+- inbound and outbound `SMTP` transport through `LPE-CT`
+- native Outlook compatibility through `EWS`, `ActiveSync`, or another explicitly selected equivalent layer
 - sent-message consistency across client protocols and the `Sent` view
 - HTTPS webmail
 - search

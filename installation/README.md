@@ -211,7 +211,7 @@ Recommended order:
 5. verify the service with `systemctl status lpe.service`
 6. open `http://server-address/` to reach the administration console through `nginx`
 
-The administration console now stores its accounts, mailboxes, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Running migrations is therefore mandatory after deployment or any schema update.
+The administration console now stores its accounts, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Running migrations is therefore mandatory after deployment or any schema update.
 
 Complete example:
 
@@ -237,7 +237,7 @@ For later updates:
 
 1. push the desired commit to `https://github.com/dducret/LPE`
 2. run `update-lpe.sh`
-3. run `run-migrations.sh` if the PostgreSQL schema changed
+3. run `run-migrations.sh` if the PostgreSQL schema changed, especially for administration console migrations such as `0004_mailbox_pst_jobs.sql`
 
 If you want to fetch the latest scripts first before an update:
 
