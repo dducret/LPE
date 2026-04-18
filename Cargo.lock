@@ -1297,6 +1297,7 @@ dependencies = [
  "lpe-ai",
  "lpe-attachments",
  "lpe-core",
+ "lpe-jmap",
  "lpe-storage",
  "serde",
  "tokio",
@@ -1361,8 +1362,13 @@ dependencies = [
 name = "lpe-jmap"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "axum",
+ "lpe-storage",
  "serde",
  "serde_json",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

@@ -10,6 +10,7 @@ axum.workspace = true
 lpe-ai = { path = "../lpe-ai" }
 lpe-attachments = { path = "../lpe-attachments" }
 lpe-core = { path = "../lpe-core" }
+lpe-jmap = { path = "../lpe-jmap" }
 lpe-storage = { path = "../lpe-storage" }
 serde.workspace = true
 argon2.workspace = true

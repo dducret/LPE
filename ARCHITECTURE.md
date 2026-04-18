@@ -377,6 +377,14 @@ The architectural principle is:
 
 This separation must still guarantee that user-submitted outbound messages are recorded in the appropriate sent-mail view inside `LPE`.
 
+The current `JMAP Mail` MVP follows that rule explicitly:
+
+- `Mailbox/get`, `Email/query`, and `Email/get` read from the canonical mailbox store
+- `Email/set` persists only draft-state mailbox data
+- `EmailSubmission/set` reuses the canonical submission workflow that writes `Sent` and `outbound_message_queue`
+- no `JMAP` path performs direct Internet-facing `SMTP`
+- protected `Bcc` metadata remains structurally separate from ordinary mailbox search and query projections
+
 ## Data and Storage Principles
 
 - `PostgreSQL` is the primary persistent store for platform metadata and operational data
@@ -747,9 +755,12 @@ The current architectural direction for the first product phases is:
 - outbound mail relay through DMZ sorting centers
 - traceability and quarantine as first-class capabilities
 - `JMAP` as the main modern API surface
+- a first `JMAP Mail` MVP with real session capabilities, `Mailbox/get`, `Email/query`, `Email/get`, draft-only `Email/set`, and canonical `EmailSubmission/set`
 - `IMAP` as a mailbox-access compatibility layer
 - `ActiveSync` as the first targeted native Outlook and mobile compatibility layer
 - `EWS` as a future extension after stabilization of the canonical submission and synchronization model
 - `PST` mailbox import and export for migration and interoperability
 - collaboration services for contacts, calendars, and to-do lists
 - mailbox growth management through storage tiers, dedicated databases, split-capable large mailbox handling, and online archive support
+
+The precise supported `JMAP Mail` MVP scope and its intentional limitations are documented in `docs/architecture/jmap-mail-mvp.md`.
