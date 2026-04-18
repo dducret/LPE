@@ -35,6 +35,8 @@ export function App() {
   const [loginForm, setLoginForm] = React.useState({ email: "", password: "" });
   const [loginError, setLoginError] = React.useState("");
   const [loginBusy, setLoginBusy] = React.useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = React.useState(false);
+  const accountMenuRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     document.documentElement.lang = locale;
@@ -68,6 +70,17 @@ export function App() {
     };
   }, [authToken]);
 
+  React.useEffect(() => {
+    if (!accountMenuOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(event.target as Node)) {
+        setAccountMenuOpen(false);
+      }
+    }
+    window.addEventListener("pointerdown", handlePointerDown);
+    return () => window.removeEventListener("pointerdown", handlePointerDown);
+  }, [accountMenuOpen]);
+
   async function loginClient(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoginBusy(true);
@@ -95,6 +108,7 @@ export function App() {
     }
     setAuthToken(null);
     setIdentity(null);
+    setAccountMenuOpen(false);
   }
 
   if (!identity) {
@@ -136,6 +150,8 @@ export function App() {
     );
   }
 
+  const showMailPane = workspace.section === "mail" && (workspace.mode !== "closed" || workspace.current !== null);
+
   return (
     <main className="app-shell">
       <header className="app-header">
@@ -148,7 +164,18 @@ export function App() {
           <input type="search" value={workspace.query} onChange={(event) => workspace.setQuery(event.target.value)} placeholder={copy.searchPlaceholder} aria-label={copy.searchPlaceholder} />
         </div>
         <div className="app-header-right">
-          <span className="header-account">{copy.signedInAs.replace("{email}", identity.email)}</span>
+          <div className="account-menu-shell" ref={accountMenuRef}>
+            <button className="account-menu-trigger" type="button" aria-haspopup="menu" aria-expanded={accountMenuOpen} aria-label={copy.accountMenuLabel} onClick={() => setAccountMenuOpen((value) => !value)}>
+              <span className="header-account">{copy.signedInAs.replace("{email}", identity.email)}</span>
+            </button>
+            {accountMenuOpen ? (
+              <div className="account-menu-popover" role="menu">
+                <strong>{copy.accountMenuTitle}</strong>
+                <span>{identity.email}</span>
+                <button className="ghost-button" type="button" onClick={() => void logoutClient()}>{copy.logout}</button>
+              </div>
+            ) : null}
+          </div>
           <span className="header-icon">◫</span>
           <span className="header-icon">✉</span>
           <span className="header-icon">⚙</span>
@@ -169,6 +196,7 @@ export function App() {
           mailboxOwner={identity.email}
           onCompose={() => workspace.openComposer("new")}
           onCloseComposer={workspace.closeComposer}
+          onAuxAction={workspace.notifyFeaturePending}
         />
 
         <section className="workspace">
@@ -181,9 +209,9 @@ export function App() {
 
           <div className="ribbon">
             <button className="primary-button ribbon-compose" type="button" onClick={() => workspace.openComposer("new")}>{copy.compose}</button>
-            {copy.ribbonActions.map((action) => <button key={action} className="ribbon-button" type="button">{action}</button>)}
+            {copy.ribbonActions.map((action) => <button key={action} className="ribbon-button" type="button" onClick={workspace.notifyFeaturePending}>{action}</button>)}
             <div className="ribbon-separator" />
-            {copy.ribbonSecondary.map((action) => <button key={action} className="ribbon-button" type="button">{action}</button>)}
+            {copy.ribbonSecondary.map((action) => <button key={action} className="ribbon-button" type="button" onClick={workspace.notifyFeaturePending}>{action}</button>)}
           </div>
 
           <header className="workspace-meta">
@@ -193,10 +221,9 @@ export function App() {
               <span className="workspace-caption">{copy.productSubtitle}</span>
             </div>
             <div className="workspace-meta-right">
-            <button className="ghost-button" type="button">{copy.topActions.sync}</button>
-            <button className="ghost-button" type="button">{copy.topActions.rules}</button>
-            <button className="ghost-button" type="button">{copy.topActions.schedule}</button>
-            <button className="ghost-button" type="button" onClick={() => void logoutClient()}>{copy.logout}</button>
+            <button className="ghost-button" type="button" onClick={() => void workspace.refreshWorkspace()}>{copy.topActions.sync}</button>
+            <button className="ghost-button" type="button" onClick={workspace.notifyFeaturePending}>{copy.topActions.rules}</button>
+            <button className="ghost-button" type="button" onClick={workspace.notifyFeaturePending}>{copy.topActions.schedule}</button>
             <label className="locale-picker">
               <span>{copy.languageLabel}</span>
               <select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>
@@ -208,7 +235,7 @@ export function App() {
 
           {workspace.notice ? <div className="notice-banner">{workspace.notice}</div> : null}
 
-          <div className="content-grid">
+          <div className={showMailPane || workspace.section !== "mail" ? "content-grid has-detail" : "content-grid"}>
             <MasterPane
               copy={copy}
               section={workspace.section}
@@ -223,48 +250,53 @@ export function App() {
               onSelectMessage={workspace.setMessageId}
               onSelectEvent={workspace.setEventId}
               onSelectContact={workspace.setContactId}
-              onCloseComposer={workspace.closeComposer}
+              onToolbarAction={workspace.notifyFeaturePending}
             />
 
+            {showMailPane ? (
             <section className="detail-pane">
-              {workspace.section === "mail" ? (
-                <MailDetail
-                  copy={copy}
-                  current={workspace.current}
-                  mode={workspace.mode}
-                  draft={workspace.draft}
-                  setDraft={workspace.setDraft}
-                  onReply={(message) => workspace.openComposer("reply", message)}
-                  onForward={(message) => workspace.openComposer("forward", message)}
-                  onCancel={workspace.closeComposer}
-                  onSaveDraft={() => void workspace.saveMessage(true)}
-                  onSend={() => void workspace.saveMessage(false)}
-                  onDeleteDraft={() => void workspace.deleteDraft()}
-                />
-              ) : null}
-
-              {workspace.section === "calendar" ? (
-                <EventEditor
-                  copy={copy}
-                  currentEvent={workspace.currentEvent}
-                  eventForm={workspace.eventForm}
-                  setEventForm={workspace.setEventForm}
-                  onNew={workspace.resetEventForm}
-                  onSave={() => void workspace.saveEvent()}
-                />
-              ) : null}
-
-              {workspace.section === "contacts" ? (
-                <ContactEditor
-                  copy={copy}
-                  currentContact={workspace.currentContact}
-                  contactForm={workspace.contactForm}
-                  setContactForm={workspace.setContactForm}
-                  onNew={workspace.resetContactForm}
-                  onSave={() => void workspace.saveContact()}
-                />
-              ) : null}
+              <MailDetail
+                copy={copy}
+                current={workspace.current}
+                mode={workspace.mode}
+                draft={workspace.draft}
+                setDraft={workspace.setDraft}
+                onReply={(message) => workspace.openComposer("reply", message)}
+                onForward={(message) => workspace.openComposer("forward", message)}
+                onCancel={workspace.closeComposer}
+                onSaveDraft={() => void workspace.saveMessage(true)}
+                onSend={() => void workspace.saveMessage(false)}
+                onDeleteDraft={() => void workspace.deleteDraft()}
+                onArchive={workspace.notifyFeaturePending}
+              />
             </section>
+            ) : null}
+
+            {workspace.section === "calendar" ? (
+            <section className="detail-pane">
+              <EventEditor
+                copy={copy}
+                currentEvent={workspace.currentEvent}
+                eventForm={workspace.eventForm}
+                setEventForm={workspace.setEventForm}
+                onNew={workspace.resetEventForm}
+                onSave={() => void workspace.saveEvent()}
+              />
+            </section>
+            ) : null}
+
+            {workspace.section === "contacts" ? (
+            <section className="detail-pane">
+              <ContactEditor
+                copy={copy}
+                currentContact={workspace.currentContact}
+                contactForm={workspace.contactForm}
+                setContactForm={workspace.setContactForm}
+                onNew={workspace.resetContactForm}
+                onSave={() => void workspace.saveContact()}
+              />
+            </section>
+            ) : null}
           </div>
         </section>
       </div>

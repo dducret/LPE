@@ -111,7 +111,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   const filtered = React.useMemo(() => filterMessages(mail, folder, query), [folder, mail, query]);
 
   React.useEffect(() => {
-    if (!filtered.some((item) => item.id === messageId)) setMessageId(filtered[0]?.id ?? "");
+    if (messageId && !filtered.some((item) => item.id === messageId)) setMessageId("");
   }, [filtered, messageId]);
 
   const current = filtered.find((item) => item.id === messageId) ?? null;
@@ -183,6 +183,15 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       pushNotice(copy.saveError);
     }
   }, [authToken, copy, draft, draftMessageId, identity, loadWorkspace, pushNotice]);
+
+  const refreshWorkspace = React.useCallback(async () => {
+    await loadWorkspace();
+    pushNotice(copy.noticeSyncDone);
+  }, [copy.noticeSyncDone, loadWorkspace, pushNotice]);
+
+  const notifyFeaturePending = React.useCallback(() => {
+    pushNotice(copy.noticeFeaturePending);
+  }, [copy.noticeFeaturePending, pushNotice]);
 
   const deleteDraft = React.useCallback(async () => {
     if (!authToken || !draftMessageId) return;
@@ -273,6 +282,8 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     openComposer,
     saveMessage,
     deleteDraft,
+    refreshWorkspace,
+    notifyFeaturePending,
     saveContact,
     saveEvent,
     resetContactForm,

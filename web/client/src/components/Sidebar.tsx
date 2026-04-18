@@ -15,6 +15,7 @@ export function Sidebar(props: {
   mailboxOwner: string;
   onCompose: () => void;
   onCloseComposer: () => void;
+  onAuxAction: () => void;
 }) {
   const mailFolders: Array<{ id: Folder | null; label: string; count?: number }> = [
     { id: "inbox", label: props.copy.folders.inbox, count: props.counts.inbox },
@@ -32,8 +33,8 @@ export function Sidebar(props: {
             {props.copy.sectionIcons[value]}
           </button>
         ))}
-        <button className="app-rail-button" type="button">✓</button>
-        <button className="app-rail-button" type="button">☁</button>
+        <button className="app-rail-button" type="button" onClick={props.onAuxAction}>✓</button>
+        <button className="app-rail-button" type="button" onClick={props.onAuxAction}>☁</button>
       </div>
 
       <div className="sidebar-column">

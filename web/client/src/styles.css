@@ -31,6 +31,11 @@ textarea { resize: vertical; }
 .client-login-form { display: grid; gap: 14px; }
 .login-error { padding: 10px 12px; border-radius: 8px; background: #fde7e9; color: #a4262c !important; }
 .header-account { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.82rem; color: rgba(255,255,255,0.9); }
+.account-menu-shell { position: relative; }
+.account-menu-trigger { border: 0; padding: 0; background: transparent; color: inherit; }
+.account-menu-popover { position: absolute; top: calc(100% + 10px); right: 0; min-width: 240px; display: grid; gap: 10px; padding: 14px; border: 1px solid rgba(15,55,95,0.18); border-radius: 12px; background: #ffffff; box-shadow: 0 18px 44px rgba(16,46,82,0.18); color: var(--text); z-index: 20; }
+.account-menu-popover strong { font-size: 0.9rem; }
+.account-menu-popover span { color: var(--muted); font-size: 0.84rem; }
 .app-shell { min-height: 100vh; display: grid; grid-template-rows: 46px 1fr; background: #f3f2f1; }
 .app-header { display: grid; grid-template-columns: 220px 1fr 220px; align-items: center; gap: 16px; padding: 0 14px; background: #0f6cbd; color: white; }
 .app-header-left, .app-header-right { display: flex; align-items: center; gap: 14px; }
@@ -98,6 +103,7 @@ textarea { resize: vertical; }
 .list-pane, .detail-pane { border: 1px solid #edebe9; border-radius: 0; background: #ffffff; }
 .notice-banner { margin: 12px 14px 0; padding: 12px 14px; border-radius: 8px; background: #fff9e6; border: 1px solid #f1d58a; }
 .content-grid { align-items: stretch; gap: 0; min-height: 0; }
+.content-grid:not(.has-detail) .list-pane { width: 100%; border-right: 0; }
 .list-pane { width: min(58%, 980px); padding: 0; border-right: 1px solid #edebe9; }
 .detail-pane { flex: 1; min-width: 420px; padding: 14px 18px; background: #ffffff; box-shadow: -18px 0 44px rgba(16,46,82,0.08); }
 .list-toolbar { display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid #edebe9; background: #ffffff; }
@@ -145,5 +151,5 @@ textarea { resize: vertical; }
 .empty-state { padding: 28px 18px; border: 1px dashed #d2d0ce; border-radius: 12px; color: var(--muted); text-align: center; }
 .empty-state.compact { padding: 18px; }
 @media (max-width: 1140px) { .app-shell { grid-template-rows: auto 1fr; } .shell-row { grid-template-columns: 1fr; } .rail { grid-template-columns: 48px 1fr; border-bottom: 1px solid #edebe9; } .content-grid { flex-direction: column; } .list-pane { width: 100%; } .message-list { max-height: none; } .message-table-head, .message-row { grid-template-columns: 160px 1fr 90px; } }
-@media (max-width: 860px) { .app-header { grid-template-columns: 1fr; padding: 10px 14px; } .workspace { padding: 0; } .workspace-meta, .detail-header { flex-direction: column; align-items: stretch; } .workspace-meta-right { width: 100%; } .form-grid { grid-template-columns: 1fr; } .field-wide { grid-column: auto; } .message-table-head { display: none; } .message-row { grid-template-columns: 1fr; } .message-time { text-align: left; } }
+@media (max-width: 860px) { .app-header { grid-template-columns: 1fr; padding: 10px 14px; } .workspace { padding: 0; } .workspace-meta, .detail-header { flex-direction: column; align-items: stretch; } .workspace-meta-right { width: 100%; } .form-grid { grid-template-columns: 1fr; } .field-wide { grid-column: auto; } .message-table-head { display: none; } .message-row { grid-template-columns: 1fr; } .message-time { text-align: left; } .account-menu-popover { left: 0; right: auto; } }
 @media (max-width: 640px) { .detail-actions .ghost-button, .detail-actions .primary-button { width: 100%; } }
