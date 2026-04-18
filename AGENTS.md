@@ -160,6 +160,8 @@ AI pipelines must not expose protected data such as `Bcc` or audit-only metadata
 - if a change affects behavior, scope, prerequisites, installation, or architecture, update the relevant documentation in the same work
 - if a new durable rule appears, also update `AGENTS.md`
 - if a structural decision is made, prefer updating architecture documentation rather than leaving the assumption implicit in code
+- for administration UI lists in `LPE` and `LPE-CT`, use the default management pattern: full-width list, primary `New` or `Create` action in the list header, and a right-side drawer modal for item creation, details, and contextual actions
+- avoid persistent side-by-side create forms for primary list management unless the object is not list-oriented or a specialized operational view is clearly more efficient
 
 ### Installation and operations
 
@@ -335,6 +337,8 @@ Les pipelines IA ne doivent pas exposer de donnees protegees comme `Bcc` ou des 
 - si une modification change le comportement, le perimetre, les prerequis, l'installation ou l'architecture, mettre a jour la documentation correspondante dans le meme travail
 - si une nouvelle regle durable apparait, mettre a jour aussi `AGENTS.md`
 - si une decision structurelle est prise, preferer une mise a jour de la documentation d'architecture plutot qu'une hypothese implicite dans le code
+- pour les listes d'administration dans `LPE` et `LPE-CT`, utiliser le pattern de gestion par defaut: liste pleine largeur, action principale `New` ou `Create` dans l'entete de liste, et drawer modal lateral droit pour la creation, les details et les actions contextuelles
+- eviter les formulaires de creation persistants cote a cote pour la gestion principale des listes, sauf si l'objet n'est pas oriente liste ou si une vue operationnelle specialisee est clairement plus efficace
 
 ### Installation et exploitation
 

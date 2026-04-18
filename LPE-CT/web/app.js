@@ -1,4 +1,8 @@
 const feedback = document.getElementById("feedback");
+const configDrawer = document.getElementById("config-drawer");
+const drawerTitle = document.getElementById("drawer-title");
+const drawerSummary = document.getElementById("drawer-summary");
+const drawerPanels = Array.from(document.querySelectorAll(".drawer-panel"));
 
 async function fetchDashboard() {
   const response = await fetch("/api/dashboard");
@@ -21,7 +25,21 @@ async function submitForm(path, payload, successMessage) {
 
   const dashboard = await response.json();
   render(dashboard);
+  closeDrawer();
   showFeedback(successMessage, false);
+}
+
+function openDrawer(panelId, title, summary) {
+  drawerPanels.forEach((panel) => {
+    panel.classList.toggle("hidden", panel.id !== panelId);
+  });
+  drawerTitle.textContent = title;
+  drawerSummary.textContent = summary;
+  configDrawer.classList.remove("hidden");
+}
+
+function closeDrawer() {
+  configDrawer.classList.add("hidden");
 }
 
 function showFeedback(message, isError) {
@@ -153,6 +171,26 @@ async function load() {
 
 document.getElementById("refresh").addEventListener("click", () => {
   void load();
+});
+
+document.querySelectorAll("[data-open-panel]").forEach((button) => {
+  button.addEventListener("click", () => {
+    openDrawer(button.dataset.openPanel, button.dataset.title, button.dataset.summary);
+  });
+});
+
+document.getElementById("drawer-close").addEventListener("click", closeDrawer);
+
+configDrawer.addEventListener("click", (event) => {
+  if (event.target === configDrawer) {
+    closeDrawer();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !configDrawer.classList.contains("hidden")) {
+    closeDrawer();
+  }
 });
 
 const payloads = formPayloads();

@@ -52,90 +52,175 @@
 
         <p id="feedback" class="feedback hidden"></p>
 
-        <div class="grid">
-          <form id="site-form" class="panel form-panel">
-            <div class="section-head">
-              <h3>Identite du noeud</h3>
-              <p>Positionnement et exposition du serveur de tri en DMZ.</p>
+        <section class="panel management-list-card">
+          <div class="section-title-row">
+            <div>
+              <h3>Configuration du centre de tri</h3>
+              <p>Selectionner une section pour ouvrir son panneau de gestion.</p>
             </div>
-            <div class="fields two">
-              <label><span>Node name</span><input name="node_name" required /></label>
-              <label><span>Role</span><input name="role" required /></label>
-              <label><span>Region</span><input name="region" required /></label>
-              <label><span>DMZ zone</span><input name="dmz_zone" required /></label>
-              <label><span>Published MX</span><input name="published_mx" required /></label>
-              <label><span>Management FQDN</span><input name="management_fqdn" required /></label>
-              <label><span>Public SMTP bind</span><input name="public_smtp_bind" required /></label>
-              <label><span>Management bind</span><input name="management_bind" required /></label>
-            </div>
-            <button class="primary-button" type="submit">Enregistrer le profil</button>
-          </form>
+          </div>
+          <div class="management-list full-width">
+            <button
+              class="management-list-item"
+              type="button"
+              data-open-panel="site-panel"
+              data-title="Identite du noeud"
+              data-summary="Positionnement et exposition du serveur de tri en DMZ."
+            >
+              <span class="management-main">
+                <strong>Identite du noeud</strong>
+                <span>Nom, role, region, FQDN et interfaces publiees.</span>
+              </span>
+              <span class="pill">Profil DMZ</span>
+              <span class="management-actions">Ouvrir</span>
+            </button>
 
-          <form id="relay-form" class="panel form-panel">
-            <div class="section-head">
-              <h3>Relais vers le LAN</h3>
-              <p>Flux strictement autorises entre la DMZ et le coeur LPE.</p>
-            </div>
-            <div class="fields two">
-              <label><span>Primary upstream</span><input name="primary_upstream" required /></label>
-              <label><span>Secondary upstream</span><input name="secondary_upstream" required /></label>
-              <label><span>Sync interval (s)</span><input name="sync_interval_seconds" type="number" min="1" required /></label>
-              <label><span>LAN dependency note</span><input name="lan_dependency_note" required /></label>
-              <label class="toggle"><span>Mutual TLS required</span><input name="mutual_tls_required" type="checkbox" /></label>
-              <label class="toggle"><span>Fallback to hold queue</span><input name="fallback_to_hold_queue" type="checkbox" /></label>
-            </div>
-            <button class="primary-button" type="submit">Enregistrer le relais</button>
-          </form>
+            <button
+              class="management-list-item"
+              type="button"
+              data-open-panel="relay-panel"
+              data-title="Relais vers le LAN"
+              data-summary="Flux strictement autorises entre la DMZ et le coeur LPE."
+            >
+              <span class="management-main">
+                <strong>Relais vers le LAN</strong>
+                <span>Upstreams, mTLS, hold queue et dependances LAN.</span>
+              </span>
+              <span class="pill">Transport</span>
+              <span class="management-actions">Ouvrir</span>
+            </button>
 
-          <form id="network-form" class="panel form-panel">
-            <div class="section-head">
-              <h3>Surface reseau</h3>
-              <p>Restriction des CIDR de management, sorties et listeners publics.</p>
-            </div>
-            <div class="fields two">
-              <label><span>Allowed management CIDRs</span><textarea name="allowed_management_cidrs" rows="3"></textarea></label>
-              <label><span>Allowed upstream CIDRs</span><textarea name="allowed_upstream_cidrs" rows="3"></textarea></label>
-              <label><span>Outbound smart hosts</span><textarea name="outbound_smart_hosts" rows="3"></textarea></label>
-              <label><span>Max concurrent sessions</span><input name="max_concurrent_sessions" type="number" min="1" required /></label>
-              <label class="toggle"><span>Public listener enabled</span><input name="public_listener_enabled" type="checkbox" /></label>
-              <label class="toggle"><span>Submission listener enabled</span><input name="submission_listener_enabled" type="checkbox" /></label>
-              <label class="toggle"><span>Proxy protocol enabled</span><input name="proxy_protocol_enabled" type="checkbox" /></label>
-            </div>
-            <button class="primary-button" type="submit">Enregistrer le reseau</button>
-          </form>
+            <button
+              class="management-list-item"
+              type="button"
+              data-open-panel="network-panel"
+              data-title="Surface reseau"
+              data-summary="Restriction des CIDR de management, sorties et listeners publics."
+            >
+              <span class="management-main">
+                <strong>Surface reseau</strong>
+                <span>CIDR autorises, smart hosts, listeners et proxy protocol.</span>
+              </span>
+              <span class="pill">DMZ</span>
+              <span class="management-actions">Ouvrir</span>
+            </button>
 
-          <form id="policies-form" class="panel form-panel">
-            <div class="section-head">
-              <h3>Politiques de tri</h3>
-              <p>Controle du drain mode, quarantaine et exigences de verification.</p>
-            </div>
-            <div class="fields two">
-              <label><span>Max message size (MB)</span><input name="max_message_size_mb" type="number" min="1" required /></label>
-              <label class="toggle"><span>Drain mode</span><input name="drain_mode" type="checkbox" /></label>
-              <label class="toggle"><span>Quarantine enabled</span><input name="quarantine_enabled" type="checkbox" /></label>
-              <label class="toggle"><span>Greylisting enabled</span><input name="greylisting_enabled" type="checkbox" /></label>
-              <label class="toggle"><span>Require SPF</span><input name="require_spf" type="checkbox" /></label>
-              <label class="toggle"><span>Require DKIM alignment</span><input name="require_dkim_alignment" type="checkbox" /></label>
-              <label class="toggle"><span>Require DMARC enforcement</span><input name="require_dmarc_enforcement" type="checkbox" /></label>
-              <label class="toggle"><span>Attachment text scan enabled</span><input name="attachment_text_scan_enabled" type="checkbox" /></label>
-            </div>
-            <button class="primary-button" type="submit">Enregistrer les politiques</button>
-          </form>
+            <button
+              class="management-list-item"
+              type="button"
+              data-open-panel="policies-panel"
+              data-title="Politiques de tri"
+              data-summary="Controle du drain mode, quarantaine et exigences de verification."
+            >
+              <span class="management-main">
+                <strong>Politiques de tri</strong>
+                <span>SPF, DKIM, DMARC, greylisting, quarantaine et taille message.</span>
+              </span>
+              <span class="pill">Securite</span>
+              <span class="management-actions">Ouvrir</span>
+            </button>
 
-          <form id="updates-form" class="panel form-panel">
-            <div class="section-head">
-              <h3>Mises a jour</h3>
-              <p>Politique de mise a jour Debian Git-first pour le noeud DMZ.</p>
+            <button
+              class="management-list-item"
+              type="button"
+              data-open-panel="updates-panel"
+              data-title="Mises a jour"
+              data-summary="Politique de mise a jour Debian Git-first pour le noeud DMZ."
+            >
+              <span class="management-main">
+                <strong>Mises a jour</strong>
+                <span>Canal, fenetre de maintenance, source Git et telechargement.</span>
+              </span>
+              <span class="pill">Operations</span>
+              <span class="management-actions">Ouvrir</span>
+            </button>
+          </div>
+        </section>
+
+        <div id="config-drawer" class="management-modal-backdrop hidden" role="presentation">
+          <aside class="management-modal panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+            <div class="drawer-header">
+              <div>
+                <h3 id="drawer-title">Configuration</h3>
+                <p id="drawer-summary">Modifier la section selectionnee.</p>
+              </div>
+              <button id="drawer-close" class="icon-button" type="button" aria-label="Fermer">x</button>
             </div>
-            <div class="fields two">
-              <label><span>Channel</span><input name="channel" required /></label>
-              <label><span>Maintenance window</span><input name="maintenance_window" required /></label>
-              <label><span>Last applied release</span><input name="last_applied_release" required /></label>
-              <label><span>Update source</span><input name="update_source" required /></label>
-              <label class="toggle"><span>Auto download</span><input name="auto_download" type="checkbox" /></label>
+
+            <div id="site-panel" class="drawer-panel hidden">
+              <form id="site-form" class="form-panel">
+                <div class="fields two">
+                  <label><span>Node name</span><input name="node_name" required /></label>
+                  <label><span>Role</span><input name="role" required /></label>
+                  <label><span>Region</span><input name="region" required /></label>
+                  <label><span>DMZ zone</span><input name="dmz_zone" required /></label>
+                  <label><span>Published MX</span><input name="published_mx" required /></label>
+                  <label><span>Management FQDN</span><input name="management_fqdn" required /></label>
+                  <label><span>Public SMTP bind</span><input name="public_smtp_bind" required /></label>
+                  <label><span>Management bind</span><input name="management_bind" required /></label>
+                </div>
+                <button class="primary-button" type="submit">Enregistrer le profil</button>
+              </form>
             </div>
-            <button class="primary-button" type="submit">Enregistrer les mises a jour</button>
-          </form>
+
+            <div id="relay-panel" class="drawer-panel hidden">
+              <form id="relay-form" class="form-panel">
+                <div class="fields two">
+                  <label><span>Primary upstream</span><input name="primary_upstream" required /></label>
+                  <label><span>Secondary upstream</span><input name="secondary_upstream" required /></label>
+                  <label><span>Sync interval (s)</span><input name="sync_interval_seconds" type="number" min="1" required /></label>
+                  <label><span>LAN dependency note</span><input name="lan_dependency_note" required /></label>
+                  <label class="toggle"><span>Mutual TLS required</span><input name="mutual_tls_required" type="checkbox" /></label>
+                  <label class="toggle"><span>Fallback to hold queue</span><input name="fallback_to_hold_queue" type="checkbox" /></label>
+                </div>
+                <button class="primary-button" type="submit">Enregistrer le relais</button>
+              </form>
+            </div>
+
+            <div id="network-panel" class="drawer-panel hidden">
+              <form id="network-form" class="form-panel">
+                <div class="fields two">
+                  <label><span>Allowed management CIDRs</span><textarea name="allowed_management_cidrs" rows="3"></textarea></label>
+                  <label><span>Allowed upstream CIDRs</span><textarea name="allowed_upstream_cidrs" rows="3"></textarea></label>
+                  <label><span>Outbound smart hosts</span><textarea name="outbound_smart_hosts" rows="3"></textarea></label>
+                  <label><span>Max concurrent sessions</span><input name="max_concurrent_sessions" type="number" min="1" required /></label>
+                  <label class="toggle"><span>Public listener enabled</span><input name="public_listener_enabled" type="checkbox" /></label>
+                  <label class="toggle"><span>Submission listener enabled</span><input name="submission_listener_enabled" type="checkbox" /></label>
+                  <label class="toggle"><span>Proxy protocol enabled</span><input name="proxy_protocol_enabled" type="checkbox" /></label>
+                </div>
+                <button class="primary-button" type="submit">Enregistrer le reseau</button>
+              </form>
+            </div>
+
+            <div id="policies-panel" class="drawer-panel hidden">
+              <form id="policies-form" class="form-panel">
+                <div class="fields two">
+                  <label><span>Max message size (MB)</span><input name="max_message_size_mb" type="number" min="1" required /></label>
+                  <label class="toggle"><span>Drain mode</span><input name="drain_mode" type="checkbox" /></label>
+                  <label class="toggle"><span>Quarantine enabled</span><input name="quarantine_enabled" type="checkbox" /></label>
+                  <label class="toggle"><span>Greylisting enabled</span><input name="greylisting_enabled" type="checkbox" /></label>
+                  <label class="toggle"><span>Require SPF</span><input name="require_spf" type="checkbox" /></label>
+                  <label class="toggle"><span>Require DKIM alignment</span><input name="require_dkim_alignment" type="checkbox" /></label>
+                  <label class="toggle"><span>Require DMARC enforcement</span><input name="require_dmarc_enforcement" type="checkbox" /></label>
+                  <label class="toggle"><span>Attachment text scan enabled</span><input name="attachment_text_scan_enabled" type="checkbox" /></label>
+                </div>
+                <button class="primary-button" type="submit">Enregistrer les politiques</button>
+              </form>
+            </div>
+
+            <div id="updates-panel" class="drawer-panel hidden">
+              <form id="updates-form" class="form-panel">
+                <div class="fields two">
+                  <label><span>Channel</span><input name="channel" required /></label>
+                  <label><span>Maintenance window</span><input name="maintenance_window" required /></label>
+                  <label><span>Last applied release</span><input name="last_applied_release" required /></label>
+                  <label><span>Update source</span><input name="update_source" required /></label>
+                  <label class="toggle"><span>Auto download</span><input name="auto_download" type="checkbox" /></label>
+                </div>
+                <button class="primary-button" type="submit">Enregistrer les mises a jour</button>
+              </form>
+            </div>
+          </aside>
         </div>
 
         <section class="panel">

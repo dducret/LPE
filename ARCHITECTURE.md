@@ -645,6 +645,14 @@ The architecture distinguishes the following roles:
 
 Administrative authority must be aligned with tenant scope and operational separation between the core platform and the shared sorting layer.
 
+## Administration UI Interaction Pattern
+
+The default administration-console pattern for manageable collections is a full-width management list with a single primary `New` or `Create` action in the list header.
+
+Selecting an existing item opens a right-side drawer-style modal containing the item's details and contextual actions. Creating a new item uses the same drawer pattern with an empty form. Persistent side-by-side create forms should be avoided for primary administration flows because they reduce list readability and make domain-scoped management harder to scan.
+
+This pattern applies by default to `LPE` and `LPE-CT` administration screens, especially domains, administrators, mailbox accounts, filtering rules, and future list-based control-plane objects. Exceptions are acceptable only when the object is not list-oriented or when a specialized operational view is clearly more efficient.
+
 ## Recipient Privacy and `Bcc` Handling
 
 ### Core rule
