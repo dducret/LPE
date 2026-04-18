@@ -12,6 +12,7 @@ export function Sidebar(props: {
   unreadCount: number;
   eventCount: number;
   draftCount: number;
+  mailboxOwner: string;
   onCompose: () => void;
   onCloseComposer: () => void;
 }) {
@@ -19,8 +20,7 @@ export function Sidebar(props: {
     { id: "inbox", label: props.copy.folders.inbox, count: props.counts.inbox },
     { id: "drafts", label: props.copy.folders.drafts, count: props.counts.drafts },
     { id: "sent", label: props.copy.folders.sent, count: props.counts.sent },
-    { id: "archive", label: props.copy.folders.archive, count: props.counts.archive },
-    ...props.copy.customFolders.map((label, index) => ({ id: null, label, count: index === 1 ? 7 : undefined }))
+    { id: "archive", label: props.copy.folders.archive, count: props.counts.archive }
   ];
 
   return (
@@ -62,7 +62,7 @@ export function Sidebar(props: {
         </div>
 
         <div className="mailbox-header">
-          <strong>{props.copy.mailboxOwner}</strong>
+          <strong>{props.mailboxOwner}</strong>
         </div>
 
         <div className="folder-panel is-tree">
@@ -86,10 +86,6 @@ export function Sidebar(props: {
               </button>
             );
           })}
-        </div>
-
-        <div className="folder-panel is-tight">
-          {props.copy.folderGroups.map((group) => <button key={group} className="tree-group" type="button">{group}</button>)}
         </div>
 
         <div className="rail-summary">

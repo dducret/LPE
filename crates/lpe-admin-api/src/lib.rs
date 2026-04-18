@@ -12,11 +12,12 @@ use lpe_ai::{LocalModelProvider, StubLocalModelProvider};
 use lpe_core::CoreService;
 use lpe_storage::{
     AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput,
-    AuthenticatedAccount, AuthenticatedAdmin, DashboardUpdate, EmailTraceResult,
-    EmailTraceSearchInput, HealthResponse, LocalAiSettings, NewAccount, NewAlias, NewDomain,
-    NewFilterRule, NewMailbox, NewPstTransferJob, NewServerAdministrator, PstJobExecutionSummary,
-    SecuritySettings, ServerSettings, Storage, SubmitMessageInput, SubmittedMessage,
-    SubmittedRecipientInput, UpdateAccount,
+    AuthenticatedAccount, AuthenticatedAdmin, ClientContact, ClientEvent, ClientWorkspace,
+    DashboardUpdate, EmailTraceResult, EmailTraceSearchInput, HealthResponse, LocalAiSettings,
+    NewAccount, NewAlias, NewDomain, NewFilterRule, NewMailbox, NewPstTransferJob,
+    NewServerAdministrator, PstJobExecutionSummary, SavedDraftMessage, SecuritySettings,
+    ServerSettings, Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    UpdateAccount, UpsertClientContactInput, UpsertClientEventInput,
 };
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -192,6 +193,28 @@ struct SubmitRecipientRequest {
     display_name: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct UpsertClientContactRequest {
+    id: Option<Uuid>,
+    name: String,
+    role: String,
+    email: String,
+    phone: String,
+    team: String,
+    notes: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpsertClientEventRequest {
+    id: Option<Uuid>,
+    date: String,
+    time: String,
+    title: String,
+    location: String,
+    attendees: String,
+    notes: String,
+}
+
 type ApiResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 
 pub fn router(storage: Storage) -> Router {
@@ -203,6 +226,7 @@ pub fn router(storage: Storage) -> Router {
         .route("/mail/auth/login", post(client_login))
         .route("/mail/auth/logout", post(client_logout))
         .route("/mail/auth/me", get(client_me))
+        .route("/mail/workspace", get(client_workspace))
         .route("/bootstrap/admin", get(bootstrap_admin))
         .route("/health/local-ai", get(local_ai_health))
         .route("/capabilities/attachments", get(attachment_support))
@@ -224,6 +248,9 @@ pub fn router(storage: Storage) -> Router {
             post(run_pst_jobs),
         )
         .route("/mail/messages/submit", post(submit_message))
+        .route("/mail/messages/draft", post(save_draft_message))
+        .route("/mail/contacts", post(upsert_client_contact))
+        .route("/mail/calendar/events", post(upsert_client_event))
         .route(
             "/console/audit/email-trace-search",
             post(search_email_trace),
@@ -351,6 +378,19 @@ async fn client_me(
     headers: HeaderMap,
 ) -> ApiResult<AuthenticatedAccount> {
     Ok(Json(require_account(&storage, &headers).await?))
+}
+
+async fn client_workspace(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<ClientWorkspace> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .fetch_client_workspace(account.account_id)
+            .await
+            .map_err(internal_error)?,
+    ))
 }
 
 async fn bootstrap_admin(
@@ -976,32 +1016,11 @@ async fn submit_message(
     Json(request): Json<SubmitMessageRequest>,
 ) -> ApiResult<SubmittedMessage> {
     let account = require_account(&storage, &headers).await?;
-    if account.account_id != request.account_id
-        || account.email.to_lowercase() != request.from_address.trim().to_lowercase()
-    {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "authenticated account cannot submit this message".to_string(),
-        ));
-    }
     let subject_for_audit = request.subject.clone();
+    ensure_client_message_owner(&account, &request)?;
     let submitted = storage
         .submit_message(
-            SubmitMessageInput {
-                account_id: request.account_id,
-                source: request.source.unwrap_or_else(|| "jmap".to_string()),
-                from_display: request.from_display,
-                from_address: request.from_address,
-                to: map_recipients(request.to),
-                cc: map_recipients(request.cc.unwrap_or_default()),
-                bcc: map_recipients(request.bcc.unwrap_or_default()),
-                subject: request.subject,
-                body_text: request.body_text,
-                body_html_sanitized: request.body_html_sanitized,
-                internet_message_id: request.internet_message_id,
-                mime_blob_ref: request.mime_blob_ref,
-                size_octets: request.size_octets.unwrap_or(0),
-            },
+            map_submit_message_request(request),
             AuditEntryInput {
                 actor: account.email,
                 action: "submit-message".to_string(),
@@ -1012,6 +1031,109 @@ async fn submit_message(
         .map_err(internal_error)?;
 
     Ok(Json(submitted))
+}
+
+async fn save_draft_message(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<SubmitMessageRequest>,
+) -> ApiResult<SavedDraftMessage> {
+    let account = require_account(&storage, &headers).await?;
+    let subject_for_audit = request.subject.clone();
+    ensure_client_message_owner(&account, &request)?;
+    let draft = storage
+        .save_draft_message(
+            map_submit_message_request(request),
+            AuditEntryInput {
+                actor: account.email,
+                action: "save-draft-message".to_string(),
+                subject: subject_for_audit,
+            },
+        )
+        .await
+        .map_err(internal_error)?;
+
+    Ok(Json(draft))
+}
+
+async fn upsert_client_contact(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<UpsertClientContactRequest>,
+) -> ApiResult<ClientContact> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .upsert_client_contact(UpsertClientContactInput {
+                id: request.id,
+                account_id: account.account_id,
+                name: request.name,
+                role: request.role,
+                email: request.email,
+                phone: request.phone,
+                team: request.team,
+                notes: request.notes,
+            })
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+async fn upsert_client_event(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<UpsertClientEventRequest>,
+) -> ApiResult<ClientEvent> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .upsert_client_event(UpsertClientEventInput {
+                id: request.id,
+                account_id: account.account_id,
+                date: request.date,
+                time: request.time,
+                title: request.title,
+                location: request.location,
+                attendees: request.attendees,
+                notes: request.notes,
+            })
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+fn ensure_client_message_owner(
+    account: &AuthenticatedAccount,
+    request: &SubmitMessageRequest,
+) -> std::result::Result<(), (StatusCode, String)> {
+    if account.account_id == request.account_id
+        && account.email.to_lowercase() == request.from_address.trim().to_lowercase()
+    {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            "authenticated account cannot submit this message".to_string(),
+        ))
+    }
+}
+
+fn map_submit_message_request(request: SubmitMessageRequest) -> SubmitMessageInput {
+    SubmitMessageInput {
+        account_id: request.account_id,
+        source: request.source.unwrap_or_else(|| "jmap".to_string()),
+        from_display: request.from_display,
+        from_address: request.from_address,
+        to: map_recipients(request.to),
+        cc: map_recipients(request.cc.unwrap_or_default()),
+        bcc: map_recipients(request.bcc.unwrap_or_default()),
+        subject: request.subject,
+        body_text: request.body_text,
+        body_html_sanitized: request.body_html_sanitized,
+        internet_message_id: request.internet_message_id,
+        mime_blob_ref: request.mime_blob_ref,
+        size_octets: request.size_octets.unwrap_or(0),
+    }
 }
 
 fn map_recipients(input: Vec<SubmitRecipientRequest>) -> Vec<SubmittedRecipientInput> {

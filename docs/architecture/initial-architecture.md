@@ -38,6 +38,8 @@ Toutes les couches clientes doivent utiliser ce modele canonique de soumission e
 
 Le webmail utilise une authentification de compte distincte de l'administration. Le formulaire `/mail/` appelle `/api/mail/auth/login`, qui verifie le hash `argon2` stocke dans `account_credentials`, cree une session dans `account_sessions`, puis expose l'identite via `/api/mail/auth/me`.
 
+Le webmail ne doit pas afficher de jeux de donnees de maquette en environnement fonctionnel. Apres authentification, il charge l'etat utilisateur par `/api/mail/workspace`, qui expose les messages, contacts et evenements persistants du compte. L'envoi, les brouillons, les contacts et le calendrier passent par des endpoints authentifies afin de rester alignes avec le modele canonique `LPE`.
+
 ### Blocs principaux
 
 1. `lpe-domain`
@@ -119,6 +121,8 @@ This sequence makes `Sent` authoritative before the sorting center performs the 
 All client layers must use this canonical submission and synchronization model. No client layer may write its own parallel `Sent` or `Outbox` logic.
 
 The webmail uses account authentication separate from administration. The `/mail/` form calls `/api/mail/auth/login`, which verifies the `argon2` hash stored in `account_credentials`, creates a session in `account_sessions`, and exposes the identity through `/api/mail/auth/me`.
+
+The webmail must not display mock datasets in a functional environment. After authentication, it loads user state through `/api/mail/workspace`, which exposes persistent messages, contacts, and events for the account. Submission, drafts, contacts, and calendar entries go through authenticated endpoints so the client remains aligned with the canonical `LPE` model.
 
 ### Main building blocks
 

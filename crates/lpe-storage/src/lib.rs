@@ -349,6 +349,89 @@ pub struct EmailTraceResult {
     pub received_at: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientWorkspace {
+    pub messages: Vec<ClientMessage>,
+    pub events: Vec<ClientEvent>,
+    pub contacts: Vec<ClientContact>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientMessage {
+    pub id: Uuid,
+    pub folder: String,
+    pub from: String,
+    pub from_address: String,
+    pub to: String,
+    pub cc: String,
+    pub subject: String,
+    pub preview: String,
+    pub received_at: String,
+    pub time_label: String,
+    pub unread: bool,
+    pub flagged: bool,
+    pub category: String,
+    pub tags: Vec<String>,
+    pub attachments: Vec<ClientAttachment>,
+    pub body: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ClientAttachment {
+    pub id: Uuid,
+    pub name: String,
+    pub kind: String,
+    pub size: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ClientEvent {
+    pub id: Uuid,
+    pub date: String,
+    pub time: String,
+    pub title: String,
+    pub location: String,
+    pub attendees: String,
+    pub notes: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ClientContact {
+    pub id: Uuid,
+    pub name: String,
+    pub role: String,
+    pub email: String,
+    pub phone: String,
+    pub team: String,
+    pub notes: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpsertClientContactInput {
+    pub id: Option<Uuid>,
+    pub account_id: Uuid,
+    pub name: String,
+    pub role: String,
+    pub email: String,
+    pub phone: String,
+    pub team: String,
+    pub notes: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpsertClientEventInput {
+    pub id: Option<Uuid>,
+    pub account_id: Uuid,
+    pub date: String,
+    pub time: String,
+    pub title: String,
+    pub location: String,
+    pub attendees: String,
+    pub notes: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct SubmitMessageInput {
     pub account_id: Uuid,
@@ -378,6 +461,14 @@ pub struct SubmittedMessage {
     pub account_id: Uuid,
     pub sent_mailbox_id: Uuid,
     pub outbound_queue_id: Uuid,
+    pub delivery_status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SavedDraftMessage {
+    pub message_id: Uuid,
+    pub account_id: Uuid,
+    pub draft_mailbox_id: Uuid,
     pub delivery_status: String,
 }
 
@@ -492,6 +583,55 @@ struct AuthenticatedAccountRow {
     email: String,
     display_name: String,
     expires_at: String,
+}
+
+#[derive(Debug, FromRow)]
+struct ClientMessageRow {
+    id: Uuid,
+    mailbox_role: String,
+    from_name: String,
+    from_address: String,
+    to_recipients: String,
+    cc_recipients: String,
+    subject: String,
+    preview: String,
+    received_at: String,
+    time_label: String,
+    unread: bool,
+    flagged: bool,
+    delivery_status: String,
+    body_text: String,
+}
+
+#[derive(Debug, FromRow)]
+struct ClientAttachmentRow {
+    id: Uuid,
+    message_id: Uuid,
+    name: String,
+    media_type: String,
+    size_octets: i64,
+}
+
+#[derive(Debug, FromRow)]
+struct ClientEventRow {
+    id: Uuid,
+    date: String,
+    time: String,
+    title: String,
+    location: String,
+    attendees: String,
+    notes: String,
+}
+
+#[derive(Debug, FromRow)]
+struct ClientContactRow {
+    id: Uuid,
+    name: String,
+    role: String,
+    email: String,
+    phone: String,
+    team: String,
+    notes: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -1539,6 +1679,320 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn fetch_client_workspace(&self, account_id: Uuid) -> Result<ClientWorkspace> {
+        let message_rows = sqlx::query_as::<_, ClientMessageRow>(
+            r#"
+            SELECT
+                m.id,
+                mb.role AS mailbox_role,
+                COALESCE(NULLIF(m.from_display, ''), m.from_address) AS from_name,
+                m.from_address,
+                COALESCE((
+                    SELECT string_agg(r.address, ', ' ORDER BY r.ordinal)
+                    FROM message_recipients r
+                    WHERE r.message_id = m.id AND r.kind = 'to'
+                ), '') AS to_recipients,
+                COALESCE((
+                    SELECT string_agg(r.address, ', ' ORDER BY r.ordinal)
+                    FROM message_recipients r
+                    WHERE r.message_id = m.id AND r.kind = 'cc'
+                ), '') AS cc_recipients,
+                m.subject_normalized AS subject,
+                m.preview_text AS preview,
+                to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') AS received_at,
+                to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'HH24:MI') AS time_label,
+                m.unread,
+                m.flagged,
+                m.delivery_status,
+                COALESCE(b.body_text, '') AS body_text
+            FROM messages m
+            JOIN mailboxes mb ON mb.id = m.mailbox_id
+            LEFT JOIN message_bodies b ON b.message_id = m.id
+            WHERE m.tenant_id = $1 AND m.account_id = $2
+            ORDER BY COALESCE(m.sent_at, m.received_at) DESC
+            LIMIT 250
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let attachment_rows = sqlx::query_as::<_, ClientAttachmentRow>(
+            r#"
+            SELECT
+                a.id,
+                a.message_id,
+                a.file_name AS name,
+                a.media_type,
+                a.size_octets
+            FROM attachments a
+            JOIN messages m ON m.id = a.message_id
+            WHERE a.tenant_id = $1 AND m.account_id = $2
+            ORDER BY a.file_name ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let events = self.fetch_client_events(account_id).await?;
+        let contacts = self.fetch_client_contacts(account_id).await?;
+
+        let messages = message_rows
+            .into_iter()
+            .map(|row| {
+                let attachments = attachment_rows
+                    .iter()
+                    .filter(|attachment| attachment.message_id == row.id)
+                    .map(|attachment| ClientAttachment {
+                        id: attachment.id,
+                        name: attachment.name.clone(),
+                        kind: attachment_kind(&attachment.media_type, &attachment.name),
+                        size: format_size(attachment.size_octets),
+                    })
+                    .collect();
+
+                ClientMessage {
+                    id: row.id,
+                    folder: client_folder(&row.mailbox_role),
+                    from: row.from_name,
+                    from_address: row.from_address,
+                    to: row.to_recipients,
+                    cc: row.cc_recipients,
+                    subject: row.subject,
+                    preview: row.preview,
+                    received_at: row.received_at,
+                    time_label: row.time_label,
+                    unread: row.unread,
+                    flagged: row.flagged,
+                    category: "internal".to_string(),
+                    tags: client_message_tags(&row.mailbox_role, &row.delivery_status),
+                    attachments,
+                    body: body_paragraphs(&row.body_text),
+                }
+            })
+            .collect();
+
+        Ok(ClientWorkspace {
+            messages,
+            events,
+            contacts,
+        })
+    }
+
+    pub async fn save_draft_message(
+        &self,
+        input: SubmitMessageInput,
+        audit: AuditEntryInput,
+    ) -> Result<SavedDraftMessage> {
+        let from_address = normalize_email(&input.from_address);
+        let subject = normalize_subject(&input.subject);
+        let body_text = input.body_text.trim().to_string();
+        let recipients = normalize_submitted_recipients(&input);
+
+        if from_address.is_empty() {
+            bail!("from_address is required");
+        }
+        if subject.is_empty() && body_text.is_empty() {
+            bail!("subject or body_text is required");
+        }
+
+        let mut tx = self.pool.begin().await?;
+        self.ensure_account_exists(&mut tx, input.account_id)
+            .await?;
+        let draft_mailbox_id = self
+            .ensure_mailbox(&mut tx, input.account_id, "drafts", "Drafts", 10, 365)
+            .await?;
+
+        let message_id = Uuid::new_v4();
+        let thread_id = Uuid::new_v4();
+        let preview_text = preview_text(&body_text);
+        let participants_normalized = participants_normalized(&from_address, &recipients);
+        let mime_blob_ref = input
+            .mime_blob_ref
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| format!("draft-message:{message_id}"));
+        let content_hash = format!("draft:{message_id}");
+
+        sqlx::query(
+            r#"
+            INSERT INTO messages (
+                id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
+                received_at, sent_at, from_display, from_address, subject_normalized,
+                preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
+                submission_source, delivery_status
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, $6,
+                NOW(), NULL, $7, $8, $9,
+                $10, FALSE, FALSE, FALSE, $11, $12,
+                $13, 'draft'
+            )
+            "#,
+        )
+        .bind(message_id)
+        .bind(DEFAULT_TENANT_ID)
+        .bind(input.account_id)
+        .bind(draft_mailbox_id)
+        .bind(thread_id)
+        .bind(input.internet_message_id)
+        .bind(input.from_display.map(|value| value.trim().to_string()))
+        .bind(&from_address)
+        .bind(&subject)
+        .bind(&preview_text)
+        .bind(input.size_octets.max(0))
+        .bind(&mime_blob_ref)
+        .bind(input.source.trim().to_lowercase())
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO message_bodies (
+                message_id, body_text, body_html_sanitized, participants_normalized,
+                language_code, content_hash, search_vector
+            )
+            VALUES ($1, $2, $3, $4, NULL, $5, to_tsvector('simple', $6))
+            "#,
+        )
+        .bind(message_id)
+        .bind(&body_text)
+        .bind(input.body_html_sanitized)
+        .bind(&participants_normalized)
+        .bind(content_hash)
+        .bind(format!("{subject} {body_text} {participants_normalized}"))
+        .execute(&mut *tx)
+        .await?;
+
+        for (ordinal, (kind, recipient)) in recipients.iter().enumerate() {
+            sqlx::query(
+                r#"
+                INSERT INTO message_recipients (
+                    id, tenant_id, message_id, kind, address, display_name, ordinal
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(DEFAULT_TENANT_ID)
+            .bind(message_id)
+            .bind(kind)
+            .bind(&recipient.address)
+            .bind(recipient.display_name.as_deref())
+            .bind(ordinal as i32)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        self.insert_audit(&mut tx, audit).await?;
+        tx.commit().await?;
+
+        Ok(SavedDraftMessage {
+            message_id,
+            account_id: input.account_id,
+            draft_mailbox_id,
+            delivery_status: "draft".to_string(),
+        })
+    }
+
+    pub async fn upsert_client_contact(
+        &self,
+        input: UpsertClientContactInput,
+    ) -> Result<ClientContact> {
+        let name = input.name.trim();
+        let email = normalize_email(&input.email);
+        if name.is_empty() || email.is_empty() {
+            bail!("contact name and email are required");
+        }
+
+        let contact_id = input.id.unwrap_or_else(Uuid::new_v4);
+        let row = sqlx::query_as::<_, ClientContactRow>(
+            r#"
+            INSERT INTO contacts (
+                id, tenant_id, account_id, name, role, email, phone, team, notes
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                role = EXCLUDED.role,
+                email = EXCLUDED.email,
+                phone = EXCLUDED.phone,
+                team = EXCLUDED.team,
+                notes = EXCLUDED.notes,
+                updated_at = NOW()
+            WHERE contacts.tenant_id = EXCLUDED.tenant_id
+              AND contacts.account_id = EXCLUDED.account_id
+            RETURNING id, name, role, email, phone, team, notes
+            "#,
+        )
+        .bind(contact_id)
+        .bind(DEFAULT_TENANT_ID)
+        .bind(input.account_id)
+        .bind(name)
+        .bind(input.role.trim())
+        .bind(email)
+        .bind(input.phone.trim())
+        .bind(input.team.trim())
+        .bind(input.notes.trim())
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(map_contact(row))
+    }
+
+    pub async fn upsert_client_event(&self, input: UpsertClientEventInput) -> Result<ClientEvent> {
+        if input.date.trim().is_empty()
+            || input.time.trim().is_empty()
+            || input.title.trim().is_empty()
+        {
+            bail!("event date, time, and title are required");
+        }
+
+        let event_id = input.id.unwrap_or_else(Uuid::new_v4);
+        let row = sqlx::query_as::<_, ClientEventRow>(
+            r#"
+            INSERT INTO calendar_events (
+                id, tenant_id, account_id, event_date, event_time,
+                title, location, attendees, notes
+            )
+            VALUES ($1, $2, $3, $4::date, $5::time, $6, $7, $8, $9)
+            ON CONFLICT (id) DO UPDATE SET
+                event_date = EXCLUDED.event_date,
+                event_time = EXCLUDED.event_time,
+                title = EXCLUDED.title,
+                location = EXCLUDED.location,
+                attendees = EXCLUDED.attendees,
+                notes = EXCLUDED.notes,
+                updated_at = NOW()
+            WHERE calendar_events.tenant_id = EXCLUDED.tenant_id
+              AND calendar_events.account_id = EXCLUDED.account_id
+            RETURNING
+                id,
+                to_char(event_date, 'YYYY-MM-DD') AS date,
+                to_char(event_time, 'HH24:MI') AS time,
+                title,
+                location,
+                attendees,
+                notes
+            "#,
+        )
+        .bind(event_id)
+        .bind(DEFAULT_TENANT_ID)
+        .bind(input.account_id)
+        .bind(input.date.trim())
+        .bind(input.time.trim())
+        .bind(input.title.trim())
+        .bind(input.location.trim())
+        .bind(input.attendees.trim())
+        .bind(input.notes.trim())
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(map_event(row))
+    }
+
     pub async fn submit_message(
         &self,
         input: SubmitMessageInput,
@@ -2197,6 +2651,72 @@ impl Storage {
             .collect())
     }
 
+    async fn fetch_client_events(&self, account_id: Uuid) -> Result<Vec<ClientEvent>> {
+        let rows = sqlx::query_as::<_, ClientEventRow>(
+            r#"
+            SELECT
+                id,
+                to_char(event_date, 'YYYY-MM-DD') AS date,
+                to_char(event_time, 'HH24:MI') AS time,
+                title,
+                location,
+                attendees,
+                notes
+            FROM calendar_events
+            WHERE tenant_id = $1 AND account_id = $2
+            ORDER BY event_date ASC, event_time ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_event).collect())
+    }
+
+    async fn fetch_client_contacts(&self, account_id: Uuid) -> Result<Vec<ClientContact>> {
+        let rows = sqlx::query_as::<_, ClientContactRow>(
+            r#"
+            SELECT id, name, role, email, phone, team, notes
+            FROM contacts
+            WHERE tenant_id = $1 AND account_id = $2
+            ORDER BY name ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_contact).collect())
+    }
+
+    async fn ensure_account_exists(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        account_id: Uuid,
+    ) -> Result<()> {
+        let account_exists = sqlx::query(
+            r#"
+            SELECT 1
+            FROM accounts
+            WHERE tenant_id = $1 AND id = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+
+        if account_exists.is_none() {
+            bail!("account not found");
+        }
+
+        Ok(())
+    }
+
     async fn ensure_mailbox(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
@@ -2288,6 +2808,93 @@ fn preview_text(body_text: &str) -> String {
         "(no preview)".to_string()
     } else {
         preview
+    }
+}
+
+fn body_paragraphs(body_text: &str) -> Vec<String> {
+    let paragraphs = body_text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+
+    if paragraphs.is_empty() {
+        vec!["".to_string()]
+    } else {
+        paragraphs
+    }
+}
+
+fn client_folder(role: &str) -> String {
+    match role {
+        "drafts" => "drafts",
+        "sent" => "sent",
+        "archive" => "archive",
+        _ => "inbox",
+    }
+    .to_string()
+}
+
+fn client_message_tags(role: &str, delivery_status: &str) -> Vec<String> {
+    if role == "drafts" || delivery_status == "draft" {
+        return vec!["Draft".to_string()];
+    }
+    if role == "sent" {
+        return vec!["Outgoing".to_string()];
+    }
+    Vec::new()
+}
+
+fn attachment_kind(media_type: &str, name: &str) -> String {
+    let lower_media = media_type.to_lowercase();
+    let lower_name = name.to_lowercase();
+    if lower_media.contains("pdf") || lower_name.ends_with(".pdf") {
+        "PDF".to_string()
+    } else if lower_media.contains("word")
+        || lower_name.ends_with(".docx")
+        || lower_name.ends_with(".doc")
+    {
+        "DOCX".to_string()
+    } else if lower_media.contains("opendocument") || lower_name.ends_with(".odt") {
+        "ODT".to_string()
+    } else {
+        "PDF".to_string()
+    }
+}
+
+fn format_size(size_octets: i64) -> String {
+    let size = size_octets.max(0) as f64;
+    if size >= 1_048_576.0 {
+        format!("{:.1} MB", size / 1_048_576.0)
+    } else if size >= 1024.0 {
+        format!("{:.0} KB", size / 1024.0)
+    } else {
+        format!("{} B", size as i64)
+    }
+}
+
+fn map_event(row: ClientEventRow) -> ClientEvent {
+    ClientEvent {
+        id: row.id,
+        date: row.date,
+        time: row.time,
+        title: row.title,
+        location: row.location,
+        attendees: row.attendees,
+        notes: row.notes,
+    }
+}
+
+fn map_contact(row: ClientContactRow) -> ClientContact {
+    ClientContact {
+        id: row.id,
+        name: row.name,
+        role: row.role,
+        email: row.email,
+        phone: row.phone,
+        team: row.team,
+        notes: row.notes,
     }
 }
 

@@ -58,3 +58,16 @@ export type MessageDraft = {
 
 export type EventDraft = Omit<EventItem, "id">;
 export type ContactDraft = Omit<ContactItem, "id">;
+
+export type ClientIdentity = {
+  account_id: string;
+  email: string;
+  display_name: string;
+  expires_at: string;
+};
+
+export type ClientWorkspacePayload = {
+  messages: Message[];
+  events: EventItem[];
+  contacts: ContactItem[];
+};

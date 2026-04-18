@@ -6,14 +6,8 @@ import { MailDetail } from "./components/MailDetail";
 import { EventEditor } from "./components/EventEditor";
 import { ContactEditor } from "./components/ContactEditor";
 import { useClientWorkspace } from "./useClientWorkspace";
+import type { ClientIdentity } from "./client-types";
 import "./styles.css";
-
-type ClientIdentity = {
-  account_id: string;
-  email: string;
-  display_name: string;
-  expires_at: string;
-};
 
 type ClientLoginResponse = {
   token: string;
@@ -35,9 +29,9 @@ async function apiJson<T>(path: string, options: RequestInit = {}): Promise<T> {
 export function App() {
   const [locale, setLocale] = React.useState<Locale>(getInitialLocale);
   const copy = messages[locale];
-  const workspace = useClientWorkspace(copy);
   const [authToken, setAuthToken] = React.useState<string | null>(() => window.localStorage.getItem("lpe.client.token"));
   const [identity, setIdentity] = React.useState<ClientIdentity | null>(null);
+  const workspace = useClientWorkspace(copy, authToken, identity);
   const [loginForm, setLoginForm] = React.useState({ email: "", password: "" });
   const [loginError, setLoginError] = React.useState("");
   const [loginBusy, setLoginBusy] = React.useState(false);
@@ -172,6 +166,7 @@ export function App() {
           unreadCount={workspace.mail.filter((item) => item.unread).length}
           eventCount={workspace.events.length}
           draftCount={workspace.mail.filter((item) => item.folder === "drafts").length}
+          mailboxOwner={identity.email}
           onCompose={() => workspace.openComposer("new")}
           onCloseComposer={workspace.closeComposer}
         />
@@ -242,8 +237,8 @@ export function App() {
                   onReply={(message) => workspace.openComposer("reply", message)}
                   onForward={(message) => workspace.openComposer("forward", message)}
                   onCancel={workspace.closeComposer}
-                  onSaveDraft={() => workspace.saveMessage(true)}
-                  onSend={() => workspace.saveMessage(false)}
+                  onSaveDraft={() => void workspace.saveMessage(true)}
+                  onSend={() => void workspace.saveMessage(false)}
                 />
               ) : null}
 
@@ -254,7 +249,7 @@ export function App() {
                   eventForm={workspace.eventForm}
                   setEventForm={workspace.setEventForm}
                   onNew={workspace.resetEventForm}
-                  onSave={workspace.saveEvent}
+                  onSave={() => void workspace.saveEvent()}
                 />
               ) : null}
 
@@ -265,7 +260,7 @@ export function App() {
                   contactForm={workspace.contactForm}
                   setContactForm={workspace.setContactForm}
                   onNew={workspace.resetContactForm}
-                  onSave={workspace.saveContact}
+                  onSave={() => void workspace.saveContact()}
                 />
               ) : null}
             </section>

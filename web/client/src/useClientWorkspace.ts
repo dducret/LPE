@@ -1,24 +1,100 @@
 import React from "react";
-import { currentUser, seedContacts, seedEvents, seedMessages } from "./client-data";
-import { blankContact, blankDraft, blankEvent, countFolders, filterMessages, mkId, quoteMessage } from "./client-helpers";
+import { blankContact, blankDraft, blankEvent, countFolders, filterMessages, quoteMessage } from "./client-helpers";
 import type { ClientCopy } from "./i18n";
-import type { ContactItem, EventItem, Folder, Message, Mode, Section } from "./client-types";
+import type {
+  ClientIdentity,
+  ClientWorkspacePayload,
+  ContactItem,
+  EventItem,
+  Folder,
+  Message,
+  MessageDraft,
+  Mode,
+  Section
+} from "./client-types";
 
-export function useClientWorkspace(copy: ClientCopy) {
+async function apiJson<T>(path: string, token: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(`/api/${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(options.headers ?? {})
+    }
+  });
+  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  return (await response.json()) as T;
+}
+
+function splitRecipients(value: string) {
+  return value
+    .split(/[;,]/)
+    .map((address) => address.trim())
+    .filter(Boolean)
+    .map((address) => ({ address }));
+}
+
+function buildMessagePayload(identity: ClientIdentity, draft: MessageDraft) {
+  return {
+    account_id: identity.account_id,
+    source: "web-client",
+    from_display: identity.display_name,
+    from_address: identity.email,
+    to: splitRecipients(draft.to),
+    cc: splitRecipients(draft.cc),
+    bcc: [],
+    subject: draft.subject,
+    body_text: draft.body,
+    body_html_sanitized: null,
+    internet_message_id: null,
+    mime_blob_ref: null,
+    size_octets: new Blob([draft.subject, draft.body]).size
+  };
+}
+
+export function useClientWorkspace(copy: ClientCopy, authToken: string | null, identity: ClientIdentity | null) {
   const [section, setSection] = React.useState<Section>("mail");
   const [folder, setFolder] = React.useState<Folder>("focused");
   const [query, setQuery] = React.useState("");
-  const [mail, setMail] = React.useState(seedMessages);
-  const [events, setEvents] = React.useState(seedEvents);
-  const [contacts, setContacts] = React.useState(seedContacts);
-  const [messageId, setMessageId] = React.useState("m1");
-  const [eventId, setEventId] = React.useState("e1");
-  const [contactId, setContactId] = React.useState("c1");
+  const [mail, setMail] = React.useState<Message[]>([]);
+  const [events, setEvents] = React.useState<EventItem[]>([]);
+  const [contacts, setContacts] = React.useState<ContactItem[]>([]);
+  const [messageId, setMessageId] = React.useState("");
+  const [eventId, setEventId] = React.useState("");
+  const [contactId, setContactId] = React.useState("");
   const [mode, setMode] = React.useState<Mode>("closed");
   const [notice, setNotice] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [loadError, setLoadError] = React.useState("");
   const [draft, setDraft] = React.useState(blankDraft());
-  const [eventForm, setEventForm] = React.useState(blankEvent(seedEvents[0]));
-  const [contactForm, setContactForm] = React.useState(blankContact(seedContacts[0]));
+  const [eventForm, setEventForm] = React.useState(blankEvent());
+  const [contactForm, setContactForm] = React.useState(blankContact());
+
+  const loadWorkspace = React.useCallback(async () => {
+    if (!authToken || !identity) {
+      setMail([]);
+      setEvents([]);
+      setContacts([]);
+      return;
+    }
+
+    setLoading(true);
+    setLoadError("");
+    try {
+      const payload = await apiJson<ClientWorkspacePayload>("mail/workspace", authToken);
+      setMail(payload.messages);
+      setEvents(payload.events);
+      setContacts(payload.contacts);
+    } catch {
+      setLoadError(copy.loadError);
+    } finally {
+      setLoading(false);
+    }
+  }, [authToken, copy.loadError, identity]);
+
+  React.useEffect(() => {
+    void loadWorkspace();
+  }, [loadWorkspace]);
 
   const counts = React.useMemo(() => countFolders(mail), [mail]);
   const filtered = React.useMemo(() => filterMessages(mail, folder, query), [folder, mail, query]);
@@ -61,65 +137,62 @@ export function useClientWorkspace(copy: ClientCopy) {
 
   const closeComposer = React.useCallback(() => setMode("closed"), []);
 
-  const saveMessage = React.useCallback((asDraft: boolean) => {
+  const saveMessage = React.useCallback(async (asDraft: boolean) => {
+    if (!authToken || !identity) return;
     if (!draft.subject.trim() && !draft.body.trim()) return pushNotice(copy.validationMessage);
     if (!asDraft && !draft.to.trim()) return pushNotice(copy.validationMessage);
 
-    const item: Message = {
-      id: mkId("m"),
-      folder: asDraft ? "drafts" : "sent",
-      from: currentUser.name,
-      fromAddress: currentUser.email,
-      to: draft.to.trim(),
-      cc: draft.cc.trim(),
-      subject: draft.subject.trim() || copy.untitledDraft,
-      preview: draft.body.trim().split(/\n+/)[0] || copy.emptyDraftPreview,
-      receivedAt: "2026-04-15 11:35",
-      timeLabel: copy.nowLabel,
-      unread: false,
-      flagged: false,
-      category: "internal",
-      tags: [asDraft ? copy.tags.draft : mode === "reply" ? copy.tags.reply : mode === "forward" ? copy.tags.forward : copy.tags.outgoing],
-      attachments: [],
-      body: draft.body.split("\n").filter(Boolean)
-    };
-
-    setMail((currentMail) => [item, ...currentMail]);
-    setFolder(item.folder);
-    setMessageId(item.id);
-    setMode("closed");
-    setDraft(blankDraft());
-    pushNotice(asDraft ? copy.noticeDraft : copy.noticeSent);
-  }, [copy, draft, mode, pushNotice]);
-
-  const saveContact = React.useCallback(() => {
-    if (!contactForm.name.trim() || !contactForm.email.trim()) return pushNotice(copy.validationContact);
-    if (currentContact) {
-      setContacts((value) => value.map((item) => (item.id === currentContact.id ? { ...item, ...contactForm } : item)));
-      return pushNotice(copy.noticeContactUpdated);
+    try {
+      await apiJson(asDraft ? "mail/messages/draft" : "mail/messages/submit", authToken, {
+        method: "POST",
+        body: JSON.stringify(buildMessagePayload(identity, draft))
+      });
+      setFolder(asDraft ? "drafts" : "sent");
+      setMode("closed");
+      setDraft(blankDraft());
+      await loadWorkspace();
+      pushNotice(asDraft ? copy.noticeDraft : copy.noticeSent);
+    } catch {
+      pushNotice(copy.saveError);
     }
-    const item: ContactItem = { id: mkId("c"), ...contactForm };
-    setContacts((value) => [item, ...value]);
-    setContactId(item.id);
-    pushNotice(copy.noticeContactCreated);
-  }, [contactForm, copy, currentContact, pushNotice]);
+  }, [authToken, copy, draft, identity, loadWorkspace, pushNotice]);
+
+  const saveContact = React.useCallback(async () => {
+    if (!authToken) return;
+    if (!contactForm.name.trim() || !contactForm.email.trim()) return pushNotice(copy.validationContact);
+    try {
+      const item = await apiJson<ContactItem>("mail/contacts", authToken, {
+        method: "POST",
+        body: JSON.stringify({ id: currentContact?.id ?? null, ...contactForm })
+      });
+      await loadWorkspace();
+      setContactId(item.id);
+      pushNotice(currentContact ? copy.noticeContactUpdated : copy.noticeContactCreated);
+    } catch {
+      pushNotice(copy.saveError);
+    }
+  }, [authToken, contactForm, copy, currentContact, loadWorkspace, pushNotice]);
 
   const resetContactForm = React.useCallback(() => {
     setContactId("");
     setContactForm(blankContact());
   }, []);
 
-  const saveEvent = React.useCallback(() => {
+  const saveEvent = React.useCallback(async () => {
+    if (!authToken) return;
     if (!eventForm.title.trim() || !eventForm.date.trim() || !eventForm.time.trim()) return pushNotice(copy.validationCalendar);
-    if (currentEvent) {
-      setEvents((value) => value.map((item) => (item.id === currentEvent.id ? { ...item, ...eventForm } : item)));
-      return pushNotice(copy.noticeCalendarUpdated);
+    try {
+      const item = await apiJson<EventItem>("mail/calendar/events", authToken, {
+        method: "POST",
+        body: JSON.stringify({ id: currentEvent?.id ?? null, ...eventForm })
+      });
+      await loadWorkspace();
+      setEventId(item.id);
+      pushNotice(currentEvent ? copy.noticeCalendarUpdated : copy.noticeCalendarCreated);
+    } catch {
+      pushNotice(copy.saveError);
     }
-    const item: EventItem = { id: mkId("e"), ...eventForm };
-    setEvents((value) => [...value, item].sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`)));
-    setEventId(item.id);
-    pushNotice(copy.noticeCalendarCreated);
-  }, [copy, currentEvent, eventForm, pushNotice]);
+  }, [authToken, copy, currentEvent, eventForm, loadWorkspace, pushNotice]);
 
   const resetEventForm = React.useCallback(() => {
     setEventId("");
@@ -144,7 +217,7 @@ export function useClientWorkspace(copy: ClientCopy) {
     setContactId,
     mode,
     closeComposer,
-    notice,
+    notice: notice || loadError || (loading ? copy.loadingWorkspace : ""),
     draft,
     setDraft,
     eventForm,
