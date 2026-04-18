@@ -38,6 +38,8 @@ Toutes les couches clientes doivent utiliser ce modele canonique de soumission e
 
 Le MVP `JMAP Mail` actuellement implemente dans `lpe-jmap` est aligne sur cette regle. `EmailSubmission/set` ne parle pas `SMTP`; il reutilise la soumission canonique existante apres lecture d'un brouillon persiste. `Mailbox/get`, `Email/query` et `Email/get` lisent la projection canonique sans reinjecter `Bcc` dans la recherche standard. Le scope supporte est detaille dans `docs/architecture/jmap-mail-mvp.md`.
 
+Le MVP `ActiveSync` actuellement implemente dans `lpe-activesync` est aligne sur la meme regle. `Provision`, `FolderSync`, `Sync` et `SendMail` sont implementes comme un adaptateur au-dessus de la meme authentification compte, de la meme persistance des brouillons, de la meme synchronisation mailbox et du meme modele canonique de soumission. `SendMail` ne contourne ni le workflow mailbox du coeur `LPE`, ni `LPE-CT`; il reutilise la soumission canonique pour que la copie autoritative `Sent` existe avant le relais sortant. Le scope supporte est detaille dans `docs/architecture/activesync-mvp.md`.
+
 Le webmail utilise une authentification de compte distincte de l'administration. Le formulaire `/mail/` appelle `/api/mail/auth/login`, qui verifie le hash `argon2` stocke dans `account_credentials`, cree une session dans `account_sessions`, puis expose l'identite via `/api/mail/auth/me`.
 
 Le webmail ne doit pas afficher de jeux de donnees de maquette en environnement fonctionnel. Apres authentification, il charge l'etat utilisateur par `/api/mail/workspace`, qui expose les messages, contacts et evenements persistants du compte. L'envoi, les brouillons, les contacts et le calendrier passent par des endpoints authentifies afin de rester alignes avec le modele canonique `LPE`. Les brouillons sont des messages persistants de la mailbox `Drafts`; leur edition met a jour la meme entree, leur expedition cree la copie autoritative `Sent` puis supprime la copie `Drafts`, et leur suppression ne peut viser qu'un message appartenant a la mailbox `Drafts` du compte authentifie.
@@ -123,6 +125,8 @@ This sequence makes `Sent` authoritative before the sorting center performs the 
 All client layers must use this canonical submission and synchronization model. No client layer may write its own parallel `Sent` or `Outbox` logic.
 
 The currently implemented `JMAP Mail` MVP in `lpe-jmap` follows that rule. `EmailSubmission/set` does not speak `SMTP`; it reuses the existing canonical submission workflow after loading a persisted draft. `Mailbox/get`, `Email/query`, and `Email/get` read the canonical mailbox projection without reinjecting `Bcc` into standard search paths. The supported scope is detailed in `docs/architecture/jmap-mail-mvp.md`.
+
+The current `ActiveSync` MVP in `lpe-activesync` follows the same rule. `Provision`, `FolderSync`, `Sync`, and `SendMail` are implemented as an adapter over the same account authentication, draft persistence, mailbox synchronization, and canonical submission model. `SendMail` does not bypass the core mailbox workflow or `LPE-CT`; it reuses the canonical submission path so the authoritative `Sent` copy exists before outbound relay. The supported scope is detailed in `docs/architecture/activesync-mvp.md`.
 
 The webmail uses account authentication separate from administration. The `/mail/` form calls `/api/mail/auth/login`, which verifies the `argon2` hash stored in `account_credentials`, creates a session in `account_sessions`, and exposes the identity through `/api/mail/auth/me`.
 

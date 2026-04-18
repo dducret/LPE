@@ -385,6 +385,16 @@ The current `JMAP Mail` MVP follows that rule explicitly:
 - no `JMAP` path performs direct Internet-facing `SMTP`
 - protected `Bcc` metadata remains structurally separate from ordinary mailbox search and query projections
 
+The current `ActiveSync` MVP follows the same rule:
+
+- `Provision`, `FolderSync`, `Sync`, and `SendMail` are implemented as an adapter in `crates/lpe-activesync`
+- account authentication is reused rather than duplicated
+- `Sync` reads canonical mailbox, contact, and calendar data
+- draft creation, modification, and deletion reuse the existing canonical draft workflow
+- `SendMail` reuses canonical submission so the authoritative `Sent` copy exists before `LPE-CT` performs outbound relay
+- no `ActiveSync` path performs direct Internet-facing `SMTP`
+- the supported scope and limitations are documented in `docs/architecture/activesync-mvp.md`
+
 ## Data and Storage Principles
 
 - `PostgreSQL` is the primary persistent store for platform metadata and operational data
@@ -757,10 +767,12 @@ The current architectural direction for the first product phases is:
 - `JMAP` as the main modern API surface
 - a first `JMAP Mail` MVP with real session capabilities, `Mailbox/get`, `Email/query`, `Email/get`, draft-only `Email/set`, and canonical `EmailSubmission/set`
 - `IMAP` as a mailbox-access compatibility layer
-- `ActiveSync` as the first targeted native Outlook and mobile compatibility layer
+- an initial `ActiveSync` MVP adapter with `Provision`, `FolderSync`, `Sync`, and canonical `SendMail`
 - `EWS` as a future extension after stabilization of the canonical submission and synchronization model
 - `PST` mailbox import and export for migration and interoperability
 - collaboration services for contacts, calendars, and to-do lists
 - mailbox growth management through storage tiers, dedicated databases, split-capable large mailbox handling, and online archive support
 
 The precise supported `JMAP Mail` MVP scope and its intentional limitations are documented in `docs/architecture/jmap-mail-mvp.md`.
+
+The precise supported `ActiveSync` MVP scope and its intentional limitations are documented in `docs/architecture/activesync-mvp.md`.

@@ -1288,12 +1288,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
+name = "lpe-activesync"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "axum",
+ "base64",
+ "lpe-storage",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "lpe-admin-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "argon2",
  "axum",
+ "lpe-activesync",
  "lpe-ai",
  "lpe-attachments",
  "lpe-core",
@@ -1377,6 +1393,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "serde",
+ "serde_json",
  "sqlx",
  "uuid",
 ]

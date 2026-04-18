@@ -1,5 +1,6 @@
 use anyhow::{bail, Result};
 use serde::Serialize;
+use serde_json::Value;
 use sqlx::{FromRow, Pool, Postgres, Row};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
@@ -316,6 +317,12 @@ pub struct AuthenticatedAccount {
     pub email: String,
     pub display_name: String,
     pub expires_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ActiveSyncSyncState {
+    pub sync_key: String,
+    pub snapshot: Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -765,6 +772,12 @@ struct AuthenticatedAccountRow {
     email: String,
     display_name: String,
     expires_at: String,
+}
+
+#[derive(Debug, FromRow)]
+struct ActiveSyncSyncStateRow {
+    sync_key: String,
+    snapshot_json: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -3527,6 +3540,73 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn store_activesync_sync_state(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+        collection_id: &str,
+        sync_key: &str,
+        snapshot: &Value,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO activesync_sync_states (
+                id, tenant_id, account_id, device_id, collection_id, sync_key, snapshot_json
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (tenant_id, account_id, device_id, collection_id, sync_key)
+            DO UPDATE SET snapshot_json = EXCLUDED.snapshot_json
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(device_id.trim())
+        .bind(collection_id.trim())
+        .bind(sync_key.trim())
+        .bind(snapshot.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn fetch_activesync_sync_state(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+        collection_id: &str,
+        sync_key: &str,
+    ) -> Result<Option<ActiveSyncSyncState>> {
+        let row = sqlx::query_as::<_, ActiveSyncSyncStateRow>(
+            r#"
+            SELECT sync_key, snapshot_json
+            FROM activesync_sync_states
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND device_id = $3
+              AND collection_id = $4
+              AND sync_key = $5
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(device_id.trim())
+        .bind(collection_id.trim())
+        .bind(sync_key.trim())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            Ok(ActiveSyncSyncState {
+                sync_key: row.sync_key,
+                snapshot: serde_json::from_str(&row.snapshot_json)?,
+            })
+        })
+        .transpose()
+    }
+
     pub async fn search_email_trace(
         &self,
         input: EmailTraceSearchInput,
@@ -4034,7 +4114,7 @@ impl Storage {
             .collect())
     }
 
-    async fn fetch_client_events(&self, account_id: Uuid) -> Result<Vec<ClientEvent>> {
+    pub async fn fetch_client_events(&self, account_id: Uuid) -> Result<Vec<ClientEvent>> {
         let rows = sqlx::query_as::<_, ClientEventRow>(
             r#"
             SELECT
@@ -4058,7 +4138,7 @@ impl Storage {
         Ok(rows.into_iter().map(map_event).collect())
     }
 
-    async fn fetch_client_contacts(&self, account_id: Uuid) -> Result<Vec<ClientContact>> {
+    pub async fn fetch_client_contacts(&self, account_id: Uuid) -> Result<Vec<ClientContact>> {
         let rows = sqlx::query_as::<_, ClientContactRow>(
             r#"
             SELECT id, name, role, email, phone, team, notes
