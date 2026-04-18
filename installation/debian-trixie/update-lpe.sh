@@ -56,6 +56,11 @@ set -a
 source "${ENV_FILE}"
 set +a
 
+if [[ -z "${DATABASE_URL:-}" ]]; then
+  echo "DATABASE_URL is not set in ${ENV_FILE}" >&2
+  exit 1
+fi
+
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
 LPE_SERVER_NAME="${LPE_SERVER_NAME:-_}"
 LPE_NGINX_CLIENT_MAX_BODY_SIZE="${LPE_NGINX_CLIENT_MAX_BODY_SIZE:-20g}"
@@ -63,6 +68,7 @@ LPE_PST_IMPORT_DIR="${LPE_PST_IMPORT_DIR:-/var/lib/lpe/imports}"
 install -d -o lpe -g lpe "${LPE_PST_IMPORT_DIR}"
 
 cd "${SRC_DIR}"
+"${SRC_DIR}/installation/debian-trixie/run-migrations.sh"
 "${CARGO_BIN}" build --release -p lpe-cli
 cd "${SRC_DIR}/web/admin"
 npm ci

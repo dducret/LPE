@@ -69,7 +69,7 @@ Fichiers:
 - `install-lpe.sh` installe les prerequis, clone le depot, compile `lpe-cli` et installe le service systemd
 - `install-lpe.sh` demarre aussi `lpe.service` a la fin de l'installation
 - `install-lpe.sh` installe aussi `nodejs`, `npm` et `nginx`, build `web/admin` et `web/client`, deploie les interfaces statiques et active le site `nginx`
-- `update-lpe.sh` met a jour le depot, recompile `lpe-cli` et redemarre le service
+- `update-lpe.sh` met a jour le depot, applique les migrations SQL, recompile `lpe-cli` et redemarre le service
 - `update-lpe.sh` rebuild aussi `web/admin` et `web/client`, redeploie les assets statiques et recharge `nginx`
 - `bootstrap-postgresql.sh` cree un role et une base PostgreSQL
 - `bootstrap-postgresql.sh` installe aussi PostgreSQL serveur si necessaire puis le demarre
@@ -93,7 +93,7 @@ Ordre recommande:
 
 Le client web demande une authentification utilisateur. Creer d'abord un compte et son mot de passe depuis la page domaine de l'administration, puis se connecter a `/mail/` avec l'adresse email complete et ce mot de passe.
 
-La console d'administration enregistre desormais ses comptes, mots de passe de comptes, boites, demandes d'import/export `PST`, domaines, alias, parametres, administrateurs delegues, objets antispam et evenements d'audit dans `PostgreSQL`. L'execution des migrations n'est donc plus optionnelle apres deploiement ou mise a jour du schema.
+La console d'administration enregistre desormais ses comptes, mots de passe de comptes, boites, demandes d'import/export `PST`, domaines, alias, parametres, administrateurs delegues, objets antispam et evenements d'audit dans `PostgreSQL`. L'execution des migrations n'est donc plus optionnelle apres deploiement ou mise a jour du schema. `update-lpe.sh` les applique automatiquement apres le `git pull`, afin d'eviter de deployer une API plus recente que le schema PostgreSQL.
 
 Les imports `PST` peuvent etre envoyes depuis le navigateur. Le service stocke les fichiers recus dans `LPE_PST_IMPORT_DIR`, par defaut `/var/lib/lpe/imports`, puis cree la demande d'import `PST` avec le chemin serveur obtenu. La taille maximale acceptee par l'API est configuree par `LPE_PST_UPLOAD_MAX_BYTES`, par defaut `21474836480` octets. Le reverse proxy `nginx` est aligne avec `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, par defaut `20g`.
 
@@ -124,7 +124,8 @@ Pour les mises a jour ulterieures:
 
 1. pousser le commit voulu dans `https://github.com/dducret/LPE`
 2. executer `update-lpe.sh`
-3. executer `run-migrations.sh` si le schema PostgreSQL a change, notamment pour les migrations de console d'administration comme `0006_admin_auth.sql`, `0007_pst_job_execution.sql` et `0008_account_credentials.sql`
+
+`update-lpe.sh` execute `run-migrations.sh` automatiquement. Cela couvre notamment les changements de schema utilises par `/api/mail/workspace`, comme les tables `contacts` et `calendar_events`.
 
 Si tu veux d'abord recuperer les derniers scripts avant une mise a jour:
 
@@ -133,7 +134,6 @@ cd /opt/lpe/src
 git pull --ff-only origin main
 cd installation/debian-trixie
 ./update-lpe.sh
-./run-migrations.sh
 ./check-lpe.sh
 ```
 
@@ -210,7 +210,7 @@ Files:
 - `install-lpe.sh` installs prerequisites, clones the repository, builds `lpe-cli`, and installs the systemd service
 - `install-lpe.sh` also starts `lpe.service` at the end of the installation
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
-- `update-lpe.sh` updates the repository, rebuilds `lpe-cli`, and restarts the service
+- `update-lpe.sh` updates the repository, applies SQL migrations, rebuilds `lpe-cli`, and restarts the service
 - `update-lpe.sh` also rebuilds `web/admin` and `web/client`, redeploys static assets, and reloads `nginx`
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
@@ -234,7 +234,7 @@ Recommended order:
 
 The web client requires user authentication. First create an account and its password from the administration domain page, then sign in to `/mail/` with the full email address and that password.
 
-The administration console now stores its accounts, account passwords, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Running migrations is therefore mandatory after deployment or any schema update.
+The administration console now stores its accounts, account passwords, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Running migrations is therefore mandatory after deployment or any schema update. `update-lpe.sh` applies them automatically after `git pull` so the API is not deployed ahead of the PostgreSQL schema.
 
 `PST` imports can be uploaded from the browser. The service stores received files in `LPE_PST_IMPORT_DIR`, defaulting to `/var/lib/lpe/imports`, then creates the `PST` import request with the resulting server path. The maximum accepted API upload size is configured through `LPE_PST_UPLOAD_MAX_BYTES`, defaulting to `21474836480` bytes. The `nginx` reverse proxy is aligned through `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, defaulting to `20g`.
 
@@ -265,7 +265,8 @@ For later updates:
 
 1. push the desired commit to `https://github.com/dducret/LPE`
 2. run `update-lpe.sh`
-3. run `run-migrations.sh` if the PostgreSQL schema changed, especially for administration console migrations such as `0006_admin_auth.sql`, `0007_pst_job_execution.sql`, and `0008_account_credentials.sql`
+
+`update-lpe.sh` runs `run-migrations.sh` automatically. This covers schema changes used by `/api/mail/workspace`, such as the `contacts` and `calendar_events` tables.
 
 If you want to fetch the latest scripts first before an update:
 
@@ -274,7 +275,6 @@ cd /opt/lpe/src
 git pull --ff-only origin main
 cd installation/debian-trixie
 ./update-lpe.sh
-./run-migrations.sh
 ./check-lpe.sh
 ```
 
