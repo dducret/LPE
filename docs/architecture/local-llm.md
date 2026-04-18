@@ -11,7 +11,7 @@
 - toutes les donnees utilisateur restent sur l'infrastructure `LPE`
 - le moteur IA accede a des projections documentaires normalisees, pas au MIME brut comme source primaire
 - toutes les requetes IA sont filtrees par ACL avant inference
-- les metadonnees protegees comme `Bcc` sont exclues des projections, chunks et entrees d'inference utilisateur
+- les metadonnees protegees comme `Bcc` sont exclues des projections, chunks et entrees d'inference utilisateur; elles restent stockees separement des destinataires visibles et hors index standard
 - chaque resultat IA conserve une provenance exploitable
 - la recherche PostgreSQL reste prioritaire pour la precision, la vitesse et les filtres
 
@@ -72,7 +72,7 @@ Le coeur produit ne doit pas dependre d'un modele donne. `Gemma` doit etre un fu
 - all user data stays on `LPE` infrastructure
 - the AI engine reads normalized document projections, not raw MIME as the primary source
 - all AI requests are ACL-filtered before inference
-- protected metadata such as `Bcc` is excluded from user-facing projections, chunks, and inference inputs
+- protected metadata such as `Bcc` is excluded from user-facing projections, chunks, and inference inputs; it remains stored separately from visible recipients and outside default search indexes
 - every AI result keeps usable provenance
 - PostgreSQL search remains the primary layer for precision, speed, and filtering
 

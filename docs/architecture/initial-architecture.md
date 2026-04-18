@@ -27,8 +27,8 @@ Le modele de soumission initial est transactionnel cote coeur `LPE` et expose pa
 1. verifier le compte emetteur
 2. garantir l'existence de la mailbox `Sent`
 3. creer le message canonique dans `messages`
-4. enregistrer les destinataires dans `message_recipients`
-5. indexer le corps dans `message_bodies`
+4. enregistrer les destinataires visibles dans `message_recipients` et conserver `Bcc` dans un stockage protege distinct
+5. indexer le corps dans `message_bodies` sans inclure `Bcc` dans `participants_normalized`
 6. ajouter une entree `outbound_message_queue` pour remise via `LPE-CT`
 7. journaliser l'action dans `audit_events`
 
@@ -111,8 +111,8 @@ The initial submission model is transactional in the `LPE` core and exposed by `
 1. verify the submitting account
 2. ensure the `Sent` mailbox exists
 3. create the canonical message in `messages`
-4. store recipients in `message_recipients`
-5. index the body in `message_bodies`
+4. store visible recipients in `message_recipients` and retain `Bcc` in separate protected storage
+5. index the body in `message_bodies` without including `Bcc` in `participants_normalized`
 6. add an `outbound_message_queue` entry for handoff through `LPE-CT`
 7. record the action in `audit_events`
 

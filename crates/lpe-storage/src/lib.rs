@@ -1791,7 +1791,8 @@ impl Storage {
         let from_address = normalize_email(&input.from_address);
         let subject = normalize_subject(&input.subject);
         let body_text = input.body_text.trim().to_string();
-        let recipients = normalize_submitted_recipients(&input);
+        let visible_recipients = normalize_visible_recipients(&input);
+        let bcc_recipients = normalize_bcc_recipients(&input);
 
         if from_address.is_empty() {
             bail!("from_address is required");
@@ -1810,7 +1811,7 @@ impl Storage {
         let message_id = input.draft_message_id.unwrap_or_else(Uuid::new_v4);
         let thread_id = Uuid::new_v4();
         let preview_text = preview_text(&body_text);
-        let participants_normalized = participants_normalized(&from_address, &recipients);
+        let participants_normalized = participants_normalized(&from_address, &visible_recipients);
         let mime_blob_ref = input
             .mime_blob_ref
             .filter(|value| !value.trim().is_empty())
@@ -1866,6 +1867,13 @@ impl Storage {
                 .bind(message_id)
                 .execute(&mut *tx)
                 .await?;
+            sqlx::query(
+                "DELETE FROM message_bcc_recipients WHERE tenant_id = $1 AND message_id = $2",
+            )
+            .bind(DEFAULT_TENANT_ID)
+            .bind(message_id)
+            .execute(&mut *tx)
+            .await?;
         } else {
             sqlx::query(
                 r#"
@@ -1924,7 +1932,7 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
-        for (ordinal, (kind, recipient)) in recipients.iter().enumerate() {
+        for (ordinal, (kind, recipient)) in visible_recipients.iter().enumerate() {
             sqlx::query(
                 r#"
                 INSERT INTO message_recipients (
@@ -1937,6 +1945,25 @@ impl Storage {
             .bind(DEFAULT_TENANT_ID)
             .bind(message_id)
             .bind(kind)
+            .bind(&recipient.address)
+            .bind(recipient.display_name.as_deref())
+            .bind(ordinal as i32)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        for (ordinal, recipient) in bcc_recipients.iter().enumerate() {
+            sqlx::query(
+                r#"
+                INSERT INTO message_bcc_recipients (
+                    id, tenant_id, message_id, address, display_name, ordinal, metadata_scope
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, 'audit-compliance')
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(DEFAULT_TENANT_ID)
+            .bind(message_id)
             .bind(&recipient.address)
             .bind(recipient.display_name.as_deref())
             .bind(ordinal as i32)
@@ -2059,12 +2086,13 @@ impl Storage {
         let from_address = normalize_email(&input.from_address);
         let subject = normalize_subject(&input.subject);
         let body_text = input.body_text.trim().to_string();
-        let recipients = normalize_submitted_recipients(&input);
+        let visible_recipients = normalize_visible_recipients(&input);
+        let bcc_recipients = normalize_bcc_recipients(&input);
 
         if from_address.is_empty() {
             bail!("from_address is required");
         }
-        if recipients.is_empty() {
+        if visible_recipients.is_empty() && bcc_recipients.is_empty() {
             bail!("at least one recipient is required");
         }
         if subject.is_empty() && body_text.is_empty() {
@@ -2098,7 +2126,7 @@ impl Storage {
         let thread_id = Uuid::new_v4();
         let outbound_queue_id = Uuid::new_v4();
         let preview_text = preview_text(&body_text);
-        let participants_normalized = participants_normalized(&from_address, &recipients);
+        let participants_normalized = participants_normalized(&from_address, &visible_recipients);
         let mime_blob_ref = input
             .mime_blob_ref
             .filter(|value| !value.trim().is_empty())
@@ -2155,7 +2183,7 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
-        for (ordinal, (kind, recipient)) in recipients.iter().enumerate() {
+        for (ordinal, (kind, recipient)) in visible_recipients.iter().enumerate() {
             sqlx::query(
                 r#"
                 INSERT INTO message_recipients (
@@ -2168,6 +2196,25 @@ impl Storage {
             .bind(DEFAULT_TENANT_ID)
             .bind(message_id)
             .bind(kind)
+            .bind(&recipient.address)
+            .bind(recipient.display_name.as_deref())
+            .bind(ordinal as i32)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        for (ordinal, recipient) in bcc_recipients.iter().enumerate() {
+            sqlx::query(
+                r#"
+                INSERT INTO message_bcc_recipients (
+                    id, tenant_id, message_id, address, display_name, ordinal, metadata_scope
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, 'audit-compliance')
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(DEFAULT_TENANT_ID)
+            .bind(message_id)
             .bind(&recipient.address)
             .bind(recipient.display_name.as_deref())
             .bind(ordinal as i32)
@@ -3005,13 +3052,18 @@ fn map_contact(row: ClientContactRow) -> ClientContact {
     }
 }
 
-fn normalize_submitted_recipients(
+fn normalize_visible_recipients(
     input: &SubmitMessageInput,
 ) -> Vec<(&'static str, SubmittedRecipientInput)> {
     let mut recipients = Vec::new();
     push_recipients(&mut recipients, "to", &input.to);
     push_recipients(&mut recipients, "cc", &input.cc);
-    push_recipients(&mut recipients, "bcc", &input.bcc);
+    recipients
+}
+
+fn normalize_bcc_recipients(input: &SubmitMessageInput) -> Vec<SubmittedRecipientInput> {
+    let mut recipients = Vec::new();
+    push_bcc_recipients(&mut recipients, &input.bcc);
     recipients
 }
 
@@ -3040,6 +3092,27 @@ fn push_recipients(
     }
 }
 
+fn push_bcc_recipients(
+    output: &mut Vec<SubmittedRecipientInput>,
+    input: &[SubmittedRecipientInput],
+) {
+    for recipient in input {
+        let address = normalize_email(&recipient.address);
+        if address.is_empty() {
+            continue;
+        }
+
+        output.push(SubmittedRecipientInput {
+            address,
+            display_name: recipient
+                .display_name
+                .as_ref()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+        });
+    }
+}
+
 fn participants_normalized(
     from_address: &str,
     recipients: &[(&'static str, SubmittedRecipientInput)],
@@ -3052,6 +3125,75 @@ fn participants_normalized(
             .map(|(_, recipient)| recipient.address.clone()),
     );
     participants.join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        normalize_bcc_recipients, normalize_visible_recipients, participants_normalized,
+        SubmitMessageInput, SubmittedRecipientInput,
+    };
+    use uuid::Uuid;
+
+    fn submit_input() -> SubmitMessageInput {
+        SubmitMessageInput {
+            draft_message_id: None,
+            account_id: Uuid::nil(),
+            source: "test".to_string(),
+            from_display: None,
+            from_address: "sender@example.test".to_string(),
+            to: vec![SubmittedRecipientInput {
+                address: "to@example.test".to_string(),
+                display_name: None,
+            }],
+            cc: vec![SubmittedRecipientInput {
+                address: "cc@example.test".to_string(),
+                display_name: Some("  CC Person  ".to_string()),
+            }],
+            bcc: vec![SubmittedRecipientInput {
+                address: "bcc@example.test".to_string(),
+                display_name: Some("  Hidden Person  ".to_string()),
+            }],
+            subject: "subject".to_string(),
+            body_text: "body".to_string(),
+            body_html_sanitized: None,
+            internet_message_id: None,
+            mime_blob_ref: None,
+            size_octets: 0,
+        }
+    }
+
+    #[test]
+    fn visible_recipients_exclude_bcc() {
+        let recipients = normalize_visible_recipients(&submit_input());
+
+        assert_eq!(recipients.len(), 2);
+        assert_eq!(recipients[0].0, "to");
+        assert_eq!(recipients[0].1.address, "to@example.test");
+        assert_eq!(recipients[1].0, "cc");
+        assert_eq!(recipients[1].1.address, "cc@example.test");
+        assert_eq!(recipients[1].1.display_name.as_deref(), Some("CC Person"));
+    }
+
+    #[test]
+    fn bcc_recipients_are_kept_separately() {
+        let recipients = normalize_bcc_recipients(&submit_input());
+
+        assert_eq!(recipients.len(), 1);
+        assert_eq!(recipients[0].address, "bcc@example.test");
+        assert_eq!(recipients[0].display_name.as_deref(), Some("Hidden Person"));
+    }
+
+    #[test]
+    fn participants_normalized_ignores_bcc_addresses() {
+        let visible = normalize_visible_recipients(&submit_input());
+        let participants = participants_normalized("sender@example.test", &visible);
+
+        assert!(participants.contains("sender@example.test"));
+        assert!(participants.contains("to@example.test"));
+        assert!(participants.contains("cc@example.test"));
+        assert!(!participants.contains("bcc@example.test"));
+    }
 }
 
 fn ensure_parent_directory(path: &str) -> Result<()> {

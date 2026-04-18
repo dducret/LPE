@@ -57,7 +57,7 @@ Cette console est maintenant persistante dans `PostgreSQL` via `lpe-storage` et 
 
 Le protocole moderne principal reste `JMAP`, mais `LPE` doit aussi rester compatible avec des clients natifs. Cela vise en particulier les usages de type application Mail sur iPhone et les clients Outlook. Le support Outlook natif est critique pour l'adoption et ne doit pas etre reduit a `IMAP` + `SMTP` + autodiscover. `ActiveSync` est la premiere couche de compatibilite native Outlook/mobile visee. `EWS` reste une extension future, a evaluer apres stabilisation du modele canonique de soumission et de synchronisation. Dans tous les cas, un message envoye depuis un client externe doit etre enregistre dans `LPE` et rester visible dans la vue `Sent` de maniere coherente sur tous les acces.
 
-Le backend expose un premier modele de soumission canonique via `/api/mail/messages/submit`: un message soumis est stocke dans `messages`, ses destinataires dans `message_recipients`, sa copie autoritative est placee dans la mailbox `Sent`, puis une entree `outbound_message_queue` prepare la remise sortante via le centre de tri `LPE-CT`.
+Le backend expose un premier modele de soumission canonique via `/api/mail/messages/submit`: un message soumis est stocke dans `messages`, ses destinataires visibles (`To`, `Cc`) sont stockes dans `message_recipients`, les destinataires `Bcc` sont conserves comme metadonnees protegees distinctes pour audit/compliance, sa copie autoritative est placee dans la mailbox `Sent`, puis une entree `outbound_message_queue` prepare la remise sortante via le centre de tri `LPE-CT`.
 
 Toutes les couches clientes doivent utiliser le modele canonique `LPE` de soumission et de synchronisation. Aucune couche cliente ne doit ecrire une logique `Sent` ou `Outbox` parallele.
 
@@ -142,7 +142,7 @@ This console is now persisted in `PostgreSQL` through `lpe-storage` and the proj
 
 The main modern protocol remains `JMAP`, but `LPE` must also stay compatible with native clients. This especially targets use cases such as the iPhone Mail application and Outlook clients. Native Outlook support is critical for adoption and must not be reduced to `IMAP` + `SMTP` + autodiscover. `ActiveSync` is the first targeted native Outlook and mobile compatibility layer. `EWS` remains a future extension to evaluate after the canonical submission and synchronization model is stabilized. In every case, a message sent from an external client must be recorded in `LPE` and remain visible in the authoritative `Sent` view across access paths.
 
-The backend now exposes an initial canonical submission model through `/api/mail/messages/submit`: a submitted message is stored in `messages`, recipients are stored in `message_recipients`, the authoritative copy is placed in the `Sent` mailbox, and an `outbound_message_queue` entry prepares outbound handoff through the `LPE-CT` sorting center.
+The backend now exposes an initial canonical submission model through `/api/mail/messages/submit`: a submitted message is stored in `messages`, visible recipients (`To`, `Cc`) are stored in `message_recipients`, `Bcc` recipients are retained as separate protected metadata for audit and compliance, the authoritative copy is placed in the `Sent` mailbox, and an `outbound_message_queue` entry prepares outbound handoff through the `LPE-CT` sorting center.
 
 All client layers must use the canonical `LPE` submission and synchronization model. No client layer may write its own parallel `Sent` or `Outbox` logic.
 
