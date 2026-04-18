@@ -13,15 +13,17 @@ export function MailDetail(props: {
   onCancel: () => void;
   onSaveDraft: () => void;
   onSend: () => void;
+  onDeleteDraft: () => void;
 }) {
   if (props.mode !== "closed") {
-    return <section className="editor-shell"><div className="detail-header"><div><p className="detail-label">{props.copy.editorLabel}</p><h3>{props.copy.editorTitles[props.mode]}</h3></div><div className="detail-actions"><button className="ghost-button" type="button" onClick={props.onSaveDraft}>{props.copy.editorActions.saveDraft}</button><button className="ghost-button" type="button" onClick={props.onCancel}>{props.copy.editorActions.cancel}</button><button className="primary-button" type="button" onClick={props.onSend}>{props.copy.editorActions.send}</button></div></div><div className="form-grid"><label className="field"><span>{props.copy.fields.to}</span><input value={props.draft.to} onChange={(event) => props.setDraft((value) => ({ ...value, to: event.target.value }))} /></label><label className="field"><span>{props.copy.fields.cc}</span><input value={props.draft.cc} onChange={(event) => props.setDraft((value) => ({ ...value, cc: event.target.value }))} /></label><label className="field field-wide"><span>{props.copy.fields.subject}</span><input value={props.draft.subject} onChange={(event) => props.setDraft((value) => ({ ...value, subject: event.target.value }))} /></label><label className="field field-wide"><span>{props.copy.fields.body}</span><textarea rows={14} value={props.draft.body} onChange={(event) => props.setDraft((value) => ({ ...value, body: event.target.value }))} /></label></div></section>;
+    return <section className="editor-shell"><div className="drawer-titlebar">{props.copy.drawerTitle}</div><div className="detail-header"><div><p className="detail-label">{props.copy.editorLabel}</p><h3>{props.copy.editorTitles[props.mode]}</h3></div><div className="detail-actions">{props.mode === "draft" ? <button className="danger-button" type="button" onClick={props.onDeleteDraft}>{props.copy.editorActions.deleteDraft}</button> : null}<button className="ghost-button" type="button" onClick={props.onSaveDraft}>{props.copy.editorActions.saveDraft}</button><button className="ghost-button" type="button" onClick={props.onCancel}>{props.copy.editorActions.cancel}</button><button className="primary-button" type="button" onClick={props.onSend}>{props.copy.editorActions.send}</button></div></div><div className="form-grid"><label className="field"><span>{props.copy.fields.to}</span><input value={props.draft.to} onChange={(event) => props.setDraft((value) => ({ ...value, to: event.target.value }))} /></label><label className="field"><span>{props.copy.fields.cc}</span><input value={props.draft.cc} onChange={(event) => props.setDraft((value) => ({ ...value, cc: event.target.value }))} /></label><label className="field field-wide"><span>{props.copy.fields.subject}</span><input value={props.draft.subject} onChange={(event) => props.setDraft((value) => ({ ...value, subject: event.target.value }))} /></label><label className="field field-wide"><span>{props.copy.fields.body}</span><textarea rows={14} value={props.draft.body} onChange={(event) => props.setDraft((value) => ({ ...value, body: event.target.value }))} /></label></div></section>;
   }
 
   if (!props.current) return <div className="empty-state">{props.copy.noMessages}</div>;
 
   return (
     <>
+      <div className="drawer-titlebar">{props.copy.drawerTitle}</div>
       <div className="reading-titlebar">{props.copy.rightPaneTitle}</div>
       <div className="detail-header">
         <div><p className="detail-label">{props.copy.readingPane}</p><h3>{props.current.subject}</h3></div>

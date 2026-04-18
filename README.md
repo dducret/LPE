@@ -61,7 +61,7 @@ Le backend expose un premier modele de soumission canonique via `/api/mail/messa
 
 Toutes les couches clientes doivent utiliser le modele canonique `LPE` de soumission et de synchronisation. Aucune couche cliente ne doit ecrire une logique `Sent` ou `Outbox` parallele.
 
-Le client web `/mail/` exige une authentification utilisateur. Les identifiants sont ceux du compte cree dans l'administration; le mot de passe est hache cote serveur avec `argon2`, stocke dans `account_credentials`, puis valide via `/api/mail/auth/login` avant d'ouvrir l'interface. Apres connexion, le client charge les messages, contacts et evenements depuis `/api/mail/workspace`; la composition, l'enregistrement de brouillons, les contacts et les entrees calendrier utilisent des endpoints persistants et n'affichent plus de donnees de maquette.
+Le client web `/mail/` exige une authentification utilisateur. Les identifiants sont ceux du compte cree dans l'administration; le mot de passe est hache cote serveur avec `argon2`, stocke dans `account_credentials`, puis valide via `/api/mail/auth/login` avant d'ouvrir l'interface. Apres connexion, le client charge les messages, contacts et evenements depuis `/api/mail/workspace`; la composition, l'enregistrement, la modification, la suppression et l'expedition de brouillons, les contacts et les entrees calendrier utilisent des endpoints persistants et n'affichent plus de donnees de maquette.
 
 ### Axe IA locale
 
@@ -146,7 +146,7 @@ The backend now exposes an initial canonical submission model through `/api/mail
 
 All client layers must use the canonical `LPE` submission and synchronization model. No client layer may write its own parallel `Sent` or `Outbox` logic.
 
-The `/mail/` web client requires user authentication. Credentials are the mailbox account credentials created in the administration console; the password is hashed server-side with `argon2`, stored in `account_credentials`, and validated through `/api/mail/auth/login` before the interface opens. After sign-in, the client loads messages, contacts, and events from `/api/mail/workspace`; composition, draft saving, contacts, and calendar entries use persistent endpoints and no longer display mock seed data.
+The `/mail/` web client requires user authentication. Credentials are the mailbox account credentials created in the administration console; the password is hashed server-side with `argon2`, stored in `account_credentials`, and validated through `/api/mail/auth/login` before the interface opens. After sign-in, the client loads messages, contacts, and events from `/api/mail/workspace`; composition, draft saving, draft editing, draft deletion, draft sending, contacts, and calendar entries use persistent endpoints and no longer display mock seed data.
 
 ### Local AI direction
 

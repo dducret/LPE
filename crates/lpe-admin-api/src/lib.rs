@@ -5,7 +5,7 @@ use argon2::{
 use axum::{
     extract::{DefaultBodyLimit, Multipart, Path as AxumPath, State},
     http::{HeaderMap, StatusCode},
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use lpe_ai::{LocalModelProvider, StubLocalModelProvider};
@@ -172,6 +172,7 @@ struct EmailTraceSearchRequest {
 
 #[derive(Debug, Deserialize)]
 struct SubmitMessageRequest {
+    draft_message_id: Option<Uuid>,
     account_id: Uuid,
     source: Option<String>,
     from_display: Option<String>,
@@ -249,6 +250,10 @@ pub fn router(storage: Storage) -> Router {
         )
         .route("/mail/messages/submit", post(submit_message))
         .route("/mail/messages/draft", post(save_draft_message))
+        .route(
+            "/mail/messages/{message_id}/draft",
+            delete(delete_draft_message),
+        )
         .route("/mail/contacts", post(upsert_client_contact))
         .route("/mail/calendar/events", post(upsert_client_event))
         .route(
@@ -1056,6 +1061,31 @@ async fn save_draft_message(
     Ok(Json(draft))
 }
 
+async fn delete_draft_message(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(message_id): AxumPath<Uuid>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    storage
+        .delete_draft_message(
+            account.account_id,
+            message_id,
+            AuditEntryInput {
+                actor: account.email,
+                action: "delete-draft-message".to_string(),
+                subject: message_id.to_string(),
+            },
+        )
+        .await
+        .map_err(bad_request_error)?;
+
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
 async fn upsert_client_contact(
     State(storage): State<Storage>,
     headers: HeaderMap,
@@ -1120,6 +1150,7 @@ fn ensure_client_message_owner(
 
 fn map_submit_message_request(request: SubmitMessageRequest) -> SubmitMessageInput {
     SubmitMessageInput {
+        draft_message_id: request.draft_message_id,
         account_id: request.account_id,
         source: request.source.unwrap_or_else(|| "jmap".to_string()),
         from_display: request.from_display,

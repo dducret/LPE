@@ -1,7 +1,7 @@
 export type Section = "mail" | "calendar" | "contacts";
 export type Folder = "focused" | "inbox" | "drafts" | "sent" | "archive";
 export type Category = "priority" | "customer" | "internal";
-export type Mode = "closed" | "new" | "reply" | "forward";
+export type Mode = "closed" | "new" | "draft" | "reply" | "forward";
 
 export type Attachment = {
   id: string;

@@ -434,6 +434,7 @@ pub struct UpsertClientEventInput {
 
 #[derive(Debug, Clone)]
 pub struct SubmitMessageInput {
+    pub draft_message_id: Option<Uuid>,
     pub account_id: Uuid,
     pub source: String,
     pub from_display: Option<String>,
@@ -1806,7 +1807,7 @@ impl Storage {
             .ensure_mailbox(&mut tx, input.account_id, "drafts", "Drafts", 10, 365)
             .await?;
 
-        let message_id = Uuid::new_v4();
+        let message_id = input.draft_message_id.unwrap_or_else(Uuid::new_v4);
         let thread_id = Uuid::new_v4();
         let preview_text = preview_text(&body_text);
         let participants_normalized = participants_normalized(&from_address, &recipients);
@@ -1816,37 +1817,88 @@ impl Storage {
             .unwrap_or_else(|| format!("draft-message:{message_id}"));
         let content_hash = format!("draft:{message_id}");
 
-        sqlx::query(
-            r#"
-            INSERT INTO messages (
-                id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                received_at, sent_at, from_display, from_address, subject_normalized,
-                preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
-                submission_source, delivery_status
+        if input.draft_message_id.is_some() {
+            let updated = sqlx::query(
+                r#"
+                UPDATE messages m
+                SET
+                    internet_message_id = $5,
+                    received_at = NOW(),
+                    sent_at = NULL,
+                    from_display = $6,
+                    from_address = $7,
+                    subject_normalized = $8,
+                    preview_text = $9,
+                    size_octets = $10,
+                    mime_blob_ref = $11,
+                    submission_source = $12,
+                    delivery_status = 'draft'
+                FROM mailboxes mb
+                WHERE m.mailbox_id = mb.id
+                  AND m.tenant_id = $1
+                  AND m.account_id = $2
+                  AND m.id = $3
+                  AND mb.role = 'drafts'
+                  AND mb.id = $4
+                "#,
             )
-            VALUES (
-                $1, $2, $3, $4, $5, $6,
-                NOW(), NULL, $7, $8, $9,
-                $10, FALSE, FALSE, FALSE, $11, $12,
-                $13, 'draft'
+            .bind(DEFAULT_TENANT_ID)
+            .bind(input.account_id)
+            .bind(message_id)
+            .bind(draft_mailbox_id)
+            .bind(input.internet_message_id)
+            .bind(input.from_display.map(|value| value.trim().to_string()))
+            .bind(&from_address)
+            .bind(&subject)
+            .bind(&preview_text)
+            .bind(input.size_octets.max(0))
+            .bind(&mime_blob_ref)
+            .bind(input.source.trim().to_lowercase())
+            .execute(&mut *tx)
+            .await?;
+
+            if updated.rows_affected() == 0 {
+                bail!("draft not found");
+            }
+
+            sqlx::query("DELETE FROM message_recipients WHERE tenant_id = $1 AND message_id = $2")
+                .bind(DEFAULT_TENANT_ID)
+                .bind(message_id)
+                .execute(&mut *tx)
+                .await?;
+        } else {
+            sqlx::query(
+                r#"
+                INSERT INTO messages (
+                    id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
+                    received_at, sent_at, from_display, from_address, subject_normalized,
+                    preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
+                    submission_source, delivery_status
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5, $6,
+                    NOW(), NULL, $7, $8, $9,
+                    $10, FALSE, FALSE, FALSE, $11, $12,
+                    $13, 'draft'
+                )
+                "#,
             )
-            "#,
-        )
-        .bind(message_id)
-        .bind(DEFAULT_TENANT_ID)
-        .bind(input.account_id)
-        .bind(draft_mailbox_id)
-        .bind(thread_id)
-        .bind(input.internet_message_id)
-        .bind(input.from_display.map(|value| value.trim().to_string()))
-        .bind(&from_address)
-        .bind(&subject)
-        .bind(&preview_text)
-        .bind(input.size_octets.max(0))
-        .bind(&mime_blob_ref)
-        .bind(input.source.trim().to_lowercase())
-        .execute(&mut *tx)
-        .await?;
+            .bind(message_id)
+            .bind(DEFAULT_TENANT_ID)
+            .bind(input.account_id)
+            .bind(draft_mailbox_id)
+            .bind(thread_id)
+            .bind(input.internet_message_id)
+            .bind(input.from_display.map(|value| value.trim().to_string()))
+            .bind(&from_address)
+            .bind(&subject)
+            .bind(&preview_text)
+            .bind(input.size_octets.max(0))
+            .bind(&mime_blob_ref)
+            .bind(input.source.trim().to_lowercase())
+            .execute(&mut *tx)
+            .await?;
+        }
 
         sqlx::query(
             r#"
@@ -1855,6 +1907,12 @@ impl Storage {
                 language_code, content_hash, search_vector
             )
             VALUES ($1, $2, $3, $4, NULL, $5, to_tsvector('simple', $6))
+            ON CONFLICT (message_id) DO UPDATE SET
+                body_text = EXCLUDED.body_text,
+                body_html_sanitized = EXCLUDED.body_html_sanitized,
+                participants_normalized = EXCLUDED.participants_normalized,
+                content_hash = EXCLUDED.content_hash,
+                search_vector = EXCLUDED.search_vector
             "#,
         )
         .bind(message_id)
@@ -2132,6 +2190,11 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
+        if let Some(draft_message_id) = input.draft_message_id {
+            self.delete_draft_message_in_tx(&mut tx, input.account_id, draft_message_id)
+                .await?;
+        }
+
         self.insert_audit(&mut tx, audit).await?;
         tx.commit().await?;
 
@@ -2142,6 +2205,20 @@ impl Storage {
             outbound_queue_id,
             delivery_status: "queued".to_string(),
         })
+    }
+
+    pub async fn delete_draft_message(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        self.delete_draft_message_in_tx(&mut tx, account_id, message_id)
+            .await?;
+        self.insert_audit(&mut tx, audit).await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn search_email_trace(
@@ -2712,6 +2789,36 @@ impl Storage {
 
         if account_exists.is_none() {
             bail!("account not found");
+        }
+
+        Ok(())
+    }
+
+    async fn delete_draft_message_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<()> {
+        let deleted = sqlx::query(
+            r#"
+            DELETE FROM messages m
+            USING mailboxes mb
+            WHERE m.mailbox_id = mb.id
+              AND m.tenant_id = $1
+              AND m.account_id = $2
+              AND m.id = $3
+              AND mb.role = 'drafts'
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(message_id)
+        .execute(&mut **tx)
+        .await?;
+
+        if deleted.rows_affected() == 0 {
+            bail!("draft not found");
         }
 
         Ok(())

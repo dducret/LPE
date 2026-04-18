@@ -239,6 +239,7 @@ export function App() {
                   onCancel={workspace.closeComposer}
                   onSaveDraft={() => void workspace.saveMessage(true)}
                   onSend={() => void workspace.saveMessage(false)}
+                  onDeleteDraft={() => void workspace.deleteDraft()}
                 />
               ) : null}
 

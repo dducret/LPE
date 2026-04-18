@@ -34,8 +34,9 @@ function splitRecipients(value: string) {
     .map((address) => ({ address }));
 }
 
-function buildMessagePayload(identity: ClientIdentity, draft: MessageDraft) {
+function buildMessagePayload(identity: ClientIdentity, draft: MessageDraft, draftMessageId: string | null) {
   return {
+    draft_message_id: draftMessageId,
     account_id: identity.account_id,
     source: "web-client",
     from_display: identity.display_name,
@@ -49,6 +50,15 @@ function buildMessagePayload(identity: ClientIdentity, draft: MessageDraft) {
     internet_message_id: null,
     mime_blob_ref: null,
     size_octets: new Blob([draft.subject, draft.body]).size
+  };
+}
+
+function draftFromMessage(message: Message): MessageDraft {
+  return {
+    to: message.to,
+    cc: message.cc,
+    subject: message.subject,
+    body: message.body.join("\n")
   };
 }
 
@@ -67,6 +77,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState("");
   const [draft, setDraft] = React.useState(blankDraft());
+  const [draftMessageId, setDraftMessageId] = React.useState<string | null>(null);
   const [eventForm, setEventForm] = React.useState(blankEvent());
   const [contactForm, setContactForm] = React.useState(blankContact());
 
@@ -118,6 +129,8 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   const openComposer = React.useCallback((next: Mode, item?: Message) => {
     setSection("mail");
     setMode(next);
+    setDraftMessageId(next === "draft" && item ? item.id : null);
+    if (next === "draft" && item) return setDraft(draftFromMessage(item));
     if (!item || next === "new") return setDraft(blankDraft());
     if (next === "reply") {
       return setDraft({
@@ -135,7 +148,20 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     });
   }, []);
 
-  const closeComposer = React.useCallback(() => setMode("closed"), []);
+  const closeComposer = React.useCallback(() => {
+    setMode("closed");
+    setDraftMessageId(null);
+  }, []);
+
+  const selectMessage = React.useCallback((id: string) => {
+    const item = mail.find((message) => message.id === id);
+    setMessageId(id);
+    if (item?.folder === "drafts") {
+      openComposer("draft", item);
+    } else {
+      closeComposer();
+    }
+  }, [closeComposer, mail, openComposer]);
 
   const saveMessage = React.useCallback(async (asDraft: boolean) => {
     if (!authToken || !identity) return;
@@ -145,17 +171,32 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     try {
       await apiJson(asDraft ? "mail/messages/draft" : "mail/messages/submit", authToken, {
         method: "POST",
-        body: JSON.stringify(buildMessagePayload(identity, draft))
+        body: JSON.stringify(buildMessagePayload(identity, draft, draftMessageId))
       });
       setFolder(asDraft ? "drafts" : "sent");
       setMode("closed");
+      setDraftMessageId(null);
       setDraft(blankDraft());
       await loadWorkspace();
       pushNotice(asDraft ? copy.noticeDraft : copy.noticeSent);
     } catch {
       pushNotice(copy.saveError);
     }
-  }, [authToken, copy, draft, identity, loadWorkspace, pushNotice]);
+  }, [authToken, copy, draft, draftMessageId, identity, loadWorkspace, pushNotice]);
+
+  const deleteDraft = React.useCallback(async () => {
+    if (!authToken || !draftMessageId) return;
+    try {
+      await apiJson(`mail/messages/${draftMessageId}/draft`, authToken, { method: "DELETE" });
+      setMode("closed");
+      setDraftMessageId(null);
+      setDraft(blankDraft());
+      await loadWorkspace();
+      pushNotice(copy.noticeDraftDeleted);
+    } catch {
+      pushNotice(copy.saveError);
+    }
+  }, [authToken, copy.noticeDraftDeleted, copy.saveError, draftMessageId, loadWorkspace, pushNotice]);
 
   const saveContact = React.useCallback(async () => {
     if (!authToken) return;
@@ -210,7 +251,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     events,
     contacts,
     messageId,
-    setMessageId,
+    setMessageId: selectMessage,
     eventId,
     setEventId,
     contactId,
@@ -231,6 +272,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     currentContact,
     openComposer,
     saveMessage,
+    deleteDraft,
     saveContact,
     saveEvent,
     resetContactForm,
