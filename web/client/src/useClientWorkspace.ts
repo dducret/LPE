@@ -64,7 +64,7 @@ function draftFromMessage(message: Message): MessageDraft {
 
 export function useClientWorkspace(copy: ClientCopy, authToken: string | null, identity: ClientIdentity | null) {
   const [section, setSection] = React.useState<Section>("mail");
-  const [folder, setFolder] = React.useState<Folder>("focused");
+  const [folder, setFolder] = React.useState<Folder>("inbox");
   const [query, setQuery] = React.useState("");
   const [mail, setMail] = React.useState<Message[]>([]);
   const [events, setEvents] = React.useState<EventItem[]>([]);
@@ -109,14 +109,30 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
 
   const counts = React.useMemo(() => countFolders(mail), [mail]);
   const filtered = React.useMemo(() => filterMessages(mail, folder, query), [folder, mail, query]);
+  const filteredEvents = React.useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return events;
+    return events.filter((item) => [item.title, item.location, item.attendees, item.notes, item.date, item.time].join(" ").toLowerCase().includes(needle));
+  }, [events, query]);
+  const filteredContacts = React.useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return contacts;
+    return contacts.filter((item) => [item.name, item.role, item.email, item.phone, item.team, item.notes].join(" ").toLowerCase().includes(needle));
+  }, [contacts, query]);
 
   React.useEffect(() => {
     if (messageId && !filtered.some((item) => item.id === messageId)) setMessageId("");
   }, [filtered, messageId]);
+  React.useEffect(() => {
+    if (eventId && !filteredEvents.some((item) => item.id === eventId)) setEventId("");
+  }, [eventId, filteredEvents]);
+  React.useEffect(() => {
+    if (contactId && !filteredContacts.some((item) => item.id === contactId)) setContactId("");
+  }, [contactId, filteredContacts]);
 
   const current = filtered.find((item) => item.id === messageId) ?? null;
-  const currentEvent = events.find((item) => item.id === eventId);
-  const currentContact = contacts.find((item) => item.id === contactId);
+  const currentEvent = filteredEvents.find((item) => item.id === eventId) ?? events.find((item) => item.id === eventId);
+  const currentContact = filteredContacts.find((item) => item.id === contactId) ?? contacts.find((item) => item.id === contactId);
 
   React.useEffect(() => setEventForm(blankEvent(currentEvent)), [currentEvent]);
   React.useEffect(() => setContactForm(blankContact(currentContact)), [currentContact]);
@@ -130,6 +146,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     setSection("mail");
     setMode(next);
     setDraftMessageId(next === "draft" && item ? item.id : null);
+    setMessageId(item?.id ?? "");
     if (next === "draft" && item) return setDraft(draftFromMessage(item));
     if (!item || next === "new") return setDraft(blankDraft());
     if (next === "reply") {
@@ -151,6 +168,8 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   const closeComposer = React.useCallback(() => {
     setMode("closed");
     setDraftMessageId(null);
+    setDraft(blankDraft());
+    setMessageId("");
   }, []);
 
   const selectMessage = React.useCallback((id: string) => {
@@ -159,9 +178,10 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     if (item?.folder === "drafts") {
       openComposer("draft", item);
     } else {
-      closeComposer();
+      setMode("closed");
+      setDraftMessageId(null);
     }
-  }, [closeComposer, mail, openComposer]);
+  }, [mail, openComposer]);
 
   const saveMessage = React.useCallback(async (asDraft: boolean) => {
     if (!authToken || !identity) return;
@@ -173,9 +193,10 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
         method: "POST",
         body: JSON.stringify(buildMessagePayload(identity, draft, draftMessageId))
       });
-      setFolder(asDraft ? "drafts" : "sent");
+      setFolder(asDraft ? "drafts" : draftMessageId ? "inbox" : "sent");
       setMode("closed");
       setDraftMessageId(null);
+      setMessageId("");
       setDraft(blankDraft());
       await loadWorkspace();
       pushNotice(asDraft ? copy.noticeDraft : copy.noticeSent);
@@ -199,6 +220,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       await apiJson(`mail/messages/${draftMessageId}/draft`, authToken, { method: "DELETE" });
       setMode("closed");
       setDraftMessageId(null);
+      setMessageId("");
       setDraft(blankDraft());
       await loadWorkspace();
       pushNotice(copy.noticeDraftDeleted);
@@ -276,6 +298,8 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     setContactForm,
     counts,
     filtered,
+    filteredEvents,
+    filteredContacts,
     current,
     currentEvent,
     currentContact,

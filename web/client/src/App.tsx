@@ -151,6 +151,11 @@ export function App() {
   }
 
   const showMailPane = workspace.section === "mail" && (workspace.mode !== "closed" || workspace.current !== null);
+  const visibleCount = workspace.section === "mail"
+    ? workspace.filtered.length
+    : workspace.section === "calendar"
+      ? workspace.filteredEvents.length
+      : workspace.filteredContacts.length;
 
   return (
     <main className="app-shell">
@@ -217,7 +222,7 @@ export function App() {
           <header className="workspace-meta">
             <div className="workspace-meta-left">
               <span className="status-pill">{copy.sections[workspace.section]}</span>
-              <span className="status-pill is-muted">{workspace.filtered.length} visible</span>
+              <span className="status-pill is-muted">{visibleCount} visible</span>
               <span className="workspace-caption">{copy.productSubtitle}</span>
             </div>
             <div className="workspace-meta-right">
@@ -242,8 +247,8 @@ export function App() {
               folder={workspace.folder}
               mode={workspace.mode}
               filteredMessages={workspace.filtered}
-              events={workspace.events}
-              contacts={workspace.contacts}
+              events={workspace.filteredEvents}
+              contacts={workspace.filteredContacts}
               messageId={workspace.messageId}
               eventId={workspace.eventId}
               contactId={workspace.contactId}
