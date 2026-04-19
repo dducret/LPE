@@ -103,6 +103,21 @@ Les imports `PST` peuvent etre envoyes depuis le navigateur. Le service valide d
 
 La premiere connexion ne cree plus d'administrateur automatiquement. Le bootstrap admin est maintenant explicite: definir temporairement `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME` (optionnel) et `LPE_BOOTSTRAP_ADMIN_PASSWORD` avec un mot de passe fort d'au moins `12` caracteres, puis executer `lpe-cli bootstrap-admin` sur le serveur coeur avant exposition de la console. Si un administrateur existe deja, la commande echoue sans modifier l'etat.
 
+Le back office supporte maintenant un premier login federé `OIDC` pour les administrateurs. Le paramettrage se fait depuis la page `Security` de la console et requiert:
+
+- activation explicite du login `OIDC`
+- libelle fournisseur
+- `issuer URL`
+- endpoint d'autorisation
+- endpoint token
+- endpoint `userinfo`
+- `client ID`
+- `client secret`
+- scopes
+- noms de claims pour sujet, email et display name
+
+Le login federé n'elimine pas le login mot de passe local par defaut. Ce dernier reste recommande pour bootstrap, recuperation et break-glass. Le modele actuel n'autorise pas encore le provisioning automatique d'administrateurs depuis l'`IdP`: il faut d'abord creer l'administrateur dans `LPE`, puis activer l'auto-link par email pour permettre le premier rattachement a un administrateur existant portant la meme adresse. Les connexions federées suivantes reutilisent ensuite l'identite persistée.
+
 Exemple complet:
 
 ```bash
@@ -260,6 +275,21 @@ The administration console now stores its accounts, account passwords, mailboxes
 `PST` imports can be uploaded from the browser. The service validates each incoming file with Google `Magika` before storing it in `LPE_PST_IMPORT_DIR`, defaulting to `/var/lib/lpe/imports`, and then creates the `PST` import request with the resulting server path. The maximum accepted API upload size is configured through `LPE_PST_UPLOAD_MAX_BYTES`, defaulting to `21474836480` bytes. The `nginx` reverse proxy is aligned through `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, defaulting to `20g`. The binary path is configured through `LPE_MAGIKA_BIN`, defaulting to `/opt/lpe/bin/magika`, and the minimum confidence threshold through `LPE_MAGIKA_MIN_SCORE`.
 
 The first sign-in no longer creates an administrator automatically. Admin bootstrap is now explicit: set `LPE_BOOTSTRAP_ADMIN_EMAIL`, optional `LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME`, and `LPE_BOOTSTRAP_ADMIN_PASSWORD` temporarily with a strong password of at least `12` characters, then run `lpe-cli bootstrap-admin` on the core server before exposing the console. If an administrator already exists, the command fails without changing the state.
+
+The back office now also supports a first federated `OIDC` login for administrators. Configuration is done from the console `Security` page and requires:
+
+- explicit `OIDC` login enablement
+- provider label
+- `issuer URL`
+- authorization endpoint
+- token endpoint
+- `userinfo` endpoint
+- `client ID`
+- `client secret`
+- scopes
+- claim names for subject, email, and display name
+
+Federated login does not remove local password login by default. Local password login remains recommended for bootstrap, recovery, and break-glass access. The current model still does not allow automatic administrator provisioning from the `IdP`: the administrator must first exist in `LPE`, then email auto-link can be enabled to allow the first binding for an already existing administrator with the same address. Later federated logins then reuse the persisted identity mapping.
 
 Complete example:
 

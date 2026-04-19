@@ -9,7 +9,7 @@ use lpe_magika::{
     read_validation_record, ExpectedKind, IngressContext, PolicyDecision, ValidationRequest,
     Validator,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Pool, Postgres, Row};
@@ -135,6 +135,7 @@ pub struct ServerAdministrator {
     pub display_name: String,
     pub role: String,
     pub rights_summary: String,
+    pub permissions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -145,6 +146,8 @@ pub struct AuthenticatedAdmin {
     pub domain_id: Option<Uuid>,
     pub domain_name: String,
     pub rights_summary: String,
+    pub permissions: Vec<String>,
+    pub auth_method: String,
     pub expires_at: String,
 }
 
@@ -166,6 +169,19 @@ pub struct SecuritySettings {
     pub mfa_required_for_admins: bool,
     pub session_timeout_minutes: u32,
     pub audit_retention_days: u32,
+    pub oidc_login_enabled: bool,
+    pub oidc_provider_label: String,
+    pub oidc_auto_link_by_email: bool,
+    pub oidc_issuer_url: String,
+    pub oidc_authorization_endpoint: String,
+    pub oidc_token_endpoint: String,
+    pub oidc_userinfo_endpoint: String,
+    pub oidc_client_id: String,
+    pub oidc_client_secret: String,
+    pub oidc_scopes: String,
+    pub oidc_claim_email: String,
+    pub oidc_claim_display_name: String,
+    pub oidc_claim_subject: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -291,6 +307,7 @@ pub struct NewServerAdministrator {
     pub display_name: String,
     pub role: String,
     pub rights_summary: String,
+    pub permissions: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -315,6 +332,15 @@ pub struct AdminLogin {
     pub domain_id: Option<Uuid>,
     pub domain_name: String,
     pub rights_summary: String,
+    pub permissions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminOidcClaims {
+    pub issuer_url: String,
+    pub subject: String,
+    pub email: String,
+    pub display_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -880,6 +906,7 @@ struct ServerAdministratorRow {
     display_name: String,
     role: String,
     rights_summary: String,
+    permissions_json: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -892,6 +919,7 @@ struct AdminLoginRow {
     domain_id: Option<Uuid>,
     domain_name: Option<String>,
     rights_summary: Option<String>,
+    permissions_json: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -911,6 +939,8 @@ struct AuthenticatedAdminRow {
     domain_id: Option<Uuid>,
     domain_name: Option<String>,
     rights_summary: Option<String>,
+    permissions_json: Option<String>,
+    auth_method: String,
     expires_at: String,
 }
 
@@ -1589,12 +1619,17 @@ impl Storage {
         audit: AuditEntryInput,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
+        let normalized_permissions = normalize_admin_permissions(
+            &input.role,
+            &input.rights_summary,
+            &input.permissions,
+        );
         sqlx::query(
             r#"
             INSERT INTO server_administrators (
-                id, tenant_id, domain_id, email, display_name, role, rights_summary
+                id, tenant_id, domain_id, email, display_name, role, rights_summary, permissions_json
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             "#,
         )
         .bind(Uuid::new_v4())
@@ -1603,7 +1638,8 @@ impl Storage {
         .bind(input.email.trim().to_lowercase())
         .bind(input.display_name.trim())
         .bind(input.role.trim())
-        .bind(input.rights_summary.trim())
+        .bind(permission_summary(&normalized_permissions))
+        .bind(serde_json::to_string(&normalized_permissions)?)
         .execute(&mut *tx)
         .await?;
 
@@ -1641,6 +1677,124 @@ impl Storage {
 
         self.insert_audit(&mut tx, audit).await?;
         tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn ensure_admin_credential_stub(&self, email: &str) -> Result<()> {
+        let email = normalize_email(email);
+        if email.is_empty() {
+            bail!("admin credential email is required");
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO admin_credentials (email, tenant_id, password_hash, status)
+            VALUES ($1, $2, 'federated-only', 'active')
+            ON CONFLICT (email) DO UPDATE SET
+                status = 'active',
+                updated_at = NOW()
+            "#,
+        )
+        .bind(email)
+        .bind(DEFAULT_TENANT_ID)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn find_server_administrator_by_email(
+        &self,
+        email: &str,
+    ) -> Result<Option<ServerAdministrator>> {
+        let email = normalize_email(email);
+        let row = sqlx::query_as::<_, ServerAdministratorRow>(
+            r#"
+            SELECT
+                sa.id,
+                sa.domain_id,
+                d.name AS domain_name,
+                sa.email,
+                sa.display_name,
+                sa.role,
+                sa.rights_summary,
+                sa.permissions_json
+            FROM server_administrators sa
+            LEFT JOIN domains d ON d.id = sa.domain_id
+            WHERE sa.tenant_id = $1
+              AND lower(sa.email) = lower($2)
+            ORDER BY sa.created_at ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(email)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| {
+            let permissions = permissions_from_storage(
+                &row.role,
+                Some(&row.rights_summary),
+                Some(&row.permissions_json),
+            );
+            ServerAdministrator {
+                id: row.id,
+                domain_id: row.domain_id,
+                domain_name: row.domain_name.unwrap_or_else(|| "All domains".to_string()),
+                email: row.email,
+                display_name: row.display_name,
+                role: row.role,
+                rights_summary: permission_summary(&permissions),
+                permissions,
+            }
+        }))
+    }
+
+    pub async fn find_admin_oidc_identity(
+        &self,
+        issuer_url: &str,
+        subject: &str,
+    ) -> Result<Option<String>> {
+        let email = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT admin_email
+            FROM admin_oidc_identities
+            WHERE tenant_id = $1 AND issuer_url = $2 AND subject = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(issuer_url.trim())
+        .bind(subject.trim())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(email)
+    }
+
+    pub async fn upsert_admin_oidc_identity(
+        &self,
+        claims: &AdminOidcClaims,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO admin_oidc_identities (
+                tenant_id, issuer_url, subject, admin_email, created_at, last_login_at
+            )
+            VALUES ($1, $2, $3, $4, NOW(), NOW())
+            ON CONFLICT (tenant_id, issuer_url, subject) DO UPDATE SET
+                admin_email = EXCLUDED.admin_email,
+                last_login_at = NOW()
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(claims.issuer_url.trim())
+        .bind(claims.subject.trim())
+        .bind(normalize_email(&claims.email))
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -1738,7 +1892,8 @@ impl Storage {
                 sa.role,
                 sa.domain_id,
                 d.name AS domain_name,
-                sa.rights_summary
+                sa.rights_summary,
+                sa.permissions_json
             FROM admin_credentials ac
             LEFT JOIN server_administrators sa
                 ON sa.tenant_id = ac.tenant_id AND lower(sa.email) = lower(ac.email)
@@ -1753,19 +1908,26 @@ impl Storage {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|row| AdminLogin {
-            email: row.email,
-            password_hash: row.password_hash,
-            status: row.status,
-            display_name: row
-                .display_name
-                .unwrap_or_else(|| "LPE Administrator".to_string()),
-            role: row.role.unwrap_or_else(|| "server-admin".to_string()),
-            domain_id: row.domain_id,
-            domain_name: row.domain_name.unwrap_or_else(|| "All domains".to_string()),
-            rights_summary: row.rights_summary.unwrap_or_else(|| {
-                "server, domains, accounts, aliases, policies, antispam, pst, audit".to_string()
-            }),
+        Ok(row.map(|row| {
+            let role = row.role.unwrap_or_else(|| "server-admin".to_string());
+            let permissions = permissions_from_storage(
+                &role,
+                row.rights_summary.as_deref(),
+                row.permissions_json.as_deref(),
+            );
+            AdminLogin {
+                email: row.email,
+                password_hash: row.password_hash,
+                status: row.status,
+                display_name: row
+                    .display_name
+                    .unwrap_or_else(|| "LPE Administrator".to_string()),
+                role,
+                domain_id: row.domain_id,
+                domain_name: row.domain_name.unwrap_or_else(|| "All domains".to_string()),
+                rights_summary: permission_summary(&permissions),
+                permissions,
+            }
         }))
     }
 
@@ -1774,17 +1936,19 @@ impl Storage {
         token: &str,
         email: &str,
         session_timeout_minutes: u32,
+        auth_method: &str,
     ) -> Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO admin_sessions (id, tenant_id, token, admin_email, expires_at)
-            VALUES ($1, $2, $3, $4, NOW() + ($5::TEXT || ' minutes')::INTERVAL)
+            INSERT INTO admin_sessions (id, tenant_id, token, admin_email, auth_method, expires_at)
+            VALUES ($1, $2, $3, $4, $5, NOW() + ($6::TEXT || ' minutes')::INTERVAL)
             "#,
         )
         .bind(Uuid::new_v4())
         .bind(DEFAULT_TENANT_ID)
         .bind(token)
         .bind(normalize_email(email))
+        .bind(auth_method.trim().to_lowercase())
         .bind(session_timeout_minutes.max(5) as i32)
         .execute(&self.pool)
         .await?;
@@ -1857,6 +2021,8 @@ impl Storage {
                 sa.domain_id,
                 d.name AS domain_name,
                 sa.rights_summary,
+                sa.permissions_json,
+                s.auth_method,
                 to_char(s.expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS expires_at
             FROM admin_sessions s
             JOIN admin_credentials ac ON ac.email = s.admin_email
@@ -1876,18 +2042,26 @@ impl Storage {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|row| AuthenticatedAdmin {
-            email: row.email,
-            display_name: row
-                .display_name
-                .unwrap_or_else(|| "LPE Administrator".to_string()),
-            role: row.role.unwrap_or_else(|| "server-admin".to_string()),
-            domain_id: row.domain_id,
-            domain_name: row.domain_name.unwrap_or_else(|| "All domains".to_string()),
-            rights_summary: row.rights_summary.unwrap_or_else(|| {
-                "server, domains, accounts, aliases, policies, antispam, pst, audit".to_string()
-            }),
-            expires_at: row.expires_at,
+        Ok(row.map(|row| {
+            let role = row.role.unwrap_or_else(|| "server-admin".to_string());
+            let permissions = permissions_from_storage(
+                &role,
+                row.rights_summary.as_deref(),
+                row.permissions_json.as_deref(),
+            );
+            AuthenticatedAdmin {
+                email: row.email,
+                display_name: row
+                    .display_name
+                    .unwrap_or_else(|| "LPE Administrator".to_string()),
+                role,
+                domain_id: row.domain_id,
+                domain_name: row.domain_name.unwrap_or_else(|| "All domains".to_string()),
+                rights_summary: permission_summary(&permissions),
+                permissions,
+                auth_method: row.auth_method,
+                expires_at: row.expires_at,
+            }
         }))
     }
 
@@ -2022,14 +2196,18 @@ impl Storage {
             r#"
             INSERT INTO security_settings (
                 tenant_id, password_login_enabled, mfa_required_for_admins,
-                session_timeout_minutes, audit_retention_days
+                session_timeout_minutes, audit_retention_days, oidc_login_enabled,
+                oidc_provider_label, oidc_auto_link_by_email
             )
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (tenant_id) DO UPDATE SET
                 password_login_enabled = EXCLUDED.password_login_enabled,
                 mfa_required_for_admins = EXCLUDED.mfa_required_for_admins,
                 session_timeout_minutes = EXCLUDED.session_timeout_minutes,
                 audit_retention_days = EXCLUDED.audit_retention_days,
+                oidc_login_enabled = EXCLUDED.oidc_login_enabled,
+                oidc_provider_label = EXCLUDED.oidc_provider_label,
+                oidc_auto_link_by_email = EXCLUDED.oidc_auto_link_by_email,
                 updated_at = NOW()
             "#,
         )
@@ -2038,6 +2216,53 @@ impl Storage {
         .bind(update.security_settings.mfa_required_for_admins)
         .bind(update.security_settings.session_timeout_minutes as i32)
         .bind(update.security_settings.audit_retention_days as i32)
+        .bind(update.security_settings.oidc_login_enabled)
+        .bind(update.security_settings.oidc_provider_label)
+        .bind(update.security_settings.oidc_auto_link_by_email)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO admin_oidc_config (
+                tenant_id,
+                issuer_url,
+                authorization_endpoint,
+                token_endpoint,
+                userinfo_endpoint,
+                client_id,
+                client_secret,
+                scopes,
+                claim_email,
+                claim_display_name,
+                claim_subject
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (tenant_id) DO UPDATE SET
+                issuer_url = EXCLUDED.issuer_url,
+                authorization_endpoint = EXCLUDED.authorization_endpoint,
+                token_endpoint = EXCLUDED.token_endpoint,
+                userinfo_endpoint = EXCLUDED.userinfo_endpoint,
+                client_id = EXCLUDED.client_id,
+                client_secret = EXCLUDED.client_secret,
+                scopes = EXCLUDED.scopes,
+                claim_email = EXCLUDED.claim_email,
+                claim_display_name = EXCLUDED.claim_display_name,
+                claim_subject = EXCLUDED.claim_subject,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(update.security_settings.oidc_issuer_url)
+        .bind(update.security_settings.oidc_authorization_endpoint)
+        .bind(update.security_settings.oidc_token_endpoint)
+        .bind(update.security_settings.oidc_userinfo_endpoint)
+        .bind(update.security_settings.oidc_client_id)
+        .bind(update.security_settings.oidc_client_secret)
+        .bind(update.security_settings.oidc_scopes)
+        .bind(update.security_settings.oidc_claim_email)
+        .bind(update.security_settings.oidc_claim_display_name)
+        .bind(update.security_settings.oidc_claim_subject)
         .execute(&mut *tx)
         .await?;
 
@@ -5253,9 +5478,27 @@ impl Storage {
     async fn fetch_security_settings(&self) -> Result<SecuritySettings> {
         let row = sqlx::query(
             r#"
-            SELECT password_login_enabled, mfa_required_for_admins, session_timeout_minutes, audit_retention_days
-            FROM security_settings
-            WHERE tenant_id = $1
+            SELECT
+                s.password_login_enabled,
+                s.mfa_required_for_admins,
+                s.session_timeout_minutes,
+                s.audit_retention_days,
+                s.oidc_login_enabled,
+                s.oidc_provider_label,
+                s.oidc_auto_link_by_email,
+                c.issuer_url,
+                c.authorization_endpoint,
+                c.token_endpoint,
+                c.userinfo_endpoint,
+                c.client_id,
+                c.client_secret,
+                c.scopes,
+                c.claim_email,
+                c.claim_display_name,
+                c.claim_subject
+            FROM security_settings s
+            LEFT JOIN admin_oidc_config c ON c.tenant_id = s.tenant_id
+            WHERE s.tenant_id = $1
             "#,
         )
         .bind(DEFAULT_TENANT_ID)
@@ -5268,12 +5511,58 @@ impl Storage {
                 mfa_required_for_admins: row.try_get("mfa_required_for_admins")?,
                 session_timeout_minutes: row.try_get::<i32, _>("session_timeout_minutes")? as u32,
                 audit_retention_days: row.try_get::<i32, _>("audit_retention_days")? as u32,
+                oidc_login_enabled: row.try_get("oidc_login_enabled")?,
+                oidc_provider_label: row.try_get("oidc_provider_label")?,
+                oidc_auto_link_by_email: row.try_get("oidc_auto_link_by_email")?,
+                oidc_issuer_url: row
+                    .try_get::<Option<String>, _>("issuer_url")?
+                    .unwrap_or_default(),
+                oidc_authorization_endpoint: row
+                    .try_get::<Option<String>, _>("authorization_endpoint")?
+                    .unwrap_or_default(),
+                oidc_token_endpoint: row
+                    .try_get::<Option<String>, _>("token_endpoint")?
+                    .unwrap_or_default(),
+                oidc_userinfo_endpoint: row
+                    .try_get::<Option<String>, _>("userinfo_endpoint")?
+                    .unwrap_or_default(),
+                oidc_client_id: row
+                    .try_get::<Option<String>, _>("client_id")?
+                    .unwrap_or_default(),
+                oidc_client_secret: row
+                    .try_get::<Option<String>, _>("client_secret")?
+                    .unwrap_or_default(),
+                oidc_scopes: row
+                    .try_get::<Option<String>, _>("scopes")?
+                    .unwrap_or_else(|| "openid profile email".to_string()),
+                oidc_claim_email: row
+                    .try_get::<Option<String>, _>("claim_email")?
+                    .unwrap_or_else(|| "email".to_string()),
+                oidc_claim_display_name: row
+                    .try_get::<Option<String>, _>("claim_display_name")?
+                    .unwrap_or_else(|| "name".to_string()),
+                oidc_claim_subject: row
+                    .try_get::<Option<String>, _>("claim_subject")?
+                    .unwrap_or_else(|| "sub".to_string()),
             },
             None => SecuritySettings {
                 password_login_enabled: true,
                 mfa_required_for_admins: true,
                 session_timeout_minutes: 45,
                 audit_retention_days: 365,
+                oidc_login_enabled: false,
+                oidc_provider_label: "Corporate SSO".to_string(),
+                oidc_auto_link_by_email: true,
+                oidc_issuer_url: String::new(),
+                oidc_authorization_endpoint: String::new(),
+                oidc_token_endpoint: String::new(),
+                oidc_userinfo_endpoint: String::new(),
+                oidc_client_id: String::new(),
+                oidc_client_secret: String::new(),
+                oidc_scopes: "openid profile email".to_string(),
+                oidc_claim_email: "email".to_string(),
+                oidc_claim_display_name: "name".to_string(),
+                oidc_claim_subject: "sub".to_string(),
             },
         })
     }
@@ -5347,7 +5636,8 @@ impl Storage {
                 sa.email,
                 sa.display_name,
                 sa.role,
-                sa.rights_summary
+                sa.rights_summary,
+                sa.permissions_json
             FROM server_administrators sa
             LEFT JOIN domains d ON d.id = sa.domain_id
             WHERE sa.tenant_id = $1
@@ -5360,14 +5650,22 @@ impl Storage {
 
         Ok(rows
             .into_iter()
-            .map(|row| ServerAdministrator {
-                id: row.id,
-                domain_id: row.domain_id,
-                domain_name: row.domain_name.unwrap_or_else(|| "All domains".to_string()),
-                email: row.email,
-                display_name: row.display_name,
-                role: row.role,
-                rights_summary: row.rights_summary,
+            .map(|row| {
+                let permissions = permissions_from_storage(
+                    &row.role,
+                    Some(&row.rights_summary),
+                    Some(&row.permissions_json),
+                );
+                ServerAdministrator {
+                    id: row.id,
+                    domain_id: row.domain_id,
+                    domain_name: row.domain_name.unwrap_or_else(|| "All domains".to_string()),
+                    email: row.email,
+                    display_name: row.display_name,
+                    role: row.role,
+                    rights_summary: permission_summary(&permissions),
+                    permissions,
+                }
             })
             .collect())
     }
@@ -6183,6 +6481,95 @@ fn client_folder(role: &str) -> String {
     .to_string()
 }
 
+fn permissions_from_storage(
+    role: &str,
+    rights_summary: Option<&str>,
+    permissions_json: Option<&str>,
+) -> Vec<String> {
+    let explicit = permissions_json
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+        .unwrap_or_default();
+    normalize_admin_permissions(role, rights_summary.unwrap_or_default(), &explicit)
+}
+
+fn normalize_admin_permissions(role: &str, rights_summary: &str, explicit: &[String]) -> Vec<String> {
+    let mut permissions = default_permissions_for_role(role);
+    permissions.extend(split_permissions(rights_summary));
+    permissions.extend(
+        explicit
+            .iter()
+            .map(|permission| permission.trim().to_lowercase())
+            .filter(|permission| !permission.is_empty()),
+    );
+    if !permissions.is_empty() {
+        permissions.push("dashboard".to_string());
+    }
+    permissions.sort();
+    permissions.dedup();
+    permissions
+}
+
+fn permission_summary(permissions: &[String]) -> String {
+    permissions.join(", ")
+}
+
+fn split_permissions(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|entry| entry.trim().to_lowercase())
+        .filter(|entry| !entry.is_empty())
+        .collect()
+}
+
+fn default_permissions_for_role(role: &str) -> Vec<String> {
+    match role.trim().to_lowercase().as_str() {
+        "server-admin" | "super-admin" => vec!["*".to_string()],
+        "tenant-admin" => vec![
+            "dashboard",
+            "domains",
+            "accounts",
+            "aliases",
+            "admins",
+            "policies",
+            "security",
+            "ai",
+            "antispam",
+            "pst",
+            "audit",
+            "mail",
+            "operations",
+            "protocols",
+        ]
+        .into_iter()
+        .map(ToString::to_string)
+        .collect(),
+        "domain-admin" => vec![
+            "dashboard",
+            "domains",
+            "accounts",
+            "aliases",
+            "admins",
+            "mail",
+            "pst",
+        ]
+        .into_iter()
+        .map(ToString::to_string)
+        .collect(),
+        "compliance-admin" => vec!["dashboard", "audit", "policies"]
+            .into_iter()
+            .map(ToString::to_string)
+            .collect(),
+        "helpdesk" | "support" => vec!["dashboard", "accounts", "mail"]
+            .into_iter()
+            .map(ToString::to_string)
+            .collect(),
+        "transport-operator" => vec!["dashboard", "antispam", "operations", "protocols"]
+            .into_iter()
+            .map(ToString::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 fn client_message_tags(role: &str, delivery_status: &str) -> Vec<String> {
     if role == "drafts" || delivery_status == "draft" {
         return vec!["Draft".to_string()];
@@ -6352,9 +6739,10 @@ fn participants_normalized(
 #[cfg(test)]
 mod tests {
     use super::{
-        domain_from_email, normalize_bcc_recipients, normalize_task_status,
-        normalize_visible_recipients, participants_normalized, validate_pst_import_path,
-        SubmitMessageInput, SubmittedRecipientInput,
+        default_permissions_for_role, domain_from_email, normalize_admin_permissions,
+        normalize_bcc_recipients, normalize_task_status, normalize_visible_recipients,
+        participants_normalized, validate_pst_import_path, SubmitMessageInput,
+        SubmittedRecipientInput,
     };
     use lpe_magika::{
         write_validation_record, ExpectedKind, IngressContext, PolicyDecision, ValidationOutcome,
@@ -6499,6 +6887,31 @@ mod tests {
     #[test]
     fn task_status_rejects_unknown_values() {
         assert!(normalize_task_status("done").is_err());
+    }
+
+    #[test]
+    fn built_in_role_permissions_include_dashboard() {
+        let permissions = default_permissions_for_role("tenant-admin");
+
+        assert!(permissions.iter().any(|permission| permission == "dashboard"));
+        assert!(permissions.iter().any(|permission| permission == "domains"));
+        assert!(!permissions.iter().any(|permission| permission == "*"));
+    }
+
+    #[test]
+    fn explicit_permissions_are_normalized_and_deduplicated() {
+        let permissions = normalize_admin_permissions(
+            "custom",
+            "mail, dashboard, mail",
+            &[
+                " dashboard ".to_string(),
+                "audit".to_string(),
+                String::new(),
+                "mail".to_string(),
+            ],
+        );
+
+        assert_eq!(permissions, vec!["audit", "dashboard", "mail"]);
     }
 }
 

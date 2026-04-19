@@ -5,6 +5,7 @@ use argon2::{
 use axum::{
     extract::{DefaultBodyLimit, Multipart, Path as AxumPath, State},
     http::{HeaderMap, StatusCode},
+    response::Redirect,
     routing::{delete, get, post, put},
     Json, Router,
 };
@@ -19,29 +20,29 @@ use lpe_storage::{
     AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput,
     AuthenticatedAccount, AuthenticatedAdmin, ClientContact, ClientEvent, ClientTask,
     ClientWorkspace, DashboardUpdate, EmailTraceResult, EmailTraceSearchInput, HealthResponse,
-    LocalAiSettings, NewAccount, NewAlias, NewDomain, NewFilterRule, NewMailbox,
-    NewPstTransferJob, NewServerAdministrator, PstJobExecutionSummary, SavedDraftMessage,
-    SecuritySettings, ServerSettings, Storage, SubmitMessageInput, SubmittedMessage,
-    SubmittedRecipientInput, UpdateAccount, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientTaskInput,
+    LocalAiSettings, NewAccount, NewAlias, NewDomain, NewFilterRule, NewMailbox, NewPstTransferJob,
+    NewServerAdministrator, PstJobExecutionSummary, SavedDraftMessage, SecuritySettings,
+    ServerSettings, Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    UpdateAccount, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::env;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
-mod types;
 mod client_config;
+mod oidc;
+mod types;
 
 use crate::types::{
     ApiResult, AttachmentSupportResponse, BootstrapAdminRequest, BootstrapAdminResponse,
     ClientLoginResponse, CreateAccountRequest, CreateAliasRequest, CreateDomainRequest,
     CreateFilterRuleRequest, CreateMailboxRequest, CreatePstTransferJobRequest,
-    CreateServerAdministratorRequest, EmailTraceSearchRequest, LocalAiHealthResponse,
-    LoginRequest, LoginResponse, SubmitMessageRequest, SubmitRecipientRequest,
-    UpdateAccountRequest, UpdateAntispamSettingsRequest, UpdateLocalAiSettingsRequest,
-    UpdateSecuritySettingsRequest, UpdateServerSettingsRequest, UpsertClientContactRequest,
-    UpsertClientEventRequest, UpsertClientTaskRequest,
+    CreateServerAdministratorRequest, EmailTraceSearchRequest, LocalAiHealthResponse, LoginRequest,
+    LoginResponse, OidcMetadataResponse, OidcStartResponse, SubmitMessageRequest,
+    SubmitRecipientRequest, UpdateAccountRequest, UpdateAntispamSettingsRequest,
+    UpdateLocalAiSettingsRequest, UpdateSecuritySettingsRequest, UpdateServerSettingsRequest,
+    UpsertClientContactRequest, UpsertClientEventRequest, UpsertClientTaskRequest,
 };
 
 const MIN_ADMIN_PASSWORD_LEN: usize = 12;
@@ -53,12 +54,21 @@ pub fn router(storage: Storage) -> Router {
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(me))
+        .route("/auth/oidc/metadata", get(oidc_metadata))
+        .route("/auth/oidc/start", get(oidc_start))
+        .route("/auth/oidc/callback", get(oidc_callback))
         .route("/mail/auth/login", post(client_login))
         .route("/mail/auth/logout", post(client_logout))
         .route("/mail/auth/me", get(client_me))
         .route("/mail/workspace", get(client_workspace))
-        .route("/mail/tasks", get(list_client_tasks).post(upsert_client_task))
-        .route("/mail/tasks/{task_id}", get(get_client_task).delete(delete_client_task))
+        .route(
+            "/mail/tasks",
+            get(list_client_tasks).post(upsert_client_task),
+        )
+        .route(
+            "/mail/tasks/{task_id}",
+            get(get_client_task).delete(delete_client_task),
+        )
         .route("/health/local-ai", get(local_ai_health))
         .route("/capabilities/attachments", get(attachment_support))
         .route("/console/dashboard", get(dashboard))
@@ -118,6 +128,18 @@ async fn login(
     State(storage): State<Storage>,
     Json(request): Json<LoginRequest>,
 ) -> ApiResult<LoginResponse> {
+    let security = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?
+        .security_settings;
+    if !security.password_login_enabled {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "password login is disabled for administrators".to_string(),
+        ));
+    }
+
     let email = request.email.trim().to_lowercase();
     let candidate = storage
         .fetch_admin_login(&email)
@@ -132,7 +154,7 @@ async fn login(
 
     let token = Uuid::new_v4().to_string();
     storage
-        .create_admin_session(&token, &email, admin_session_minutes())
+        .create_admin_session(&token, &email, admin_session_minutes(), "password")
         .await
         .map_err(internal_error)?;
     let admin = storage
@@ -162,6 +184,106 @@ async fn logout(State(storage): State<Storage>, headers: HeaderMap) -> ApiResult
 
 async fn me(State(storage): State<Storage>, headers: HeaderMap) -> ApiResult<AuthenticatedAdmin> {
     Ok(Json(require_admin(&storage, &headers, "dashboard").await?))
+}
+
+async fn oidc_metadata(State(storage): State<Storage>) -> ApiResult<OidcMetadataResponse> {
+    let settings = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?
+        .security_settings;
+    Ok(Json(OidcMetadataResponse {
+        enabled: settings.oidc_login_enabled,
+        provider_label: settings.oidc_provider_label,
+    }))
+}
+
+async fn oidc_start(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<OidcStartResponse> {
+    let settings = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?
+        .security_settings;
+    let public_origin = public_origin(&headers);
+    let authorization_url =
+        oidc::authorization_url(&settings, &public_origin).map_err(bad_request_error)?;
+    Ok(Json(OidcStartResponse { authorization_url }))
+}
+
+async fn oidc_callback(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Redirect, (StatusCode, String)> {
+    let code = params
+        .get("code")
+        .cloned()
+        .ok_or((StatusCode::BAD_REQUEST, "missing OIDC code".to_string()))?;
+    let state = params
+        .get("state")
+        .cloned()
+        .ok_or((StatusCode::BAD_REQUEST, "missing OIDC state".to_string()))?;
+
+    let settings = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?
+        .security_settings;
+    let public_origin = public_origin(&headers);
+    let claims = oidc::exchange_code_for_claims(&settings, &public_origin, &code, &state)
+        .await
+        .map_err(bad_request_error)?;
+
+    let admin_email = match storage
+        .find_admin_oidc_identity(&claims.issuer_url, &claims.subject)
+        .await
+        .map_err(internal_error)?
+    {
+        Some(email) => email,
+        None if settings.oidc_auto_link_by_email => {
+            let admin = storage
+                .find_server_administrator_by_email(&claims.email)
+                .await
+                .map_err(internal_error)?
+                .ok_or((
+                    StatusCode::FORBIDDEN,
+                    "OIDC identity is not linked to an administrator".to_string(),
+                ))?;
+            storage
+                .upsert_admin_oidc_identity(&lpe_storage::AdminOidcClaims {
+                    issuer_url: claims.issuer_url.clone(),
+                    subject: claims.subject.clone(),
+                    email: admin.email.clone(),
+                    display_name: claims.display_name.clone(),
+                })
+                .await
+                .map_err(internal_error)?;
+            admin.email
+        }
+        None => {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "OIDC identity is not linked to an administrator".to_string(),
+            ));
+        }
+    };
+
+    storage
+        .ensure_admin_credential_stub(&admin_email)
+        .await
+        .map_err(internal_error)?;
+
+    let token = Uuid::new_v4().to_string();
+    storage
+        .create_admin_session(&token, &admin_email, admin_session_minutes(), "oidc")
+        .await
+        .map_err(internal_error)?;
+
+    let redirect = format!("/#admin_token={token}");
+    Ok(Redirect::to(&redirect))
 }
 
 async fn client_login(
@@ -633,6 +755,22 @@ async fn update_security_settings(
                     mfa_required_for_admins: request.mfa_required_for_admins,
                     session_timeout_minutes: request.session_timeout_minutes.max(5),
                     audit_retention_days: request.audit_retention_days.max(30),
+                    oidc_login_enabled: request.oidc_login_enabled,
+                    oidc_provider_label: request.oidc_provider_label.trim().to_string(),
+                    oidc_auto_link_by_email: request.oidc_auto_link_by_email,
+                    oidc_issuer_url: request.oidc_issuer_url.trim().to_string(),
+                    oidc_authorization_endpoint: request
+                        .oidc_authorization_endpoint
+                        .trim()
+                        .to_string(),
+                    oidc_token_endpoint: request.oidc_token_endpoint.trim().to_string(),
+                    oidc_userinfo_endpoint: request.oidc_userinfo_endpoint.trim().to_string(),
+                    oidc_client_id: request.oidc_client_id.trim().to_string(),
+                    oidc_client_secret: request.oidc_client_secret.trim().to_string(),
+                    oidc_scopes: request.oidc_scopes.trim().to_string(),
+                    oidc_claim_email: request.oidc_claim_email.trim().to_string(),
+                    oidc_claim_display_name: request.oidc_claim_display_name.trim().to_string(),
+                    oidc_claim_subject: request.oidc_claim_subject.trim().to_string(),
                 },
                 local_ai_settings: existing.local_ai_settings,
                 antispam_settings: existing.antispam_settings,
@@ -735,6 +873,7 @@ async fn create_server_administrator(
                 display_name: request.display_name,
                 role: request.role,
                 rights_summary: request.rights_summary,
+                permissions: request.permissions,
             },
             AuditEntryInput {
                 actor: admin.email.clone(),
@@ -1153,15 +1292,31 @@ fn bearer_token(headers: &HeaderMap) -> Option<String> {
 }
 
 fn admin_has_right(admin: &AuthenticatedAdmin, right: &str) -> bool {
-    if admin.role == "server-admin" || admin.role == "super-admin" {
-        return true;
-    }
-
     admin
-        .rights_summary
-        .split(',')
-        .map(|entry| entry.trim().to_lowercase())
+        .permissions
+        .iter()
         .any(|entry| entry == right || entry == "*")
+}
+
+fn public_origin(headers: &HeaderMap) -> String {
+    let scheme = forwarded_header(headers, "x-forwarded-proto")
+        .or_else(|| env::var("LPE_PUBLIC_SCHEME").ok())
+        .unwrap_or_else(|| "http".to_string());
+    let host = forwarded_header(headers, "x-forwarded-host")
+        .or_else(|| forwarded_header(headers, "host"))
+        .or_else(|| env::var("LPE_PUBLIC_HOSTNAME").ok())
+        .unwrap_or_else(|| "localhost".to_string());
+    format!("{}://{}", scheme.trim(), host.trim())
+}
+
+fn forwarded_header(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 fn ensure_admin_can_manage_email(
@@ -1309,6 +1464,7 @@ pub async fn bootstrap_admin(
                 rights_summary:
                     "server, domains, accounts, aliases, admins, policies, security, ai, antispam, pst, audit, mail"
                         .to_string(),
+                permissions: vec!["*".to_string()],
             },
             AuditEntryInput {
                 actor: "bootstrap-cli".to_string(),

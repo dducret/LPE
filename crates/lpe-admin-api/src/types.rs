@@ -39,6 +39,17 @@ pub struct LoginResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct OidcMetadataResponse {
+    pub enabled: bool,
+    pub provider_label: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OidcStartResponse {
+    pub authorization_url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ClientLoginResponse {
     pub token: String,
     pub account: AuthenticatedAccount,
@@ -115,6 +126,19 @@ pub struct UpdateSecuritySettingsRequest {
     pub mfa_required_for_admins: bool,
     pub session_timeout_minutes: u32,
     pub audit_retention_days: u32,
+    pub oidc_login_enabled: bool,
+    pub oidc_provider_label: String,
+    pub oidc_auto_link_by_email: bool,
+    pub oidc_issuer_url: String,
+    pub oidc_authorization_endpoint: String,
+    pub oidc_token_endpoint: String,
+    pub oidc_userinfo_endpoint: String,
+    pub oidc_client_id: String,
+    pub oidc_client_secret: String,
+    pub oidc_scopes: String,
+    pub oidc_claim_email: String,
+    pub oidc_claim_display_name: String,
+    pub oidc_claim_subject: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -141,6 +165,8 @@ pub struct CreateServerAdministratorRequest {
     pub display_name: String,
     pub role: String,
     pub rights_summary: String,
+    #[serde(default)]
+    pub permissions: Vec<String>,
     pub password: Option<String>,
 }
 
