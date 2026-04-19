@@ -3,6 +3,7 @@ const configDrawer = document.getElementById("config-drawer");
 const drawerTitle = document.getElementById("drawer-title");
 const drawerSummary = document.getElementById("drawer-summary");
 const drawerPanels = Array.from(document.querySelectorAll(".drawer-panel"));
+const panelTriggers = Array.from(document.querySelectorAll("[data-open-panel]"));
 
 async function fetchDashboard() {
   const response = await fetch("/api/dashboard");
@@ -33,12 +34,16 @@ function openDrawer(panelId, title, summary) {
   drawerPanels.forEach((panel) => {
     panel.classList.toggle("hidden", panel.id !== panelId);
   });
+  panelTriggers.forEach((trigger) => {
+    trigger.classList.toggle("is-active", trigger.dataset.openPanel === panelId);
+  });
   drawerTitle.textContent = title;
   drawerSummary.textContent = summary;
   configDrawer.classList.remove("hidden");
 }
 
 function closeDrawer() {
+  panelTriggers.forEach((trigger) => trigger.classList.remove("is-active"));
   configDrawer.classList.add("hidden");
 }
 
@@ -173,7 +178,7 @@ document.getElementById("refresh").addEventListener("click", () => {
   void load();
 });
 
-document.querySelectorAll("[data-open-panel]").forEach((button) => {
+panelTriggers.forEach((button) => {
   button.addEventListener("click", () => {
     openDrawer(button.dataset.openPanel, button.dataset.title, button.dataset.summary);
   });

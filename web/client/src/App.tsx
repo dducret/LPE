@@ -181,9 +181,9 @@ export function App() {
               </div>
             ) : null}
           </div>
-          <span className="header-icon">◫</span>
-          <span className="header-icon">✉</span>
-          <span className="header-icon">⚙</span>
+          <button className="header-action" type="button" onClick={workspace.notifyFeaturePending} aria-label={copy.topActions.rules}>◫</button>
+          <button className="header-action" type="button" onClick={workspace.notifyFeaturePending} aria-label={copy.topActions.schedule}>✉</button>
+          <button className="header-action" type="button" onClick={workspace.notifyFeaturePending} aria-label={copy.accountMenuLabel}>⚙</button>
         </div>
       </header>
 
