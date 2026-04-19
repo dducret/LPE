@@ -3,13 +3,14 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lpe_attachments::extract_text_from_bytes;
 use lpe_domain::{
     InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
-    TransportDeliveryStatus, TransportRecipient,
+    OutboundMessageHandoffResponse, TransportDeliveryStatus, TransportRecipient,
 };
 use lpe_magika::{
     read_validation_record, ExpectedKind, IngressContext, PolicyDecision, ValidationRequest,
     Validator,
 };
 use serde::Serialize;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Pool, Postgres, Row};
 use std::fs::{self, File};
@@ -566,6 +567,9 @@ pub struct OutboundQueueStatusUpdate {
     pub message_id: Uuid,
     pub status: String,
     pub remote_message_ref: Option<String>,
+    pub retry_after_seconds: Option<i32>,
+    pub retry_policy: Option<String>,
+    pub technical_status: Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -829,12 +833,14 @@ struct PendingOutboundQueueRow {
     queue_id: Uuid,
     message_id: Uuid,
     account_id: Uuid,
+    attempts: i32,
     from_address: String,
     from_display: Option<String>,
     subject: String,
     body_text: String,
     body_html_sanitized: Option<String>,
     internet_message_id: Option<String>,
+    last_error: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -3011,12 +3017,14 @@ impl Storage {
                 q.id AS queue_id,
                 q.message_id,
                 q.account_id,
+                q.attempts,
                 m.from_address,
                 m.from_display,
                 m.subject_normalized AS subject,
                 b.body_text,
                 b.body_html_sanitized,
-                m.internet_message_id
+                m.internet_message_id,
+                q.last_error
             FROM outbound_message_queue q
             JOIN messages m ON m.id = q.message_id
             JOIN message_bodies b ON b.message_id = m.id
@@ -3103,6 +3111,8 @@ impl Storage {
                 body_text: row.body_text,
                 body_html_sanitized: row.body_html_sanitized,
                 internet_message_id: row.internet_message_id,
+                attempt_count: row.attempts.max(0) as u32,
+                last_attempt_error: row.last_error,
             });
         }
 
@@ -3111,12 +3121,15 @@ impl Storage {
 
     pub async fn update_outbound_queue_status(
         &self,
-        queue_id: Uuid,
-        status: TransportDeliveryStatus,
-        remote_message_ref: Option<&str>,
-        detail: Option<&str>,
+        response: &OutboundMessageHandoffResponse,
     ) -> Result<OutboundQueueStatusUpdate> {
-        let status_value = status.as_str().to_string();
+        let status_value = response.status.as_str().to_string();
+        let retry_after_seconds = response
+            .retry
+            .as_ref()
+            .map(|retry| retry.retry_after_seconds.min(i32::MAX as u32) as i32);
+        let retry_policy = response.retry.as_ref().map(|retry| retry.policy.clone());
+        let technical_status = serde_json::to_value(response)?;
         let row = sqlx::query(
             r#"
             UPDATE outbound_message_queue
@@ -3124,24 +3137,57 @@ impl Storage {
                 attempts = attempts + 1,
                 next_attempt_at = CASE
                     WHEN $3 = 'deferred'
-                        THEN NOW() + make_interval(mins => LEAST(60, GREATEST(1, attempts + 1) * 5))
+                        THEN NOW() + make_interval(secs => GREATEST(1, COALESCE($4, LEAST(3600, GREATEST(1, attempts + 1) * 300))))
                     ELSE NOW()
                 END,
                 last_error = CASE
                     WHEN $3 = 'relayed' THEN NULL
-                    ELSE $4
+                    ELSE $5
                 END,
-                remote_message_ref = COALESCE($5, remote_message_ref),
+                remote_message_ref = COALESCE($6, remote_message_ref),
+                last_result_json = $7,
+                last_attempt_at = NOW(),
+                retry_after_seconds = $4,
+                retry_policy = $8,
+                last_dsn_action = $9,
+                last_dsn_status = $10,
+                last_smtp_code = $11,
+                last_enhanced_status = $12,
+                last_routing_rule = $13,
+                last_throttle_scope = $14,
+                last_throttle_delay_seconds = $15,
                 updated_at = NOW()
             WHERE tenant_id = $1 AND id = $2
-            RETURNING message_id, status, remote_message_ref
+            RETURNING message_id, status, remote_message_ref, retry_after_seconds, retry_policy, last_result_json
             "#,
         )
         .bind(DEFAULT_TENANT_ID)
-        .bind(queue_id)
+        .bind(response.queue_id)
         .bind(&status_value)
-        .bind(detail)
-        .bind(remote_message_ref)
+        .bind(retry_after_seconds)
+        .bind(response.detail.as_deref())
+        .bind(response.remote_message_ref.as_deref())
+        .bind(&technical_status)
+        .bind(retry_policy.as_deref())
+        .bind(response.dsn.as_ref().map(|dsn| dsn.action.as_str()))
+        .bind(response.dsn.as_ref().map(|dsn| dsn.status.as_str()))
+        .bind(response.technical.as_ref().and_then(|status| status.smtp_code.map(i32::from)))
+        .bind(
+            response
+                .technical
+                .as_ref()
+                .and_then(|status| status.enhanced_code.as_deref()),
+        )
+        .bind(response.route.as_ref().and_then(|route| route.rule_id.as_deref()))
+        .bind(
+            response
+                .throttle
+                .as_ref()
+                .map(|throttle| throttle.scope.as_str()),
+        )
+        .bind(response.throttle.as_ref().map(|throttle| {
+            throttle.retry_after_seconds.min(i32::MAX as u32) as i32
+        }))
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| anyhow::anyhow!("outbound queue item not found"))?;
@@ -3149,6 +3195,9 @@ impl Storage {
         let message_id: Uuid = row.try_get("message_id")?;
         let stored_status: String = row.try_get("status")?;
         let stored_remote_message_ref: Option<String> = row.try_get("remote_message_ref")?;
+        let stored_retry_after_seconds: Option<i32> = row.try_get("retry_after_seconds")?;
+        let stored_retry_policy: Option<String> = row.try_get("retry_policy")?;
+        let stored_technical_status: Value = row.try_get("last_result_json")?;
 
         sqlx::query(
             r#"
@@ -3164,11 +3213,34 @@ impl Storage {
         .await?;
 
         Ok(OutboundQueueStatusUpdate {
-            queue_id,
+            queue_id: response.queue_id,
             message_id,
             status: stored_status,
             remote_message_ref: stored_remote_message_ref,
+            retry_after_seconds: stored_retry_after_seconds,
+            retry_policy: stored_retry_policy,
+            technical_status: stored_technical_status,
         })
+    }
+
+    pub async fn mark_outbound_queue_attempt_failure(
+        &self,
+        queue_id: Uuid,
+        detail: &str,
+    ) -> Result<OutboundQueueStatusUpdate> {
+        self.update_outbound_queue_status(&OutboundMessageHandoffResponse {
+            queue_id,
+            status: TransportDeliveryStatus::Deferred,
+            trace_id: format!("lpe-dispatch-{queue_id}"),
+            detail: Some(detail.to_string()),
+            remote_message_ref: None,
+            retry: None,
+            dsn: None,
+            technical: None,
+            route: None,
+            throttle: None,
+        })
+        .await
     }
 
     pub async fn deliver_inbound_message(

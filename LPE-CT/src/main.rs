@@ -45,6 +45,40 @@ struct RelaySettings {
     lan_dependency_note: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct RoutingSettings {
+    #[serde(default)]
+    rules: Vec<RoutingRule>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RoutingRule {
+    id: String,
+    description: String,
+    sender_domain: Option<String>,
+    recipient_domain: Option<String>,
+    relay_target: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct ThrottlingSettings {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    rules: Vec<ThrottleRule>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ThrottleRule {
+    id: String,
+    scope: String,
+    recipient_domain: Option<String>,
+    sender_domain: Option<String>,
+    max_messages: u32,
+    window_seconds: u32,
+    retry_after_seconds: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct NetworkSettings {
     allowed_management_cidrs: Vec<String>,
@@ -109,6 +143,10 @@ struct AuditEvent {
 struct DashboardState {
     site: SiteProfile,
     relay: RelaySettings,
+    #[serde(default)]
+    routing: RoutingSettings,
+    #[serde(default)]
+    throttling: ThrottlingSettings,
     network: NetworkSettings,
     policies: PolicySettings,
     updates: UpdateSettings,
@@ -402,7 +440,10 @@ fn apply_env_overrides(state: &mut DashboardState) {
 }
 
 fn parse_bool(value: &str) -> bool {
-    matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+    matches!(
+        value.to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 fn parse_csv(value: &str) -> Vec<String> {
@@ -433,7 +474,29 @@ fn default_state() -> DashboardState {
             mutual_tls_required: false,
             fallback_to_hold_queue: false,
             sync_interval_seconds: 30,
-            lan_dependency_note: "Only relay and management flows to the LAN are allowed.".to_string(),
+            lan_dependency_note: "Only relay and management flows to the LAN are allowed."
+                .to_string(),
+        },
+        routing: RoutingSettings {
+            rules: vec![RoutingRule {
+                id: "default-primary".to_string(),
+                description: "Default outbound route through the primary relay".to_string(),
+                sender_domain: None,
+                recipient_domain: None,
+                relay_target: "smtp://10.20.0.12:2525".to_string(),
+            }],
+        },
+        throttling: ThrottlingSettings {
+            enabled: true,
+            rules: vec![ThrottleRule {
+                id: "per-recipient-domain".to_string(),
+                scope: "recipient-domain".to_string(),
+                recipient_domain: None,
+                sender_domain: None,
+                max_messages: 20,
+                window_seconds: 60,
+                retry_after_seconds: 120,
+            }],
         },
         network: NetworkSettings {
             allowed_management_cidrs: vec!["10.20.30.0/24".to_string()],
@@ -503,10 +566,7 @@ fn default_dnsbl_enabled() -> bool {
 }
 
 fn default_dnsbl_zones() -> Vec<String> {
-    vec![
-        "zen.spamhaus.org".to_string(),
-        "bl.spamcop.net".to_string(),
-    ]
+    vec!["zen.spamhaus.org".to_string(), "bl.spamcop.net".to_string()]
 }
 
 fn default_reputation_enabled() -> bool {

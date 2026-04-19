@@ -41,8 +41,15 @@ Cette sequence donne a `Sent` le statut de source autoritative avant meme la rem
 L'integration fonctionnelle v1 entre le coeur et le centre de tri est maintenant explicite:
 
 - un worker `LPE` lit `outbound_message_queue` et appelle `LPE-CT`
-- `LPE-CT` retourne un statut de transport parmi `queued`, `relayed`, `deferred`, `quarantined`, `failed`
+- `LPE-CT` retourne un resultat de transport structure avec au minimum un statut parmi `queued`, `relayed`, `deferred`, `quarantined`, `bounced`, `failed`
 - `LPE-CT` remet les messages entrants acceptes vers `LPE` via une API interne de livraison finale
+
+Pour la sortie, `LPE-CT` reste responsable des fonctions MTA avancees de bord:
+
+- classification des erreurs SMTP en retry transitoire, bounce/`DSN` ou echec permanent
+- gestion locale des regles de routage sortant
+- throttling sortant par politique locale
+- statut technique detaille de la derniere tentative, persiste cote `LPE` sans reintegrer la logique SMTP dans le coeur
 
 Le detail du contrat est documente dans `docs/architecture/lpe-ct-integration.md`.
 
@@ -155,8 +162,15 @@ This sequence makes `Sent` authoritative before the sorting center performs the 
 The functional v1 integration between the core platform and the sorting center is now explicit:
 
 - an `LPE` worker reads `outbound_message_queue` and calls `LPE-CT`
-- `LPE-CT` returns one of `queued`, `relayed`, `deferred`, `quarantined`, or `failed`
+- `LPE-CT` returns a structured transport result with at least one status among `queued`, `relayed`, `deferred`, `quarantined`, `bounced`, and `failed`
 - `LPE-CT` delivers accepted inbound messages into `LPE` through an internal final-delivery API
+
+For outbound transport, `LPE-CT` remains responsible for the advanced edge MTA functions:
+
+- classifying SMTP failures into transient retry, bounce/`DSN`, or permanent failure
+- local outbound routing rules
+- outbound throttling policies
+- detailed technical status for the latest attempt, persisted on the `LPE` side without moving SMTP logic into the core
 
 The detailed contract is documented in `docs/architecture/lpe-ct-integration.md`.
 

@@ -25,6 +25,13 @@ Le pipeline de perimeterie execute maintenant en plus:
 - scoring antispam et reputation simple
 - trace detaillee des decisions persistee dans le spool
 
+Pour la sortie `LPE -> LPE-CT`, le centre de tri couvre maintenant aussi:
+
+- regles de routage sortant locales
+- throttling sortant local
+- classification des reponses `SMTP` en `relayed`, `deferred`, `bounced` ou `failed`
+- detail technique structure et `DSN` associe pour la derniere tentative
+
 ### Positionnement d'architecture
 
 `LPE-CT` ne remplace pas le coeur `LPE`:
@@ -107,6 +114,13 @@ The perimeter pipeline now also executes:
 - `SPF`, `DKIM`, and `DMARC` verification
 - anti-spam scoring and simple local reputation
 - detailed decision tracing persisted in the spool
+
+For outbound `LPE -> LPE-CT` handoff, the sorting center now also covers:
+
+- local outbound routing rules
+- local outbound throttling
+- classification of `SMTP` replies into `relayed`, `deferred`, `bounced`, or `failed`
+- structured technical and `DSN` detail for the latest attempt
 
 ### Architecture position
 

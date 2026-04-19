@@ -59,7 +59,7 @@ Le protocole moderne principal reste `JMAP`, mais `LPE` doit aussi rester compat
 
 Le backend expose un premier modele de soumission canonique via `/api/mail/messages/submit`: un message soumis est stocke dans `messages`, ses destinataires visibles (`To`, `Cc`) sont stockes dans `message_recipients`, les destinataires `Bcc` sont conserves comme metadonnees protegees distinctes pour audit/compliance, sa copie autoritative est placee dans la mailbox `Sent`, puis une entree `outbound_message_queue` prepare la remise sortante via le centre de tri `LPE-CT`.
 
-L'integration fonctionnelle entre `LPE` et `LPE-CT` repose maintenant sur un contrat HTTP interne explicite: un worker `LPE` consomme `outbound_message_queue` et appelle `LPE-CT` pour le handoff sortant, tandis que `LPE-CT` appelle `LPE` pour la remise finale entrante vers les mailbox du `LAN`. Le contrat et les variables d'environnement associees sont documentes dans `docs/architecture/lpe-ct-integration.md`.
+L'integration fonctionnelle entre `LPE` et `LPE-CT` repose maintenant sur un contrat HTTP interne explicite: un worker `LPE` consomme `outbound_message_queue` et appelle `LPE-CT` pour le handoff sortant, tandis que `LPE-CT` appelle `LPE` pour la remise finale entrante vers les mailbox du `LAN`. Ce contrat couvre maintenant aussi les retries enrichis, les retours `DSN`/bounce, les regles de routage, le throttling sortant et un statut technique structure persiste cote `LPE`. Le contrat et les variables d'environnement associees sont documentes dans `docs/architecture/lpe-ct-integration.md`.
 
 Toutes les couches clientes doivent utiliser le modele canonique `LPE` de soumission et de synchronisation. Aucune couche cliente ne doit ecrire une logique `Sent` ou `Outbox` parallele.
 
@@ -162,7 +162,7 @@ The main modern protocol remains `JMAP`, but `LPE` must also stay compatible wit
 
 The backend now exposes an initial canonical submission model through `/api/mail/messages/submit`: a submitted message is stored in `messages`, visible recipients (`To`, `Cc`) are stored in `message_recipients`, `Bcc` recipients are retained as separate protected metadata for audit and compliance, the authoritative copy is placed in the `Sent` mailbox, and an `outbound_message_queue` entry prepares outbound handoff through the `LPE-CT` sorting center.
 
-The working integration between `LPE` and `LPE-CT` now relies on an explicit internal HTTP contract: an `LPE` worker consumes `outbound_message_queue` and calls `LPE-CT` for outbound handoff, while `LPE-CT` calls back into `LPE` for final inbound delivery into LAN-hosted mailboxes. The contract and its environment variables are documented in `docs/architecture/lpe-ct-integration.md`.
+The working integration between `LPE` and `LPE-CT` now relies on an explicit internal HTTP contract: an `LPE` worker consumes `outbound_message_queue` and calls `LPE-CT` for outbound handoff, while `LPE-CT` calls back into `LPE` for final inbound delivery into LAN-hosted mailboxes. That contract now also covers richer retries, `DSN`/bounce feedback, outbound routing rules, outbound throttling, and a structured technical status persisted on the `LPE` side. The contract and its environment variables are documented in `docs/architecture/lpe-ct-integration.md`.
 
 All client layers must use the canonical `LPE` submission and synchronization model. No client layer may write its own parallel `Sent` or `Outbox` logic.
 

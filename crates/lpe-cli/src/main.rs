@@ -2,9 +2,7 @@ use anyhow::Result;
 use lpe_admin_api::{
     bootstrap_admin, bootstrap_admin_request_from_env, integration_shared_secret, router,
 };
-use lpe_domain::{
-    OutboundMessageHandoffRequest, OutboundMessageHandoffResponse, TransportDeliveryStatus,
-};
+use lpe_domain::{OutboundMessageHandoffRequest, OutboundMessageHandoffResponse};
 use lpe_imap::ImapServer;
 use lpe_storage::Storage;
 use std::{env, time::Duration};
@@ -42,7 +40,8 @@ async fn main() -> Result<()> {
         axum::serve(listener, router(api_storage)).await?;
         Result::<()>::Ok(())
     });
-    let imap_task = tokio::spawn(async move { ImapServer::new(imap_storage).serve(imap_listener).await });
+    let imap_task =
+        tokio::spawn(async move { ImapServer::new(imap_storage).serve(imap_listener).await });
     let worker_task = tokio::spawn(async move { run_outbound_worker(worker_storage).await });
 
     tokio::select! {
@@ -119,12 +118,7 @@ async fn dispatch_outbound_message(
     match send_outbound_handoff(client, &endpoint, integration_key, &item).await {
         Ok(response) => {
             let status = response.status.clone();
-            let detail = response.detail.clone();
-            let trace_id = Some(response.trace_id.as_str());
-            if let Err(error) = storage
-                .update_outbound_queue_status(queue_id, status.clone(), trace_id, detail.as_deref())
-                .await
-            {
+            if let Err(error) = storage.update_outbound_queue_status(&response).await {
                 warn!("unable to persist outbound status for {queue_id}: {error}");
             } else {
                 info!(
@@ -137,12 +131,7 @@ async fn dispatch_outbound_message(
         Err(error) => {
             warn!("outbound handoff failed for {queue_id}: {error}");
             if let Err(update_error) = storage
-                .update_outbound_queue_status(
-                    queue_id,
-                    TransportDeliveryStatus::Deferred,
-                    None,
-                    Some(&error),
-                )
+                .mark_outbound_queue_attempt_failure(queue_id, &error)
                 .await
             {
                 warn!("unable to mark queue {queue_id} as deferred: {update_error}");
@@ -209,6 +198,12 @@ mod tests {
                 status: TransportDeliveryStatus::Relayed,
                 trace_id: "ct-trace-1".to_string(),
                 detail: None,
+                remote_message_ref: Some("remote-1".to_string()),
+                retry: None,
+                dsn: None,
+                technical: None,
+                route: None,
+                throttle: None,
             })
         }
 
@@ -238,6 +233,8 @@ mod tests {
             body_text: "Body".to_string(),
             body_html_sanitized: None,
             internet_message_id: None,
+            attempt_count: 0,
+            last_attempt_error: None,
         };
         let client = reqwest::Client::builder().build().unwrap();
         let response = send_outbound_handoff(
@@ -251,6 +248,7 @@ mod tests {
 
         assert_eq!(response.status, TransportDeliveryStatus::Relayed);
         assert_eq!(response.trace_id, "ct-trace-1");
+        assert_eq!(response.remote_message_ref.as_deref(), Some("remote-1"));
         assert_eq!(
             capture.header.lock().unwrap().as_deref(),
             Some("shared-secret")

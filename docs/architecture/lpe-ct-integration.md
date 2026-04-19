@@ -21,7 +21,7 @@ La separation d'architecture reste stricte:
 5. le worker appelle `POST /api/v1/integration/outbound-messages` sur `LPE-CT`
 6. `LPE-CT` applique ses politiques locales puis tente le relais `SMTP`
 7. `LPE-CT` repond avec un statut explicite et un `trace_id`
-8. `LPE` met a jour `outbound_message_queue.status`, `messages.delivery_status`, `remote_message_ref`, `attempts`, `last_error` et `next_attempt_at`
+8. `LPE` met a jour `outbound_message_queue.status`, `messages.delivery_status`, `remote_message_ref`, `attempts`, `last_error`, `next_attempt_at` et le dernier resultat technique structure
 
 Statuts minimaux supportes:
 
@@ -29,7 +29,19 @@ Statuts minimaux supportes:
 - `relayed`: `LPE-CT` a accepte le handoff et relaye le message vers la cible `SMTP`
 - `deferred`: echec transitoire; `LPE` recalcule `next_attempt_at`
 - `quarantined`: `LPE-CT` a retenu le message selon sa politique
+- `bounced`: echec permanent de transport avec retour `DSN` exploitable
 - `failed`: echec permanent ou configuration incompatible avec le relais
+
+Le resultat de handoff sortant est maintenant structure. En plus du statut et du `trace_id`, `LPE-CT` peut retourner:
+
+- `remote_message_ref`: reference technique du relais final quand elle existe
+- `retry`: consigne de retry (`retry_after_seconds`, politique, raison)
+- `dsn`: action `DSN` (`delayed`, `failed`, etc.), code ameliore et diagnostic
+- `technical`: phase (`connect`, `rcpt-to`, `data`, `final-response`, `throttle`), code `SMTP`, code ameliore, hote distant, detail
+- `route`: regle de routage appliquee et relais choisi
+- `throttle`: perimetre de throttling, cle, fenetre, limite et delai recommande
+
+`LPE` persiste ce resultat detaille dans `outbound_message_queue` afin de conserver un etat de queue exploitable sans deplacer la logique MTA dans le coeur.
 
 ### Flux entrant `LPE-CT -> LPE`
 
@@ -73,9 +85,12 @@ Cote `LPE-CT`:
 ### Remarques d'implementation v1
 
 - le worker `LPE` effectue un handoff synchrone et met a jour l'etat ensuite
+- le worker `LPE` transmet maintenant `attempt_count` et `last_attempt_error`; `LPE-CT` peut donc appliquer des politiques de retry et de throttling informees
 - `LPE-CT` conserve les octets SMTP bruts sur l'entree et les transporte jusqu'a la persistance et a la remise finale interne
 - `LPE-CT` extrait le texte visible entrant a partir du MIME decode (`multipart/alternative`, `quoted-printable`, `base64`, HTML) sans indexer brutement tout le body RFC 822
 - `LPE-CT` compose le relais sortant en RFC 822 avec `text/plain` seul ou `multipart/alternative` `text/plain` + `text/html` quand `body_html_sanitized` est disponible, sans reinjecter `Bcc` dans les en-tetes visibles
+- `LPE-CT` applique les regles de routage et le throttling sortant avant le relais SMTP effectif
+- `LPE-CT` classe les erreurs sortantes en statuts `deferred`, `bounced` ou `failed` a partir des reponses SMTP et produit un detail technique et `DSN` structure
 - la remise finale entrante cree des copies `Inbox` par mailbox resolue dans `LPE`
 - la recherche standard et les projections visibles ne reinjectent pas `Bcc`
 
@@ -100,7 +115,7 @@ The architectural split remains strict:
 5. the worker calls `POST /api/v1/integration/outbound-messages` on `LPE-CT`
 6. `LPE-CT` applies local policy and attempts `SMTP` relay
 7. `LPE-CT` replies with an explicit status and a `trace_id`
-8. `LPE` updates `outbound_message_queue.status`, `messages.delivery_status`, `remote_message_ref`, `attempts`, `last_error`, and `next_attempt_at`
+8. `LPE` updates `outbound_message_queue.status`, `messages.delivery_status`, `remote_message_ref`, `attempts`, `last_error`, `next_attempt_at`, and the latest structured transport result
 
 Minimum supported statuses:
 
@@ -108,7 +123,19 @@ Minimum supported statuses:
 - `relayed`: `LPE-CT` accepted the handoff and relayed the message toward its `SMTP` target
 - `deferred`: transient failure; `LPE` recomputes `next_attempt_at`
 - `quarantined`: `LPE-CT` retained the message under policy
+- `bounced`: permanent delivery failure with usable `DSN` feedback
 - `failed`: permanent failure or relay-incompatible configuration
+
+The outbound handoff result is now structured. In addition to the status and `trace_id`, `LPE-CT` may return:
+
+- `remote_message_ref`: technical relay reference when available
+- `retry`: retry guidance (`retry_after_seconds`, policy, reason)
+- `dsn`: `DSN` action (`delayed`, `failed`, etc.), enhanced status, and diagnostic
+- `technical`: phase (`connect`, `rcpt-to`, `data`, `final-response`, `throttle`), `SMTP` code, enhanced code, remote host, and detail
+- `route`: applied routing rule and chosen relay
+- `throttle`: throttling scope, key, window, limit, and suggested delay
+
+`LPE` persists that detailed result on `outbound_message_queue` so queue state remains operationally useful without moving MTA logic into the core platform.
 
 ### Inbound flow `LPE-CT -> LPE`
 
@@ -152,8 +179,11 @@ On the `LPE-CT` side:
 ### v1 implementation notes
 
 - the `LPE` worker performs synchronous handoff and updates state afterward
+- the `LPE` worker now also sends `attempt_count` and `last_attempt_error`, allowing `LPE-CT` to apply informed retry and throttling policies
 - `LPE-CT` keeps raw SMTP bytes intact on ingress and carries them through persistence and internal final delivery
 - `LPE-CT` extracts inbound visible text from decoded MIME (`multipart/alternative`, `quoted-printable`, `base64`, HTML) instead of indexing the raw RFC 822 body blindly
 - `LPE-CT` composes outbound relay as RFC 822 with either plain `text/plain` or `multipart/alternative` `text/plain` + `text/html` when `body_html_sanitized` is available, without reinjecting `Bcc` into visible headers
+- `LPE-CT` applies outbound routing rules and throttling before the actual SMTP relay
+- `LPE-CT` classifies outbound failures into `deferred`, `bounced`, or `failed` from SMTP replies and produces structured technical and `DSN` feedback
 - inbound final delivery creates per-mailbox `Inbox` copies in `LPE`
 - standard search and visible projections do not reinject `Bcc`

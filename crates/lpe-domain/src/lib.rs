@@ -97,6 +97,7 @@ pub enum TransportDeliveryStatus {
     Relayed,
     Deferred,
     Quarantined,
+    Bounced,
     Failed,
 }
 
@@ -107,9 +108,50 @@ impl TransportDeliveryStatus {
             Self::Relayed => "relayed",
             Self::Deferred => "deferred",
             Self::Quarantined => "quarantined",
+            Self::Bounced => "bounced",
             Self::Failed => "failed",
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransportRetryAdvice {
+    pub retry_after_seconds: u32,
+    pub policy: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransportDsnReport {
+    pub action: String,
+    pub status: String,
+    pub diagnostic_code: Option<String>,
+    pub remote_mta: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransportTechnicalStatus {
+    pub phase: String,
+    pub smtp_code: Option<u16>,
+    pub enhanced_code: Option<String>,
+    pub remote_host: Option<String>,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransportRouteDecision {
+    pub rule_id: Option<String>,
+    pub relay_target: Option<String>,
+    pub queue: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransportThrottleStatus {
+    pub scope: String,
+    pub key: String,
+    pub limit: u32,
+    pub window_seconds: u32,
+    pub retry_after_seconds: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -132,6 +174,8 @@ pub struct OutboundMessageHandoffRequest {
     pub body_text: String,
     pub body_html_sanitized: Option<String>,
     pub internet_message_id: Option<String>,
+    pub attempt_count: u32,
+    pub last_attempt_error: Option<String>,
 }
 
 impl OutboundMessageHandoffRequest {
@@ -151,6 +195,12 @@ pub struct OutboundMessageHandoffResponse {
     pub status: TransportDeliveryStatus,
     pub trace_id: String,
     pub detail: Option<String>,
+    pub remote_message_ref: Option<String>,
+    pub retry: Option<TransportRetryAdvice>,
+    pub dsn: Option<TransportDsnReport>,
+    pub technical: Option<TransportTechnicalStatus>,
+    pub route: Option<TransportRouteDecision>,
+    pub throttle: Option<TransportThrottleStatus>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -179,7 +229,11 @@ pub struct InboundDeliveryResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::{OutboundMessageHandoffRequest, TransportDeliveryStatus, TransportRecipient};
+    use super::{
+        OutboundMessageHandoffRequest, OutboundMessageHandoffResponse, TransportDeliveryStatus,
+        TransportDsnReport, TransportRecipient, TransportRetryAdvice, TransportRouteDecision,
+        TransportTechnicalStatus, TransportThrottleStatus,
+    };
     use uuid::Uuid;
 
     #[test]
@@ -212,6 +266,8 @@ mod tests {
             body_text: "body".to_string(),
             body_html_sanitized: None,
             internet_message_id: None,
+            attempt_count: 0,
+            last_attempt_error: None,
         };
 
         assert_eq!(
@@ -222,5 +278,53 @@ mod tests {
                 "bcc@example.test".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn outbound_handoff_response_carries_structured_transport_details() {
+        let response = OutboundMessageHandoffResponse {
+            queue_id: Uuid::nil(),
+            status: TransportDeliveryStatus::Deferred,
+            trace_id: "trace-1".to_string(),
+            detail: Some("rate limit reached".to_string()),
+            remote_message_ref: Some("remote-42".to_string()),
+            retry: Some(TransportRetryAdvice {
+                retry_after_seconds: 120,
+                policy: "throttle".to_string(),
+                reason: Some("tenant quota".to_string()),
+            }),
+            dsn: Some(TransportDsnReport {
+                action: "delayed".to_string(),
+                status: "4.7.1".to_string(),
+                diagnostic_code: Some("smtp; 451 4.7.1 throttled".to_string()),
+                remote_mta: Some("mx1.example.test".to_string()),
+            }),
+            technical: Some(TransportTechnicalStatus {
+                phase: "rcpt-to".to_string(),
+                smtp_code: Some(451),
+                enhanced_code: Some("4.7.1".to_string()),
+                remote_host: Some("mx1.example.test".to_string()),
+                detail: Some("recipient domain throttled".to_string()),
+            }),
+            route: Some(TransportRouteDecision {
+                rule_id: Some("domain-example".to_string()),
+                relay_target: Some("smtp://mx1.example.test:25".to_string()),
+                queue: "deferred".to_string(),
+            }),
+            throttle: Some(TransportThrottleStatus {
+                scope: "recipient-domain".to_string(),
+                key: "example.test".to_string(),
+                limit: 20,
+                window_seconds: 60,
+                retry_after_seconds: 120,
+            }),
+        };
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["status"], "deferred");
+        assert_eq!(json["retry"]["retry_after_seconds"], 120);
+        assert_eq!(json["dsn"]["status"], "4.7.1");
+        assert_eq!(json["route"]["queue"], "deferred");
+        assert_eq!(json["throttle"]["scope"], "recipient-domain");
     }
 }

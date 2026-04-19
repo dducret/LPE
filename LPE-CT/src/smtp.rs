@@ -5,13 +5,12 @@ use email_auth::{
     dmarc::Disposition as DmarcDisposition,
     EmailAuthenticator,
 };
-use hickory_resolver::{
-    proto::rr::RecordType,
-    TokioResolver,
-};
+use hickory_resolver::{proto::rr::RecordType, TokioResolver};
 use lpe_domain::{
     InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
-    OutboundMessageHandoffResponse, TransportDeliveryStatus,
+    OutboundMessageHandoffResponse, TransportDeliveryStatus, TransportDsnReport,
+    TransportRetryAdvice, TransportRouteDecision, TransportTechnicalStatus,
+    TransportThrottleStatus,
 };
 use lpe_magika::{
     collect_mime_attachment_parts, extract_visible_text, parse_rfc822_header_value, Detector,
@@ -54,6 +53,28 @@ pub(crate) struct RuntimeConfig {
     spam_quarantine_threshold: f32,
     spam_reject_threshold: f32,
     max_message_size_mb: u32,
+    routing_rules: Vec<OutboundRoutingRule>,
+    throttle_enabled: bool,
+    throttle_rules: Vec<OutboundThrottleRule>,
+}
+
+#[derive(Debug, Clone)]
+struct OutboundRoutingRule {
+    id: String,
+    sender_domain: Option<String>,
+    recipient_domain: Option<String>,
+    relay_target: String,
+}
+
+#[derive(Debug, Clone)]
+struct OutboundThrottleRule {
+    id: String,
+    scope: String,
+    recipient_domain: Option<String>,
+    sender_domain: Option<String>,
+    max_messages: u32,
+    window_seconds: u32,
+    retry_after_seconds: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -95,8 +116,41 @@ struct QueuedMessage {
     auth_summary: AuthSummary,
     #[serde(default)]
     decision_trace: Vec<DecisionTraceEntry>,
+    #[serde(default)]
+    remote_message_ref: Option<String>,
+    #[serde(default)]
+    technical_status: Option<TransportTechnicalStatus>,
+    #[serde(default)]
+    dsn: Option<TransportDsnReport>,
+    #[serde(default)]
+    route: Option<TransportRouteDecision>,
+    #[serde(default)]
+    throttle: Option<TransportThrottleStatus>,
     #[serde(with = "base64_bytes")]
     data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct ThrottleState {
+    hits: Vec<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct OutboundExecution {
+    status: TransportDeliveryStatus,
+    detail: Option<String>,
+    remote_message_ref: Option<String>,
+    retry: Option<TransportRetryAdvice>,
+    dsn: Option<TransportDsnReport>,
+    technical: Option<TransportTechnicalStatus>,
+    route: Option<TransportRouteDecision>,
+    throttle: Option<TransportThrottleStatus>,
+}
+
+#[derive(Debug, Clone)]
+struct SmtpReply {
+    code: u16,
+    message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,6 +208,7 @@ pub(crate) fn initialize_spool(spool_dir: &Path) -> Result<()> {
         "deferred",
         "quarantine",
         "held",
+        "bounces",
         "sent",
         "outbound",
         "policy",
@@ -221,6 +276,32 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
         spam_quarantine_threshold: dashboard.policies.spam_quarantine_threshold,
         spam_reject_threshold: dashboard.policies.spam_reject_threshold,
         max_message_size_mb: dashboard.policies.max_message_size_mb,
+        routing_rules: dashboard
+            .routing
+            .rules
+            .iter()
+            .map(|rule| OutboundRoutingRule {
+                id: rule.id.clone(),
+                sender_domain: rule.sender_domain.clone(),
+                recipient_domain: rule.recipient_domain.clone(),
+                relay_target: rule.relay_target.clone(),
+            })
+            .collect(),
+        throttle_enabled: dashboard.throttling.enabled,
+        throttle_rules: dashboard
+            .throttling
+            .rules
+            .iter()
+            .map(|rule| OutboundThrottleRule {
+                id: rule.id.clone(),
+                scope: rule.scope.clone(),
+                recipient_domain: rule.recipient_domain.clone(),
+                sender_domain: rule.sender_domain.clone(),
+                max_messages: rule.max_messages,
+                window_seconds: rule.window_seconds,
+                retry_after_seconds: rule.retry_after_seconds,
+            })
+            .collect(),
     }
 }
 
@@ -229,6 +310,7 @@ pub(crate) async fn process_outbound_handoff(
     config: &RuntimeConfig,
     payload: OutboundMessageHandoffRequest,
 ) -> Result<OutboundMessageHandoffResponse> {
+    let route = resolve_outbound_route(config, &payload);
     let mut message = QueuedMessage {
         id: format!("lpe-ct-out-{}", payload.queue_id),
         direction: "outbound".to_string(),
@@ -251,6 +333,11 @@ pub(crate) async fn process_outbound_handoff(
             outcome: "accepted".to_string(),
             detail: "message received from LPE core for outbound relay".to_string(),
         }],
+        remote_message_ref: None,
+        technical_status: None,
+        dsn: None,
+        route: Some(route.clone()),
+        throttle: None,
         data: compose_rfc822_message(&payload),
     };
 
@@ -270,56 +357,229 @@ pub(crate) async fn process_outbound_handoff(
             status: TransportDeliveryStatus::Quarantined,
             trace_id: message.id,
             detail: Some("message matched quarantine policy".to_string()),
+            remote_message_ref: None,
+            retry: None,
+            dsn: None,
+            technical: None,
+            route: Some(route),
+            throttle: None,
         });
     }
 
-    match relay_message(config, &message).await {
-        Ok(()) => {
-            message.status = "sent".to_string();
-            message.decision_trace.push(DecisionTraceEntry {
-                stage: "outbound-relay".to_string(),
-                outcome: "relayed".to_string(),
-                detail: "message relayed to upstream SMTP target".to_string(),
-            });
-            move_message(spool_dir, &message, "outbound", "sent").await?;
-            Ok(OutboundMessageHandoffResponse {
-                queue_id: payload.queue_id,
-                status: TransportDeliveryStatus::Relayed,
-                trace_id: message.id,
-                detail: None,
-            })
+    if let Some(throttle) = evaluate_outbound_throttle(spool_dir, config, &payload)? {
+        message.status = "deferred".to_string();
+        message.throttle = Some(throttle.clone());
+        message.route = Some(route.clone());
+        message.technical_status = Some(TransportTechnicalStatus {
+            phase: "throttle".to_string(),
+            smtp_code: Some(451),
+            enhanced_code: Some("4.7.1".to_string()),
+            remote_host: route.relay_target.clone(),
+            detail: Some(format!("throttled by {}", throttle.scope)),
+        });
+        message.relay_error = Some("message throttled before outbound relay".to_string());
+        message.decision_trace.push(DecisionTraceEntry {
+            stage: "outbound-throttle".to_string(),
+            outcome: "deferred".to_string(),
+            detail: format!(
+                "scope={} key={} retry_after={}s",
+                throttle.scope, throttle.key, throttle.retry_after_seconds
+            ),
+        });
+        move_message(spool_dir, &message, "outbound", "deferred").await?;
+        return Ok(OutboundMessageHandoffResponse {
+            queue_id: payload.queue_id,
+            status: TransportDeliveryStatus::Deferred,
+            trace_id: message.id,
+            detail: Some("message throttled before outbound relay".to_string()),
+            remote_message_ref: None,
+            retry: Some(TransportRetryAdvice {
+                retry_after_seconds: throttle.retry_after_seconds,
+                policy: "throttle".to_string(),
+                reason: Some(format!("{} {}", throttle.scope, throttle.key)),
+            }),
+            dsn: Some(TransportDsnReport {
+                action: "delayed".to_string(),
+                status: "4.7.1".to_string(),
+                diagnostic_code: Some("smtp; 451 4.7.1 locally throttled".to_string()),
+                remote_mta: route.relay_target.clone(),
+            }),
+            technical: message.technical_status.clone(),
+            route: Some(route),
+            throttle: Some(throttle),
+        });
+    }
+
+    let execution = relay_message(config, &message, &route).await;
+    message.status = execution
+        .route
+        .as_ref()
+        .map(|decision| decision.queue.clone())
+        .unwrap_or_else(|| default_queue_for_status(&execution.status).to_string());
+    message.relay_error = execution.detail.clone();
+    message.remote_message_ref = execution.remote_message_ref.clone();
+    message.technical_status = execution.technical.clone();
+    message.dsn = execution.dsn.clone();
+    message.route = execution.route.clone().or_else(|| Some(route.clone()));
+    message.throttle = execution.throttle.clone();
+    message.decision_trace.push(DecisionTraceEntry {
+        stage: "outbound-relay".to_string(),
+        outcome: execution.status.as_str().to_string(),
+        detail: execution
+            .detail
+            .clone()
+            .unwrap_or_else(|| "outbound relay completed".to_string()),
+    });
+    let destination = default_queue_for_status(&execution.status);
+    if destination == "bounces" {
+        persist_message(spool_dir, "bounces", &message).await?;
+        move_message(spool_dir, &message, "outbound", "held").await?;
+    } else {
+        move_message(spool_dir, &message, "outbound", destination).await?;
+    }
+
+    Ok(OutboundMessageHandoffResponse {
+        queue_id: payload.queue_id,
+        status: execution.status,
+        trace_id: message.id,
+        detail: execution.detail,
+        remote_message_ref: execution.remote_message_ref,
+        retry: execution.retry,
+        dsn: execution.dsn,
+        technical: execution.technical,
+        route: execution.route.or(Some(route)),
+        throttle: execution.throttle,
+    })
+}
+
+fn resolve_outbound_route(
+    config: &RuntimeConfig,
+    payload: &OutboundMessageHandoffRequest,
+) -> TransportRouteDecision {
+    let sender_domain = domain_part(&payload.from_address);
+    let recipient_domains = payload
+        .envelope_recipients()
+        .into_iter()
+        .filter_map(|address| domain_part(&address))
+        .collect::<Vec<_>>();
+
+    let matched = config.routing_rules.iter().find(|rule| {
+        matches_domain(rule.sender_domain.as_deref(), sender_domain.as_deref())
+            && matches_any_domain(rule.recipient_domain.as_deref(), &recipient_domains)
+    });
+
+    if let Some(rule) = matched {
+        return TransportRouteDecision {
+            rule_id: Some(rule.id.clone()),
+            relay_target: Some(rule.relay_target.clone()),
+            queue: "outbound".to_string(),
+        };
+    }
+
+    TransportRouteDecision {
+        rule_id: None,
+        relay_target: if !config.primary_upstream.trim().is_empty() {
+            Some(config.primary_upstream.clone())
+        } else if !config.secondary_upstream.trim().is_empty() {
+            Some(config.secondary_upstream.clone())
+        } else {
+            None
+        },
+        queue: "outbound".to_string(),
+    }
+}
+
+fn evaluate_outbound_throttle(
+    spool_dir: &Path,
+    config: &RuntimeConfig,
+    payload: &OutboundMessageHandoffRequest,
+) -> Result<Option<TransportThrottleStatus>> {
+    if !config.throttle_enabled {
+        return Ok(None);
+    }
+
+    let sender_domain = domain_part(&payload.from_address);
+    let recipient_domains = payload
+        .envelope_recipients()
+        .into_iter()
+        .filter_map(|address| domain_part(&address))
+        .collect::<Vec<_>>();
+
+    for rule in &config.throttle_rules {
+        if !matches_domain(rule.sender_domain.as_deref(), sender_domain.as_deref())
+            || !matches_any_domain(rule.recipient_domain.as_deref(), &recipient_domains)
+        {
+            continue;
         }
-        Err(error) => {
-            let detail = error.to_string();
-            let final_status = if is_permanent_relay_error(&detail) {
-                TransportDeliveryStatus::Failed
-            } else {
-                TransportDeliveryStatus::Deferred
-            };
-            message.status = match final_status {
-                TransportDeliveryStatus::Failed => "held".to_string(),
-                TransportDeliveryStatus::Deferred => "deferred".to_string(),
-                _ => "held".to_string(),
-            };
-            message.relay_error = Some(detail.clone());
-            message.decision_trace.push(DecisionTraceEntry {
-                stage: "outbound-relay".to_string(),
-                outcome: final_status.as_str().to_string(),
-                detail: detail.clone(),
-            });
-            let destination = if final_status == TransportDeliveryStatus::Deferred {
-                "deferred"
-            } else {
-                "held"
-            };
-            move_message(spool_dir, &message, "outbound", destination).await?;
-            Ok(OutboundMessageHandoffResponse {
-                queue_id: payload.queue_id,
-                status: final_status,
-                trace_id: message.id,
-                detail: Some(detail),
-            })
+
+        let key = match rule.scope.as_str() {
+            "sender-domain" => sender_domain
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
+            _ => recipient_domains
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "unknown".to_string()),
+        };
+        let state_path = spool_dir.join("policy").join(format!(
+            "throttle-{}.json",
+            stable_key_id(&(rule.id.clone(), key.clone()))
+        ));
+        let mut state = if state_path.exists() {
+            serde_json::from_str::<ThrottleState>(&fs::read_to_string(&state_path)?)?
+        } else {
+            ThrottleState::default()
+        };
+        let now = unix_now();
+        state
+            .hits
+            .retain(|timestamp| now.saturating_sub(*timestamp) < rule.window_seconds as u64);
+        if state.hits.len() >= rule.max_messages as usize {
+            return Ok(Some(TransportThrottleStatus {
+                scope: rule.scope.clone(),
+                key,
+                limit: rule.max_messages,
+                window_seconds: rule.window_seconds,
+                retry_after_seconds: rule.retry_after_seconds.max(1),
+            }));
         }
+
+        state.hits.push(now);
+        fs::write(&state_path, serde_json::to_string_pretty(&state)?)?;
+    }
+
+    Ok(None)
+}
+
+fn default_queue_for_status(status: &TransportDeliveryStatus) -> &'static str {
+    match status {
+        TransportDeliveryStatus::Relayed => "sent",
+        TransportDeliveryStatus::Deferred => "deferred",
+        TransportDeliveryStatus::Quarantined => "quarantine",
+        TransportDeliveryStatus::Bounced => "bounces",
+        TransportDeliveryStatus::Queued => "outbound",
+        TransportDeliveryStatus::Failed => "held",
+    }
+}
+
+fn domain_part(address: &str) -> Option<String> {
+    address
+        .rsplit_once('@')
+        .map(|(_, domain)| domain.trim().to_ascii_lowercase())
+        .filter(|domain| !domain.is_empty())
+}
+
+fn matches_domain(expected: Option<&str>, actual: Option<&str>) -> bool {
+    match expected.map(|value| value.trim().to_ascii_lowercase()) {
+        Some(expected) if !expected.is_empty() => actual == Some(expected.as_str()),
+        _ => true,
+    }
+}
+
+fn matches_any_domain(expected: Option<&str>, actual: &[String]) -> bool {
+    match expected.map(|value| value.trim().to_ascii_lowercase()) {
+        Some(expected) if !expected.is_empty() => actual.iter().any(|value| value == &expected),
+        _ => true,
     }
 }
 
@@ -472,6 +732,11 @@ async fn receive_message_with_validator<D: Detector>(
             outcome: "accepted".to_string(),
             detail: "message accepted by SMTP edge and persisted to the incoming spool".to_string(),
         }],
+        remote_message_ref: None,
+        technical_status: None,
+        dsn: None,
+        route: None,
+        throttle: None,
         data,
     };
 
@@ -575,7 +840,7 @@ async fn receive_message_with_validator<D: Detector>(
                 move_message(spool_dir, &message, "incoming", destination).await?;
                 update_reputation(spool_dir, &message, FilterAction::Defer)?;
             }
-        }
+        },
         FilterAction::Quarantine => {
             message.status = "quarantined".to_string();
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
@@ -734,7 +999,9 @@ async fn evaluate_inbound_policy(
                 decision_trace.push(DecisionTraceEntry {
                     stage: "authentication".to_string(),
                     outcome: "temperror".to_string(),
-                    detail: format!("authentication checks failed open with resolver error: {error}"),
+                    detail: format!(
+                        "authentication checks failed open with resolver error: {error}"
+                    ),
                 });
             }
         }
@@ -742,7 +1009,8 @@ async fn evaluate_inbound_policy(
         decision_trace.push(DecisionTraceEntry {
             stage: "authentication".to_string(),
             outcome: "skipped".to_string(),
-            detail: "source peer IP could not be parsed for SPF, DKIM, and DMARC evaluation".to_string(),
+            detail: "source peer IP could not be parsed for SPF, DKIM, and DMARC evaluation"
+                .to_string(),
         });
     }
 
@@ -842,7 +1110,9 @@ fn apply_filter_verdict(message: &mut QueuedMessage, verdict: &FilterVerdict) {
     message.reputation_score = verdict.reputation_score;
     message.dnsbl_hits = verdict.dnsbl_hits.clone();
     message.auth_summary = verdict.auth_summary.clone();
-    message.decision_trace.extend(verdict.decision_trace.clone());
+    message
+        .decision_trace
+        .extend(verdict.decision_trace.clone());
     if let Some(reason) = &verdict.reason {
         message.relay_error = Some(reason.clone());
     }
@@ -896,11 +1166,7 @@ async fn authenticate_message(
         });
     }
 
-    Ok((
-        AuthSummary { spf, dkim, dmarc },
-        trace,
-        action_hint,
-    ))
+    Ok((AuthSummary { spf, dkim, dmarc }, trace, action_hint))
 }
 
 async fn query_dnsbl_hits(ip: IpAddr, zones: &[String]) -> Vec<String> {
@@ -934,7 +1200,11 @@ fn dnsbl_query_name(ip: IpAddr, zone: &str) -> String {
                 .flat_map(|byte| [byte >> 4, byte & 0x0f])
                 .map(|nibble| format!("{nibble:x}"))
                 .collect::<Vec<_>>();
-            format!("{}.{}", hex.into_iter().rev().collect::<Vec<_>>().join("."), zone)
+            format!(
+                "{}.{}",
+                hex.into_iter().rev().collect::<Vec<_>>().join("."),
+                zone
+            )
         }
     }
 }
@@ -953,7 +1223,11 @@ fn evaluate_greylisting(
     rcpt_to: &[String],
 ) -> Result<Option<String>> {
     let rcpt = rcpt_to.first().map(String::as_str).unwrap_or_default();
-    let key = stable_key_id(&(ip, mail_from.to_ascii_lowercase(), rcpt.to_ascii_lowercase()));
+    let key = stable_key_id(&(
+        ip,
+        mail_from.to_ascii_lowercase(),
+        rcpt.to_ascii_lowercase(),
+    ));
     let path = spool_dir.join("greylist").join(format!("{key}.json"));
     let now = unix_now();
     let mut entry = if path.exists() {
@@ -981,14 +1255,22 @@ fn evaluate_greylisting(
     Ok(None)
 }
 
-fn load_reputation_score(spool_dir: &Path, peer_ip: Option<IpAddr>, mail_from: &str) -> Result<i32> {
+fn load_reputation_score(
+    spool_dir: &Path,
+    peer_ip: Option<IpAddr>,
+    mail_from: &str,
+) -> Result<i32> {
     let store = load_reputation_store(spool_dir)?;
     let key = reputation_key(peer_ip, mail_from);
     let entry = store.entries.get(&key).cloned().unwrap_or_default();
     Ok(entry.accepted as i32 - (entry.quarantined as i32 * 2) - (entry.rejected as i32 * 3))
 }
 
-fn update_reputation(spool_dir: &Path, message: &QueuedMessage, action: FilterAction) -> Result<()> {
+fn update_reputation(
+    spool_dir: &Path,
+    message: &QueuedMessage,
+    action: FilterAction,
+) -> Result<()> {
     let mut store = load_reputation_store(spool_dir)?;
     let key = reputation_key(parse_peer_ip(&message.peer), &message.mail_from);
     let entry = store.entries.entry(key).or_default();
@@ -1072,12 +1354,20 @@ impl DnsResolver for SystemDnsResolver {
     }
 
     async fn query_a(&self, name: &str) -> Result<Vec<Ipv4Addr>, DnsError> {
-        let lookup = self.resolver.ipv4_lookup(name).await.map_err(map_dns_error)?;
+        let lookup = self
+            .resolver
+            .ipv4_lookup(name)
+            .await
+            .map_err(map_dns_error)?;
         Ok(lookup.iter().map(|record| record.0).collect())
     }
 
     async fn query_aaaa(&self, name: &str) -> Result<Vec<Ipv6Addr>, DnsError> {
-        let lookup = self.resolver.ipv6_lookup(name).await.map_err(map_dns_error)?;
+        let lookup = self
+            .resolver
+            .ipv6_lookup(name)
+            .await
+            .map_err(map_dns_error)?;
         Ok(lookup.iter().map(|record| record.0).collect())
     }
 
@@ -1166,29 +1456,123 @@ async fn deliver_inbound_message(
     Ok(delivery)
 }
 
-async fn relay_message(config: &RuntimeConfig, message: &QueuedMessage) -> Result<()> {
+async fn relay_message(
+    config: &RuntimeConfig,
+    message: &QueuedMessage,
+    route: &TransportRouteDecision,
+) -> OutboundExecution {
     if config.mutual_tls_required {
-        return Err(anyhow!(
-            "mutual TLS relay is configured but not implemented in LPE-CT v1"
-        ));
+        return OutboundExecution {
+            status: TransportDeliveryStatus::Failed,
+            detail: Some(
+                "mutual TLS relay is configured but not implemented in LPE-CT v1".to_string(),
+            ),
+            remote_message_ref: None,
+            retry: None,
+            dsn: None,
+            technical: Some(TransportTechnicalStatus {
+                phase: "connect".to_string(),
+                smtp_code: None,
+                enhanced_code: None,
+                remote_host: route.relay_target.clone(),
+                detail: Some(
+                    "mutual TLS relay is configured but not implemented in LPE-CT v1".to_string(),
+                ),
+            }),
+            route: Some(TransportRouteDecision {
+                rule_id: route.rule_id.clone(),
+                relay_target: route.relay_target.clone(),
+                queue: "held".to_string(),
+            }),
+            throttle: None,
+        };
+    }
+
+    let mut targets = Vec::new();
+    if let Some(target) = route.relay_target.clone() {
+        targets.push(target);
+    }
+    for candidate in [&config.primary_upstream, &config.secondary_upstream] {
+        let candidate = candidate.trim();
+        if !candidate.is_empty() && !targets.iter().any(|existing| existing == candidate) {
+            targets.push(candidate.to_string());
+        }
     }
 
     let mut last_error = None;
-    for target in [&config.primary_upstream, &config.secondary_upstream] {
-        if target.trim().is_empty() {
-            continue;
-        }
-
-        match relay_message_to_target(target, message).await {
-            Ok(()) => return Ok(()),
-            Err(error) => last_error = Some(error),
+    for target in targets {
+        match relay_message_to_target(&target, message, route).await {
+            Ok(execution) => return execution,
+            Err(error) => last_error = Some((target, error)),
         }
     }
 
-    Err(last_error.unwrap_or_else(|| anyhow!("no relay target configured")))
+    let (target, error) =
+        last_error.unwrap_or_else(|| ("".to_string(), anyhow!("no relay target configured")));
+    let detail = error.to_string();
+    let status = if is_permanent_relay_error(&detail) {
+        TransportDeliveryStatus::Failed
+    } else {
+        TransportDeliveryStatus::Deferred
+    };
+    let retry = if status == TransportDeliveryStatus::Deferred {
+        Some(TransportRetryAdvice {
+            retry_after_seconds: 300,
+            policy: "connect-backoff".to_string(),
+            reason: Some(detail.clone()),
+        })
+    } else {
+        None
+    };
+    let dsn = if status == TransportDeliveryStatus::Deferred {
+        Some(TransportDsnReport {
+            action: "delayed".to_string(),
+            status: "4.4.1".to_string(),
+            diagnostic_code: Some(format!("smtp; {detail}")),
+            remote_mta: if target.is_empty() {
+                None
+            } else {
+                Some(target.clone())
+            },
+        })
+    } else {
+        None
+    };
+    OutboundExecution {
+        status: status.clone(),
+        detail: Some(detail.clone()),
+        remote_message_ref: None,
+        retry,
+        dsn,
+        technical: Some(TransportTechnicalStatus {
+            phase: "connect".to_string(),
+            smtp_code: None,
+            enhanced_code: None,
+            remote_host: if target.is_empty() {
+                route.relay_target.clone()
+            } else {
+                Some(target.clone())
+            },
+            detail: Some(detail),
+        }),
+        route: Some(TransportRouteDecision {
+            rule_id: route.rule_id.clone(),
+            relay_target: if target.is_empty() {
+                route.relay_target.clone()
+            } else {
+                Some(target)
+            },
+            queue: default_queue_for_status(&status).to_string(),
+        }),
+        throttle: None,
+    }
 }
 
-async fn relay_message_to_target(target: &str, message: &QueuedMessage) -> Result<()> {
+async fn relay_message_to_target(
+    target: &str,
+    message: &QueuedMessage,
+    route: &TransportRouteDecision,
+) -> Result<OutboundExecution> {
     let address = normalize_smtp_target(target);
     let stream = TcpStream::connect(&address)
         .await
@@ -1206,23 +1590,176 @@ async fn relay_message_to_target(target: &str, message: &QueuedMessage) -> Resul
     )
     .await?;
     for recipient in &message.rcpt_to {
-        smtp_command(
+        let reply = smtp_command_reply(
             &mut reader,
             &mut writer,
             &format!("RCPT TO:<{}>", recipient),
-            250,
         )
         .await?;
+        if !(reply.code == 250 || reply.code == 251) {
+            let status = if reply.code >= 500 {
+                TransportDeliveryStatus::Bounced
+            } else {
+                TransportDeliveryStatus::Deferred
+            };
+            let enhanced = parse_enhanced_status(&reply.message);
+            return Ok(OutboundExecution {
+                status: status.clone(),
+                detail: Some(reply.message.clone()),
+                remote_message_ref: None,
+                retry: if status == TransportDeliveryStatus::Deferred {
+                    Some(TransportRetryAdvice {
+                        retry_after_seconds: 300,
+                        policy: "remote-smtp".to_string(),
+                        reason: Some(reply.message.clone()),
+                    })
+                } else {
+                    None
+                },
+                dsn: Some(TransportDsnReport {
+                    action: if status == TransportDeliveryStatus::Bounced {
+                        "failed".to_string()
+                    } else {
+                        "delayed".to_string()
+                    },
+                    status: enhanced.clone().unwrap_or_else(|| {
+                        if status == TransportDeliveryStatus::Bounced {
+                            "5.1.1".to_string()
+                        } else {
+                            "4.4.1".to_string()
+                        }
+                    }),
+                    diagnostic_code: Some(format!("smtp; {}", reply.message)),
+                    remote_mta: Some(address.clone()),
+                }),
+                technical: Some(TransportTechnicalStatus {
+                    phase: "rcpt-to".to_string(),
+                    smtp_code: Some(reply.code),
+                    enhanced_code: enhanced,
+                    remote_host: Some(address.clone()),
+                    detail: Some(reply.message.clone()),
+                }),
+                route: Some(TransportRouteDecision {
+                    rule_id: route.rule_id.clone(),
+                    relay_target: Some(target.to_string()),
+                    queue: default_queue_for_status(&status).to_string(),
+                }),
+                throttle: None,
+            });
+        }
     }
-    smtp_command(&mut reader, &mut writer, "DATA", 354).await?;
+    let data_reply = smtp_command_reply(&mut reader, &mut writer, "DATA").await?;
+    if data_reply.code != 354 {
+        let enhanced = parse_enhanced_status(&data_reply.message);
+        return Ok(OutboundExecution {
+            status: TransportDeliveryStatus::Deferred,
+            detail: Some(data_reply.message.clone()),
+            remote_message_ref: None,
+            retry: Some(TransportRetryAdvice {
+                retry_after_seconds: 300,
+                policy: "remote-smtp".to_string(),
+                reason: Some(data_reply.message.clone()),
+            }),
+            dsn: Some(TransportDsnReport {
+                action: "delayed".to_string(),
+                status: enhanced.clone().unwrap_or_else(|| "4.3.0".to_string()),
+                diagnostic_code: Some(format!("smtp; {}", data_reply.message)),
+                remote_mta: Some(address.clone()),
+            }),
+            technical: Some(TransportTechnicalStatus {
+                phase: "data".to_string(),
+                smtp_code: Some(data_reply.code),
+                enhanced_code: enhanced,
+                remote_host: Some(address.clone()),
+                detail: Some(data_reply.message.clone()),
+            }),
+            route: Some(TransportRouteDecision {
+                rule_id: route.rule_id.clone(),
+                relay_target: Some(target.to_string()),
+                queue: "deferred".to_string(),
+            }),
+            throttle: None,
+        });
+    }
     writer.write_all(&message.data).await?;
     if !message.data.ends_with(b"\r\n") {
         writer.write_all(b"\r\n").await?;
     }
     writer.write_all(b".\r\n").await?;
-    expect_smtp(&mut reader, 250).await?;
+    let final_reply = read_smtp_reply(&mut reader).await?;
     writer.write_all(b"QUIT\r\n").await?;
-    Ok(())
+    if final_reply.code != 250 {
+        let status = if final_reply.code >= 500 {
+            TransportDeliveryStatus::Bounced
+        } else {
+            TransportDeliveryStatus::Deferred
+        };
+        let enhanced = parse_enhanced_status(&final_reply.message);
+        return Ok(OutboundExecution {
+            status: status.clone(),
+            detail: Some(final_reply.message.clone()),
+            remote_message_ref: None,
+            retry: if status == TransportDeliveryStatus::Deferred {
+                Some(TransportRetryAdvice {
+                    retry_after_seconds: 300,
+                    policy: "remote-smtp".to_string(),
+                    reason: Some(final_reply.message.clone()),
+                })
+            } else {
+                None
+            },
+            dsn: Some(TransportDsnReport {
+                action: if status == TransportDeliveryStatus::Bounced {
+                    "failed".to_string()
+                } else {
+                    "delayed".to_string()
+                },
+                status: enhanced.clone().unwrap_or_else(|| {
+                    if status == TransportDeliveryStatus::Bounced {
+                        "5.0.0".to_string()
+                    } else {
+                        "4.0.0".to_string()
+                    }
+                }),
+                diagnostic_code: Some(format!("smtp; {}", final_reply.message)),
+                remote_mta: Some(address.clone()),
+            }),
+            technical: Some(TransportTechnicalStatus {
+                phase: "final-response".to_string(),
+                smtp_code: Some(final_reply.code),
+                enhanced_code: enhanced,
+                remote_host: Some(address.clone()),
+                detail: Some(final_reply.message.clone()),
+            }),
+            route: Some(TransportRouteDecision {
+                rule_id: route.rule_id.clone(),
+                relay_target: Some(target.to_string()),
+                queue: default_queue_for_status(&status).to_string(),
+            }),
+            throttle: None,
+        });
+    }
+
+    Ok(OutboundExecution {
+        status: TransportDeliveryStatus::Relayed,
+        detail: None,
+        remote_message_ref: Some(final_reply.message.clone()),
+        retry: None,
+        dsn: None,
+        technical: Some(TransportTechnicalStatus {
+            phase: "final-response".to_string(),
+            smtp_code: Some(final_reply.code),
+            enhanced_code: parse_enhanced_status(&final_reply.message),
+            remote_host: Some(address.clone()),
+            detail: Some(final_reply.message.clone()),
+        }),
+        route: Some(TransportRouteDecision {
+            rule_id: route.rule_id.clone(),
+            relay_target: Some(target.to_string()),
+            queue: "sent".to_string(),
+        }),
+        throttle: None,
+    })
 }
 
 async fn smtp_command(
@@ -1236,9 +1773,29 @@ async fn smtp_command(
     expect_smtp(reader, expected).await
 }
 
+async fn smtp_command_reply(
+    reader: &mut BufReader<OwnedReadHalf>,
+    writer: &mut OwnedWriteHalf,
+    command: &str,
+) -> Result<SmtpReply> {
+    writer.write_all(command.as_bytes()).await?;
+    writer.write_all(b"\r\n").await?;
+    read_smtp_reply(reader).await
+}
+
 async fn expect_smtp(reader: &mut BufReader<OwnedReadHalf>, expected: u16) -> Result<()> {
+    let reply = read_smtp_reply(reader).await?;
+    if reply.code == expected {
+        Ok(())
+    } else {
+        Err(anyhow!("unexpected SMTP response: {}", reply.message))
+    }
+}
+
+async fn read_smtp_reply(reader: &mut BufReader<OwnedReadHalf>) -> Result<SmtpReply> {
     let mut line = String::new();
-    loop {
+    let mut message = String::new();
+    let code = loop {
         line.clear();
         reader.read_line(&mut line).await?;
         if line.len() < 3 {
@@ -1246,13 +1803,17 @@ async fn expect_smtp(reader: &mut BufReader<OwnedReadHalf>, expected: u16) -> Re
         }
         let code = line[0..3].parse::<u16>().unwrap_or(0);
         let more = line.as_bytes().get(3) == Some(&b'-');
-        if !more {
-            if code == expected {
-                return Ok(());
-            }
-            return Err(anyhow!("unexpected SMTP response: {}", line.trim_end()));
+        let trimmed = line.trim_end().to_string();
+        if !message.is_empty() {
+            message.push('\n');
         }
-    }
+        message.push_str(&trimmed);
+        if !more {
+            break code;
+        }
+    };
+
+    Ok(SmtpReply { code, message })
 }
 
 async fn read_smtp_data(reader: &mut BufReader<OwnedReadHalf>, max_mb: u32) -> Result<Vec<u8>> {
@@ -1333,11 +1894,7 @@ fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
         quarantine_enabled: bool_at(&value, &["policies", "quarantine_enabled"], true),
         greylisting_enabled: bool_at(&value, &["policies", "greylisting_enabled"], true),
         require_spf: bool_at(&value, &["policies", "require_spf"], true),
-        require_dkim_alignment: bool_at(
-            &value,
-            &["policies", "require_dkim_alignment"],
-            false,
-        ),
+        require_dkim_alignment: bool_at(&value, &["policies", "require_dkim_alignment"], false),
         require_dmarc_enforcement: bool_at(
             &value,
             &["policies", "require_dmarc_enforcement"],
@@ -1350,14 +1907,70 @@ fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
             &["zen.spamhaus.org", "bl.spamcop.net"],
         ),
         reputation_enabled: bool_at(&value, &["policies", "reputation_enabled"], true),
-        spam_quarantine_threshold: f32_at(
-            &value,
-            &["policies", "spam_quarantine_threshold"],
-            5.0,
-        ),
+        spam_quarantine_threshold: f32_at(&value, &["policies", "spam_quarantine_threshold"], 5.0),
         spam_reject_threshold: f32_at(&value, &["policies", "spam_reject_threshold"], 9.0),
         max_message_size_mb: u32_at(&value, &["policies", "max_message_size_mb"], 64),
+        routing_rules: routing_rules_at(&value),
+        throttle_enabled: bool_at(&value, &["throttling", "enabled"], true),
+        throttle_rules: throttle_rules_at(&value),
     })
+}
+
+fn routing_rules_at(value: &Value) -> Vec<OutboundRoutingRule> {
+    value
+        .get("routing")
+        .and_then(|routing| routing.get("rules"))
+        .and_then(Value::as_array)
+        .map(|rules| {
+            rules
+                .iter()
+                .filter_map(|rule| {
+                    Some(OutboundRoutingRule {
+                        id: rule.get("id")?.as_str()?.to_string(),
+                        sender_domain: rule
+                            .get("sender_domain")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string),
+                        recipient_domain: rule
+                            .get("recipient_domain")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string),
+                        relay_target: rule.get("relay_target")?.as_str()?.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn throttle_rules_at(value: &Value) -> Vec<OutboundThrottleRule> {
+    value
+        .get("throttling")
+        .and_then(|throttling| throttling.get("rules"))
+        .and_then(Value::as_array)
+        .map(|rules| {
+            rules
+                .iter()
+                .filter_map(|rule| {
+                    Some(OutboundThrottleRule {
+                        id: rule.get("id")?.as_str()?.to_string(),
+                        scope: rule.get("scope")?.as_str()?.to_string(),
+                        recipient_domain: rule
+                            .get("recipient_domain")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string),
+                        sender_domain: rule
+                            .get("sender_domain")
+                            .and_then(Value::as_str)
+                            .map(ToString::to_string),
+                        max_messages: rule.get("max_messages")?.as_u64()? as u32,
+                        window_seconds: rule.get("window_seconds")?.as_u64()? as u32,
+                        retry_after_seconds: rule.get("retry_after_seconds")?.as_u64()? as u32,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn string_at(value: &Value, path: &[&str]) -> String {
@@ -1542,6 +2155,23 @@ fn is_permanent_relay_error(detail: &str) -> bool {
         || lower.contains("mutual tls relay is configured but not implemented")
 }
 
+fn parse_enhanced_status(detail: &str) -> Option<String> {
+    detail
+        .split_whitespace()
+        .map(|token| token.trim_matches(|ch: char| matches!(ch, ';' | ',' | ':')))
+        .find(|token| {
+            let mut parts = token.split('.');
+            matches!(
+                (parts.next(), parts.next(), parts.next(), parts.next()),
+                (Some(a), Some(b), Some(c), None)
+                    if a.chars().all(|ch| ch.is_ascii_digit())
+                        && b.chars().all(|ch| ch.is_ascii_digit())
+                        && c.chars().all(|ch| ch.is_ascii_digit())
+            )
+        })
+        .map(ToString::to_string)
+}
+
 fn message_id(prefix: &str) -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1561,10 +2191,10 @@ fn current_timestamp() -> String {
 mod tests {
     use super::{
         classify_inbound_message, compose_rfc822_message, dnsbl_query_name,
-        encode_quoted_printable, evaluate_greylisting, initialize_spool,
-        load_reputation_score, parse_peer_ip, process_outbound_handoff, receive_message,
-        receive_message_with_validator, stable_key_id, unix_now, update_reputation, AuthSummary,
-        FilterAction, GreylistEntry, QueuedMessage, RuntimeConfig,
+        encode_quoted_printable, evaluate_greylisting, initialize_spool, load_reputation_score,
+        parse_peer_ip, process_outbound_handoff, receive_message, receive_message_with_validator,
+        stable_key_id, unix_now, update_reputation, AuthSummary, FilterAction, GreylistEntry,
+        OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig,
     };
     use axum::{routing::post, Json, Router};
     use lpe_domain::{
@@ -1616,6 +2246,9 @@ mod tests {
             spam_quarantine_threshold: 5.0,
             spam_reject_threshold: 9.0,
             max_message_size_mb: 16,
+            routing_rules: Vec::new(),
+            throttle_enabled: false,
+            throttle_rules: Vec::new(),
         }
     }
 
@@ -1656,12 +2289,35 @@ mod tests {
                 body_text: "Body".to_string(),
                 body_html_sanitized: None,
                 internet_message_id: Some("<relay@test>".to_string()),
+                attempt_count: 0,
+                last_attempt_error: None,
             },
         )
         .await
         .unwrap();
 
         assert_eq!(response.status, TransportDeliveryStatus::Relayed);
+        assert_eq!(
+            response
+                .route
+                .as_ref()
+                .and_then(|route| route.rule_id.as_deref()),
+            None
+        );
+        assert_eq!(
+            response
+                .route
+                .as_ref()
+                .and_then(|route| route.relay_target.as_deref()),
+            Some(smtp_address.as_str())
+        );
+        assert_eq!(
+            response
+                .technical
+                .as_ref()
+                .and_then(|status| status.smtp_code),
+            Some(250)
+        );
         assert!(spool
             .join("sent")
             .join(format!("{}.json", response.trace_id))
@@ -1696,6 +2352,8 @@ mod tests {
                 body_text: "Body".to_string(),
                 body_html_sanitized: None,
                 internet_message_id: None,
+                attempt_count: 0,
+                last_attempt_error: None,
             },
         )
         .await
@@ -1706,6 +2364,116 @@ mod tests {
             .join("quarantine")
             .join(format!("{}.json", response.trace_id))
             .exists());
+    }
+
+    #[tokio::test]
+    async fn outbound_handoff_bounces_on_permanent_rcpt_failure() {
+        let spool = temp_dir("outbound-bounce");
+        initialize_spool(&spool).unwrap();
+        let smtp_address = spawn_dummy_smtp_with_profile(DummySmtpProfile {
+            rcpt_reply: "550 5.1.1 user unknown".to_string(),
+            ..DummySmtpProfile::default()
+        })
+        .await;
+
+        let response = process_outbound_handoff(
+            &spool,
+            &runtime_config(smtp_address.clone(), "http://127.0.0.1:9".to_string()),
+            outbound_request("Bounce test"),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status, TransportDeliveryStatus::Bounced);
+        assert_eq!(
+            response.dsn.as_ref().map(|dsn| dsn.status.as_str()),
+            Some("5.1.1")
+        );
+        assert_eq!(
+            response
+                .technical
+                .as_ref()
+                .and_then(|status| status.smtp_code),
+            Some(550)
+        );
+        assert!(spool
+            .join("bounces")
+            .join(format!("{}.json", response.trace_id))
+            .exists());
+    }
+
+    #[tokio::test]
+    async fn outbound_handoff_defers_when_local_throttle_hits() {
+        let spool = temp_dir("outbound-throttle");
+        initialize_spool(&spool).unwrap();
+        let smtp_address = spawn_dummy_smtp(Arc::new(Mutex::new(String::new()))).await;
+        let mut config = runtime_config(smtp_address, "http://127.0.0.1:9".to_string());
+        config.throttle_enabled = true;
+        config.throttle_rules = vec![OutboundThrottleRule {
+            id: "recipient-domain".to_string(),
+            scope: "recipient-domain".to_string(),
+            recipient_domain: None,
+            sender_domain: None,
+            max_messages: 1,
+            window_seconds: 300,
+            retry_after_seconds: 120,
+        }];
+
+        let first = process_outbound_handoff(&spool, &config, outbound_request("First"))
+            .await
+            .unwrap();
+        let second = process_outbound_handoff(&spool, &config, outbound_request("Second"))
+            .await
+            .unwrap();
+
+        assert_eq!(first.status, TransportDeliveryStatus::Relayed);
+        assert_eq!(second.status, TransportDeliveryStatus::Deferred);
+        assert_eq!(
+            second
+                .throttle
+                .as_ref()
+                .map(|throttle| throttle.retry_after_seconds),
+            Some(120)
+        );
+        assert_eq!(
+            second.retry.as_ref().map(|retry| retry.policy.as_str()),
+            Some("throttle")
+        );
+    }
+
+    #[tokio::test]
+    async fn outbound_handoff_uses_matching_routing_rule() {
+        let spool = temp_dir("outbound-routing");
+        initialize_spool(&spool).unwrap();
+        let smtp_address = spawn_dummy_smtp(Arc::new(Mutex::new(String::new()))).await;
+        let mut config =
+            runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+        config.routing_rules = vec![OutboundRoutingRule {
+            id: "example-route".to_string(),
+            sender_domain: None,
+            recipient_domain: Some("example.test".to_string()),
+            relay_target: smtp_address.clone(),
+        }];
+
+        let response = process_outbound_handoff(&spool, &config, outbound_request("Routed"))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, TransportDeliveryStatus::Relayed);
+        assert_eq!(
+            response
+                .route
+                .as_ref()
+                .and_then(|route| route.rule_id.as_deref()),
+            Some("example-route")
+        );
+        assert_eq!(
+            response
+                .route
+                .as_ref()
+                .and_then(|route| route.relay_target.as_deref()),
+            Some(smtp_address.as_str())
+        );
     }
 
     #[tokio::test]
@@ -1839,6 +2607,8 @@ mod tests {
             body_text: "Plain body".to_string(),
             body_html_sanitized: Some("<p>HTML body</p>".to_string()),
             internet_message_id: None,
+            attempt_count: 0,
+            last_attempt_error: None,
         }))
         .unwrap();
 
@@ -1913,9 +2683,14 @@ mod tests {
         let first = evaluate_greylisting(&spool, ip, "sender@example.test", &rcpt).unwrap();
         assert!(first.unwrap().contains("greylisted triplet"));
 
-        let key = stable_key_id(&(ip, "sender@example.test".to_string(), "dest@example.test".to_string()));
+        let key = stable_key_id(&(
+            ip,
+            "sender@example.test".to_string(),
+            "dest@example.test".to_string(),
+        ));
         let path = spool.join("greylist").join(format!("{key}.json"));
-        let mut entry: GreylistEntry = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let mut entry: GreylistEntry =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         entry.release_after_unix = unix_now().saturating_sub(1);
         std::fs::write(&path, serde_json::to_string_pretty(&entry).unwrap()).unwrap();
 
@@ -1945,6 +2720,11 @@ mod tests {
             dnsbl_hits: Vec::new(),
             auth_summary: AuthSummary::default(),
             decision_trace: Vec::new(),
+            remote_message_ref: None,
+            technical_status: None,
+            dsn: None,
+            route: None,
+            throttle: None,
             data: b"Subject: test\r\n\r\nbody".to_vec(),
         };
 
@@ -1953,7 +2733,8 @@ mod tests {
         message.id = "trace-2".to_string();
         update_reputation(&spool, &message, FilterAction::Reject).unwrap();
 
-        let score = load_reputation_score(&spool, parse_peer_ip(&message.peer), &message.mail_from).unwrap();
+        let score = load_reputation_score(&spool, parse_peer_ip(&message.peer), &message.mail_from)
+            .unwrap();
         assert_eq!(score, -4);
     }
 
@@ -1970,16 +2751,31 @@ mod tests {
     }
 
     async fn spawn_dummy_smtp(captured: Arc<Mutex<String>>) -> String {
+        spawn_dummy_smtp_with_profile(DummySmtpProfile {
+            captured: Some(captured),
+            ..DummySmtpProfile::default()
+        })
+        .await
+    }
+
+    #[derive(Clone, Default)]
+    struct DummySmtpProfile {
+        captured: Option<Arc<Mutex<String>>>,
+        rcpt_reply: String,
+        final_reply: String,
+    }
+
+    async fn spawn_dummy_smtp_with_profile(profile: DummySmtpProfile) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            handle_dummy_smtp(stream, captured).await;
+            handle_dummy_smtp(stream, profile).await;
         });
         address.to_string()
     }
 
-    async fn handle_dummy_smtp(stream: TcpStream, captured: Arc<Mutex<String>>) {
+    async fn handle_dummy_smtp(stream: TcpStream, profile: DummySmtpProfile) {
         let (reader, mut writer) = stream.into_split();
         let mut reader = BufReader::new(reader);
         writer.write_all(b"220 dummy\r\n").await.unwrap();
@@ -2002,14 +2798,51 @@ mod tests {
                     }
                     data.push_str(&line);
                 }
-                *captured.lock().unwrap() = data;
-                writer.write_all(b"250 stored\r\n").await.unwrap();
+                if let Some(captured) = &profile.captured {
+                    *captured.lock().unwrap() = data;
+                }
+                let final_reply = if profile.final_reply.is_empty() {
+                    "250 stored".to_string()
+                } else {
+                    profile.final_reply.clone()
+                };
+                writer
+                    .write_all(format!("{final_reply}\r\n").as_bytes())
+                    .await
+                    .unwrap();
             } else if trimmed == "QUIT" {
                 writer.write_all(b"221 bye\r\n").await.unwrap();
                 break;
+            } else if trimmed.starts_with("RCPT TO:") && !profile.rcpt_reply.is_empty() {
+                writer
+                    .write_all(format!("{}\r\n", profile.rcpt_reply).as_bytes())
+                    .await
+                    .unwrap();
             } else {
                 writer.write_all(b"250 ok\r\n").await.unwrap();
             }
+        }
+    }
+
+    fn outbound_request(subject: &str) -> OutboundMessageHandoffRequest {
+        OutboundMessageHandoffRequest {
+            queue_id: Uuid::new_v4(),
+            message_id: Uuid::new_v4(),
+            account_id: Uuid::new_v4(),
+            from_address: "sender@example.test".to_string(),
+            from_display: Some("Sender".to_string()),
+            to: vec![TransportRecipient {
+                address: "dest@example.test".to_string(),
+                display_name: Some("Dest".to_string()),
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: subject.to_string(),
+            body_text: "Body".to_string(),
+            body_html_sanitized: None,
+            internet_message_id: Some(format!("<{}@test>", subject.to_ascii_lowercase())),
+            attempt_count: 0,
+            last_attempt_error: None,
         }
     }
 

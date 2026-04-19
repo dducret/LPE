@@ -31,6 +31,9 @@ cargo run --manifest-path LPE-CT/Cargo.toml
 - spool local dans `incoming`, `deferred`, `quarantine`, `held` et `sent`
 - handoff HTTP interne recu depuis `LPE` pour les messages sortants
 - relais SMTP simple vers un upstream primaire puis secondaire pour la sortie
+- classification sortante plus fine avec `deferred`, `bounced`, `failed` et detail `DSN`/technique
+- regles locales de routage sortant
+- throttling sortant par fenetre glissante locale
 - remise finale des messages entrants vers `LPE` via `POST /internal/lpe-ct/inbound-deliveries`
 - quarantaine de test via l'en-tete `X-LPE-CT-Quarantine: yes` ou un sujet contenant `[quarantine]`
 - execution des controles `SPF`, `DKIM` et `DMARC` a l'entree
@@ -120,6 +123,9 @@ cargo run --manifest-path LPE-CT/Cargo.toml
 - local spool in `incoming`, `deferred`, `quarantine`, `held`, and `sent`
 - internal HTTP handoff received from `LPE` for outbound messages
 - simple SMTP relay to a primary then secondary upstream for outbound transport
+- richer outbound classification with `deferred`, `bounced`, `failed`, and structured `DSN`/technical detail
+- local outbound routing rules
+- local sliding-window outbound throttling
 - final delivery of accepted inbound messages to `LPE` through `POST /internal/lpe-ct/inbound-deliveries`
 - test quarantine through the `X-LPE-CT-Quarantine: yes` header or a subject containing `[quarantine]`
 - executed inbound `SPF`, `DKIM`, and `DMARC` checks

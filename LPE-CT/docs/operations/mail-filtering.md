@@ -86,6 +86,16 @@ Message trace files now also persist:
 
 This trace is the primary operational artifact for explaining why a message was deferred, quarantined, rejected, or accepted.
 
+Outbound trace files now also persist:
+
+- applied routing rule and selected relay target
+- local throttling decisions
+- last SMTP phase and reply code
+- enhanced status code when available
+- `DSN` action and diagnostic for deferred/bounced deliveries
+
+Permanent outbound failures are copied to `bounces/` while the operational queue copy remains in `held/`.
+
 ## SMTP outcomes
 
 Typical perimeter outcomes are:
@@ -106,5 +116,7 @@ Typical perimeter outcomes are:
 ## Current scope
 
 This implementation executes inbound SPF, DKIM, and DMARC verification, DNSBL checks, greylisting, reputation weighting, and detailed trace persistence.
+
+It also now executes outbound routing selection, local throttling, and SMTP-result classification into `relayed`, `deferred`, `bounced`, or `failed`, with structured `DSN`/technical trace feedback for the `LPE` worker.
 
 It does not yet add outbound DKIM signing. That remains an explicit `LPE-CT` responsibility to complete in a later increment.
