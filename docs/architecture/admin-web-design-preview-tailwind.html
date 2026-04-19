@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LPE Admin Preview - Tailwind</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            lpe: {
+              bg: "#f3f6f9",
+              panel: "#ffffff",
+              panelSoft: "#f8fbfd",
+              border: "#d8e2ea",
+              text: "#16212b",
+              soft: "#62707d",
+              nav: "#0f1822",
+              navSoft: "#172333",
+              primary: "#2e6ff2",
+              success: "#1d9d62",
+              warning: "#c6871b",
+              danger: "#ce4242"
+            }
+          },
+          transitionProperty: {
+            width: "width",
+            spacing: "margin, padding",
+          },
+          boxShadow: {
+            shell: "0 18px 44px rgba(17, 28, 39, 0.08)",
+            card: "0 10px 26px rgba(17, 28, 39, 0.06)"
+          },
+          borderRadius: {
+            xl2: "18px"
+          },
+          fontFamily: {
+            sans: ["Inter", "Segoe UI", "Helvetica Neue", "Arial", "sans-serif"]
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    .nav-item-tooltip {
+      position: relative;
+    }
+
+    .is-collapsed .nav-item-tooltip::after {
+      content: attr(data-title);
+      position: absolute;
+      left: calc(100% + 12px);
+      top: 50%;
+      transform: translateY(-50%);
+      background: #1e293b;
+      color: #ffffff;
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.2s ease;
+      z-index: 50;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .is-collapsed .nav-item-tooltip:hover::after {
+      opacity: 1;
+      transform: translateY(-50%) translateX(4px);
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-[radial-gradient(circle_at_top_right,rgba(46,111,242,0.08),transparent_26%),radial-gradient(circle_at_bottom_left,rgba(29,157,98,0.06),transparent_22%),linear-gradient(180deg,#f8fafc_0%,#edf3f8_100%)] text-lpe-text font-sans">
+  <div id="appShell" class="grid min-h-screen grid-cols-1 lg:grid-cols-[auto_minmax(0,1fr)]">
+    <aside id="sidebar" class="fixed inset-y-4 left-4 z-30 hidden w-[min(20rem,calc(100vw-2rem))] overflow-hidden whitespace-nowrap rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),transparent_28%),linear-gradient(180deg,#0e1822_0%,#101a24_100%)] p-4 text-slate-100 shadow-shell transition-[width,padding] duration-300 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] lg:static lg:inset-auto lg:block lg:h-screen lg:w-[18.25rem] lg:rounded-none lg:border-r lg:border-t-0 lg:border-l-0 lg:border-b-0 lg:border-r-white/5 lg:p-[18px] lg:shadow-none">
+      <div class="grid h-full grid-rows-[auto_auto_1fr_auto] gap-4">
+        <div class="brand flex items-center gap-3 rounded-2xl bg-white/5 px-3 py-3">
+          <div class="grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-lpe-primary to-sky-400 text-sm font-bold text-white shadow-inner">L</div>
+          <div class="brand-copy min-w-0">
+            <div class="truncate text-sm font-semibold tracking-[0.02em]">LPE Admin</div>
+            <div class="mt-0.5 truncate text-xs text-slate-300/70">Unified operations shell</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="mb-2 px-3 text-[11px] uppercase tracking-[0.12em] text-slate-300/45">Workspace</div>
+          <nav class="grid gap-1.5">
+            <a href="#" data-title="Dashboard" class="nav-item nav-item-tooltip group relative grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl bg-gradient-to-r from-lpe-primary/30 to-lpe-primary/10 px-3 shadow-[inset_0_0_0_1px_rgba(100,160,255,0.18)]">
+              <div class="absolute left-0 h-4 w-1 rounded-r-full bg-lpe-primary shadow-[0_0_8px_rgba(46,111,242,0.6)]"></div>
+              <div class="flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]"> </div>
+              <span class="truncate text-sm">Dashboard</span>
+              <span class="rounded-full bg-white/10 px-2 py-0.5 text-[11px]">4</span>
+            </a>
+            <a href="#" data-title="Tenants and Domains" class="nav-item nav-item-tooltip group grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+              <div class="flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]"> </div>
+              <span class="truncate text-sm">Tenants and Domains</span>
+              <span class="rounded-full bg-white/10 px-2 py-0.5 text-[11px]">36</span>
+            </a>
+            <a href="#" data-title="Accounts and Mailboxes" class="nav-item nav-item-tooltip group grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+              <div class="flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]"> </div>
+              <span class="truncate text-sm">Accounts and Mailboxes</span>
+              <span class="rounded-full bg-white/10 px-2 py-0.5 text-[11px]">1.2k</span>
+            </a>
+            <a href="#" data-title="Mail Flow and Quarantine" class="nav-item nav-item-tooltip group grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+              <div class="flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]"> </div>
+              <span class="truncate text-sm">Mail Flow and Quarantine</span>
+              <span class="rounded-full bg-white/10 px-2 py-0.5 text-[11px]">19</span>
+            </a>
+            <a href="#" data-title="Security and Policies" class="nav-item nav-item-tooltip group grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+              <div class="flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]"> </div>
+              <span class="truncate text-sm">Security and Policies</span>
+              <span class="rounded-full bg-white/10 px-2 py-0.5 text-[11px]">7</span>
+            </a>
+          </nav>
+        </div>
+
+        <div>
+          <div class="mb-2 px-3 text-[11px] uppercase tracking-[0.12em] text-slate-300/45">Governance</div>
+          <nav class="grid gap-1.5">
+            <a href="#" data-title="Audit and Compliance" class="nav-item nav-item-tooltip group grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+              <div class="flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]"> </div>
+              <span class="truncate text-sm">Audit and Compliance</span>
+              <span class="rounded-full bg-white/10 px-2 py-0.5 text-[11px]">3</span>
+            </a>
+            <a href="#" data-title="Storage and Lifecycle" class="nav-item nav-item-tooltip group grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+              <div class="flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]"> </div>
+              <span class="truncate text-sm">Storage and Lifecycle</span>
+              <span class="rounded-full bg-white/10 px-2 py-0.5 text-[11px]">2</span>
+            </a>
+            <a href="#" data-title="Protocols and Access" class="nav-item nav-item-tooltip group grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+              <div class="flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]"> </div>
+              <span class="truncate text-sm">Protocols and Access</span>
+              <span class="rounded-full bg-white/10 px-2 py-0.5 text-[11px]">5</span>
+            </a>
+            <a href="#" data-title="System Operations" class="nav-item nav-item-tooltip group grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+              <div class="flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]"> </div>
+              <span class="truncate text-sm">System Operations</span>
+              <span class="rounded-full bg-white/10 px-2 py-0.5 text-[11px]">1</span>
+            </a>
+          </nav>
+        </div>
+
+        <div id="sidebarFooter" class="grid gap-3 rounded-2xl bg-white/5 p-3.5">
+          <div id="viewToggle" class="relative grid grid-cols-2 rounded-full bg-white/5 p-1">
+            <div id="viewTogglePill" class="absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-full bg-white/15 transition-all duration-300"></div>
+            <button id="simpleViewButton" class="relative z-10 rounded-full px-3 py-2 text-sm text-white">
+              <span class="toggle-label">Simple</span>
+              <span class="toggle-short hidden">S</span>
+            </button>
+            <button id="advancedViewButton" class="relative z-10 rounded-full px-3 py-2 text-sm text-slate-200/85">
+              <span class="toggle-label">Advanced</span>
+              <span class="toggle-short hidden">A</span>
+            </button>
+          </div>
+          <p class="sidebar-note text-xs leading-5 text-slate-300/70">
+            The shell stays stable. Advanced mode increases depth and exposes expert operations.
+          </p>
+        </div>
+      </div>
+    </aside>
+
+    <div class="grid min-w-0 grid-rows-[76px_minmax(0,1fr)] lg:col-start-2">
+      <header class="sticky top-0 z-20 flex flex-col gap-3 border-b border-lpe-border/80 bg-white/75 px-4 py-3 backdrop-blur-xl sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:gap-4 lg:py-0">
+        <div class="flex min-w-0 flex-1 items-center gap-3">
+          <button id="sidebarToggle" class="inline-flex min-h-10 items-center justify-center rounded-xl border border-lpe-border bg-white/80 px-3 text-sm shadow-sm">Menu</button>
+          <label class="relative grid min-h-[46px] flex-1 grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 rounded-2xl border border-lpe-border bg-white/90 px-4 shadow-sm transition-all duration-300 focus-within:border-lpe-primary focus-within:ring-4 focus-within:ring-lpe-primary/10">
+            <span aria-hidden="true">?</span>
+            <input class="min-w-0 border-0 bg-transparent outline-none" placeholder="Search domains, accounts, queues..." value="" />
+            <kbd class="ml-auto hidden h-5 items-center gap-1 rounded border border-lpe-border bg-lpe-bg px-1.5 font-sans text-[10px] font-medium text-lpe-soft sm:inline-flex">
+              <span class="text-xs">⌘</span>K
+            </kbd>
+          </label>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 lg:flex-nowrap">
+          <button class="inline-flex min-h-10 items-center rounded-xl border border-lpe-border bg-white/80 px-3 text-sm shadow-sm">Alerts</button>
+          <button class="inline-flex min-h-10 items-center rounded-xl border border-lpe-border bg-white/80 px-3 text-sm shadow-sm">Help</button>
+          <div class="flex min-h-11 items-center gap-3 rounded-2xl border border-lpe-border bg-white/85 px-3 shadow-sm">
+            <div class="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-lpe-success to-emerald-400 text-xs font-bold text-white">AD</div>
+            <div class="text-sm">
+              <div class="font-semibold">admin@lpe.test</div>
+              <div class="text-xs text-lpe-soft">Global administrator</div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main class="grid gap-6 p-4 sm:p-6">
+        <section class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div class="text-xs uppercase tracking-[0.12em] text-lpe-soft">Control plane</div>
+            <h1 class="mt-2 text-3xl font-semibold leading-tight text-slate-900 sm:text-4xl">Tailwind-based admin shell preview</h1>
+            <p class="mt-3 max-w-3xl text-sm leading-6 text-lpe-soft sm:text-base">
+              This version keeps the same product architecture but expresses it with Tailwind utility classes and a small theme layer.
+              It is useful to compare implementation ergonomics, consistency, and the visual direction of the shell.
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center gap-3">
+            <button class="inline-flex min-h-10 items-center rounded-xl border border-lpe-border bg-white/80 px-4 text-sm shadow-sm">Export audit report</button>
+            <button id="openDrawerButton" class="group relative inline-flex min-h-10 items-center overflow-hidden rounded-xl bg-gradient-to-br from-lpe-primary to-blue-400 px-4 text-sm font-medium text-white shadow-[0_12px_24px_rgba(46,111,242,0.2)]">
+              <span class="relative z-10">Create domain</span>
+              <div class="absolute inset-0 -translate-x-full skew-x-[-20deg] bg-white/20 transition-transform duration-500 group-hover:translate-x-full"></div>
+            </button>
+          </div>
+        </section>
+
+        <section class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <article class="relative overflow-hidden rounded-xl2 border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-lpe-success">
+            <div class="text-[12px] uppercase tracking-[0.08em] text-lpe-soft">System health</div>
+            <div class="mt-3 text-4xl font-bold leading-none">98.7%</div>
+            <p class="mt-3 text-sm leading-6 text-lpe-soft">Core services healthy. One node pending routine maintenance.</p>
+          </article>
+          <article class="relative overflow-hidden rounded-xl2 border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-lpe-primary">
+            <div class="text-[12px] uppercase tracking-[0.08em] text-lpe-soft">Inbound flow</div>
+            <div class="mt-3 text-4xl font-bold leading-none">42k</div>
+            <p class="mt-3 text-sm leading-6 text-lpe-soft">Messages accepted in the last 24 hours. Transport latency within target.</p>
+          </article>
+          <article class="relative overflow-hidden rounded-xl2 border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-lpe-warning">
+            <div class="text-[12px] uppercase tracking-[0.08em] text-lpe-soft">Quarantine</div>
+            <div class="mt-3 text-4xl font-bold leading-none">19</div>
+            <p class="mt-3 text-sm leading-6 text-lpe-soft">Pending reviews. Three releases are awaiting compliance approval.</p>
+          </article>
+          <article class="relative overflow-hidden rounded-xl2 border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-lpe-danger">
+            <div class="text-[12px] uppercase tracking-[0.08em] text-lpe-soft">Attention required</div>
+            <div class="mt-3 text-4xl font-bold leading-none">1</div>
+            <p class="mt-3 text-sm leading-6 text-lpe-soft">A sorting center link has elevated retry counts and should be reviewed.</p>
+          </article>
+        </section>
+
+        <section class="grid gap-4">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 class="text-xl font-semibold">Dashboard cards</h2>
+              <p class="mt-1 text-sm text-lpe-soft">Cards are modular and should become reorderable in the real implementation.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <span class="rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">Simple view</span>
+              <span id="advancedPill" class="hidden rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">Advanced metrics visible</span>
+            </div>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <article class="grid min-h-[168px] gap-4 rounded-xl2 border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="font-semibold">Inbound relay summary</h3>
+                  <p class="mt-1 text-sm text-lpe-soft">Last 24 hours</p>
+                </div>
+                <span class="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 shadow-[inset_0_1px_rgba(255,255,255,0.4)]"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>Stable</span>
+              </div>
+              <div class="text-3xl font-bold leading-none">99.94%</div>
+              <div class="grid gap-3">
+                <div class="flex items-center gap-3">
+                  <div class="flex-1 overflow-hidden rounded-full bg-slate-100 h-2">
+                    <div class="h-full w-[84%] rounded-full bg-gradient-to-r from-lpe-primary to-sky-400 transition-all duration-1000"></div>
+                  </div>
+                  <span class="w-8 text-right text-[10px] font-medium text-lpe-soft">84%</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <div class="flex-1 overflow-hidden rounded-full bg-slate-100 h-2">
+                    <div class="h-full w-[71%] rounded-full bg-gradient-to-r from-lpe-primary to-sky-400 transition-all duration-1000"></div>
+                  </div>
+                  <span class="w-8 text-right text-[10px] font-medium text-lpe-soft">71%</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <div class="flex-1 overflow-hidden rounded-full bg-slate-100 h-2">
+                    <div class="h-full w-[92%] rounded-full bg-gradient-to-r from-lpe-primary to-sky-400 transition-all duration-1000"></div>
+                  </div>
+                  <span class="w-8 text-right text-[10px] font-medium text-lpe-soft">92%</span>
+                </div>
+              </div>
+            </article>
+
+            <article class="grid min-h-[168px] gap-4 rounded-xl2 border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="font-semibold">Outbound queue</h3>
+                  <p class="mt-1 text-sm text-lpe-soft">Deferred, relayed, failed</p>
+                </div>
+                <span class="inline-flex items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 shadow-[inset_0_1px_rgba(255,255,255,0.4)]"><span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>Watch</span>
+              </div>
+              <div class="text-3xl font-bold leading-none">12</div>
+              <p class="text-sm leading-6 text-lpe-soft">Messages deferred for less than 15 minutes. DSN generation unaffected.</p>
+            </article>
+
+            <article class="grid min-h-[168px] gap-4 rounded-xl2 border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="font-semibold">Storage capacity</h3>
+                  <p class="mt-1 text-sm text-lpe-soft">Mailbox and archive tiers</p>
+                </div>
+                <span class="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 shadow-[inset_0_1px_rgba(255,255,255,0.4)]"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>Healthy</span>
+              </div>
+              <div class="text-3xl font-bold leading-none">67 TB</div>
+              <p class="text-sm leading-6 text-lpe-soft">Split and online archive thresholds are within planned headroom.</p>
+            </article>
+
+            <article class="grid min-h-[168px] gap-4 rounded-xl2 border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="font-semibold">Security signals</h3>
+                  <p class="mt-1 text-sm text-lpe-soft">Spam vs security scoring</p>
+                </div>
+                <span class="inline-flex items-center gap-1.5 rounded-full border border-rose-500/20 bg-rose-500/10 px-2 py-0.5 text-[11px] font-medium text-rose-700 shadow-[inset_0_1px_rgba(255,255,255,0.4)]"><span class="h-1.5 w-1.5 rounded-full bg-rose-500"></span>1 critical</span>
+              </div>
+              <div class="text-3xl font-bold leading-none">4.2</div>
+              <p class="text-sm leading-6 text-lpe-soft">One inbound flow hit an elevated deterministic security score.</p>
+            </article>
+
+            <article id="advancedCard" class="hidden min-h-[168px] gap-4 rounded-xl2 border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="font-semibold">gRPC backbone</h3>
+                  <p class="mt-1 text-sm text-lpe-soft">LPE-CT to LPE handoff</p>
+                </div>
+                <span class="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 shadow-[inset_0_1px_rgba(255,255,255,0.4)]"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>Nominal</span>
+              </div>
+              <div class="text-3xl font-bold leading-none">18 ms</div>
+              <p class="text-sm leading-6 text-lpe-soft">Median internal request latency with streaming handoff enabled.</p>
+            </article>
+
+            <article class="grid min-h-[168px] gap-4 rounded-xl2 border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md">
+              <div>
+                <h3 class="font-semibold">Quick actions</h3>
+                <p class="mt-1 text-sm text-lpe-soft">Frequent operations</p>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <button class="cursor-pointer rounded-full border border-transparent bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft transition-colors hover:border-lpe-primary/20 hover:bg-lpe-primary/10 hover:text-lpe-primary">Create mailbox</button>
+                <button class="cursor-pointer rounded-full border border-transparent bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft transition-colors hover:border-lpe-primary/20 hover:bg-lpe-primary/10 hover:text-lpe-primary">Release quarantine</button>
+                <button class="cursor-pointer rounded-full border border-transparent bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft transition-colors hover:border-lpe-primary/20 hover:bg-lpe-primary/10 hover:text-lpe-primary">Rotate policy</button>
+                <button class="cursor-pointer rounded-full border border-transparent bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft transition-colors hover:border-lpe-primary/20 hover:bg-lpe-primary/10 hover:text-lpe-primary">Run PST import</button>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="grid gap-4 xl:grid-cols-[minmax(0,1.8fr)_minmax(18rem,0.9fr)]">
+          <div class="rounded-xl2 border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md">
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 class="text-xl font-semibold">Domains</h2>
+                <p class="mt-1 text-sm text-lpe-soft">Default management pattern: full-width list with a right drawer for actions.</p>
+              </div>
+              <div class="flex flex-wrap gap-3">
+                <button class="inline-flex min-h-10 items-center rounded-xl border border-lpe-border bg-white px-4 text-sm shadow-sm">Filter</button>
+                <button class="group relative inline-flex min-h-10 items-center overflow-hidden rounded-xl bg-gradient-to-br from-lpe-primary to-blue-400 px-4 text-sm font-medium text-white shadow-[0_12px_24px_rgba(46,111,242,0.2)]"><span class="relative z-10">Create</span><div class="absolute inset-0 -translate-x-full skew-x-[-20deg] bg-white/20 transition-transform duration-500 group-hover:translate-x-full"></div></button>
+              </div>
+            </div>
+
+            <div class="mt-4 flex flex-wrap gap-2">
+              <span class="rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">All tenants</span>
+              <span class="rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">Production</span>
+              <span class="rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">Archive enabled</span>
+              <span id="advancedFilter" class="hidden rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">Compliance hold</span>
+            </div>
+
+            <div class="mt-4 overflow-hidden rounded-2xl border border-white/40 bg-white/75 ring-1 ring-inset ring-white/20 backdrop-blur-md">
+              <div class="hidden grid-cols-[minmax(180px,2fr)_1fr_120px_140px_40px] gap-3 border-b border-lpe-border bg-lpe-panelSoft px-4 py-3 text-[12px] uppercase tracking-[0.08em] text-lpe-soft md:grid">
+                <div>Domain</div>
+                <div>Owner</div>
+                <div>Users</div>
+                <div>Status</div>
+                <div></div>
+              </div>
+
+              <div class="group cursor-pointer border-b border-lpe-border/70 px-4 py-4 transition-colors hover:bg-lpe-panelSoft/50 md:grid md:grid-cols-[minmax(180px,2fr)_1fr_120px_140px_40px] md:items-center md:gap-3">
+                <div>
+                  <strong class="block text-sm">example.fr</strong>
+                  <span class="mt-1 block text-xs text-lpe-soft">Mail, contacts, calendars, tasks</span>
+                </div>
+                <div class="mt-2 text-sm md:mt-0">Tenant A</div>
+                <div class="mt-2 text-sm md:mt-0">184</div>
+                <div class="mt-2 md:mt-0"><span class="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 shadow-[inset_0_1px_rgba(255,255,255,0.4)]"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>Healthy</span></div>
+                <div class="mt-2 text-lpe-soft transition-transform group-hover:translate-x-1 md:mt-0">
+                  <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4 stroke-current" aria-hidden="true"><path d="M7 4l6 6-6 6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </div>
+              </div>
+
+              <div class="group cursor-pointer border-b border-lpe-border/70 px-4 py-4 transition-colors hover:bg-lpe-panelSoft/50 md:grid md:grid-cols-[minmax(180px,2fr)_1fr_120px_140px_40px] md:items-center md:gap-3">
+                <div>
+                  <strong class="block text-sm">example.de</strong>
+                  <span class="mt-1 block text-xs text-lpe-soft">Archive threshold reached for 3 mailboxes</span>
+                </div>
+                <div class="mt-2 text-sm md:mt-0">Tenant B</div>
+                <div class="mt-2 text-sm md:mt-0">92</div>
+                <div class="mt-2 md:mt-0"><span class="inline-flex items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 shadow-[inset_0_1px_rgba(255,255,255,0.4)]"><span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>Review</span></div>
+                <div class="mt-2 text-lpe-soft transition-transform group-hover:translate-x-1 md:mt-0">
+                  <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4 stroke-current" aria-hidden="true"><path d="M7 4l6 6-6 6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </div>
+              </div>
+
+              <div class="group cursor-pointer px-4 py-4 transition-colors hover:bg-lpe-panelSoft/50 md:grid md:grid-cols-[minmax(180px,2fr)_1fr_120px_140px_40px] md:items-center md:gap-3">
+                <div>
+                  <strong class="block text-sm">example.test</strong>
+                  <span class="mt-1 block text-xs text-lpe-soft">Dedicated database tier active</span>
+                </div>
+                <div class="mt-2 text-sm md:mt-0">Tenant Lab</div>
+                <div class="mt-2 text-sm md:mt-0">28</div>
+                <div class="mt-2 md:mt-0"><span class="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 shadow-[inset_0_1px_rgba(255,255,255,0.4)]"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>Healthy</span></div>
+                <div class="mt-2 text-lpe-soft transition-transform group-hover:translate-x-1 md:mt-0">
+                  <svg viewBox="0 0 20 20" fill="none" class="h-4 w-4 stroke-current" aria-hidden="true"><path d="M7 4l6 6-6 6" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid gap-4">
+            <aside class="rounded-xl2 border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md">
+              <div>
+                <h2 class="text-xl font-semibold">Quarantine focus</h2>
+                <p class="mt-1 text-sm text-lpe-soft">Operational items that should remain one click away.</p>
+              </div>
+              <div class="mt-4 grid gap-3">
+                <div class="rounded-2xl border border-white/40 bg-white/60 px-4 py-4 ring-1 ring-inset ring-white/20 backdrop-blur-md">
+                  <strong class="block text-sm text-slate-900">invoice-0427.zip</strong>
+                  <span class="mt-1 block text-xs leading-5 text-lpe-soft">Detected as exotic payload by Magika. Held in LPE-CT.</span>
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    <span class="inline-flex items-center gap-1.5 rounded-full border border-rose-500/20 bg-rose-500/10 px-2 py-0.5 text-[11px] font-medium text-rose-700 shadow-[inset_0_1px_rgba(255,255,255,0.4)]"><span class="h-1.5 w-1.5 rounded-full bg-rose-500"></span>Quarantine</span>
+                    <span class="inline-flex items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 shadow-[inset_0_1px_rgba(255,255,255,0.4)]"><span class="font-mono">9.1</span></span>
+                  </div>
+                </div>
+                <div class="rounded-2xl border border-white/40 bg-white/60 px-4 py-4 ring-1 ring-inset ring-white/20 backdrop-blur-md">
+                  <strong class="block text-sm text-slate-900">board-minutes.p7m</strong>
+                  <span class="mt-1 block text-xs leading-5 text-lpe-soft">Encrypted payload marked uninspectable. Awaiting domain policy review.</span>
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    <span class="inline-flex items-center gap-1.5 rounded-full border border-lpe-primary/20 bg-lpe-primary/10 px-2 py-0.5 text-[11px] font-medium text-lpe-primary shadow-[inset_0_1px_rgba(255,255,255,0.4)]"><span class="h-1.5 w-1.5 rounded-full bg-lpe-primary"></span>Uninspectable</span>
+                    <span class="inline-flex items-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-700 shadow-[inset_0_1px_rgba(255,255,255,0.4)]">Reduced trust</span>
+                  </div>
+                </div>
+              </div>
+            </aside>
+
+            <aside id="advancedAside" class="hidden rounded-xl2 border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md">
+              <div>
+                <h2 class="text-xl font-semibold">Advanced operators</h2>
+                <p class="mt-1 text-sm text-lpe-soft">Extra depth exposed only in advanced mode.</p>
+              </div>
+              <div class="mt-4 flex flex-wrap gap-2">
+                <span class="rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">gRPC tracing</span>
+                <span class="rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">Policy push status</span>
+                <span class="rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">Shard placement</span>
+                <span class="rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">Retention audits</span>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="drawerOverlay" class="fixed inset-0 z-30 hidden bg-slate-900/40 backdrop-blur-sm"></div>
+  <aside id="drawer" class="fixed inset-y-4 right-4 z-40 grid w-[min(26.25rem,calc(100vw-2rem))] translate-x-[calc(100%+28px)] grid-rows-[auto_auto_1fr_auto] gap-4 rounded-[24px] border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md transition-transform duration-200">
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <div class="text-xs uppercase tracking-[0.12em] text-lpe-soft">Deep-linkable drawer</div>
+        <h2 class="mt-2 text-2xl font-semibold">Create domain</h2>
+        <p class="mt-2 text-sm leading-6 text-lpe-soft">
+          This models the right-side drawer pattern for creation, details, and contextual actions.
+        </p>
+      </div>
+      <button id="closeDrawerButton" class="inline-flex min-h-10 items-center rounded-xl border border-lpe-border bg-white px-3 text-sm shadow-sm">Close</button>
+    </div>
+
+    <div class="rounded-2xl border border-white/40 bg-white/60 p-4 ring-1 ring-inset ring-white/20 backdrop-blur-md">
+      <strong class="text-sm">URL behavior</strong>
+      <p class="mt-2 text-sm leading-6 text-lpe-soft">
+        In the real application, this drawer should reopen from a dedicated URL so a specific admin record or form can be shared directly.
+      </p>
+    </div>
+
+    <div class="grid gap-3">
+      <label class="grid gap-1.5">
+        <span class="text-[12px] uppercase tracking-[0.05em] text-lpe-soft">Domain name</span>
+        <input class="min-h-11 rounded-xl border border-lpe-border bg-white px-4 outline-none" value="example.org" />
+      </label>
+      <label class="grid gap-1.5">
+        <span class="text-[12px] uppercase tracking-[0.05em] text-lpe-soft">Tenant</span>
+        <select class="min-h-11 rounded-xl border border-lpe-border bg-white px-4 outline-none">
+          <option>Tenant A</option>
+          <option>Tenant B</option>
+          <option>Tenant Lab</option>
+        </select>
+      </label>
+      <label class="grid gap-1.5">
+        <span class="text-[12px] uppercase tracking-[0.05em] text-lpe-soft">Operational notes</span>
+        <textarea class="min-h-[104px] rounded-xl border border-lpe-border bg-white px-4 py-3 outline-none">Archive policy enabled after 100 GB. Magika validation required on all uploads.</textarea>
+      </label>
+    </div>
+
+    <div class="flex justify-end gap-3">
+      <button id="cancelDrawerButton" class="inline-flex min-h-10 items-center rounded-xl border border-lpe-border bg-white px-4 text-sm shadow-sm">Cancel</button>
+      <button class="inline-flex min-h-10 items-center rounded-xl bg-gradient-to-br from-lpe-primary to-blue-400 px-4 text-sm font-medium text-white shadow-[0_12px_24px_rgba(46,111,242,0.2)]">Create domain</button>
+    </div>
+  </aside>
+
+  <script>
+    (function () {
+      const body = document.body;
+      const appShell = document.getElementById("appShell");
+      const sidebar = document.getElementById("sidebar");
+      const sidebarFooter = document.getElementById("sidebarFooter");
+      const drawer = document.getElementById("drawer");
+      const drawerOverlay = document.getElementById("drawerOverlay");
+      const sidebarToggle = document.getElementById("sidebarToggle");
+      const simpleViewButton = document.getElementById("simpleViewButton");
+      const advancedViewButton = document.getElementById("advancedViewButton");
+      const viewTogglePill = document.getElementById("viewTogglePill");
+      const advancedCard = document.getElementById("advancedCard");
+      const advancedAside = document.getElementById("advancedAside");
+      const advancedFilter = document.getElementById("advancedFilter");
+      const advancedPill = document.getElementById("advancedPill");
+      const openDrawerButton = document.getElementById("openDrawerButton");
+      const closeDrawerButton = document.getElementById("closeDrawerButton");
+      const cancelDrawerButton = document.getElementById("cancelDrawerButton");
+
+      function setAdvanced(enabled) {
+        simpleViewButton.classList.toggle("text-white", !enabled);
+        simpleViewButton.classList.toggle("text-slate-200/85", enabled);
+        advancedViewButton.classList.toggle("text-white", enabled);
+        advancedViewButton.classList.toggle("text-slate-200/85", !enabled);
+        viewTogglePill.classList.toggle("translate-x-full", enabled);
+        advancedCard.classList.toggle("hidden", !enabled);
+        advancedCard.classList.toggle("grid", enabled);
+        advancedAside.classList.toggle("hidden", !enabled);
+        advancedFilter.classList.toggle("hidden", !enabled);
+        advancedPill.classList.toggle("hidden", !enabled);
+      }
+
+      function setDrawer(open) {
+        drawer.classList.toggle("translate-x-[calc(100%+28px)]", !open);
+        drawer.classList.toggle("translate-x-0", open);
+        drawerOverlay.classList.toggle("hidden", !open);
+      }
+
+      function setDesktopSidebarCollapsed(collapsed) {
+        if (window.innerWidth < 1280) {
+          return;
+        }
+
+        appShell.dataset.sidebarCollapsed = collapsed ? "true" : "false";
+        sidebar.classList.toggle("is-collapsed", collapsed);
+
+        if (collapsed) {
+          sidebar.style.width = "5rem";
+          sidebar.classList.remove("lg:p-[18px]");
+          sidebar.classList.add("lg:p-2");
+        } else {
+          sidebar.style.width = "18.25rem";
+          sidebar.classList.remove("lg:p-2");
+          sidebar.classList.add("lg:p-[18px]");
+        }
+
+        const textElements = sidebar.querySelectorAll(".brand-copy, .nav-item .truncate, .nav-item .rounded-full, .sidebar-note, .toggle-label, [class*='tracking-[0.12em]']");
+
+        textElements.forEach(function (element) {
+          element.style.transition = "opacity 0.2s ease";
+
+          if (collapsed) {
+            element.style.opacity = "0";
+            element.style.pointerEvents = "none";
+            window.setTimeout(function () {
+              if (appShell.dataset.sidebarCollapsed === "true") {
+                element.classList.add("hidden");
+              }
+            }, 200);
+          } else {
+            element.classList.remove("hidden");
+            window.setTimeout(function () {
+              element.style.opacity = "1";
+              element.style.pointerEvents = "auto";
+            }, 10);
+          }
+        });
+
+        sidebar.querySelectorAll(".nav-item").forEach(function (item) {
+          item.classList.toggle("lg:grid-cols-[18px_minmax(0,1fr)_auto]", !collapsed);
+          item.classList.toggle("lg:grid-cols-1", collapsed);
+          item.classList.toggle("lg:justify-items-center", collapsed);
+          item.classList.toggle("lg:justify-center", collapsed);
+
+          item.querySelectorAll("div.flex.h-5.w-5").forEach(function (iconBox) {
+            iconBox.classList.toggle("lg:mx-auto", collapsed);
+          });
+        });
+
+        const brand = sidebar.querySelector(".brand");
+        if (brand) {
+          brand.classList.toggle("lg:justify-center", collapsed);
+        }
+
+        if (sidebarFooter) {
+          sidebarFooter.classList.toggle("lg:px-2", collapsed);
+          sidebarFooter.classList.toggle("lg:justify-items-center", collapsed);
+          sidebarFooter.querySelectorAll(".toggle-short").forEach(function (element) {
+            element.classList.toggle("hidden", !collapsed);
+          });
+        }
+      }
+
+      function toggleSidebar() {
+        if (window.innerWidth < 1280) {
+          sidebar.classList.toggle("hidden");
+          return;
+        }
+
+        const collapsed = appShell.dataset.sidebarCollapsed === "true";
+        setDesktopSidebarCollapsed(!collapsed);
+      }
+
+      sidebarToggle.addEventListener("click", toggleSidebar);
+      simpleViewButton.addEventListener("click", function () { setAdvanced(false); });
+      advancedViewButton.addEventListener("click", function () { setAdvanced(true); });
+      openDrawerButton.addEventListener("click", function () { setDrawer(true); });
+      closeDrawerButton.addEventListener("click", function () { setDrawer(false); });
+      cancelDrawerButton.addEventListener("click", function () { setDrawer(false); });
+      drawerOverlay.addEventListener("click", function () { setDrawer(false); });
+
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+          setDrawer(false);
+        }
+      });
+
+      window.addEventListener("resize", function () {
+        if (window.innerWidth >= 1280) {
+          sidebar.classList.remove("hidden");
+          if (appShell.dataset.sidebarCollapsed === "true") {
+            sidebar.style.width = "5rem";
+          } else {
+            sidebar.style.width = "18.25rem";
+          }
+          if (appShell.dataset.sidebarCollapsed !== "true") {
+            sidebar.classList.remove("is-collapsed");
+          }
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

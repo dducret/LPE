@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LPE Client Preview - Tailwind</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            lpe: {
+              bg: "#f3f6f9",
+              panel: "#ffffff",
+              panelSoft: "#f8fbfd",
+              border: "#d8e2ea",
+              text: "#16212b",
+              soft: "#62707d",
+              nav: "#0f1822",
+              navSoft: "#172333",
+              primary: "#2e6ff2",
+              success: "#1d9d62",
+              warning: "#c6871b",
+              danger: "#ce4242"
+            }
+          },
+          transitionProperty: {
+            width: "width",
+            spacing: "margin, padding",
+          },
+          boxShadow: {
+            shell: "0 18px 44px rgba(17, 28, 39, 0.08)",
+            card: "0 10px 26px rgba(17, 28, 39, 0.06)"
+          },
+          borderRadius: {
+            xl2: "18px"
+          },
+          fontFamily: {
+            sans: ["Inter", "Segoe UI", "Helvetica Neue", "Arial", "sans-serif"]
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    @keyframes menu-appear {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    #contextMenu:not(.hidden) {
+      animation: menu-appear 0.15s ease-out;
+    }
+
+    @keyframes badge-pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.2); }
+      100% { transform: scale(1); }
+    }
+
+    .notification-dot {
+      animation: badge-pulse 2s infinite ease-in-out;
+    }
+
+    :not(.is-collapsed) .notification-dot {
+      opacity: 0;
+      transform: scale(0);
+    }
+
+    .nav-item-tooltip {
+      position: relative;
+    }
+
+    .is-collapsed .nav-item-tooltip::after {
+      content: attr(data-title);
+      position: absolute;
+      left: calc(100% + 12px);
+      top: 50%;
+      transform: translateY(-50%);
+      background: #1e293b;
+      color: #ffffff;
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.2s ease;
+      z-index: 50;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .is-collapsed .nav-item-tooltip:hover::after {
+      opacity: 1;
+      transform: translateY(-50%) translateX(4px);
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-[radial-gradient(circle_at_top_right,rgba(46,111,242,0.08),transparent_24%),radial-gradient(circle_at_bottom_left,rgba(29,157,98,0.05),transparent_20%),linear-gradient(180deg,#f8fafc_0%,#edf3f8_100%)] text-lpe-text font-sans">
+  <div id="clientShell" class="grid min-h-screen grid-cols-1 xl:grid-cols-[18rem_minmax(0,1fr)]">
+    <aside id="clientSidebar" class="fixed inset-y-4 left-4 z-30 hidden w-[min(18rem,calc(100vw-2rem))] overflow-hidden whitespace-nowrap rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.05),transparent_28%),linear-gradient(180deg,#0e1822_0%,#101a24_100%)] p-4 text-slate-100 shadow-shell transition-[width,padding] duration-300 [transition-timing-function:cubic-bezier(0.34,1.56,0.64,1)] xl:static xl:inset-auto xl:block xl:h-screen xl:w-auto xl:rounded-none xl:border-r xl:border-t-0 xl:border-l-0 xl:border-b-0 xl:border-r-white/5 xl:p-[18px] xl:shadow-none">
+      <div class="grid h-full grid-rows-[auto_auto_1fr_auto] gap-4">
+        <div class="brand flex items-center gap-3 rounded-2xl bg-white/5 px-3 py-3">
+          <div class="grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-lpe-primary to-sky-400 text-sm font-bold text-white shadow-inner">L</div>
+          <div class="brand-copy">
+            <div class="text-sm font-semibold tracking-[0.02em]">LPE Mail</div>
+            <div class="mt-0.5 text-xs text-slate-300/70">Unified client shell</div>
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <div>
+            <div class="mb-2 px-3 text-[11px] uppercase tracking-[0.12em] text-slate-300/45">Mail</div>
+            <nav class="grid gap-1.5">
+              <a href="#" data-title="Inbox" class="nav-item nav-item-tooltip relative grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl bg-gradient-to-r from-lpe-primary/30 to-lpe-primary/10 px-3 shadow-[inset_0_0_0_1px_rgba(100,160,255,0.18)]">
+                <div class="absolute left-0 h-4 w-1 rounded-r-full bg-lpe-primary shadow-[0_0_8px_rgba(46,111,242,0.6)]"></div>
+                <div class="relative flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]">
+                  <span class="notification-dot absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-lpe-nav bg-lpe-primary shadow-[0_0_8px_rgba(46,111,242,0.6)] transition-all duration-300"></span>
+                </div>
+                <span class="truncate text-sm">Inbox</span>
+                <span class="unread-count rounded-full bg-white/10 px-2 py-0.5 text-[11px]">28</span>
+              </a>
+              <a href="#" data-title="Sent" class="nav-item nav-item-tooltip grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+                <div class="relative flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]">
+                  <span class="notification-dot absolute -right-1 -top-1 hidden h-2.5 w-2.5 rounded-full border-2 border-lpe-nav bg-lpe-primary shadow-[0_0_8px_rgba(46,111,242,0.6)] transition-all duration-300"></span>
+                </div>
+                <span class="truncate text-sm">Sent</span>
+                <span class="unread-count rounded-full bg-white/10 px-2 py-0.5 text-[11px]">4</span>
+              </a>
+              <a href="#" data-title="Drafts" class="nav-item nav-item-tooltip grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+                <div class="relative flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]">
+                  <span class="notification-dot absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-lpe-nav bg-lpe-primary shadow-[0_0_8px_rgba(46,111,242,0.6)] transition-all duration-300"></span>
+                </div>
+                <span class="truncate text-sm">Drafts</span>
+                <span class="unread-count rounded-full bg-white/10 px-2 py-0.5 text-[11px]">2</span>
+              </a>
+              <a href="#" data-title="Archive" class="nav-item nav-item-tooltip grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+                <div class="relative flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]">
+                  <span class="notification-dot absolute -right-1 -top-1 hidden h-2.5 w-2.5 rounded-full border-2 border-lpe-nav bg-lpe-primary shadow-[0_0_8px_rgba(46,111,242,0.6)] transition-all duration-300"></span>
+                </div>
+                <span class="truncate text-sm">Archive</span>
+                <span class="unread-count rounded-full bg-white/10 px-2 py-0.5 text-[11px]">0</span>
+              </a>
+            </nav>
+          </div>
+
+          <div>
+            <div class="mb-2 px-3 text-[11px] uppercase tracking-[0.12em] text-slate-300/45">Workspace</div>
+            <nav class="grid gap-1.5">
+              <a href="#" data-title="Calendar" class="nav-item nav-item-tooltip grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+                <div class="flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]"> </div>
+                <span class="truncate text-sm">Calendar</span>
+              </a>
+              <a href="#" data-title="Contacts" class="nav-item nav-item-tooltip grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+                <div class="flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]"> </div>
+                <span class="truncate text-sm">Contacts</span>
+              </a>
+              <a href="#" data-title="Tasks" class="nav-item nav-item-tooltip grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+                <div class="flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]"> </div>
+                <span class="truncate text-sm">Tasks</span>
+              </a>
+            </nav>
+          </div>
+        </div>
+
+        <button data-title="Configuration" class="nav-item nav-item-tooltip grid min-h-[46px] grid-cols-[18px_minmax(0,1fr)] items-center gap-3 rounded-xl px-3 hover:bg-white/5">
+          <div class="relative flex h-5 w-5 items-center justify-center rounded-md bg-white/10 text-[10px]">⚙</div>
+          <span class="truncate text-sm">Configuration</span>
+        </button>
+
+      </div>
+    </aside>
+
+    <div class="grid min-w-0 grid-rows-[76px_auto_minmax(0,1fr)] bg-white/40 backdrop-blur-sm xl:col-start-2">
+      <header class="sticky top-0 z-20 flex flex-col gap-3 border-b border-lpe-border/80 bg-white/75 px-4 py-3 backdrop-blur-xl sm:px-6 xl:flex-row xl:items-center xl:justify-between xl:gap-4 xl:py-0">
+        <div class="flex min-w-0 items-center gap-3">
+          <button id="sidebarToggle" class="inline-flex min-h-10 items-center justify-center rounded-xl border border-lpe-border bg-white/80 px-3 text-sm shadow-sm">Menu</button>
+          <label class="relative grid min-h-[46px] flex-1 grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 rounded-2xl border border-lpe-border bg-white/90 px-4 shadow-sm transition-all duration-300 focus-within:border-lpe-primary focus-within:ring-4 focus-within:ring-lpe-primary/10">
+            <span aria-hidden="true">?</span>
+            <input class="min-w-0 border-0 bg-transparent outline-none" placeholder="Search messages, contacts, calendars..." value="" />
+            <kbd class="ml-auto hidden h-5 items-center gap-1 rounded border border-lpe-border bg-lpe-bg px-1.5 font-sans text-[10px] font-medium text-lpe-soft sm:inline-flex">
+              <span class="text-xs">⌘</span>K
+            </kbd>
+          </label>
+        </div>
+        <div class="flex items-center gap-3">
+          <button class="inline-flex min-h-10 items-center rounded-xl border border-lpe-border bg-white/80 px-3 text-sm shadow-sm">Help</button>
+          <div class="flex min-h-11 items-center gap-3 rounded-2xl border border-lpe-border bg-white/85 px-3 shadow-sm">
+            <div class="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-lpe-success to-emerald-400 text-xs font-bold text-white">AD</div>
+            <div class="text-sm">
+              <div class="font-semibold">alice@example.fr</div>
+              <div class="text-xs text-lpe-soft">Primary mailbox</div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div class="border-b border-lpe-border/70 bg-white/65 px-4 py-3 backdrop-blur-sm sm:px-6">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-wrap gap-2">
+            <button id="composeButton" class="group relative inline-flex min-h-10 items-center overflow-hidden rounded-xl bg-gradient-to-br from-lpe-primary to-blue-400 px-4 text-sm font-medium text-white shadow-[0_12px_24px_rgba(46,111,242,0.2)]">
+              <span class="relative z-10">New message</span>
+              <div class="absolute inset-0 -translate-x-full skew-x-[-20deg] bg-white/20 transition-transform duration-500 group-hover:translate-x-full"></div>
+            </button>
+            <button class="inline-flex min-h-10 items-center rounded-xl border border-lpe-border bg-white/80 px-3 text-sm shadow-sm">Filter</button>
+            <button class="inline-flex min-h-10 items-center rounded-xl border border-lpe-border bg-white/80 px-3 text-sm shadow-sm">Views</button>
+            <button class="inline-flex min-h-10 items-center rounded-xl border border-lpe-border bg-white/80 px-3 text-sm shadow-sm">Focused</button>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span class="rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">Unread 28</span>
+            <span class="rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">Attachments 6</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid min-h-0 gap-4 p-4 sm:p-6 xl:grid-cols-[24rem_minmax(0,1fr)]">
+        <section class="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-4">
+            <section class="rounded-xl2 border border-white/40 bg-white/70 p-5 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md">
+              <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div class="text-xs uppercase tracking-[0.12em] text-lpe-soft">Client workspace</div>
+                  <h1 class="mt-2 text-3xl font-semibold leading-tight text-slate-900">Inbox</h1>
+                  <p class="mt-2 max-w-2xl text-sm leading-6 text-lpe-soft">
+                    The client shell uses the same visual language as the administration UI, but with softer hierarchy,
+                    lower density, and reading comfort first.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section class="grid min-h-0 gap-4">
+            <div class="grid gap-3 overflow-auto rounded-xl2 border border-white/40 bg-white/70 p-3 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md">
+              <article id="openReadingPaneButton" class="email-article cursor-pointer rounded-2xl border border-lpe-primary/20 bg-gradient-to-r from-lpe-primary/10 to-blue-50 px-4 py-4 transition-all duration-200 hover:scale-[1.01] hover:bg-white hover:shadow-md active:scale-95">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="h-2.5 w-2.5 rounded-full bg-lpe-primary shadow-[0_0_10px_rgba(46,111,242,0.45)]"></span>
+                      <strong class="truncate text-sm text-slate-900">Paul Bernard</strong>
+                      <span class="inline-flex items-center gap-1.5 rounded-full border border-lpe-primary/20 bg-lpe-primary/10 px-2 py-0.5 text-[11px] font-medium text-lpe-primary shadow-[inset_0_1px_rgba(255,255,255,0.4)]">
+                        <span class="h-1.5 w-1.5 rounded-full bg-lpe-primary"></span>
+                        Unread
+                      </span>
+                    </div>
+                    <div class="mt-1 truncate text-sm text-lpe-soft">Quarterly review notes and action items</div>
+                  </div>
+                  <div class="shrink-0 text-xs text-lpe-soft">09:14</div>
+                </div>
+              </article>
+
+              <article class="email-article cursor-pointer rounded-2xl border border-lpe-border bg-white px-4 py-4 transition-all duration-200 hover:scale-[1.01] hover:bg-white hover:shadow-md active:scale-95">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <strong class="truncate text-sm text-slate-900">Sophie Martin</strong>
+                    <div class="mt-1 truncate text-sm text-lpe-soft">Can we confirm the migration window for Friday?</div>
+                  </div>
+                  <div class="shrink-0 text-xs text-lpe-soft">08:47</div>
+                </div>
+              </article>
+
+              <article class="email-article cursor-pointer rounded-2xl border border-lpe-border bg-white px-4 py-4 transition-all duration-200 hover:scale-[1.01] hover:bg-white hover:shadow-md active:scale-95">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <strong class="truncate text-sm text-slate-900">Legal Hold Notification</strong>
+                    <div class="mt-1 truncate text-sm text-lpe-soft">A mailbox retention policy was updated for your tenant.</div>
+                  </div>
+                  <div class="shrink-0 text-xs text-lpe-soft">Yesterday</div>
+                </div>
+              </article>
+
+              <article class="email-article cursor-pointer rounded-2xl border border-lpe-border bg-white px-4 py-4 transition-all duration-200 hover:scale-[1.01] hover:bg-white hover:shadow-md active:scale-95">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <strong class="truncate text-sm text-slate-900">Board Documents</strong>
+                    <div class="mt-1 truncate text-sm text-lpe-soft">Encrypted documents shared for next committee review.</div>
+                  </div>
+                  <div class="shrink-0 text-xs text-lpe-soft">Yesterday</div>
+                </div>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <section class="min-h-0">
+          <main class="min-h-0 overflow-auto">
+            <div id="readingPaneEmpty" class="rounded-[22px] border border-dashed border-white/40 bg-white/70 p-10 text-center shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md">
+              <div class="text-xs uppercase tracking-[0.12em] text-lpe-soft">Reading pane</div>
+              <h2 class="mt-3 text-2xl font-semibold text-slate-900">Select a message</h2>
+              <p class="mt-3 text-sm leading-6 text-lpe-soft">
+                The detailed reading pane stays hidden until a message is selected from the list.
+              </p>
+            </div>
+
+            <article id="readingPane" class="hidden rounded-[22px] border border-white/40 bg-white/70 p-6 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] ring-1 ring-inset ring-white/20 backdrop-blur-md sm:p-8">
+              <div class="flex flex-col gap-4 border-b border-lpe-border pb-6 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 class="text-2xl font-semibold text-slate-900">Quarterly review notes and action items</h2>
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    <span class="rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">From Paul Bernard</span>
+                    <span class="rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">To alice@example.fr</span>
+                    <span class="rounded-full bg-lpe-panelSoft px-3 py-2 text-sm text-lpe-soft">Attachment 2</span>
+                  </div>
+                </div>
+                <div class="text-sm text-slate-600">April 19, 2026 at 09:14</div>
+              </div>
+
+              <div class="prose prose-slate mt-8 max-w-none">
+                <p class="text-base leading-relaxed text-slate-900">
+                  Hello Alice,
+                </p>
+                <p class="text-base leading-relaxed text-slate-900">
+                  Please find below the consolidated notes from the quarterly review. The client shell is intentionally calmer than the administration console:
+                  larger reading surface, softer grouping, and fewer competing signals.
+                </p>
+                <p class="text-base leading-relaxed text-slate-900">
+                  The goal is to keep the same design language across `LPE`, while optimizing each surface for its actual workflow. Administration favors density and rapid control.
+                  The client favors reading, composition, and day-to-day continuity.
+                </p>
+                <div class="mt-6 rounded-2xl border border-white/40 bg-white/60 p-5 ring-1 ring-inset ring-white/20 backdrop-blur-md">
+                  <h3 class="text-lg font-semibold text-slate-900">Action items</h3>
+                  <ul class="mt-4 space-y-3 text-base leading-relaxed text-slate-900">
+                    <li>Validate the final ActiveSync compatibility test matrix.</li>
+                    <li>Review the mailbox archive threshold communication plan.</li>
+                    <li>Confirm that the shared Tailwind design tokens are sufficient for both admin and client surfaces.</li>
+                  </ul>
+                </div>
+                <p class="mt-6 text-base leading-relaxed text-slate-900">
+                  Regards,<br />
+                  Paul
+                </p>
+              </div>
+
+              <div class="mt-8 border-t border-lpe-border pt-6">
+                <div class="text-xs uppercase tracking-[0.12em] text-lpe-soft">Attachments</div>
+                <div class="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div class="rounded-2xl border border-white/40 bg-white/60 px-4 py-4 ring-1 ring-inset ring-white/20 backdrop-blur-md">
+                    <strong class="block text-sm text-slate-900">review-summary.pdf</strong>
+                    <span class="mt-1 block text-xs text-lpe-soft">Indexed text available</span>
+                  </div>
+                  <div class="rounded-2xl border border-white/40 bg-white/60 px-4 py-4 ring-1 ring-inset ring-white/20 backdrop-blur-md">
+                    <strong class="block text-sm text-slate-900">planning-notes.docx</strong>
+                    <span class="mt-1 block text-xs text-lpe-soft">Preview generated</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </main>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <aside id="composeDrawer" class="fixed inset-y-4 right-4 z-40 grid w-[min(30rem,calc(100vw-2rem))] translate-x-[calc(100%+28px)] grid-rows-[auto_1fr_auto] gap-4 rounded-[24px] border border-lpe-border bg-white/96 p-5 shadow-shell transition-transform duration-200">
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <div class="text-xs uppercase tracking-[0.12em] text-lpe-soft">Compose drawer</div>
+        <h2 class="mt-2 text-2xl font-semibold">New message</h2>
+        <p class="mt-2 text-sm leading-6 text-lpe-soft">
+          Client composition should remain aligned with the canonical LPE submission model.
+        </p>
+      </div>
+      <button id="closeComposeButton" class="inline-flex min-h-10 items-center rounded-xl border border-lpe-border bg-white px-3 text-sm shadow-sm">Close</button>
+    </div>
+
+    <div class="grid min-h-0 gap-3">
+      <label class="grid gap-1.5">
+        <span class="text-[12px] uppercase tracking-[0.05em] text-lpe-soft">To</span>
+        <input class="min-h-11 rounded-xl border border-lpe-border bg-white px-4 outline-none" value="team@example.fr" />
+      </label>
+      <label class="grid gap-1.5">
+        <span class="text-[12px] uppercase tracking-[0.05em] text-lpe-soft">Subject</span>
+        <input class="min-h-11 rounded-xl border border-lpe-border bg-white px-4 outline-none" value="Follow-up on quarterly review" />
+      </label>
+      <label class="grid min-h-0 gap-1.5">
+        <span class="text-[12px] uppercase tracking-[0.05em] text-lpe-soft">Message</span>
+        <textarea class="h-[50vh] min-h-[180px] rounded-xl border border-lpe-border bg-white px-4 py-3 outline-none">Hello team,
+
+Here is a draft follow-up prepared from the client-shell Tailwind demo.
+
+Regards,
+Alice</textarea>
+      </label>
+    </div>
+
+    <div class="flex justify-end gap-3">
+      <button class="inline-flex min-h-10 items-center rounded-xl border border-lpe-border bg-white px-4 text-sm shadow-sm">Save draft</button>
+      <button class="inline-flex min-h-10 items-center rounded-xl bg-gradient-to-br from-lpe-primary to-blue-400 px-4 text-sm font-medium text-white shadow-[0_12px_24px_rgba(46,111,242,0.2)]">Send</button>
+    </div>
+  </aside>
+
+  <div id="contextMenu" class="fixed z-[100] hidden min-w-[160px] overflow-hidden rounded-xl border border-lpe-border bg-white/95 p-1.5 shadow-xl backdrop-blur-xl transition-opacity duration-200">
+    <div class="grid gap-0.5">
+      <button class="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-lpe-text transition-colors hover:bg-lpe-primary/10 hover:text-lpe-primary">
+        <span class="text-xs">✉️</span> Mark as read
+      </button>
+      <button class="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-lpe-text transition-colors hover:bg-lpe-primary/10 hover:text-lpe-primary">
+        <span class="text-xs">📥</span> Archive
+      </button>
+      <button class="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-lpe-text transition-colors hover:bg-lpe-primary/10 hover:text-lpe-primary">
+        <span class="text-xs">🚩</span> Flag message
+      </button>
+      <div class="my-1 border-t border-lpe-border/50"></div>
+      <button class="flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-medium text-lpe-danger transition-colors hover:bg-lpe-danger/10">
+        <span class="text-xs">🗑️</span> Delete
+      </button>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const shell = document.getElementById("clientShell");
+      const sidebar = document.getElementById("clientSidebar");
+      const sidebarToggle = document.getElementById("sidebarToggle");
+      const composeButton = document.getElementById("composeButton");
+      const composeDrawer = document.getElementById("composeDrawer");
+      const closeComposeButton = document.getElementById("closeComposeButton");
+      const openReadingPaneButton = document.getElementById("openReadingPaneButton");
+      const readingPane = document.getElementById("readingPane");
+      const readingPaneEmpty = document.getElementById("readingPaneEmpty");
+      const contextMenu = document.getElementById("contextMenu");
+      const emailArticles = document.querySelectorAll(".email-article");
+
+      function updateNotificationDots() {
+        sidebar.querySelectorAll(".nav-item").forEach(function (item) {
+          const countElement = item.querySelector(".unread-count");
+          const dot = item.querySelector(".notification-dot");
+
+          if (!countElement || !dot) {
+            return;
+          }
+
+          const count = parseInt(countElement.innerText, 10);
+          dot.style.display = Number.isFinite(count) && count > 0 ? "block" : "none";
+        });
+      }
+
+      function setDesktopSidebarCollapsed(collapsed) {
+        if (window.innerWidth < 1280) {
+          return;
+        }
+
+        shell.dataset.sidebarCollapsed = collapsed ? "true" : "false";
+        sidebar.classList.toggle("is-collapsed", collapsed);
+
+        sidebar.classList.toggle("xl:p-[18px]", !collapsed);
+        sidebar.classList.toggle("xl:px-3", collapsed);
+        sidebar.classList.toggle("xl:py-[18px]", collapsed);
+
+        const textElements = sidebar.querySelectorAll(".brand-copy, nav .truncate, nav .rounded-full, [class*='tracking-[0.12em]']");
+
+        textElements.forEach(function (element) {
+          element.classList.add("transition-opacity", "duration-200");
+
+          if (collapsed) {
+            element.style.opacity = "0";
+            element.style.pointerEvents = "none";
+            window.setTimeout(function () {
+              if (shell.dataset.sidebarCollapsed === "true") {
+                element.classList.add("xl:hidden");
+              }
+            }, 200);
+          } else {
+            element.classList.remove("xl:hidden");
+            window.setTimeout(function () {
+              element.style.opacity = "1";
+              element.style.pointerEvents = "auto";
+            }, 10);
+          }
+        });
+
+        sidebar.querySelectorAll("nav a").forEach(function (item) {
+          item.classList.toggle("xl:grid-cols-[18px_minmax(0,1fr)_auto]", !collapsed);
+          item.classList.toggle("xl:grid-cols-1", collapsed);
+          item.classList.toggle("xl:justify-items-center", collapsed);
+          item.classList.toggle("xl:justify-center", collapsed);
+          item.classList.toggle("px-3", !collapsed);
+        });
+      }
+
+      function setCompose(open) {
+        composeDrawer.classList.toggle("translate-x-[calc(100%+28px)]", !open);
+        composeDrawer.classList.toggle("translate-x-0", open);
+      }
+
+      function hideContextMenu() {
+        contextMenu.classList.add("hidden");
+        emailArticles.forEach(function (article) {
+          article.classList.remove("ring-2", "ring-lpe-primary/30");
+        });
+      }
+
+      function openReadingPane() {
+        readingPaneEmpty.classList.add("hidden");
+        readingPane.classList.remove("hidden");
+      }
+
+      sidebarToggle.addEventListener("click", function () {
+        if (window.innerWidth < 1280) {
+          sidebar.classList.toggle("hidden");
+          return;
+        }
+
+        const collapsed = shell.dataset.sidebarCollapsed === "true";
+        setDesktopSidebarCollapsed(!collapsed);
+        shell.style.gridTemplateColumns = collapsed ? "18rem minmax(0, 1fr)" : "5rem minmax(0, 1fr)";
+      });
+
+      composeButton.addEventListener("click", function () {
+        setCompose(true);
+      });
+
+      closeComposeButton.addEventListener("click", function () {
+        setCompose(false);
+      });
+
+      openReadingPaneButton.addEventListener("click", function () {
+        openReadingPane();
+      });
+
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") {
+          setCompose(false);
+          hideContextMenu();
+        }
+      });
+
+      document.addEventListener("contextmenu", function (event) {
+        const targetArticle = event.target.closest(".email-article");
+
+        if (!targetArticle) {
+          hideContextMenu();
+          return;
+        }
+
+        event.preventDefault();
+        const x = event.clientX;
+        const y = event.clientY;
+
+        emailArticles.forEach(function (article) {
+          article.classList.remove("ring-2", "ring-lpe-primary/30");
+        });
+
+        targetArticle.classList.add("ring-2", "ring-lpe-primary/30");
+        contextMenu.classList.remove("hidden");
+
+        const menuRect = contextMenu.getBoundingClientRect();
+        const safeX = x + menuRect.width > window.innerWidth - 12 ? Math.max(12, x - menuRect.width) : x;
+        const safeY = y + menuRect.height > window.innerHeight - 12 ? Math.max(12, y - menuRect.height) : y;
+
+        contextMenu.style.top = safeY + "px";
+        contextMenu.style.left = safeX + "px";
+      });
+
+      document.addEventListener("click", hideContextMenu);
+      window.addEventListener("scroll", hideContextMenu);
+
+      window.addEventListener("resize", function () {
+        if (window.innerWidth >= 1280) {
+          sidebar.classList.remove("hidden");
+          shell.style.gridTemplateColumns = "";
+          if (shell.dataset.sidebarCollapsed !== "true") {
+            sidebar.classList.remove("is-collapsed");
+          }
+        }
+      });
+
+      updateNotificationDots();
+    })();
+  </script>
+</body>
+</html>
