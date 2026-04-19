@@ -178,6 +178,13 @@ document.getElementById("refresh").addEventListener("click", () => {
   void load();
 });
 
+const refreshToolbar = document.getElementById("refresh-toolbar");
+if (refreshToolbar) {
+  refreshToolbar.addEventListener("click", () => {
+    void load();
+  });
+}
+
 panelTriggers.forEach((button) => {
   button.addEventListener("click", () => {
     openDrawer(button.dataset.openPanel, button.dataset.title, button.dataset.summary);

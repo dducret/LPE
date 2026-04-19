@@ -156,12 +156,27 @@ export function App() {
     );
   }
 
-  const showMailPane = workspace.section === "mail" && (workspace.mode !== "closed" || workspace.current !== null);
+  const isMailWorkspace = workspace.section === "mail";
+  const showMailPane = isMailWorkspace;
   const visibleCount = workspace.section === "mail"
     ? workspace.filtered.length
     : workspace.section === "calendar"
       ? workspace.filteredEvents.length
       : workspace.filteredContacts.length;
+  const attachmentCount = workspace.section === "mail"
+    ? workspace.filtered.reduce((total, item) => total + item.attachments.length, 0)
+    : 0;
+  const unreadCount = workspace.section === "mail"
+    ? workspace.filtered.filter((item) => item.unread).length
+    : 0;
+  const workspaceTitle = workspace.section === "mail"
+    ? copy.folders[workspace.folder]
+    : copy.altViews[workspace.section];
+  const workspaceBody = workspace.section === "mail"
+    ? copy.heroBody
+    : workspace.section === "calendar"
+      ? "Shared calendar data stays aligned with the canonical account workspace."
+      : "People data remains available in the same softer three-pane shell.";
 
   return (
     <main className="app-shell">
@@ -220,38 +235,35 @@ export function App() {
         />
 
         <section className="workspace">
-          <div className="command-strip">
-            <div className="command-tabs">
-              {copy.shellTabs.map((tab, index) => <button key={tab} className={index === 1 ? "command-tab is-active" : "command-tab"} type="button">{tab}</button>)}
+          <div className="workspace-toolbar">
+            <div className="workspace-toolbar-actions">
+              <button className="primary-button workspace-compose-button" type="button" onClick={() => workspace.openComposer("new")}>{copy.compose}</button>
+              {copy.toolbarChips.map((label) => <button key={label} className="workspace-tool-button" type="button" onClick={workspace.notifyFeaturePending}>{label}</button>)}
             </div>
-            <div className="strip-meta">{copy.rightPaneTitle}</div>
+            <div className="workspace-toolbar-summary">
+              {isMailWorkspace ? <span className="workspace-chip">{`Unread ${unreadCount}`}</span> : null}
+              {isMailWorkspace ? <span className="workspace-chip">{`Attachments ${attachmentCount}`}</span> : null}
+              <button className="ghost-button" type="button" onClick={() => void workspace.refreshWorkspace()}>{copy.topActions.sync}</button>
+              <label className="locale-picker compact">
+                <span>{copy.languageLabel}</span>
+                <select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>
+                  {supportedLocales.map((value) => <option key={value} value={value}>{localeLabels[value]}</option>)}
+                </select>
+              </label>
+            </div>
           </div>
 
-          <div className="ribbon">
-            <button className="primary-button ribbon-compose" type="button" onClick={() => workspace.openComposer("new")}>{copy.compose}</button>
-            {copy.ribbonActions.map((action) => <button key={action} className="ribbon-button" type="button" onClick={workspace.notifyFeaturePending}>{action}</button>)}
-            <div className="ribbon-separator" />
-            {copy.ribbonSecondary.map((action) => <button key={action} className="ribbon-button" type="button" onClick={workspace.notifyFeaturePending}>{action}</button>)}
-          </div>
-
-          <header className="workspace-meta">
-            <div className="workspace-meta-left">
-              <span className="status-pill">{copy.sections[workspace.section]}</span>
-              <span className="status-pill is-muted">{visibleCount} visible</span>
-              <span className="workspace-caption">{copy.productSubtitle}</span>
+          <section className="workspace-hero-card">
+            <div>
+              <p className="workspace-hero-eyebrow">{copy.sections[workspace.section]}</p>
+              <h1>{workspaceTitle}</h1>
+              <p>{workspaceBody}</p>
             </div>
-            <div className="workspace-meta-right">
-            <button className="ghost-button" type="button" onClick={() => void workspace.refreshWorkspace()}>{copy.topActions.sync}</button>
-            <button className="ghost-button" type="button" onClick={workspace.notifyFeaturePending}>{copy.topActions.rules}</button>
-            <button className="ghost-button" type="button" onClick={workspace.notifyFeaturePending}>{copy.topActions.schedule}</button>
-            <label className="locale-picker">
-              <span>{copy.languageLabel}</span>
-              <select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>
-                {supportedLocales.map((value) => <option key={value} value={value}>{localeLabels[value]}</option>)}
-              </select>
-            </label>
+            <div className="workspace-hero-meta">
+              <span className="workspace-stat-pill">{`${visibleCount} visible`}</span>
+              <span className="workspace-stat-pill is-soft">{copy.productSubtitle}</span>
             </div>
-          </header>
+          </section>
 
           {workspace.notice ? <div className="notice-banner">{workspace.notice}</div> : null}
 
@@ -274,22 +286,22 @@ export function App() {
             />
 
             {showMailPane ? (
-            <section className="detail-pane">
-              <MailDetail
-                copy={copy}
-                current={workspace.current}
-                mode={workspace.mode}
-                draft={workspace.draft}
-                setDraft={workspace.setDraft}
-                onReply={(message) => workspace.openComposer("reply", message)}
-                onForward={(message) => workspace.openComposer("forward", message)}
-                onCancel={workspace.closeComposer}
-                onSaveDraft={() => void workspace.saveMessage(true)}
-                onSend={() => void workspace.saveMessage(false)}
-                onDeleteDraft={() => void workspace.deleteDraft()}
-                onArchive={workspace.notifyFeaturePending}
-              />
-            </section>
+              <section className="detail-pane">
+                <MailDetail
+                  copy={copy}
+                  current={workspace.current}
+                  mode={workspace.mode}
+                  draft={workspace.draft}
+                  setDraft={workspace.setDraft}
+                  onReply={(message) => workspace.openComposer("reply", message)}
+                  onForward={(message) => workspace.openComposer("forward", message)}
+                  onCancel={workspace.closeComposer}
+                  onSaveDraft={() => void workspace.saveMessage(true)}
+                  onSend={() => void workspace.saveMessage(false)}
+                  onDeleteDraft={() => void workspace.deleteDraft()}
+                  onArchive={workspace.notifyFeaturePending}
+                />
+              </section>
             ) : null}
 
             {workspace.section === "calendar" ? (

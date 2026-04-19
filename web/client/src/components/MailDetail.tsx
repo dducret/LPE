@@ -17,17 +17,59 @@ export function MailDetail(props: {
   onArchive: () => void;
 }) {
   if (props.mode !== "closed") {
-    return <section className="editor-shell"><div className="drawer-titlebar">{props.copy.drawerTitle}</div><div className="detail-header"><div><p className="detail-label">{props.copy.editorLabel}</p><h3>{props.copy.editorTitles[props.mode]}</h3></div><div className="detail-actions">{props.mode === "draft" ? <button className="danger-button" type="button" onClick={props.onDeleteDraft}>{props.copy.editorActions.deleteDraft}</button> : null}<button className="ghost-button" type="button" onClick={props.onSaveDraft}>{props.copy.editorActions.saveDraft}</button><button className="ghost-button" type="button" onClick={props.onCancel}>{props.copy.editorActions.cancel}</button><button className="primary-button" type="button" onClick={props.onSend}>{props.copy.editorActions.send}</button></div></div><div className="form-grid"><label className="field"><span>{props.copy.fields.to}</span><input value={props.draft.to} onChange={(event) => props.setDraft((value) => ({ ...value, to: event.target.value }))} /></label><label className="field"><span>{props.copy.fields.cc}</span><input value={props.draft.cc} onChange={(event) => props.setDraft((value) => ({ ...value, cc: event.target.value }))} /></label><label className="field field-wide"><span>{props.copy.fields.subject}</span><input value={props.draft.subject} onChange={(event) => props.setDraft((value) => ({ ...value, subject: event.target.value }))} /></label><label className="field field-wide"><span>{props.copy.fields.body}</span><textarea rows={14} value={props.draft.body} onChange={(event) => props.setDraft((value) => ({ ...value, body: event.target.value }))} /></label></div></section>;
+    return (
+      <section className="editor-shell">
+        <div className="editor-shell-header">
+          <div>
+            <p className="detail-label">Compose drawer</p>
+            <h3>{props.copy.editorTitles[props.mode]}</h3>
+            <p className="editor-shell-copy">Client composition stays aligned with the canonical LPE submission model.</p>
+          </div>
+          <button className="ghost-button" type="button" onClick={props.onCancel}>{props.copy.editorActions.cancel}</button>
+        </div>
+
+        <div className="form-grid">
+          <label className="field field-wide">
+            <span>{props.copy.fields.to}</span>
+            <input value={props.draft.to} onChange={(event) => props.setDraft((value) => ({ ...value, to: event.target.value }))} />
+          </label>
+          <label className="field field-wide">
+            <span>{props.copy.fields.cc}</span>
+            <input value={props.draft.cc} onChange={(event) => props.setDraft((value) => ({ ...value, cc: event.target.value }))} />
+          </label>
+          <label className="field field-wide">
+            <span>{props.copy.fields.subject}</span>
+            <input value={props.draft.subject} onChange={(event) => props.setDraft((value) => ({ ...value, subject: event.target.value }))} />
+          </label>
+          <label className="field field-wide">
+            <span>{props.copy.fields.body}</span>
+            <textarea rows={14} value={props.draft.body} onChange={(event) => props.setDraft((value) => ({ ...value, body: event.target.value }))} />
+          </label>
+        </div>
+
+        <div className="editor-shell-actions">
+          {props.mode === "draft" ? <button className="danger-button" type="button" onClick={props.onDeleteDraft}>{props.copy.editorActions.deleteDraft}</button> : null}
+          <button className="ghost-button" type="button" onClick={props.onSaveDraft}>{props.copy.editorActions.saveDraft}</button>
+          <button className="primary-button" type="button" onClick={props.onSend}>{props.copy.editorActions.send}</button>
+        </div>
+      </section>
+    );
   }
 
-  if (!props.current) return null;
+  if (!props.current) {
+    return (
+      <section className="reading-empty-state">
+        <p className="detail-label">{props.copy.readingPane}</p>
+        <h3>Select a message</h3>
+        <p>The detailed reading pane stays hidden until a message is selected from the list.</p>
+      </section>
+    );
+  }
 
   const current = props.current;
 
   return (
-    <>
-      <div className="drawer-titlebar">{props.copy.drawerTitle}</div>
-      <div className="reading-titlebar">{props.copy.rightPaneTitle}</div>
+    <article className="reading-pane-card">
       <div className="detail-header">
         <div><p className="detail-label">{props.copy.readingPane}</p><h3>{current.subject}</h3></div>
         <div className="detail-actions">
@@ -43,6 +85,6 @@ export function MailDetail(props: {
         {current.body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
       </article>
       <section className="attachment-panel"><div className="pane-header compact"><div><p className="pane-kicker">{props.copy.attachmentsTitle}</p><h4>{props.copy.attachmentsSubtitle}</h4></div></div><div className="attachment-list">{current.attachments.length > 0 ? current.attachments.map((item) => <article className="attachment-card" key={item.id}><span className="attachment-kind">{item.kind}</span><div><strong>{item.name}</strong><p>{item.size}</p></div></article>) : <div className="empty-state compact">{props.copy.noAttachments}</div>}</div></section>
-    </>
+    </article>
   );
 }

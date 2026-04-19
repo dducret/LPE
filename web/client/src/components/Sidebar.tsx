@@ -27,20 +27,14 @@ export function Sidebar(props: {
     { id: "sent", label: props.copy.folders.sent, count: props.counts.sent },
     { id: "archive", label: props.copy.folders.archive, count: props.counts.archive }
   ];
+  const sectionLinks: Array<{ id: Section; label: string }> = [
+    { id: "mail", label: props.copy.sections.mail },
+    { id: "calendar", label: props.copy.sections.calendar },
+    { id: "contacts", label: props.copy.sections.contacts }
+  ];
 
   return (
     <aside className={props.collapsed ? props.mobileOpen ? "rail is-collapsed is-mobile-open" : "rail is-collapsed" : props.mobileOpen ? "rail is-mobile-open" : "rail"}>
-      <div className="app-rail">
-        <div className="app-rail-brand">☰</div>
-        {(["mail", "calendar", "contacts"] as Section[]).map((value) => (
-          <button key={value} className={props.section === value ? "app-rail-button is-active" : "app-rail-button"} type="button" title={props.copy.sections[value]} aria-label={props.copy.sections[value]} onClick={() => { props.setSection(value); props.onCloseMobile(); }}>
-            {props.copy.sectionIcons[value]}
-          </button>
-        ))}
-        <button className="app-rail-button" type="button" title={props.copy.workspaceSummary} aria-label={props.copy.workspaceSummary} onClick={props.onAuxAction}>✓</button>
-        <button className="app-rail-button" type="button" title={props.copy.topActions.sync} aria-label={props.copy.topActions.sync} onClick={props.onAuxAction}>☁</button>
-      </div>
-
       <div className="sidebar-column">
         <div className="sidebar-toolbar">
           <div className="brand-lockup">
@@ -60,12 +54,37 @@ export function Sidebar(props: {
           <span className="sidebar-label">{props.copy.compose}</span>
         </button>
 
+        <div className="sidebar-group">
+          <p className="panel-title">{props.copy.sectionLabel}</p>
+          <nav className="sidebar-section-nav" aria-label={props.copy.sectionLabel}>
+            {sectionLinks.map((item) => (
+              <button
+                key={item.id}
+                className={props.section === item.id ? "section-item is-active" : "section-item"}
+                type="button"
+                title={item.label}
+                aria-label={item.label}
+                onClick={() => {
+                  props.setSection(item.id);
+                  props.onCloseComposer();
+                  props.onCloseMobile();
+                }}
+              >
+                <span className="section-item-icon">{props.copy.sectionIcons[item.id]}</span>
+                <span className="sidebar-label">{item.label}</span>
+              </button>
+            ))}
+          </nav>
+        </div>
+
         <div className="folder-panel is-tight">
           <p className="panel-title">{props.copy.favoritesLabel}</p>
           <button className="tree-item" type="button" title={props.copy.folders.focused} onClick={() => { props.setSection("mail"); props.setFolder("focused"); props.onCloseComposer(); props.onCloseMobile(); }}>
+            <span className="tree-item-icon">•</span>
             <span className="sidebar-label">{props.copy.folders.focused}</span>
           </button>
           <button className="tree-item" type="button" title={props.copy.folders.inbox} onClick={() => { props.setSection("mail"); props.setFolder("inbox"); props.onCloseComposer(); props.onCloseMobile(); }}>
+            <span className="tree-item-icon">•</span>
             <span className="sidebar-label">{props.copy.folders.inbox}</span>
             <span className="sidebar-meta">{props.counts.inbox}</span>
           </button>
@@ -94,6 +113,7 @@ export function Sidebar(props: {
                   }
                 }}
               >
+                <span className="tree-item-icon">{item.id === "inbox" ? "•" : item.id === "drafts" ? "◦" : item.id === "sent" ? "↗" : "▤"}</span>
                 <span className="sidebar-label">{item.label}</span>
                 <span className="sidebar-meta">{item.count ?? ""}</span>
               </button>

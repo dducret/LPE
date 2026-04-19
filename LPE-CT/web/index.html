@@ -18,28 +18,36 @@
               le routage, la quarantaine, les politiques d'entree et les mises a jour.
             </p>
           </div>
-          <nav class="page-list">
-            <button class="page-button" type="button" data-open-panel="site-panel" data-title="Identite du noeud" data-summary="Positionnement et exposition du serveur de tri en DMZ.">
-              <span class="page-icon">01</span>
-              <span>Identite du noeud</span>
-            </button>
-            <button class="page-button" type="button" data-open-panel="relay-panel" data-title="Relais vers le LAN" data-summary="Flux strictement autorises entre la DMZ et le coeur LPE.">
-              <span class="page-icon">02</span>
-              <span>Relais vers le LAN</span>
-            </button>
-            <button class="page-button" type="button" data-open-panel="network-panel" data-title="Surface reseau" data-summary="Restriction des CIDR de management, sorties et listeners publics.">
-              <span class="page-icon">03</span>
-              <span>Surface reseau</span>
-            </button>
-            <button class="page-button" type="button" data-open-panel="policies-panel" data-title="Politiques de tri" data-summary="Controle du drain mode, quarantaine et exigences de verification.">
-              <span class="page-icon">04</span>
-              <span>Politiques de tri</span>
-            </button>
-            <button class="page-button" type="button" data-open-panel="updates-panel" data-title="Mises a jour" data-summary="Politique de mise a jour Debian Git-first pour le noeud DMZ.">
-              <span class="page-icon">05</span>
-              <span>Mises a jour</span>
-            </button>
-          </nav>
+          <div class="sidebar-group">
+            <p class="sidebar-heading">Workspace</p>
+            <nav class="page-list">
+              <button class="page-button" type="button" data-open-panel="site-panel" data-title="Identite du noeud" data-summary="Positionnement et exposition du serveur de tri en DMZ.">
+                <span class="page-icon">01</span>
+                <span>Identite du noeud</span>
+              </button>
+              <button class="page-button" type="button" data-open-panel="relay-panel" data-title="Relais vers le LAN" data-summary="Flux strictement autorises entre la DMZ et le coeur LPE.">
+                <span class="page-icon">02</span>
+                <span>Relais vers le LAN</span>
+              </button>
+              <button class="page-button" type="button" data-open-panel="network-panel" data-title="Surface reseau" data-summary="Restriction des CIDR de management, sorties et listeners publics.">
+                <span class="page-icon">03</span>
+                <span>Surface reseau</span>
+              </button>
+            </nav>
+          </div>
+          <div class="sidebar-group">
+            <p class="sidebar-heading">Governance</p>
+            <nav class="page-list">
+              <button class="page-button" type="button" data-open-panel="policies-panel" data-title="Politiques de tri" data-summary="Controle du drain mode, quarantaine et exigences de verification.">
+                <span class="page-icon">04</span>
+                <span>Politiques de tri</span>
+              </button>
+              <button class="page-button" type="button" data-open-panel="updates-panel" data-title="Mises a jour" data-summary="Politique de mise a jour Debian Git-first pour le noeud DMZ.">
+                <span class="page-icon">05</span>
+                <span>Mises a jour</span>
+              </button>
+            </nav>
+          </div>
         </div>
         <div class="sidebar-footer">
           <button id="refresh" class="secondary-button" type="button">Actualiser</button>
@@ -58,6 +66,19 @@
             <span id="upstream-badge" class="badge muted">Relay</span>
           </div>
         </header>
+
+        <section class="panel workspace-toolbar">
+          <div class="toolbar-actions">
+            <button id="refresh-toolbar" class="primary-button" type="button">Refresh state</button>
+            <button class="secondary-button" type="button" data-open-panel="policies-panel" data-title="Politiques de tri" data-summary="Controle du drain mode, quarantaine et exigences de verification.">Policies</button>
+            <button class="secondary-button" type="button" data-open-panel="relay-panel" data-title="Relais vers le LAN" data-summary="Flux strictement autorises entre la DMZ et le coeur LPE.">Relay</button>
+          </div>
+          <div class="toolbar-chips">
+            <span class="pill">DMZ boundary</span>
+            <span class="pill">Magika aware</span>
+            <span class="pill">Queue discipline</span>
+          </div>
+        </section>
 
         <section class="panel metrics">
           <article>
@@ -163,6 +184,45 @@
               <span class="management-actions">Ouvrir</span>
             </button>
           </div>
+        </section>
+
+        <section class="ops-grid">
+          <article class="panel ops-card">
+            <div class="section-head">
+              <h3>Quick actions</h3>
+              <p>Frequent operations for the DMZ node.</p>
+            </div>
+            <div class="ops-pills">
+              <button class="pill-button" type="button" data-open-panel="site-panel" data-title="Identite du noeud" data-summary="Positionnement et exposition du serveur de tri en DMZ.">Review identity</button>
+              <button class="pill-button" type="button" data-open-panel="network-panel" data-title="Surface reseau" data-summary="Restriction des CIDR de management, sorties et listeners publics.">Review network</button>
+              <button class="pill-button" type="button" data-open-panel="updates-panel" data-title="Mises a jour" data-summary="Politique de mise a jour Debian Git-first pour le noeud DMZ.">Plan update</button>
+            </div>
+          </article>
+
+          <article class="panel ops-card">
+            <div class="section-head">
+              <h3>Quarantine focus</h3>
+              <p>Items that should remain one click away for perimeter review.</p>
+            </div>
+            <div class="quarantine-focus">
+              <div class="quarantine-item">
+                <strong>invoice-0427.zip</strong>
+                <span>Detected as exotic payload by Magika. Held in LPE-CT.</span>
+                <div class="quarantine-tags">
+                  <span class="badge danger">Quarantine</span>
+                  <span class="pill">Score 9.1</span>
+                </div>
+              </div>
+              <div class="quarantine-item">
+                <strong>board-minutes.p7m</strong>
+                <span>Encrypted payload marked uninspectable. Awaiting policy review.</span>
+                <div class="quarantine-tags">
+                  <span class="badge warn">Pending review</span>
+                  <span class="pill">Encrypted</span>
+                </div>
+              </div>
+            </div>
+          </article>
         </section>
 
         <div id="config-drawer" class="management-modal-backdrop hidden" role="presentation">
