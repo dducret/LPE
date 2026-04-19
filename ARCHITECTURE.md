@@ -247,6 +247,8 @@ It manages:
 - calendars
 - to-do lists
 
+The current MVP task model is canonical and account-scoped: tasks are persisted in `PostgreSQL` and must later be reused by `JMAP Tasks`, `DAV`, and mobile adapters instead of being reimplemented per protocol.
+
 The mailbox platform remains the system of record for accepted user data, while DMZ sorting centers act as the controlled intake and routing layer for inbound mail flow.
 
 `LPE` supports both:
@@ -930,6 +932,7 @@ The current architectural direction for the first product phases is:
 - `EWS` as a future extension after stabilization of the canonical submission and synchronization model
 - `PST` mailbox import and export for migration and interoperability
 - collaboration services for contacts, calendars, and to-do lists
+- a first canonical tasks MVP exposed through the internal account API and documented in `docs/architecture/tasks-mvp.md`
 - mailbox growth management through storage tiers, dedicated databases, split-capable large mailbox handling, and online archive support
 
 The precise supported `JMAP Mail` MVP scope and its intentional limitations are documented in `docs/architecture/jmap-mail-mvp.md`.

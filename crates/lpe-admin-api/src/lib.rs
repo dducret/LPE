@@ -17,12 +17,13 @@ use lpe_magika::{
 };
 use lpe_storage::{
     AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput,
-    AuthenticatedAccount, AuthenticatedAdmin, ClientContact, ClientEvent, ClientWorkspace,
-    DashboardUpdate, EmailTraceResult, EmailTraceSearchInput, HealthResponse, LocalAiSettings,
-    NewAccount, NewAlias, NewDomain, NewFilterRule, NewMailbox, NewPstTransferJob,
-    NewServerAdministrator, PstJobExecutionSummary, SavedDraftMessage, SecuritySettings,
-    ServerSettings, Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
-    UpdateAccount, UpsertClientContactInput, UpsertClientEventInput,
+    AuthenticatedAccount, AuthenticatedAdmin, ClientContact, ClientEvent, ClientTask,
+    ClientWorkspace, DashboardUpdate, EmailTraceResult, EmailTraceSearchInput, HealthResponse,
+    LocalAiSettings, NewAccount, NewAlias, NewDomain, NewFilterRule, NewMailbox,
+    NewPstTransferJob, NewServerAdministrator, PstJobExecutionSummary, SavedDraftMessage,
+    SecuritySettings, ServerSettings, Storage, SubmitMessageInput, SubmittedMessage,
+    SubmittedRecipientInput, UpdateAccount, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientTaskInput,
 };
 use std::env;
 use std::path::{Path, PathBuf};
@@ -40,7 +41,7 @@ use crate::types::{
     LoginRequest, LoginResponse, SubmitMessageRequest, SubmitRecipientRequest,
     UpdateAccountRequest, UpdateAntispamSettingsRequest, UpdateLocalAiSettingsRequest,
     UpdateSecuritySettingsRequest, UpdateServerSettingsRequest, UpsertClientContactRequest,
-    UpsertClientEventRequest,
+    UpsertClientEventRequest, UpsertClientTaskRequest,
 };
 
 const MIN_ADMIN_PASSWORD_LEN: usize = 12;
@@ -56,6 +57,8 @@ pub fn router(storage: Storage) -> Router {
         .route("/mail/auth/logout", post(client_logout))
         .route("/mail/auth/me", get(client_me))
         .route("/mail/workspace", get(client_workspace))
+        .route("/mail/tasks", get(list_client_tasks).post(upsert_client_task))
+        .route("/mail/tasks/{task_id}", get(get_client_task).delete(delete_client_task))
         .route("/health/local-ai", get(local_ai_health))
         .route("/capabilities/attachments", get(attachment_support))
         .route("/console/dashboard", get(dashboard))
@@ -934,6 +937,75 @@ async fn upsert_client_event(
             .await
             .map_err(bad_request_error)?,
     ))
+}
+
+async fn list_client_tasks(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<Vec<ClientTask>> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .fetch_client_tasks(account.account_id)
+            .await
+            .map_err(internal_error)?,
+    ))
+}
+
+async fn get_client_task(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(task_id): AxumPath<Uuid>,
+) -> ApiResult<ClientTask> {
+    let account = require_account(&storage, &headers).await?;
+    let mut tasks = storage
+        .fetch_client_tasks_by_ids(account.account_id, &[task_id])
+        .await
+        .map_err(internal_error)?;
+    let task = tasks
+        .pop()
+        .ok_or((StatusCode::NOT_FOUND, "task not found".to_string()))?;
+    Ok(Json(task))
+}
+
+async fn upsert_client_task(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<UpsertClientTaskRequest>,
+) -> ApiResult<ClientTask> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .upsert_client_task(UpsertClientTaskInput {
+                id: request.id,
+                account_id: account.account_id,
+                title: request.title,
+                description: request.description,
+                status: request.status,
+                due_at: request.due_at,
+                completed_at: request.completed_at,
+                sort_order: request.sort_order.unwrap_or(0),
+            })
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+async fn delete_client_task(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(task_id): AxumPath<Uuid>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    storage
+        .delete_client_task(account.account_id, task_id)
+        .await
+        .map_err(bad_request_error)?;
+
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
 }
 
 async fn deliver_inbound_message(

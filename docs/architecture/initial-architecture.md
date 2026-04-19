@@ -24,6 +24,8 @@ Cela implique que tout envoi realise via un protocole client supporte, notamment
 
 `CalDAV` et `CardDAV` sont des couches de compatibilite standards pour les donnees de collaboration. Ils doivent rester branches sur les modeles canoniques `LPE` pour les contacts et le calendrier, sans introduire de stockage, de droits ou de logique metier paralleles.
 
+Les taches/to-do doivent suivre la meme regle: un seul modele canonique de taches dans `LPE`, stocke en base, puis reutilise plus tard par `JMAP Tasks`, `DAV` et les couches mobiles sans modele metier parallele.
+
 Le modele de soumission initial est transactionnel cote coeur `LPE` et expose par l'API `/api/mail/messages/submit`:
 
 1. verifier le compte emetteur
@@ -58,9 +60,11 @@ L'autoconfiguration client publie des endpoints reels seulement. En v1, `Thunder
 
 Le MVP `DAV` actuellement implemente dans `lpe-dav` suit la meme approche d'adaptateur pour les usages contacts/calendrier. `CardDAV` et `CalDAV` reutilisent la meme authentification compte, exposent `contacts` et `calendar_events` via un mapping DAV minimal, puis mettent a jour directement ces tables canoniques sans logique metier specifique a DAV. Le scope supporte est detaille dans `docs/architecture/dav-mvp.md`.
 
+Le MVP `tasks` actuellement implemente suit la meme logique canonique. Les taches personnelles sont stockees dans `tasks`, exposees par des endpoints comptes `/api/mail/tasks`, et rechargees via `/api/mail/workspace`, afin de preparer plus tard `JMAP Tasks`, `DAV` et le mobile sur la meme base. Le scope supporte est detaille dans `docs/architecture/tasks-mvp.md`.
+
 Le webmail utilise une authentification de compte distincte de l'administration. Le formulaire `/mail/` appelle `/api/mail/auth/login`, qui verifie le hash `argon2` stocke dans `account_credentials`, cree une session dans `account_sessions`, puis expose l'identite via `/api/mail/auth/me`.
 
-Le webmail ne doit pas afficher de jeux de donnees de maquette en environnement fonctionnel. Apres authentification, il charge l'etat utilisateur par `/api/mail/workspace`, qui expose les messages, contacts et evenements persistants du compte. L'envoi, les brouillons, les contacts et le calendrier passent par des endpoints authentifies afin de rester alignes avec le modele canonique `LPE`. Les brouillons sont des messages persistants de la mailbox `Drafts`; leur edition met a jour la meme entree, leur expedition cree la copie autoritative `Sent` puis supprime la copie `Drafts`, et leur suppression ne peut viser qu'un message appartenant a la mailbox `Drafts` du compte authentifie.
+Le webmail ne doit pas afficher de jeux de donnees de maquette en environnement fonctionnel. Apres authentification, il charge l'etat utilisateur par `/api/mail/workspace`, qui expose les messages, contacts, evenements et taches persistants du compte. L'envoi, les brouillons, les contacts, le calendrier et les taches passent par des endpoints authentifies afin de rester alignes avec le modele canonique `LPE`. Les brouillons sont des messages persistants de la mailbox `Drafts`; leur edition met a jour la meme entree, leur expedition cree la copie autoritative `Sent` puis supprime la copie `Drafts`, et leur suppression ne peut viser qu'un message appartenant a la mailbox `Drafts` du compte authentifie.
 
 ### Blocs principaux
 
@@ -98,6 +102,7 @@ Centre de tri distinct pour l'entree `SMTP` exposee, le relais sortant, le filtr
 - transport `SMTP` entrant et sortant via `LPE-CT`
 - compatibilite Outlook/mobile native via `ActiveSync` en premiere cible
 - compatibilite contacts/calendrier via `CardDAV` et `CalDAV`
+- modele canonique des taches personnelles, prepare pour futurs adaptateurs `JMAP Tasks`, `DAV` et mobile
 - `EWS` comme extension future apres stabilisation du modele canonique de soumission et de synchronisation
 - coherence des messages envoyes entre protocoles clients et vue `Sent`
 - webmail HTTPS
@@ -130,6 +135,8 @@ This implies that every supported client submission path, especially `JMAP`, `IM
 `ActiveSync` is the first targeted native Outlook and mobile compatibility layer. `EWS` remains a future extension to evaluate after the canonical submission and synchronization model is stabilized.
 
 `CalDAV` and `CardDAV` are standards-based compatibility adapters for collaboration data. They must remain layered over the canonical `LPE` contact and calendar models, without introducing a separate DAV storage or rights model.
+
+Tasks and to-do items must follow the same rule: one canonical task model in `LPE`, stored in the database first, then reused later by `JMAP Tasks`, `DAV`, and mobile layers without any parallel business model.
 
 The initial submission model is transactional in the `LPE` core and exposed by `/api/mail/messages/submit`:
 
@@ -165,9 +172,11 @@ Client auto-configuration must publish only real endpoints. In v1, `Thunderbird`
 
 The current `DAV` MVP in `lpe-dav` follows the same adapter approach for collaboration compatibility. `CardDAV` and `CalDAV` reuse the same mailbox-account authentication, expose `contacts` and `calendar_events` through a minimal DAV collection model, and update those canonical tables directly instead of introducing DAV-only business logic. The supported scope is detailed in `docs/architecture/dav-mvp.md`.
 
+The current `tasks` MVP follows the same canonical approach. Personal tasks are stored in `tasks`, exposed through account-scoped `/api/mail/tasks` endpoints, and included in `/api/mail/workspace` so future `JMAP Tasks`, `DAV`, and mobile adapters can reuse the same base. The supported scope is detailed in `docs/architecture/tasks-mvp.md`.
+
 The webmail uses account authentication separate from administration. The `/mail/` form calls `/api/mail/auth/login`, which verifies the `argon2` hash stored in `account_credentials`, creates a session in `account_sessions`, and exposes the identity through `/api/mail/auth/me`.
 
-The webmail must not display mock datasets in a functional environment. After authentication, it loads user state through `/api/mail/workspace`, which exposes persistent messages, contacts, and events for the account. Submission, drafts, contacts, and calendar entries go through authenticated endpoints so the client remains aligned with the canonical `LPE` model. Drafts are persistent messages in the `Drafts` mailbox; editing updates the same row, sending creates the authoritative `Sent` copy and then removes the `Drafts` copy, and deletion is limited to a message owned by the authenticated account in the `Drafts` mailbox.
+The webmail must not display mock datasets in a functional environment. After authentication, it loads user state through `/api/mail/workspace`, which exposes persistent messages, contacts, events, and tasks for the account. Submission, drafts, contacts, calendar entries, and tasks go through authenticated endpoints so the client remains aligned with the canonical `LPE` model. Drafts are persistent messages in the `Drafts` mailbox; editing updates the same row, sending creates the authoritative `Sent` copy and then removes the `Drafts` copy, and deletion is limited to a message owned by the authenticated account in the `Drafts` mailbox.
 
 ### Main building blocks
 
@@ -205,6 +214,7 @@ Separate sorting center for exposed `SMTP` ingress, outbound relay, perimeter fi
 - inbound and outbound `SMTP` transport through `LPE-CT`
 - native Outlook and mobile compatibility through `ActiveSync` as the first target
 - contacts and calendar compatibility through `CardDAV` and `CalDAV`
+- a canonical personal-tasks model prepared for future `JMAP Tasks`, `DAV`, and mobile adapters
 - `EWS` as a future extension after stabilization of the canonical submission and synchronization model
 - sent-message consistency across client protocols and the `Sent` view
 - HTTPS webmail

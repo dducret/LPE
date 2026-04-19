@@ -382,6 +382,7 @@ pub struct ClientWorkspace {
     pub messages: Vec<ClientMessage>,
     pub events: Vec<ClientEvent>,
     pub contacts: Vec<ClientContact>,
+    pub tasks: Vec<ClientTask>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -447,6 +448,18 @@ pub struct UpsertClientContactInput {
     pub notes: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientTask {
+    pub id: Uuid,
+    pub title: String,
+    pub description: String,
+    pub status: String,
+    pub due_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub sort_order: i32,
+}
+
 #[derive(Debug, Clone)]
 pub struct UpsertClientEventInput {
     pub id: Option<Uuid>,
@@ -457,6 +470,18 @@ pub struct UpsertClientEventInput {
     pub location: String,
     pub attendees: String,
     pub notes: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpsertClientTaskInput {
+    pub id: Option<Uuid>,
+    pub account_id: Uuid,
+    pub title: String,
+    pub description: String,
+    pub status: String,
+    pub due_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub sort_order: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -918,6 +943,17 @@ struct ClientContactRow {
     phone: String,
     team: String,
     notes: String,
+}
+
+#[derive(Debug, FromRow)]
+struct ClientTaskRow {
+    id: Uuid,
+    title: String,
+    description: String,
+    status: String,
+    due_at: Option<String>,
+    completed_at: Option<String>,
+    sort_order: i32,
 }
 
 #[derive(Debug, FromRow)]
@@ -2072,6 +2108,7 @@ impl Storage {
 
         let events = self.fetch_client_events(account_id).await?;
         let contacts = self.fetch_client_contacts(account_id).await?;
+        let tasks = self.fetch_client_tasks(account_id).await?;
 
         let messages = message_rows
             .into_iter()
@@ -2112,6 +2149,7 @@ impl Storage {
             messages,
             events,
             contacts,
+            tasks,
         })
     }
 
@@ -3634,6 +3672,74 @@ impl Storage {
         Ok(map_event(row))
     }
 
+    pub async fn upsert_client_task(&self, input: UpsertClientTaskInput) -> Result<ClientTask> {
+        let title = input.title.trim();
+        if title.is_empty() {
+            bail!("task title is required");
+        }
+
+        let status = normalize_task_status(&input.status)?;
+        let task_id = input.id.unwrap_or_else(Uuid::new_v4);
+        let row = sqlx::query_as::<_, ClientTaskRow>(
+            r#"
+            INSERT INTO tasks (
+                id, tenant_id, account_id, title, description, status, due_at, completed_at, sort_order
+            )
+            VALUES (
+                $1,
+                $2,
+                $3,
+                $4,
+                $5,
+                $6,
+                NULLIF($7, '')::timestamptz,
+                CASE
+                    WHEN $6 = 'completed' THEN COALESCE(NULLIF($8, '')::timestamptz, NOW())
+                    ELSE NULL
+                END,
+                $9
+            )
+            ON CONFLICT (id) DO UPDATE SET
+                title = EXCLUDED.title,
+                description = EXCLUDED.description,
+                status = EXCLUDED.status,
+                due_at = EXCLUDED.due_at,
+                completed_at = EXCLUDED.completed_at,
+                sort_order = EXCLUDED.sort_order,
+                updated_at = NOW()
+            WHERE tasks.tenant_id = EXCLUDED.tenant_id
+              AND tasks.account_id = EXCLUDED.account_id
+            RETURNING
+                id,
+                title,
+                description,
+                status,
+                CASE
+                    WHEN due_at IS NULL THEN NULL
+                    ELSE to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS due_at,
+                CASE
+                    WHEN completed_at IS NULL THEN NULL
+                    ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS completed_at,
+                sort_order
+            "#,
+        )
+        .bind(task_id)
+        .bind(DEFAULT_TENANT_ID)
+        .bind(input.account_id)
+        .bind(title)
+        .bind(input.description.trim())
+        .bind(status)
+        .bind(input.due_at.as_deref().unwrap_or_default().trim())
+        .bind(input.completed_at.as_deref().unwrap_or_default().trim())
+        .bind(input.sort_order)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(map_task(row))
+    }
+
     pub async fn delete_client_contact(&self, account_id: Uuid, contact_id: Uuid) -> Result<()> {
         let deleted = sqlx::query(
             r#"
@@ -3669,6 +3775,26 @@ impl Storage {
 
         if deleted.rows_affected() == 0 {
             bail!("event not found");
+        }
+
+        Ok(())
+    }
+
+    pub async fn delete_client_task(&self, account_id: Uuid, task_id: Uuid) -> Result<()> {
+        let deleted = sqlx::query(
+            r#"
+            DELETE FROM tasks
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(task_id)
+        .execute(&self.pool)
+        .await?;
+
+        if deleted.rows_affected() == 0 {
+            bail!("task not found");
         }
 
         Ok(())
@@ -5286,6 +5412,93 @@ impl Storage {
         Ok(rows.into_iter().map(map_contact).collect())
     }
 
+    pub async fn fetch_client_tasks(&self, account_id: Uuid) -> Result<Vec<ClientTask>> {
+        let rows = sqlx::query_as::<_, ClientTaskRow>(
+            r#"
+            SELECT
+                id,
+                title,
+                description,
+                status,
+                CASE
+                    WHEN due_at IS NULL THEN NULL
+                    ELSE to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS due_at,
+                CASE
+                    WHEN completed_at IS NULL THEN NULL
+                    ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS completed_at,
+                sort_order
+            FROM tasks
+            WHERE tenant_id = $1 AND account_id = $2
+            ORDER BY
+                CASE status
+                    WHEN 'completed' THEN 2
+                    WHEN 'cancelled' THEN 3
+                    ELSE 1
+                END ASC,
+                due_at ASC NULLS LAST,
+                sort_order ASC,
+                created_at ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_task).collect())
+    }
+
+    pub async fn fetch_client_tasks_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientTask>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let rows = sqlx::query_as::<_, ClientTaskRow>(
+            r#"
+            SELECT
+                id,
+                title,
+                description,
+                status,
+                CASE
+                    WHEN due_at IS NULL THEN NULL
+                    ELSE to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS due_at,
+                CASE
+                    WHEN completed_at IS NULL THEN NULL
+                    ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS completed_at,
+                sort_order
+            FROM tasks
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND id = ANY($3)
+            ORDER BY
+                CASE status
+                    WHEN 'completed' THEN 2
+                    WHEN 'cancelled' THEN 3
+                    ELSE 1
+                END ASC,
+                due_at ASC NULLS LAST,
+                sort_order ASC,
+                created_at ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_task).collect())
+    }
+
     async fn ingest_message_attachments_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
@@ -5651,6 +5864,16 @@ fn normalize_subject(value: &str) -> String {
     value.trim().to_string()
 }
 
+fn normalize_task_status(value: &str) -> Result<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "" | "needs-action" => Ok("needs-action"),
+        "in-progress" => Ok("in-progress"),
+        "completed" => Ok("completed"),
+        "cancelled" => Ok("cancelled"),
+        other => bail!("unsupported task status: {other}"),
+    }
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -5786,6 +6009,18 @@ fn map_contact(row: ClientContactRow) -> ClientContact {
     }
 }
 
+fn map_task(row: ClientTaskRow) -> ClientTask {
+    ClientTask {
+        id: row.id,
+        title: row.title,
+        description: row.description,
+        status: row.status,
+        due_at: row.due_at,
+        completed_at: row.completed_at,
+        sort_order: row.sort_order,
+    }
+}
+
 fn normalize_visible_recipients(
     input: &SubmitMessageInput,
 ) -> Vec<(&'static str, SubmittedRecipientInput)> {
@@ -5864,9 +6099,9 @@ fn participants_normalized(
 #[cfg(test)]
 mod tests {
     use super::{
-        domain_from_email, normalize_bcc_recipients, normalize_visible_recipients,
-        participants_normalized, validate_pst_import_path, SubmitMessageInput,
-        SubmittedRecipientInput,
+        domain_from_email, normalize_bcc_recipients, normalize_task_status,
+        normalize_visible_recipients, participants_normalized, validate_pst_import_path,
+        SubmitMessageInput, SubmittedRecipientInput,
     };
     use lpe_magika::{
         write_validation_record, ExpectedKind, IngressContext, PolicyDecision, ValidationOutcome,
@@ -5990,6 +6225,24 @@ mod tests {
             domain_from_email("Alice@Example.Test").unwrap(),
             "example.test"
         );
+    }
+
+    #[test]
+    fn task_status_defaults_to_needs_action() {
+        assert_eq!(normalize_task_status("").unwrap(), "needs-action");
+    }
+
+    #[test]
+    fn task_status_accepts_vtodo_aligned_values() {
+        assert_eq!(normalize_task_status("needs-action").unwrap(), "needs-action");
+        assert_eq!(normalize_task_status("in-progress").unwrap(), "in-progress");
+        assert_eq!(normalize_task_status("completed").unwrap(), "completed");
+        assert_eq!(normalize_task_status("cancelled").unwrap(), "cancelled");
+    }
+
+    #[test]
+    fn task_status_rejects_unknown_values() {
+        assert!(normalize_task_status("done").is_err());
     }
 
 }

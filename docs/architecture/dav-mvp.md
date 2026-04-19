@@ -13,6 +13,7 @@ The `crates/lpe-dav` crate exposes a deliberately small DAV compatibility layer 
 - mailbox-account authentication is reused rather than duplicated
 - `contacts` remains the source of truth for address-book data
 - `calendar_events` remains the source of truth for calendar data
+- future task compatibility must reuse the canonical `tasks` model rather than introducing DAV-only task storage
 - the adapter must not introduce a separate storage, tenant, or rights model
 - each DAV request is scoped to the authenticated account only
 
@@ -105,3 +106,4 @@ The implementation keeps discovery and synchronization intentionally minimal:
 - calendar updates replace the whole `VEVENT`; recurrence, alarms, organizers, attendees as structured entities, and time zones are not implemented
 - calendar attendee data is currently preserved through `X-LPE-ATTENDEES` because the canonical model still stores attendees as plain text
 - `ETag` values are derived from the serialized DAV payload and do not yet support conditional writes
+- `VTODO` and task collections are intentionally out of scope; future task compatibility must build on `docs/architecture/tasks-mvp.md`

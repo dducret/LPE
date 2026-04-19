@@ -75,7 +75,9 @@ L'autoconfiguration client publie maintenant des endpoints MVP reels pour `Thund
 
 Le crate `lpe-dav` expose maintenant un premier adaptateur `CardDAV` et `CalDAV` MVP. Il reutilise l'authentification compte deja utilisee par le webmail et `ActiveSync`, expose les contacts et evenements canoniques stockes dans `contacts` et `calendar_events`, supporte un sous-ensemble minimal de `PROPFIND`, `REPORT`, `GET`, `PUT`, `DELETE` et `OPTIONS`, et reste une couche de compatibilite sans logique metier parallele. Le scope detaille et les limites du MVP sont documentes dans `docs/architecture/dav-mvp.md`.
 
-Le client web `/mail/` exige une authentification utilisateur. Les identifiants sont ceux du compte cree dans l'administration; le mot de passe est hache cote serveur avec `argon2`, stocke dans `account_credentials`, puis valide via `/api/mail/auth/login` avant d'ouvrir l'interface. Apres connexion, le client charge les messages, contacts et evenements depuis `/api/mail/workspace`; la composition, l'enregistrement, la modification, la suppression et l'expedition de brouillons, les contacts et les entrees calendrier utilisent des endpoints persistants et n'affichent plus de donnees de maquette.
+`LPE` expose maintenant un premier modele canonique des taches personnelles via la table `tasks`, des endpoints comptes `/api/mail/tasks`, et une inclusion dans `/api/mail/workspace`, sans logique parallele par protocole. Le modele MVP et ses limites sont documentes dans `docs/architecture/tasks-mvp.md`.
+
+Le client web `/mail/` exige une authentification utilisateur. Les identifiants sont ceux du compte cree dans l'administration; le mot de passe est hache cote serveur avec `argon2`, stocke dans `account_credentials`, puis valide via `/api/mail/auth/login` avant d'ouvrir l'interface. Apres connexion, le client charge les messages, contacts, evenements et taches depuis `/api/mail/workspace`; la composition, l'enregistrement, la modification, la suppression et l'expedition de brouillons, les contacts, les entrees calendrier et les taches utilisent des endpoints persistants et n'affichent plus de donnees de maquette.
 
 ### Axe IA locale
 
@@ -174,7 +176,9 @@ Client auto-configuration now publishes real MVP endpoints for `Thunderbird` and
 
 The `lpe-dav` crate now exposes a first `CardDAV` and `CalDAV` MVP adapter. It reuses the mailbox-account authentication already used by the web client and `ActiveSync`, exposes the canonical collaboration data stored in `contacts` and `calendar_events`, supports a minimal subset of `PROPFIND`, `REPORT`, `GET`, `PUT`, `DELETE`, and `OPTIONS`, and remains a compatibility layer rather than a parallel business model. The supported scope and limitations are documented in `docs/architecture/dav-mvp.md`.
 
-The `/mail/` web client requires user authentication. Credentials are the mailbox account credentials created in the administration console; the password is hashed server-side with `argon2`, stored in `account_credentials`, and validated through `/api/mail/auth/login` before the interface opens. After sign-in, the client loads messages, contacts, and events from `/api/mail/workspace`; composition, draft saving, draft editing, draft deletion, draft sending, contacts, and calendar entries use persistent endpoints and no longer display mock seed data.
+`LPE` now exposes a first canonical personal-task model through the `tasks` table, account-scoped `/api/mail/tasks` endpoints, and inclusion in `/api/mail/workspace`, without introducing protocol-specific parallel logic. The MVP model and its limits are documented in `docs/architecture/tasks-mvp.md`.
+
+The `/mail/` web client requires user authentication. Credentials are the mailbox account credentials created in the administration console; the password is hashed server-side with `argon2`, stored in `account_credentials`, and validated through `/api/mail/auth/login` before the interface opens. After sign-in, the client loads messages, contacts, events, and tasks from `/api/mail/workspace`; composition, draft saving, draft editing, draft deletion, draft sending, contacts, calendar entries, and tasks use persistent endpoints and no longer display mock seed data.
 
 ### Local AI direction
 

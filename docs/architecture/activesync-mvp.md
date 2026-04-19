@@ -104,6 +104,7 @@ The `crates/lpe-activesync` crate exposes a pragmatic subset of `Exchange Active
 - the `ActiveSync` adapter is separated from `lpe-jmap` and from the business core
 - authentication reuses the mailbox account already defined in `LPE`
 - synchronization reads the canonical mailbox projection stored in `PostgreSQL`
+- future task synchronization must reuse the canonical `tasks` model instead of introducing an `ActiveSync`-specific task store
 - drafts reuse `save_draft_message` and `delete_draft_message`
 - message submission reuses `submit_message`, which writes the authoritative `Sent` copy and then appends the `outbound_message_queue` row
 - no `ActiveSync` endpoint performs direct Internet-facing `SMTP`
@@ -176,6 +177,7 @@ Client-side create, update, and delete operations for those two classes are inte
 
 - the MVP does not implement `EWS`
 - the MVP does not implement `SmartReply`, `SmartForward`, `ItemOperations`, `Ping`, `Search`, or ActiveSync attachment retrieval
+- the MVP does not expose the `Tasks` class yet; future task support must build on `docs/architecture/tasks-mvp.md`
 - the `WBXML` parser is intentionally limited to the tags used by this MVP
 - the `SendMail` `MIME` parser is still intentionally limited to MVP needs: it handles native text-message cases better, but it does not yet cover attachments or full MIME richness
 - `Contacts` and `Calendar` synchronization is read-only in this first step

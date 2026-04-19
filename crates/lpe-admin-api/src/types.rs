@@ -202,3 +202,14 @@ pub struct UpsertClientEventRequest {
     pub attendees: String,
     pub notes: String,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct UpsertClientTaskRequest {
+    pub id: Option<Uuid>,
+    pub title: String,
+    pub description: String,
+    pub status: String,
+    pub due_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub sort_order: Option<i32>,
+}
