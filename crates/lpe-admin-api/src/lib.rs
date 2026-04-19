@@ -27,6 +27,7 @@ use lpe_storage::{
 };
 use std::env;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
@@ -39,10 +40,11 @@ use crate::types::{
     ClientLoginResponse, CreateAccountRequest, CreateAliasRequest, CreateDomainRequest,
     CreateFilterRuleRequest, CreateMailboxRequest, CreatePstTransferJobRequest,
     CreateServerAdministratorRequest, EmailTraceSearchRequest, LocalAiHealthResponse, LoginRequest,
-    LoginResponse, OidcMetadataResponse, OidcStartResponse, SubmitMessageRequest,
-    SubmitRecipientRequest, UpdateAccountRequest, UpdateAntispamSettingsRequest,
-    UpdateLocalAiSettingsRequest, UpdateSecuritySettingsRequest, UpdateServerSettingsRequest,
-    UpsertClientContactRequest, UpsertClientEventRequest, UpsertClientTaskRequest,
+    LoginResponse, OidcMetadataResponse, OidcStartResponse, ReadinessCheck, ReadinessResponse,
+    SubmitMessageRequest, SubmitRecipientRequest, UpdateAccountRequest,
+    UpdateAntispamSettingsRequest, UpdateLocalAiSettingsRequest, UpdateSecuritySettingsRequest,
+    UpdateServerSettingsRequest, UpsertClientContactRequest, UpsertClientEventRequest,
+    UpsertClientTaskRequest,
 };
 
 const MIN_ADMIN_PASSWORD_LEN: usize = 12;
@@ -51,6 +53,8 @@ const MIN_INTEGRATION_SECRET_LEN: usize = 32;
 pub fn router(storage: Storage) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/health/live", get(health_live))
+        .route("/health/ready", get(health_ready))
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(me))
@@ -124,6 +128,60 @@ async fn health(State(storage): State<Storage>) -> ApiResult<HealthResponse> {
     Ok(Json(dashboard.health))
 }
 
+async fn health_live() -> ApiResult<HealthResponse> {
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+async fn health_ready(State(storage): State<Storage>) -> ApiResult<ReadinessResponse> {
+    let mut checks = Vec::new();
+
+    checks.push(
+        match tokio::time::timeout(Duration::from_millis(1_500), storage.fetch_admin_dashboard())
+            .await
+        {
+            Ok(Ok(_)) => readiness_ok("postgresql", true, "primary metadata store reachable"),
+            Ok(Err(error)) => readiness_failed(
+                "postgresql",
+                true,
+                format!("database-backed dashboard query failed: {error}"),
+            ),
+            Err(_) => readiness_failed(
+                "postgresql",
+                true,
+                "database-backed dashboard query timed out",
+            ),
+        },
+    );
+
+    checks.push(match integration_shared_secret() {
+        Ok(_) => readiness_ok(
+            "integration-secret",
+            true,
+            "shared LPE/LPE-CT integration secret is configured",
+        ),
+        Err(error) => readiness_failed(
+            "integration-secret",
+            true,
+            format!("integration secret is invalid: {error}"),
+        ),
+    });
+
+    checks.push(
+        check_optional_http_dependency(
+            "lpe-ct-api",
+            &format!("{}/health/live", lpe_ct_base_url()),
+            "outbound relay API reachable",
+            "outbound relay API unreachable; outbound queue will accumulate until recovery",
+        )
+        .await,
+    );
+
+    Ok(Json(build_readiness_response("lpe-admin-api", checks)))
+}
+
 async fn login(
     State(storage): State<Storage>,
     Json(request): Json<LoginRequest>,
@@ -154,7 +212,13 @@ async fn login(
 
     let token = Uuid::new_v4().to_string();
     storage
-        .create_admin_session(&token, &email, admin_session_minutes(), "password")
+        .create_admin_session(
+            &token,
+            &candidate.tenant_id,
+            &email,
+            admin_session_minutes(),
+            "password",
+        )
         .await
         .map_err(internal_error)?;
     let admin = storage
@@ -278,7 +342,21 @@ async fn oidc_callback(
 
     let token = Uuid::new_v4().to_string();
     storage
-        .create_admin_session(&token, &admin_email, admin_session_minutes(), "oidc")
+        .create_admin_session(
+            &token,
+            &storage
+                .fetch_admin_login(&admin_email)
+                .await
+                .map_err(internal_error)?
+                .ok_or((
+                    StatusCode::UNAUTHORIZED,
+                    "administrator not found".to_string(),
+                ))?
+                .tenant_id,
+            &admin_email,
+            admin_session_minutes(),
+            "oidc",
+        )
         .await
         .map_err(internal_error)?;
 
@@ -304,7 +382,12 @@ async fn client_login(
 
     let token = Uuid::new_v4().to_string();
     storage
-        .create_account_session(&token, &candidate.email, client_session_minutes())
+        .create_account_session(
+            &token,
+            &candidate.tenant_id,
+            &candidate.email,
+            client_session_minutes(),
+        )
         .await
         .map_err(internal_error)?;
     let account = storage
@@ -1362,6 +1445,87 @@ fn pst_upload_max_bytes() -> usize {
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(20 * 1024 * 1024 * 1024)
+}
+
+fn lpe_ct_base_url() -> String {
+    env::var("LPE_CT_API_BASE_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:8380".to_string())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn readiness_ok(name: &str, critical: bool, detail: impl Into<String>) -> ReadinessCheck {
+    ReadinessCheck {
+        name: name.to_string(),
+        status: "ok".to_string(),
+        critical,
+        detail: detail.into(),
+    }
+}
+
+fn readiness_warn(name: &str, detail: impl Into<String>) -> ReadinessCheck {
+    ReadinessCheck {
+        name: name.to_string(),
+        status: "warn".to_string(),
+        critical: false,
+        detail: detail.into(),
+    }
+}
+
+fn readiness_failed(name: &str, critical: bool, detail: impl Into<String>) -> ReadinessCheck {
+    ReadinessCheck {
+        name: name.to_string(),
+        status: "failed".to_string(),
+        critical,
+        detail: detail.into(),
+    }
+}
+
+fn build_readiness_response(service: &str, checks: Vec<ReadinessCheck>) -> ReadinessResponse {
+    let has_critical_failure = checks
+        .iter()
+        .any(|check| check.critical && check.status == "failed");
+    let warnings = checks.iter().filter(|check| check.status == "warn").count() as u32;
+
+    ReadinessResponse {
+        service: service.to_string(),
+        status: if has_critical_failure {
+            "failed".to_string()
+        } else {
+            "ready".to_string()
+        },
+        warnings,
+        checks,
+    }
+}
+
+async fn check_optional_http_dependency(
+    name: &str,
+    url: &str,
+    ok_detail: &str,
+    warn_detail: &str,
+) -> ReadinessCheck {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_millis(1_500))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            return readiness_warn(
+                name,
+                format!("unable to initialize HTTP client for {url}: {error}"),
+            );
+        }
+    };
+
+    match client.get(url).send().await {
+        Ok(response) if response.status().is_success() => readiness_ok(name, false, ok_detail),
+        Ok(response) => readiness_warn(
+            name,
+            format!("{warn_detail} ({url} returned HTTP {})", response.status()),
+        ),
+        Err(error) => readiness_warn(name, format!("{warn_detail} ({url}: {error})")),
+    }
 }
 
 fn validate_uploaded_pst_file(

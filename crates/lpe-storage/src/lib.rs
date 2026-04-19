@@ -22,7 +22,7 @@ pub mod mail;
 
 use crate::mail::{parse_header_recipients, parse_message_attachments};
 
-const DEFAULT_TENANT_ID: &str = "default";
+const PLATFORM_TENANT_ID: &str = "__platform__";
 
 #[derive(Clone)]
 pub struct Storage {
@@ -140,6 +140,7 @@ pub struct ServerAdministrator {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AuthenticatedAdmin {
+    pub tenant_id: String,
     pub email: String,
     pub display_name: String,
     pub role: String,
@@ -324,6 +325,7 @@ pub struct AccountCredentialInput {
 
 #[derive(Debug, Clone)]
 pub struct AdminLogin {
+    pub tenant_id: String,
     pub email: String,
     pub password_hash: String,
     pub status: String,
@@ -345,6 +347,7 @@ pub struct AdminOidcClaims {
 
 #[derive(Debug, Clone)]
 pub struct AccountLogin {
+    pub tenant_id: String,
     pub account_id: Uuid,
     pub email: String,
     pub password_hash: String,
@@ -354,6 +357,7 @@ pub struct AccountLogin {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AuthenticatedAccount {
+    pub tenant_id: String,
     pub account_id: Uuid,
     pub email: String,
     pub display_name: String,
@@ -911,6 +915,7 @@ struct ServerAdministratorRow {
 
 #[derive(Debug, FromRow)]
 struct AdminLoginRow {
+    tenant_id: String,
     email: String,
     password_hash: String,
     status: String,
@@ -924,6 +929,7 @@ struct AdminLoginRow {
 
 #[derive(Debug, FromRow)]
 struct AccountLoginRow {
+    tenant_id: String,
     account_id: Uuid,
     email: String,
     password_hash: String,
@@ -933,6 +939,7 @@ struct AccountLoginRow {
 
 #[derive(Debug, FromRow)]
 struct AuthenticatedAdminRow {
+    tenant_id: String,
     email: String,
     display_name: Option<String>,
     role: Option<String>,
@@ -946,6 +953,7 @@ struct AuthenticatedAdminRow {
 
 #[derive(Debug, FromRow)]
 struct AuthenticatedAccountRow {
+    tenant_id: String,
     account_id: Uuid,
     email: String,
     display_name: String,
@@ -1034,6 +1042,7 @@ struct ClientTaskRow {
 #[derive(Debug, FromRow)]
 struct PendingPstJobRow {
     id: Uuid,
+    tenant_id: String,
     mailbox_id: Uuid,
     account_id: Uuid,
     direction: String,
@@ -1101,7 +1110,7 @@ impl Storage {
     }
 
     pub async fn fetch_admin_dashboard(&self) -> Result<AdminDashboard> {
-        let tenant_id = DEFAULT_TENANT_ID;
+        let tenant_id = PLATFORM_TENANT_ID;
         let account_rows = sqlx::query_as::<_, AccountRow>(
             r#"
             SELECT id, primary_email, display_name, quota_mb, used_mb, status
@@ -1362,6 +1371,7 @@ impl Storage {
         let account_id = Uuid::new_v4();
         let email = input.email.trim().to_lowercase();
         let display_name = input.display_name.trim();
+        let tenant_id = self.tenant_id_for_account_email(&email).await?;
 
         let insert_result = sqlx::query(
             r#"
@@ -1371,7 +1381,7 @@ impl Storage {
             "#,
         )
         .bind(account_id)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(&email)
         .bind(display_name)
         .bind(input.quota_mb as i32)
@@ -1386,12 +1396,12 @@ impl Storage {
                 "#,
             )
             .bind(Uuid::new_v4())
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(account_id)
             .execute(&mut *tx)
             .await?;
 
-            self.insert_audit(&mut tx, audit).await?;
+            self.insert_audit(&mut tx, &tenant_id, audit).await?;
         }
 
         tx.commit().await?;
@@ -1402,6 +1412,7 @@ impl Storage {
         let mut tx = self.pool.begin().await?;
         let display_name = input.display_name.trim();
         let status = input.status.trim().to_lowercase();
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
 
         if display_name.is_empty() {
             bail!("account display name is required");
@@ -1422,7 +1433,7 @@ impl Storage {
         .bind(display_name)
         .bind(input.quota_mb.max(256) as i32)
         .bind(&status)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .fetch_optional(&mut *tx)
         .await?;
@@ -1447,19 +1458,20 @@ impl Storage {
                 "#,
             )
             .bind(normalize_email(&account_email))
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(password_hash)
             .execute(&mut *tx)
             .await?;
         }
 
-        self.insert_audit(&mut tx, audit).await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
         Ok(())
     }
 
     pub async fn create_mailbox(&self, input: NewMailbox, audit: AuditEntryInput) -> Result<()> {
         let mut tx = self.pool.begin().await?;
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         let exists = sqlx::query(
             r#"
             SELECT 1
@@ -1468,7 +1480,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .bind(input.display_name.trim())
         .fetch_optional(&mut *tx)
@@ -1482,7 +1494,7 @@ impl Storage {
                 WHERE tenant_id = $1 AND account_id = $2
                 "#,
             )
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(input.account_id)
             .fetch_one(&mut *tx)
             .await?;
@@ -1494,7 +1506,7 @@ impl Storage {
                 "#,
             )
             .bind(Uuid::new_v4())
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(input.account_id)
             .bind(input.role.trim())
             .bind(input.display_name.trim())
@@ -1503,7 +1515,7 @@ impl Storage {
             .execute(&mut *tx)
             .await?;
 
-            self.insert_audit(&mut tx, audit).await?;
+            self.insert_audit(&mut tx, &tenant_id, audit).await?;
         }
 
         tx.commit().await?;
@@ -1519,6 +1531,18 @@ impl Storage {
         let direction = input.direction.trim().to_lowercase();
         let server_path = input.server_path.trim();
         let requested_by = input.requested_by.trim().to_lowercase();
+        let tenant_id = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tenant_id
+            FROM mailboxes
+            WHERE id = $1
+            LIMIT 1
+            "#,
+        )
+        .bind(input.mailbox_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| anyhow!("mailbox not found"))?;
 
         let mailbox_exists = sqlx::query(
             r#"
@@ -1528,7 +1552,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.mailbox_id)
         .fetch_optional(&mut *tx)
         .await?;
@@ -1547,7 +1571,7 @@ impl Storage {
                 "#,
             )
             .bind(Uuid::new_v4())
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(input.mailbox_id)
             .bind(direction)
             .bind(server_path)
@@ -1555,7 +1579,7 @@ impl Storage {
             .execute(&mut *tx)
             .await?;
 
-            self.insert_audit(&mut tx, audit).await?;
+            self.insert_audit(&mut tx, &tenant_id, audit).await?;
         }
 
         tx.commit().await?;
@@ -1564,6 +1588,7 @@ impl Storage {
 
     pub async fn create_domain(&self, input: NewDomain, audit: AuditEntryInput) -> Result<()> {
         let mut tx = self.pool.begin().await?;
+        let tenant_id = self.tenant_id_for_domain_name(&input.name).await?;
         let result = sqlx::query(
             r#"
             INSERT INTO domains (id, tenant_id, name, status, inbound_enabled, outbound_enabled, default_quota_mb)
@@ -1572,7 +1597,7 @@ impl Storage {
             "#,
         )
         .bind(Uuid::new_v4())
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.name.trim().to_lowercase())
         .bind(input.inbound_enabled)
         .bind(input.outbound_enabled)
@@ -1581,7 +1606,7 @@ impl Storage {
         .await?;
 
         if result.rows_affected() > 0 {
-            self.insert_audit(&mut tx, audit).await?;
+            self.insert_audit(&mut tx, &tenant_id, audit).await?;
         }
 
         tx.commit().await?;
@@ -1590,6 +1615,9 @@ impl Storage {
 
     pub async fn create_alias(&self, input: NewAlias, audit: AuditEntryInput) -> Result<()> {
         let mut tx = self.pool.begin().await?;
+        let tenant_id = self
+            .tenant_id_for_account_email(input.source.trim())
+            .await?;
         let result = sqlx::query(
             r#"
             INSERT INTO aliases (id, tenant_id, source, target, kind, status)
@@ -1598,7 +1626,7 @@ impl Storage {
             "#,
         )
         .bind(Uuid::new_v4())
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.source.trim().to_lowercase())
         .bind(input.target.trim().to_lowercase())
         .bind(input.kind.trim())
@@ -1606,7 +1634,7 @@ impl Storage {
         .await?;
 
         if result.rows_affected() > 0 {
-            self.insert_audit(&mut tx, audit).await?;
+            self.insert_audit(&mut tx, &tenant_id, audit).await?;
         }
 
         tx.commit().await?;
@@ -1619,11 +1647,12 @@ impl Storage {
         audit: AuditEntryInput,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        let normalized_permissions = normalize_admin_permissions(
-            &input.role,
-            &input.rights_summary,
-            &input.permissions,
-        );
+        let tenant_id = match input.domain_id {
+            Some(domain_id) => self.tenant_id_for_domain_id(domain_id).await?,
+            None => PLATFORM_TENANT_ID.to_string(),
+        };
+        let normalized_permissions =
+            normalize_admin_permissions(&input.role, &input.rights_summary, &input.permissions);
         sqlx::query(
             r#"
             INSERT INTO server_administrators (
@@ -1633,7 +1662,7 @@ impl Storage {
             "#,
         )
         .bind(Uuid::new_v4())
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.domain_id)
         .bind(input.email.trim().to_lowercase())
         .bind(input.display_name.trim())
@@ -1643,7 +1672,7 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
-        self.insert_audit(&mut tx, audit).await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1655,6 +1684,7 @@ impl Storage {
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         let email = normalize_email(&input.email);
+        let tenant_id = self.tenant_id_for_admin_email(&email).await?;
         if email.is_empty() || input.password_hash.trim().is_empty() {
             bail!("admin credential email and password hash are required");
         }
@@ -1670,18 +1700,19 @@ impl Storage {
             "#,
         )
         .bind(email)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.password_hash)
         .execute(&mut *tx)
         .await?;
 
-        self.insert_audit(&mut tx, audit).await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
         Ok(())
     }
 
     pub async fn ensure_admin_credential_stub(&self, email: &str) -> Result<()> {
         let email = normalize_email(email);
+        let tenant_id = self.tenant_id_for_admin_email(&email).await?;
         if email.is_empty() {
             bail!("admin credential email is required");
         }
@@ -1696,7 +1727,7 @@ impl Storage {
             "#,
         )
         .bind(email)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .execute(&self.pool)
         .await?;
 
@@ -1708,6 +1739,7 @@ impl Storage {
         email: &str,
     ) -> Result<Option<ServerAdministrator>> {
         let email = normalize_email(email);
+        let tenant_id = self.tenant_id_for_admin_email(&email).await?;
         let row = sqlx::query_as::<_, ServerAdministratorRow>(
             r#"
             SELECT
@@ -1727,7 +1759,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(email)
         .fetch_optional(&self.pool)
         .await?;
@@ -1756,6 +1788,19 @@ impl Storage {
         issuer_url: &str,
         subject: &str,
     ) -> Result<Option<String>> {
+        let tenant_id = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tenant_id
+            FROM admin_oidc_identities
+            WHERE issuer_url = $1 AND subject = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(issuer_url.trim())
+        .bind(subject.trim())
+        .fetch_optional(&self.pool)
+        .await?
+        .unwrap_or_else(|| PLATFORM_TENANT_ID.to_string());
         let email = sqlx::query_scalar::<_, String>(
             r#"
             SELECT admin_email
@@ -1764,7 +1809,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(issuer_url.trim())
         .bind(subject.trim())
         .fetch_optional(&self.pool)
@@ -1773,10 +1818,8 @@ impl Storage {
         Ok(email)
     }
 
-    pub async fn upsert_admin_oidc_identity(
-        &self,
-        claims: &AdminOidcClaims,
-    ) -> Result<()> {
+    pub async fn upsert_admin_oidc_identity(&self, claims: &AdminOidcClaims) -> Result<()> {
+        let tenant_id = self.tenant_id_for_admin_email(&claims.email).await?;
         sqlx::query(
             r#"
             INSERT INTO admin_oidc_identities (
@@ -1788,7 +1831,7 @@ impl Storage {
                 last_login_at = NOW()
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(claims.issuer_url.trim())
         .bind(claims.subject.trim())
         .bind(normalize_email(&claims.email))
@@ -1805,6 +1848,7 @@ impl Storage {
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         let email = normalize_email(&input.email);
+        let tenant_id = self.tenant_id_for_account_email(&email).await?;
         if email.is_empty() || input.password_hash.trim().is_empty() {
             bail!("account credential email and password hash are required");
         }
@@ -1817,7 +1861,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(&email)
         .fetch_optional(&mut *tx)
         .await?;
@@ -1837,12 +1881,12 @@ impl Storage {
             "#,
         )
         .bind(email)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.password_hash)
         .execute(&mut *tx)
         .await?;
 
-        self.insert_audit(&mut tx, audit).await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1857,7 +1901,7 @@ impl Storage {
             )
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .fetch_one(&self.pool)
         .await?;
         if credentials_exist {
@@ -1873,7 +1917,7 @@ impl Storage {
             )
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .fetch_one(&self.pool)
         .await?;
 
@@ -1882,9 +1926,11 @@ impl Storage {
 
     pub async fn fetch_admin_login(&self, email: &str) -> Result<Option<AdminLogin>> {
         let email = normalize_email(email);
+        let tenant_id = self.tenant_id_for_admin_email(&email).await?;
         let row = sqlx::query_as::<_, AdminLoginRow>(
             r#"
             SELECT
+                ac.tenant_id,
                 ac.email,
                 ac.password_hash,
                 ac.status,
@@ -1903,7 +1949,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(email)
         .fetch_optional(&self.pool)
         .await?;
@@ -1916,6 +1962,7 @@ impl Storage {
                 row.permissions_json.as_deref(),
             );
             AdminLogin {
+                tenant_id: row.tenant_id,
                 email: row.email,
                 password_hash: row.password_hash,
                 status: row.status,
@@ -1934,6 +1981,7 @@ impl Storage {
     pub async fn create_admin_session(
         &self,
         token: &str,
+        tenant_id: &str,
         email: &str,
         session_timeout_minutes: u32,
         auth_method: &str,
@@ -1945,7 +1993,7 @@ impl Storage {
             "#,
         )
         .bind(Uuid::new_v4())
-        .bind(DEFAULT_TENANT_ID)
+        .bind(tenant_id)
         .bind(token)
         .bind(normalize_email(email))
         .bind(auth_method.trim().to_lowercase())
@@ -1958,9 +2006,11 @@ impl Storage {
 
     pub async fn fetch_account_login(&self, email: &str) -> Result<Option<AccountLogin>> {
         let email = normalize_email(email);
+        let tenant_id = self.tenant_id_for_account_email(&email).await?;
         let row = sqlx::query_as::<_, AccountLoginRow>(
             r#"
             SELECT
+                a.tenant_id,
                 a.id AS account_id,
                 ac.account_email AS email,
                 ac.password_hash,
@@ -1974,12 +2024,13 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(email)
         .fetch_optional(&self.pool)
         .await?;
 
         Ok(row.map(|row| AccountLogin {
+            tenant_id: row.tenant_id,
             account_id: row.account_id,
             email: row.email,
             password_hash: row.password_hash,
@@ -1991,6 +2042,7 @@ impl Storage {
     pub async fn create_account_session(
         &self,
         token: &str,
+        tenant_id: &str,
         account_email: &str,
         session_timeout_minutes: u32,
     ) -> Result<()> {
@@ -2001,7 +2053,7 @@ impl Storage {
             "#,
         )
         .bind(Uuid::new_v4())
-        .bind(DEFAULT_TENANT_ID)
+        .bind(tenant_id)
         .bind(token)
         .bind(normalize_email(account_email))
         .bind(session_timeout_minutes.max(5) as i32)
@@ -2012,9 +2064,24 @@ impl Storage {
     }
 
     pub async fn fetch_admin_session(&self, token: &str) -> Result<Option<AuthenticatedAdmin>> {
+        let Some(tenant_id) = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tenant_id
+            FROM admin_sessions
+            WHERE token = $1
+            LIMIT 1
+            "#,
+        )
+        .bind(token)
+        .fetch_optional(&self.pool)
+        .await?
+        else {
+            return Ok(None);
+        };
         let row = sqlx::query_as::<_, AuthenticatedAdminRow>(
             r#"
             SELECT
+                s.tenant_id,
                 ac.email,
                 sa.display_name,
                 sa.role,
@@ -2037,7 +2104,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(token)
         .fetch_optional(&self.pool)
         .await?;
@@ -2050,6 +2117,7 @@ impl Storage {
                 row.permissions_json.as_deref(),
             );
             AuthenticatedAdmin {
+                tenant_id: row.tenant_id,
                 email: row.email,
                 display_name: row
                     .display_name
@@ -2066,13 +2134,25 @@ impl Storage {
     }
 
     pub async fn delete_admin_session(&self, token: &str) -> Result<()> {
+        let tenant_id = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tenant_id
+            FROM admin_sessions
+            WHERE token = $1
+            LIMIT 1
+            "#,
+        )
+        .bind(token)
+        .fetch_optional(&self.pool)
+        .await?
+        .unwrap_or_else(|| PLATFORM_TENANT_ID.to_string());
         sqlx::query(
             r#"
             DELETE FROM admin_sessions
             WHERE tenant_id = $1 AND token = $2
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(token)
         .execute(&self.pool)
         .await?;
@@ -2081,9 +2161,24 @@ impl Storage {
     }
 
     pub async fn fetch_account_session(&self, token: &str) -> Result<Option<AuthenticatedAccount>> {
+        let Some(tenant_id) = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tenant_id
+            FROM account_sessions
+            WHERE token = $1
+            LIMIT 1
+            "#,
+        )
+        .bind(token)
+        .fetch_optional(&self.pool)
+        .await?
+        else {
+            return Ok(None);
+        };
         let row = sqlx::query_as::<_, AuthenticatedAccountRow>(
             r#"
             SELECT
+                s.tenant_id,
                 a.id AS account_id,
                 ac.account_email AS email,
                 a.display_name,
@@ -2100,12 +2195,13 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(token)
         .fetch_optional(&self.pool)
         .await?;
 
         Ok(row.map(|row| AuthenticatedAccount {
+            tenant_id: row.tenant_id,
             account_id: row.account_id,
             email: row.email,
             display_name: row.display_name,
@@ -2114,13 +2210,25 @@ impl Storage {
     }
 
     pub async fn delete_account_session(&self, token: &str) -> Result<()> {
+        let tenant_id = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tenant_id
+            FROM account_sessions
+            WHERE token = $1
+            LIMIT 1
+            "#,
+        )
+        .bind(token)
+        .fetch_optional(&self.pool)
+        .await?
+        .unwrap_or_else(|| PLATFORM_TENANT_ID.to_string());
         sqlx::query(
             r#"
             DELETE FROM account_sessions
             WHERE tenant_id = $1 AND token = $2
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(token)
         .execute(&self.pool)
         .await?;
@@ -2141,7 +2249,7 @@ impl Storage {
             "#,
         )
         .bind(Uuid::new_v4())
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .bind(input.name.trim())
         .bind(input.scope.trim())
         .bind(input.action.trim())
@@ -2149,7 +2257,8 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
-        self.insert_audit(&mut tx, audit).await?;
+        self.insert_audit(&mut tx, PLATFORM_TENANT_ID, audit)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -2180,7 +2289,7 @@ impl Storage {
                 updated_at = NOW()
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .bind(update.server_settings.primary_hostname)
         .bind(update.server_settings.admin_bind_address)
         .bind(update.server_settings.smtp_bind_address)
@@ -2211,7 +2320,7 @@ impl Storage {
                 updated_at = NOW()
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .bind(update.security_settings.password_login_enabled)
         .bind(update.security_settings.mfa_required_for_admins)
         .bind(update.security_settings.session_timeout_minutes as i32)
@@ -2252,7 +2361,7 @@ impl Storage {
                 updated_at = NOW()
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .bind(update.security_settings.oidc_issuer_url)
         .bind(update.security_settings.oidc_authorization_endpoint)
         .bind(update.security_settings.oidc_token_endpoint)
@@ -2281,7 +2390,7 @@ impl Storage {
                 updated_at = NOW()
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .bind(update.local_ai_settings.enabled)
         .bind(update.local_ai_settings.provider)
         .bind(update.local_ai_settings.model)
@@ -2305,7 +2414,7 @@ impl Storage {
                 updated_at = NOW()
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .bind(update.antispam_settings.content_filtering_enabled)
         .bind(update.antispam_settings.spam_engine)
         .bind(update.antispam_settings.quarantine_enabled)
@@ -2313,12 +2422,14 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
-        self.insert_audit(&mut tx, audit).await?;
+        self.insert_audit(&mut tx, PLATFORM_TENANT_ID, audit)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
 
     pub async fn fetch_client_workspace(&self, account_id: Uuid) -> Result<ClientWorkspace> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let message_rows = sqlx::query_as::<_, ClientMessageRow>(
             r#"
             SELECT
@@ -2352,7 +2463,7 @@ impl Storage {
             LIMIT 250
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .fetch_all(&self.pool)
         .await?;
@@ -2371,7 +2482,7 @@ impl Storage {
             ORDER BY a.file_name ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .fetch_all(&self.pool)
         .await?;
@@ -2424,6 +2535,7 @@ impl Storage {
     }
 
     pub async fn fetch_jmap_mailboxes(&self, account_id: Uuid) -> Result<Vec<JmapMailbox>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query_as::<_, JmapMailboxRow>(
             r#"
             SELECT
@@ -2444,7 +2556,7 @@ impl Storage {
             ORDER BY mb.sort_order ASC, lower(mb.display_name) ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .fetch_all(&self.pool)
         .await?;
@@ -2464,12 +2576,14 @@ impl Storage {
 
     pub async fn ensure_imap_mailboxes(&self, account_id: Uuid) -> Result<Vec<JmapMailbox>> {
         let mut tx = self.pool.begin().await?;
-        self.ensure_account_exists(&mut tx, account_id).await?;
-        self.ensure_mailbox(&mut tx, account_id, "inbox", "Inbox", 0, 365)
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        self.ensure_account_exists(&mut tx, &tenant_id, account_id)
             .await?;
-        self.ensure_mailbox(&mut tx, account_id, "drafts", "Drafts", 10, 365)
+        self.ensure_mailbox(&mut tx, &tenant_id, account_id, "inbox", "Inbox", 0, 365)
             .await?;
-        self.ensure_mailbox(&mut tx, account_id, "sent", "Sent", 20, 365)
+        self.ensure_mailbox(&mut tx, &tenant_id, account_id, "drafts", "Drafts", 10, 365)
+            .await?;
+        self.ensure_mailbox(&mut tx, &tenant_id, account_id, "sent", "Sent", 20, 365)
             .await?;
         tx.commit().await?;
 
@@ -2496,7 +2610,8 @@ impl Storage {
         audit: AuditEntryInput,
     ) -> Result<JmapMailbox> {
         let mut tx = self.pool.begin().await?;
-        self.ensure_account_exists(&mut tx, input.account_id)
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
+        self.ensure_account_exists(&mut tx, &tenant_id, input.account_id)
             .await?;
 
         let name = input.name.trim();
@@ -2512,7 +2627,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .bind(name)
         .fetch_optional(&mut *tx)
@@ -2528,7 +2643,7 @@ impl Storage {
             WHERE tenant_id = $1 AND account_id = $2
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .fetch_one(&mut *tx)
         .await?;
@@ -2542,14 +2657,14 @@ impl Storage {
             "#,
         )
         .bind(mailbox_id)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .bind(name)
         .bind(sort_order)
         .execute(&mut *tx)
         .await?;
 
-        self.insert_audit(&mut tx, audit).await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
 
         self.fetch_jmap_mailboxes(input.account_id)
@@ -2565,6 +2680,7 @@ impl Storage {
         audit: AuditEntryInput,
     ) -> Result<JmapMailbox> {
         let mut tx = self.pool.begin().await?;
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         let current = sqlx::query(
             r#"
             SELECT role, display_name, sort_order
@@ -2573,7 +2689,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .bind(input.mailbox_id)
         .fetch_optional(&mut *tx)
@@ -2605,7 +2721,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .bind(&name)
         .bind(input.mailbox_id)
@@ -2622,7 +2738,7 @@ impl Storage {
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .bind(input.mailbox_id)
         .bind(name)
@@ -2630,7 +2746,7 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
-        self.insert_audit(&mut tx, audit).await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
 
         self.fetch_jmap_mailboxes(input.account_id)
@@ -2647,6 +2763,7 @@ impl Storage {
         audit: AuditEntryInput,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let current = sqlx::query(
             r#"
             SELECT role
@@ -2655,7 +2772,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(mailbox_id)
         .fetch_optional(&mut *tx)
@@ -2674,7 +2791,7 @@ impl Storage {
             WHERE tenant_id = $1 AND account_id = $2 AND mailbox_id = $3
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(mailbox_id)
         .fetch_one(&mut *tx)
@@ -2689,13 +2806,13 @@ impl Storage {
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(mailbox_id)
         .execute(&mut *tx)
         .await?;
 
-        self.insert_audit(&mut tx, audit).await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -2765,6 +2882,7 @@ impl Storage {
     }
 
     pub async fn fetch_all_jmap_email_ids(&self, account_id: Uuid) -> Result<Vec<Uuid>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query(
             r#"
             SELECT id
@@ -2773,7 +2891,7 @@ impl Storage {
             ORDER BY COALESCE(sent_at, received_at) DESC, id DESC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .fetch_all(&self.pool)
         .await?;
@@ -2784,6 +2902,7 @@ impl Storage {
     }
 
     pub async fn fetch_all_jmap_thread_ids(&self, account_id: Uuid) -> Result<Vec<Uuid>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query(
             r#"
             SELECT DISTINCT thread_id
@@ -2792,7 +2911,7 @@ impl Storage {
             ORDER BY thread_id
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .fetch_all(&self.pool)
         .await?;
@@ -2810,6 +2929,7 @@ impl Storage {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
 
         let rows = sqlx::query_as::<_, JmapEmailRow>(
             r#"
@@ -2845,7 +2965,7 @@ impl Storage {
               AND m.id = ANY($3)
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(ids)
         .fetch_all(&self.pool)
@@ -2867,7 +2987,7 @@ impl Storage {
             ORDER BY r.message_id ASC, r.kind ASC, r.ordinal ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(ids)
         .fetch_all(&self.pool)
@@ -2900,7 +3020,7 @@ impl Storage {
                     ORDER BY ordinal ASC
                     "#,
                 )
-                .bind(DEFAULT_TENANT_ID)
+                .bind(&tenant_id)
                 .bind(*id)
                 .fetch_all(&self.pool)
                 .await?
@@ -2946,6 +3066,7 @@ impl Storage {
         account_id: Uuid,
         mailbox_id: Uuid,
     ) -> Result<Vec<ImapEmail>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query_as::<_, JmapEmailRow>(
             r#"
             SELECT
@@ -2981,7 +3102,7 @@ impl Storage {
             ORDER BY m.imap_uid ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(mailbox_id)
         .fetch_all(&self.pool)
@@ -3008,7 +3129,7 @@ impl Storage {
             ORDER BY r.message_id ASC, r.kind ASC, r.ordinal ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(&message_ids)
         .fetch_all(&self.pool)
@@ -3022,7 +3143,7 @@ impl Storage {
             ORDER BY message_id ASC, ordinal ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(&message_ids)
         .fetch_all(&self.pool)
         .await?;
@@ -3096,6 +3217,7 @@ impl Storage {
         if message_ids.is_empty() {
             return Ok(());
         }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
 
         sqlx::query(
             r#"
@@ -3109,7 +3231,7 @@ impl Storage {
               AND id = ANY($6)
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(mailbox_id)
         .bind(unread)
@@ -3133,6 +3255,7 @@ impl Storage {
         account_id: Uuid,
         ids: &[Uuid],
     ) -> Result<Vec<JmapEmailSubmission>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query_as::<_, JmapEmailSubmissionRow>(
             r#"
             SELECT
@@ -3151,7 +3274,7 @@ impl Storage {
             ORDER BY q.created_at DESC, q.id DESC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(if ids.is_empty() {
             None::<Vec<Uuid>>
@@ -3179,7 +3302,7 @@ impl Storage {
                 ORDER BY r.message_id ASC, r.kind ASC, r.ordinal ASC
                 "#,
             )
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(&message_ids)
             .fetch_all(&self.pool)
             .await?
@@ -3210,6 +3333,7 @@ impl Storage {
     }
 
     pub async fn fetch_jmap_quota(&self, account_id: Uuid) -> Result<JmapQuota> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let row = sqlx::query_as::<_, AccountQuotaRow>(
             r#"
             SELECT quota_mb, used_mb
@@ -3218,7 +3342,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .fetch_optional(&self.pool)
         .await?
@@ -3253,14 +3377,12 @@ impl Storage {
             FROM outbound_message_queue q
             JOIN messages m ON m.id = q.message_id
             JOIN message_bodies b ON b.message_id = m.id
-            WHERE q.tenant_id = $1
-              AND q.status IN ('queued', 'deferred')
+            WHERE q.status IN ('queued', 'deferred')
               AND q.next_attempt_at <= NOW()
             ORDER BY q.created_at ASC, q.id ASC
-            LIMIT $2
+            LIMIT $1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
         .bind(limit.max(1))
         .fetch_all(&self.pool)
         .await?;
@@ -3281,7 +3403,7 @@ impl Storage {
                 ORDER BY r.kind ASC, r.ordinal ASC
                 "#,
             )
-            .bind(DEFAULT_TENANT_ID)
+            .bind(self.tenant_id_for_account_id(row.account_id).await?)
             .bind(row.message_id)
             .fetch_all(&self.pool)
             .await?;
@@ -3294,7 +3416,7 @@ impl Storage {
                 ORDER BY ordinal ASC
                 "#,
             )
-            .bind(DEFAULT_TENANT_ID)
+            .bind(self.tenant_id_for_account_id(row.account_id).await?)
             .bind(row.message_id)
             .fetch_all(&self.pool)
             .await?;
@@ -3348,6 +3470,18 @@ impl Storage {
         &self,
         response: &OutboundMessageHandoffResponse,
     ) -> Result<OutboundQueueStatusUpdate> {
+        let tenant_id = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tenant_id
+            FROM outbound_message_queue
+            WHERE id = $1
+            LIMIT 1
+            "#,
+        )
+        .bind(response.queue_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| anyhow!("outbound queue item not found"))?;
         let status_value = response.status.as_str().to_string();
         let retry_after_seconds = response
             .retry
@@ -3386,7 +3520,7 @@ impl Storage {
             RETURNING message_id, status, remote_message_ref, retry_after_seconds, retry_policy, last_result_json
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(response.queue_id)
         .bind(&status_value)
         .bind(retry_after_seconds)
@@ -3431,7 +3565,7 @@ impl Storage {
             WHERE tenant_id = $1 AND id = $2
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(message_id)
         .bind(&stored_status)
         .execute(&self.pool)
@@ -3500,14 +3634,12 @@ impl Storage {
 
         let account_rows = sqlx::query(
             r#"
-            SELECT id, primary_email
+            SELECT id, tenant_id, primary_email
             FROM accounts
-            WHERE tenant_id = $1
-              AND lower(primary_email) = ANY($2)
+            WHERE lower(primary_email) = ANY($1)
             ORDER BY primary_email ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
         .bind(&rcpt_to)
         .fetch_all(&self.pool)
         .await?;
@@ -3530,8 +3662,9 @@ impl Storage {
             };
 
             let account_id: Uuid = row.try_get("id")?;
+            let tenant_id: String = row.try_get("tenant_id")?;
             let inbox_mailbox_id = self
-                .ensure_mailbox(&mut tx, account_id, "inbox", "Inbox", 0, 365)
+                .ensure_mailbox(&mut tx, &tenant_id, account_id, "inbox", "Inbox", 0, 365)
                 .await?;
             let message_id = Uuid::new_v4();
             let mime_blob_ref = format!("lpe-ct-inbound:{}:{message_id}", request.trace_id);
@@ -3553,7 +3686,7 @@ impl Storage {
                 "#,
             )
             .bind(message_id)
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(account_id)
             .bind(inbox_mailbox_id)
             .bind(thread_id)
@@ -3593,7 +3726,7 @@ impl Storage {
                     "#,
                 )
                 .bind(Uuid::new_v4())
-                .bind(DEFAULT_TENANT_ID)
+                .bind(&tenant_id)
                 .bind(message_id)
                 .bind(*kind)
                 .bind(&recipient_value.address)
@@ -3603,8 +3736,14 @@ impl Storage {
                 .await?;
             }
 
-            self.ingest_message_attachments_in_tx(&mut tx, account_id, message_id, &attachments)
-                .await?;
+            self.ingest_message_attachments_in_tx(
+                &mut tx,
+                &tenant_id,
+                account_id,
+                message_id,
+                &attachments,
+            )
+            .await?;
 
             accepted.push(recipient.clone());
             stored_message_ids.push(message_id);
@@ -3617,6 +3756,7 @@ impl Storage {
         };
         self.insert_audit(
             &mut tx,
+            PLATFORM_TENANT_ID,
             AuditEntryInput {
                 actor: "lpe-ct".to_string(),
                 action: audit_action.to_string(),
@@ -3647,7 +3787,9 @@ impl Storage {
         blob_bytes: &[u8],
     ) -> Result<JmapUploadBlob> {
         let mut tx = self.pool.begin().await?;
-        self.ensure_account_exists(&mut tx, account_id).await?;
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        self.ensure_account_exists(&mut tx, &tenant_id, account_id)
+            .await?;
 
         let id = Uuid::new_v4();
         sqlx::query(
@@ -3657,7 +3799,7 @@ impl Storage {
             "#,
         )
         .bind(id)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(media_type.trim())
         .bind(blob_bytes.len() as i64)
@@ -3680,6 +3822,7 @@ impl Storage {
         account_id: Uuid,
         blob_id: Uuid,
     ) -> Result<Option<JmapUploadBlob>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let row = sqlx::query_as::<_, JmapUploadBlobRow>(
             r#"
             SELECT id, account_id, media_type, octet_size, blob_bytes
@@ -3688,7 +3831,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(blob_id)
         .fetch_optional(&self.pool)
@@ -3719,10 +3862,19 @@ impl Storage {
         }
 
         let mut tx = self.pool.begin().await?;
-        self.ensure_account_exists(&mut tx, input.account_id)
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
+        self.ensure_account_exists(&mut tx, &tenant_id, input.account_id)
             .await?;
         let draft_mailbox_id = self
-            .ensure_mailbox(&mut tx, input.account_id, "drafts", "Drafts", 10, 365)
+            .ensure_mailbox(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                "drafts",
+                "Drafts",
+                10,
+                365,
+            )
             .await?;
 
         let message_id = input.draft_message_id.unwrap_or_else(Uuid::new_v4);
@@ -3760,7 +3912,7 @@ impl Storage {
                   AND mb.id = $4
                 "#,
             )
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(input.account_id)
             .bind(message_id)
             .bind(draft_mailbox_id)
@@ -3780,19 +3932,19 @@ impl Storage {
             }
 
             sqlx::query("DELETE FROM message_recipients WHERE tenant_id = $1 AND message_id = $2")
-                .bind(DEFAULT_TENANT_ID)
+                .bind(&tenant_id)
                 .bind(message_id)
                 .execute(&mut *tx)
                 .await?;
             sqlx::query(
                 "DELETE FROM message_bcc_recipients WHERE tenant_id = $1 AND message_id = $2",
             )
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(message_id)
             .execute(&mut *tx)
             .await?;
             sqlx::query("DELETE FROM attachments WHERE tenant_id = $1 AND message_id = $2")
-                .bind(DEFAULT_TENANT_ID)
+                .bind(&tenant_id)
                 .bind(message_id)
                 .execute(&mut *tx)
                 .await?;
@@ -3814,7 +3966,7 @@ impl Storage {
                 "#,
             )
             .bind(message_id)
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(input.account_id)
             .bind(draft_mailbox_id)
             .bind(thread_id)
@@ -3864,7 +4016,7 @@ impl Storage {
                 "#,
             )
             .bind(Uuid::new_v4())
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(message_id)
             .bind(kind)
             .bind(&recipient.address)
@@ -3884,7 +4036,7 @@ impl Storage {
                 "#,
             )
             .bind(Uuid::new_v4())
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(message_id)
             .bind(&recipient.address)
             .bind(recipient.display_name.as_deref())
@@ -3895,13 +4047,14 @@ impl Storage {
 
         self.ingest_message_attachments_in_tx(
             &mut tx,
+            &tenant_id,
             input.account_id,
             message_id,
             &input.attachments,
         )
         .await?;
 
-        self.insert_audit(&mut tx, audit).await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
 
         Ok(SavedDraftMessage {
@@ -3923,6 +4076,7 @@ impl Storage {
         }
 
         let contact_id = input.id.unwrap_or_else(Uuid::new_v4);
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         let row = sqlx::query_as::<_, ClientContactRow>(
             r#"
             INSERT INTO contacts (
@@ -3943,7 +4097,7 @@ impl Storage {
             "#,
         )
         .bind(contact_id)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .bind(name)
         .bind(input.role.trim())
@@ -3966,6 +4120,7 @@ impl Storage {
         }
 
         let event_id = input.id.unwrap_or_else(Uuid::new_v4);
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         let row = sqlx::query_as::<_, ClientEventRow>(
             r#"
             INSERT INTO calendar_events (
@@ -4003,7 +4158,7 @@ impl Storage {
             "#,
         )
         .bind(event_id)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .bind(input.date.trim())
         .bind(input.time.trim())
@@ -4029,6 +4184,7 @@ impl Storage {
 
         let status = normalize_task_status(&input.status)?;
         let task_id = input.id.unwrap_or_else(Uuid::new_v4);
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         let row = sqlx::query_as::<_, ClientTaskRow>(
             r#"
             INSERT INTO tasks (
@@ -4075,7 +4231,7 @@ impl Storage {
             "#,
         )
         .bind(task_id)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .bind(title)
         .bind(input.description.trim())
@@ -4090,13 +4246,14 @@ impl Storage {
     }
 
     pub async fn delete_client_contact(&self, account_id: Uuid, contact_id: Uuid) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let deleted = sqlx::query(
             r#"
             DELETE FROM contacts
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(contact_id)
         .execute(&self.pool)
@@ -4110,13 +4267,14 @@ impl Storage {
     }
 
     pub async fn delete_client_event(&self, account_id: Uuid, event_id: Uuid) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let deleted = sqlx::query(
             r#"
             DELETE FROM calendar_events
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(event_id)
         .execute(&self.pool)
@@ -4130,13 +4288,14 @@ impl Storage {
     }
 
     pub async fn delete_client_task(&self, account_id: Uuid, task_id: Uuid) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let deleted = sqlx::query(
             r#"
             DELETE FROM tasks
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(task_id)
         .execute(&self.pool)
@@ -4171,6 +4330,7 @@ impl Storage {
         }
 
         let mut tx = self.pool.begin().await?;
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
 
         let account_exists = sqlx::query(
             r#"
@@ -4180,7 +4340,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .fetch_optional(&mut *tx)
         .await?;
@@ -4190,7 +4350,15 @@ impl Storage {
         }
 
         let sent_mailbox_id = self
-            .ensure_mailbox(&mut tx, input.account_id, "sent", "Sent", 20, 365)
+            .ensure_mailbox(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                "sent",
+                "Sent",
+                20,
+                365,
+            )
             .await?;
 
         let message_id = Uuid::new_v4();
@@ -4221,7 +4389,7 @@ impl Storage {
             "#,
         )
         .bind(message_id)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .bind(sent_mailbox_id)
         .bind(thread_id)
@@ -4264,7 +4432,7 @@ impl Storage {
                 "#,
             )
             .bind(Uuid::new_v4())
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(message_id)
             .bind(kind)
             .bind(&recipient.address)
@@ -4284,7 +4452,7 @@ impl Storage {
                 "#,
             )
             .bind(Uuid::new_v4())
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(message_id)
             .bind(&recipient.address)
             .bind(recipient.display_name.as_deref())
@@ -4295,6 +4463,7 @@ impl Storage {
 
         self.ingest_message_attachments_in_tx(
             &mut tx,
+            &tenant_id,
             input.account_id,
             message_id,
             &input.attachments,
@@ -4310,18 +4479,23 @@ impl Storage {
             "#,
         )
         .bind(outbound_queue_id)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(message_id)
         .bind(input.account_id)
         .execute(&mut *tx)
         .await?;
 
         if let Some(draft_message_id) = input.draft_message_id {
-            self.delete_draft_message_in_tx(&mut tx, input.account_id, draft_message_id)
-                .await?;
+            self.delete_draft_message_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                draft_message_id,
+            )
+            .await?;
         }
 
-        self.insert_audit(&mut tx, audit).await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
 
         Ok(SubmittedMessage {
@@ -4341,6 +4515,7 @@ impl Storage {
         source: &str,
         audit: AuditEntryInput,
     ) -> Result<SubmittedMessage> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let draft = self
             .fetch_jmap_draft(account_id, draft_message_id)
             .await?
@@ -4360,7 +4535,7 @@ impl Storage {
             ORDER BY r.kind ASC, r.ordinal ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(draft_message_id)
         .fetch_all(&self.pool)
         .await?;
@@ -4373,7 +4548,7 @@ impl Storage {
             ORDER BY ordinal ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(draft_message_id)
         .fetch_all(&self.pool)
         .await?;
@@ -4432,6 +4607,7 @@ impl Storage {
         target_mailbox_id: Uuid,
         audit: AuditEntryInput,
     ) -> Result<JmapEmail> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         self.fetch_jmap_emails(account_id, &[message_id])
             .await?
             .into_iter()
@@ -4446,7 +4622,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(target_mailbox_id)
         .fetch_optional(&self.pool)
@@ -4481,7 +4657,7 @@ impl Storage {
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(message_id)
         .bind(copied_message_id)
@@ -4517,7 +4693,7 @@ impl Storage {
             ORDER BY kind ASC, ordinal ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(message_id)
         .fetch_all(&mut *tx)
         .await?;
@@ -4529,7 +4705,7 @@ impl Storage {
                 "#,
             )
             .bind(Uuid::new_v4())
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(copied_message_id)
             .bind(row.try_get::<String, _>("kind")?)
             .bind(row.try_get::<String, _>("address")?)
@@ -4547,7 +4723,7 @@ impl Storage {
             ORDER BY ordinal ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(message_id)
         .fetch_all(&mut *tx)
         .await?;
@@ -4559,7 +4735,7 @@ impl Storage {
                 "#,
             )
             .bind(Uuid::new_v4())
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(copied_message_id)
             .bind(row.try_get::<String, _>("address")?)
             .bind(row.try_get::<Option<String>, _>("display_name")?)
@@ -4577,7 +4753,7 @@ impl Storage {
             ORDER BY file_name ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(message_id)
         .fetch_all(&mut *tx)
         .await?;
@@ -4595,7 +4771,7 @@ impl Storage {
                 "#,
             )
             .bind(Uuid::new_v4())
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(copied_message_id)
             .bind(row.try_get::<String, _>("file_name")?)
             .bind(row.try_get::<String, _>("media_type")?)
@@ -4607,7 +4783,7 @@ impl Storage {
             .await?;
         }
 
-        self.insert_audit(&mut tx, audit).await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
 
         self.fetch_jmap_emails(account_id, &[copied_message_id])
@@ -4622,6 +4798,7 @@ impl Storage {
         input: JmapImportedEmailInput,
         audit: AuditEntryInput,
     ) -> Result<JmapEmail> {
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         let target_mailbox = sqlx::query(
             r#"
             SELECT role
@@ -4630,7 +4807,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .bind(input.mailbox_id)
         .fetch_optional(&self.pool)
@@ -4657,7 +4834,8 @@ impl Storage {
         };
 
         let mut tx = self.pool.begin().await?;
-        self.ensure_account_exists(&mut tx, input.account_id)
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
+        self.ensure_account_exists(&mut tx, &tenant_id, input.account_id)
             .await?;
         sqlx::query(
             r#"
@@ -4676,7 +4854,7 @@ impl Storage {
             "#,
         )
         .bind(message_id)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(input.account_id)
         .bind(input.mailbox_id)
         .bind(thread_id)
@@ -4723,7 +4901,7 @@ impl Storage {
                 "#,
             )
             .bind(Uuid::new_v4())
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(message_id)
             .bind(&recipient.address)
             .bind(recipient.display_name.as_deref())
@@ -4739,7 +4917,7 @@ impl Storage {
                 "#,
             )
             .bind(Uuid::new_v4())
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(message_id)
             .bind(&recipient.address)
             .bind(recipient.display_name.as_deref())
@@ -4755,7 +4933,7 @@ impl Storage {
                 "#,
             )
             .bind(Uuid::new_v4())
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&tenant_id)
             .bind(message_id)
             .bind(&recipient.address)
             .bind(recipient.display_name.as_deref())
@@ -4766,13 +4944,14 @@ impl Storage {
 
         self.ingest_message_attachments_in_tx(
             &mut tx,
+            &tenant_id,
             input.account_id,
             message_id,
             &input.attachments,
         )
         .await?;
 
-        self.insert_audit(&mut tx, audit).await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
 
         self.fetch_jmap_emails(input.account_id, &[message_id])
@@ -4789,9 +4968,10 @@ impl Storage {
         audit: AuditEntryInput,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        self.delete_draft_message_in_tx(&mut tx, account_id, message_id)
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        self.delete_draft_message_in_tx(&mut tx, &tenant_id, account_id, message_id)
             .await?;
-        self.insert_audit(&mut tx, audit).await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -4804,6 +4984,7 @@ impl Storage {
         sync_key: &str,
         snapshot_json: &str,
     ) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         sqlx::query(
             r#"
             INSERT INTO activesync_sync_states (
@@ -4815,7 +4996,7 @@ impl Storage {
             "#,
         )
         .bind(Uuid::new_v4())
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(device_id.trim())
         .bind(collection_id.trim())
@@ -4834,6 +5015,7 @@ impl Storage {
         collection_id: &str,
         sync_key: &str,
     ) -> Result<Option<ActiveSyncSyncState>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let row = sqlx::query_as::<_, ActiveSyncSyncStateRow>(
             r#"
             SELECT sync_key, snapshot_json
@@ -4846,7 +5028,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(device_id.trim())
         .bind(collection_id.trim())
@@ -4870,6 +5052,7 @@ impl Storage {
         position: u64,
         limit: u64,
     ) -> Result<Vec<ActiveSyncItemState>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query(
             r#"
             SELECT
@@ -4912,7 +5095,7 @@ impl Storage {
             LIMIT $5
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(mailbox_id)
         .bind(position as i64)
@@ -4939,6 +5122,7 @@ impl Storage {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
 
         let rows = sqlx::query(
             r#"
@@ -4980,7 +5164,7 @@ impl Storage {
               AND m.id = ANY($4)
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(mailbox_id)
         .bind(ids)
@@ -5001,6 +5185,7 @@ impl Storage {
         &self,
         account_id: Uuid,
     ) -> Result<Vec<ActiveSyncItemState>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query(
             r#"
             SELECT
@@ -5011,7 +5196,7 @@ impl Storage {
             ORDER BY name ASC, id ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .fetch_all(&self.pool)
         .await?;
@@ -5034,6 +5219,7 @@ impl Storage {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
 
         let rows = sqlx::query(
             r#"
@@ -5046,7 +5232,7 @@ impl Storage {
               AND id = ANY($3)
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(ids)
         .fetch_all(&self.pool)
@@ -5066,6 +5252,7 @@ impl Storage {
         &self,
         account_id: Uuid,
     ) -> Result<Vec<ActiveSyncItemState>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query(
             r#"
             SELECT
@@ -5076,7 +5263,7 @@ impl Storage {
             ORDER BY event_date ASC, event_time ASC, id ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .fetch_all(&self.pool)
         .await?;
@@ -5099,6 +5286,7 @@ impl Storage {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
 
         let rows = sqlx::query(
             r#"
@@ -5111,7 +5299,7 @@ impl Storage {
               AND id = ANY($3)
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(ids)
         .fetch_all(&self.pool)
@@ -5163,7 +5351,7 @@ impl Storage {
             LIMIT 50
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .bind(like_query)
         .fetch_all(&self.pool)
         .await?;
@@ -5187,6 +5375,7 @@ impl Storage {
             r#"
             SELECT
                 j.id,
+                j.tenant_id,
                 j.mailbox_id,
                 mb.account_id,
                 j.direction,
@@ -5194,12 +5383,11 @@ impl Storage {
                 j.requested_by
             FROM mailbox_pst_jobs j
             JOIN mailboxes mb ON mb.id = j.mailbox_id
-            WHERE j.tenant_id = $1 AND j.status IN ('requested', 'failed')
+            WHERE j.status IN ('requested', 'failed')
             ORDER BY j.created_at ASC
             LIMIT 10
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
         .fetch_all(&self.pool)
         .await?;
 
@@ -5211,10 +5399,14 @@ impl Storage {
 
         for job in jobs {
             summary.processed_jobs += 1;
-            if let Err(error) = self.mark_pst_job_running(job.id).await {
+            if let Err(error) = self.mark_pst_job_running(&job.tenant_id, job.id).await {
                 summary.failed_jobs += 1;
                 let _ = self
-                    .mark_pst_job_failed(job.id, &format!("cannot start job: {error}"))
+                    .mark_pst_job_failed(
+                        &job.tenant_id,
+                        job.id,
+                        &format!("cannot start job: {error}"),
+                    )
                     .await;
                 continue;
             }
@@ -5227,12 +5419,13 @@ impl Storage {
 
             match result {
                 Ok(processed_messages) => {
-                    self.mark_pst_job_completed(job.id, processed_messages)
+                    self.mark_pst_job_completed(&job.tenant_id, job.id, processed_messages)
                         .await?;
                     summary.completed_jobs += 1;
                 }
                 Err(error) => {
-                    self.mark_pst_job_failed(job.id, &error.to_string()).await?;
+                    self.mark_pst_job_failed(&job.tenant_id, job.id, &error.to_string())
+                        .await?;
                     summary.failed_jobs += 1;
                 }
             }
@@ -5241,7 +5434,7 @@ impl Storage {
         Ok(summary)
     }
 
-    async fn mark_pst_job_running(&self, job_id: Uuid) -> Result<()> {
+    async fn mark_pst_job_running(&self, tenant_id: &str, job_id: Uuid) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE mailbox_pst_jobs
@@ -5249,7 +5442,7 @@ impl Storage {
             WHERE tenant_id = $1 AND id = $2
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(tenant_id)
         .bind(job_id)
         .execute(&self.pool)
         .await?;
@@ -5257,7 +5450,12 @@ impl Storage {
         Ok(())
     }
 
-    async fn mark_pst_job_completed(&self, job_id: Uuid, processed_messages: u32) -> Result<()> {
+    async fn mark_pst_job_completed(
+        &self,
+        tenant_id: &str,
+        job_id: Uuid,
+        processed_messages: u32,
+    ) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE mailbox_pst_jobs
@@ -5268,7 +5466,7 @@ impl Storage {
             WHERE tenant_id = $1 AND id = $2
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(tenant_id)
         .bind(job_id)
         .bind(processed_messages as i32)
         .execute(&self.pool)
@@ -5277,7 +5475,12 @@ impl Storage {
         Ok(())
     }
 
-    async fn mark_pst_job_failed(&self, job_id: Uuid, error_message: &str) -> Result<()> {
+    async fn mark_pst_job_failed(
+        &self,
+        tenant_id: &str,
+        job_id: Uuid,
+        error_message: &str,
+    ) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE mailbox_pst_jobs
@@ -5287,7 +5490,7 @@ impl Storage {
             WHERE tenant_id = $1 AND id = $2
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(tenant_id)
         .bind(job_id)
         .bind(error_message.chars().take(1000).collect::<String>())
         .execute(&self.pool)
@@ -5312,7 +5515,7 @@ impl Storage {
             ORDER BY m.received_at ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&job.tenant_id)
         .bind(job.mailbox_id)
         .fetch_all(&self.pool)
         .await?;
@@ -5350,7 +5553,7 @@ impl Storage {
                 ORDER BY a.file_name ASC
                 "#,
             )
-            .bind(DEFAULT_TENANT_ID)
+            .bind(&job.tenant_id)
             .bind(row.try_get::<Uuid, _>("id")?)
             .fetch_all(&self.pool)
             .await?;
@@ -5447,7 +5650,7 @@ impl Storage {
             WHERE tenant_id = $1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -5501,7 +5704,7 @@ impl Storage {
             WHERE s.tenant_id = $1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -5575,7 +5778,7 @@ impl Storage {
             WHERE tenant_id = $1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -5605,7 +5808,7 @@ impl Storage {
             WHERE tenant_id = $1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -5644,7 +5847,7 @@ impl Storage {
             ORDER BY sa.created_at ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .fetch_all(&self.pool)
         .await?;
 
@@ -5679,7 +5882,7 @@ impl Storage {
             ORDER BY created_at ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .fetch_all(&self.pool)
         .await?;
 
@@ -5712,7 +5915,7 @@ impl Storage {
             LIMIT 50
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(PLATFORM_TENANT_ID)
         .fetch_all(&self.pool)
         .await?;
 
@@ -5731,6 +5934,7 @@ impl Storage {
     }
 
     pub async fn fetch_client_events(&self, account_id: Uuid) -> Result<Vec<ClientEvent>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query_as::<_, ClientEventRow>(
             r#"
             SELECT
@@ -5750,7 +5954,7 @@ impl Storage {
             ORDER BY event_date ASC, event_time ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .fetch_all(&self.pool)
         .await?;
@@ -5766,6 +5970,7 @@ impl Storage {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
 
         let rows = sqlx::query_as::<_, ClientEventRow>(
             r#"
@@ -5788,7 +5993,7 @@ impl Storage {
             ORDER BY event_date ASC, event_time ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(ids)
         .fetch_all(&self.pool)
@@ -5798,6 +6003,7 @@ impl Storage {
     }
 
     pub async fn fetch_client_contacts(&self, account_id: Uuid) -> Result<Vec<ClientContact>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query_as::<_, ClientContactRow>(
             r#"
             SELECT id, name, role, email, phone, team, notes
@@ -5806,7 +6012,7 @@ impl Storage {
             ORDER BY name ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .fetch_all(&self.pool)
         .await?;
@@ -5822,6 +6028,7 @@ impl Storage {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
 
         let rows = sqlx::query_as::<_, ClientContactRow>(
             r#"
@@ -5833,7 +6040,7 @@ impl Storage {
             ORDER BY name ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(ids)
         .fetch_all(&self.pool)
@@ -5843,6 +6050,7 @@ impl Storage {
     }
 
     pub async fn fetch_client_tasks(&self, account_id: Uuid) -> Result<Vec<ClientTask>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query_as::<_, ClientTaskRow>(
             r#"
             SELECT
@@ -5872,7 +6080,7 @@ impl Storage {
                 created_at ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .fetch_all(&self.pool)
         .await?;
@@ -5888,6 +6096,7 @@ impl Storage {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
 
         let rows = sqlx::query_as::<_, ClientTaskRow>(
             r#"
@@ -5920,7 +6129,7 @@ impl Storage {
                 created_at ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(ids)
         .fetch_all(&self.pool)
@@ -5935,6 +6144,7 @@ impl Storage {
         device_id: &str,
         collection_id: &str,
     ) -> Result<Option<ActiveSyncSyncState>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let row = sqlx::query_as::<_, ActiveSyncSyncStateRow>(
             r#"
             SELECT sync_key, snapshot_json
@@ -5947,7 +6157,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(device_id.trim())
         .bind(collection_id.trim())
@@ -5965,6 +6175,7 @@ impl Storage {
         account_id: Uuid,
         message_id: Uuid,
     ) -> Result<Vec<ActiveSyncAttachment>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query_as::<_, ActiveSyncAttachmentRow>(
             r#"
             SELECT a.id, a.message_id, a.file_name, a.media_type, a.size_octets
@@ -5976,7 +6187,7 @@ impl Storage {
             ORDER BY a.file_name ASC, a.id ASC
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(account_id)
         .bind(message_id)
         .fetch_all(&self.pool)
@@ -6004,6 +6215,7 @@ impl Storage {
         else {
             return Ok(None);
         };
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
 
         let row = sqlx::query(
             r#"
@@ -6018,7 +6230,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(attachment_id)
         .bind(message_id)
         .bind(account_id)
@@ -6036,6 +6248,7 @@ impl Storage {
     async fn ingest_message_attachments_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
         account_id: Uuid,
         message_id: Uuid,
         attachments: &[AttachmentUploadInput],
@@ -6078,7 +6291,7 @@ impl Storage {
                 "#,
             )
             .bind(Uuid::new_v4())
-            .bind(DEFAULT_TENANT_ID)
+            .bind(tenant_id)
             .bind(message_id)
             .bind(attachment.file_name.trim())
             .bind(attachment.media_type.trim())
@@ -6097,7 +6310,7 @@ impl Storage {
             WHERE tenant_id = $1 AND id = $2
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(tenant_id)
         .bind(message_id)
         .execute(&mut **tx)
         .await?;
@@ -6140,7 +6353,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(self.tenant_id_for_domain_name(domain_name).await?)
         .bind(domain_name)
         .bind(&content_sha256)
         .fetch_optional(&mut **tx)
@@ -6161,7 +6374,7 @@ impl Storage {
             "#,
         )
         .bind(blob_id)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(self.tenant_id_for_domain_name(domain_name).await?)
         .bind(domain_name)
         .bind(content_sha256)
         .bind(media_type)
@@ -6182,11 +6395,10 @@ impl Storage {
             r#"
             SELECT primary_email
             FROM accounts
-            WHERE tenant_id = $1 AND id = $2
+            WHERE id = $1
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
         .bind(account_id)
         .fetch_optional(&mut **tx)
         .await?
@@ -6201,6 +6413,7 @@ impl Storage {
         job: &PendingPstJobRow,
         message: PstImportedMessage,
     ) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(job.account_id).await?;
         let message_id = Uuid::new_v4();
         let preview_text = preview_text(&message.body_text);
         let size_octets = message.body_text.len().saturating_add(
@@ -6228,7 +6441,7 @@ impl Storage {
             "#,
         )
         .bind(message_id)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(&tenant_id)
         .bind(job.account_id)
         .bind(job.mailbox_id)
         .bind(Uuid::new_v4())
@@ -6257,8 +6470,14 @@ impl Storage {
         .execute(&mut **tx)
         .await?;
 
-        self.ingest_message_attachments_in_tx(tx, job.account_id, message_id, &message.attachments)
-            .await?;
+        self.ingest_message_attachments_in_tx(
+            tx,
+            &self.tenant_id_for_account_id(job.account_id).await?,
+            job.account_id,
+            message_id,
+            &message.attachments,
+        )
+        .await?;
 
         Ok(())
     }
@@ -6266,6 +6485,7 @@ impl Storage {
     async fn ensure_account_exists(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
         account_id: Uuid,
     ) -> Result<()> {
         let account_exists = sqlx::query(
@@ -6276,7 +6496,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(tenant_id)
         .bind(account_id)
         .fetch_optional(&mut **tx)
         .await?;
@@ -6291,6 +6511,7 @@ impl Storage {
     async fn delete_draft_message_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
         account_id: Uuid,
         message_id: Uuid,
     ) -> Result<()> {
@@ -6305,7 +6526,7 @@ impl Storage {
               AND mb.role = 'drafts'
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(tenant_id)
         .bind(account_id)
         .bind(message_id)
         .execute(&mut **tx)
@@ -6321,6 +6542,7 @@ impl Storage {
     async fn ensure_mailbox(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
         account_id: Uuid,
         role: &str,
         display_name: &str,
@@ -6336,7 +6558,7 @@ impl Storage {
             LIMIT 1
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
+        .bind(tenant_id)
         .bind(account_id)
         .bind(role)
         .fetch_optional(&mut **tx)
@@ -6355,7 +6577,7 @@ impl Storage {
             "#,
         )
         .bind(mailbox_id)
-        .bind(DEFAULT_TENANT_ID)
+        .bind(tenant_id)
         .bind(account_id)
         .bind(role)
         .bind(display_name)
@@ -6370,6 +6592,7 @@ impl Storage {
     async fn insert_audit(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
         audit: AuditEntryInput,
     ) -> Result<()> {
         sqlx::query(
@@ -6379,7 +6602,7 @@ impl Storage {
             "#,
         )
         .bind(Uuid::new_v4())
-        .bind(DEFAULT_TENANT_ID)
+        .bind(tenant_id)
         .bind(audit.actor)
         .bind(audit.action)
         .bind(audit.subject)
@@ -6387,6 +6610,125 @@ impl Storage {
         .await?;
 
         Ok(())
+    }
+
+    async fn tenant_id_for_domain_name(&self, domain_name: &str) -> Result<String> {
+        let domain_name = domain_name.trim().to_lowercase();
+        if domain_name.is_empty() {
+            bail!("domain name is required");
+        }
+
+        let existing = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tenant_id
+            FROM domains
+            WHERE lower(name) = lower($1)
+            ORDER BY created_at ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(&domain_name)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(existing.unwrap_or(domain_name))
+    }
+
+    async fn tenant_id_for_domain_id(&self, domain_id: Uuid) -> Result<String> {
+        sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tenant_id
+            FROM domains
+            WHERE id = $1
+            LIMIT 1
+            "#,
+        )
+        .bind(domain_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| anyhow!("domain not found"))
+    }
+
+    async fn tenant_id_for_account_id(&self, account_id: Uuid) -> Result<String> {
+        sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tenant_id
+            FROM accounts
+            WHERE id = $1
+            LIMIT 1
+            "#,
+        )
+        .bind(account_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| anyhow!("account not found"))
+    }
+
+    async fn tenant_id_for_account_email(&self, email: &str) -> Result<String> {
+        let email = normalize_email(email);
+        if email.is_empty() {
+            bail!("account email is required");
+        }
+
+        if let Some(tenant_id) = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tenant_id
+            FROM accounts
+            WHERE lower(primary_email) = lower($1)
+            ORDER BY created_at ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(&email)
+        .fetch_optional(&self.pool)
+        .await?
+        {
+            return Ok(tenant_id);
+        }
+
+        let domain = domain_from_email(&email)?;
+        self.tenant_id_for_domain_name(&domain).await
+    }
+
+    async fn tenant_id_for_admin_email(&self, email: &str) -> Result<String> {
+        let email = normalize_email(email);
+        if email.is_empty() {
+            bail!("admin email is required");
+        }
+
+        if let Some(tenant_id) = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tenant_id
+            FROM server_administrators
+            WHERE lower(email) = lower($1)
+            ORDER BY created_at ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(&email)
+        .fetch_optional(&self.pool)
+        .await?
+        {
+            return Ok(tenant_id);
+        }
+
+        if let Some(tenant_id) = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tenant_id
+            FROM admin_credentials
+            WHERE lower(email) = lower($1)
+            ORDER BY created_at ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(&email)
+        .fetch_optional(&self.pool)
+        .await?
+        {
+            return Ok(tenant_id);
+        }
+
+        Ok(PLATFORM_TENANT_ID.to_string())
     }
 }
 
@@ -6492,7 +6834,11 @@ fn permissions_from_storage(
     normalize_admin_permissions(role, rights_summary.unwrap_or_default(), &explicit)
 }
 
-fn normalize_admin_permissions(role: &str, rights_summary: &str, explicit: &[String]) -> Vec<String> {
+fn normalize_admin_permissions(
+    role: &str,
+    rights_summary: &str,
+    explicit: &[String],
+) -> Vec<String> {
     let mut permissions = default_permissions_for_role(role);
     permissions.extend(split_permissions(rights_summary));
     permissions.extend(
@@ -6893,7 +7239,9 @@ mod tests {
     fn built_in_role_permissions_include_dashboard() {
         let permissions = default_permissions_for_role("tenant-admin");
 
-        assert!(permissions.iter().any(|permission| permission == "dashboard"));
+        assert!(permissions
+            .iter()
+            .any(|permission| permission == "dashboard"));
         assert!(permissions.iter().any(|permission| permission == "domains"));
         assert!(!permissions.iter().any(|permission| permission == "*"));
     }
