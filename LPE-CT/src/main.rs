@@ -19,6 +19,8 @@ use tracing_subscriber::EnvFilter;
 
 mod smtp;
 
+const MIN_INTEGRATION_SECRET_LEN: usize = 32;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SiteProfile {
     node_name: String,
@@ -135,6 +137,7 @@ async fn main() -> Result<()> {
     let spool_dir = PathBuf::from(
         env::var("LPE_CT_SPOOL_DIR").unwrap_or_else(|_| "/var/spool/lpe-ct".to_string()),
     );
+    integration_shared_secret()?;
     smtp::initialize_spool(&spool_dir)?;
 
     let mut dashboard = load_or_initialize_state(&state_file)?;
@@ -479,8 +482,8 @@ fn require_integration_key(headers: &HeaderMap) -> Result<(), ApiError> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "missing integration key"))?;
-    let expected =
-        env::var("LPE_INTEGRATION_SHARED_SECRET").unwrap_or_else(|_| "change-me".to_string());
+    let expected = integration_shared_secret()
+        .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     if provided == expected {
         Ok(())
     } else {
@@ -488,5 +491,68 @@ fn require_integration_key(headers: &HeaderMap) -> Result<(), ApiError> {
             StatusCode::UNAUTHORIZED,
             "invalid integration key",
         ))
+    }
+}
+
+pub(crate) fn integration_shared_secret() -> Result<String> {
+    let value = env::var("LPE_INTEGRATION_SHARED_SECRET")
+        .map_err(|_| anyhow::anyhow!("LPE_INTEGRATION_SHARED_SECRET must be set"))?;
+    let trimmed = value.trim().to_string();
+    if trimmed.is_empty() {
+        anyhow::bail!("LPE_INTEGRATION_SHARED_SECRET must not be empty");
+    }
+    if trimmed.len() < MIN_INTEGRATION_SECRET_LEN {
+        anyhow::bail!(
+            "LPE_INTEGRATION_SHARED_SECRET must contain at least {MIN_INTEGRATION_SECRET_LEN} characters"
+        );
+    }
+    if is_known_weak_secret(&trimmed) {
+        anyhow::bail!("LPE_INTEGRATION_SHARED_SECRET uses a forbidden weak placeholder value");
+    }
+    Ok(trimmed)
+}
+
+fn is_known_weak_secret(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "change-me"
+            | "changeme"
+            | "secret"
+            | "shared-secret"
+            | "integration-test"
+            | "password"
+            | "admin"
+            | "default"
+            | "test"
+            | "example"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::integration_shared_secret;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn integration_secret_must_be_present_and_strong() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
+        assert!(integration_shared_secret().is_err());
+
+        std::env::set_var("LPE_INTEGRATION_SHARED_SECRET", "change-me");
+        assert!(integration_shared_secret().is_err());
+
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "abcdef0123456789abcdef0123456789",
+        );
+        assert_eq!(
+            integration_shared_secret().unwrap(),
+            "abcdef0123456789abcdef0123456789"
+        );
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 }

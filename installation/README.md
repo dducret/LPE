@@ -35,7 +35,7 @@ Pour un serveur de tri separe en `DMZ`, utiliser plutot `LPE-CT/installation/deb
 
 Les scripts `LPE-CT` installent aussi un listener SMTP, un spool local dans `/var/spool/lpe-ct`, et trois jeux de tests:
 
-L'integration fonctionnelle `LPE` / `LPE-CT` demande aussi d'aligner `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL` et `LPE_INTEGRATION_SHARED_SECRET` entre les deux noeuds. Le contrat est documente dans `docs/architecture/lpe-ct-integration.md`.
+L'integration fonctionnelle `LPE` / `LPE-CT` demande aussi d'aligner `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL` et `LPE_INTEGRATION_SHARED_SECRET` entre les deux noeuds. `LPE_INTEGRATION_SHARED_SECRET` est maintenant obligatoire des deux cotes au demarrage, doit rester hors des interfaces publiques, et doit etre definie avec une valeur forte non triviale d'au moins `32` caracteres. Le contrat est documente dans `docs/architecture/lpe-ct-integration.md`.
 
 - `test-local-lpe-ct.sh` depuis le serveur `LPE-CT`
 - `test-from-lpe.sh` depuis le LAN ou le serveur coeur
@@ -101,7 +101,7 @@ La console d'administration enregistre desormais ses comptes, mots de passe de c
 
 Les imports `PST` peuvent etre envoyes depuis le navigateur. Le service valide d'abord chaque fichier entrant avec Google `Magika`, puis stocke les fichiers recus dans `LPE_PST_IMPORT_DIR`, par defaut `/var/lib/lpe/imports`, et cree la demande d'import `PST` avec le chemin serveur obtenu. La taille maximale acceptee par l'API est configuree par `LPE_PST_UPLOAD_MAX_BYTES`, par defaut `21474836480` octets. Le reverse proxy `nginx` est aligne avec `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, par defaut `20g`. Le chemin du binaire est configure via `LPE_MAGIKA_BIN`, par defaut `/opt/lpe/bin/magika`, et le seuil minimal via `LPE_MAGIKA_MIN_SCORE`.
 
-La premiere connexion cree automatiquement un administrateur de bootstrap si aucun identifiant n'existe encore. Les variables `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD` et `LPE_ADMIN_SESSION_MINUTES` doivent etre ajustees dans `/etc/lpe/lpe.env` avant exposition de la console.
+La premiere connexion ne cree plus d'administrateur automatiquement. Le bootstrap admin est maintenant explicite: definir temporairement `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME` (optionnel) et `LPE_BOOTSTRAP_ADMIN_PASSWORD` avec un mot de passe fort d'au moins `12` caracteres, puis executer `lpe-cli bootstrap-admin` sur le serveur coeur avant exposition de la console. Si un administrateur existe deja, la commande echoue sans modifier l'etat.
 
 Exemple complet:
 
@@ -111,6 +111,7 @@ cd ~/LPE-bootstrap/installation/debian-trixie
 ./install-lpe.sh
 nano /etc/lpe/lpe.env
 ./run-migrations.sh
+LPE_BOOTSTRAP_ADMIN_EMAIL=admin@example.test LPE_BOOTSTRAP_ADMIN_PASSWORD='Very-Strong-Bootstrap-Password-2026' /opt/lpe/bin/lpe-cli bootstrap-admin
 systemctl status lpe.service
 ./check-lpe.sh
 ```
@@ -180,7 +181,7 @@ For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trix
 
 The `LPE-CT` scripts also install an SMTP listener, a local spool in `/var/spool/lpe-ct`, and three test suites:
 
-The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL`, and `LPE_INTEGRATION_SHARED_SECRET` values across the two nodes. The contract is documented in `docs/architecture/lpe-ct-integration.md`.
+The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL`, and `LPE_INTEGRATION_SHARED_SECRET` values across the two nodes. `LPE_INTEGRATION_SHARED_SECRET` is now mandatory on both sides at startup, must stay out of public interfaces, and must be set to a strong non-trivial value of at least `32` characters. The contract is documented in `docs/architecture/lpe-ct-integration.md`.
 
 - `test-local-lpe-ct.sh` from the `LPE-CT` server
 - `test-from-lpe.sh` from the LAN or core server
@@ -246,7 +247,7 @@ The administration console now stores its accounts, account passwords, mailboxes
 
 `PST` imports can be uploaded from the browser. The service validates each incoming file with Google `Magika` before storing it in `LPE_PST_IMPORT_DIR`, defaulting to `/var/lib/lpe/imports`, and then creates the `PST` import request with the resulting server path. The maximum accepted API upload size is configured through `LPE_PST_UPLOAD_MAX_BYTES`, defaulting to `21474836480` bytes. The `nginx` reverse proxy is aligned through `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, defaulting to `20g`. The binary path is configured through `LPE_MAGIKA_BIN`, defaulting to `/opt/lpe/bin/magika`, and the minimum confidence threshold through `LPE_MAGIKA_MIN_SCORE`.
 
-The first sign-in automatically creates a bootstrap administrator if no credential exists yet. `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD`, and `LPE_ADMIN_SESSION_MINUTES` must be adjusted in `/etc/lpe/lpe.env` before exposing the console.
+The first sign-in no longer creates an administrator automatically. Admin bootstrap is now explicit: set `LPE_BOOTSTRAP_ADMIN_EMAIL`, optional `LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME`, and `LPE_BOOTSTRAP_ADMIN_PASSWORD` temporarily with a strong password of at least `12` characters, then run `lpe-cli bootstrap-admin` on the core server before exposing the console. If an administrator already exists, the command fails without changing the state.
 
 Complete example:
 
@@ -256,6 +257,7 @@ cd ~/LPE-bootstrap/installation/debian-trixie
 ./install-lpe.sh
 nano /etc/lpe/lpe.env
 ./run-migrations.sh
+LPE_BOOTSTRAP_ADMIN_EMAIL=admin@example.test LPE_BOOTSTRAP_ADMIN_PASSWORD='Very-Strong-Bootstrap-Password-2026' /opt/lpe/bin/lpe-cli bootstrap-admin
 systemctl status lpe.service
 ./check-lpe.sh
 ```

@@ -1568,6 +1568,39 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn has_admin_bootstrap_state(&self) -> Result<bool> {
+        let credentials_exist = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM admin_credentials
+                WHERE tenant_id = $1
+            )
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .fetch_one(&self.pool)
+        .await?;
+        if credentials_exist {
+            return Ok(true);
+        }
+
+        let administrators_exist = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM server_administrators
+                WHERE tenant_id = $1
+            )
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(administrators_exist)
+    }
+
     pub async fn fetch_admin_login(&self, email: &str) -> Result<Option<AdminLogin>> {
         let email = normalize_email(email);
         let row = sqlx::query_as::<_, AdminLoginRow>(
@@ -3242,8 +3275,13 @@ impl Storage {
             .await?;
         }
 
-        self.ingest_message_attachments_in_tx(&mut tx, input.account_id, message_id, &input.attachments)
-            .await?;
+        self.ingest_message_attachments_in_tx(
+            &mut tx,
+            input.account_id,
+            message_id,
+            &input.attachments,
+        )
+        .await?;
 
         self.insert_audit(&mut tx, audit).await?;
         tx.commit().await?;
@@ -3536,8 +3574,13 @@ impl Storage {
             .await?;
         }
 
-        self.ingest_message_attachments_in_tx(&mut tx, input.account_id, message_id, &input.attachments)
-            .await?;
+        self.ingest_message_attachments_in_tx(
+            &mut tx,
+            input.account_id,
+            message_id,
+            &input.attachments,
+        )
+        .await?;
 
         sqlx::query(
             r#"
@@ -4002,8 +4045,13 @@ impl Storage {
             .await?;
         }
 
-        self.ingest_message_attachments_in_tx(&mut tx, input.account_id, message_id, &input.attachments)
-            .await?;
+        self.ingest_message_attachments_in_tx(
+            &mut tx,
+            input.account_id,
+            message_id,
+            &input.attachments,
+        )
+        .await?;
 
         self.insert_audit(&mut tx, audit).await?;
         tx.commit().await?;
@@ -4695,7 +4743,10 @@ impl Storage {
                 attachment.file_name.as_str(),
                 &attachment.blob_bytes,
             )?;
-            if let Some(text) = extracted_text.as_ref().filter(|text| !text.trim().is_empty()) {
+            if let Some(text) = extracted_text
+                .as_ref()
+                .filter(|text| !text.trim().is_empty())
+            {
                 search_fragments.push(text.clone());
             }
 
@@ -4834,16 +4885,13 @@ impl Storage {
     ) -> Result<()> {
         let message_id = Uuid::new_v4();
         let preview_text = preview_text(&message.body_text);
-        let size_octets = message
-            .body_text
-            .len()
-            .saturating_add(
-                message
-                    .attachments
-                    .iter()
-                    .map(|attachment| attachment.blob_bytes.len())
-                    .sum::<usize>(),
-            ) as i64;
+        let size_octets = message.body_text.len().saturating_add(
+            message
+                .attachments
+                .iter()
+                .map(|attachment| attachment.blob_bytes.len())
+                .sum::<usize>(),
+        ) as i64;
 
         sqlx::query(
             r#"

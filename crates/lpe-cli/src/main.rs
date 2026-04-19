@@ -1,5 +1,7 @@
 use anyhow::Result;
-use lpe_admin_api::router;
+use lpe_admin_api::{
+    bootstrap_admin, bootstrap_admin_request_from_env, integration_shared_secret, router,
+};
 use lpe_domain::{
     OutboundMessageHandoffRequest, OutboundMessageHandoffResponse, TransportDeliveryStatus,
 };
@@ -15,10 +17,15 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
 
+    if env::args().nth(1).as_deref() == Some("bootstrap-admin") {
+        return run_bootstrap_admin_command().await;
+    }
+
     let bind_address =
         env::var("LPE_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
     let database_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://lpe:change-me@localhost:5432/lpe".to_string());
+    integration_shared_secret()?;
     let storage = Storage::connect(&database_url).await?;
     let listener = TcpListener::bind(&bind_address).await?;
     info!("lpe admin api listening on http://{bind_address}");
@@ -39,13 +46,25 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+async fn run_bootstrap_admin_command() -> Result<()> {
+    let database_url = env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://lpe:change-me@localhost:5432/lpe".to_string());
+    let storage = Storage::connect(&database_url).await?;
+    let request = bootstrap_admin_request_from_env()?;
+    let result = bootstrap_admin(&storage, request).await?;
+    info!(
+        "bootstrap administrator created for {} ({})",
+        result.email, result.display_name
+    );
+    Ok(())
+}
+
 async fn run_outbound_worker(storage: Storage) -> Result<()> {
     let base_url = env::var("LPE_CT_API_BASE_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:8380".to_string())
         .trim_end_matches('/')
         .to_string();
-    let integration_key =
-        env::var("LPE_INTEGRATION_SHARED_SECRET").unwrap_or_else(|_| "change-me".to_string());
+    let integration_key = integration_shared_secret()?;
     let interval_ms = env::var("LPE_OUTBOUND_WORKER_INTERVAL_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())

@@ -30,10 +30,20 @@ use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
+const MIN_ADMIN_PASSWORD_LEN: usize = 12;
+const MIN_INTEGRATION_SECRET_LEN: usize = 32;
+
+#[derive(Debug, Clone)]
+pub struct BootstrapAdminRequest {
+    pub email: String,
+    pub display_name: String,
+    pub password: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
-struct BootstrapResponse {
-    email: String,
-    display_name: String,
+pub struct BootstrapAdminResponse {
+    pub email: String,
+    pub display_name: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -233,7 +243,6 @@ pub fn router(storage: Storage) -> Router {
         .route("/mail/auth/logout", post(client_logout))
         .route("/mail/auth/me", get(client_me))
         .route("/mail/workspace", get(client_workspace))
-        .route("/bootstrap/admin", get(bootstrap_admin))
         .route("/health/local-ai", get(local_ai_health))
         .route("/capabilities/attachments", get(attachment_support))
         .route("/console/dashboard", get(dashboard))
@@ -292,9 +301,6 @@ async fn login(
     State(storage): State<Storage>,
     Json(request): Json<LoginRequest>,
 ) -> ApiResult<LoginResponse> {
-    ensure_bootstrap_admin(&storage)
-        .await
-        .map_err(internal_error)?;
     let email = request.email.trim().to_lowercase();
     let candidate = storage
         .fetch_admin_login(&email)
@@ -408,31 +414,6 @@ async fn client_workspace(
             .await
             .map_err(internal_error)?,
     ))
-}
-
-async fn bootstrap_admin(
-    State(storage): State<Storage>,
-    headers: HeaderMap,
-) -> ApiResult<BootstrapResponse> {
-    require_admin(&storage, &headers, "dashboard").await?;
-    let dashboard = storage
-        .fetch_admin_dashboard()
-        .await
-        .map_err(internal_error)?;
-    let bootstrap = dashboard
-        .accounts
-        .first()
-        .cloned()
-        .map(|account| BootstrapResponse {
-            email: account.email,
-            display_name: account.display_name,
-        })
-        .unwrap_or(BootstrapResponse {
-            email: "admin@example.test".to_string(),
-            display_name: "LPE Administrator".to_string(),
-        });
-
-    Ok(Json(bootstrap))
 }
 
 async fn local_ai_health(State(storage): State<Storage>) -> ApiResult<LocalAiHealthResponse> {
@@ -1219,8 +1200,7 @@ fn require_integration(headers: &HeaderMap) -> std::result::Result<(), (StatusCo
             StatusCode::UNAUTHORIZED,
             "missing integration key".to_string(),
         ))?;
-    let expected =
-        env::var("LPE_INTEGRATION_SHARED_SECRET").unwrap_or_else(|_| "change-me".to_string());
+    let expected = integration_shared_secret().map_err(internal_error)?;
     if provided == expected {
         Ok(())
     } else {
@@ -1400,15 +1380,162 @@ fn sanitize_upload_filename(file_name: &str) -> String {
     }
 }
 
+pub fn bootstrap_admin_request_from_env() -> anyhow::Result<BootstrapAdminRequest> {
+    let email = required_env("LPE_BOOTSTRAP_ADMIN_EMAIL")?;
+    let display_name = env::var("LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME")
+        .unwrap_or_else(|_| "Bootstrap Administrator".to_string())
+        .trim()
+        .to_string();
+    let password = required_env("LPE_BOOTSTRAP_ADMIN_PASSWORD")?;
+
+    validate_bootstrap_admin_request(&email, &display_name, &password)?;
+
+    Ok(BootstrapAdminRequest {
+        email,
+        display_name,
+        password,
+    })
+}
+
+pub async fn bootstrap_admin(
+    storage: &Storage,
+    request: BootstrapAdminRequest,
+) -> anyhow::Result<BootstrapAdminResponse> {
+    validate_bootstrap_admin_request(&request.email, &request.display_name, &request.password)?;
+
+    if storage.has_admin_bootstrap_state().await? {
+        anyhow::bail!("bootstrap administrator already exists");
+    }
+
+    let email = request.email.trim().to_lowercase();
+    let display_name = request.display_name.trim().to_string();
+    storage
+        .create_server_administrator(
+            NewServerAdministrator {
+                domain_id: None,
+                email: email.clone(),
+                display_name: display_name.clone(),
+                role: "server-admin".to_string(),
+                rights_summary:
+                    "server, domains, accounts, aliases, admins, policies, security, ai, antispam, pst, audit, mail"
+                        .to_string(),
+            },
+            AuditEntryInput {
+                actor: "bootstrap-cli".to_string(),
+                action: "create-bootstrap-admin".to_string(),
+                subject: email.clone(),
+            },
+        )
+        .await?;
+
+    storage
+        .upsert_admin_credential(
+            AdminCredentialInput {
+                email: email.clone(),
+                password_hash: hash_password(&request.password)?,
+            },
+            AuditEntryInput {
+                actor: "bootstrap-cli".to_string(),
+                action: "set-bootstrap-password".to_string(),
+                subject: email.clone(),
+            },
+        )
+        .await?;
+
+    Ok(BootstrapAdminResponse {
+        email,
+        display_name,
+    })
+}
+
+pub fn integration_shared_secret() -> anyhow::Result<String> {
+    let secret = required_env("LPE_INTEGRATION_SHARED_SECRET")?;
+    validate_shared_secret("LPE_INTEGRATION_SHARED_SECRET", &secret)?;
+    Ok(secret)
+}
+
+fn required_env(name: &str) -> anyhow::Result<String> {
+    let value = env::var(name)
+        .map_err(|_| anyhow::anyhow!("{name} must be set"))?
+        .trim()
+        .to_string();
+    if value.is_empty() {
+        anyhow::bail!("{name} must not be empty");
+    }
+    Ok(value)
+}
+
+fn validate_bootstrap_admin_request(
+    email: &str,
+    display_name: &str,
+    password: &str,
+) -> anyhow::Result<()> {
+    if !email.contains('@') {
+        anyhow::bail!("bootstrap admin email must contain '@'");
+    }
+    if display_name.trim().is_empty() {
+        anyhow::bail!("bootstrap admin display name must not be empty");
+    }
+    validate_admin_password(password)?;
+    Ok(())
+}
+
+fn validate_admin_password(password: &str) -> anyhow::Result<()> {
+    let trimmed = password.trim();
+    if trimmed.len() < MIN_ADMIN_PASSWORD_LEN {
+        anyhow::bail!(
+            "bootstrap admin password must contain at least {MIN_ADMIN_PASSWORD_LEN} characters"
+        );
+    }
+    if is_known_weak_secret(trimmed) {
+        anyhow::bail!("bootstrap admin password uses a forbidden weak placeholder value");
+    }
+    Ok(())
+}
+
+fn validate_shared_secret(name: &str, secret: &str) -> anyhow::Result<()> {
+    let trimmed = secret.trim();
+    if trimmed.len() < MIN_INTEGRATION_SECRET_LEN {
+        anyhow::bail!("{name} must contain at least {MIN_INTEGRATION_SECRET_LEN} characters");
+    }
+    if is_known_weak_secret(trimmed) {
+        anyhow::bail!("{name} uses a forbidden weak placeholder value");
+    }
+    Ok(())
+}
+
+fn is_known_weak_secret(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    matches!(
+        normalized.as_str(),
+        "change-me"
+            | "changeme"
+            | "secret"
+            | "shared-secret"
+            | "integration-test"
+            | "password"
+            | "admin"
+            | "default"
+            | "test"
+            | "example"
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::validate_uploaded_pst_file_with_validator;
+    use super::{
+        bootstrap_admin_request_from_env, integration_shared_secret,
+        validate_uploaded_pst_file_with_validator,
+    };
     use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
     use std::{
         fs,
         path::PathBuf,
+        sync::Mutex,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[derive(Debug, Clone)]
     struct FakeDetector {
@@ -1490,52 +1617,49 @@ mod tests {
         assert!(error.to_string().contains("PST upload blocked"));
         assert!(!path.exists());
     }
-}
 
-async fn ensure_bootstrap_admin(storage: &Storage) -> anyhow::Result<()> {
-    let email =
-        env::var("LPE_BOOTSTRAP_ADMIN_EMAIL").unwrap_or_else(|_| "admin@example.test".to_string());
-    let password =
-        env::var("LPE_BOOTSTRAP_ADMIN_PASSWORD").unwrap_or_else(|_| "change-me".to_string());
+    #[test]
+    fn integration_secret_rejects_missing_or_weak_values() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
+        assert!(integration_shared_secret().is_err());
 
-    if storage.fetch_admin_login(&email).await?.is_some() {
-        return Ok(());
+        std::env::set_var("LPE_INTEGRATION_SHARED_SECRET", "change-me");
+        assert!(integration_shared_secret().is_err());
+
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
+        assert_eq!(
+            integration_shared_secret().unwrap(),
+            "0123456789abcdef0123456789abcdef"
+        );
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 
-    storage
-        .create_server_administrator(
-            NewServerAdministrator {
-                domain_id: None,
-                email: email.clone(),
-                display_name: "Bootstrap Administrator".to_string(),
-                role: "server-admin".to_string(),
-                rights_summary:
-                    "server, domains, accounts, aliases, admins, policies, security, ai, antispam, pst, audit, mail"
-                        .to_string(),
-            },
-            AuditEntryInput {
-                actor: "bootstrap".to_string(),
-                action: "create-bootstrap-admin".to_string(),
-                subject: email.clone(),
-            },
-        )
-        .await?;
+    #[test]
+    fn bootstrap_request_requires_explicit_strong_password() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("LPE_BOOTSTRAP_ADMIN_EMAIL", "admin@example.test");
+        std::env::remove_var("LPE_BOOTSTRAP_ADMIN_PASSWORD");
+        assert!(bootstrap_admin_request_from_env().is_err());
 
-    storage
-        .upsert_admin_credential(
-            AdminCredentialInput {
-                email: email.clone(),
-                password_hash: hash_password(&password)?,
-            },
-            AuditEntryInput {
-                actor: "bootstrap".to_string(),
-                action: "set-bootstrap-password".to_string(),
-                subject: email,
-            },
-        )
-        .await?;
+        std::env::set_var("LPE_BOOTSTRAP_ADMIN_PASSWORD", "change-me");
+        assert!(bootstrap_admin_request_from_env().is_err());
 
-    Ok(())
+        std::env::set_var(
+            "LPE_BOOTSTRAP_ADMIN_PASSWORD",
+            "Very-Strong-Bootstrap-Password-2026",
+        );
+        let request = bootstrap_admin_request_from_env().unwrap();
+        assert_eq!(request.email, "admin@example.test");
+        assert_eq!(request.display_name, "Bootstrap Administrator");
+
+        std::env::remove_var("LPE_BOOTSTRAP_ADMIN_EMAIL");
+        std::env::remove_var("LPE_BOOTSTRAP_ADMIN_PASSWORD");
+        std::env::remove_var("LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME");
+    }
 }
 
 fn admin_session_minutes() -> u32 {

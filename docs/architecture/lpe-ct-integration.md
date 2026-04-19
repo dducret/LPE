@@ -52,7 +52,7 @@ La cle partagee est fournie par:
 
 - `LPE_INTEGRATION_SHARED_SECRET`
 
-Cette cle ne doit pas etre exposee dans les interfaces publiques ni stockee dans l'etat de management JSON de `LPE-CT`.
+Cette cle est obligatoire au demarrage des deux composants, doit echouer fermee si elle manque, et ne doit pas utiliser de valeur triviale ou connue telle que `change-me`. Une longueur minimale de `32` caracteres est requise. Cette cle ne doit pas etre exposee dans les interfaces publiques ni stockee dans l'etat de management JSON de `LPE-CT`.
 
 ### Variables d'environnement principales
 
@@ -129,7 +129,7 @@ The shared secret is provided through:
 
 - `LPE_INTEGRATION_SHARED_SECRET`
 
-That secret must not be exposed in public interfaces or stored in the `LPE-CT` management JSON state.
+That secret is mandatory at startup on both components, must fail closed when missing, and must not use a trivial or known placeholder value such as `change-me`. A minimum length of `32` characters is required. That secret must not be exposed in public interfaces or stored in the `LPE-CT` management JSON state.
 
 ### Main environment variables
 

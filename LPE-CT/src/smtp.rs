@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use lpe_magika::{
-    collect_mime_attachment_parts, DetectionSource, Detector, ExpectedKind, IngressContext,
-    MagikaDetection, PolicyDecision, ValidationRequest, Validator,
+    collect_mime_attachment_parts, Detector, ExpectedKind, IngressContext, PolicyDecision,
+    ValidationRequest, Validator,
 };
 use lpe_domain::{
     InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
@@ -20,6 +20,8 @@ use tokio::{
     net::{tcp::OwnedReadHalf, tcp::OwnedWriteHalf, TcpListener, TcpStream},
 };
 use tracing::{info, warn};
+
+use crate::integration_shared_secret;
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
@@ -441,13 +443,10 @@ async fn deliver_inbound_message(
     };
 
     let client = reqwest::Client::builder().build()?;
+    let integration_secret = integration_shared_secret()?;
     let response = client
         .post(endpoint)
-        .header(
-            "x-lpe-integration-key",
-            std::env::var("LPE_INTEGRATION_SHARED_SECRET")
-                .unwrap_or_else(|_| "change-me".to_string()),
-        )
+        .header("x-lpe-integration-key", integration_secret)
         .json(&request)
         .send()
         .await?;
@@ -812,6 +811,8 @@ mod tests {
     };
     use uuid::Uuid;
 
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
     fn temp_dir(label: &str) -> PathBuf {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -922,9 +923,13 @@ mod tests {
 
     #[tokio::test]
     async fn inbound_message_posts_to_core_delivery_api() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let spool = temp_dir("inbound-delivery");
         initialize_spool(&spool).unwrap();
-        std::env::set_var("LPE_INTEGRATION_SHARED_SECRET", "integration-test");
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
         let captured = Arc::new(Mutex::new(None::<InboundDeliveryRequest>));
         let core_base_url = spawn_dummy_core(captured.clone()).await;
 
@@ -946,6 +951,7 @@ mod tests {
         assert_eq!(request.subject, "Inbound");
         assert_eq!(request.body_text, "Body");
         assert_eq!(request.rcpt_to, vec!["dest@example.test".to_string()]);
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 
     #[test]
