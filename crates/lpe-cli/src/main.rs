@@ -1,6 +1,6 @@
 use anyhow::Result;
 use lpe_admin_api::{
-    bootstrap_admin, bootstrap_admin_request_from_env, init_observability,
+    bootstrap_admin, bootstrap_admin_request_from_env, bootstrap_admin_request_from_env_or_defaults, init_observability,
     integration_shared_secret, observe_outbound_worker_dispatch, observe_outbound_worker_poll,
     router,
 };
@@ -30,6 +30,7 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|_| "postgres://lpe:change-me@localhost:5432/lpe".to_string());
     integration_shared_secret()?;
     let storage = Storage::connect(&database_url).await?;
+    auto_bootstrap_admin_if_missing(&storage).await?;
     let listener = TcpListener::bind(&bind_address).await?;
     let imap_listener = TcpListener::bind(&imap_bind_address).await?;
     let managesieve_listener = TcpListener::bind(&managesieve_bind_address).await?;
@@ -61,6 +62,20 @@ async fn main() -> Result<()> {
         result = worker_task => result??,
     }
 
+    Ok(())
+}
+
+async fn auto_bootstrap_admin_if_missing(storage: &Storage) -> Result<()> {
+    if storage.has_admin_bootstrap_state().await? {
+        return Ok(());
+    }
+
+    let request = bootstrap_admin_request_from_env_or_defaults()?;
+    let result = bootstrap_admin(storage, request).await?;
+    info!(
+        "auto-bootstrap administrator created for {} ({})",
+        result.email, result.display_name
+    );
     Ok(())
 }
 

@@ -22,7 +22,21 @@ struct OidcTokenResponse {
     token_type: Option<String>,
 }
 
-pub fn authorization_url(settings: &SecuritySettings, public_origin: &str) -> Result<String> {
+#[derive(Debug, Deserialize)]
+struct OidcDiscoveryDocument {
+    authorization_endpoint: String,
+    token_endpoint: String,
+    userinfo_endpoint: String,
+}
+
+#[derive(Debug, Clone)]
+struct OidcResolvedEndpoints {
+    authorization_endpoint: String,
+    token_endpoint: String,
+    userinfo_endpoint: String,
+}
+
+pub async fn authorization_url(settings: &SecuritySettings, public_origin: &str) -> Result<String> {
     ensure_oidc_ready(settings)?;
     let redirect_uri = callback_url(public_origin)?;
     let state = sign_state(
@@ -32,7 +46,8 @@ pub fn authorization_url(settings: &SecuritySettings, public_origin: &str) -> Re
         },
         &settings.oidc_client_secret,
     )?;
-    let mut url = Url::parse(settings.oidc_authorization_endpoint.trim())
+    let endpoints = resolved_endpoints(settings).await?;
+    let mut url = Url::parse(&endpoints.authorization_endpoint)
         .context("invalid OIDC authorization endpoint")?;
     url.query_pairs_mut()
         .append_pair("response_type", "code")
@@ -52,9 +67,10 @@ pub async fn exchange_code_for_claims(
     ensure_oidc_ready(settings)?;
     let redirect_uri = callback_url(public_origin)?;
     verify_state(state, &settings.oidc_client_secret, &redirect_uri)?;
+    let endpoints = resolved_endpoints(settings).await?;
 
     let token = Client::new()
-        .post(settings.oidc_token_endpoint.trim())
+        .post(&endpoints.token_endpoint)
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", code.trim()),
@@ -82,7 +98,7 @@ pub async fn exchange_code_for_claims(
     }
 
     let userinfo = Client::new()
-        .get(settings.oidc_userinfo_endpoint.trim())
+        .get(&endpoints.userinfo_endpoint)
         .bearer_auth(token.access_token)
         .send()
         .await
@@ -116,12 +132,6 @@ fn ensure_oidc_ready(settings: &SecuritySettings) -> Result<()> {
 
     for (name, value) in [
         ("issuer", settings.oidc_issuer_url.trim()),
-        (
-            "authorization endpoint",
-            settings.oidc_authorization_endpoint.trim(),
-        ),
-        ("token endpoint", settings.oidc_token_endpoint.trim()),
-        ("userinfo endpoint", settings.oidc_userinfo_endpoint.trim()),
         ("client id", settings.oidc_client_id.trim()),
         ("client secret", settings.oidc_client_secret.trim()),
     ] {
@@ -148,6 +158,38 @@ fn normalized_scopes(settings: &SecuritySettings) -> &str {
     } else {
         scopes
     }
+}
+
+async fn resolved_endpoints(settings: &SecuritySettings) -> Result<OidcResolvedEndpoints> {
+    if !settings.oidc_authorization_endpoint.trim().is_empty()
+        && !settings.oidc_token_endpoint.trim().is_empty()
+        && !settings.oidc_userinfo_endpoint.trim().is_empty()
+    {
+        return Ok(OidcResolvedEndpoints {
+            authorization_endpoint: settings.oidc_authorization_endpoint.trim().to_string(),
+            token_endpoint: settings.oidc_token_endpoint.trim().to_string(),
+            userinfo_endpoint: settings.oidc_userinfo_endpoint.trim().to_string(),
+        });
+    }
+
+    let issuer = settings.oidc_issuer_url.trim().trim_end_matches('/');
+    let discovery_url = format!("{issuer}/.well-known/openid-configuration");
+    let document = Client::new()
+        .get(&discovery_url)
+        .send()
+        .await
+        .context("OIDC discovery request failed")?
+        .error_for_status()
+        .context("OIDC discovery endpoint returned an error")?
+        .json::<OidcDiscoveryDocument>()
+        .await
+        .context("OIDC discovery payload is invalid")?;
+
+    Ok(OidcResolvedEndpoints {
+        authorization_endpoint: document.authorization_endpoint,
+        token_endpoint: document.token_endpoint,
+        userinfo_endpoint: document.userinfo_endpoint,
+    })
 }
 
 fn sign_state(payload: &OidcStatePayload, secret: &str) -> Result<String> {
@@ -235,7 +277,10 @@ mod tests {
 
     #[test]
     fn authorization_url_contains_required_parameters() {
-        let url = authorization_url(&settings(), "https://admin.example.test").unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let url = runtime
+            .block_on(authorization_url(&settings(), "https://admin.example.test"))
+            .unwrap();
         assert!(url.contains("response_type=code"));
         assert!(url.contains("client_id=client-id"));
         assert!(url.contains("scope=openid+profile+email"));
@@ -244,11 +289,14 @@ mod tests {
 
     #[test]
     fn generated_state_is_accepted_for_matching_origin() {
-        let url = authorization_url(&settings(), "https://admin.example.test").unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let url = runtime
+            .block_on(authorization_url(&settings(), "https://admin.example.test"))
+            .unwrap();
         let state = url
             .split("state=")
             .nth(1)
-            .and_then(|tail| tail.split('&').next())
+            .and_then(|tail: &str| tail.split('&').next())
             .unwrap();
         verify_state(
             state,

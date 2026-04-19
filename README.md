@@ -45,8 +45,8 @@ Pour un serveur de tri distinct en `DMZ`, le sous-repertoire `LPE-CT/` fournit u
 
 La console d'administration actuelle couvre deja une V1 de pilotage du plan de controle:
 
-- authentification administrateur avec sessions persistantes et controle des droits cote API
-- login admin local par mot de passe et premier login federé `OIDC` pour le back office
+- authentification administrateur avec sessions persistantes, audit de connexion et controle des droits cote API
+- login admin local par mot de passe avec premier `TOTP` exploitable et premier login federé `OIDC` pour le back office
 - page serveur avec etat, politiques, domaines et administrateurs
 - page domaine orientee gestion des comptes avec mot de passe, alias et delegations
 - demandes et execution testable d'import/export `PST` au niveau des boites aux lettres depuis la page domaine, avec upload navigateur pour les imports
@@ -151,8 +151,8 @@ For a separate sorting server placed in a `DMZ`, the `LPE-CT/` subdirectory prov
 
 The current administration console already exposes a first control-plane V1:
 
-- administrator authentication with persistent sessions and API-side rights checks
-- local password admin login and a first federated `OIDC` login for the back office
+- administrator authentication with persistent sessions, sign-in audit, and API-side rights checks
+- local password admin login with a first usable `TOTP` flow and a first federated `OIDC` login for the back office
 - server page with status, policies, domains, and administrators
 - domain-oriented page for accounts with passwords, aliases, and delegated administration
 - mailbox-level `PST` import/export requests and testable execution from the domain page, with browser upload for imports

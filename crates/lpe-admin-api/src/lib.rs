@@ -21,10 +21,11 @@ use lpe_storage::{
     AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput,
     AuthenticatedAccount, AuthenticatedAdmin, ClientContact, ClientEvent, ClientTask,
     ClientWorkspace, DashboardUpdate, EmailTraceResult, EmailTraceSearchInput, HealthResponse,
-    LocalAiSettings, NewAccount, NewAlias, NewDomain, NewFilterRule, NewMailbox, NewPstTransferJob,
-    NewServerAdministrator, PstJobExecutionSummary, SavedDraftMessage, SecuritySettings,
-    ServerSettings, Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
-    UpdateAccount, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    LocalAiSettings, NewAccount, NewAdminAuthFactor, NewAlias, NewDomain, NewFilterRule,
+    NewMailbox, NewPstTransferJob, NewServerAdministrator, PstJobExecutionSummary,
+    SavedDraftMessage, SecuritySettings, ServerSettings, Storage, SubmitMessageInput,
+    SubmittedMessage, SubmittedRecipientInput, UpdateAccount, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::env;
 use std::path::{Path, PathBuf};
@@ -36,18 +37,20 @@ use uuid::Uuid;
 mod client_config;
 mod oidc;
 mod observability;
+mod totp;
 mod types;
 
 use crate::types::{
     ApiResult, AttachmentSupportResponse, BootstrapAdminRequest, BootstrapAdminResponse,
     ClientLoginResponse, CreateAccountRequest, CreateAliasRequest, CreateDomainRequest,
     CreateFilterRuleRequest, CreateMailboxRequest, CreatePstTransferJobRequest,
-    CreateServerAdministratorRequest, EmailTraceSearchRequest, LocalAiHealthResponse, LoginRequest,
-    LoginResponse, OidcMetadataResponse, OidcStartResponse, ReadinessCheck, ReadinessResponse,
+    CreateServerAdministratorRequest, EmailTraceSearchRequest, EnrollTotpRequest,
+    EnrollTotpResponse, LocalAiHealthResponse, LoginRequest, LoginResponse,
+    OidcMetadataResponse, OidcStartResponse, ReadinessCheck, ReadinessResponse,
     SubmitMessageRequest, SubmitRecipientRequest, UpdateAccountRequest,
     UpdateAntispamSettingsRequest, UpdateLocalAiSettingsRequest, UpdateSecuritySettingsRequest,
     UpdateServerSettingsRequest, UpsertClientContactRequest, UpsertClientEventRequest,
-    UpsertClientTaskRequest,
+    UpsertClientTaskRequest, VerifyTotpRequest, AdminAuthFactorsResponse,
 };
 
 const MIN_ADMIN_PASSWORD_LEN: usize = 12;
@@ -62,6 +65,10 @@ pub fn router(storage: Storage) -> Router {
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(me))
+        .route("/auth/factors", get(admin_auth_factors))
+        .route("/auth/factors/totp/enroll", post(enroll_totp))
+        .route("/auth/factors/totp/verify", post(verify_totp_factor))
+        .route("/auth/factors/{factor_id}", delete(revoke_admin_factor))
         .route("/auth/oidc/metadata", get(oidc_metadata))
         .route("/auth/oidc/start", get(oidc_start))
         .route("/auth/oidc/callback", get(oidc_callback))
@@ -212,8 +219,45 @@ async fn login(
 
     if candidate.status != "active" || !verify_password(&candidate.password_hash, &request.password)
     {
+        let _ = storage
+            .append_audit_event(
+                &candidate.tenant_id,
+                AuditEntryInput {
+                    actor: email.clone(),
+                    action: "admin-auth.login-failed".to_string(),
+                    subject: "password".to_string(),
+                },
+            )
+            .await;
         return Err((StatusCode::UNAUTHORIZED, "invalid credentials".to_string()));
     }
+
+    let auth_method = if let Some((_, secret)) = storage
+        .fetch_admin_totp_secret(&email)
+        .await
+        .map_err(internal_error)?
+    {
+        let code = request
+            .totp_code
+            .as_deref()
+            .ok_or((StatusCode::UNAUTHORIZED, "missing TOTP code".to_string()))?;
+        if !totp::verify_code(&secret, code, totp::unix_time()) {
+            let _ = storage
+                .append_audit_event(
+                    &candidate.tenant_id,
+                    AuditEntryInput {
+                        actor: email.clone(),
+                        action: "admin-auth.totp-failed".to_string(),
+                        subject: "password".to_string(),
+                    },
+                )
+                .await;
+            return Err((StatusCode::UNAUTHORIZED, "invalid TOTP code".to_string()));
+        }
+        "password+totp"
+    } else {
+        "password"
+    };
 
     let token = Uuid::new_v4().to_string();
     storage
@@ -222,10 +266,20 @@ async fn login(
             &candidate.tenant_id,
             &email,
             admin_session_minutes(),
-            "password",
+            auth_method,
         )
         .await
         .map_err(internal_error)?;
+    let _ = storage
+        .append_audit_event(
+            &candidate.tenant_id,
+            AuditEntryInput {
+                actor: email.clone(),
+                action: "admin-auth.login-succeeded".to_string(),
+                subject: auth_method.to_string(),
+            },
+        )
+        .await;
     let admin = storage
         .fetch_admin_session(&token)
         .await
@@ -240,6 +294,18 @@ async fn login(
 
 async fn logout(State(storage): State<Storage>, headers: HeaderMap) -> ApiResult<HealthResponse> {
     if let Some(token) = bearer_token(&headers) {
+        if let Ok(Some(admin)) = storage.fetch_admin_session(&token).await {
+            let _ = storage
+                .append_audit_event(
+                    &admin.tenant_id,
+                    AuditEntryInput {
+                        actor: admin.email.clone(),
+                        action: "admin-auth.logout".to_string(),
+                        subject: admin.auth_method.clone(),
+                    },
+                )
+                .await;
+        }
         storage
             .delete_admin_session(&token)
             .await
@@ -253,6 +319,129 @@ async fn logout(State(storage): State<Storage>, headers: HeaderMap) -> ApiResult
 
 async fn me(State(storage): State<Storage>, headers: HeaderMap) -> ApiResult<AuthenticatedAdmin> {
     Ok(Json(require_admin(&storage, &headers, "dashboard").await?))
+}
+
+async fn admin_auth_factors(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<AdminAuthFactorsResponse> {
+    let admin = require_admin(&storage, &headers, "dashboard").await?;
+    let factors = storage
+        .fetch_admin_auth_factors(&admin.email)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(AdminAuthFactorsResponse { factors }))
+}
+
+async fn enroll_totp(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<EnrollTotpRequest>,
+) -> ApiResult<EnrollTotpResponse> {
+    let admin = require_admin(&storage, &headers, "dashboard").await?;
+    let dashboard = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?;
+    let label = request
+        .label
+        .unwrap_or_else(|| admin.display_name.clone())
+        .trim()
+        .to_string();
+    let secret = totp::generate_secret();
+    let factor_id = storage
+        .create_admin_auth_factor(NewAdminAuthFactor {
+            admin_email: admin.email.clone(),
+            factor_type: "totp".to_string(),
+            secret_ciphertext: secret.clone(),
+        })
+        .await
+        .map_err(internal_error)?;
+    let _ = storage
+        .append_audit_event(
+            &admin.tenant_id,
+            AuditEntryInput {
+                actor: admin.email.clone(),
+                action: "admin-auth.totp-enrollment-started".to_string(),
+                subject: factor_id.to_string(),
+            },
+        )
+        .await;
+    Ok(Json(EnrollTotpResponse {
+        factor_id,
+        secret: secret.clone(),
+        otpauth_url: totp::otpauth_url(
+            &dashboard.server_settings.primary_hostname,
+            &admin.email,
+            &label,
+            &secret,
+        ),
+    }))
+}
+
+async fn verify_totp_factor(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<VerifyTotpRequest>,
+) -> ApiResult<AdminAuthFactorsResponse> {
+    let admin = require_admin(&storage, &headers, "dashboard").await?;
+    let secret = storage
+        .fetch_pending_admin_factor_secret(&admin.email, request.factor_id)
+        .await
+        .map_err(internal_error)?
+        .ok_or((StatusCode::NOT_FOUND, "pending factor not found".to_string()))?;
+    if !totp::verify_code(&secret, &request.code, totp::unix_time()) {
+        return Err((StatusCode::UNAUTHORIZED, "invalid TOTP code".to_string()));
+    }
+    storage
+        .activate_admin_auth_factor(&admin.email, request.factor_id)
+        .await
+        .map_err(internal_error)?;
+    let _ = storage
+        .append_audit_event(
+            &admin.tenant_id,
+            AuditEntryInput {
+                actor: admin.email.clone(),
+                action: "admin-auth.totp-enrollment-verified".to_string(),
+                subject: request.factor_id.to_string(),
+            },
+        )
+        .await;
+    let factors = storage
+        .fetch_admin_auth_factors(&admin.email)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(AdminAuthFactorsResponse { factors }))
+}
+
+async fn revoke_admin_factor(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(factor_id): AxumPath<Uuid>,
+) -> ApiResult<AdminAuthFactorsResponse> {
+    let admin = require_admin(&storage, &headers, "dashboard").await?;
+    let revoked = storage
+        .revoke_admin_auth_factor(&admin.email, factor_id)
+        .await
+        .map_err(internal_error)?;
+    if !revoked {
+        return Err((StatusCode::NOT_FOUND, "factor not found".to_string()));
+    }
+    let _ = storage
+        .append_audit_event(
+            &admin.tenant_id,
+            AuditEntryInput {
+                actor: admin.email.clone(),
+                action: "admin-auth.factor-revoked".to_string(),
+                subject: factor_id.to_string(),
+            },
+        )
+        .await;
+    let factors = storage
+        .fetch_admin_auth_factors(&admin.email)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(AdminAuthFactorsResponse { factors }))
 }
 
 async fn oidc_metadata(State(storage): State<Storage>) -> ApiResult<OidcMetadataResponse> {
@@ -277,8 +466,9 @@ async fn oidc_start(
         .map_err(internal_error)?
         .security_settings;
     let public_origin = public_origin(&headers);
-    let authorization_url =
-        oidc::authorization_url(&settings, &public_origin).map_err(bad_request_error)?;
+    let authorization_url = oidc::authorization_url(&settings, &public_origin)
+        .await
+        .map_err(bad_request_error)?;
     Ok(Json(OidcStartResponse { authorization_url }))
 }
 
@@ -1642,6 +1832,29 @@ pub fn bootstrap_admin_request_from_env() -> anyhow::Result<BootstrapAdminReques
     })
 }
 
+pub fn bootstrap_admin_request_from_env_or_defaults() -> anyhow::Result<BootstrapAdminRequest> {
+    let email = env::var("LPE_BOOTSTRAP_ADMIN_EMAIL")
+        .unwrap_or_else(|_| "admin@example.test".to_string())
+        .trim()
+        .to_string();
+    let display_name = env::var("LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME")
+        .unwrap_or_else(|_| "Bootstrap Administrator".to_string())
+        .trim()
+        .to_string();
+    let password = env::var("LPE_BOOTSTRAP_ADMIN_PASSWORD")
+        .unwrap_or_else(|_| "ChangeMeNow$".to_string())
+        .trim()
+        .to_string();
+
+    validate_bootstrap_admin_request(&email, &display_name, &password)?;
+
+    Ok(BootstrapAdminRequest {
+        email,
+        display_name,
+        password,
+    })
+}
+
 pub async fn bootstrap_admin(
     storage: &Storage,
     request: BootstrapAdminRequest,
@@ -1782,7 +1995,8 @@ fn is_known_weak_secret(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        bootstrap_admin_request_from_env, integration_shared_secret,
+        bootstrap_admin_request_from_env, bootstrap_admin_request_from_env_or_defaults,
+        integration_shared_secret,
         validate_uploaded_pst_file_with_validator,
     };
     use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
@@ -1917,6 +2131,18 @@ mod tests {
         std::env::remove_var("LPE_BOOTSTRAP_ADMIN_EMAIL");
         std::env::remove_var("LPE_BOOTSTRAP_ADMIN_PASSWORD");
         std::env::remove_var("LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME");
+    }
+
+    #[test]
+    fn bootstrap_defaults_allow_first_login_secret() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("LPE_BOOTSTRAP_ADMIN_EMAIL");
+        std::env::remove_var("LPE_BOOTSTRAP_ADMIN_PASSWORD");
+        std::env::remove_var("LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME");
+
+        let request = bootstrap_admin_request_from_env_or_defaults().unwrap();
+        assert_eq!(request.email, "admin@example.test");
+        assert_eq!(request.password, "ChangeMeNow$");
     }
 }
 

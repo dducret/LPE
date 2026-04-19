@@ -1,12 +1,21 @@
 const feedback = document.getElementById("feedback");
+const loginFeedback = document.getElementById("login-feedback");
+const loginShell = document.getElementById("login-shell");
+const consoleShell = document.getElementById("console-shell");
 const configDrawer = document.getElementById("config-drawer");
 const drawerTitle = document.getElementById("drawer-title");
 const drawerSummary = document.getElementById("drawer-summary");
 const drawerPanels = Array.from(document.querySelectorAll(".drawer-panel"));
 const panelTriggers = Array.from(document.querySelectorAll("[data-open-panel]"));
+const AUTH_TOKEN_KEY = "lpeCtAdminToken";
+
+function authHeaders() {
+  const token = window.localStorage.getItem(AUTH_TOKEN_KEY);
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 async function fetchDashboard() {
-  const response = await fetch("/api/dashboard");
+  const response = await fetch("/api/dashboard", { headers: authHeaders() });
   if (!response.ok) {
     throw new Error(`dashboard request failed: ${response.status}`);
   }
@@ -16,7 +25,7 @@ async function fetchDashboard() {
 async function submitForm(path, payload, successMessage) {
   const response = await fetch(path, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(payload),
   });
 
@@ -50,6 +59,11 @@ function closeDrawer() {
 function showFeedback(message, isError) {
   feedback.textContent = message;
   feedback.className = isError ? "feedback error" : "feedback";
+}
+
+function showLoginFeedback(message, isError) {
+  loginFeedback.textContent = message;
+  loginFeedback.className = isError ? "feedback error" : "feedback";
 }
 
 function csvLines(text) {
@@ -168,10 +182,36 @@ async function load() {
   try {
     const dashboard = await fetchDashboard();
     render(dashboard);
+    loginShell.classList.add("hidden");
+    consoleShell.classList.remove("hidden");
     feedback.className = "feedback hidden";
   } catch (error) {
+    if (error instanceof Error && error.message.includes("401")) {
+      window.localStorage.removeItem(AUTH_TOKEN_KEY);
+      consoleShell.classList.add("hidden");
+      loginShell.classList.remove("hidden");
+      showLoginFeedback("Management authentication required.", true);
+      return;
+    }
     showFeedback(error instanceof Error ? error.message : "unknown error", true);
   }
+}
+
+async function loginAdmin() {
+  const form = document.getElementById("login-form");
+  const payload = Object.fromEntries(new FormData(form).entries());
+  const response = await fetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(`login request failed: ${response.status}`);
+  }
+  const body = await response.json();
+  window.localStorage.setItem(AUTH_TOKEN_KEY, body.token);
+  showLoginFeedback("Authenticated.", false);
+  await load();
 }
 
 document.getElementById("refresh").addEventListener("click", () => {
@@ -230,6 +270,13 @@ document.getElementById("policies-form").addEventListener("submit", (event) => {
 document.getElementById("updates-form").addEventListener("submit", (event) => {
   event.preventDefault();
   void submitForm("/api/updates", payloads.updates(), "Politique de mise a jour enregistree.");
+});
+
+document.getElementById("login-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void loginAdmin().catch((error) => {
+    showLoginFeedback(error instanceof Error ? error.message : "unknown error", true);
+  });
 });
 
 void load();

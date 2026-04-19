@@ -1,4 +1,8 @@
 use anyhow::{Context, Result};
+use argon2::{
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
@@ -16,6 +20,7 @@ use std::{
 };
 use tokio::net::TcpListener;
 use tracing::info;
+use uuid::Uuid;
 
 mod observability;
 mod smtp;
@@ -147,6 +152,12 @@ struct AuditEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct ManagementAuthState {
+    admin_email: String,
+    password_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct DashboardState {
     site: SiteProfile,
     relay: RelaySettings,
@@ -158,6 +169,7 @@ struct DashboardState {
     policies: PolicySettings,
     updates: UpdateSettings,
     queues: QueueMetrics,
+    management_auth: ManagementAuthState,
     audit: Vec<AuditEvent>,
 }
 
@@ -190,8 +202,33 @@ struct ReadinessResponse {
 #[derive(Clone)]
 struct AppState {
     store: Arc<Mutex<DashboardState>>,
+    sessions: Arc<Mutex<std::collections::BTreeMap<String, ManagementSession>>>,
     state_file: Arc<PathBuf>,
     spool_dir: Arc<PathBuf>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LoginRequest {
+    email: String,
+    password: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ManagementIdentity {
+    email: String,
+    auth_method: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct LoginResponse {
+    token: String,
+    admin: ManagementIdentity,
+}
+
+#[derive(Debug, Clone)]
+struct ManagementSession {
+    email: String,
+    auth_method: String,
 }
 
 #[tokio::main]
@@ -213,6 +250,7 @@ async fn main() -> Result<()> {
 
     let mut dashboard = load_or_initialize_state(&state_file)?;
     apply_env_overrides(&mut dashboard);
+    ensure_management_bootstrap(&mut dashboard)?;
     normalize_policy_settings(&mut dashboard.policies);
     dashboard.site.management_bind = bind_address.clone();
     dashboard.site.public_smtp_bind = smtp_bind_address.clone();
@@ -220,6 +258,7 @@ async fn main() -> Result<()> {
 
     let state = AppState {
         store: Arc::new(Mutex::new(dashboard)),
+        sessions: Arc::new(Mutex::new(std::collections::BTreeMap::new())),
         state_file: Arc::new(state_file),
         spool_dir: Arc::new(spool_dir),
     };
@@ -250,6 +289,9 @@ fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/health/live", get(health_live))
         .route("/health/ready", get(health_ready))
+        .route("/api/v1/auth/login", post(login))
+        .route("/api/v1/auth/logout", post(logout))
+        .route("/api/v1/auth/me", get(me))
         .route(
             "/metrics",
             get(|State(state): State<AppState>| async move {
@@ -343,7 +385,100 @@ async fn health_ready(State(state): State<AppState>) -> Result<Json<ReadinessRes
     }))
 }
 
-async fn dashboard(State(state): State<AppState>) -> Result<Json<DashboardState>, ApiError> {
+async fn login(
+    State(state): State<AppState>,
+    Json(payload): Json<LoginRequest>,
+) -> Result<Json<LoginResponse>, ApiError> {
+    let snapshot = read_state(&state)?;
+    let email = payload.email.trim().to_lowercase();
+    if email != snapshot.management_auth.admin_email.trim().to_lowercase()
+        || !verify_password(&snapshot.management_auth.password_hash, &payload.password)
+    {
+        observability::record_security_event("management_auth_failure");
+        append_audit_event_with_actor(
+            &state,
+            &email,
+            "management-login-failed",
+            "Invalid LPE-CT management credentials",
+        )?;
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "invalid management credentials",
+        ));
+    }
+
+    let token = Uuid::new_v4().to_string();
+    state
+        .sessions
+        .lock()
+        .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "session lock poisoned"))?
+        .insert(
+            token.clone(),
+            ManagementSession {
+                email: email.clone(),
+                auth_method: "password".to_string(),
+            },
+        );
+    append_audit_event_with_actor(
+        &state,
+        &email,
+        "management-login-succeeded",
+        "LPE-CT management session opened",
+    )?;
+
+    Ok(Json(LoginResponse {
+        token,
+        admin: ManagementIdentity {
+            email,
+            auth_method: "password".to_string(),
+        },
+    }))
+}
+
+async fn logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<HealthResponse>, ApiError> {
+    if let Some(token) = bearer_token(&headers) {
+        if let Some(session) = state
+            .sessions
+            .lock()
+            .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "session lock poisoned"))?
+            .remove(&token)
+        {
+            append_audit_event_with_actor(
+                &state,
+                &session.email,
+                "management-logout",
+                "LPE-CT management session closed",
+            )?;
+        }
+    }
+
+    Ok(Json(HealthResponse {
+        status: "ok".to_string(),
+        service: "lpe-ct".to_string(),
+        node_name: "management".to_string(),
+        role: "management".to_string(),
+    }))
+}
+
+async fn me(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<ManagementIdentity>, ApiError> {
+    let session = require_management_admin(&state, &headers)?;
+    Ok(Json(ManagementIdentity {
+        email: session.email,
+        auth_method: session.auth_method,
+    }))
+}
+
+async fn dashboard(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<DashboardState>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
     let mut snapshot = read_state(&state)?;
     snapshot.queues = smtp::queue_metrics(&state.spool_dir, snapshot.queues.upstream_reachable)
         .map_err(ApiError::from)?;
@@ -352,46 +487,56 @@ async fn dashboard(State(state): State<AppState>) -> Result<Json<DashboardState>
 
 async fn update_site(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<SiteProfile>,
 ) -> Result<Json<DashboardState>, ApiError> {
-    mutate_state(&state, "update-site", move |dashboard| {
+    let admin = require_management_admin(&state, &headers)?;
+    mutate_state(&state, &admin.email, "update-site", move |dashboard| {
         dashboard.site = payload;
     })
 }
 
 async fn update_relay(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<RelaySettings>,
 ) -> Result<Json<DashboardState>, ApiError> {
-    mutate_state(&state, "update-relay", move |dashboard| {
+    let admin = require_management_admin(&state, &headers)?;
+    mutate_state(&state, &admin.email, "update-relay", move |dashboard| {
         dashboard.relay = payload;
     })
 }
 
 async fn update_network(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<NetworkSettings>,
 ) -> Result<Json<DashboardState>, ApiError> {
-    mutate_state(&state, "update-network", move |dashboard| {
+    let admin = require_management_admin(&state, &headers)?;
+    mutate_state(&state, &admin.email, "update-network", move |dashboard| {
         dashboard.network = payload;
     })
 }
 
 async fn update_policies(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(mut payload): Json<PolicySettings>,
 ) -> Result<Json<DashboardState>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
     normalize_policy_settings(&mut payload);
-    mutate_state(&state, "update-policies", move |dashboard| {
+    mutate_state(&state, &admin.email, "update-policies", move |dashboard| {
         dashboard.policies = payload;
     })
 }
 
 async fn update_updates(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<UpdateSettings>,
 ) -> Result<Json<DashboardState>, ApiError> {
-    mutate_state(&state, "update-updates", move |dashboard| {
+    let admin = require_management_admin(&state, &headers)?;
+    mutate_state(&state, &admin.email, "update-updates", move |dashboard| {
         dashboard.updates = payload;
     })
 }
@@ -426,6 +571,7 @@ async fn outbound_handoff(
 
 fn mutate_state<F>(
     state: &AppState,
+    actor: &str,
     action: &str,
     update: F,
 ) -> Result<Json<DashboardState>, ApiError>
@@ -437,7 +583,7 @@ where
         .lock()
         .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))?;
     update(&mut guard);
-    append_audit_event(&mut guard, action);
+    append_dashboard_audit_event(&mut guard, actor, action);
     persist_state(&state.state_file, &guard)?;
     Ok(Json(guard.clone()))
 }
@@ -450,17 +596,41 @@ fn read_state(state: &AppState) -> Result<DashboardState, ApiError> {
         .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))
 }
 
-fn append_audit_event(state: &mut DashboardState, action: &str) {
+fn append_dashboard_audit_event(state: &mut DashboardState, actor: &str, action: &str) {
     state.audit.insert(
         0,
         AuditEvent {
             timestamp: current_timestamp(),
-            actor: "management-ui".to_string(),
+            actor: actor.to_string(),
             action: action.to_string(),
             details: "DMZ sorting center configuration updated".to_string(),
         },
     );
     state.audit.truncate(12);
+}
+
+fn append_audit_event_with_actor(
+    state: &AppState,
+    actor: &str,
+    action: &str,
+    details: &str,
+) -> Result<(), ApiError> {
+    let mut guard = state
+        .store
+        .lock()
+        .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))?;
+    guard.audit.insert(
+        0,
+        AuditEvent {
+            timestamp: current_timestamp(),
+            actor: actor.to_string(),
+            action: action.to_string(),
+            details: details.to_string(),
+        },
+    );
+    guard.audit.truncate(12);
+    persist_state(&state.state_file, &guard)?;
+    Ok(())
 }
 
 fn load_or_initialize_state(path: &Path) -> Result<DashboardState> {
@@ -579,6 +749,36 @@ fn parse_bool(value: &str) -> bool {
     )
 }
 
+fn ensure_management_bootstrap(state: &mut DashboardState) -> Result<()> {
+    let admin_email = env::var("LPE_CT_BOOTSTRAP_ADMIN_EMAIL")
+        .unwrap_or_else(|_| "admin@example.test".to_string())
+        .trim()
+        .to_lowercase();
+    let password = env::var("LPE_CT_BOOTSTRAP_ADMIN_PASSWORD")
+        .unwrap_or_else(|_| "ChangeMeNow$".to_string());
+
+    if state.management_auth.admin_email.trim().is_empty()
+        || state.management_auth.password_hash.trim().is_empty()
+    {
+        state.management_auth = ManagementAuthState {
+            admin_email: admin_email.clone(),
+            password_hash: hash_password(password.trim())?,
+        };
+        state.audit.insert(
+            0,
+            AuditEvent {
+                timestamp: current_timestamp(),
+                actor: "system".to_string(),
+                action: "seed-management-admin".to_string(),
+                details: format!("Bootstrap LPE-CT management admin prepared for {admin_email}"),
+            },
+        );
+        state.audit.truncate(12);
+    }
+
+    Ok(())
+}
+
 fn parse_csv(value: &str) -> Vec<String> {
     value
         .split(',')
@@ -675,6 +875,10 @@ fn default_state() -> DashboardState {
             held_messages: 0,
             delivery_attempts_last_hour: 0,
             upstream_reachable: true,
+        },
+        management_auth: ManagementAuthState {
+            admin_email: String::new(),
+            password_hash: String::new(),
         },
         audit: vec![
             AuditEvent {
@@ -887,6 +1091,32 @@ impl axum::response::IntoResponse for ApiError {
     }
 }
 
+fn require_management_admin(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<ManagementSession, ApiError> {
+    let token = bearer_token(headers)
+        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "missing bearer token"))?;
+    let session = state
+        .sessions
+        .lock()
+        .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "session lock poisoned"))?
+        .get(&token)
+        .cloned()
+        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "invalid management session"))?;
+    Ok(session)
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
 fn require_integration_key(headers: &HeaderMap) -> Result<(), ApiError> {
     let provided = headers
         .get("x-lpe-integration-key")
@@ -926,6 +1156,26 @@ pub(crate) fn integration_shared_secret() -> Result<String> {
         anyhow::bail!("LPE_INTEGRATION_SHARED_SECRET uses a forbidden weak placeholder value");
     }
     Ok(trimmed)
+}
+
+fn hash_password(password: &str) -> Result<String> {
+    let salt = SaltString::encode_b64(Uuid::new_v4().as_bytes())
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    Ok(Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .map_err(|error| anyhow::anyhow!(error.to_string()))?
+        .to_string())
+}
+
+fn verify_password(password_hash: &str, password: &str) -> bool {
+    PasswordHash::new(password_hash)
+        .ok()
+        .and_then(|parsed| {
+            Argon2::default()
+                .verify_password(password.as_bytes(), &parsed)
+                .ok()
+        })
+        .is_some()
 }
 
 fn is_known_weak_secret(value: &str) -> bool {

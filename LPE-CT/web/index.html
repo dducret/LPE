@@ -7,7 +7,26 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <main class="shell">
+    <section id="login-shell" class="shell login-shell">
+      <section class="panel login-card">
+        <p class="eyebrow">La Poste Electronique</p>
+        <h1>LPE-CT Management Login</h1>
+        <p class="sidebar-copy">
+          First access uses the bootstrap administrator. Change the bootstrap secret in deployment
+          configuration after initial validation.
+        </p>
+        <form id="login-form" class="form-panel">
+          <div class="fields">
+            <label><span>Admin email</span><input name="email" value="admin@example.test" required /></label>
+            <label><span>Password</span><input name="password" type="password" required /></label>
+          </div>
+          <button class="primary-button" type="submit">Sign in</button>
+        </form>
+        <p id="login-feedback" class="feedback hidden"></p>
+      </section>
+    </section>
+
+    <main id="console-shell" class="shell hidden">
       <aside class="sidebar">
         <div class="sidebar-stack">
           <div>

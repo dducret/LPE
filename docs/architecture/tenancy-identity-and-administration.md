@@ -43,7 +43,7 @@ Le scope initial reste volontairement limite:
 - le login des comptes mailbox reste base sur mot de passe en v1
 - `ManageSieve` reutilise le meme login de compte mailbox et n'introduit pas d'identite distincte
 - aucun mode passwordless-only n'est requis en v1
-- la base reserve deja des facteurs d'authentification pour une prise en charge future de `TOTP`
+- les facteurs admin supportent maintenant un premier `TOTP` pour le login mot de passe
 
 ### Federation admin MVP
 
@@ -73,11 +73,23 @@ Les roles integres fournissent des permissions par defaut, tandis que des permis
 
 Le login mot de passe et le login `OIDC` resolvent tous deux vers le meme modele interne de role et de permissions.
 
-### Preparation MFA
+### MFA admin MVP
 
-Le modele d'authentification enregistre maintenant la methode d'authentification utilisee par chaque session admin et reserve une table dediee aux facteurs d'authentification admin.
+Le modele d'authentification enregistre maintenant la methode d'authentification utilisee par chaque session admin et supporte un premier cycle de vie des facteurs admin.
 
-Il s'agit uniquement d'une preparation. `TOTP`, recovery codes, step-up policies et UX d'enrolement restent du travail futur.
+Le scope courant couvre:
+
+- enrolement `TOTP` admin par API
+- verification du facteur avant activation
+- verification `TOTP` au login mot de passe quand un facteur actif existe
+- revocation du facteur
+- journalisation des connexions admin et des actions sur les facteurs
+
+Restent hors scope:
+
+- recovery codes
+- step-up policies
+- `TOTP` ajoute au login `OIDC`
 
 ### Pattern d'administration
 
@@ -132,7 +144,7 @@ The initial scope stays intentionally limited:
 - mailbox-account login remains password-based in v1
 - `ManageSieve` reuses the same mailbox-account login and does not introduce a separate identity surface
 - no passwordless-only mode is required in v1
-- the database already reserves authentication-factor records for later `TOTP` support
+- administrator factors now support a first `TOTP` flow for password login
 
 ### Federated admin MVP
 
@@ -162,11 +174,23 @@ Built-in roles provide default permissions, while explicit permissions may be ad
 
 Password login and `OIDC` login both resolve to the same internal role and permission model.
 
-### MFA preparation
+### Admin MFA MVP
 
-The authentication model now records the authentication method used by each admin session and reserves a dedicated table for administrator authentication factors.
+The authentication model now records the authentication method used by each admin session and now supports a first administrator-factor lifecycle.
 
-This is only a preparation step. `TOTP`, recovery codes, step-up policies, and enrollment UX remain future work.
+The current scope covers:
+
+- admin `TOTP` enrollment through the API
+- factor verification before activation
+- `TOTP` verification during password login when an active factor exists
+- factor revocation
+- audit logging for admin sign-ins and factor actions
+
+Still out of scope:
+
+- recovery codes
+- step-up policies
+- `TOTP` layered on the current `OIDC` flow
 
 ### Administration pattern
 

@@ -8,6 +8,7 @@ description = "DMZ sorting center management plane for LPE"
 
 [dependencies]
 anyhow = "1.0"
+argon2 = "0.5"
 axum = "0.8"
 base64 = "0.22"
 email-auth = "0.1.2"

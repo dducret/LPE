@@ -44,8 +44,11 @@ cargo run --manifest-path LPE-CT/Cargo.toml
 - trace detaillee des decisions de perimeterie dans les fichiers JSON du spool
 - mode drainage qui accepte les messages et les place en `held`
 - metriques de files exposees dans le dashboard de management
+- login de management local avec session `Bearer` pour proteger le dashboard et les modifications
 
 Par defaut, l'API ecoute sur `127.0.0.1:8380`, le SMTP ecoute sur `0.0.0.0:25`, l'etat est persiste dans `LPE_CT_STATE_FILE` et le spool dans `LPE_CT_SPOOL_DIR`.
+
+Le premier acces de management peut utiliser `admin@example.test` avec `ChangeMeNow$` si aucune credentielle de management n'est encore presente dans l'etat local. En production, ce bootstrap doit etre remplace immediatement.
 
 Pour un test sans privilege port 25:
 
@@ -69,6 +72,8 @@ systemctl restart lpe-ct.service
 
 Configurer au minimum:
 
+- `LPE_CT_BOOTSTRAP_ADMIN_EMAIL`, par defaut `admin@example.test`
+- `LPE_CT_BOOTSTRAP_ADMIN_PASSWORD`, par defaut `ChangeMeNow$`
 - `LPE_CT_SMTP_BIND_ADDRESS`, par defaut `0.0.0.0:25`
 - `LPE_CT_CORE_DELIVERY_BASE_URL`, par exemple `http://10.20.0.20:8080`
 - `LPE_CT_RELAY_PRIMARY`, par exemple `smtp://10.20.0.12:2525`
@@ -147,8 +152,11 @@ cargo run --manifest-path LPE-CT/Cargo.toml
 - detailed perimeter-decision trace persisted in spool JSON files
 - drain mode that accepts messages and places them in `held`
 - queue metrics exposed in the management dashboard
+- local management login with `Bearer` session protection for dashboard reads and updates
 
 By default, the API listens on `127.0.0.1:8380`, SMTP listens on `0.0.0.0:25`, state is persisted in `LPE_CT_STATE_FILE`, and the spool is stored in `LPE_CT_SPOOL_DIR`.
+
+The first management access may use `admin@example.test` with `ChangeMeNow$` when no management credential is present yet in local state. In production that bootstrap secret must be replaced immediately.
 
 For a non-privileged port 25 test:
 
@@ -172,6 +180,8 @@ systemctl restart lpe-ct.service
 
 Configure at least:
 
+- `LPE_CT_BOOTSTRAP_ADMIN_EMAIL`, default `admin@example.test`
+- `LPE_CT_BOOTSTRAP_ADMIN_PASSWORD`, default `ChangeMeNow$`
 - `LPE_CT_SMTP_BIND_ADDRESS`, default `0.0.0.0:25`
 - `LPE_CT_CORE_DELIVERY_BASE_URL`, for example `http://10.20.0.20:8080`
 - `LPE_CT_RELAY_PRIMARY`, for example `smtp://10.20.0.12:2525`

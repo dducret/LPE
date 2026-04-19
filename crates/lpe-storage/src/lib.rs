@@ -162,6 +162,15 @@ pub struct AuthenticatedAdmin {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct AdminAuthFactor {
+    pub id: Uuid,
+    pub factor_type: String,
+    pub status: String,
+    pub created_at: String,
+    pub verified_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ServerSettings {
     pub primary_hostname: String,
     pub admin_bind_address: String,
@@ -352,6 +361,13 @@ pub struct AdminOidcClaims {
     pub subject: String,
     pub email: String,
     pub display_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewAdminAuthFactor {
+    pub admin_email: String,
+    pub factor_type: String,
+    pub secret_ciphertext: String,
 }
 
 #[derive(Debug, Clone)]
@@ -974,6 +990,16 @@ struct AuthenticatedAdminRow {
     permissions_json: Option<String>,
     auth_method: String,
     expires_at: String,
+}
+
+#[derive(Debug, FromRow)]
+struct AdminAuthFactorRow {
+    id: Uuid,
+    factor_type: String,
+    status: String,
+    created_at: String,
+    verified_at: Option<String>,
+    secret_ciphertext: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -1863,6 +1889,187 @@ impl Storage {
         .execute(&self.pool)
         .await?;
 
+        Ok(())
+    }
+
+    pub async fn create_admin_auth_factor(&self, input: NewAdminAuthFactor) -> Result<Uuid> {
+        let admin_email = normalize_email(&input.admin_email);
+        let tenant_id = self.tenant_id_for_admin_email(&admin_email).await?;
+        let factor_id = Uuid::new_v4();
+
+        sqlx::query(
+            r#"
+            INSERT INTO admin_auth_factors (
+                id, tenant_id, admin_email, factor_type, status, secret_ciphertext
+            )
+            VALUES ($1, $2, $3, $4, 'pending', $5)
+            "#,
+        )
+        .bind(factor_id)
+        .bind(&tenant_id)
+        .bind(admin_email)
+        .bind(input.factor_type.trim().to_lowercase())
+        .bind(input.secret_ciphertext)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(factor_id)
+    }
+
+    pub async fn fetch_admin_auth_factors(
+        &self,
+        admin_email: &str,
+    ) -> Result<Vec<AdminAuthFactor>> {
+        let admin_email = normalize_email(admin_email);
+        let tenant_id = self.tenant_id_for_admin_email(&admin_email).await?;
+        let rows = sqlx::query_as::<_, AdminAuthFactorRow>(
+            r#"
+            SELECT
+                id,
+                factor_type,
+                status,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                CASE
+                    WHEN verified_at IS NULL THEN NULL
+                    ELSE to_char(verified_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS verified_at,
+                secret_ciphertext
+            FROM admin_auth_factors
+            WHERE tenant_id = $1 AND lower(admin_email) = lower($2)
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(admin_email)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| AdminAuthFactor {
+                id: row.id,
+                factor_type: row.factor_type,
+                status: row.status,
+                created_at: row.created_at,
+                verified_at: row.verified_at,
+            })
+            .collect())
+    }
+
+    pub async fn fetch_admin_totp_secret(&self, admin_email: &str) -> Result<Option<(Uuid, String)>> {
+        let admin_email = normalize_email(admin_email);
+        let tenant_id = self.tenant_id_for_admin_email(&admin_email).await?;
+        let row = sqlx::query_as::<_, AdminAuthFactorRow>(
+            r#"
+            SELECT
+                id,
+                factor_type,
+                status,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                CASE
+                    WHEN verified_at IS NULL THEN NULL
+                    ELSE to_char(verified_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS verified_at,
+                secret_ciphertext
+            FROM admin_auth_factors
+            WHERE tenant_id = $1
+              AND lower(admin_email) = lower($2)
+              AND factor_type = 'totp'
+              AND status = 'active'
+            ORDER BY verified_at DESC NULLS LAST, created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(admin_email)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.and_then(|row| row.secret_ciphertext.map(|secret| (row.id, secret))))
+    }
+
+    pub async fn fetch_pending_admin_factor_secret(
+        &self,
+        admin_email: &str,
+        factor_id: Uuid,
+    ) -> Result<Option<String>> {
+        let admin_email = normalize_email(admin_email);
+        let tenant_id = self.tenant_id_for_admin_email(&admin_email).await?;
+        sqlx::query_scalar(
+            r#"
+            SELECT secret_ciphertext
+            FROM admin_auth_factors
+            WHERE tenant_id = $1
+              AND lower(admin_email) = lower($2)
+              AND id = $3
+              AND status = 'pending'
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(admin_email)
+        .bind(factor_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    pub async fn activate_admin_auth_factor(
+        &self,
+        admin_email: &str,
+        factor_id: Uuid,
+    ) -> Result<bool> {
+        let admin_email = normalize_email(admin_email);
+        let tenant_id = self.tenant_id_for_admin_email(&admin_email).await?;
+        let updated = sqlx::query(
+            r#"
+            UPDATE admin_auth_factors
+            SET status = 'active', verified_at = NOW()
+            WHERE tenant_id = $1
+              AND lower(admin_email) = lower($2)
+              AND id = $3
+              AND status = 'pending'
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(admin_email)
+        .bind(factor_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(updated.rows_affected() > 0)
+    }
+
+    pub async fn revoke_admin_auth_factor(
+        &self,
+        admin_email: &str,
+        factor_id: Uuid,
+    ) -> Result<bool> {
+        let admin_email = normalize_email(admin_email);
+        let tenant_id = self.tenant_id_for_admin_email(&admin_email).await?;
+        let updated = sqlx::query(
+            r#"
+            UPDATE admin_auth_factors
+            SET status = 'revoked'
+            WHERE tenant_id = $1
+              AND lower(admin_email) = lower($2)
+              AND id = $3
+              AND status IN ('pending', 'active')
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(admin_email)
+        .bind(factor_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(updated.rows_affected() > 0)
+    }
+
+    pub async fn append_audit_event(&self, tenant_id: &str, audit: AuditEntryInput) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        self.insert_audit(&mut tx, tenant_id, audit).await?;
+        tx.commit().await?;
         Ok(())
     }
 

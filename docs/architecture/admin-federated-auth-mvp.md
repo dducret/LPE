@@ -4,35 +4,38 @@
 
 ### Objectif
 
-Ce document decrit la premiere brique d'authentification federée et d'`IAM` moderne pour le back office `LPE`.
+Ce document decrit le MVP actuel d'authentification admin moderne pour `LPE`.
 
-Le scope concerne uniquement le plan d'administration coeur `LPE`.
+Le scope reste borne au plan d'administration coeur `LPE`.
 
 ### Objectifs du MVP
 
-- ajouter un login `OIDC` sans casser l'authentification actuelle par mot de passe
-- conserver la separation des roles admin serveur / tenant / domaine / support / compliance / operations
-- structurer les permissions d'administration avec des identifiants normalises
-- preparer la base de donnees pour des facteurs additionnels comme `TOTP`
+- supporter un login admin local robuste
+- supporter un login `OIDC` admin mieux integre
+- conserver l'autorisation strictement interne a `LPE`
+- garder les roles et permissions admin structures
+- fournir un premier `TOTP` admin exploitable pour le login mot de passe
+- journaliser les connexions admin et le cycle de vie des facteurs
 
 ### Hors scope du MVP
 
 - federation des comptes mailbox utilisateur
-- provisioning automatique d'administrateurs depuis l'`IdP`
-- synchronisation de groupes ou de roles depuis l'`IdP`
+- provisioning automatique des administrateurs depuis l'`IdP`
+- synchronisation des groupes ou roles depuis l'`IdP`
 - validation locale avancee des `ID Token`
 - `PKCE` obligatoire
-- enforcement `MFA`
-- UX d'enrolement `TOTP`
+- enforcement `MFA` generalise pour tous les admins
+- recovery codes
+- `TOTP` ajoute au flux `OIDC`
 
-### Flux actuel
+### Flux `OIDC`
 
-Le flux actuel est un `OIDC` authorization code flow confidentiel:
+Le flux `OIDC` reste un `authorization code flow` confidentiel:
 
 1. l'administrateur ouvre la console
-2. `LPE` expose des metadonnees `OIDC` minimales au frontend
-3. le frontend demande une URL d'autorisation a l'API
-4. l'API signe un `state` contenant l'origine publique et un horodatage
+2. le frontend demande l'URL d'autorisation a l'API
+3. l'API signe un `state` avec callback attendu et horodatage
+4. `LPE` utilise les endpoints configures ou resout `/.well-known/openid-configuration` a partir de l'issuer si seuls l'issuer et les secrets sont fournis
 5. l'utilisateur s'authentifie chez l'`IdP`
 6. l'`IdP` redirige vers le callback `LPE`
 7. `LPE` echange le `code` contre un jeton d'acces
@@ -40,84 +43,76 @@ Le flux actuel est un `OIDC` authorization code flow confidentiel:
 9. `LPE` rattache l'identite federée a un administrateur existant
 10. `LPE` cree une session admin interne avec la methode `oidc`
 
+### Flux mot de passe admin
+
+Le flux mot de passe admin est maintenant:
+
+1. l'administrateur soumet email et mot de passe
+2. `LPE` verifie le credential local `argon2`
+3. si un facteur `TOTP` actif existe pour cet administrateur, un code `TOTP` valide est exige
+4. `LPE` cree une session admin interne avec la methode `password` ou `password+totp`
+5. `LPE` journalise succes et echec dans l'audit interne
+
 ### Regles d'autorisation
 
 Le fournisseur `OIDC` authentifie l'identite. L'autorisation reste entierement dans `LPE`.
 
-Les regles actuelles sont:
+Les regles du MVP sont:
 
 - un login federé doit correspondre a un administrateur `LPE` existant
 - si l'auto-link est desactive, seul un rattachement deja enregistre `issuer + subject` est accepte
-- si l'auto-link est active, `LPE` peut rattacher automatiquement un identifiant federé a un administrateur deja cree ayant la meme adresse email
+- si l'auto-link est active, `LPE` peut rattacher automatiquement une identite federée a un administrateur deja cree ayant la meme adresse email
 - aucun administrateur n'est cree automatiquement depuis l'`IdP`
 - les roles et permissions `LPE` restent la source de verite
 
-### Modele de permissions
+### `TOTP` admin MVP
 
-Le MVP introduit une normalisation des permissions admin:
+Le MVP implemente maintenant:
 
-- chaque administrateur conserve un role principal
-- les permissions sont stockees sous forme structuree
-- les roles integres fournissent un ensemble de permissions par defaut
-- des permissions explicites peuvent etre ajoutees pour des cas d'exception
+- enrolement `TOTP` admin par API
+- verification initiale du facteur avant activation
+- verification du code au login mot de passe quand un facteur actif existe
+- revocation d'un facteur admin
+- journalisation des evenements d'enrolement, verification, revocation et login
 
-Exemples de permissions normalisees:
+### Limites actuelles
 
-- `dashboard`
-- `domains`
-- `accounts`
-- `aliases`
-- `admins`
-- `policies`
-- `security`
-- `audit`
-- `mail`
-- `operations`
-- `protocols`
+- pas de recovery codes
+- pas de `step-up`
+- pas d'enforcement `TOTP` sur le flux `OIDC`
+- le secret `TOTP` est stocke tel quel dans la base MVP et doit etre traite comme une donnee sensible
 
-Le role `server-admin` conserve la permission globale `*`.
-
-### Preparation MFA
-
-Le schema reserve maintenant:
-
-- la methode d'authentification de la session admin
-- une table dediee aux facteurs d'authentification admin
-
-Cette base servira plus tard a:
-
-- `TOTP`
-- recovery codes
-- politiques de step-up
-- exigence differenciee selon le role ou la permission
-
-### Contraintes de securite actuelles
+### Contraintes de securite
 
 - le mot de passe admin local reste supporte pour bootstrap et recuperation
+- le bootstrap local peut utiliser `admin@example.test` avec `ChangeMeNow$` pour le premier acces operationnel
+- ce secret de bootstrap doit etre remplace immediatement en environnement reel
 - le callback `OIDC` doit etre aligne avec l'origine publique reelle
 - les secrets `OIDC` restent configures cote serveur
-- le flux repose sur `userinfo` pour le MVP et devra etre durci avant une generalisation plus large
+- le flux `OIDC` repose encore sur `userinfo` pour ce MVP
 
 ### Licences et dependances
 
 Le MVP n'introduit pas de bibliotheque `OIDC` additionnelle.
 
-L'implementation reutilise des dependances deja presentes dans le workspace, ce qui evite d'ajouter une exception de licence supplementaire pour cette premiere brique.
+L'implementation reutilise les dependances deja presentes dans le workspace. Le `TOTP` est calcule sans ajouter une nouvelle dependance de federation.
 
 ## English
 
 ### Goal
 
-This document describes the first federated-authentication and modern `IAM` building block for the `LPE` administration back office.
+This document describes the current modern admin-authentication MVP for `LPE`.
 
-The scope only covers the core `LPE` administration plane.
+The scope remains limited to the core `LPE` administration plane.
 
 ### MVP goals
 
-- add `OIDC` login without breaking the current password-based authentication
-- preserve the separation between server-admin / tenant / domain / support / compliance / operations roles
-- structure administration permissions around normalized identifiers
-- prepare the database for additional factors such as `TOTP`
+- support a robust local admin login
+- support a better integrated admin `OIDC` login
+- keep authorization strictly internal to `LPE`
+- preserve structured admin roles and permissions
+- provide a first usable admin `TOTP` flow for password login
+- audit admin sign-ins and factor lifecycle actions
 
 ### Out of scope for the MVP
 
@@ -126,17 +121,18 @@ The scope only covers the core `LPE` administration plane.
 - group or role synchronization from the `IdP`
 - advanced local `ID Token` validation
 - mandatory `PKCE`
-- `MFA` enforcement
-- `TOTP` enrollment UX
+- broad mandatory `MFA` enforcement for all admins
+- recovery codes
+- `TOTP` layered on top of `OIDC`
 
-### Current flow
+### `OIDC` flow
 
-The current flow is a confidential `OIDC` authorization code flow:
+The `OIDC` flow remains a confidential authorization code flow:
 
 1. the administrator opens the console
-2. `LPE` exposes minimal `OIDC` metadata to the frontend
-3. the frontend asks the API for an authorization URL
-4. the API signs a `state` containing the public origin and a timestamp
+2. the frontend asks the API for the authorization URL
+3. the API signs a `state` with the expected callback and timestamp
+4. `LPE` uses configured endpoints or resolves `/.well-known/openid-configuration` from the issuer when only issuer metadata and secrets are provided
 5. the user authenticates with the `IdP`
 6. the `IdP` redirects back to the `LPE` callback
 7. `LPE` exchanges the `code` for an access token
@@ -144,11 +140,21 @@ The current flow is a confidential `OIDC` authorization code flow:
 9. `LPE` binds the federated identity to an existing administrator
 10. `LPE` creates an internal admin session with auth method `oidc`
 
+### Admin password flow
+
+The admin password flow is now:
+
+1. the administrator submits email and password
+2. `LPE` verifies the local `argon2` credential
+3. when an active admin `TOTP` factor exists, a valid `TOTP` code is required
+4. `LPE` creates an internal admin session with auth method `password` or `password+totp`
+5. `LPE` records success and failure in the internal audit log
+
 ### Authorization rules
 
-The `OIDC` provider authenticates the identity. Authorization stays entirely inside `LPE`.
+The `OIDC` provider authenticates the identity. Authorization remains entirely inside `LPE`.
 
-The current rules are:
+The MVP rules are:
 
 - a federated login must match an existing `LPE` administrator
 - when auto-link is disabled, only an already registered `issuer + subject` mapping is accepted
@@ -156,54 +162,34 @@ The current rules are:
 - no administrator is automatically created from the `IdP`
 - `LPE` roles and permissions remain the source of truth
 
-### Permission model
+### Admin `TOTP` MVP
 
-The MVP introduces normalized admin permissions:
+The MVP now implements:
 
-- each administrator still has a primary role
-- permissions are stored in structured form
-- built-in roles provide default permission sets
-- explicit permissions may be added for exceptional delegations
+- admin `TOTP` enrollment through the API
+- initial factor verification before activation
+- `TOTP` verification during password login when an active factor exists
+- factor revocation
+- audit logging for enrollment, verification, revocation, and sign-in events
 
-Examples of normalized permissions are:
+### Current limits
 
-- `dashboard`
-- `domains`
-- `accounts`
-- `aliases`
-- `admins`
-- `policies`
-- `security`
-- `audit`
-- `mail`
-- `operations`
-- `protocols`
+- no recovery codes
+- no step-up policies
+- no `TOTP` enforcement on the `OIDC` flow
+- the MVP stores the `TOTP` secret as-is in the database and treats it as sensitive data
 
-The `server-admin` role keeps the global `*` permission.
-
-### MFA preparation
-
-The schema now reserves:
-
-- the authentication method used by an admin session
-- a dedicated table for administrator authentication factors
-
-This foundation is intended for later:
-
-- `TOTP`
-- recovery codes
-- step-up policies
-- differentiated requirements by role or permission
-
-### Current security constraints
+### Security constraints
 
 - local admin password login remains supported for bootstrap and recovery
+- bootstrap may use `admin@example.test` with `ChangeMeNow$` for the first operational sign-in
+- that bootstrap secret must be changed immediately in real deployments
 - the `OIDC` callback must match the real public origin
-- `OIDC` secrets stay server-side
-- the flow currently relies on `userinfo` for the MVP and should be hardened before broader rollout
+- `OIDC` secrets remain server-side
+- the current `OIDC` flow still relies on `userinfo` for this MVP
 
 ### Licensing and dependencies
 
 The MVP does not introduce an additional `OIDC` library.
 
-The implementation reuses dependencies that are already present in the workspace, which avoids adding another license exception for this first building block.
+The implementation reuses dependencies already present in the workspace. `TOTP` is computed without introducing a new federation dependency.

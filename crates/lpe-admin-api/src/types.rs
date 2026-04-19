@@ -1,5 +1,5 @@
 use axum::{http::StatusCode, Json};
-use lpe_storage::{AuthenticatedAccount, AuthenticatedAdmin};
+use lpe_storage::{AdminAuthFactor, AuthenticatedAccount, AuthenticatedAdmin};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -75,6 +75,34 @@ pub struct ClientLoginResponse {
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
+    pub totp_code: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminAuthFactorsResponse {
+    pub factors: Vec<AdminAuthFactor>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollTotpRequest {
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollTotpResponse {
+    pub factor_id: Uuid,
+    pub secret: String,
+    pub otpauth_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyTotpRequest {
+    pub factor_id: Uuid,
+    pub code: String,
 }
 
 #[derive(Debug, Deserialize)]
