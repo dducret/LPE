@@ -60,6 +60,7 @@ The important non-negotiable rules are:
 - `docs/architecture/jmap-contacts-calendars-mvp.md`
 - `docs/architecture/activesync-mvp.md`
 - `docs/architecture/imap-mvp.md`
+- `docs/architecture/sieve-managesieve-mvp.md`
 - `docs/architecture/dav-mvp.md`
 - `docs/architecture/tasks-mvp.md`
 

@@ -26,6 +26,8 @@ Cela implique que tout envoi realise via un protocole client supporte, notamment
 
 Les taches/to-do doivent suivre la meme regle: un seul modele canonique de taches dans `LPE`, stocke en base, puis reutilise plus tard par `JMAP Tasks`, `DAV` et les couches mobiles sans modele metier parallele.
 
+Les regles mailbox `Sieve` suivent la meme logique. Les scripts sont stockes par compte dans `LPE`, administres par `ManageSieve`, puis executes a la remise finale entrante dans le coeur `LPE` sans deplacer les politiques de bord du centre de tri ni introduire un moteur de routage parallele.
+
 Le modele de soumission initial est transactionnel cote coeur `LPE` et expose par l'API `/api/mail/messages/submit`:
 
 1. verifier le compte emetteur
@@ -60,6 +62,8 @@ Tout fichier entrant via connexion externe ou via un client doit etre valide par
 Le MVP `JMAP Mail` actuellement implemente dans `lpe-jmap` est aligne sur cette regle. `EmailSubmission/set` ne parle pas `SMTP`; il reutilise la soumission canonique existante apres lecture d'un brouillon persiste. `Mailbox/get`, `Email/query` et `Email/get` lisent la projection canonique sans reinjecter `Bcc` dans la recherche standard. Le scope supporte est detaille dans `docs/architecture/jmap-mail-mvp.md`.
 
 Le MVP `IMAP` actuellement implemente dans `lpe-imap` suit la meme regle. `LOGIN`, `LIST`, `SELECT`, `FETCH`, `STORE`, `SEARCH` et `UID` lisent et modifient l'etat canonique des mailboxes, tandis que `APPEND` est limite a `Drafts` et reutilise la persistance canonique des brouillons sans logique parallele de `Sent`, `Drafts` ou `Outbox`. Le scope supporte est detaille dans `docs/architecture/imap-mvp.md`.
+
+Le MVP `Sieve` / `ManageSieve` actuellement implemente suit aussi cette regle. `ManageSieve` gere seulement les scripts stockes par compte; l'execution se produit a la remise finale entrante et reste bornee a des actions mailbox `fileinto`, `discard`, `redirect` et `vacation`. `redirect` et `vacation` reutilisent la soumission canonique `LPE` et le relais sortant via `LPE-CT`, sans moteur de transport parallele. Le scope supporte est detaille dans `docs/architecture/sieve-managesieve-mvp.md`.
 
 Le MVP `ActiveSync` actuellement implemente dans `lpe-activesync` est aligne sur la meme regle. `Provision`, `FolderSync`, `Sync` et `SendMail` sont implementes comme un adaptateur au-dessus de la meme authentification compte, de la meme persistance des brouillons, de la meme synchronisation mailbox et du meme modele canonique de soumission. `SendMail` ne contourne ni le workflow mailbox du coeur `LPE`, ni `LPE-CT`; il reutilise la soumission canonique pour que la copie autoritative `Sent` existe avant le relais sortant. Le scope supporte est detaille dans `docs/architecture/activesync-mvp.md`.
 
@@ -147,6 +151,8 @@ This implies that every supported client submission path, especially `JMAP`, `IM
 
 Tasks and to-do items must follow the same rule: one canonical task model in `LPE`, stored in the database first, then reused later by `JMAP Tasks`, `DAV`, and mobile layers without any parallel business model.
 
+Mailbox `Sieve` rules follow the same rule. Scripts are stored per account in `LPE`, administered through `ManageSieve`, and executed during final inbound delivery inside the core `LPE` runtime without moving sorting-center edge policy into the core or introducing a parallel routing engine.
+
 The initial submission model is transactional in the `LPE` core and exposed by `/api/mail/messages/submit`:
 
 1. verify the submitting account
@@ -181,6 +187,8 @@ Every file entering through an external connection or through a client must be v
 The currently implemented `JMAP Mail` MVP in `lpe-jmap` follows that rule. `EmailSubmission/set` does not speak `SMTP`; it reuses the existing canonical submission workflow after loading a persisted draft. `Mailbox/get`, `Email/query`, and `Email/get` read the canonical mailbox projection without reinjecting `Bcc` into standard search paths. The supported scope is detailed in `docs/architecture/jmap-mail-mvp.md`.
 
 The currently implemented `IMAP` MVP in `lpe-imap` follows the same rule. `LOGIN`, `LIST`, `SELECT`, `FETCH`, `STORE`, `SEARCH`, and `UID` read and update canonical mailbox state, while `APPEND` is limited to `Drafts` and reuses canonical draft persistence without introducing parallel `Sent`, `Drafts`, or `Outbox` logic. The supported scope is detailed in `docs/architecture/imap-mvp.md`.
+
+The current `Sieve` / `ManageSieve` MVP follows the same rule. `ManageSieve` only manages per-account stored scripts; execution happens during final inbound delivery and stays bounded to mailbox actions such as `fileinto`, `discard`, `redirect`, and `vacation`. `redirect` and `vacation` reuse canonical `LPE` submission and outbound relay through `LPE-CT` instead of introducing a parallel transport engine. The supported scope is detailed in `docs/architecture/sieve-managesieve-mvp.md`.
 
 The current `ActiveSync` MVP in `lpe-activesync` follows the same rule. `Provision`, `FolderSync`, `Sync`, and `SendMail` are implemented as an adapter over the same account authentication, draft persistence, mailbox synchronization, and canonical submission model. `SendMail` does not bypass the core mailbox workflow or `LPE-CT`; it reuses the canonical submission path so the authoritative `Sent` copy exists before outbound relay. The supported scope is detailed in `docs/architecture/activesync-mvp.md`.
 

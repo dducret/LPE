@@ -6,6 +6,7 @@ use lpe_admin_api::{
 };
 use lpe_domain::{OutboundMessageHandoffRequest, OutboundMessageHandoffResponse};
 use lpe_imap::ImapServer;
+use lpe_managesieve::ManageSieveServer;
 use lpe_storage::Storage;
 use std::{env, time::Duration};
 use tokio::{net::TcpListener, time::sleep};
@@ -23,29 +24,40 @@ async fn main() -> Result<()> {
         env::var("LPE_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
     let imap_bind_address =
         env::var("LPE_IMAP_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:1143".to_string());
+    let managesieve_bind_address = env::var("LPE_MANAGESIEVE_BIND_ADDRESS")
+        .unwrap_or_else(|_| "127.0.0.1:4190".to_string());
     let database_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://lpe:change-me@localhost:5432/lpe".to_string());
     integration_shared_secret()?;
     let storage = Storage::connect(&database_url).await?;
     let listener = TcpListener::bind(&bind_address).await?;
     let imap_listener = TcpListener::bind(&imap_bind_address).await?;
+    let managesieve_listener = TcpListener::bind(&managesieve_bind_address).await?;
     info!("lpe admin api listening on http://{bind_address}");
     info!("lpe imap listening on {imap_bind_address}");
+    info!("lpe managesieve listening on {managesieve_bind_address}");
 
     let api_storage = storage.clone();
     let worker_storage = storage.clone();
     let imap_storage = storage.clone();
+    let managesieve_storage = storage.clone();
     let api_task = tokio::spawn(async move {
         axum::serve(listener, router(api_storage)).await?;
         Result::<()>::Ok(())
     });
     let imap_task =
         tokio::spawn(async move { ImapServer::new(imap_storage).serve(imap_listener).await });
+    let managesieve_task = tokio::spawn(async move {
+        ManageSieveServer::new(managesieve_storage)
+            .serve(managesieve_listener)
+            .await
+    });
     let worker_task = tokio::spawn(async move { run_outbound_worker(worker_storage).await });
 
     tokio::select! {
         result = api_task => result??,
         result = imap_task => result??,
+        result = managesieve_task => result??,
         result = worker_task => result??,
     }
 

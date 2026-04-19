@@ -101,6 +101,12 @@ pub fn parse_rfc822_message(bytes: &[u8]) -> Result<ParsedRfc822Message> {
     })
 }
 
+pub fn parse_headers_map(raw_message: &[u8]) -> HashMap<String, String> {
+    let raw = String::from_utf8_lossy(raw_message).replace("\r\n", "\n");
+    let (header_text, _) = raw.split_once("\n\n").unwrap_or((raw.as_str(), ""));
+    parse_headers(header_text)
+}
+
 fn normalize_email(value: &str) -> String {
     value.trim().to_lowercase()
 }

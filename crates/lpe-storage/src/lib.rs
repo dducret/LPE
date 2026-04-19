@@ -1,6 +1,10 @@
 use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lpe_attachments::extract_text_from_bytes;
+use lpe_core::sieve::{
+    evaluate_script, parse_script, ExecutionOutcome as SieveExecutionOutcome,
+    MessageContext as SieveMessageContext, VacationAction,
+};
 use lpe_domain::{
     InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
     OutboundMessageHandoffResponse, TransportDeliveryStatus, TransportRecipient,
@@ -13,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Pool, Postgres, Row};
+use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -20,9 +25,13 @@ use uuid::Uuid;
 
 pub mod mail;
 
-use crate::mail::{parse_header_recipients, parse_message_attachments};
+use crate::mail::{parse_header_recipients, parse_headers_map, parse_message_attachments};
 
 const PLATFORM_TENANT_ID: &str = "__platform__";
+const MAX_SIEVE_SCRIPT_BYTES: usize = 64 * 1024;
+const MAX_SIEVE_SCRIPTS_PER_ACCOUNT: i64 = 16;
+const MAX_SIEVE_REDIRECTS_PER_MESSAGE: usize = 4;
+const DEFAULT_SIEVE_MAILBOX_RETENTION_DAYS: i32 = 365;
 
 #[derive(Clone)]
 pub struct Storage {
@@ -581,6 +590,22 @@ pub struct SubmittedMessage {
     pub sent_mailbox_id: Uuid,
     pub outbound_queue_id: Uuid,
     pub delivery_status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SieveScriptSummary {
+    pub name: String,
+    pub is_active: bool,
+    pub size_octets: u64,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SieveScriptDocument {
+    pub name: String,
+    pub content: String,
+    pub is_active: bool,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2236,6 +2261,337 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn list_sieve_scripts(&self, account_id: Uuid) -> Result<Vec<SieveScriptSummary>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                name,
+                is_active,
+                octet_length(content)::BIGINT AS size_octets,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM sieve_scripts
+            WHERE tenant_id = $1 AND account_id = $2
+            ORDER BY lower(name) ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(SieveScriptSummary {
+                    name: row.try_get("name")?,
+                    is_active: row.try_get("is_active")?,
+                    size_octets: row.try_get::<i64, _>("size_octets")?.max(0) as u64,
+                    updated_at: row.try_get("updated_at")?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn get_sieve_script(
+        &self,
+        account_id: Uuid,
+        name: &str,
+    ) -> Result<Option<SieveScriptDocument>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let normalized_name = validate_sieve_script_name(name)?;
+        let row = sqlx::query(
+            r#"
+            SELECT
+                name,
+                content,
+                is_active,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM sieve_scripts
+            WHERE tenant_id = $1 AND account_id = $2 AND lower(name) = lower($3)
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(&normalized_name)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            Ok(SieveScriptDocument {
+                name: row.try_get("name")?,
+                content: row.try_get("content")?,
+                is_active: row.try_get("is_active")?,
+                updated_at: row.try_get("updated_at")?,
+            })
+        })
+        .transpose()
+    }
+
+    pub async fn put_sieve_script(
+        &self,
+        account_id: Uuid,
+        name: &str,
+        content: &str,
+        activate: bool,
+        audit: AuditEntryInput,
+    ) -> Result<SieveScriptDocument> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let name = validate_sieve_script_name(name)?;
+        let content = validate_sieve_script_content(content)?;
+        parse_script(&content)?;
+
+        let mut tx = self.pool.begin().await?;
+        self.ensure_account_exists(&mut tx, &tenant_id, account_id).await?;
+
+        let existing_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM sieve_scripts
+            WHERE tenant_id = $1 AND account_id = $2
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let exists = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM sieve_scripts
+                WHERE tenant_id = $1 AND account_id = $2 AND lower(name) = lower($3)
+            )
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(&name)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        if !exists && existing_count >= MAX_SIEVE_SCRIPTS_PER_ACCOUNT {
+            bail!("too many sieve scripts for account");
+        }
+
+        if activate {
+            sqlx::query(
+                r#"
+                UPDATE sieve_scripts
+                SET is_active = FALSE, updated_at = NOW()
+                WHERE tenant_id = $1 AND account_id = $2 AND is_active = TRUE
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        let row = sqlx::query(
+            r#"
+            INSERT INTO sieve_scripts (id, tenant_id, account_id, name, content, is_active)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (tenant_id, account_id, normalized_name) DO UPDATE SET
+                name = EXCLUDED.name,
+                content = EXCLUDED.content,
+                is_active = EXCLUDED.is_active OR sieve_scripts.is_active,
+                updated_at = NOW()
+            RETURNING
+                name,
+                content,
+                is_active,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(&name)
+        .bind(&content)
+        .bind(activate)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        tx.commit().await?;
+
+        Ok(SieveScriptDocument {
+            name: row.try_get("name")?,
+            content: row.try_get("content")?,
+            is_active: row.try_get("is_active")?,
+            updated_at: row.try_get("updated_at")?,
+        })
+    }
+
+    pub async fn delete_sieve_script(
+        &self,
+        account_id: Uuid,
+        name: &str,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let name = validate_sieve_script_name(name)?;
+        let mut tx = self.pool.begin().await?;
+
+        let active = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT is_active
+            FROM sieve_scripts
+            WHERE tenant_id = $1 AND account_id = $2 AND lower(name) = lower($3)
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(&name)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| anyhow!("sieve script not found"))?;
+
+        if active {
+            bail!("cannot delete the active sieve script");
+        }
+
+        sqlx::query(
+            r#"
+            DELETE FROM sieve_scripts
+            WHERE tenant_id = $1 AND account_id = $2 AND lower(name) = lower($3)
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(&name)
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn rename_sieve_script(
+        &self,
+        account_id: Uuid,
+        old_name: &str,
+        new_name: &str,
+        audit: AuditEntryInput,
+    ) -> Result<SieveScriptSummary> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let old_name = validate_sieve_script_name(old_name)?;
+        let new_name = validate_sieve_script_name(new_name)?;
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            r#"
+            UPDATE sieve_scripts
+            SET name = $4, updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $2 AND lower(name) = lower($3)
+            RETURNING
+                name,
+                is_active,
+                octet_length(content)::BIGINT AS size_octets,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(&old_name)
+        .bind(&new_name)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| anyhow!("sieve script not found"))?;
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        tx.commit().await?;
+
+        Ok(SieveScriptSummary {
+            name: row.try_get("name")?,
+            is_active: row.try_get("is_active")?,
+            size_octets: row.try_get::<i64, _>("size_octets")?.max(0) as u64,
+            updated_at: row.try_get("updated_at")?,
+        })
+    }
+
+    pub async fn set_active_sieve_script(
+        &self,
+        account_id: Uuid,
+        name: Option<&str>,
+        audit: AuditEntryInput,
+    ) -> Result<Option<String>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            r#"
+            UPDATE sieve_scripts
+            SET is_active = FALSE, updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $2 AND is_active = TRUE
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let active_name = if let Some(name) = name {
+            let name = validate_sieve_script_name(name)?;
+            let updated = sqlx::query(
+                r#"
+                UPDATE sieve_scripts
+                SET is_active = TRUE, updated_at = NOW()
+                WHERE tenant_id = $1 AND account_id = $2 AND lower(name) = lower($3)
+                RETURNING name
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(&name)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| anyhow!("sieve script not found"))?;
+            Some(updated.try_get("name")?)
+        } else {
+            None
+        };
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        tx.commit().await?;
+        Ok(active_name)
+    }
+
+    pub async fn fetch_active_sieve_script(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Option<SieveScriptDocument>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let row = sqlx::query(
+            r#"
+            SELECT
+                name,
+                content,
+                is_active,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM sieve_scripts
+            WHERE tenant_id = $1 AND account_id = $2 AND is_active = TRUE
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            Ok(SieveScriptDocument {
+                name: row.try_get("name")?,
+                content: row.try_get("content")?,
+                is_active: row.try_get("is_active")?,
+                updated_at: row.try_get("updated_at")?,
+            })
+        })
+        .transpose()
+    }
+
     pub async fn create_filter_rule(
         &self,
         input: NewFilterRule,
@@ -3609,6 +3965,7 @@ impl Storage {
         let mail_from = normalize_email(&request.mail_from);
         let subject = normalize_subject(&request.subject);
         let body_text = request.body_text.trim().to_string();
+        let headers = parse_headers_map(&request.raw_message);
         let rcpt_to = request
             .rcpt_to
             .iter()
@@ -3634,7 +3991,7 @@ impl Storage {
 
         let account_rows = sqlx::query(
             r#"
-            SELECT id, tenant_id, primary_email
+            SELECT id, tenant_id, primary_email, display_name
             FROM accounts
             WHERE lower(primary_email) = ANY($1)
             ORDER BY primary_email ASC
@@ -3650,6 +4007,7 @@ impl Storage {
         let mut tx = self.pool.begin().await?;
         let thread_id = Uuid::new_v4();
         let attachments = parse_message_attachments(&request.raw_message)?;
+        let mut followups = Vec::new();
 
         for recipient in &rcpt_to {
             let Some(row) = account_rows.iter().find(|row| {
@@ -3663,90 +4021,94 @@ impl Storage {
 
             let account_id: Uuid = row.try_get("id")?;
             let tenant_id: String = row.try_get("tenant_id")?;
-            let inbox_mailbox_id = self
-                .ensure_mailbox(&mut tx, &tenant_id, account_id, "inbox", "Inbox", 0, 365)
+            let account_email: String = row.try_get("primary_email")?;
+            let account_display_name: String = row.try_get("display_name")?;
+            let sieve_outcome = self
+                .evaluate_inbound_sieve(
+                    account_id,
+                    &mail_from,
+                    recipient,
+                    &headers,
+                    &account_email,
+                )
                 .await?;
-            let message_id = Uuid::new_v4();
-            let mime_blob_ref = format!("lpe-ct-inbound:{}:{message_id}", request.trace_id);
+            let had_sieve_actions = sieve_outcome.file_into.is_some()
+                || sieve_outcome.discard
+                || !sieve_outcome.redirects.is_empty()
+                || sieve_outcome.vacation.is_some();
 
-            sqlx::query(
-                r#"
-                INSERT INTO messages (
-                    id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                    received_at, sent_at, from_display, from_address, subject_normalized,
-                    preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
-                    submission_source, delivery_status
-                )
-                VALUES (
-                    $1, $2, $3, $4, $5, $6,
-                    NOW(), NULL, NULL, $7, $8,
-                    $9, TRUE, FALSE, FALSE, $10, $11,
-                    'lpe-ct', 'stored'
-                )
-                "#,
-            )
-            .bind(message_id)
-            .bind(&tenant_id)
-            .bind(account_id)
-            .bind(inbox_mailbox_id)
-            .bind(thread_id)
-            .bind(request.internet_message_id.as_deref())
-            .bind(&mail_from)
-            .bind(&subject)
-            .bind(&preview)
-            .bind(size_octets.max(0))
-            .bind(&mime_blob_ref)
-            .execute(&mut *tx)
-            .await?;
-
-            sqlx::query(
-                r#"
-                INSERT INTO message_bodies (
-                    message_id, body_text, body_html_sanitized, participants_normalized,
-                    language_code, content_hash, search_vector
-                )
-                VALUES ($1, $2, NULL, $3, NULL, $4, to_tsvector('simple', $5))
-                "#,
-            )
-            .bind(message_id)
-            .bind(&body_text)
-            .bind(&participants)
-            .bind(format!("inbound:{}:{message_id}", request.trace_id))
-            .bind(format!("{subject} {body_text} {participants}"))
-            .execute(&mut *tx)
-            .await?;
-
-            for (ordinal, (kind, recipient_value)) in visible_recipients.iter().enumerate() {
-                sqlx::query(
-                    r#"
-                    INSERT INTO message_recipients (
-                        id, tenant_id, message_id, kind, address, display_name, ordinal
+            if !sieve_outcome.discard {
+                let mailbox_id = if let Some(folder_name) = sieve_outcome.file_into.as_deref() {
+                    self.ensure_named_mailbox(
+                        &mut tx,
+                        &tenant_id,
+                        account_id,
+                        folder_name,
+                        DEFAULT_SIEVE_MAILBOX_RETENTION_DAYS,
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
-                    "#,
+                    .await?
+                } else {
+                    self.ensure_mailbox(
+                        &mut tx,
+                        &tenant_id,
+                        account_id,
+                        "inbox",
+                        "Inbox",
+                        0,
+                        DEFAULT_SIEVE_MAILBOX_RETENTION_DAYS,
+                    )
+                    .await?
+                };
+                let message_id = Uuid::new_v4();
+                self.store_inbound_message_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    account_id,
+                    mailbox_id,
+                    thread_id,
+                    message_id,
+                    &request,
+                    &mail_from,
+                    &subject,
+                    &preview,
+                    size_octets,
+                    &body_text,
+                    &participants,
+                    &visible_recipients,
+                    &attachments,
                 )
-                .bind(Uuid::new_v4())
-                .bind(&tenant_id)
-                .bind(message_id)
-                .bind(*kind)
-                .bind(&recipient_value.address)
-                .bind(recipient_value.display_name.as_deref())
-                .bind(ordinal as i32)
-                .execute(&mut *tx)
+                .await?;
+                stored_message_ids.push(message_id);
+            }
+
+            if !sieve_outcome.redirects.is_empty() || sieve_outcome.vacation.is_some() {
+                followups.push(SieveFollowUp {
+                    account_id,
+                    account_email: normalize_email(&account_email),
+                    account_display_name,
+                    redirects: sieve_outcome.redirects,
+                    vacation: sieve_outcome.vacation,
+                    subject: subject.clone(),
+                    body_text: body_text.clone(),
+                    attachments: attachments.clone(),
+                    sender_address: mail_from.clone(),
+                });
+            }
+
+            if had_sieve_actions {
+                self.insert_audit(
+                    &mut tx,
+                    &tenant_id,
+                    AuditEntryInput {
+                        actor: account_email.clone(),
+                        action: "mail.sieve.applied".to_string(),
+                        subject: format!("{}:{}", request.trace_id, recipient),
+                    },
+                )
                 .await?;
             }
 
-            self.ingest_message_attachments_in_tx(
-                &mut tx,
-                &tenant_id,
-                account_id,
-                message_id,
-                &attachments,
-            )
-            .await?;
-
             accepted.push(recipient.clone());
-            stored_message_ids.push(message_id);
         }
 
         let audit_action = if accepted.is_empty() {
@@ -3765,6 +4127,13 @@ impl Storage {
         )
         .await?;
         tx.commit().await?;
+        let mut followup_errors = Vec::new();
+
+        for followup in followups {
+            if let Err(error) = self.dispatch_sieve_followups(&followup).await {
+                followup_errors.push(error.to_string());
+            }
+        }
 
         Ok(InboundDeliveryResponse {
             trace_id: request.trace_id,
@@ -3776,8 +4145,324 @@ impl Storage {
             accepted_recipients: accepted,
             rejected_recipients: rejected,
             stored_message_ids,
-            detail: None,
+            detail: if followup_errors.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "sieve follow-up errors: {}",
+                    followup_errors.join(" | ")
+                ))
+            },
         })
+    }
+
+    async fn evaluate_inbound_sieve(
+        &self,
+        account_id: Uuid,
+        envelope_from: &str,
+        envelope_to: &str,
+        headers: &std::collections::HashMap<String, String>,
+        account_email: &str,
+    ) -> Result<SieveExecutionOutcome> {
+        let Some(script) = self.fetch_active_sieve_script(account_id).await? else {
+            return Ok(SieveExecutionOutcome::default());
+        };
+        let Ok(script) = parse_script(&script.content) else {
+            return Ok(SieveExecutionOutcome::default());
+        };
+
+        let mut normalized_headers = BTreeMap::new();
+        for (name, value) in headers {
+            normalized_headers.insert(name.to_lowercase(), vec![value.clone()]);
+        }
+        if !normalized_headers.contains_key("to") {
+            normalized_headers.insert("to".to_string(), vec![account_email.to_string()]);
+        }
+
+        evaluate_script(
+            &script,
+            &SieveMessageContext {
+                envelope_from: envelope_from.to_string(),
+                envelope_to: envelope_to.to_string(),
+                headers: normalized_headers,
+            },
+        )
+    }
+
+    async fn dispatch_sieve_followups(&self, followup: &SieveFollowUp) -> Result<()> {
+        for redirect in followup
+            .redirects
+            .iter()
+            .take(MAX_SIEVE_REDIRECTS_PER_MESSAGE)
+        {
+            if redirect.eq_ignore_ascii_case(&followup.account_email) {
+                continue;
+            }
+            self.submit_message(
+                SubmitMessageInput {
+                    draft_message_id: None,
+                    account_id: followup.account_id,
+                    source: "sieve-redirect".to_string(),
+                    from_display: Some(followup.account_display_name.clone()),
+                    from_address: followup.account_email.clone(),
+                    to: vec![SubmittedRecipientInput {
+                        address: redirect.clone(),
+                        display_name: None,
+                    }],
+                    cc: Vec::new(),
+                    bcc: Vec::new(),
+                    subject: followup.subject.clone(),
+                    body_text: followup.body_text.clone(),
+                    body_html_sanitized: None,
+                    internet_message_id: None,
+                    mime_blob_ref: None,
+                    size_octets: estimate_generated_message_size(
+                        &followup.subject,
+                        &followup.body_text,
+                        &followup.attachments,
+                    ),
+                    attachments: followup.attachments.clone(),
+                },
+                AuditEntryInput {
+                    actor: followup.account_email.clone(),
+                    action: "mail.sieve.redirect".to_string(),
+                    subject: redirect.clone(),
+                },
+            )
+            .await?;
+        }
+
+        if let Some(vacation) = &followup.vacation {
+            if !followup
+                .sender_address
+                .eq_ignore_ascii_case(&followup.account_email)
+                && self
+                    .should_send_sieve_vacation(
+                        followup.account_id,
+                        &followup.sender_address,
+                        vacation,
+                    )
+                    .await?
+            {
+                self.submit_message(
+                    SubmitMessageInput {
+                        draft_message_id: None,
+                        account_id: followup.account_id,
+                        source: "sieve-vacation".to_string(),
+                        from_display: Some(followup.account_display_name.clone()),
+                        from_address: followup.account_email.clone(),
+                        to: vec![SubmittedRecipientInput {
+                            address: followup.sender_address.clone(),
+                            display_name: None,
+                        }],
+                        cc: Vec::new(),
+                        bcc: Vec::new(),
+                        subject: vacation
+                            .subject
+                            .clone()
+                            .unwrap_or_else(|| format!("Re: {}", followup.subject)),
+                        body_text: vacation.reason.clone(),
+                        body_html_sanitized: None,
+                        internet_message_id: None,
+                        mime_blob_ref: None,
+                        size_octets: vacation.reason.len() as i64,
+                        attachments: Vec::new(),
+                    },
+                    AuditEntryInput {
+                        actor: followup.account_email.clone(),
+                        action: "mail.sieve.vacation".to_string(),
+                        subject: followup.sender_address.clone(),
+                    },
+                )
+                .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn should_send_sieve_vacation(
+        &self,
+        account_id: Uuid,
+        sender_address: &str,
+        vacation: &VacationAction,
+    ) -> Result<bool> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let sender_address = normalize_email(sender_address);
+        let response_key = hash_sieve_vacation_key(vacation);
+        let updated = sqlx::query(
+            r#"
+            INSERT INTO sieve_vacation_responses (
+                tenant_id, account_id, sender_address, response_key, last_sent_at
+            )
+            VALUES ($1, $2, $3, $4, NOW())
+            ON CONFLICT (tenant_id, account_id, sender_address, response_key) DO UPDATE SET
+                last_sent_at = EXCLUDED.last_sent_at
+            WHERE sieve_vacation_responses.last_sent_at
+                <= NOW() - make_interval(days => GREATEST(1, $5))
+            RETURNING last_sent_at
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(&sender_address)
+        .bind(&response_key)
+        .bind(vacation.days as i32)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(updated.is_some())
+    }
+
+    async fn store_inbound_message_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        thread_id: Uuid,
+        message_id: Uuid,
+        request: &InboundDeliveryRequest,
+        mail_from: &str,
+        subject: &str,
+        preview: &str,
+        size_octets: i64,
+        body_text: &str,
+        participants: &str,
+        visible_recipients: &[(&'static str, SubmittedRecipientInput)],
+        attachments: &[AttachmentUploadInput],
+    ) -> Result<()> {
+        let mime_blob_ref = format!("lpe-ct-inbound:{}:{message_id}", request.trace_id);
+
+        sqlx::query(
+            r#"
+            INSERT INTO messages (
+                id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
+                received_at, sent_at, from_display, from_address, subject_normalized,
+                preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
+                submission_source, delivery_status
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, $6,
+                NOW(), NULL, NULL, $7, $8,
+                $9, TRUE, FALSE, FALSE, $10, $11,
+                'lpe-ct', 'stored'
+            )
+            "#,
+        )
+        .bind(message_id)
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(thread_id)
+        .bind(request.internet_message_id.as_deref())
+        .bind(mail_from)
+        .bind(subject)
+        .bind(preview)
+        .bind(size_octets.max(0))
+        .bind(&mime_blob_ref)
+        .execute(&mut **tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO message_bodies (
+                message_id, body_text, body_html_sanitized, participants_normalized,
+                language_code, content_hash, search_vector
+            )
+            VALUES ($1, $2, NULL, $3, NULL, $4, to_tsvector('simple', $5))
+            "#,
+        )
+        .bind(message_id)
+        .bind(body_text)
+        .bind(participants)
+        .bind(format!("inbound:{}:{message_id}", request.trace_id))
+        .bind(format!("{subject} {body_text} {participants}"))
+        .execute(&mut **tx)
+        .await?;
+
+        for (ordinal, (kind, recipient_value)) in visible_recipients.iter().enumerate() {
+            sqlx::query(
+                r#"
+                INSERT INTO message_recipients (
+                    id, tenant_id, message_id, kind, address, display_name, ordinal
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(tenant_id)
+            .bind(message_id)
+            .bind(kind)
+            .bind(&recipient_value.address)
+            .bind(recipient_value.display_name.as_deref())
+            .bind(ordinal as i32)
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        self.ingest_message_attachments_in_tx(tx, tenant_id, account_id, message_id, attachments)
+            .await
+    }
+
+    async fn ensure_named_mailbox(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Uuid,
+        display_name: &str,
+        retention_days: i32,
+    ) -> Result<Uuid> {
+        let display_name = display_name.trim();
+        if display_name.is_empty() {
+            bail!("fileinto target mailbox is required");
+        }
+        if let Some(mailbox_id) = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT id
+            FROM mailboxes
+            WHERE tenant_id = $1 AND account_id = $2 AND lower(display_name) = lower($3)
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(display_name)
+        .fetch_optional(&mut **tx)
+        .await?
+        {
+            return Ok(mailbox_id);
+        }
+
+        let sort_order = sqlx::query_scalar::<_, i32>(
+            r#"
+            SELECT COALESCE(MAX(sort_order), 0) + 1
+            FROM mailboxes
+            WHERE tenant_id = $1 AND account_id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        let mailbox_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO mailboxes (
+                id, tenant_id, account_id, role, display_name, sort_order, retention_days
+            )
+            VALUES ($1, $2, $3, '', $4, $5, $6)
+            "#,
+        )
+        .bind(mailbox_id)
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(display_name)
+        .bind(sort_order)
+        .bind(retention_days)
+        .execute(&mut **tx)
+        .await?;
+        Ok(mailbox_id)
     }
 
     pub async fn save_jmap_upload_blob(
@@ -7080,6 +7765,66 @@ fn participants_normalized(
             .map(|(_, recipient)| recipient.address.clone()),
     );
     participants.join(" ")
+}
+
+#[derive(Debug, Clone)]
+struct SieveFollowUp {
+    account_id: Uuid,
+    account_email: String,
+    account_display_name: String,
+    redirects: Vec<String>,
+    vacation: Option<VacationAction>,
+    subject: String,
+    body_text: String,
+    attachments: Vec<AttachmentUploadInput>,
+    sender_address: String,
+}
+
+fn validate_sieve_script_name(value: &str) -> Result<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        bail!("sieve script name is required");
+    }
+    if trimmed.len() > 128 {
+        bail!("sieve script name is too long");
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') || trimmed.contains('\0') {
+        bail!("sieve script name contains unsupported characters");
+    }
+    Ok(trimmed.to_string())
+}
+
+fn validate_sieve_script_content(value: &str) -> Result<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        bail!("sieve script content is required");
+    }
+    if trimmed.len() > MAX_SIEVE_SCRIPT_BYTES {
+        bail!("sieve script exceeds the MVP size limit");
+    }
+    Ok(trimmed.to_string())
+}
+
+fn estimate_generated_message_size(
+    subject: &str,
+    body_text: &str,
+    attachments: &[AttachmentUploadInput],
+) -> i64 {
+    let attachments_size = attachments
+        .iter()
+        .map(|attachment| attachment.blob_bytes.len() as i64)
+        .sum::<i64>();
+    (subject.len() as i64) + (body_text.len() as i64) + attachments_size
+}
+
+fn hash_sieve_vacation_key(vacation: &VacationAction) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(vacation.subject.as_deref().unwrap_or_default().as_bytes());
+    hasher.update(b"\n");
+    hasher.update(vacation.reason.as_bytes());
+    hasher.update(b"\n");
+    hasher.update(vacation.days.to_string().as_bytes());
+    format!("{:x}", hasher.finalize())
 }
 
 #[cfg(test)]

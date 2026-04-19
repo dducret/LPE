@@ -1,0 +1,15 @@
+[package]
+name = "lpe-managesieve"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+argon2.workspace = true
+base64.workspace = true
+lpe-core = { path = "../lpe-core" }
+lpe-mail-auth = { path = "../lpe-mail-auth" }
+lpe-storage = { path = "../lpe-storage" }
+tokio.workspace = true
+uuid.workspace = true

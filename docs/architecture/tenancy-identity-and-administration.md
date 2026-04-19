@@ -29,6 +29,7 @@ La multi-tenance runtime suit les invariants suivants:
 - toute requete de stockage qui lit ou modifie des donnees runtime d'un tenant doit filtrer a la fois par `tenant_id` resolu et par le proprietaire ou l'identifiant de l'objet
 - la remise entrante doit resoudre le tenant independamment pour chaque destinataire accepte afin qu'une transaction `SMTP` unique ne fusionne pas plusieurs tenants dans un meme scope runtime
 - la deduplication des pieces jointes reste scopee par domaine et donc par tenant dans le modele runtime actuel un domaine par tenant
+- les scripts `Sieve`, leur statut actif et la memoire minimale `vacation` sont scopes par `(tenant_id, account_id)` et ne doivent jamais etre resolves hors du compte authentifie ou du destinataire de remise
 
 ### Identite moderne
 
@@ -40,6 +41,7 @@ Le scope initial reste volontairement limite:
 
 - le login federé concerne actuellement le back office d'administration
 - le login des comptes mailbox reste base sur mot de passe en v1
+- `ManageSieve` reutilise le meme login de compte mailbox et n'introduit pas d'identite distincte
 - aucun mode passwordless-only n'est requis en v1
 - la base reserve deja des facteurs d'authentification pour une prise en charge future de `TOTP`
 
@@ -116,6 +118,7 @@ Runtime multi-tenancy follows these invariants:
 - every storage query that reads or mutates tenant-owned runtime data must filter by both the resolved `tenant_id` and the object owner or identifier
 - inbound delivery must resolve the tenant independently for each accepted recipient so one SMTP transaction cannot collapse multiple tenants into one runtime scope
 - attachment deduplication remains domain-scoped and therefore tenant-scoped in the current one-domain-per-tenant runtime model
+- `Sieve` scripts, their active state, and the minimal `vacation` memory are scoped by `(tenant_id, account_id)` and must never be resolved outside the authenticated account or inbound-delivery recipient
 
 ### Modern identity
 
@@ -127,6 +130,7 @@ The initial scope stays intentionally limited:
 
 - federated login currently applies to the administration back office
 - mailbox-account login remains password-based in v1
+- `ManageSieve` reuses the same mailbox-account login and does not introduce a separate identity surface
 - no passwordless-only mode is required in v1
 - the database already reserves authentication-factor records for later `TOTP` support
 

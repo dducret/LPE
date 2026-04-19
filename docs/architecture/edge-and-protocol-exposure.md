@@ -21,6 +21,7 @@ Le coeur `LPE` ne doit pas etre accessible directement depuis Internet et n'en a
 - `ActiveSync` en `HTTPS` sous `/activesync`
 - les endpoints `JMAP` en `TLS` vers `LPE`
 - `IMAPS`
+- `ManageSieve` en `TLS` sur `4190` lorsqu'il est active
 - `SMTPS`
 
 Pour la soumission cliente securisee, la base cible prefere le port `465` en TLS implicite, conformement a `RFC 8314`.
@@ -30,7 +31,10 @@ Les WebSockets `JMAP` securisees sont une extension future et ne font pas partie
 ### Separation entre publication et logique protocolaire
 
 - `LPE` porte la logique protocolaire mailbox et collaboration
+- `LPE` porte aussi l'execution des regles mailbox `Sieve` et le service `ManageSieve` associe
 - `LPE-CT` porte l'exposition externe, le reverse proxy, le proxy TCP/TLS et la posture perimetrique
+
+Les politiques de bord `LPE-CT` restent distinctes des regles `Sieve` utilisateur. `Sieve` ne doit pas devenir un vehicule pour exprimer du filtrage perimeterique, des decisions antispam, des quarantaines, ni des politiques de relay ou de throttling qui restent du ressort du centre de tri.
 
 ### ActiveSync
 
@@ -83,6 +87,7 @@ The core `LPE` server must not be directly reachable from the public Internet an
 - `ActiveSync` over `HTTPS` under `/activesync`
 - exposed `JMAP` endpoints over `TLS` toward `LPE`
 - `IMAPS`
+- `ManageSieve` over `TLS` on `4190` when enabled
 - `SMTPS`
 
 For secure client submission, the baseline target prefers implicit TLS on port `465`, aligned with `RFC 8314`.
@@ -92,7 +97,10 @@ Secure `JMAP` WebSockets are a future extension and are not part of the current 
 ### Separation between publication and protocol logic
 
 - `LPE` owns mailbox and collaboration protocol logic
+- `LPE` also owns mailbox `Sieve` execution and the related `ManageSieve` service
 - `LPE-CT` owns external exposure, reverse proxying, TCP/TLS proxying, and edge security posture
+
+`LPE-CT` edge policies remain distinct from end-user mailbox `Sieve` rules. `Sieve` must not become a vehicle for perimeter filtering, anti-spam decisions, quarantine handling, relay routing, or throttling policies, which stay under sorting-center control.
 
 ### ActiveSync
 

@@ -10,6 +10,7 @@ axum.workspace = true
 lpe-admin-api = { path = "../lpe-admin-api" }
 lpe-domain = { path = "../lpe-domain" }
 lpe-imap = { path = "../lpe-imap" }
+lpe-managesieve = { path = "../lpe-managesieve" }
 lpe-storage = { path = "../lpe-storage" }
 reqwest.workspace = true
 tokio.workspace = true

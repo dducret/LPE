@@ -4,6 +4,8 @@ use lpe_attachments::AttachmentFormat;
 use lpe_domain::{AccessScope, Account, DocumentChunk, DocumentKind, DocumentProjection};
 use uuid::Uuid;
 
+pub mod sieve;
+
 #[derive(Debug, Default)]
 pub struct CoreService;
 

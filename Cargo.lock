@@ -1427,6 +1427,7 @@ dependencies = [
  "lpe-admin-api",
  "lpe-domain",
  "lpe-imap",
+ "lpe-managesieve",
  "lpe-storage",
  "reqwest",
  "tokio",
@@ -1522,12 +1523,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpe-managesieve"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "base64",
+ "lpe-core",
+ "lpe-mail-auth",
+ "lpe-storage",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "lpe-storage"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
  "lpe-attachments",
+ "lpe-core",
  "lpe-domain",
  "lpe-magika",
  "serde",
