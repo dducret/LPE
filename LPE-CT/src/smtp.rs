@@ -1,5 +1,14 @@
 use anyhow::{anyhow, Context, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
+use email_auth::{
+    common::dns::{DnsError, DnsResolver, MxRecord},
+    dmarc::Disposition as DmarcDisposition,
+    EmailAuthenticator,
+};
+use hickory_resolver::{
+    proto::rr::RecordType,
+    TokioResolver,
+};
 use lpe_domain::{
     InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
     OutboundMessageHandoffResponse, TransportDeliveryStatus,
@@ -11,8 +20,10 @@ use lpe_magika::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
+    collections::{hash_map::DefaultHasher, HashMap},
     fs,
-    net::SocketAddr,
+    hash::{Hash, Hasher},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -33,7 +44,30 @@ pub(crate) struct RuntimeConfig {
     fallback_to_hold_queue: bool,
     drain_mode: bool,
     quarantine_enabled: bool,
+    greylisting_enabled: bool,
+    require_spf: bool,
+    require_dkim_alignment: bool,
+    require_dmarc_enforcement: bool,
+    dnsbl_enabled: bool,
+    dnsbl_zones: Vec<String>,
+    reputation_enabled: bool,
+    spam_quarantine_threshold: f32,
+    spam_reject_threshold: f32,
     max_message_size_mb: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct AuthSummary {
+    spf: String,
+    dkim: String,
+    dmarc: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DecisionTraceEntry {
+    stage: String,
+    outcome: String,
+    detail: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +83,18 @@ struct QueuedMessage {
     relay_error: Option<String>,
     magika_summary: Option<String>,
     magika_decision: Option<String>,
+    #[serde(default)]
+    spam_score: f32,
+    #[serde(default)]
+    security_score: f32,
+    #[serde(default)]
+    reputation_score: i32,
+    #[serde(default)]
+    dnsbl_hits: Vec<String>,
+    #[serde(default)]
+    auth_summary: AuthSummary,
+    #[serde(default)]
+    decision_trace: Vec<DecisionTraceEntry>,
     #[serde(with = "base64_bytes")]
     data: Vec<u8>,
 }
@@ -60,6 +106,48 @@ enum InboundMagikaOutcome {
     Reject(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FilterAction {
+    Accept,
+    Quarantine,
+    Reject,
+    Defer,
+}
+
+#[derive(Debug, Clone)]
+struct FilterVerdict {
+    action: FilterAction,
+    reason: Option<String>,
+    spam_score: f32,
+    security_score: f32,
+    reputation_score: i32,
+    dnsbl_hits: Vec<String>,
+    auth_summary: AuthSummary,
+    decision_trace: Vec<DecisionTraceEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct GreylistEntry {
+    first_seen_unix: u64,
+    release_after_unix: u64,
+    pass_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct ReputationStore {
+    entries: HashMap<String, ReputationEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct ReputationEntry {
+    accepted: u32,
+    quarantined: u32,
+    rejected: u32,
+    deferred: u32,
+}
+
+const GREYLIST_DELAY_SECONDS: u64 = 90;
+
 pub(crate) fn initialize_spool(spool_dir: &Path) -> Result<()> {
     for queue in [
         "incoming",
@@ -68,6 +156,8 @@ pub(crate) fn initialize_spool(spool_dir: &Path) -> Result<()> {
         "held",
         "sent",
         "outbound",
+        "policy",
+        "greylist",
     ] {
         fs::create_dir_all(spool_dir.join(queue))
             .with_context(|| format!("unable to create spool queue {queue}"))?;
@@ -121,6 +211,15 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
         fallback_to_hold_queue: dashboard.relay.fallback_to_hold_queue,
         drain_mode: dashboard.policies.drain_mode,
         quarantine_enabled: dashboard.policies.quarantine_enabled,
+        greylisting_enabled: dashboard.policies.greylisting_enabled,
+        require_spf: dashboard.policies.require_spf,
+        require_dkim_alignment: dashboard.policies.require_dkim_alignment,
+        require_dmarc_enforcement: dashboard.policies.require_dmarc_enforcement,
+        dnsbl_enabled: dashboard.policies.dnsbl_enabled,
+        dnsbl_zones: dashboard.policies.dnsbl_zones.clone(),
+        reputation_enabled: dashboard.policies.reputation_enabled,
+        spam_quarantine_threshold: dashboard.policies.spam_quarantine_threshold,
+        spam_reject_threshold: dashboard.policies.spam_reject_threshold,
         max_message_size_mb: dashboard.policies.max_message_size_mb,
     }
 }
@@ -142,6 +241,16 @@ pub(crate) async fn process_outbound_handoff(
         relay_error: None,
         magika_summary: None,
         magika_decision: None,
+        spam_score: 0.0,
+        security_score: 0.0,
+        reputation_score: 0,
+        dnsbl_hits: Vec::new(),
+        auth_summary: AuthSummary::default(),
+        decision_trace: vec![DecisionTraceEntry {
+            stage: "outbound-handoff".to_string(),
+            outcome: "accepted".to_string(),
+            detail: "message received from LPE core for outbound relay".to_string(),
+        }],
         data: compose_rfc822_message(&payload),
     };
 
@@ -149,6 +258,12 @@ pub(crate) async fn process_outbound_handoff(
 
     if config.quarantine_enabled && should_quarantine(&message.data) {
         message.status = "quarantined".to_string();
+        message.spam_score = config.spam_quarantine_threshold.max(1.0);
+        message.decision_trace.push(DecisionTraceEntry {
+            stage: "outbound-policy".to_string(),
+            outcome: "quarantine".to_string(),
+            detail: "message matched local quarantine policy".to_string(),
+        });
         move_message(spool_dir, &message, "outbound", "quarantine").await?;
         return Ok(OutboundMessageHandoffResponse {
             queue_id: payload.queue_id,
@@ -161,6 +276,11 @@ pub(crate) async fn process_outbound_handoff(
     match relay_message(config, &message).await {
         Ok(()) => {
             message.status = "sent".to_string();
+            message.decision_trace.push(DecisionTraceEntry {
+                stage: "outbound-relay".to_string(),
+                outcome: "relayed".to_string(),
+                detail: "message relayed to upstream SMTP target".to_string(),
+            });
             move_message(spool_dir, &message, "outbound", "sent").await?;
             Ok(OutboundMessageHandoffResponse {
                 queue_id: payload.queue_id,
@@ -182,6 +302,11 @@ pub(crate) async fn process_outbound_handoff(
                 _ => "held".to_string(),
             };
             message.relay_error = Some(detail.clone());
+            message.decision_trace.push(DecisionTraceEntry {
+                stage: "outbound-relay".to_string(),
+                outcome: final_status.as_str().to_string(),
+                detail: detail.clone(),
+            });
             let destination = if final_status == TransportDeliveryStatus::Deferred {
                 "deferred"
             } else {
@@ -257,7 +382,16 @@ async fn handle_smtp_session(
                 write_smtp(
                     &mut writer,
                     &format!(
-                        "554 message rejected by Magika policy (trace {})",
+                        "554 message rejected by perimeter policy (trace {})",
+                        message.id
+                    ),
+                )
+                .await?;
+            } else if message.status == "deferred" {
+                write_smtp(
+                    &mut writer,
+                    &format!(
+                        "451 message temporarily deferred by perimeter policy (trace {})",
                         message.id
                     ),
                 )
@@ -328,6 +462,16 @@ async fn receive_message_with_validator<D: Detector>(
         relay_error: None,
         magika_summary: None,
         magika_decision: None,
+        spam_score: 0.0,
+        security_score: 0.0,
+        reputation_score: 0,
+        dnsbl_hits: Vec::new(),
+        auth_summary: AuthSummary::default(),
+        decision_trace: vec![DecisionTraceEntry {
+            stage: "smtp-ingress".to_string(),
+            outcome: "accepted".to_string(),
+            detail: "message accepted by SMTP edge and persisted to the incoming spool".to_string(),
+        }],
         data,
     };
 
@@ -335,6 +479,11 @@ async fn receive_message_with_validator<D: Detector>(
 
     if config.drain_mode {
         message.status = "held".to_string();
+        message.decision_trace.push(DecisionTraceEntry {
+            stage: "drain-mode".to_string(),
+            outcome: "held".to_string(),
+            detail: "drain mode is enabled on the sorting center".to_string(),
+        });
         move_message(spool_dir, &message, "incoming", "held").await?;
         return Ok(message);
     }
@@ -345,6 +494,12 @@ async fn receive_message_with_validator<D: Detector>(
             message.status = "quarantined".to_string();
             message.magika_decision = Some("quarantine".to_string());
             message.magika_summary = Some(reason);
+            message.security_score += 5.0;
+            message.decision_trace.push(DecisionTraceEntry {
+                stage: "magika".to_string(),
+                outcome: "quarantine".to_string(),
+                detail: message.magika_summary.clone().unwrap_or_default(),
+            });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             return Ok(message);
         }
@@ -352,6 +507,12 @@ async fn receive_message_with_validator<D: Detector>(
             message.status = "rejected".to_string();
             message.magika_decision = Some("reject".to_string());
             message.magika_summary = Some(reason);
+            message.security_score += 8.0;
+            message.decision_trace.push(DecisionTraceEntry {
+                stage: "magika".to_string(),
+                outcome: "reject".to_string(),
+                detail: message.magika_summary.clone().unwrap_or_default(),
+            });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             return Ok(message);
         }
@@ -359,35 +520,76 @@ async fn receive_message_with_validator<D: Detector>(
             message.status = "quarantined".to_string();
             message.magika_decision = Some("quarantine".to_string());
             message.magika_summary = Some(format!("Magika validation failed: {error}"));
+            message.security_score += 4.0;
+            message.decision_trace.push(DecisionTraceEntry {
+                stage: "magika".to_string(),
+                outcome: "quarantine".to_string(),
+                detail: message.magika_summary.clone().unwrap_or_default(),
+            });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             return Ok(message);
         }
     }
 
-    if config.quarantine_enabled && should_quarantine(&message.data) {
-        message.status = "quarantined".to_string();
-        move_message(spool_dir, &message, "incoming", "quarantine").await?;
-        return Ok(message);
-    }
+    let verdict = evaluate_inbound_policy(
+        spool_dir,
+        config,
+        parse_peer_ip(&message.peer),
+        &message.helo,
+        &message.mail_from,
+        &message.rcpt_to,
+        &message.data,
+    )
+    .await?;
+    apply_filter_verdict(&mut message, &verdict);
 
-    match deliver_inbound_message(config, &message).await {
-        Ok(_) => {
-            message.status = "sent".to_string();
-            move_message(spool_dir, &message, "incoming", "sent").await?;
+    match verdict.action {
+        FilterAction::Accept => match deliver_inbound_message(config, &message).await {
+            Ok(_) => {
+                message.status = "sent".to_string();
+                message.decision_trace.push(DecisionTraceEntry {
+                    stage: "core-delivery".to_string(),
+                    outcome: "sent".to_string(),
+                    detail: "message delivered to the core LPE inbound-delivery API".to_string(),
+                });
+                move_message(spool_dir, &message, "incoming", "sent").await?;
+                update_reputation(spool_dir, &message, FilterAction::Accept)?;
+            }
+            Err(error) => {
+                message.status = if config.fallback_to_hold_queue {
+                    "held".to_string()
+                } else {
+                    "deferred".to_string()
+                };
+                message.relay_error = Some(error.to_string());
+                message.decision_trace.push(DecisionTraceEntry {
+                    stage: "core-delivery".to_string(),
+                    outcome: message.status.clone(),
+                    detail: error.to_string(),
+                });
+                let destination = if config.fallback_to_hold_queue {
+                    "held"
+                } else {
+                    "deferred"
+                };
+                move_message(spool_dir, &message, "incoming", destination).await?;
+                update_reputation(spool_dir, &message, FilterAction::Defer)?;
+            }
         }
-        Err(error) => {
-            message.status = if config.fallback_to_hold_queue {
-                "held".to_string()
-            } else {
-                "deferred".to_string()
-            };
-            message.relay_error = Some(error.to_string());
-            let destination = if config.fallback_to_hold_queue {
-                "held"
-            } else {
-                "deferred"
-            };
-            move_message(spool_dir, &message, "incoming", destination).await?;
+        FilterAction::Quarantine => {
+            message.status = "quarantined".to_string();
+            move_message(spool_dir, &message, "incoming", "quarantine").await?;
+            update_reputation(spool_dir, &message, FilterAction::Quarantine)?;
+        }
+        FilterAction::Reject => {
+            message.status = "rejected".to_string();
+            move_message(spool_dir, &message, "incoming", "quarantine").await?;
+            update_reputation(spool_dir, &message, FilterAction::Reject)?;
+        }
+        FilterAction::Defer => {
+            message.status = "deferred".to_string();
+            move_message(spool_dir, &message, "incoming", "deferred").await?;
+            update_reputation(spool_dir, &message, FilterAction::Defer)?;
         }
     }
 
@@ -426,6 +628,494 @@ fn classify_inbound_message<D: Detector>(
         }
     }
     Ok(InboundMagikaOutcome::Accept)
+}
+
+async fn evaluate_inbound_policy(
+    spool_dir: &Path,
+    config: &RuntimeConfig,
+    peer_ip: Option<IpAddr>,
+    helo: &str,
+    mail_from: &str,
+    rcpt_to: &[String],
+    message_bytes: &[u8],
+) -> Result<FilterVerdict> {
+    let mut spam_score = 0.0;
+    let mut security_score = 0.0;
+    let mut decision_trace = Vec::new();
+    let mut dnsbl_hits = Vec::new();
+    let mut auth_summary = AuthSummary::default();
+    let reputation_score = if config.reputation_enabled {
+        load_reputation_score(spool_dir, peer_ip, mail_from)?
+    } else {
+        0
+    };
+
+    if config.quarantine_enabled && should_quarantine(message_bytes) {
+        decision_trace.push(DecisionTraceEntry {
+            stage: "manual-quarantine".to_string(),
+            outcome: "quarantine".to_string(),
+            detail: "message matched the explicit quarantine marker policy".to_string(),
+        });
+        return Ok(FilterVerdict {
+            action: FilterAction::Quarantine,
+            reason: Some("message matched local quarantine policy".to_string()),
+            spam_score: config.spam_quarantine_threshold.max(1.0),
+            security_score: 1.0,
+            reputation_score,
+            dnsbl_hits,
+            auth_summary,
+            decision_trace,
+        });
+    }
+
+    if let Some(ip) = peer_ip {
+        if config.greylisting_enabled {
+            match evaluate_greylisting(spool_dir, ip, mail_from, rcpt_to)? {
+                Some(reason) => {
+                    decision_trace.push(DecisionTraceEntry {
+                        stage: "greylisting".to_string(),
+                        outcome: "defer".to_string(),
+                        detail: reason.clone(),
+                    });
+                    spam_score += 1.5;
+                    return Ok(FilterVerdict {
+                        action: FilterAction::Defer,
+                        reason: Some(reason),
+                        spam_score,
+                        security_score,
+                        reputation_score,
+                        dnsbl_hits,
+                        auth_summary,
+                        decision_trace,
+                    });
+                }
+                None => {
+                    decision_trace.push(DecisionTraceEntry {
+                        stage: "greylisting".to_string(),
+                        outcome: "pass".to_string(),
+                        detail: "triplet already aged through greylisting".to_string(),
+                    });
+                }
+            }
+        }
+
+        if config.dnsbl_enabled {
+            dnsbl_hits = query_dnsbl_hits(ip, &config.dnsbl_zones).await;
+            if !dnsbl_hits.is_empty() {
+                spam_score += 4.0 + dnsbl_hits.len() as f32;
+                security_score += 2.0;
+                decision_trace.push(DecisionTraceEntry {
+                    stage: "dnsbl".to_string(),
+                    outcome: "listed".to_string(),
+                    detail: format!("source IP listed on {}", dnsbl_hits.join(", ")),
+                });
+            } else {
+                decision_trace.push(DecisionTraceEntry {
+                    stage: "dnsbl".to_string(),
+                    outcome: "clear".to_string(),
+                    detail: "source IP not listed on configured DNSBL zones".to_string(),
+                });
+            }
+        }
+
+        match authenticate_message(ip, helo, mail_from, message_bytes).await {
+            Ok((summary, auth_trace, action_hint)) => {
+                auth_summary = summary;
+                decision_trace.extend(auth_trace);
+                match action_hint {
+                    Some(FilterAction::Reject) => security_score += 4.0,
+                    Some(FilterAction::Quarantine) => spam_score += 3.0,
+                    Some(FilterAction::Defer) => security_score += 1.0,
+                    _ => {}
+                }
+            }
+            Err(error) => {
+                security_score += 1.0;
+                decision_trace.push(DecisionTraceEntry {
+                    stage: "authentication".to_string(),
+                    outcome: "temperror".to_string(),
+                    detail: format!("authentication checks failed open with resolver error: {error}"),
+                });
+            }
+        }
+    } else {
+        decision_trace.push(DecisionTraceEntry {
+            stage: "authentication".to_string(),
+            outcome: "skipped".to_string(),
+            detail: "source peer IP could not be parsed for SPF, DKIM, and DMARC evaluation".to_string(),
+        });
+    }
+
+    if reputation_score < 0 {
+        spam_score += (-reputation_score) as f32 * 0.35;
+        security_score += (-reputation_score) as f32 * 0.10;
+        decision_trace.push(DecisionTraceEntry {
+            stage: "reputation".to_string(),
+            outcome: "negative".to_string(),
+            detail: format!("historical reputation score is {}", reputation_score),
+        });
+    } else {
+        decision_trace.push(DecisionTraceEntry {
+            stage: "reputation".to_string(),
+            outcome: "neutral".to_string(),
+            detail: format!("historical reputation score is {}", reputation_score),
+        });
+    }
+
+    let reason = if config.require_dmarc_enforcement
+        && auth_summary.dmarc.to_ascii_lowercase().contains("reject")
+    {
+        Some("DMARC policy requested reject".to_string())
+    } else if config.require_spf
+        && auth_summary.spf.to_ascii_lowercase().contains("fail")
+        && auth_summary.dkim.to_ascii_lowercase().contains("none")
+    {
+        Some("SPF failed and no aligned DKIM signature passed".to_string())
+    } else if config.require_dkim_alignment
+        && !auth_summary.dkim.to_ascii_lowercase().contains("pass")
+    {
+        Some("aligned DKIM verification did not pass".to_string())
+    } else if spam_score >= config.spam_reject_threshold {
+        Some(format!(
+            "spam score {:.1} reached reject threshold {:.1}",
+            spam_score, config.spam_reject_threshold
+        ))
+    } else if spam_score >= config.spam_quarantine_threshold {
+        Some(format!(
+            "spam score {:.1} reached quarantine threshold {:.1}",
+            spam_score, config.spam_quarantine_threshold
+        ))
+    } else {
+        None
+    };
+
+    let action = if config.require_dmarc_enforcement
+        && auth_summary.dmarc.to_ascii_lowercase().contains("reject")
+    {
+        FilterAction::Reject
+    } else if config.require_spf
+        && auth_summary.spf.to_ascii_lowercase().contains("fail")
+        && auth_summary.dkim.to_ascii_lowercase().contains("none")
+    {
+        FilterAction::Reject
+    } else if config.require_dkim_alignment
+        && !auth_summary.dkim.to_ascii_lowercase().contains("pass")
+    {
+        FilterAction::Quarantine
+    } else if spam_score >= config.spam_reject_threshold {
+        FilterAction::Reject
+    } else if spam_score >= config.spam_quarantine_threshold {
+        FilterAction::Quarantine
+    } else {
+        FilterAction::Accept
+    };
+
+    decision_trace.push(DecisionTraceEntry {
+        stage: "final-policy".to_string(),
+        outcome: match action {
+            FilterAction::Accept => "accept",
+            FilterAction::Quarantine => "quarantine",
+            FilterAction::Reject => "reject",
+            FilterAction::Defer => "defer",
+        }
+        .to_string(),
+        detail: reason
+            .clone()
+            .unwrap_or_else(|| "message passed SMTP perimeter policy".to_string()),
+    });
+
+    Ok(FilterVerdict {
+        action,
+        reason,
+        spam_score,
+        security_score,
+        reputation_score,
+        dnsbl_hits,
+        auth_summary,
+        decision_trace,
+    })
+}
+
+fn apply_filter_verdict(message: &mut QueuedMessage, verdict: &FilterVerdict) {
+    message.spam_score = verdict.spam_score;
+    message.security_score = verdict.security_score;
+    message.reputation_score = verdict.reputation_score;
+    message.dnsbl_hits = verdict.dnsbl_hits.clone();
+    message.auth_summary = verdict.auth_summary.clone();
+    message.decision_trace.extend(verdict.decision_trace.clone());
+    if let Some(reason) = &verdict.reason {
+        message.relay_error = Some(reason.clone());
+    }
+}
+
+async fn authenticate_message(
+    client_ip: IpAddr,
+    helo: &str,
+    mail_from: &str,
+    message_bytes: &[u8],
+) -> Result<(AuthSummary, Vec<DecisionTraceEntry>, Option<FilterAction>)> {
+    let authenticator = EmailAuthenticator::new(SystemDnsResolver::new()?, "lpe-ct.local");
+    let result = authenticator
+        .authenticate(message_bytes, client_ip, helo, mail_from)
+        .await
+        .map_err(|error| anyhow!("authentication evaluation failed: {error}"))?;
+
+    let spf = format!("{:?}", result.spf);
+    let dkim = format!("{:?}", result.dkim);
+    let dmarc = format!("{:?}", result.dmarc.disposition);
+    let mut trace = vec![
+        DecisionTraceEntry {
+            stage: "spf".to_string(),
+            outcome: spf.clone(),
+            detail: format!("SPF evaluation for {} from {}", mail_from, client_ip),
+        },
+        DecisionTraceEntry {
+            stage: "dkim".to_string(),
+            outcome: dkim.clone(),
+            detail: "DKIM verification executed on the RFC 5322 message".to_string(),
+        },
+        DecisionTraceEntry {
+            stage: "dmarc".to_string(),
+            outcome: dmarc.clone(),
+            detail: "DMARC evaluation executed from the RFC 5322 From domain".to_string(),
+        },
+    ];
+
+    let action_hint = match result.dmarc.disposition {
+        DmarcDisposition::Reject => Some(FilterAction::Reject),
+        DmarcDisposition::Quarantine => Some(FilterAction::Quarantine),
+        DmarcDisposition::TempFail => Some(FilterAction::Defer),
+        _ => None,
+    };
+    if action_hint.is_none() && spf.to_ascii_lowercase().contains("softfail") {
+        trace.push(DecisionTraceEntry {
+            stage: "spf".to_string(),
+            outcome: "softfail".to_string(),
+            detail: "SPF softfail contributes to the spam score but does not reject by itself"
+                .to_string(),
+        });
+    }
+
+    Ok((
+        AuthSummary { spf, dkim, dmarc },
+        trace,
+        action_hint,
+    ))
+}
+
+async fn query_dnsbl_hits(ip: IpAddr, zones: &[String]) -> Vec<String> {
+    let resolver = match SystemDnsResolver::new() {
+        Ok(resolver) => resolver,
+        Err(_) => return Vec::new(),
+    };
+    let mut hits = Vec::new();
+    for zone in zones {
+        let query = dnsbl_query_name(ip, zone);
+        if resolver.query_exists(&query).await.unwrap_or(false) {
+            hits.push(zone.clone());
+        }
+    }
+    hits
+}
+
+fn dnsbl_query_name(ip: IpAddr, zone: &str) -> String {
+    match ip {
+        IpAddr::V4(ip) => {
+            let octets = ip.octets();
+            format!(
+                "{}.{}.{}.{}.{}",
+                octets[3], octets[2], octets[1], octets[0], zone
+            )
+        }
+        IpAddr::V6(ip) => {
+            let hex = ip
+                .octets()
+                .iter()
+                .flat_map(|byte| [byte >> 4, byte & 0x0f])
+                .map(|nibble| format!("{nibble:x}"))
+                .collect::<Vec<_>>();
+            format!("{}.{}", hex.into_iter().rev().collect::<Vec<_>>().join("."), zone)
+        }
+    }
+}
+
+fn parse_peer_ip(peer: &str) -> Option<IpAddr> {
+    if let Ok(addr) = peer.parse::<SocketAddr>() {
+        return Some(addr.ip());
+    }
+    peer.parse::<IpAddr>().ok()
+}
+
+fn evaluate_greylisting(
+    spool_dir: &Path,
+    ip: IpAddr,
+    mail_from: &str,
+    rcpt_to: &[String],
+) -> Result<Option<String>> {
+    let rcpt = rcpt_to.first().map(String::as_str).unwrap_or_default();
+    let key = stable_key_id(&(ip, mail_from.to_ascii_lowercase(), rcpt.to_ascii_lowercase()));
+    let path = spool_dir.join("greylist").join(format!("{key}.json"));
+    let now = unix_now();
+    let mut entry = if path.exists() {
+        serde_json::from_str::<GreylistEntry>(&fs::read_to_string(&path)?)?
+    } else {
+        GreylistEntry {
+            first_seen_unix: now,
+            release_after_unix: now + GREYLIST_DELAY_SECONDS,
+            pass_count: 0,
+        }
+    };
+
+    if now < entry.release_after_unix {
+        if !path.exists() {
+            fs::write(&path, serde_json::to_string_pretty(&entry)?)?;
+        }
+        return Ok(Some(format!(
+            "greylisted triplet {} for {} seconds",
+            key, GREYLIST_DELAY_SECONDS
+        )));
+    }
+
+    entry.pass_count += 1;
+    fs::write(&path, serde_json::to_string_pretty(&entry)?)?;
+    Ok(None)
+}
+
+fn load_reputation_score(spool_dir: &Path, peer_ip: Option<IpAddr>, mail_from: &str) -> Result<i32> {
+    let store = load_reputation_store(spool_dir)?;
+    let key = reputation_key(peer_ip, mail_from);
+    let entry = store.entries.get(&key).cloned().unwrap_or_default();
+    Ok(entry.accepted as i32 - (entry.quarantined as i32 * 2) - (entry.rejected as i32 * 3))
+}
+
+fn update_reputation(spool_dir: &Path, message: &QueuedMessage, action: FilterAction) -> Result<()> {
+    let mut store = load_reputation_store(spool_dir)?;
+    let key = reputation_key(parse_peer_ip(&message.peer), &message.mail_from);
+    let entry = store.entries.entry(key).or_default();
+    match action {
+        FilterAction::Accept => entry.accepted += 1,
+        FilterAction::Quarantine => entry.quarantined += 1,
+        FilterAction::Reject => entry.rejected += 1,
+        FilterAction::Defer => entry.deferred += 1,
+    }
+    save_reputation_store(spool_dir, &store)
+}
+
+fn reputation_key(peer_ip: Option<IpAddr>, mail_from: &str) -> String {
+    format!(
+        "{}|{}",
+        peer_ip
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+        sender_domain(mail_from)
+    )
+}
+
+fn sender_domain(mail_from: &str) -> String {
+    mail_from
+        .split('@')
+        .nth(1)
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn load_reputation_store(spool_dir: &Path) -> Result<ReputationStore> {
+    let path = spool_dir.join("policy").join("reputation.json");
+    if !path.exists() {
+        return Ok(ReputationStore::default());
+    }
+    Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
+}
+
+fn save_reputation_store(spool_dir: &Path, store: &ReputationStore) -> Result<()> {
+    let path = spool_dir.join("policy").join("reputation.json");
+    fs::write(path, serde_json::to_string_pretty(store)?)?;
+    Ok(())
+}
+
+fn stable_key_id<T: Hash>(value: &T) -> String {
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+#[derive(Clone)]
+struct SystemDnsResolver {
+    resolver: TokioResolver,
+}
+
+impl SystemDnsResolver {
+    fn new() -> Result<Self> {
+        let resolver = TokioResolver::builder_tokio()
+            .context("unable to create DNS resolver builder from system configuration")?
+            .build();
+        Ok(Self { resolver })
+    }
+}
+
+impl DnsResolver for SystemDnsResolver {
+    async fn query_txt(&self, name: &str) -> Result<Vec<String>, DnsError> {
+        let lookup = self
+            .resolver
+            .lookup(name, RecordType::TXT)
+            .await
+            .map_err(map_dns_error)?;
+        Ok(lookup.iter().map(|record| record.to_string()).collect())
+    }
+
+    async fn query_a(&self, name: &str) -> Result<Vec<Ipv4Addr>, DnsError> {
+        let lookup = self.resolver.ipv4_lookup(name).await.map_err(map_dns_error)?;
+        Ok(lookup.iter().map(|record| record.0).collect())
+    }
+
+    async fn query_aaaa(&self, name: &str) -> Result<Vec<Ipv6Addr>, DnsError> {
+        let lookup = self.resolver.ipv6_lookup(name).await.map_err(map_dns_error)?;
+        Ok(lookup.iter().map(|record| record.0).collect())
+    }
+
+    async fn query_mx(&self, name: &str) -> Result<Vec<MxRecord>, DnsError> {
+        let lookup = self.resolver.mx_lookup(name).await.map_err(map_dns_error)?;
+        Ok(lookup
+            .iter()
+            .map(|record| MxRecord {
+                preference: record.preference(),
+                exchange: record.exchange().to_utf8(),
+            })
+            .collect())
+    }
+
+    async fn query_ptr(&self, ip: &IpAddr) -> Result<Vec<String>, DnsError> {
+        let lookup = self
+            .resolver
+            .reverse_lookup(*ip)
+            .await
+            .map_err(map_dns_error)?;
+        Ok(lookup.iter().map(|name| name.to_utf8()).collect())
+    }
+
+    async fn query_exists(&self, name: &str) -> Result<bool, DnsError> {
+        let a = self.resolver.lookup_ip(name).await.map_err(map_dns_error)?;
+        Ok(a.iter().next().is_some())
+    }
+}
+
+fn map_dns_error(error: hickory_resolver::ResolveError) -> DnsError {
+    let message = error.to_string().to_ascii_lowercase();
+    if message.contains("nxdomain") || message.contains("no such domain") {
+        DnsError::NxDomain
+    } else if message.contains("no records") || message.contains("no data") {
+        DnsError::NoRecords
+    } else {
+        DnsError::TempFail
+    }
 }
 
 async fn deliver_inbound_message(
@@ -641,6 +1331,31 @@ fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
         fallback_to_hold_queue: bool_at(&value, &["relay", "fallback_to_hold_queue"], false),
         drain_mode: bool_at(&value, &["policies", "drain_mode"], false),
         quarantine_enabled: bool_at(&value, &["policies", "quarantine_enabled"], true),
+        greylisting_enabled: bool_at(&value, &["policies", "greylisting_enabled"], true),
+        require_spf: bool_at(&value, &["policies", "require_spf"], true),
+        require_dkim_alignment: bool_at(
+            &value,
+            &["policies", "require_dkim_alignment"],
+            false,
+        ),
+        require_dmarc_enforcement: bool_at(
+            &value,
+            &["policies", "require_dmarc_enforcement"],
+            true,
+        ),
+        dnsbl_enabled: bool_at(&value, &["policies", "dnsbl_enabled"], true),
+        dnsbl_zones: strings_at(
+            &value,
+            &["policies", "dnsbl_zones"],
+            &["zen.spamhaus.org", "bl.spamcop.net"],
+        ),
+        reputation_enabled: bool_at(&value, &["policies", "reputation_enabled"], true),
+        spam_quarantine_threshold: f32_at(
+            &value,
+            &["policies", "spam_quarantine_threshold"],
+            5.0,
+        ),
+        spam_reject_threshold: f32_at(&value, &["policies", "spam_reject_threshold"], 9.0),
         max_message_size_mb: u32_at(&value, &["policies", "max_message_size_mb"], 64),
     })
 }
@@ -666,6 +1381,29 @@ fn u32_at(value: &Value, path: &[&str], fallback: u32) -> u32 {
         .and_then(Value::as_u64)
         .map(|value| value as u32)
         .unwrap_or(fallback)
+}
+
+fn f32_at(value: &Value, path: &[&str], fallback: f32) -> f32 {
+    path.iter()
+        .try_fold(value, |current, key| current.get(*key))
+        .and_then(Value::as_f64)
+        .map(|value| value as f32)
+        .unwrap_or(fallback)
+}
+
+fn strings_at(value: &Value, path: &[&str], fallback: &[&str]) -> Vec<String> {
+    path.iter()
+        .try_fold(value, |current, key| current.get(*key))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .filter(|items| !items.is_empty())
+        .unwrap_or_else(|| fallback.iter().map(|value| value.to_string()).collect())
 }
 
 fn should_quarantine(data: &[u8]) -> bool {
@@ -822,9 +1560,11 @@ fn current_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_inbound_message, compose_rfc822_message, encode_quoted_printable,
-        initialize_spool, process_outbound_handoff, receive_message,
-        receive_message_with_validator, RuntimeConfig,
+        classify_inbound_message, compose_rfc822_message, dnsbl_query_name,
+        encode_quoted_printable, evaluate_greylisting, initialize_spool,
+        load_reputation_score, parse_peer_ip, process_outbound_handoff, receive_message,
+        receive_message_with_validator, stable_key_id, unix_now, update_reputation, AuthSummary,
+        FilterAction, GreylistEntry, QueuedMessage, RuntimeConfig,
     };
     use axum::{routing::post, Json, Router};
     use lpe_domain::{
@@ -833,6 +1573,7 @@ mod tests {
     };
     use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
     use std::{
+        net::IpAddr,
         net::SocketAddr,
         path::PathBuf,
         sync::{Arc, Mutex},
@@ -865,6 +1606,15 @@ mod tests {
             fallback_to_hold_queue: false,
             drain_mode: false,
             quarantine_enabled: true,
+            greylisting_enabled: false,
+            require_spf: true,
+            require_dkim_alignment: false,
+            require_dmarc_enforcement: true,
+            dnsbl_enabled: false,
+            dnsbl_zones: Vec::new(),
+            reputation_enabled: true,
+            spam_quarantine_threshold: 5.0,
+            spam_reject_threshold: 9.0,
             max_message_size_mb: 16,
         }
     }
@@ -1151,6 +1901,72 @@ mod tests {
         assert_eq!(request.body_text, "Visible body");
         assert_eq!(request.raw_message, raw);
         std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
+    }
+
+    #[test]
+    fn greylisting_defers_first_triplet_then_allows_after_release_window() {
+        let spool = temp_dir("greylisting");
+        initialize_spool(&spool).unwrap();
+        let ip: IpAddr = "192.0.2.45".parse().unwrap();
+        let rcpt = vec!["dest@example.test".to_string()];
+
+        let first = evaluate_greylisting(&spool, ip, "sender@example.test", &rcpt).unwrap();
+        assert!(first.unwrap().contains("greylisted triplet"));
+
+        let key = stable_key_id(&(ip, "sender@example.test".to_string(), "dest@example.test".to_string()));
+        let path = spool.join("greylist").join(format!("{key}.json"));
+        let mut entry: GreylistEntry = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        entry.release_after_unix = unix_now().saturating_sub(1);
+        std::fs::write(&path, serde_json::to_string_pretty(&entry).unwrap()).unwrap();
+
+        let second = evaluate_greylisting(&spool, ip, "sender@example.test", &rcpt).unwrap();
+        assert!(second.is_none());
+    }
+
+    #[test]
+    fn reputation_score_penalizes_quarantine_and_rejects() {
+        let spool = temp_dir("reputation");
+        initialize_spool(&spool).unwrap();
+        let mut message = QueuedMessage {
+            id: "trace-1".to_string(),
+            direction: "inbound".to_string(),
+            received_at: "unix:1".to_string(),
+            peer: "192.0.2.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "sender@example.test".to_string(),
+            rcpt_to: vec!["dest@example.test".to_string()],
+            status: "incoming".to_string(),
+            relay_error: None,
+            magika_summary: None,
+            magika_decision: None,
+            spam_score: 0.0,
+            security_score: 0.0,
+            reputation_score: 0,
+            dnsbl_hits: Vec::new(),
+            auth_summary: AuthSummary::default(),
+            decision_trace: Vec::new(),
+            data: b"Subject: test\r\n\r\nbody".to_vec(),
+        };
+
+        update_reputation(&spool, &message, FilterAction::Accept).unwrap();
+        update_reputation(&spool, &message, FilterAction::Quarantine).unwrap();
+        message.id = "trace-2".to_string();
+        update_reputation(&spool, &message, FilterAction::Reject).unwrap();
+
+        let score = load_reputation_score(&spool, parse_peer_ip(&message.peer), &message.mail_from).unwrap();
+        assert_eq!(score, -4);
+    }
+
+    #[test]
+    fn dnsbl_query_name_reverses_ipv4_and_ipv6_addresses() {
+        let ipv4: IpAddr = "203.0.113.7".parse().unwrap();
+        assert_eq!(
+            dnsbl_query_name(ipv4, "zen.spamhaus.org"),
+            "7.113.0.203.zen.spamhaus.org"
+        );
+
+        let ipv6: IpAddr = "2001:db8::1".parse().unwrap();
+        assert!(dnsbl_query_name(ipv6, "dnsbl.example.test").ends_with(".dnsbl.example.test"));
     }
 
     async fn spawn_dummy_smtp(captured: Arc<Mutex<String>>) -> String {

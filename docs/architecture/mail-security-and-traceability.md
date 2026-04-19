@@ -12,6 +12,8 @@ Ce document decrit le flux mail, la securite edge, la tracabilite et la quaranta
 
 `LPE` persiste les mailbox et reste systeme de record.
 
+La mise en oeuvre actuelle de `LPE-CT` execute deja `SPF`, `DKIM`, `DMARC`, le greylisting, des lookups `DNSBL/RBL`, une reputation locale simple et une trace detaillee de decision persistee dans le spool.
+
 ### Scores separes
 
 Le modele doit separer:
@@ -81,6 +83,8 @@ This document describes mail flow, edge security, traceability, and quarantine b
 `LPE-CT` receives, filters, traces, routes, and quarantines.
 
 `LPE` persists mailboxes and remains the system of record.
+
+The current `LPE-CT` implementation already executes `SPF`, `DKIM`, `DMARC`, greylisting, `DNSBL/RBL` lookups, simple local reputation, and a detailed decision trace persisted in the spool.
 
 ### Separate scores
 

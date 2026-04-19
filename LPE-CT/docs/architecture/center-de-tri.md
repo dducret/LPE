@@ -16,6 +16,15 @@ Le centre de tri:
 
 La v1 fonctionnelle inclut un listener SMTP minimal, un spool local, une quarantaine simple, un mode drainage, un endpoint de handoff interne pour la sortie, et une remise finale HTTP vers `LPE` pour l'entree. Le `mTLS` est conserve comme politique de configuration mais n'est pas active par defaut dans cette v1 tant que le choix TLS conforme aux licences n'est pas documente.
 
+Le pipeline de perimeterie execute maintenant en plus:
+
+- validation `Magika` des pieces jointes
+- greylisting
+- lookups `DNSBL/RBL`
+- verification `SPF`, `DKIM`, `DMARC`
+- scoring antispam et reputation simple
+- trace detaillee des decisions persistee dans le spool
+
 ### Positionnement d'architecture
 
 `LPE-CT` ne remplace pas le coeur `LPE`:
@@ -89,6 +98,15 @@ The sorting center:
 - exposes a management interface through `nginx` and a local Rust API
 
 The functional v1 includes a minimal SMTP listener, local spool, simple quarantine, drain mode, an internal handoff endpoint for outbound work, and HTTP final delivery into `LPE` for inbound mail. `mTLS` remains a configuration policy but is not enabled by default in this v1 until the license-compliant TLS choice is documented.
+
+The perimeter pipeline now also executes:
+
+- `Magika` validation for attachments
+- greylisting
+- `DNSBL/RBL` lookups
+- `SPF`, `DKIM`, and `DMARC` verification
+- anti-spam scoring and simple local reputation
+- detailed decision tracing persisted in the spool
 
 ### Architecture position
 

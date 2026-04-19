@@ -64,6 +64,16 @@ struct PolicySettings {
     require_spf: bool,
     require_dkim_alignment: bool,
     require_dmarc_enforcement: bool,
+    #[serde(default = "default_dnsbl_enabled")]
+    dnsbl_enabled: bool,
+    #[serde(default = "default_dnsbl_zones")]
+    dnsbl_zones: Vec<String>,
+    #[serde(default = "default_reputation_enabled")]
+    reputation_enabled: bool,
+    #[serde(default = "default_spam_quarantine_threshold")]
+    spam_quarantine_threshold: f32,
+    #[serde(default = "default_spam_reject_threshold")]
+    spam_reject_threshold: f32,
     attachment_text_scan_enabled: bool,
     max_message_size_mb: u32,
 }
@@ -352,6 +362,38 @@ fn apply_env_overrides(state: &mut DashboardState) {
     if let Ok(value) = env::var("LPE_CT_DRAIN_MODE") {
         state.policies.drain_mode = parse_bool(&value);
     }
+    if let Ok(value) = env::var("LPE_CT_GREYLISTING_ENABLED") {
+        state.policies.greylisting_enabled = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_REQUIRE_SPF") {
+        state.policies.require_spf = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_REQUIRE_DKIM_ALIGNMENT") {
+        state.policies.require_dkim_alignment = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_REQUIRE_DMARC_ENFORCEMENT") {
+        state.policies.require_dmarc_enforcement = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_DNSBL_ENABLED") {
+        state.policies.dnsbl_enabled = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_DNSBL_ZONES") {
+        state.policies.dnsbl_zones = parse_csv(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_REPUTATION_ENABLED") {
+        state.policies.reputation_enabled = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_SPAM_QUARANTINE_THRESHOLD") {
+        if let Ok(parsed) = value.parse::<f32>() {
+            state.policies.spam_quarantine_threshold = parsed.max(0.0);
+        }
+    }
+    if let Ok(value) = env::var("LPE_CT_SPAM_REJECT_THRESHOLD") {
+        if let Ok(parsed) = value.parse::<f32>() {
+            state.policies.spam_reject_threshold =
+                parsed.max(state.policies.spam_quarantine_threshold);
+        }
+    }
     if let Ok(value) = env::var("LPE_CT_MAX_MESSAGE_SIZE_MB") {
         if let Ok(parsed) = value.parse::<u32>() {
             state.policies.max_message_size_mb = parsed.max(1);
@@ -361,6 +403,15 @@ fn apply_env_overrides(state: &mut DashboardState) {
 
 fn parse_bool(value: &str) -> bool {
     matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on")
+}
+
+fn parse_csv(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 fn default_state() -> DashboardState {
@@ -399,10 +450,15 @@ fn default_state() -> DashboardState {
         policies: PolicySettings {
             drain_mode: false,
             quarantine_enabled: true,
-            greylisting_enabled: false,
-            require_spf: false,
+            greylisting_enabled: true,
+            require_spf: true,
             require_dkim_alignment: false,
-            require_dmarc_enforcement: false,
+            require_dmarc_enforcement: true,
+            dnsbl_enabled: default_dnsbl_enabled(),
+            dnsbl_zones: default_dnsbl_zones(),
+            reputation_enabled: default_reputation_enabled(),
+            spam_quarantine_threshold: default_spam_quarantine_threshold(),
+            spam_reject_threshold: default_spam_reject_threshold(),
             attachment_text_scan_enabled: true,
             max_message_size_mb: 64,
         },
@@ -440,6 +496,29 @@ fn default_state() -> DashboardState {
 
 fn default_core_delivery_base_url() -> String {
     "http://10.20.0.20:8080".to_string()
+}
+
+fn default_dnsbl_enabled() -> bool {
+    true
+}
+
+fn default_dnsbl_zones() -> Vec<String> {
+    vec![
+        "zen.spamhaus.org".to_string(),
+        "bl.spamcop.net".to_string(),
+    ]
+}
+
+fn default_reputation_enabled() -> bool {
+    true
+}
+
+fn default_spam_quarantine_threshold() -> f32 {
+    5.0
+}
+
+fn default_spam_reject_threshold() -> f32 {
+    9.0
 }
 
 fn current_timestamp() -> String {

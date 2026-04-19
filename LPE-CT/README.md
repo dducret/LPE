@@ -17,6 +17,7 @@
 - `web/` interface statique de management servie par `nginx`
 - `installation/debian-trixie/` scripts d'installation, mise a jour et verification
 - `docs/architecture/center-de-tri.md` architecture et perimetre DMZ
+- `docs/operations/mail-filtering.md` exploitation du pipeline SMTP, antispam et traçabilité
 
 ### Demarrage local
 
@@ -32,6 +33,11 @@ cargo run --manifest-path LPE-CT/Cargo.toml
 - relais SMTP simple vers un upstream primaire puis secondaire pour la sortie
 - remise finale des messages entrants vers `LPE` via `POST /internal/lpe-ct/inbound-deliveries`
 - quarantaine de test via l'en-tete `X-LPE-CT-Quarantine: yes` ou un sujet contenant `[quarantine]`
+- execution des controles `SPF`, `DKIM` et `DMARC` a l'entree
+- greylisting sur triplets `(IP source, MAIL FROM, premier RCPT TO)`
+- lookups `DNSBL/RBL` configurables
+- scoring antispam enrichi avec reputation locale simple
+- trace detaillee des decisions de perimeterie dans les fichiers JSON du spool
 - mode drainage qui accepte les messages et les place en `held`
 - metriques de files exposees dans le dashboard de management
 
@@ -65,6 +71,9 @@ Configurer au minimum:
 - `LPE_CT_RELAY_SECONDARY` si un second relais sortant existe
 - `LPE_INTEGRATION_SHARED_SECRET`
 - `LPE_CT_MUTUAL_TLS_REQUIRED=false` pour la v1 fonctionnelle actuelle
+- `LPE_CT_GREYLISTING_ENABLED`, `LPE_CT_DNSBL_ZONES`, `LPE_CT_SPAM_QUARANTINE_THRESHOLD`, `LPE_CT_SPAM_REJECT_THRESHOLD`
+
+Voir aussi `docs/operations/mail-filtering.md` pour le detail des scores, traces et politiques operatoires.
 
 ### Jeux de tests
 
@@ -97,6 +106,7 @@ CT_PUBLIC_HOST=mx1.example.test ./test-from-internet.sh
 - `web/` static management interface served by `nginx`
 - `installation/debian-trixie/` install, update, and verification scripts
 - `docs/architecture/center-de-tri.md` DMZ architecture and scope
+- `docs/operations/mail-filtering.md` SMTP filtering, anti-spam, and traceability operations
 
 ### Local start
 
@@ -112,6 +122,11 @@ cargo run --manifest-path LPE-CT/Cargo.toml
 - simple SMTP relay to a primary then secondary upstream for outbound transport
 - final delivery of accepted inbound messages to `LPE` through `POST /internal/lpe-ct/inbound-deliveries`
 - test quarantine through the `X-LPE-CT-Quarantine: yes` header or a subject containing `[quarantine]`
+- executed inbound `SPF`, `DKIM`, and `DMARC` checks
+- greylisting on `(source IP, MAIL FROM, first RCPT TO)` triplets
+- configurable `DNSBL/RBL` lookups
+- richer anti-spam scoring with simple local reputation
+- detailed perimeter-decision trace persisted in spool JSON files
 - drain mode that accepts messages and places them in `held`
 - queue metrics exposed in the management dashboard
 
@@ -145,6 +160,9 @@ Configure at least:
 - `LPE_CT_RELAY_SECONDARY` if a second outbound relay exists
 - `LPE_INTEGRATION_SHARED_SECRET`
 - `LPE_CT_MUTUAL_TLS_REQUIRED=false` for the current functional v1
+- `LPE_CT_GREYLISTING_ENABLED`, `LPE_CT_DNSBL_ZONES`, `LPE_CT_SPAM_QUARANTINE_THRESHOLD`, `LPE_CT_SPAM_REJECT_THRESHOLD`
+
+See `docs/operations/mail-filtering.md` for the detailed score, trace, and policy workflow.
 
 ### Test suites
 
