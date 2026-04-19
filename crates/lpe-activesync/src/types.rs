@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Default)]
@@ -39,9 +39,14 @@ pub(crate) struct SnapshotChange {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct CollectionStateEntry {
+    pub(crate) server_id: String,
+    pub(crate) fingerprint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct StoredSyncState {
-    pub(crate) baseline_snapshot: Value,
-    pub(crate) target_snapshot: Value,
+    pub(crate) collection_state: Vec<CollectionStateEntry>,
     pub(crate) pending_changes: Vec<SnapshotChange>,
     pub(crate) next_offset: usize,
 }

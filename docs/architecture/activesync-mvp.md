@@ -155,6 +155,7 @@ The MVP implements a focused `WBXML` codec for the code pages needed by the curr
 - guarantee that a message sent from a native client becomes visible in the authoritative `Sent` view
 - persistent `SyncKey` storage in `PostgreSQL` per account, device, and collection
 - complete `Sync` pagination with `WindowSize` and `MoreAvailable`, including continuation of a server batch across multiple `SyncKey` values
+- incremental `Sync` state tracking with compact per-item fingerprints instead of full serialized `ApplicationData` snapshots for large mailbox collections
 - hardened `SendMail` parsing for native clients: folded headers, RFC 2047 encoded subjects and display names, `quoted-printable`, `base64`, and `multipart/alternative` text bodies
 
 ### Contacts and calendar
@@ -181,3 +182,4 @@ Client-side create, update, and delete operations for those two classes are inte
 - fine-grained client-originated mutation handling is currently focused on `Drafts`
 - `Drafts` synchronization is targeted for `ActiveSync 16.1`; clients limited to older protocol versions should not be treated as fully supported for that capability
 - the first `Sync` with `SyncKey = 0` uses a conservative priming round-trip before emitting the paged server changes; this is targeted for Outlook/mobile but has not yet been validated against the full diversity of `ActiveSync` clients
+- `Sync` continuation is stabilized around a compact collection fingerprint set rather than persisted full payload snapshots; if an item targeted by an unfinished paged batch mutates before that page is emitted, the server may invalidate that continuation `SyncKey` and require a fresh sync instead of replaying a stale payload

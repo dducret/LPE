@@ -5,50 +5,11 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::{
-    constants::{CALENDAR_CLASS, CONTACTS_CLASS, MAIL_CLASS},
+    constants::MAIL_CLASS,
     message::{activesync_timestamp, format_email_address, split_name},
-    types::{CollectionDefinition, SnapshotChange, SnapshotEntry},
+    types::{CollectionDefinition, CollectionStateEntry, SnapshotChange, SnapshotEntry},
     wbxml::WbxmlNode,
 };
-
-pub(crate) fn fingerprint_email(email: &JmapEmail) -> String {
-    let recipients = |values: &[lpe_storage::JmapEmailAddress]| {
-        values
-            .iter()
-            .map(|recipient| recipient.address.as_str())
-            .collect::<Vec<_>>()
-            .join(",")
-    };
-    format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        email.subject,
-        email.preview,
-        email.body_text,
-        email
-            .sent_at
-            .clone()
-            .unwrap_or_else(|| email.received_at.clone()),
-        email.unread,
-        email.flagged,
-        recipients(&email.to),
-        recipients(&email.cc),
-        recipients(&email.bcc),
-    )
-}
-
-pub(crate) fn fingerprint_contact(contact: &ClientContact) -> String {
-    format!(
-        "{}|{}|{}|{}|{}|{}",
-        contact.name, contact.role, contact.email, contact.phone, contact.team, contact.notes
-    )
-}
-
-pub(crate) fn fingerprint_event(event: &ClientEvent) -> String {
-    format!(
-        "{}|{}|{}|{}|{}|{}",
-        event.date, event.time, event.title, event.location, event.attendees, event.notes
-    )
-}
 
 pub(crate) fn email_application_data(email: &JmapEmail) -> Value {
     let to = email
@@ -147,28 +108,50 @@ pub(crate) fn snapshot_to_value(entries: &[SnapshotEntry]) -> Value {
     )
 }
 
-pub(crate) fn snapshot_map(snapshot: &Value) -> HashMap<String, WbxmlNode> {
-    let mut map = HashMap::new();
-    if let Value::Array(entries) = snapshot {
-        for entry in entries {
-            if let Some(object) = entry.as_object() {
-                let id = object
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                if let Some(data) = object.get("data").and_then(Value::as_object) {
-                    map.insert(id, value_to_node(data));
-                }
-            }
-        }
-    }
-    map
-}
-
 pub(crate) fn diff_snapshots(previous: Option<&Value>, current: &Value) -> Vec<SnapshotChange> {
     let previous_fingerprints = snapshot_fingerprints(previous);
     let current_fingerprints = snapshot_fingerprints(Some(current));
+    let mut changes = Vec::new();
+
+    for (server_id, fingerprint) in &current_fingerprints {
+        match previous_fingerprints.get(server_id) {
+            None => changes.push(SnapshotChange {
+                kind: "Add".to_string(),
+                server_id: server_id.clone(),
+            }),
+            Some(previous) if previous != fingerprint => changes.push(SnapshotChange {
+                kind: "Update".to_string(),
+                server_id: server_id.clone(),
+            }),
+            _ => {}
+        }
+    }
+
+    for server_id in previous_fingerprints.keys() {
+        if !current_fingerprints.contains_key(server_id) {
+            changes.push(SnapshotChange {
+                kind: "Delete".to_string(),
+                server_id: server_id.clone(),
+            });
+        }
+    }
+
+    changes.sort_by(|left, right| left.server_id.cmp(&right.server_id));
+    changes
+}
+
+pub(crate) fn diff_collection_states(
+    previous: &[CollectionStateEntry],
+    current: &[CollectionStateEntry],
+) -> Vec<SnapshotChange> {
+    let previous_fingerprints = previous
+        .iter()
+        .map(|entry| (entry.server_id.clone(), entry.fingerprint.clone()))
+        .collect::<HashMap<_, _>>();
+    let current_fingerprints = current
+        .iter()
+        .map(|entry| (entry.server_id.clone(), entry.fingerprint.clone()))
+        .collect::<HashMap<_, _>>();
     let mut changes = Vec::new();
 
     for (server_id, fingerprint) in &current_fingerprints {
@@ -279,47 +262,6 @@ pub(crate) fn mail_collection(collection: &CollectionDefinition) -> bool {
 
 pub(crate) fn drafts_collection(collection: &CollectionDefinition) -> bool {
     collection.class_name == MAIL_CLASS && collection.display_name == "Drafts"
-}
-
-pub(crate) fn collection_entries(
-    collection: &CollectionDefinition,
-    emails: Vec<JmapEmail>,
-    contacts: Vec<ClientContact>,
-    events: Vec<ClientEvent>,
-) -> Result<Value> {
-    match collection.class_name.as_str() {
-        MAIL_CLASS => Ok(snapshot_to_value(
-            &emails
-                .into_iter()
-                .map(|email| SnapshotEntry {
-                    server_id: email.id.to_string(),
-                    fingerprint: fingerprint_email(&email),
-                    data: email_application_data(&email),
-                })
-                .collect::<Vec<_>>(),
-        )),
-        CONTACTS_CLASS => Ok(snapshot_to_value(
-            &contacts
-                .into_iter()
-                .map(|contact| SnapshotEntry {
-                    server_id: contact.id.to_string(),
-                    fingerprint: fingerprint_contact(&contact),
-                    data: contact_application_data(&contact),
-                })
-                .collect::<Vec<_>>(),
-        )),
-        CALENDAR_CLASS => Ok(snapshot_to_value(
-            &events
-                .into_iter()
-                .map(|event| SnapshotEntry {
-                    server_id: event.id.to_string(),
-                    fingerprint: fingerprint_event(&event),
-                    data: calendar_application_data(&event),
-                })
-                .collect::<Vec<_>>(),
-        )),
-        _ => bail!("unsupported collection class"),
-    }
 }
 
 pub(crate) fn parse_collection_mailbox_id(collection: &CollectionDefinition) -> Result<Uuid> {

@@ -1,10 +1,9 @@
 use anyhow::Result;
 use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
-    ActiveSyncSyncState, AuditEntryInput, ClientContact, ClientEvent, JmapEmail, JmapMailbox,
-    SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage,
+    ActiveSyncItemState, ActiveSyncSyncState, AuditEntryInput, ClientContact, ClientEvent,
+    JmapEmail, JmapMailbox, SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage,
 };
-use serde_json::Value;
 use std::{future::Future, pin::Pin};
 use uuid::Uuid;
 
@@ -25,6 +24,19 @@ pub trait ActiveSyncStore: AccountAuthStore {
         account_id: Uuid,
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<JmapEmail>>;
+    fn fetch_activesync_email_states<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        position: u64,
+        limit: u64,
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>>;
+    fn fetch_activesync_email_states_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>>;
     fn fetch_jmap_draft<'a>(
         &'a self,
         account_id: Uuid,
@@ -48,14 +60,42 @@ pub trait ActiveSyncStore: AccountAuthStore {
     ) -> StoreFuture<'a, SubmittedMessage>;
     fn fetch_client_contacts<'a>(&'a self, account_id: Uuid)
         -> StoreFuture<'a, Vec<ClientContact>>;
+    fn fetch_client_contacts_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ClientContact>>;
     fn fetch_client_events<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<ClientEvent>>;
+    fn fetch_client_events_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ClientEvent>>;
+    fn fetch_activesync_contact_states<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>>;
+    fn fetch_activesync_contact_states_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>>;
+    fn fetch_activesync_event_states<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>>;
+    fn fetch_activesync_event_states_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>>;
     fn store_activesync_sync_state<'a>(
         &'a self,
         account_id: Uuid,
         device_id: &'a str,
         collection_id: &'a str,
         sync_key: &'a str,
-        snapshot: Value,
+        snapshot_json: String,
     ) -> StoreFuture<'a, ()>;
     fn fetch_activesync_sync_state<'a>(
         &'a self,
@@ -91,6 +131,31 @@ impl ActiveSyncStore for Storage {
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<JmapEmail>> {
         Box::pin(async move { self.fetch_jmap_emails(account_id, ids).await })
+    }
+
+    fn fetch_activesync_email_states<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        position: u64,
+        limit: u64,
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>> {
+        Box::pin(async move {
+            self.fetch_activesync_email_states(account_id, mailbox_id, position, limit)
+                .await
+        })
+    }
+
+    fn fetch_activesync_email_states_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>> {
+        Box::pin(async move {
+            self.fetch_activesync_email_states_by_ids(account_id, mailbox_id, ids)
+                .await
+        })
     }
 
     fn fetch_jmap_draft<'a>(
@@ -136,8 +201,57 @@ impl ActiveSyncStore for Storage {
         Box::pin(async move { self.fetch_client_contacts(account_id).await })
     }
 
+    fn fetch_client_contacts_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ClientContact>> {
+        Box::pin(async move { self.fetch_client_contacts_by_ids(account_id, ids).await })
+    }
+
     fn fetch_client_events<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<ClientEvent>> {
         Box::pin(async move { self.fetch_client_events(account_id).await })
+    }
+
+    fn fetch_client_events_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ClientEvent>> {
+        Box::pin(async move { self.fetch_client_events_by_ids(account_id, ids).await })
+    }
+
+    fn fetch_activesync_contact_states<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>> {
+        Box::pin(async move { self.fetch_activesync_contact_states(account_id).await })
+    }
+
+    fn fetch_activesync_contact_states_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>> {
+        Box::pin(async move {
+            self.fetch_activesync_contact_states_by_ids(account_id, ids)
+                .await
+        })
+    }
+
+    fn fetch_activesync_event_states<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>> {
+        Box::pin(async move { self.fetch_activesync_event_states(account_id).await })
+    }
+
+    fn fetch_activesync_event_states_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>> {
+        Box::pin(async move { self.fetch_activesync_event_states_by_ids(account_id, ids).await })
     }
 
     fn store_activesync_sync_state<'a>(
@@ -146,7 +260,7 @@ impl ActiveSyncStore for Storage {
         device_id: &'a str,
         collection_id: &'a str,
         sync_key: &'a str,
-        snapshot: Value,
+        snapshot_json: String,
     ) -> StoreFuture<'a, ()> {
         Box::pin(async move {
             self.store_activesync_sync_state(
@@ -154,7 +268,7 @@ impl ActiveSyncStore for Storage {
                 device_id,
                 collection_id,
                 sync_key,
-                &snapshot,
+                &snapshot_json,
             )
             .await
         })

@@ -10,7 +10,6 @@ use lpe_magika::{
     PolicyDecision, ValidationRequest, Validator,
 };
 use serde::Serialize;
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Pool, Postgres, Row};
 use std::fs::{self, File};
@@ -333,7 +332,13 @@ pub struct AuthenticatedAccount {
 #[derive(Debug, Clone, Serialize)]
 pub struct ActiveSyncSyncState {
     pub sync_key: String,
-    pub snapshot: Value,
+    pub snapshot_json: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ActiveSyncItemState {
+    pub id: Uuid,
+    pub fingerprint: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -4083,7 +4088,7 @@ impl Storage {
         device_id: &str,
         collection_id: &str,
         sync_key: &str,
-        snapshot: &Value,
+        snapshot_json: &str,
     ) -> Result<()> {
         sqlx::query(
             r#"
@@ -4101,7 +4106,7 @@ impl Storage {
         .bind(device_id.trim())
         .bind(collection_id.trim())
         .bind(sync_key.trim())
-        .bind(snapshot.to_string())
+        .bind(snapshot_json.trim())
         .execute(&self.pool)
         .await?;
 
@@ -4138,10 +4143,274 @@ impl Storage {
         row.map(|row| {
             Ok(ActiveSyncSyncState {
                 sync_key: row.sync_key,
-                snapshot: serde_json::from_str(&row.snapshot_json)?,
+                snapshot_json: row.snapshot_json,
             })
         })
         .transpose()
+    }
+
+    pub async fn fetch_activesync_email_states(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        position: u64,
+        limit: u64,
+    ) -> Result<Vec<ActiveSyncItemState>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                m.id,
+                concat_ws(
+                    '|',
+                    m.subject_normalized,
+                    m.preview_text,
+                    COALESCE(b.content_hash, ''),
+                    to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                    CASE WHEN m.unread THEN '1' ELSE '0' END,
+                    CASE WHEN m.flagged THEN '1' ELSE '0' END,
+                    COALESCE(m.from_display, ''),
+                    m.from_address,
+                    COALESCE(recipients.to_recipients, ''),
+                    COALESCE(recipients.cc_recipients, ''),
+                    m.delivery_status
+                ) AS fingerprint
+            FROM messages m
+            LEFT JOIN message_bodies b ON b.message_id = m.id
+            LEFT JOIN LATERAL (
+                SELECT
+                    string_agg(
+                        lower(r.address) || ':' || COALESCE(r.display_name, ''),
+                        ',' ORDER BY r.ordinal
+                    ) FILTER (WHERE r.kind = 'to') AS to_recipients,
+                    string_agg(
+                        lower(r.address) || ':' || COALESCE(r.display_name, ''),
+                        ',' ORDER BY r.ordinal
+                    ) FILTER (WHERE r.kind = 'cc') AS cc_recipients
+                FROM message_recipients r
+                WHERE r.tenant_id = $1
+                  AND r.message_id = m.id
+            ) recipients ON TRUE
+            WHERE m.tenant_id = $1
+              AND m.account_id = $2
+              AND m.mailbox_id = $3
+            ORDER BY COALESCE(m.sent_at, m.received_at) DESC, m.id DESC
+            OFFSET $4
+            LIMIT $5
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(position as i64)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(ActiveSyncItemState {
+                    id: row.try_get("id")?,
+                    fingerprint: row.try_get("fingerprint")?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn fetch_activesync_email_states_by_ids(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ActiveSyncItemState>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                m.id,
+                concat_ws(
+                    '|',
+                    m.subject_normalized,
+                    m.preview_text,
+                    COALESCE(b.content_hash, ''),
+                    to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                    CASE WHEN m.unread THEN '1' ELSE '0' END,
+                    CASE WHEN m.flagged THEN '1' ELSE '0' END,
+                    COALESCE(m.from_display, ''),
+                    m.from_address,
+                    COALESCE(recipients.to_recipients, ''),
+                    COALESCE(recipients.cc_recipients, ''),
+                    m.delivery_status
+                ) AS fingerprint
+            FROM messages m
+            LEFT JOIN message_bodies b ON b.message_id = m.id
+            LEFT JOIN LATERAL (
+                SELECT
+                    string_agg(
+                        lower(r.address) || ':' || COALESCE(r.display_name, ''),
+                        ',' ORDER BY r.ordinal
+                    ) FILTER (WHERE r.kind = 'to') AS to_recipients,
+                    string_agg(
+                        lower(r.address) || ':' || COALESCE(r.display_name, ''),
+                        ',' ORDER BY r.ordinal
+                    ) FILTER (WHERE r.kind = 'cc') AS cc_recipients
+                FROM message_recipients r
+                WHERE r.tenant_id = $1
+                  AND r.message_id = m.id
+            ) recipients ON TRUE
+            WHERE m.tenant_id = $1
+              AND m.account_id = $2
+              AND m.mailbox_id = $3
+              AND m.id = ANY($4)
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(ActiveSyncItemState {
+                    id: row.try_get("id")?,
+                    fingerprint: row.try_get("fingerprint")?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn fetch_activesync_contact_states(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Vec<ActiveSyncItemState>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fingerprint
+            FROM contacts
+            WHERE tenant_id = $1 AND account_id = $2
+            ORDER BY name ASC, id ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(ActiveSyncItemState {
+                    id: row.try_get("id")?,
+                    fingerprint: row.try_get("fingerprint")?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn fetch_activesync_contact_states_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ActiveSyncItemState>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fingerprint
+            FROM contacts
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND id = ANY($3)
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(ActiveSyncItemState {
+                    id: row.try_get("id")?,
+                    fingerprint: row.try_get("fingerprint")?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn fetch_activesync_event_states(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Vec<ActiveSyncItemState>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fingerprint
+            FROM calendar_events
+            WHERE tenant_id = $1 AND account_id = $2
+            ORDER BY event_date ASC, event_time ASC, id ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(ActiveSyncItemState {
+                    id: row.try_get("id")?,
+                    fingerprint: row.try_get("fingerprint")?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn fetch_activesync_event_states_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ActiveSyncItemState>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fingerprint
+            FROM calendar_events
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND id = ANY($3)
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                Ok(ActiveSyncItemState {
+                    id: row.try_get("id")?,
+                    fingerprint: row.try_get("fingerprint")?,
+                })
+            })
+            .collect()
     }
 
     pub async fn search_email_trace(
@@ -4698,6 +4967,41 @@ impl Storage {
         Ok(rows.into_iter().map(map_event).collect())
     }
 
+    pub async fn fetch_client_events_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientEvent>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let rows = sqlx::query_as::<_, ClientEventRow>(
+            r#"
+            SELECT
+                id,
+                to_char(event_date, 'YYYY-MM-DD') AS date,
+                to_char(event_time, 'HH24:MI') AS time,
+                title,
+                location,
+                attendees,
+                notes
+            FROM calendar_events
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND id = ANY($3)
+            ORDER BY event_date ASC, event_time ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_event).collect())
+    }
+
     pub async fn fetch_client_contacts(&self, account_id: Uuid) -> Result<Vec<ClientContact>> {
         let rows = sqlx::query_as::<_, ClientContactRow>(
             r#"
@@ -4709,6 +5013,34 @@ impl Storage {
         )
         .bind(DEFAULT_TENANT_ID)
         .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_contact).collect())
+    }
+
+    pub async fn fetch_client_contacts_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientContact>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let rows = sqlx::query_as::<_, ClientContactRow>(
+            r#"
+            SELECT id, name, role, email, phone, team, notes
+            FROM contacts
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND id = ANY($3)
+            ORDER BY name ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(ids)
         .fetch_all(&self.pool)
         .await?;
 

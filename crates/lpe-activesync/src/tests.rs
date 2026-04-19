@@ -8,11 +8,10 @@ use axum::body::to_bytes;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
-    AccountLogin, ActiveSyncSyncState, AuditEntryInput, AuthenticatedAccount, ClientContact,
-    ClientEvent, JmapEmail, JmapEmailAddress, JmapEmailQuery, JmapMailbox, SavedDraftMessage,
-    SubmitMessageInput, SubmittedMessage,
+    AccountLogin, ActiveSyncItemState, ActiveSyncSyncState, AuditEntryInput,
+    AuthenticatedAccount, ClientContact, ClientEvent, JmapEmail, JmapEmailAddress,
+    JmapEmailQuery, JmapMailbox, SavedDraftMessage, SubmitMessageInput, SubmittedMessage,
 };
-use serde_json::Value;
 use uuid::Uuid;
 
 use crate::{
@@ -27,12 +26,13 @@ struct FakeStore {
     session: Option<AuthenticatedAccount>,
     login: Option<AccountLogin>,
     mailboxes: Vec<JmapMailbox>,
-    emails: Vec<JmapEmail>,
+    emails: Arc<Mutex<Vec<JmapEmail>>>,
     contacts: Vec<ClientContact>,
     events: Vec<ClientEvent>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
     sync_states: Arc<Mutex<std::collections::HashMap<String, ActiveSyncSyncState>>>,
+    full_email_fetches: Arc<Mutex<u32>>,
 }
 
 impl FakeStore {
@@ -161,6 +161,8 @@ impl ActiveSyncStore for FakeStore {
     ) -> StoreFuture<'a, JmapEmailQuery> {
         let filtered = self
             .emails
+            .lock()
+            .unwrap()
             .iter()
             .filter(|email| mailbox_id.is_none() || Some(email.mailbox_id) == mailbox_id)
             .map(|email| email.id)
@@ -179,8 +181,11 @@ impl ActiveSyncStore for FakeStore {
         _account_id: Uuid,
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<JmapEmail>> {
+        *self.full_email_fetches.lock().unwrap() += 1;
         let emails = self
             .emails
+            .lock()
+            .unwrap()
             .iter()
             .filter(|email| ids.contains(&email.id))
             .cloned()
@@ -193,8 +198,118 @@ impl ActiveSyncStore for FakeStore {
         _account_id: Uuid,
         id: Uuid,
     ) -> StoreFuture<'a, Option<JmapEmail>> {
-        let email = self.emails.iter().find(|email| email.id == id).cloned();
+        let email = self
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|email| email.id == id)
+            .cloned();
         Box::pin(async move { Ok(email) })
+    }
+
+    fn fetch_activesync_email_states<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_id: Uuid,
+        position: u64,
+        limit: u64,
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>> {
+        let states = self
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|email| email.mailbox_id == mailbox_id)
+            .map(|email| ActiveSyncItemState {
+                id: email.id,
+                fingerprint: format!(
+                    "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+                    email.subject,
+                    email.preview,
+                    email.body_text,
+                    email.sent_at.clone().unwrap_or_else(|| email.received_at.clone()),
+                    if email.unread { "1" } else { "0" },
+                    if email.flagged { "1" } else { "0" },
+                    email.from_display.clone().unwrap_or_default(),
+                    email.from_address,
+                    email.to
+                        .iter()
+                        .map(|recipient| format!(
+                            "{}:{}",
+                            recipient.address.to_lowercase(),
+                            recipient.display_name.clone().unwrap_or_default()
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    email.cc
+                        .iter()
+                        .map(|recipient| format!(
+                            "{}:{}",
+                            recipient.address.to_lowercase(),
+                            recipient.display_name.clone().unwrap_or_default()
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    email.delivery_status,
+                ),
+            })
+            .collect::<Vec<_>>();
+        let paged = states
+            .into_iter()
+            .skip(position as usize)
+            .take(limit as usize)
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(paged) })
+    }
+
+    fn fetch_activesync_email_states_by_ids<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>> {
+        let states = self
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|email| email.mailbox_id == mailbox_id && ids.contains(&email.id))
+            .map(|email| ActiveSyncItemState {
+                id: email.id,
+                fingerprint: format!(
+                    "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+                    email.subject,
+                    email.preview,
+                    email.body_text,
+                    email.sent_at.clone().unwrap_or_else(|| email.received_at.clone()),
+                    if email.unread { "1" } else { "0" },
+                    if email.flagged { "1" } else { "0" },
+                    email.from_display.clone().unwrap_or_default(),
+                    email.from_address,
+                    email.to
+                        .iter()
+                        .map(|recipient| format!(
+                            "{}:{}",
+                            recipient.address.to_lowercase(),
+                            recipient.display_name.clone().unwrap_or_default()
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    email.cc
+                        .iter()
+                        .map(|recipient| format!(
+                            "{}:{}",
+                            recipient.address.to_lowercase(),
+                            recipient.display_name.clone().unwrap_or_default()
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    email.delivery_status,
+                ),
+            })
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(states) })
     }
 
     fn save_draft_message<'a>(
@@ -250,9 +365,113 @@ impl ActiveSyncStore for FakeStore {
         Box::pin(async move { Ok(contacts) })
     }
 
+    fn fetch_client_contacts_by_ids<'a>(
+        &'a self,
+        _account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ClientContact>> {
+        let contacts = self
+            .contacts
+            .iter()
+            .filter(|contact| ids.contains(&contact.id))
+            .cloned()
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(contacts) })
+    }
+
     fn fetch_client_events<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<ClientEvent>> {
         let events = self.events.clone();
         Box::pin(async move { Ok(events) })
+    }
+
+    fn fetch_client_events_by_ids<'a>(
+        &'a self,
+        _account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ClientEvent>> {
+        let events = self
+            .events
+            .iter()
+            .filter(|event| ids.contains(&event.id))
+            .cloned()
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(events) })
+    }
+
+    fn fetch_activesync_contact_states<'a>(
+        &'a self,
+        _account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>> {
+        let states = self
+            .contacts
+            .iter()
+            .map(|contact| ActiveSyncItemState {
+                id: contact.id,
+                fingerprint: format!(
+                    "{}|{}|{}|{}|{}|{}",
+                    contact.name, contact.role, contact.email, contact.phone, contact.team, contact.notes
+                ),
+            })
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(states) })
+    }
+
+    fn fetch_activesync_contact_states_by_ids<'a>(
+        &'a self,
+        _account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>> {
+        let states = self
+            .contacts
+            .iter()
+            .filter(|contact| ids.contains(&contact.id))
+            .map(|contact| ActiveSyncItemState {
+                id: contact.id,
+                fingerprint: format!(
+                    "{}|{}|{}|{}|{}|{}",
+                    contact.name, contact.role, contact.email, contact.phone, contact.team, contact.notes
+                ),
+            })
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(states) })
+    }
+
+    fn fetch_activesync_event_states<'a>(
+        &'a self,
+        _account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>> {
+        let states = self
+            .events
+            .iter()
+            .map(|event| ActiveSyncItemState {
+                id: event.id,
+                fingerprint: format!(
+                    "{}|{}|{}|{}|{}|{}",
+                    event.date, event.time, event.title, event.location, event.attendees, event.notes
+                ),
+            })
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(states) })
+    }
+
+    fn fetch_activesync_event_states_by_ids<'a>(
+        &'a self,
+        _account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ActiveSyncItemState>> {
+        let states = self
+            .events
+            .iter()
+            .filter(|event| ids.contains(&event.id))
+            .map(|event| ActiveSyncItemState {
+                id: event.id,
+                fingerprint: format!(
+                    "{}|{}|{}|{}|{}|{}",
+                    event.date, event.time, event.title, event.location, event.attendees, event.notes
+                ),
+            })
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(states) })
     }
 
     fn store_activesync_sync_state<'a>(
@@ -261,14 +480,14 @@ impl ActiveSyncStore for FakeStore {
         device_id: &'a str,
         collection_id: &'a str,
         sync_key: &'a str,
-        snapshot: Value,
+        snapshot_json: String,
     ) -> StoreFuture<'a, ()> {
         let key = format!("{account_id}:{device_id}:{collection_id}:{sync_key}");
         self.sync_states.lock().unwrap().insert(
             key,
             ActiveSyncSyncState {
                 sync_key: sync_key.to_string(),
-                snapshot,
+                snapshot_json,
             },
         );
         Box::pin(async move { Ok(()) })
@@ -447,7 +666,7 @@ async fn sync_handles_multiple_collections_and_common_optional_tokens() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: vec![inbox.clone(), sent.clone()],
-        emails: vec![
+        emails: Arc::new(Mutex::new(vec![
             FakeStore::inbox_email(
                 "11111111-1111-1111-1111-111111111111",
                 inbox.id,
@@ -460,7 +679,7 @@ async fn sync_handles_multiple_collections_and_common_optional_tokens() {
                 "sent",
                 "Two",
             ),
-        ],
+        ])),
         ..Default::default()
     };
     let service = ActiveSyncService::new(store);
@@ -513,7 +732,7 @@ async fn sync_key_zero_primes_then_returns_paged_more_available_changes() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: vec![inbox.clone()],
-        emails: vec![
+        emails: Arc::new(Mutex::new(vec![
             FakeStore::inbox_email(
                 "11111111-1111-1111-1111-111111111111",
                 inbox.id,
@@ -532,7 +751,7 @@ async fn sync_key_zero_primes_then_returns_paged_more_available_changes() {
                 "inbox",
                 "Three",
             ),
-        ],
+        ])),
         ..Default::default()
     };
     let service = ActiveSyncService::new(store);
@@ -693,6 +912,217 @@ async fn sync_key_zero_primes_then_returns_paged_more_available_changes() {
         .unwrap();
     assert!(stable_collection.child("Commands").is_none());
     assert!(stable_collection.child("MoreAvailable").is_none());
+}
+
+#[tokio::test]
+async fn stable_sync_does_not_reload_full_email_payloads_without_changes() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            inbox.id,
+            "inbox",
+            "One",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+
+    let priming_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", "0"));
+        collection.push(WbxmlNode::with_text(0, "CollectionId", inbox.id.to_string()));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+
+    let priming_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &priming_request,
+        )
+        .await
+        .unwrap();
+    let first_key = collection_sync_key(&decode_response_body(priming_response).await, &inbox.id.to_string());
+
+    let page_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", &first_key));
+        collection.push(WbxmlNode::with_text(0, "CollectionId", inbox.id.to_string()));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+
+    let page_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &page_request,
+        )
+        .await
+        .unwrap();
+    let stable_key = collection_sync_key(&decode_response_body(page_response).await, &inbox.id.to_string());
+    *store.full_email_fetches.lock().unwrap() = 0;
+
+    let stable_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", &stable_key));
+        collection.push(WbxmlNode::with_text(0, "CollectionId", inbox.id.to_string()));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+
+    let stable_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &stable_request,
+        )
+        .await
+        .unwrap();
+    let stable_sync = decode_response_body(stable_response).await;
+    let stable_collection = stable_sync
+        .child("Collections")
+        .unwrap()
+        .child("Collection")
+        .unwrap();
+    assert!(stable_collection.child("Commands").is_none());
+    assert_eq!(*store.full_email_fetches.lock().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn sync_key_stays_usable_for_new_changes_after_a_stable_round() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            inbox.id,
+            "inbox",
+            "One",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+
+    let first_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", "0"));
+        collection.push(WbxmlNode::with_text(0, "CollectionId", inbox.id.to_string()));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+    let first_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &first_request,
+        )
+        .await
+        .unwrap();
+    let primed_key = collection_sync_key(&decode_response_body(first_response).await, &inbox.id.to_string());
+
+    let second_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", &primed_key));
+        collection.push(WbxmlNode::with_text(0, "CollectionId", inbox.id.to_string()));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+    let second_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &second_request,
+        )
+        .await
+        .unwrap();
+    let stable_key = collection_sync_key(&decode_response_body(second_response).await, &inbox.id.to_string());
+
+    store.emails.lock().unwrap().push(FakeStore::inbox_email(
+        "22222222-2222-2222-2222-222222222222",
+        inbox.id,
+        "inbox",
+        "Two",
+    ));
+
+    let delta_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", &stable_key));
+        collection.push(WbxmlNode::with_text(0, "CollectionId", inbox.id.to_string()));
+        collection.push(WbxmlNode::with_text(0, "WindowSize", "1"));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+
+    let delta_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &delta_request,
+        )
+        .await
+        .unwrap();
+    let delta_sync = decode_response_body(delta_response).await;
+    let delta_collection = delta_sync
+        .child("Collections")
+        .unwrap()
+        .child("Collection")
+        .unwrap();
+    assert_eq!(delta_collection.child("Commands").unwrap().children.len(), 1);
+    assert!(delta_collection.child("MoreAvailable").is_none());
 }
 
 #[tokio::test]
