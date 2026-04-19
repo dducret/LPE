@@ -37,9 +37,10 @@ cargo run --manifest-path LPE-CT/Cargo.toml
 - remise finale des messages entrants vers `LPE` via `POST /internal/lpe-ct/inbound-deliveries`
 - quarantaine de test via l'en-tete `X-LPE-CT-Quarantine: yes` ou un sujet contenant `[quarantine]`
 - execution des controles `SPF`, `DKIM` et `DMARC` a l'entree
+- decisions `reject` / `quarantine` / `defer` fondees sur des verdicts SPF/DKIM/DMARC structures, pas sur des comparaisons textuelles fragiles
 - greylisting sur triplets `(IP source, MAIL FROM, premier RCPT TO)`
 - lookups `DNSBL/RBL` configurables
-- scoring antispam enrichi avec reputation locale simple
+- scoring antispam enrichi avec reputation locale simple et seuils de quarantaine/rejet par `(IP source, domaine emetteur)`
 - trace detaillee des decisions de perimeterie dans les fichiers JSON du spool
 - mode drainage qui accepte les messages et les place en `held`
 - metriques de files exposees dans le dashboard de management
@@ -74,9 +75,19 @@ Configurer au minimum:
 - `LPE_CT_RELAY_SECONDARY` si un second relais sortant existe
 - `LPE_INTEGRATION_SHARED_SECRET`
 - `LPE_CT_MUTUAL_TLS_REQUIRED=false` pour la v1 fonctionnelle actuelle
-- `LPE_CT_GREYLISTING_ENABLED`, `LPE_CT_DNSBL_ZONES`, `LPE_CT_SPAM_QUARANTINE_THRESHOLD`, `LPE_CT_SPAM_REJECT_THRESHOLD`
+- `LPE_CT_GREYLISTING_ENABLED`, `LPE_CT_DNSBL_ZONES`, `LPE_CT_DEFER_ON_AUTH_TEMPFAIL`
+- `LPE_CT_REPUTATION_QUARANTINE_THRESHOLD`, `LPE_CT_REPUTATION_REJECT_THRESHOLD`
+- `LPE_CT_SPAM_QUARANTINE_THRESHOLD`, `LPE_CT_SPAM_REJECT_THRESHOLD`
 
 Voir aussi `docs/operations/mail-filtering.md` pour le detail des scores, traces et politiques operatoires.
+
+Fonctions encore hors scope dans ce lot:
+
+- signature `DKIM` sortante
+- `ARC`
+- `MTA-STS`
+- `TLS-RPT`
+- reputation externe ou federée
 
 ### Jeux de tests
 
@@ -129,9 +140,10 @@ cargo run --manifest-path LPE-CT/Cargo.toml
 - final delivery of accepted inbound messages to `LPE` through `POST /internal/lpe-ct/inbound-deliveries`
 - test quarantine through the `X-LPE-CT-Quarantine: yes` header or a subject containing `[quarantine]`
 - executed inbound `SPF`, `DKIM`, and `DMARC` checks
+- `reject` / `quarantine` / `defer` decisions driven by structured SPF/DKIM/DMARC outcomes rather than brittle string matching
 - greylisting on `(source IP, MAIL FROM, first RCPT TO)` triplets
 - configurable `DNSBL/RBL` lookups
-- richer anti-spam scoring with simple local reputation
+- richer anti-spam scoring with simple local reputation and sender/IP quarantine or reject thresholds
 - detailed perimeter-decision trace persisted in spool JSON files
 - drain mode that accepts messages and places them in `held`
 - queue metrics exposed in the management dashboard
@@ -166,9 +178,19 @@ Configure at least:
 - `LPE_CT_RELAY_SECONDARY` if a second outbound relay exists
 - `LPE_INTEGRATION_SHARED_SECRET`
 - `LPE_CT_MUTUAL_TLS_REQUIRED=false` for the current functional v1
-- `LPE_CT_GREYLISTING_ENABLED`, `LPE_CT_DNSBL_ZONES`, `LPE_CT_SPAM_QUARANTINE_THRESHOLD`, `LPE_CT_SPAM_REJECT_THRESHOLD`
+- `LPE_CT_GREYLISTING_ENABLED`, `LPE_CT_DNSBL_ZONES`, `LPE_CT_DEFER_ON_AUTH_TEMPFAIL`
+- `LPE_CT_REPUTATION_QUARANTINE_THRESHOLD`, `LPE_CT_REPUTATION_REJECT_THRESHOLD`
+- `LPE_CT_SPAM_QUARANTINE_THRESHOLD`, `LPE_CT_SPAM_REJECT_THRESHOLD`
 
 See `docs/operations/mail-filtering.md` for the detailed score, trace, and policy workflow.
+
+Still out of scope in this lot:
+
+- outbound `DKIM` signing
+- `ARC`
+- `MTA-STS`
+- `TLS-RPT`
+- external or federated reputation feeds
 
 ### Test suites
 

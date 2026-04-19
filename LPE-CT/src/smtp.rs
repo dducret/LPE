@@ -2,7 +2,9 @@ use anyhow::{anyhow, Context, Result};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use email_auth::{
     common::dns::{DnsError, DnsResolver, MxRecord},
+    dkim::DkimResult,
     dmarc::Disposition as DmarcDisposition,
+    spf::SpfResult,
     EmailAuthenticator,
 };
 use hickory_resolver::{proto::rr::RecordType, TokioResolver};
@@ -20,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::{hash_map::DefaultHasher, HashMap},
+    convert::TryFrom,
     fs,
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -47,9 +50,12 @@ pub(crate) struct RuntimeConfig {
     require_spf: bool,
     require_dkim_alignment: bool,
     require_dmarc_enforcement: bool,
+    defer_on_auth_tempfail: bool,
     dnsbl_enabled: bool,
     dnsbl_zones: Vec<String>,
     reputation_enabled: bool,
+    reputation_quarantine_threshold: i32,
+    reputation_reject_threshold: i32,
     spam_quarantine_threshold: f32,
     spam_reject_threshold: f32,
     max_message_size_mb: u32,
@@ -180,6 +186,51 @@ struct FilterVerdict {
     decision_trace: Vec<DecisionTraceEntry>,
 }
 
+#[derive(Debug, Clone)]
+struct AuthenticationAssessment {
+    spf: SpfDisposition,
+    dkim: DkimDisposition,
+    dkim_aligned: bool,
+    spf_aligned: bool,
+    dmarc: DmarcDisposition,
+    from_domain: String,
+    spf_domain: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpfDisposition {
+    Pass,
+    Fail,
+    SoftFail,
+    Neutral,
+    None,
+    TempError,
+    PermError,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DkimDisposition {
+    Pass,
+    Fail,
+    None,
+    TempFail,
+    PermFail,
+}
+
+#[derive(Debug, Clone, Default)]
+struct DnsblOutcome {
+    hits: Vec<String>,
+    tempfail_zones: Vec<String>,
+}
+
+impl AuthenticationAssessment {
+    fn has_temporary_failure(&self) -> bool {
+        matches!(self.spf, SpfDisposition::TempError)
+            || matches!(self.dkim, DkimDisposition::TempFail)
+            || matches!(self.dmarc, DmarcDisposition::TempFail)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct GreylistEntry {
     first_seen_unix: u64,
@@ -271,9 +322,12 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
         require_spf: dashboard.policies.require_spf,
         require_dkim_alignment: dashboard.policies.require_dkim_alignment,
         require_dmarc_enforcement: dashboard.policies.require_dmarc_enforcement,
+        defer_on_auth_tempfail: dashboard.policies.defer_on_auth_tempfail,
         dnsbl_enabled: dashboard.policies.dnsbl_enabled,
         dnsbl_zones: dashboard.policies.dnsbl_zones.clone(),
         reputation_enabled: dashboard.policies.reputation_enabled,
+        reputation_quarantine_threshold: dashboard.policies.reputation_quarantine_threshold,
+        reputation_reject_threshold: dashboard.policies.reputation_reject_threshold,
         spam_quarantine_threshold: dashboard.policies.spam_quarantine_threshold,
         spam_reject_threshold: dashboard.policies.spam_reject_threshold,
         max_message_size_mb: dashboard.policies.max_message_size_mb,
@@ -458,7 +512,9 @@ pub(crate) async fn process_outbound_handoff(
     }
     if matches!(
         execution.status,
-        TransportDeliveryStatus::Quarantined | TransportDeliveryStatus::Bounced | TransportDeliveryStatus::Failed
+        TransportDeliveryStatus::Quarantined
+            | TransportDeliveryStatus::Bounced
+            | TransportDeliveryStatus::Failed
     ) {
         observability::record_security_event(match execution.status {
             TransportDeliveryStatus::Quarantined => "outbound_quarantine",
@@ -980,8 +1036,9 @@ async fn evaluate_inbound_policy(
     let mut spam_score = 0.0;
     let mut security_score = 0.0;
     let mut decision_trace = Vec::new();
-    let mut dnsbl_hits = Vec::new();
+    let mut dnsbl = DnsblOutcome::default();
     let mut auth_summary = AuthSummary::default();
+    let mut auth_assessment = None;
     let reputation_score = if config.reputation_enabled {
         load_reputation_score(spool_dir, peer_ip, mail_from)?
     } else {
@@ -1000,7 +1057,7 @@ async fn evaluate_inbound_policy(
             spam_score: config.spam_quarantine_threshold.max(1.0),
             security_score: 1.0,
             reputation_score,
-            dnsbl_hits,
+            dnsbl_hits: dnsbl.hits,
             auth_summary,
             decision_trace,
         });
@@ -1022,7 +1079,7 @@ async fn evaluate_inbound_policy(
                         spam_score,
                         security_score,
                         reputation_score,
-                        dnsbl_hits,
+                        dnsbl_hits: dnsbl.hits,
                         auth_summary,
                         decision_trace,
                     });
@@ -1038,14 +1095,14 @@ async fn evaluate_inbound_policy(
         }
 
         if config.dnsbl_enabled {
-            dnsbl_hits = query_dnsbl_hits(ip, &config.dnsbl_zones).await;
-            if !dnsbl_hits.is_empty() {
-                spam_score += 4.0 + dnsbl_hits.len() as f32;
+            dnsbl = query_dnsbl(ip, &config.dnsbl_zones).await;
+            if !dnsbl.hits.is_empty() {
+                spam_score += 4.0 + dnsbl.hits.len() as f32;
                 security_score += 2.0;
                 decision_trace.push(DecisionTraceEntry {
                     stage: "dnsbl".to_string(),
                     outcome: "listed".to_string(),
-                    detail: format!("source IP listed on {}", dnsbl_hits.join(", ")),
+                    detail: format!("source IP listed on {}", dnsbl.hits.join(", ")),
                 });
             } else {
                 decision_trace.push(DecisionTraceEntry {
@@ -1054,18 +1111,30 @@ async fn evaluate_inbound_policy(
                     detail: "source IP not listed on configured DNSBL zones".to_string(),
                 });
             }
+            if !dnsbl.tempfail_zones.is_empty() {
+                security_score += 0.5;
+                decision_trace.push(DecisionTraceEntry {
+                    stage: "dnsbl".to_string(),
+                    outcome: "temperror".to_string(),
+                    detail: format!(
+                        "temporary DNS failure while querying {}",
+                        dnsbl.tempfail_zones.join(", ")
+                    ),
+                });
+            }
         }
 
         match authenticate_message(ip, helo, mail_from, message_bytes).await {
-            Ok((summary, auth_trace, action_hint)) => {
+            Ok((summary, auth_trace, assessment)) => {
                 auth_summary = summary;
+                auth_assessment = Some(assessment.clone());
                 decision_trace.extend(auth_trace);
-                match action_hint {
-                    Some(FilterAction::Reject) => security_score += 4.0,
-                    Some(FilterAction::Quarantine) => spam_score += 3.0,
-                    Some(FilterAction::Defer) => security_score += 1.0,
-                    _ => {}
-                }
+                apply_authentication_scores(
+                    &assessment,
+                    &mut spam_score,
+                    &mut security_score,
+                    &mut decision_trace,
+                );
             }
             Err(error) => {
                 security_score += 1.0;
@@ -1103,19 +1172,70 @@ async fn evaluate_inbound_policy(
         });
     }
 
-    let reason = if config.require_dmarc_enforcement
-        && auth_summary.dmarc.to_ascii_lowercase().contains("reject")
+    if config.reputation_enabled && reputation_score <= config.reputation_reject_threshold {
+        decision_trace.push(DecisionTraceEntry {
+            stage: "reputation".to_string(),
+            outcome: "reject".to_string(),
+            detail: format!(
+                "historical reputation score {} reached reject threshold {}",
+                reputation_score, config.reputation_reject_threshold
+            ),
+        });
+    } else if config.reputation_enabled
+        && reputation_score <= config.reputation_quarantine_threshold
+    {
+        decision_trace.push(DecisionTraceEntry {
+            stage: "reputation".to_string(),
+            outcome: "quarantine".to_string(),
+            detail: format!(
+                "historical reputation score {} reached quarantine threshold {}",
+                reputation_score, config.reputation_quarantine_threshold
+            ),
+        });
+    }
+
+    let reason = if config.defer_on_auth_tempfail
+        && auth_assessment
+            .as_ref()
+            .is_some_and(AuthenticationAssessment::has_temporary_failure)
+    {
+        Some("authentication dependency temporarily failed".to_string())
+    } else if config.require_dmarc_enforcement
+        && auth_assessment
+            .as_ref()
+            .is_some_and(|assessment| assessment.dmarc == DmarcDisposition::Reject)
     {
         Some("DMARC policy requested reject".to_string())
+    } else if config.require_dmarc_enforcement
+        && auth_assessment
+            .as_ref()
+            .is_some_and(|assessment| assessment.dmarc == DmarcDisposition::Quarantine)
+    {
+        Some("DMARC policy requested quarantine".to_string())
     } else if config.require_spf
-        && auth_summary.spf.to_ascii_lowercase().contains("fail")
-        && auth_summary.dkim.to_ascii_lowercase().contains("none")
+        && auth_assessment.as_ref().is_some_and(|assessment| {
+            assessment.spf == SpfDisposition::Fail && !assessment.dkim_aligned
+        })
     {
         Some("SPF failed and no aligned DKIM signature passed".to_string())
     } else if config.require_dkim_alignment
-        && !auth_summary.dkim.to_ascii_lowercase().contains("pass")
+        && auth_assessment
+            .as_ref()
+            .is_some_and(|assessment| !assessment.dkim_aligned)
     {
         Some("aligned DKIM verification did not pass".to_string())
+    } else if config.reputation_enabled && reputation_score <= config.reputation_reject_threshold {
+        Some(format!(
+            "reputation score {} reached reject threshold {}",
+            reputation_score, config.reputation_reject_threshold
+        ))
+    } else if config.reputation_enabled
+        && reputation_score <= config.reputation_quarantine_threshold
+    {
+        Some(format!(
+            "reputation score {} reached quarantine threshold {}",
+            reputation_score, config.reputation_quarantine_threshold
+        ))
     } else if spam_score >= config.spam_reject_threshold {
         Some(format!(
             "spam score {:.1} reached reject threshold {:.1}",
@@ -1130,17 +1250,40 @@ async fn evaluate_inbound_policy(
         None
     };
 
-    let action = if config.require_dmarc_enforcement
-        && auth_summary.dmarc.to_ascii_lowercase().contains("reject")
+    let action = if config.defer_on_auth_tempfail
+        && auth_assessment
+            .as_ref()
+            .is_some_and(AuthenticationAssessment::has_temporary_failure)
+    {
+        FilterAction::Defer
+    } else if config.require_dmarc_enforcement
+        && auth_assessment
+            .as_ref()
+            .is_some_and(|assessment| assessment.dmarc == DmarcDisposition::Reject)
     {
         FilterAction::Reject
+    } else if config.require_dmarc_enforcement
+        && auth_assessment
+            .as_ref()
+            .is_some_and(|assessment| assessment.dmarc == DmarcDisposition::Quarantine)
+    {
+        FilterAction::Quarantine
     } else if config.require_spf
-        && auth_summary.spf.to_ascii_lowercase().contains("fail")
-        && auth_summary.dkim.to_ascii_lowercase().contains("none")
+        && auth_assessment.as_ref().is_some_and(|assessment| {
+            assessment.spf == SpfDisposition::Fail && !assessment.dkim_aligned
+        })
     {
         FilterAction::Reject
     } else if config.require_dkim_alignment
-        && !auth_summary.dkim.to_ascii_lowercase().contains("pass")
+        && auth_assessment
+            .as_ref()
+            .is_some_and(|assessment| !assessment.dkim_aligned)
+    {
+        FilterAction::Quarantine
+    } else if config.reputation_enabled && reputation_score <= config.reputation_reject_threshold {
+        FilterAction::Reject
+    } else if config.reputation_enabled
+        && reputation_score <= config.reputation_quarantine_threshold
     {
         FilterAction::Quarantine
     } else if spam_score >= config.spam_reject_threshold {
@@ -1162,7 +1305,11 @@ async fn evaluate_inbound_policy(
         .to_string(),
         detail: reason
             .clone()
-            .unwrap_or_else(|| "message passed SMTP perimeter policy".to_string()),
+            .unwrap_or_else(|| {
+                format!(
+                    "message passed SMTP perimeter policy (spam_score={spam_score:.1}, security_score={security_score:.1})"
+                )
+            }),
     });
 
     Ok(FilterVerdict {
@@ -1171,7 +1318,7 @@ async fn evaluate_inbound_policy(
         spam_score,
         security_score,
         reputation_score,
-        dnsbl_hits,
+        dnsbl_hits: dnsbl.hits,
         auth_summary,
         decision_trace,
     })
@@ -1191,70 +1338,256 @@ fn apply_filter_verdict(message: &mut QueuedMessage, verdict: &FilterVerdict) {
     }
 }
 
+fn apply_authentication_scores(
+    assessment: &AuthenticationAssessment,
+    spam_score: &mut f32,
+    security_score: &mut f32,
+    decision_trace: &mut Vec<DecisionTraceEntry>,
+) {
+    match assessment.spf {
+        SpfDisposition::SoftFail => {
+            *spam_score += 1.5;
+            decision_trace.push(DecisionTraceEntry {
+                stage: "spf".to_string(),
+                outcome: "softfail".to_string(),
+                detail: "SPF softfail increases spam score without forcing a reject".to_string(),
+            });
+        }
+        SpfDisposition::Fail => {
+            *security_score += 2.5;
+        }
+        SpfDisposition::PermError => {
+            *security_score += 1.5;
+            decision_trace.push(DecisionTraceEntry {
+                stage: "spf".to_string(),
+                outcome: "permerror".to_string(),
+                detail: "SPF record is malformed or exceeded processing limits".to_string(),
+            });
+        }
+        SpfDisposition::TempError => {
+            *security_score += 1.0;
+        }
+        _ => {}
+    }
+
+    match assessment.dkim {
+        DkimDisposition::Fail => {
+            *spam_score += 1.0;
+            *security_score += 1.0;
+        }
+        DkimDisposition::PermFail => {
+            *spam_score += 1.5;
+            *security_score += 1.5;
+            decision_trace.push(DecisionTraceEntry {
+                stage: "dkim".to_string(),
+                outcome: "permfail".to_string(),
+                detail: "DKIM signature or key policy is structurally invalid".to_string(),
+            });
+        }
+        DkimDisposition::TempFail => {
+            *security_score += 1.0;
+        }
+        _ => {}
+    }
+
+    match assessment.dmarc {
+        DmarcDisposition::Quarantine => {
+            *spam_score += 3.0;
+            *security_score += 1.0;
+        }
+        DmarcDisposition::Reject => {
+            *security_score += 4.0;
+        }
+        DmarcDisposition::TempFail => {
+            *security_score += 2.0;
+        }
+        _ => {}
+    }
+
+    if !assessment.spf_aligned {
+        decision_trace.push(DecisionTraceEntry {
+            stage: "spf-alignment".to_string(),
+            outcome: "misaligned".to_string(),
+            detail: format!(
+                "RFC 5322 From domain {} is not aligned with SPF domain {}",
+                assessment.from_domain, assessment.spf_domain
+            ),
+        });
+    }
+    if !assessment.dkim_aligned {
+        decision_trace.push(DecisionTraceEntry {
+            stage: "dkim-alignment".to_string(),
+            outcome: "misaligned".to_string(),
+            detail: format!(
+                "no aligned DKIM signature passed for RFC 5322 From domain {}",
+                assessment.from_domain
+            ),
+        });
+    }
+}
+
+fn spf_disposition(result: &SpfResult) -> SpfDisposition {
+    match result {
+        SpfResult::Pass => SpfDisposition::Pass,
+        SpfResult::Fail { .. } => SpfDisposition::Fail,
+        SpfResult::SoftFail => SpfDisposition::SoftFail,
+        SpfResult::Neutral => SpfDisposition::Neutral,
+        SpfResult::None => SpfDisposition::None,
+        SpfResult::TempError => SpfDisposition::TempError,
+        SpfResult::PermError => SpfDisposition::PermError,
+    }
+}
+
+fn dkim_disposition(results: &[DkimResult]) -> DkimDisposition {
+    if results
+        .iter()
+        .any(|result| matches!(result, DkimResult::Pass { .. }))
+    {
+        DkimDisposition::Pass
+    } else if results
+        .iter()
+        .any(|result| matches!(result, DkimResult::TempFail { .. }))
+    {
+        DkimDisposition::TempFail
+    } else if results
+        .iter()
+        .any(|result| matches!(result, DkimResult::PermFail { .. }))
+    {
+        DkimDisposition::PermFail
+    } else if results
+        .iter()
+        .any(|result| matches!(result, DkimResult::Fail { .. }))
+    {
+        DkimDisposition::Fail
+    } else {
+        DkimDisposition::None
+    }
+}
+
+fn summarize_spf(result: &SpfResult) -> String {
+    match result {
+        SpfResult::Pass => "pass".to_string(),
+        SpfResult::Fail { explanation } => match explanation {
+            Some(explanation) if !explanation.trim().is_empty() => {
+                format!("fail ({})", explanation.trim())
+            }
+            _ => "fail".to_string(),
+        },
+        SpfResult::SoftFail => "softfail".to_string(),
+        SpfResult::Neutral => "neutral".to_string(),
+        SpfResult::None => "none".to_string(),
+        SpfResult::TempError => "temperror".to_string(),
+        SpfResult::PermError => "permerror".to_string(),
+    }
+}
+
+fn summarize_dkim(results: &[DkimResult], aligned: bool) -> String {
+    match dkim_disposition(results) {
+        DkimDisposition::Pass if aligned => "pass (aligned)".to_string(),
+        DkimDisposition::Pass => "pass (unaligned)".to_string(),
+        DkimDisposition::Fail => "fail".to_string(),
+        DkimDisposition::TempFail => "temperror".to_string(),
+        DkimDisposition::PermFail => "permerror".to_string(),
+        DkimDisposition::None => "none".to_string(),
+    }
+}
+
+fn summarize_dmarc(result: DmarcDisposition) -> String {
+    match result {
+        DmarcDisposition::Pass => "pass".to_string(),
+        DmarcDisposition::Quarantine => "quarantine".to_string(),
+        DmarcDisposition::Reject => "reject".to_string(),
+        DmarcDisposition::None => "none".to_string(),
+        DmarcDisposition::TempFail => "temperror".to_string(),
+    }
+}
+
 async fn authenticate_message(
     client_ip: IpAddr,
     helo: &str,
     mail_from: &str,
     message_bytes: &[u8],
-) -> Result<(AuthSummary, Vec<DecisionTraceEntry>, Option<FilterAction>)> {
+) -> Result<(
+    AuthSummary,
+    Vec<DecisionTraceEntry>,
+    AuthenticationAssessment,
+)> {
     let authenticator = EmailAuthenticator::new(SystemDnsResolver::new()?, "lpe-ct.local");
     let result = authenticator
         .authenticate(message_bytes, client_ip, helo, mail_from)
         .await
         .map_err(|error| anyhow!("authentication evaluation failed: {error}"))?;
 
-    let spf = format!("{:?}", result.spf);
-    let dkim = format!("{:?}", result.dkim);
-    let dmarc = format!("{:?}", result.dmarc.disposition);
+    let spf = summarize_spf(&result.spf);
+    let dkim = summarize_dkim(&result.dkim, result.dmarc.dkim_aligned);
+    let dmarc = summarize_dmarc(result.dmarc.disposition);
+    let assessment = AuthenticationAssessment {
+        spf: spf_disposition(&result.spf),
+        dkim: dkim_disposition(&result.dkim),
+        dkim_aligned: result.dmarc.dkim_aligned,
+        spf_aligned: result.dmarc.spf_aligned,
+        dmarc: result.dmarc.disposition,
+        from_domain: result.from_domain.clone(),
+        spf_domain: result.spf_domain.clone(),
+    };
     let mut trace = vec![
         DecisionTraceEntry {
             stage: "spf".to_string(),
             outcome: spf.clone(),
-            detail: format!("SPF evaluation for {} from {}", mail_from, client_ip),
+            detail: format!(
+                "SPF evaluation for envelope sender {} from {} using domain {}",
+                mail_from, client_ip, result.spf_domain
+            ),
         },
         DecisionTraceEntry {
             stage: "dkim".to_string(),
             outcome: dkim.clone(),
-            detail: "DKIM verification executed on the RFC 5322 message".to_string(),
+            detail: format!(
+                "DKIM verification executed on the RFC 5322 message (aligned={})",
+                result.dmarc.dkim_aligned
+            ),
         },
         DecisionTraceEntry {
             stage: "dmarc".to_string(),
             outcome: dmarc.clone(),
-            detail: "DMARC evaluation executed from the RFC 5322 From domain".to_string(),
+            detail: format!(
+                "DMARC evaluation executed for RFC 5322 From domain {} (spf_aligned={}, dkim_aligned={})",
+                result.from_domain, result.dmarc.spf_aligned, result.dmarc.dkim_aligned
+            ),
         },
     ];
 
-    let action_hint = match result.dmarc.disposition {
-        DmarcDisposition::Reject => Some(FilterAction::Reject),
-        DmarcDisposition::Quarantine => Some(FilterAction::Quarantine),
-        DmarcDisposition::TempFail => Some(FilterAction::Defer),
-        _ => None,
-    };
-    if action_hint.is_none() && spf.to_ascii_lowercase().contains("softfail") {
+    if assessment.has_temporary_failure() {
         trace.push(DecisionTraceEntry {
-            stage: "spf".to_string(),
-            outcome: "softfail".to_string(),
-            detail: "SPF softfail contributes to the spam score but does not reject by itself"
-                .to_string(),
+            stage: "authentication".to_string(),
+            outcome: "temperror".to_string(),
+            detail: "one of SPF, DKIM, or DMARC encountered a temporary failure".to_string(),
         });
     }
 
-    Ok((AuthSummary { spf, dkim, dmarc }, trace, action_hint))
+    Ok((AuthSummary { spf, dkim, dmarc }, trace, assessment))
 }
 
-async fn query_dnsbl_hits(ip: IpAddr, zones: &[String]) -> Vec<String> {
+async fn query_dnsbl(ip: IpAddr, zones: &[String]) -> DnsblOutcome {
     let resolver = match SystemDnsResolver::new() {
         Ok(resolver) => resolver,
-        Err(_) => return Vec::new(),
+        Err(_) => {
+            return DnsblOutcome {
+                hits: Vec::new(),
+                tempfail_zones: zones.to_vec(),
+            };
+        }
     };
-    let mut hits = Vec::new();
+    let mut outcome = DnsblOutcome::default();
     for zone in zones {
         let query = dnsbl_query_name(ip, zone);
-        if resolver.query_exists(&query).await.unwrap_or(false) {
-            hits.push(zone.clone());
+        match resolver.query_exists(&query).await {
+            Ok(true) => outcome.hits.push(zone.clone()),
+            Ok(false) | Err(DnsError::NxDomain) | Err(DnsError::NoRecords) => {}
+            Err(DnsError::TempFail) => outcome.tempfail_zones.push(zone.clone()),
         }
     }
-    hits
+    outcome
 }
 
 fn dnsbl_query_name(ip: IpAddr, zone: &str) -> String {
@@ -1336,7 +1669,10 @@ fn load_reputation_score(
     let store = load_reputation_store(spool_dir)?;
     let key = reputation_key(peer_ip, mail_from);
     let entry = store.entries.get(&key).cloned().unwrap_or_default();
-    Ok(entry.accepted as i32 - (entry.quarantined as i32 * 2) - (entry.rejected as i32 * 3))
+    Ok(entry.accepted as i32
+        - entry.deferred as i32
+        - (entry.quarantined as i32 * 2)
+        - (entry.rejected as i32 * 3))
 }
 
 fn update_reputation(
@@ -1984,6 +2320,7 @@ fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
             &["policies", "require_dmarc_enforcement"],
             true,
         ),
+        defer_on_auth_tempfail: bool_at(&value, &["policies", "defer_on_auth_tempfail"], true),
         dnsbl_enabled: bool_at(&value, &["policies", "dnsbl_enabled"], true),
         dnsbl_zones: strings_at(
             &value,
@@ -1991,6 +2328,16 @@ fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
             &["zen.spamhaus.org", "bl.spamcop.net"],
         ),
         reputation_enabled: bool_at(&value, &["policies", "reputation_enabled"], true),
+        reputation_quarantine_threshold: i32_at(
+            &value,
+            &["policies", "reputation_quarantine_threshold"],
+            -4,
+        ),
+        reputation_reject_threshold: i32_at(
+            &value,
+            &["policies", "reputation_reject_threshold"],
+            -8,
+        ),
         spam_quarantine_threshold: f32_at(&value, &["policies", "spam_quarantine_threshold"], 5.0),
         spam_reject_threshold: f32_at(&value, &["policies", "spam_reject_threshold"], 9.0),
         max_message_size_mb: u32_at(&value, &["policies", "max_message_size_mb"], 64),
@@ -2085,6 +2432,14 @@ fn f32_at(value: &Value, path: &[&str], fallback: f32) -> f32 {
         .try_fold(value, |current, key| current.get(*key))
         .and_then(Value::as_f64)
         .map(|value| value as f32)
+        .unwrap_or(fallback)
+}
+
+fn i32_at(value: &Value, path: &[&str], fallback: i32) -> i32 {
+    path.iter()
+        .try_fold(value, |current, key| current.get(*key))
+        .and_then(Value::as_i64)
+        .and_then(|parsed| i32::try_from(parsed).ok())
         .unwrap_or(fallback)
 }
 
@@ -2274,13 +2629,16 @@ fn current_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_inbound_message, compose_rfc822_message, dnsbl_query_name,
-        encode_quoted_printable, evaluate_greylisting, initialize_spool, load_reputation_score,
-        parse_peer_ip, process_outbound_handoff, receive_message, receive_message_with_validator,
-        stable_key_id, unix_now, update_reputation, AuthSummary, FilterAction, GreylistEntry,
-        OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig,
+        apply_authentication_scores, classify_inbound_message, compose_rfc822_message,
+        dkim_disposition, dnsbl_query_name, encode_quoted_printable, evaluate_greylisting,
+        initialize_spool, load_reputation_score, parse_peer_ip, process_outbound_handoff,
+        receive_message, receive_message_with_validator, spf_disposition, stable_key_id,
+        summarize_dkim, summarize_dmarc, summarize_spf, unix_now, update_reputation, AuthSummary,
+        AuthenticationAssessment, DkimDisposition, FilterAction, GreylistEntry,
+        OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig, SpfDisposition,
     };
     use axum::{routing::post, Json, Router};
+    use email_auth::{dkim::DkimResult, dmarc::Disposition as DmarcDisposition, spf::SpfResult};
     use lpe_domain::{
         InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
         TransportDeliveryStatus, TransportRecipient,
@@ -2324,9 +2682,12 @@ mod tests {
             require_spf: true,
             require_dkim_alignment: false,
             require_dmarc_enforcement: true,
+            defer_on_auth_tempfail: true,
             dnsbl_enabled: false,
             dnsbl_zones: Vec::new(),
             reputation_enabled: true,
+            reputation_quarantine_threshold: -4,
+            reputation_reject_threshold: -8,
             spam_quarantine_threshold: 5.0,
             spam_reject_threshold: 9.0,
             max_message_size_mb: 16,
@@ -2820,6 +3181,76 @@ mod tests {
         let score = load_reputation_score(&spool, parse_peer_ip(&message.peer), &message.mail_from)
             .unwrap();
         assert_eq!(score, -4);
+    }
+
+    #[test]
+    fn auth_summary_uses_structured_outcomes() {
+        assert_eq!(summarize_spf(&SpfResult::Pass), "pass");
+        assert_eq!(
+            summarize_spf(&SpfResult::Fail {
+                explanation: Some("policy".to_string())
+            }),
+            "fail (policy)"
+        );
+        assert_eq!(
+            summarize_dkim(
+                &[DkimResult::Pass {
+                    domain: "example.test".to_string(),
+                    selector: "s1".to_string(),
+                    testing: false,
+                }],
+                true,
+            ),
+            "pass (aligned)"
+        );
+        assert_eq!(summarize_dmarc(DmarcDisposition::Reject), "reject");
+        assert_eq!(
+            spf_disposition(&SpfResult::SoftFail),
+            SpfDisposition::SoftFail
+        );
+        assert_eq!(dkim_disposition(&[DkimResult::None]), DkimDisposition::None);
+    }
+
+    #[test]
+    fn auth_tempfail_is_detected_for_defer_logic() {
+        let assessment = AuthenticationAssessment {
+            spf: SpfDisposition::TempError,
+            dkim: DkimDisposition::None,
+            dkim_aligned: false,
+            spf_aligned: false,
+            dmarc: DmarcDisposition::None,
+            from_domain: "example.test".to_string(),
+            spf_domain: "example.test".to_string(),
+        };
+        assert!(assessment.has_temporary_failure());
+    }
+
+    #[test]
+    fn auth_score_application_penalizes_failures_and_alignment_gaps() {
+        let assessment = AuthenticationAssessment {
+            spf: SpfDisposition::Fail,
+            dkim: DkimDisposition::PermFail,
+            dkim_aligned: false,
+            spf_aligned: false,
+            dmarc: DmarcDisposition::Quarantine,
+            from_domain: "from.example.test".to_string(),
+            spf_domain: "bounce.example.test".to_string(),
+        };
+        let mut spam_score = 0.0;
+        let mut security_score = 0.0;
+        let mut trace = Vec::new();
+
+        apply_authentication_scores(
+            &assessment,
+            &mut spam_score,
+            &mut security_score,
+            &mut trace,
+        );
+
+        assert!(spam_score >= 4.5);
+        assert!(security_score >= 5.0);
+        assert!(trace.iter().any(|entry| entry.stage == "spf-alignment"));
+        assert!(trace.iter().any(|entry| entry.stage == "dkim-alignment"));
     }
 
     #[test]

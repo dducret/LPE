@@ -99,12 +99,18 @@ struct PolicySettings {
     require_spf: bool,
     require_dkim_alignment: bool,
     require_dmarc_enforcement: bool,
+    #[serde(default = "default_defer_on_auth_tempfail")]
+    defer_on_auth_tempfail: bool,
     #[serde(default = "default_dnsbl_enabled")]
     dnsbl_enabled: bool,
     #[serde(default = "default_dnsbl_zones")]
     dnsbl_zones: Vec<String>,
     #[serde(default = "default_reputation_enabled")]
     reputation_enabled: bool,
+    #[serde(default = "default_reputation_quarantine_threshold")]
+    reputation_quarantine_threshold: i32,
+    #[serde(default = "default_reputation_reject_threshold")]
+    reputation_reject_threshold: i32,
     #[serde(default = "default_spam_quarantine_threshold")]
     spam_quarantine_threshold: f32,
     #[serde(default = "default_spam_reject_threshold")]
@@ -207,6 +213,7 @@ async fn main() -> Result<()> {
 
     let mut dashboard = load_or_initialize_state(&state_file)?;
     apply_env_overrides(&mut dashboard);
+    normalize_policy_settings(&mut dashboard.policies);
     dashboard.site.management_bind = bind_address.clone();
     dashboard.site.public_smtp_bind = smtp_bind_address.clone();
     persist_state(&state_file, &dashboard)?;
@@ -372,8 +379,9 @@ async fn update_network(
 
 async fn update_policies(
     State(state): State<AppState>,
-    Json(payload): Json<PolicySettings>,
+    Json(mut payload): Json<PolicySettings>,
 ) -> Result<Json<DashboardState>, ApiError> {
+    normalize_policy_settings(&mut payload);
     mutate_state(&state, "update-policies", move |dashboard| {
         dashboard.policies = payload;
     })
@@ -515,6 +523,9 @@ fn apply_env_overrides(state: &mut DashboardState) {
     if let Ok(value) = env::var("LPE_CT_REQUIRE_DMARC_ENFORCEMENT") {
         state.policies.require_dmarc_enforcement = parse_bool(&value);
     }
+    if let Ok(value) = env::var("LPE_CT_DEFER_ON_AUTH_TEMPFAIL") {
+        state.policies.defer_on_auth_tempfail = parse_bool(&value);
+    }
     if let Ok(value) = env::var("LPE_CT_DNSBL_ENABLED") {
         state.policies.dnsbl_enabled = parse_bool(&value);
     }
@@ -523,6 +534,16 @@ fn apply_env_overrides(state: &mut DashboardState) {
     }
     if let Ok(value) = env::var("LPE_CT_REPUTATION_ENABLED") {
         state.policies.reputation_enabled = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_REPUTATION_QUARANTINE_THRESHOLD") {
+        if let Ok(parsed) = value.parse::<i32>() {
+            state.policies.reputation_quarantine_threshold = parsed;
+        }
+    }
+    if let Ok(value) = env::var("LPE_CT_REPUTATION_REJECT_THRESHOLD") {
+        if let Ok(parsed) = value.parse::<i32>() {
+            state.policies.reputation_reject_threshold = parsed;
+        }
     }
     if let Ok(value) = env::var("LPE_CT_SPAM_QUARANTINE_THRESHOLD") {
         if let Ok(parsed) = value.parse::<f32>() {
@@ -539,6 +560,15 @@ fn apply_env_overrides(state: &mut DashboardState) {
         if let Ok(parsed) = value.parse::<u32>() {
             state.policies.max_message_size_mb = parsed.max(1);
         }
+    }
+}
+
+fn normalize_policy_settings(policies: &mut PolicySettings) {
+    if policies.reputation_reject_threshold > policies.reputation_quarantine_threshold {
+        policies.reputation_reject_threshold = policies.reputation_quarantine_threshold;
+    }
+    if policies.spam_reject_threshold < policies.spam_quarantine_threshold {
+        policies.spam_reject_threshold = policies.spam_quarantine_threshold;
     }
 }
 
@@ -620,9 +650,12 @@ fn default_state() -> DashboardState {
             require_spf: true,
             require_dkim_alignment: false,
             require_dmarc_enforcement: true,
+            defer_on_auth_tempfail: default_defer_on_auth_tempfail(),
             dnsbl_enabled: default_dnsbl_enabled(),
             dnsbl_zones: default_dnsbl_zones(),
             reputation_enabled: default_reputation_enabled(),
+            reputation_quarantine_threshold: default_reputation_quarantine_threshold(),
+            reputation_reject_threshold: default_reputation_reject_threshold(),
             spam_quarantine_threshold: default_spam_quarantine_threshold(),
             spam_reject_threshold: default_spam_reject_threshold(),
             attachment_text_scan_enabled: true,
@@ -668,12 +701,24 @@ fn default_dnsbl_enabled() -> bool {
     true
 }
 
+fn default_defer_on_auth_tempfail() -> bool {
+    true
+}
+
 fn default_dnsbl_zones() -> Vec<String> {
     vec!["zen.spamhaus.org".to_string(), "bl.spamcop.net".to_string()]
 }
 
 fn default_reputation_enabled() -> bool {
     true
+}
+
+fn default_reputation_quarantine_threshold() -> i32 {
+    -4
+}
+
+fn default_reputation_reject_threshold() -> i32 {
+    -8
 }
 
 fn default_spam_quarantine_threshold() -> f32 {

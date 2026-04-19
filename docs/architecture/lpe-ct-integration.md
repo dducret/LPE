@@ -88,6 +88,7 @@ Cote `LPE-CT`:
 - le worker `LPE` transmet maintenant `attempt_count` et `last_attempt_error`; `LPE-CT` peut donc appliquer des politiques de retry et de throttling informees
 - `LPE-CT` conserve les octets SMTP bruts sur l'entree et les transporte jusqu'a la persistance et a la remise finale interne
 - `LPE-CT` extrait le texte visible entrant a partir du MIME decode (`multipart/alternative`, `quoted-printable`, `base64`, HTML) sans indexer brutement tout le body RFC 822
+- `LPE-CT` persiste maintenant un resume d'authentification structure (`SPF`, `DKIM`, `DMARC`, alignement, tempfail) et des raisons explicites de `defer` / `quarantine` / `reject`
 - `LPE-CT` compose le relais sortant en RFC 822 avec `text/plain` seul ou `multipart/alternative` `text/plain` + `text/html` quand `body_html_sanitized` est disponible, sans reinjecter `Bcc` dans les en-tetes visibles
 - `LPE-CT` applique les regles de routage et le throttling sortant avant le relais SMTP effectif
 - `LPE-CT` classe les erreurs sortantes en statuts `deferred`, `bounced` ou `failed` a partir des reponses SMTP et produit un detail technique et `DSN` structure
@@ -200,6 +201,7 @@ The detailed metric families and logging behavior are documented in `docs/archit
 - the `LPE` worker now also sends `attempt_count` and `last_attempt_error`, allowing `LPE-CT` to apply informed retry and throttling policies
 - `LPE-CT` keeps raw SMTP bytes intact on ingress and carries them through persistence and internal final delivery
 - `LPE-CT` extracts inbound visible text from decoded MIME (`multipart/alternative`, `quoted-printable`, `base64`, HTML) instead of indexing the raw RFC 822 body blindly
+- `LPE-CT` now persists a structured authentication summary (`SPF`, `DKIM`, `DMARC`, alignment, tempfail) and explicit `defer` / `quarantine` / `reject` reasons
 - `LPE-CT` composes outbound relay as RFC 822 with either plain `text/plain` or `multipart/alternative` `text/plain` + `text/html` when `body_html_sanitized` is available, without reinjecting `Bcc` into visible headers
 - `LPE-CT` applies outbound routing rules and throttling before the actual SMTP relay
 - `LPE-CT` classifies outbound failures into `deferred`, `bounced`, or `failed` from SMTP replies and produces structured technical and `DSN` feedback

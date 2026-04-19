@@ -12,7 +12,15 @@ Ce document decrit le flux mail, la securite edge, la tracabilite et la quaranta
 
 `LPE` persiste les mailbox et reste systeme de record.
 
-La mise en oeuvre actuelle de `LPE-CT` execute deja `SPF`, `DKIM`, `DMARC`, le greylisting, des lookups `DNSBL/RBL`, une reputation locale simple et une trace detaillee de decision persistee dans le spool.
+La mise en oeuvre actuelle de `LPE-CT` execute deja des validations reelles `SPF`, `DKIM` et `DMARC`, le greylisting, des lookups `DNSBL/RBL`, une reputation locale simple et une trace detaillee de decision persistee dans le spool.
+
+Les decisions edge reposent maintenant sur des verdicts structures:
+
+- `DMARC reject` peut forcer un rejet `SMTP`
+- `DMARC quarantine` peut forcer une quarantaine
+- `SPF fail` peut forcer un rejet s'il n'existe pas de `DKIM` aligne compensatoire
+- un echec temporaire d'authentification (`SPF`/`DKIM`/`DMARC`) peut forcer un `defer`
+- une mauvaise reputation expediteur/IP peut forcer une quarantaine ou un rejet
 
 ### Scores separes
 
@@ -62,6 +70,12 @@ Si `LPE` rejette une livraison finale apres acceptation edge, il doit renvoyer c
 - garder une trace coherente de bout en bout
 - generer un bounce ou `DSN` coherent
 
+La trace persistee doit aussi rester suffisamment structuree pour preparer plus tard:
+
+- `ARC`
+- `MTA-STS`
+- `TLS-RPT`
+
 ### Streaming interne
 
 Quand la livraison peut s'effectuer normalement, l'echange interne `LPE-CT -> LPE` doit supporter le streaming afin d'eviter les doubles ecritures disque inutiles.
@@ -84,7 +98,15 @@ This document describes mail flow, edge security, traceability, and quarantine b
 
 `LPE` persists mailboxes and remains the system of record.
 
-The current `LPE-CT` implementation already executes `SPF`, `DKIM`, `DMARC`, greylisting, `DNSBL/RBL` lookups, simple local reputation, and a detailed decision trace persisted in the spool.
+The current `LPE-CT` implementation already executes real `SPF`, `DKIM`, and `DMARC` validation, greylisting, `DNSBL/RBL` lookups, simple local reputation, and a detailed decision trace persisted in the spool.
+
+Edge decisions now rely on structured outcomes:
+
+- `DMARC reject` can force SMTP reject
+- `DMARC quarantine` can force quarantine
+- `SPF fail` can force reject when no aligned `DKIM` pass compensates
+- temporary authentication failure (`SPF`/`DKIM`/`DMARC`) can force `defer`
+- poor sender/IP reputation can force quarantine or reject
 
 ### Separate scores
 
@@ -133,6 +155,12 @@ If `LPE` rejects final delivery after edge acceptance, it must return that statu
 - correlate the error with the original identifier
 - keep end-to-end trace search coherent
 - generate a consistent bounce or `DSN`
+
+The persisted trace must also stay structured enough to prepare later work on:
+
+- `ARC`
+- `MTA-STS`
+- `TLS-RPT`
 
 ### Internal streaming
 

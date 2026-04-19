@@ -109,9 +109,7 @@ pub async fn observe_http(mut request: Request, next: Next) -> Response {
     response
 }
 
-pub async fn metrics_endpoint(
-    spool_dir: std::sync::Arc<std::path::PathBuf>,
-) -> impl IntoResponse {
+pub async fn metrics_endpoint(spool_dir: std::sync::Arc<std::path::PathBuf>) -> impl IntoResponse {
     if !metrics_enabled() {
         return StatusCode::NOT_FOUND.into_response();
     }
@@ -143,7 +141,10 @@ pub fn record_inbound_delivery(status: &str) {
 
 pub fn record_smtp_session(result: &str) {
     if let Ok(mut guard) = metrics().lock() {
-        *guard.smtp_sessions_total.entry(result.to_string()).or_insert(0) += 1;
+        *guard
+            .smtp_sessions_total
+            .entry(result.to_string())
+            .or_insert(0) += 1;
     }
 }
 
@@ -185,7 +186,9 @@ fn render_metrics(spool_dir: &Path) -> String {
         ));
     }
 
-    output.push_str("# HELP lpe_ct_http_request_duration_seconds_sum Total HTTP request duration in seconds.\n");
+    output.push_str(
+        "# HELP lpe_ct_http_request_duration_seconds_sum Total HTTP request duration in seconds.\n",
+    );
     output.push_str("# TYPE lpe_ct_http_request_duration_seconds_sum counter\n");
     for ((method, route, status), value) in &guard.http_request_duration {
         output.push_str(&format!(
@@ -209,7 +212,9 @@ fn render_metrics(spool_dir: &Path) -> String {
         ));
     }
 
-    output.push_str("# HELP lpe_ct_outbound_handoffs_total Outbound relay handoff results handled by LPE-CT.\n");
+    output.push_str(
+        "# HELP lpe_ct_outbound_handoffs_total Outbound relay handoff results handled by LPE-CT.\n",
+    );
     output.push_str("# TYPE lpe_ct_outbound_handoffs_total counter\n");
     for (status, value) in &guard.outbound_handoffs_total {
         output.push_str(&format!(
@@ -229,7 +234,9 @@ fn render_metrics(spool_dir: &Path) -> String {
         ));
     }
 
-    output.push_str("# HELP lpe_ct_smtp_sessions_total SMTP session outcomes observed at the DMZ edge.\n");
+    output.push_str(
+        "# HELP lpe_ct_smtp_sessions_total SMTP session outcomes observed at the DMZ edge.\n",
+    );
     output.push_str("# TYPE lpe_ct_smtp_sessions_total counter\n");
     for (result, value) in &guard.smtp_sessions_total {
         output.push_str(&format!(
@@ -239,7 +246,9 @@ fn render_metrics(spool_dir: &Path) -> String {
         ));
     }
 
-    output.push_str("# HELP lpe_ct_security_events_total Security-significant decisions observed by LPE-CT.\n");
+    output.push_str(
+        "# HELP lpe_ct_security_events_total Security-significant decisions observed by LPE-CT.\n",
+    );
     output.push_str("# TYPE lpe_ct_security_events_total counter\n");
     for (event, value) in &guard.security_events_total {
         output.push_str(&format!(
@@ -249,9 +258,19 @@ fn render_metrics(spool_dir: &Path) -> String {
         ));
     }
 
-    output.push_str("# HELP lpe_ct_spool_messages Current number of queued message files per spool queue.\n");
+    output.push_str(
+        "# HELP lpe_ct_spool_messages Current number of queued message files per spool queue.\n",
+    );
     output.push_str("# TYPE lpe_ct_spool_messages gauge\n");
-    for queue in ["incoming", "outbound", "deferred", "quarantine", "held", "bounces", "sent"] {
+    for queue in [
+        "incoming",
+        "outbound",
+        "deferred",
+        "quarantine",
+        "held",
+        "bounces",
+        "sent",
+    ] {
         output.push_str(&format!(
             "lpe_ct_spool_messages{{queue=\"{}\"}} {}\n",
             queue,
@@ -274,7 +293,12 @@ fn count_queue(spool_dir: &Path, queue: &str) -> u64 {
 fn metrics_enabled() -> bool {
     env::var("LPE_CT_METRICS_ENABLED")
         .ok()
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(true)
 }
 

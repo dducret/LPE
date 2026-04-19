@@ -43,6 +43,11 @@ The resulting decision trace is persisted with the queued message JSON in the lo
 - default: `true`
 - DMARC `reject` dispositions are enforced as SMTP rejects
 
+`LPE_CT_DEFER_ON_AUTH_TEMPFAIL`
+
+- default: `true`
+- if SPF, DKIM, or DMARC returns a temporary authentication failure, `LPE-CT` replies with `451` instead of silently failing open
+
 `LPE_CT_DNSBL_ENABLED`
 
 - default: `true`
@@ -57,6 +62,16 @@ The resulting decision trace is persisted with the queued message JSON in the lo
 
 - default: `true`
 - enables a local reputation score per `(source IP, sender domain)`
+
+`LPE_CT_REPUTATION_QUARANTINE_THRESHOLD`
+
+- default: `-4`
+- a sender reputation at or below this threshold forces quarantine before final delivery
+
+`LPE_CT_REPUTATION_REJECT_THRESHOLD`
+
+- default: `-8`
+- a sender reputation at or below this threshold forces an SMTP reject
 
 `LPE_CT_SPAM_QUARANTINE_THRESHOLD`
 
@@ -84,6 +99,13 @@ Message trace files now also persist:
 - `auth_summary`
 - `decision_trace`
 
+`auth_summary` is now derived from structured SPF/DKIM/DMARC results rather than string matching on debug output. The decision trace also records:
+
+- SPF domain used for evaluation
+- RFC 5322 `From` domain used for `DMARC`
+- SPF and DKIM alignment gaps
+- temporary DNS or authentication failures that caused `defer`
+
 This trace is the primary operational artifact for explaining why a message was deferred, quarantined, rejected, or accepted.
 
 Outbound trace files now also persist:
@@ -105,6 +127,15 @@ Typical perimeter outcomes are:
 - `451 message temporarily deferred by perimeter policy (trace <trace>)`: greylisting or transient auth/DNS conditions
 - `554 message rejected by perimeter policy (trace <trace>)`: hard reject, for example enforced DMARC reject
 
+The decision matrix is now intentionally stricter:
+
+- DMARC `reject` enforces SMTP reject when `LPE_CT_REQUIRE_DMARC_ENFORCEMENT=true`
+- DMARC `quarantine` enforces quarantine when DMARC enforcement is enabled
+- SPF `fail` rejects only when no aligned DKIM pass compensates
+- DKIM alignment can independently force quarantine when `LPE_CT_REQUIRE_DKIM_ALIGNMENT=true`
+- authentication temporary failures can produce `451` when `LPE_CT_DEFER_ON_AUTH_TEMPFAIL=true`
+- poor sender/IP reputation can force quarantine or reject before spam-score thresholds are reached
+
 ## Operational recommendations
 
 - keep recursive DNS resolvers reachable and low-latency, because SPF, DKIM, DMARC, and DNSBL now depend on them
@@ -119,4 +150,13 @@ This implementation executes inbound SPF, DKIM, and DMARC verification, DNSBL ch
 
 It also now executes outbound routing selection, local throttling, and SMTP-result classification into `relayed`, `deferred`, `bounced`, or `failed`, with structured `DSN`/technical trace feedback for the `LPE` worker.
 
-It does not yet add outbound DKIM signing. That remains an explicit `LPE-CT` responsibility to complete in a later increment.
+It does not yet add:
+
+- outbound DKIM signing
+- inbound or outbound `ARC`
+- `MTA-STS` policy fetch and TLS-policy enforcement
+- `TLS-RPT` report generation and sending
+- advanced reputation feeds beyond the local `(IP, sender domain)` spool state
+- DNSSEC validation or DANE for SMTP transport
+
+The current lot prepares those follow-ups by persisting structured authentication outcomes, richer technical status, and explicit defer/quarantine/reject reasons in the spool trace.
