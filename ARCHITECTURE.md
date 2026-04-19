@@ -139,6 +139,37 @@ They are mutualized across tenants, but they must still enforce domain-aware rou
 
 Sorting centers have their own administrators, distinct from tenant administrators.
 
+### Baseline external exposure model
+
+The baseline implementation should expose external client and transport entry points through `LPE-CT`, not directly through the core `LPE` server.
+
+At this stage, `LPE-CT` is the network-facing entry layer for both mail transport and the first published client-access surface.
+
+The baseline role split is:
+
+- `LPE-CT` receives inbound `SMTP` on port `25`
+- `LPE-CT` acts as the HTTPS reverse proxy for the `LPE` web client on port `443` under `/mail`
+- `LPE-CT` acts as the HTTPS reverse proxy for `ActiveSync` under `/activesync`
+- `LPE-CT` acts as the TLS entry proxy for exposed `JMAP` endpoints toward `LPE`
+- secure `JMAP` WebSocket support is a future extension and is not part of the baseline implementation
+- `LPE-CT` acts as the proxy for `IMAPS`
+- `LPE-CT` acts as the proxy for `SMTPS`
+
+For secure client message submission, this baseline should prefer implicit TLS submission on port `465`, which is aligned with the recommendation in `RFC 8314`.
+
+This means the core `LPE` services should remain behind the internal trust boundary, while `LPE-CT` owns the external publication layer.
+
+`LPE-CT` is the unique external exposure point.
+
+The core `LPE` server must not need to be reachable from the public Internet and should not be exposed directly. The baseline architecture assumes that external clients and external mail senders never connect to `LPE` itself.
+
+The architectural consequence is that protocol publication and protocol ownership are not the same concern:
+
+- `LPE` still owns the mailbox and collaboration protocol logic for `JMAP`, `ActiveSync`, `IMAP`, and future compatibility layers
+- `LPE-CT` owns the external exposure, edge proxying, and perimeter filtering posture for the protocols that are published
+
+This baseline model keeps Internet-facing entry points concentrated in the DMZ layer, even when the protocol semantics are implemented by the core platform.
+
 ### Sorting centers in the DMZ
 
 Inbound email first reaches one or more mail sorting centers deployed in the `DMZ`.
