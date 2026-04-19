@@ -520,7 +520,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         loop {
             let page = self
                 .store
-                .query_jmap_email_ids(account_id, Some(mailbox_id), position, 512)
+            .query_jmap_email_ids(account_id, Some(mailbox_id), None, position, 512)
                 .await?;
             let batch_len = page.ids.len() as u64;
             ids.extend(page.ids);
@@ -689,6 +689,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     internet_message_id: parsed.internet_message_id,
                     mime_blob_ref: Some(format!("activesync-mime:{}", Uuid::new_v4())),
                     size_octets: mime_payload.len() as i64,
+                    attachments: Vec::new(),
                 },
                 AuditEntryInput {
                     actor: principal.email.clone(),

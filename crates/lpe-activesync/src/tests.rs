@@ -155,6 +155,7 @@ impl ActiveSyncStore for FakeStore {
         &'a self,
         _account_id: Uuid,
         mailbox_id: Option<Uuid>,
+        _search_text: Option<&'a str>,
         position: u64,
         limit: u64,
     ) -> StoreFuture<'a, JmapEmailQuery> {

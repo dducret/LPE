@@ -664,6 +664,8 @@ The architecture therefore requires:
 - no loss of attachment fidelity in full or partial exports
 - no coupling between blob deduplication and user-visible mailbox ownership semantics
 
+The current v1 implementation uses a domain-scoped shared blob store for attachment bytes, while keeping per-message attachment rows for mailbox projection, search metadata, and export reconstruction.
+
 ### Deletion, audit, archive, and integrity rules
 
 When a message is deleted, the architecture should preserve auditability by reconstructing the message and storing it as deleted for audit purposes.
@@ -695,6 +697,8 @@ The architecture should support:
 - text indexes for supported attachment content
 
 The indexing model must remain compatible with tenant isolation, archive access, encryption-at-rest policy, and attachment deduplication constraints.
+
+In the current v1 implementation, attachment search is backed by `PostgreSQL` full-text search over message text plus extracted attachment text for supported formats only: `PDF`, `DOCX`, and `ODT`.
 
 ## Roles and IAM Model
 

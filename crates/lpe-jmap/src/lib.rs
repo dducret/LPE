@@ -7,12 +7,15 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
+use lpe_magika::{
+    collect_mime_attachment_parts, ExpectedKind, IngressContext, PolicyDecision,
+    ValidationRequest, Validator,
+};
 use lpe_storage::{
-    AuditEntryInput, AuthenticatedAccount, JmapEmail, JmapEmailAddress, JmapEmailQuery,
-    JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob, SavedDraftMessage, Storage,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    AttachmentUploadInput, AuditEntryInput, AuthenticatedAccount, JmapEmail, JmapEmailAddress,
+    JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob,
+    SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -92,6 +95,7 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         &'a self,
         account_id: Uuid,
         mailbox_id: Option<Uuid>,
+        search_text: Option<&'a str>,
         position: u64,
         limit: u64,
     ) -> StoreFuture<'a, JmapEmailQuery>;
@@ -172,11 +176,12 @@ impl JmapStore for Storage {
         &'a self,
         account_id: Uuid,
         mailbox_id: Option<Uuid>,
+        search_text: Option<&'a str>,
         position: u64,
         limit: u64,
     ) -> StoreFuture<'a, JmapEmailQuery> {
         Box::pin(async move {
-            self.query_jmap_email_ids(account_id, mailbox_id, position, limit)
+            self.query_jmap_email_ids(account_id, mailbox_id, search_text, position, limit)
                 .await
         })
     }
@@ -432,6 +437,7 @@ struct EmailQueryArguments {
 #[serde(rename_all = "camelCase")]
 struct EmailQueryFilter {
     in_mailbox: Option<String>,
+    text: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -935,9 +941,14 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         let mailbox_id = arguments
             .filter
-            .and_then(|filter| filter.in_mailbox)
+            .as_ref()
+            .and_then(|filter| filter.in_mailbox.as_deref())
             .map(|value| parse_uuid(&value))
             .transpose()?;
+        let search_text = arguments
+            .filter
+            .as_ref()
+            .and_then(|filter| filter.text.as_deref());
         let position = arguments.position.unwrap_or(0);
         let limit = arguments
             .limit
@@ -945,7 +956,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .min(MAX_QUERY_LIMIT);
         let query = self
             .store
-            .query_jmap_email_ids(account_id, mailbox_id, position, limit)
+            .query_jmap_email_ids(account_id, mailbox_id, search_text, position, limit)
             .await?;
 
         Ok(json!({
@@ -971,7 +982,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             Some(ids) => ids,
             None => {
                 self.store
-                    .query_jmap_email_ids(account_id, None, 0, DEFAULT_GET_LIMIT)
+                    .query_jmap_email_ids(account_id, None, None, 0, DEFAULT_GET_LIMIT)
                     .await?
                     .ids
             }
@@ -1529,6 +1540,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     internet_message_id: None,
                     mime_blob_ref: None,
                     size_octets: 0,
+                    attachments: Vec::new(),
                 },
                 audit,
             )
@@ -1591,6 +1603,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     internet_message_id: existing.internet_message_id,
                     mime_blob_ref: None,
                     size_octets: existing.size_octets,
+                    attachments: Vec::new(),
                 },
                 audit,
             )
@@ -1668,6 +1681,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             mime_blob_ref: format!("upload:{}", blob.id),
             size_octets: blob.octet_size as i64,
             received_at: None,
+            attachments: parsed.attachments,
         })
     }
 
@@ -2480,6 +2494,7 @@ struct ParsedRfc822Message {
     subject: String,
     message_id: Option<String>,
     body_text: String,
+    attachments: Vec<AttachmentUploadInput>,
 }
 
 fn parse_rfc822_message(bytes: &[u8]) -> Result<ParsedRfc822Message> {
@@ -2507,6 +2522,19 @@ fn parse_rfc822_message(bytes: &[u8]) -> Result<ParsedRfc822Message> {
         subject: headers.get("subject").cloned().unwrap_or_default(),
         message_id: headers.get("message-id").cloned(),
         body_text: body_text.trim().to_string(),
+        attachments: collect_mime_attachment_parts(bytes)?
+            .into_iter()
+            .enumerate()
+            .map(|(index, attachment)| AttachmentUploadInput {
+                file_name: attachment
+                    .filename
+                    .unwrap_or_else(|| format!("attachment-{}.bin", index + 1)),
+                media_type: attachment
+                    .declared_mime
+                    .unwrap_or_else(|| "application/octet-stream".to_string()),
+                blob_bytes: attachment.bytes,
+            })
+            .collect(),
     })
 }
 
@@ -2553,7 +2581,7 @@ fn parse_address_header(value: &str) -> Result<Vec<EmailAddressInput>> {
         .collect()
 }
 
-fn parse_single_address(value: &str) -> Result<EmailAddressInput> {
+    fn parse_single_address(value: &str) -> Result<EmailAddressInput> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         bail!("email address is empty");
@@ -2592,6 +2620,38 @@ mod tests {
     #[derive(Clone)]
     struct FakeDetector {
         result: Result<MagikaDetection, String>,
+    }
+
+    #[test]
+    fn parse_rfc822_message_collects_supported_attachment_parts() {
+        let message = concat!(
+            "From: Alice <alice@example.test>\r\n",
+            "To: Bob <bob@example.test>\r\n",
+            "Subject: Import\r\n",
+            "Content-Type: multipart/mixed; boundary=\"b1\"\r\n",
+            "\r\n",
+            "--b1\r\n",
+            "Content-Type: text/plain\r\n",
+            "\r\n",
+            "Hello\r\n",
+            "--b1\r\n",
+            "Content-Type: application/vnd.oasis.opendocument.text\r\n",
+            "Content-Disposition: attachment; filename=\"notes.odt\"\r\n",
+            "\r\n",
+            "ODT-DATA\r\n",
+            "--b1--\r\n"
+        );
+
+        let parsed = parse_rfc822_message(message.as_bytes()).unwrap();
+
+        assert_eq!(parsed.subject, "Import");
+        assert_eq!(parsed.attachments.len(), 1);
+        assert_eq!(parsed.attachments[0].file_name, "notes.odt");
+        assert_eq!(
+            parsed.attachments[0].media_type,
+            "application/vnd.oasis.opendocument.text"
+        );
+        assert_eq!(parsed.attachments[0].blob_bytes, b"ODT-DATA".to_vec());
     }
 
     impl Detector for FakeDetector {
@@ -2715,6 +2775,7 @@ mod tests {
             &'a self,
             _account_id: Uuid,
             mailbox_id: Option<Uuid>,
+            _search_text: Option<&'a str>,
             position: u64,
             limit: u64,
         ) -> StoreFuture<'a, JmapEmailQuery> {

@@ -16,6 +16,7 @@ pub trait ActiveSyncStore: AccountAuthStore {
         &'a self,
         account_id: Uuid,
         mailbox_id: Option<Uuid>,
+        search_text: Option<&'a str>,
         position: u64,
         limit: u64,
     ) -> StoreFuture<'a, lpe_storage::JmapEmailQuery>;
@@ -74,11 +75,12 @@ impl ActiveSyncStore for Storage {
         &'a self,
         account_id: Uuid,
         mailbox_id: Option<Uuid>,
+        search_text: Option<&'a str>,
         position: u64,
         limit: u64,
     ) -> StoreFuture<'a, lpe_storage::JmapEmailQuery> {
         Box::pin(async move {
-            self.query_jmap_email_ids(account_id, mailbox_id, position, limit)
+            self.query_jmap_email_ids(account_id, mailbox_id, search_text, position, limit)
                 .await
         })
     }

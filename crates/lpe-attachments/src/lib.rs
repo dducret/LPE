@@ -2,9 +2,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
 use quick_xml::events::Event;
 use quick_xml::Reader;
-use std::fs::File;
+use std::fs::{self};
 use std::io::Read;
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 use zip::ZipArchive;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +56,34 @@ pub fn extract_text_from_path(path: impl AsRef<Path>) -> Result<String> {
     }
 }
 
+pub fn extract_text_from_bytes(
+    bytes: &[u8],
+    declared_mime: Option<&str>,
+    filename: Option<&str>,
+) -> Result<String> {
+    let outcome = Validator::from_env().validate_bytes(
+        ValidationRequest {
+            ingress_context: IngressContext::AttachmentParsing,
+            declared_mime: declared_mime.map(ToString::to_string),
+            filename: filename.map(ToString::to_string),
+            expected_kind: ExpectedKind::SupportedAttachmentText,
+        },
+        bytes,
+    )?;
+    if outcome.policy_decision != PolicyDecision::Accept {
+        bail!(
+            "attachment validation blocked extraction: {}",
+            outcome.reason
+        );
+    }
+
+    match AttachmentFormat::from_detected_mime(&outcome.detected_mime)? {
+        AttachmentFormat::Pdf => extract_pdf_text_from_bytes(bytes),
+        AttachmentFormat::Docx => extract_docx_text_from_bytes(bytes),
+        AttachmentFormat::Odt => extract_odt_text_from_bytes(bytes),
+    }
+}
+
 fn extract_pdf_text(path: &Path) -> Result<String> {
     let mut document = pdf_oxide::PdfDocument::open(path)
         .with_context(|| format!("open PDF at {}", path.display()))?;
@@ -73,24 +102,45 @@ fn extract_pdf_text(path: &Path) -> Result<String> {
     Ok(pages.join("\n\n"))
 }
 
-fn extract_docx_text(path: &Path) -> Result<String> {
-    let text = docx_lite::extract_text_from_bytes(
-        &std::fs::read(path).with_context(|| format!("read DOCX at {}", path.display()))?,
-    )
-    .with_context(|| format!("extract DOCX text from {}", path.display()))?;
+fn extract_pdf_text_from_bytes(bytes: &[u8]) -> Result<String> {
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let temp_path = std::env::temp_dir().join(format!("lpe-attachment-{suffix}.pdf"));
+    fs::write(&temp_path, bytes)
+        .with_context(|| format!("write temporary PDF at {}", temp_path.display()))?;
+    let result = extract_pdf_text(&temp_path);
+    let _ = fs::remove_file(&temp_path);
+    result
+}
 
+fn extract_docx_text(path: &Path) -> Result<String> {
+    let bytes = std::fs::read(path).with_context(|| format!("read DOCX at {}", path.display()))?;
+    extract_docx_text_from_bytes(&bytes)
+        .with_context(|| format!("extract DOCX text from {}", path.display()))
+}
+
+fn extract_docx_text_from_bytes(bytes: &[u8]) -> Result<String> {
+    let text =
+        docx_lite::extract_text_from_bytes(bytes).context("extract DOCX text from bytes")?;
     Ok(normalize_whitespace(&text))
 }
 
 fn extract_odt_text(path: &Path) -> Result<String> {
-    let file = File::open(path).with_context(|| format!("open ODT at {}", path.display()))?;
-    let mut archive =
-        ZipArchive::new(file).with_context(|| format!("read ZIP container {}", path.display()))?;
+    let bytes = std::fs::read(path).with_context(|| format!("read ODT at {}", path.display()))?;
+    extract_odt_text_from_bytes(&bytes)
+        .with_context(|| format!("extract ODT text from {}", path.display()))
+}
+
+fn extract_odt_text_from_bytes(bytes: &[u8]) -> Result<String> {
+    let cursor = std::io::Cursor::new(bytes);
+    let mut archive = ZipArchive::new(cursor).context("read ODT ZIP container from bytes")?;
     let mut content_xml = String::new();
 
     archive
         .by_name("content.xml")
-        .with_context(|| format!("read content.xml from {}", path.display()))?
+        .context("read content.xml from ODT bytes")?
         .read_to_string(&mut content_xml)
         .context("decode ODT content.xml as UTF-8")?;
 

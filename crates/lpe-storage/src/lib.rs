@@ -1,14 +1,17 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use lpe_attachments::extract_text_from_bytes;
 use lpe_domain::{
     InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
     TransportDeliveryStatus, TransportRecipient,
 };
 use lpe_magika::{
-    read_validation_record, ExpectedKind, IngressContext, PolicyDecision, ValidationRequest,
-    Validator,
+    collect_mime_attachment_parts, read_validation_record, ExpectedKind, IngressContext,
+    PolicyDecision, ValidationRequest, Validator,
 };
 use serde::Serialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Pool, Postgres, Row};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
@@ -463,12 +466,20 @@ pub struct SubmitMessageInput {
     pub internet_message_id: Option<String>,
     pub mime_blob_ref: Option<String>,
     pub size_octets: i64,
+    pub attachments: Vec<AttachmentUploadInput>,
 }
 
 #[derive(Debug, Clone)]
 pub struct SubmittedRecipientInput {
     pub address: String,
     pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AttachmentUploadInput {
+    pub file_name: String,
+    pub media_type: String,
+    pub blob_bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -607,6 +618,7 @@ pub struct JmapImportedEmailInput {
     pub mime_blob_ref: String,
     pub size_octets: i64,
     pub received_at: Option<String>,
+    pub attachments: Vec<AttachmentUploadInput>,
 }
 
 #[derive(Debug, FromRow)]
@@ -872,6 +884,20 @@ struct PendingPstJobRow {
     direction: String,
     server_path: String,
     requested_by: String,
+}
+
+#[derive(Debug)]
+struct StoredAttachmentBlob {
+    id: Uuid,
+}
+
+#[derive(Debug)]
+struct PstImportedMessage {
+    internet_message_id: String,
+    from_address: String,
+    subject: String,
+    body_text: String,
+    attachments: Vec<AttachmentUploadInput>,
 }
 
 #[derive(Debug, FromRow)]
@@ -2274,24 +2300,33 @@ impl Storage {
         &self,
         account_id: Uuid,
         mailbox_id: Option<Uuid>,
+        search_text: Option<&str>,
         position: u64,
         limit: u64,
     ) -> Result<JmapEmailQuery> {
+        let normalized_search = search_text
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string);
         let ids = sqlx::query(
             r#"
-            SELECT m.id
-            FROM messages m
-            WHERE m.tenant_id = $1
-              AND m.account_id = $2
-              AND ($3::uuid IS NULL OR m.mailbox_id = $3)
-            ORDER BY COALESCE(m.sent_at, m.received_at) DESC, m.id DESC
+            SELECT s.message_id AS id
+            FROM searchable_mail_documents s
+            WHERE s.account_id = $1
+              AND ($2::uuid IS NULL OR s.mailbox_id = $2)
+              AND (
+                $3::text IS NULL
+                OR (s.message_search_vector || s.attachment_search_vector)
+                    @@ websearch_to_tsquery('simple', $3)
+              )
+            ORDER BY s.received_at DESC, s.message_id DESC
             OFFSET $4
             LIMIT $5
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
         .bind(account_id)
         .bind(mailbox_id)
+        .bind(normalized_search.as_deref())
         .bind(position as i64)
         .bind(limit as i64)
         .fetch_all(&self.pool)
@@ -2303,15 +2338,19 @@ impl Storage {
         let total: i64 = sqlx::query_scalar(
             r#"
             SELECT COUNT(*)
-            FROM messages m
-            WHERE m.tenant_id = $1
-              AND m.account_id = $2
-              AND ($3::uuid IS NULL OR m.mailbox_id = $3)
+            FROM searchable_mail_documents s
+            WHERE s.account_id = $1
+              AND ($2::uuid IS NULL OR s.mailbox_id = $2)
+              AND (
+                $3::text IS NULL
+                OR (s.message_search_vector || s.attachment_search_vector)
+                    @@ websearch_to_tsquery('simple', $3)
+              )
             "#,
         )
-        .bind(DEFAULT_TENANT_ID)
         .bind(account_id)
         .bind(mailbox_id)
+        .bind(normalized_search.as_deref())
         .fetch_one(&self.pool)
         .await?;
 
@@ -2827,6 +2866,7 @@ impl Storage {
         let mut stored_message_ids = Vec::new();
         let mut tx = self.pool.begin().await?;
         let thread_id = Uuid::new_v4();
+        let attachments = parse_message_attachments(request.raw_message.as_bytes())?;
 
         for recipient in &rcpt_to {
             let Some(row) = account_rows.iter().find(|row| {
@@ -2911,6 +2951,9 @@ impl Storage {
                 .execute(&mut *tx)
                 .await?;
             }
+
+            self.ingest_message_attachments_in_tx(&mut tx, account_id, message_id, &attachments)
+                .await?;
 
             accepted.push(recipient.clone());
             stored_message_ids.push(message_id);
@@ -3097,6 +3140,11 @@ impl Storage {
             .bind(message_id)
             .execute(&mut *tx)
             .await?;
+            sqlx::query("DELETE FROM attachments WHERE tenant_id = $1 AND message_id = $2")
+                .bind(DEFAULT_TENANT_ID)
+                .bind(message_id)
+                .execute(&mut *tx)
+                .await?;
         } else {
             sqlx::query(
                 r#"
@@ -3193,6 +3241,9 @@ impl Storage {
             .execute(&mut *tx)
             .await?;
         }
+
+        self.ingest_message_attachments_in_tx(&mut tx, input.account_id, message_id, &input.attachments)
+            .await?;
 
         self.insert_audit(&mut tx, audit).await?;
         tx.commit().await?;
@@ -3485,6 +3536,9 @@ impl Storage {
             .await?;
         }
 
+        self.ingest_message_attachments_in_tx(&mut tx, input.account_id, message_id, &input.attachments)
+            .await?;
+
         sqlx::query(
             r#"
             INSERT INTO outbound_message_queue (
@@ -3602,6 +3656,7 @@ impl Storage {
                 internet_message_id: draft.internet_message_id,
                 mime_blob_ref: None,
                 size_octets: draft.size_octets,
+                attachments: Vec::new(),
             },
             audit,
         )
@@ -3754,7 +3809,7 @@ impl Storage {
 
         let attachment_rows = sqlx::query(
             r#"
-            SELECT file_name, media_type, size_octets, blob_ref, extracted_text
+            SELECT file_name, media_type, size_octets, blob_ref, extracted_text, attachment_blob_id
             FROM attachments
             WHERE tenant_id = $1 AND message_id = $2
             ORDER BY file_name ASC
@@ -3767,8 +3822,14 @@ impl Storage {
         for row in attachment_rows {
             sqlx::query(
                 r#"
-                INSERT INTO attachments (id, tenant_id, message_id, file_name, media_type, size_octets, blob_ref, extracted_text, extracted_text_tsv)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL)
+                INSERT INTO attachments (
+                    id, tenant_id, message_id, file_name, media_type, size_octets,
+                    blob_ref, extracted_text, extracted_text_tsv, attachment_blob_id
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5, $6,
+                    $7, $8, to_tsvector('simple', COALESCE($8, '')), $9
+                )
                 "#,
             )
             .bind(Uuid::new_v4())
@@ -3779,6 +3840,7 @@ impl Storage {
             .bind(row.try_get::<i64, _>("size_octets")?)
             .bind(row.try_get::<String, _>("blob_ref")?)
             .bind(row.try_get::<Option<String>, _>("extracted_text")?)
+            .bind(row.try_get::<Option<Uuid>, _>("attachment_blob_id")?)
             .execute(&mut *tx)
             .await?;
         }
@@ -3940,6 +4002,9 @@ impl Storage {
             .await?;
         }
 
+        self.ingest_message_attachments_in_tx(&mut tx, input.account_id, message_id, &input.attachments)
+            .await?;
+
         self.insert_audit(&mut tx, audit).await?;
         tx.commit().await?;
 
@@ -4055,6 +4120,13 @@ impl Storage {
                 OR lower(m.subject_normalized) LIKE $2
                 OR lower(COALESCE(m.internet_message_id, '')) LIKE $2
                 OR lower(a.primary_email) LIKE $2
+                OR EXISTS (
+                    SELECT 1
+                    FROM attachments at
+                    WHERE at.tenant_id = m.tenant_id
+                      AND at.message_id = m.id
+                      AND lower(COALESCE(at.extracted_text, '')) LIKE $2
+                )
               )
             ORDER BY m.received_at DESC
             LIMIT 50
@@ -4198,6 +4270,7 @@ impl Storage {
         let rows = sqlx::query(
             r#"
             SELECT
+                m.id,
                 m.internet_message_id,
                 m.from_address,
                 m.subject_normalized,
@@ -4233,6 +4306,36 @@ impl Storage {
                 encode_pst_field(&subject),
                 encode_pst_field(&body_text)
             )?;
+
+            let attachments = sqlx::query(
+                r#"
+                SELECT
+                    a.file_name,
+                    a.media_type,
+                    b.blob_bytes
+                FROM attachments a
+                JOIN attachment_blobs b ON b.id = a.attachment_blob_id
+                WHERE a.tenant_id = $1 AND a.message_id = $2
+                ORDER BY a.file_name ASC
+                "#,
+            )
+            .bind(DEFAULT_TENANT_ID)
+            .bind(row.try_get::<Uuid, _>("id")?)
+            .fetch_all(&self.pool)
+            .await?;
+
+            for attachment in attachments {
+                let file_name: String = attachment.try_get("file_name")?;
+                let media_type: String = attachment.try_get("media_type")?;
+                let blob_bytes: Vec<u8> = attachment.try_get("blob_bytes")?;
+                writeln!(
+                    file,
+                    "ATTACHMENT\t{}\t{}\t{}",
+                    encode_pst_field(&file_name),
+                    encode_pst_field(&media_type),
+                    BASE64.encode(blob_bytes)
+                )?;
+            }
         }
 
         Ok(rows.len() as u32)
@@ -4250,70 +4353,53 @@ impl Storage {
         }
 
         let mut processed_messages = 0;
+        let mut pending_message: Option<PstImportedMessage> = None;
         let mut tx = self.pool.begin().await?;
         for line in reader.lines() {
             let line = line?;
+            if line.starts_with("ATTACHMENT\t") {
+                let parts = line.split('\t').collect::<Vec<_>>();
+                if parts.len() != 4 {
+                    continue;
+                }
+                if let Some(message) = pending_message.as_mut() {
+                    message.attachments.push(AttachmentUploadInput {
+                        file_name: decode_pst_field(parts[1]),
+                        media_type: decode_pst_field(parts[2]),
+                        blob_bytes: BASE64
+                            .decode(parts[3])
+                            .context("decode PST attachment payload")?,
+                    });
+                }
+                continue;
+            }
+
             if !line.starts_with("MESSAGE\t") {
                 continue;
             }
+
+            if let Some(message) = pending_message.take() {
+                self.persist_pst_imported_message_in_tx(&mut tx, job, message)
+                    .await?;
+                processed_messages += 1;
+            }
+
             let parts = line.split('\t').collect::<Vec<_>>();
             if parts.len() != 5 {
                 continue;
             }
+            pending_message = Some(PstImportedMessage {
+                internet_message_id: decode_pst_field(parts[1]),
+                from_address: decode_pst_field(parts[2]),
+                subject: decode_pst_field(parts[3]),
+                body_text: decode_pst_field(parts[4]),
+                attachments: Vec::new(),
+            });
+        }
 
-            let message_id = Uuid::new_v4();
-            let body_text = decode_pst_field(parts[4]);
-            let subject = decode_pst_field(parts[3]);
-            let from_address = decode_pst_field(parts[2]);
-            let internet_message_id = decode_pst_field(parts[1]);
-            let preview_text = preview_text(&body_text);
-
-            sqlx::query(
-                r#"
-                INSERT INTO messages (
-                    id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                    received_at, sent_at, from_display, from_address, subject_normalized,
-                    preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
-                    submission_source, delivery_status
-                )
-                VALUES (
-                    $1, $2, $3, $4, $5, NULLIF($6, ''),
-                    NOW(), NULL, NULL, $7, $8,
-                    $9, TRUE, FALSE, FALSE, $10, $11,
-                    'pst-import', 'stored'
-                )
-                "#,
-            )
-            .bind(message_id)
-            .bind(DEFAULT_TENANT_ID)
-            .bind(job.account_id)
-            .bind(job.mailbox_id)
-            .bind(Uuid::new_v4())
-            .bind(internet_message_id)
-            .bind(from_address)
-            .bind(subject.clone())
-            .bind(preview_text)
-            .bind(body_text.len() as i64)
-            .bind(format!("pst-import:{message_id}"))
-            .execute(&mut *tx)
-            .await?;
-
-            sqlx::query(
-                r#"
-                INSERT INTO message_bodies (
-                    message_id, body_text, body_html_sanitized, participants_normalized,
-                    language_code, content_hash, search_vector
-                )
-                VALUES ($1, $2, NULL, '', NULL, $3, to_tsvector('simple', $4))
-                "#,
-            )
-            .bind(message_id)
-            .bind(body_text.clone())
-            .bind(format!("pst-import:{message_id}"))
-            .bind(format!("{subject} {body_text}"))
-            .execute(&mut *tx)
-            .await?;
-
+        if let Some(message) = pending_message.take() {
+            self.persist_pst_imported_message_in_tx(&mut tx, job, message)
+                .await?;
             processed_messages += 1;
         }
 
@@ -4581,6 +4667,236 @@ impl Storage {
         Ok(rows.into_iter().map(map_contact).collect())
     }
 
+    async fn ingest_message_attachments_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        account_id: Uuid,
+        message_id: Uuid,
+        attachments: &[AttachmentUploadInput],
+    ) -> Result<()> {
+        if attachments.is_empty() {
+            return Ok(());
+        }
+
+        let domain_name = self.load_account_domain_in_tx(tx, account_id).await?;
+        let mut search_fragments = Vec::new();
+
+        for attachment in attachments {
+            let blob = self
+                .store_attachment_blob_in_tx(
+                    tx,
+                    &domain_name,
+                    attachment.media_type.trim(),
+                    &attachment.blob_bytes,
+                )
+                .await?;
+            let extracted_text = extract_supported_attachment_text(
+                attachment.media_type.trim(),
+                attachment.file_name.as_str(),
+                &attachment.blob_bytes,
+            )?;
+            if let Some(text) = extracted_text.as_ref().filter(|text| !text.trim().is_empty()) {
+                search_fragments.push(text.clone());
+            }
+
+            sqlx::query(
+                r#"
+                INSERT INTO attachments (
+                    id, tenant_id, message_id, file_name, media_type, size_octets,
+                    blob_ref, extracted_text, extracted_text_tsv, attachment_blob_id
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, to_tsvector('simple', COALESCE($8, '')), $9)
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(DEFAULT_TENANT_ID)
+            .bind(message_id)
+            .bind(attachment.file_name.trim())
+            .bind(attachment.media_type.trim())
+            .bind(attachment.blob_bytes.len() as i64)
+            .bind(format!("attachment-blob:{}", blob.id))
+            .bind(extracted_text)
+            .bind(blob.id)
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE messages
+            SET has_attachments = TRUE
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(message_id)
+        .execute(&mut **tx)
+        .await?;
+
+        if !search_fragments.is_empty() {
+            let attachment_text = search_fragments.join("\n");
+            sqlx::query(
+                r#"
+                UPDATE message_bodies
+                SET search_vector = to_tsvector(
+                    'simple',
+                    concat_ws(' ', body_text, participants_normalized, $2)
+                )
+                WHERE message_id = $1
+                "#,
+            )
+            .bind(message_id)
+            .bind(attachment_text)
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn store_attachment_blob_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        domain_name: &str,
+        media_type: &str,
+        blob_bytes: &[u8],
+    ) -> Result<StoredAttachmentBlob> {
+        let content_sha256 = sha256_hex(blob_bytes);
+
+        if let Some(row) = sqlx::query(
+            r#"
+            SELECT id
+            FROM attachment_blobs
+            WHERE tenant_id = $1 AND domain_name = $2 AND content_sha256 = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(domain_name)
+        .bind(&content_sha256)
+        .fetch_optional(&mut **tx)
+        .await?
+        {
+            return Ok(StoredAttachmentBlob {
+                id: row.try_get("id")?,
+            });
+        }
+
+        let blob_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO attachment_blobs (
+                id, tenant_id, domain_name, content_sha256, media_type, size_octets, blob_bytes
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            "#,
+        )
+        .bind(blob_id)
+        .bind(DEFAULT_TENANT_ID)
+        .bind(domain_name)
+        .bind(content_sha256)
+        .bind(media_type)
+        .bind(blob_bytes.len() as i64)
+        .bind(blob_bytes)
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(StoredAttachmentBlob { id: blob_id })
+    }
+
+    async fn load_account_domain_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        account_id: Uuid,
+    ) -> Result<String> {
+        let row = sqlx::query(
+            r#"
+            SELECT primary_email
+            FROM accounts
+            WHERE tenant_id = $1 AND id = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| anyhow!("account not found"))?;
+        let primary_email: String = row.try_get("primary_email")?;
+        domain_from_email(&primary_email)
+    }
+
+    async fn persist_pst_imported_message_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        job: &PendingPstJobRow,
+        message: PstImportedMessage,
+    ) -> Result<()> {
+        let message_id = Uuid::new_v4();
+        let preview_text = preview_text(&message.body_text);
+        let size_octets = message
+            .body_text
+            .len()
+            .saturating_add(
+                message
+                    .attachments
+                    .iter()
+                    .map(|attachment| attachment.blob_bytes.len())
+                    .sum::<usize>(),
+            ) as i64;
+
+        sqlx::query(
+            r#"
+            INSERT INTO messages (
+                id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
+                received_at, sent_at, from_display, from_address, subject_normalized,
+                preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
+                submission_source, delivery_status
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, NULLIF($6, ''),
+                NOW(), NULL, NULL, $7, $8,
+                $9, TRUE, FALSE, FALSE, $10, $11,
+                'pst-import', 'stored'
+            )
+            "#,
+        )
+        .bind(message_id)
+        .bind(DEFAULT_TENANT_ID)
+        .bind(job.account_id)
+        .bind(job.mailbox_id)
+        .bind(Uuid::new_v4())
+        .bind(message.internet_message_id)
+        .bind(message.from_address)
+        .bind(message.subject.clone())
+        .bind(preview_text)
+        .bind(size_octets.max(0))
+        .bind(format!("pst-import:{message_id}"))
+        .execute(&mut **tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO message_bodies (
+                message_id, body_text, body_html_sanitized, participants_normalized,
+                language_code, content_hash, search_vector
+            )
+            VALUES ($1, $2, NULL, '', NULL, $3, to_tsvector('simple', $4))
+            "#,
+        )
+        .bind(message_id)
+        .bind(message.body_text.clone())
+        .bind(format!("pst-import:{message_id}"))
+        .bind(format!("{} {}", message.subject, message.body_text))
+        .execute(&mut **tx)
+        .await?;
+
+        self.ingest_message_attachments_in_tx(tx, job.account_id, message_id, &message.attachments)
+            .await?;
+
+        Ok(())
+    }
+
     async fn ensure_account_exists(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
@@ -4714,6 +5030,60 @@ fn normalize_email(value: &str) -> String {
 
 fn normalize_subject(value: &str) -> String {
     value.trim().to_string()
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
+fn domain_from_email(email: &str) -> Result<String> {
+    email
+        .split_once('@')
+        .map(|(_, domain)| domain.trim().to_lowercase())
+        .filter(|domain| !domain.is_empty())
+        .ok_or_else(|| anyhow!("account email does not contain a domain"))
+}
+
+fn parse_message_attachments(bytes: &[u8]) -> Result<Vec<AttachmentUploadInput>> {
+    collect_mime_attachment_parts(bytes)?
+        .into_iter()
+        .enumerate()
+        .map(|(index, attachment)| {
+            let file_name = attachment
+                .filename
+                .unwrap_or_else(|| format!("attachment-{}.bin", index + 1));
+            let media_type = attachment
+                .declared_mime
+                .unwrap_or_else(|| "application/octet-stream".to_string());
+            Ok(AttachmentUploadInput {
+                file_name,
+                media_type,
+                blob_bytes: attachment.bytes,
+            })
+        })
+        .collect()
+}
+
+fn extract_supported_attachment_text(
+    media_type: &str,
+    file_name: &str,
+    blob_bytes: &[u8],
+) -> Result<Option<String>> {
+    match extract_text_from_bytes(blob_bytes, Some(media_type), Some(file_name)) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) => {
+            let message = error.to_string();
+            if message.contains("unsupported validated attachment format")
+                || message.contains("blocked extraction")
+            {
+                Ok(None)
+            } else {
+                Err(error)
+            }
+        }
+    }
 }
 
 fn parse_header_recipients(raw_message: &str, header_name: &str) -> Vec<SubmittedRecipientInput> {
@@ -4979,9 +5349,9 @@ fn participants_normalized(
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_bcc_recipients, normalize_visible_recipients, parse_header_recipients,
-        participants_normalized, validate_pst_import_path, SubmitMessageInput,
-        SubmittedRecipientInput,
+        domain_from_email, normalize_bcc_recipients, normalize_visible_recipients,
+        parse_header_recipients, parse_message_attachments, participants_normalized,
+        validate_pst_import_path, SubmitMessageInput, SubmittedRecipientInput,
     };
     use lpe_magika::{
         write_validation_record, ExpectedKind, IngressContext, PolicyDecision, ValidationOutcome,
@@ -5018,6 +5388,7 @@ mod tests {
             internet_message_id: None,
             mime_blob_ref: None,
             size_octets: 0,
+            attachments: Vec::new(),
         }
     }
 
@@ -5117,6 +5488,42 @@ mod tests {
         let result = validate_pst_import_path(&pst_path);
         std::env::remove_var("LPE_MAGIKA_BIN");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn domain_dedup_scope_comes_from_account_email_domain() {
+        assert_eq!(
+            domain_from_email("Alice@Example.Test").unwrap(),
+            "example.test"
+        );
+    }
+
+    #[test]
+    fn mime_attachment_parsing_keeps_filename_mime_and_bytes() {
+        let message = concat!(
+            "From: Sender <sender@example.test>\r\n",
+            "To: Recipient <recipient@example.test>\r\n",
+            "Subject: Indexed attachment\r\n",
+            "Content-Type: multipart/mixed; boundary=\"boundary42\"\r\n",
+            "\r\n",
+            "--boundary42\r\n",
+            "Content-Type: text/plain; charset=utf-8\r\n",
+            "\r\n",
+            "Body\r\n",
+            "--boundary42\r\n",
+            "Content-Type: application/pdf\r\n",
+            "Content-Disposition: attachment; filename=\"report.pdf\"\r\n",
+            "\r\n",
+            "PDF-ATTACHMENT\r\n",
+            "--boundary42--\r\n"
+        );
+
+        let attachments = parse_message_attachments(message.as_bytes()).unwrap();
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].file_name, "report.pdf");
+        assert_eq!(attachments[0].media_type, "application/pdf");
+        assert_eq!(attachments[0].blob_bytes, b"PDF-ATTACHMENT".to_vec());
     }
 }
 
