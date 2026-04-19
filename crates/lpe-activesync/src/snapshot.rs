@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Result};
-use lpe_storage::{ClientContact, ClientEvent, JmapEmail};
+use lpe_storage::{ActiveSyncAttachment, ClientContact, ClientEvent, JmapEmail};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -11,7 +11,10 @@ use crate::{
     wbxml::WbxmlNode,
 };
 
-pub(crate) fn email_application_data(email: &JmapEmail) -> Value {
+pub(crate) fn email_application_data(
+    email: &JmapEmail,
+    attachments: &[ActiveSyncAttachment],
+) -> Value {
     let to = email
         .to
         .iter()
@@ -25,30 +28,51 @@ pub(crate) fn email_application_data(email: &JmapEmail) -> Value {
         .collect::<Vec<_>>()
         .join(", ");
 
+    let mut children = vec![
+        json!({"page": 2, "name": "Subject", "text": email.subject}),
+        json!({"page": 2, "name": "From", "text": email.from_display.as_deref().map(|display| format!("{display} <{}>", email.from_address)).unwrap_or_else(|| email.from_address.clone())}),
+        json!({"page": 2, "name": "To", "text": to}),
+        json!({"page": 2, "name": "Cc", "text": cc}),
+        json!({"page": 2, "name": "DisplayTo", "text": to}),
+        json!({"page": 2, "name": "Read", "text": if email.unread { "0" } else { "1" }}),
+        json!({"page": 2, "name": "Importance", "text": "1"}),
+        json!({"page": 2, "name": "MessageClass", "text": "IPM.Note"}),
+        json!({"page": 2, "name": "DateReceived", "text": activesync_timestamp(email.sent_at.as_deref().unwrap_or(&email.received_at))}),
+        json!({
+            "page": 17,
+            "name": "Body",
+            "children": [
+                {"page": 17, "name": "Type", "text": "1"},
+                {"page": 17, "name": "EstimatedDataSize", "text": email.body_text.len().to_string()},
+                {"page": 17, "name": "Data", "text": email.body_text},
+                {"page": 17, "name": "Truncated", "text": "0"}
+            ]
+        }),
+    ];
+
+    if !attachments.is_empty() {
+        children.push(json!({
+            "page": 17,
+            "name": "Attachments",
+            "children": attachments.iter().map(|attachment| json!({
+                "page": 17,
+                "name": "Attachment",
+                "children": [
+                    {"page": 17, "name": "DisplayName", "text": attachment.file_name},
+                    {"page": 17, "name": "FileReference", "text": attachment.file_reference},
+                    {"page": 17, "name": "Method", "text": "1"},
+                    {"page": 17, "name": "ContentType", "text": attachment.media_type},
+                    {"page": 17, "name": "EstimatedDataSize", "text": attachment.size_octets.to_string()},
+                    {"page": 17, "name": "IsInline", "text": "0"}
+                ]
+            })).collect::<Vec<_>>()
+        }));
+    }
+
     json!({
         "page": 0,
         "name": "ApplicationData",
-        "children": [
-            {"page": 2, "name": "Subject", "text": email.subject},
-            {"page": 2, "name": "From", "text": email.from_display.as_deref().map(|display| format!("{display} <{}>", email.from_address)).unwrap_or_else(|| email.from_address.clone())},
-            {"page": 2, "name": "To", "text": to},
-            {"page": 2, "name": "Cc", "text": cc},
-            {"page": 2, "name": "DisplayTo", "text": to},
-            {"page": 2, "name": "Read", "text": if email.unread { "0" } else { "1" }},
-            {"page": 2, "name": "Importance", "text": "1"},
-            {"page": 2, "name": "MessageClass", "text": "IPM.Note"},
-            {"page": 2, "name": "DateReceived", "text": activesync_timestamp(email.sent_at.as_deref().unwrap_or(&email.received_at))},
-            {
-                "page": 17,
-                "name": "Body",
-                "children": [
-                    {"page": 17, "name": "Type", "text": "1"},
-                    {"page": 17, "name": "EstimatedDataSize", "text": email.body_text.len().to_string()},
-                    {"page": 17, "name": "Data", "text": email.body_text},
-                    {"page": 17, "name": "Truncated", "text": "0"}
-                ]
-            }
-        ]
+        "children": children,
     })
 }
 

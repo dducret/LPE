@@ -5,6 +5,7 @@ pub(crate) struct WbxmlNode {
     pub(crate) page: u8,
     pub(crate) name: String,
     pub(crate) text: Option<String>,
+    pub(crate) opaque: Option<Vec<u8>>,
     pub(crate) children: Vec<WbxmlNode>,
 }
 
@@ -14,6 +15,7 @@ impl WbxmlNode {
             page,
             name: name.into(),
             text: None,
+            opaque: None,
             children: Vec::new(),
         }
     }
@@ -23,6 +25,17 @@ impl WbxmlNode {
             page,
             name: name.into(),
             text: Some(text.into()),
+            opaque: None,
+            children: Vec::new(),
+        }
+    }
+
+    pub(crate) fn with_opaque(page: u8, name: impl Into<String>, data: Vec<u8>) -> Self {
+        Self {
+            page,
+            name: name.into(),
+            text: None,
+            opaque: Some(data),
             children: Vec::new(),
         }
     }
@@ -62,13 +75,19 @@ fn encode_node(node: &WbxmlNode, current_page: &mut u8, out: &mut Vec<u8>) {
     }
 
     let token = token_for(node.page, &node.name).unwrap_or(0x05);
-    let has_content = node.text.is_some() || !node.children.is_empty();
+    let has_content = node.text.is_some() || node.opaque.is_some() || !node.children.is_empty();
     out.push(if has_content { token | 0x40 } else { token });
 
     if let Some(text) = &node.text {
         out.push(0x03);
         out.extend_from_slice(text.as_bytes());
         out.push(0x00);
+    }
+
+    if let Some(opaque) = &node.opaque {
+        out.push(0xC3);
+        write_multibyte_int(opaque.len() as u32, out);
+        out.extend_from_slice(opaque);
     }
 
     for child in &node.children {
@@ -127,6 +146,7 @@ fn parse_node(bytes: &[u8], cursor: &mut usize, current_page: &mut u8) -> Result
 
     if has_content {
         let mut text = String::new();
+        let mut opaque = Vec::new();
         while *cursor < bytes.len() {
             match bytes[*cursor] {
                 0x00 => {
@@ -150,7 +170,7 @@ fn parse_node(bytes: &[u8], cursor: &mut usize, current_page: &mut u8) -> Result
                     let chunk = bytes
                         .get(*cursor..*cursor + length)
                         .ok_or_else(|| anyhow!("invalid WBXML opaque block"))?;
-                    text.push_str(&String::from_utf8_lossy(chunk));
+                    opaque.extend_from_slice(chunk);
                     *cursor += length;
                 }
                 _ => node.children.push(parse_node(bytes, cursor, current_page)?),
@@ -158,6 +178,9 @@ fn parse_node(bytes: &[u8], cursor: &mut usize, current_page: &mut u8) -> Result
         }
         if !text.is_empty() {
             node.text = Some(text);
+        }
+        if !opaque.is_empty() {
+            node.opaque = Some(opaque);
         }
     }
 
@@ -176,6 +199,17 @@ fn read_multibyte_int(bytes: &[u8], cursor: &mut usize) -> Result<u32> {
             return Ok(value);
         }
     }
+}
+
+fn write_multibyte_int(mut value: u32, out: &mut Vec<u8>) {
+    let mut bytes = vec![(value & 0x7F) as u8];
+    value >>= 7;
+    while value > 0 {
+        bytes.push(((value & 0x7F) as u8) | 0x80);
+        value >>= 7;
+    }
+    bytes.reverse();
+    out.extend_from_slice(&bytes);
 }
 
 fn read_inline_string(bytes: &[u8], cursor: &mut usize) -> Result<String> {
@@ -229,6 +263,7 @@ fn token_for(page: u8, name: &str) -> Option<u8> {
         (1, "HomePhoneNumber") => Some(0x27),
         (1, "LastName") => Some(0x29),
         (1, "MobilePhoneNumber") => Some(0x2B),
+        (4, "TimeZone") => Some(0x05),
         (2, "DateReceived") => Some(0x0F),
         (2, "DisplayTo") => Some(0x11),
         (2, "Importance") => Some(0x12),
@@ -262,6 +297,13 @@ fn token_for(page: u8, name: &str) -> Option<u8> {
         (7, "SyncKey") => Some(0x12),
         (7, "FolderSync") => Some(0x16),
         (7, "Count") => Some(0x17),
+        (13, "Ping") => Some(0x05),
+        (13, "Status") => Some(0x07),
+        (13, "Folders") => Some(0x09),
+        (13, "Folder") => Some(0x0A),
+        (13, "Id") => Some(0x0B),
+        (13, "Class") => Some(0x0C),
+        (13, "MaxFolders") => Some(0x0D),
         (14, "Provision") => Some(0x05),
         (14, "Policies") => Some(0x06),
         (14, "Policy") => Some(0x07),
@@ -283,6 +325,24 @@ fn token_for(page: u8, name: &str) -> Option<u8> {
         (14, "AllowPOPIMAPEmail") => Some(0x23),
         (14, "AllowBrowser") => Some(0x33),
         (14, "AllowConsumerEmail") => Some(0x34),
+        (15, "Search") => Some(0x05),
+        (15, "Store") => Some(0x07),
+        (15, "Name") => Some(0x08),
+        (15, "Query") => Some(0x09),
+        (15, "Options") => Some(0x0A),
+        (15, "Range") => Some(0x0B),
+        (15, "Status") => Some(0x0C),
+        (15, "Response") => Some(0x0D),
+        (15, "Result") => Some(0x0E),
+        (15, "Properties") => Some(0x0F),
+        (15, "Total") => Some(0x10),
+        (15, "EqualTo") => Some(0x11),
+        (15, "Value") => Some(0x12),
+        (15, "And") => Some(0x13),
+        (15, "Or") => Some(0x14),
+        (15, "FreeText") => Some(0x15),
+        (15, "DeepTraversal") => Some(0x17),
+        (15, "LongId") => Some(0x18),
         (17, "BodyPreference") => Some(0x05),
         (17, "Type") => Some(0x06),
         (17, "TruncationSize") => Some(0x07),
@@ -291,6 +351,16 @@ fn token_for(page: u8, name: &str) -> Option<u8> {
         (17, "Data") => Some(0x0B),
         (17, "EstimatedDataSize") => Some(0x0C),
         (17, "Truncated") => Some(0x0D),
+        (17, "Attachments") => Some(0x0E),
+        (17, "Attachment") => Some(0x0F),
+        (17, "DisplayName") => Some(0x10),
+        (17, "FileReference") => Some(0x11),
+        (17, "Method") => Some(0x12),
+        (17, "ContentId") => Some(0x13),
+        (17, "ContentLocation") => Some(0x14),
+        (17, "IsInline") => Some(0x15),
+        (17, "ContentType") => Some(0x17),
+        (17, "Preview") => Some(0x18),
         (18, "Status") => Some(0x06),
         (18, "Set") => Some(0x08),
         (18, "DeviceInformation") => Some(0x16),
@@ -302,11 +372,31 @@ fn token_for(page: u8, name: &str) -> Option<u8> {
         (18, "PhoneNumber") => Some(0x1C),
         (18, "UserAgent") => Some(0x20),
         (18, "MobileOperator") => Some(0x22),
+        (20, "ItemOperations") => Some(0x05),
+        (20, "Fetch") => Some(0x06),
+        (20, "Store") => Some(0x07),
+        (20, "Options") => Some(0x08),
+        (20, "Range") => Some(0x09),
+        (20, "Total") => Some(0x0A),
+        (20, "Properties") => Some(0x0B),
+        (20, "Data") => Some(0x0C),
+        (20, "Status") => Some(0x0D),
+        (20, "Response") => Some(0x0E),
+        (20, "Part") => Some(0x11),
         (21, "SendMail") => Some(0x05),
+        (21, "SmartForward") => Some(0x06),
+        (21, "SmartReply") => Some(0x07),
         (21, "SaveInSentItems") => Some(0x08),
+        (21, "ReplaceMime") => Some(0x09),
+        (21, "Source") => Some(0x0B),
+        (21, "FolderId") => Some(0x0C),
+        (21, "ItemId") => Some(0x0D),
+        (21, "LongId") => Some(0x0E),
+        (21, "InstanceId") => Some(0x0F),
         (21, "Mime") => Some(0x10),
         (21, "ClientId") => Some(0x11),
         (21, "Status") => Some(0x12),
+        (21, "AccountId") => Some(0x13),
         _ => None,
     }
 }
@@ -352,6 +442,7 @@ fn name_for(page: u8, token: u8) -> Option<&'static str> {
         (1, 0x27) => Some("HomePhoneNumber"),
         (1, 0x29) => Some("LastName"),
         (1, 0x2B) => Some("MobilePhoneNumber"),
+        (4, 0x05) => Some("TimeZone"),
         (2, 0x0F) => Some("DateReceived"),
         (2, 0x11) => Some("DisplayTo"),
         (2, 0x12) => Some("Importance"),
@@ -385,6 +476,13 @@ fn name_for(page: u8, token: u8) -> Option<&'static str> {
         (7, 0x12) => Some("SyncKey"),
         (7, 0x16) => Some("FolderSync"),
         (7, 0x17) => Some("Count"),
+        (13, 0x05) => Some("Ping"),
+        (13, 0x07) => Some("Status"),
+        (13, 0x09) => Some("Folders"),
+        (13, 0x0A) => Some("Folder"),
+        (13, 0x0B) => Some("Id"),
+        (13, 0x0C) => Some("Class"),
+        (13, 0x0D) => Some("MaxFolders"),
         (14, 0x05) => Some("Provision"),
         (14, 0x06) => Some("Policies"),
         (14, 0x07) => Some("Policy"),
@@ -406,6 +504,24 @@ fn name_for(page: u8, token: u8) -> Option<&'static str> {
         (14, 0x23) => Some("AllowPOPIMAPEmail"),
         (14, 0x33) => Some("AllowBrowser"),
         (14, 0x34) => Some("AllowConsumerEmail"),
+        (15, 0x05) => Some("Search"),
+        (15, 0x07) => Some("Store"),
+        (15, 0x08) => Some("Name"),
+        (15, 0x09) => Some("Query"),
+        (15, 0x0A) => Some("Options"),
+        (15, 0x0B) => Some("Range"),
+        (15, 0x0C) => Some("Status"),
+        (15, 0x0D) => Some("Response"),
+        (15, 0x0E) => Some("Result"),
+        (15, 0x0F) => Some("Properties"),
+        (15, 0x10) => Some("Total"),
+        (15, 0x11) => Some("EqualTo"),
+        (15, 0x12) => Some("Value"),
+        (15, 0x13) => Some("And"),
+        (15, 0x14) => Some("Or"),
+        (15, 0x15) => Some("FreeText"),
+        (15, 0x17) => Some("DeepTraversal"),
+        (15, 0x18) => Some("LongId"),
         (17, 0x05) => Some("BodyPreference"),
         (17, 0x06) => Some("Type"),
         (17, 0x07) => Some("TruncationSize"),
@@ -414,6 +530,16 @@ fn name_for(page: u8, token: u8) -> Option<&'static str> {
         (17, 0x0B) => Some("Data"),
         (17, 0x0C) => Some("EstimatedDataSize"),
         (17, 0x0D) => Some("Truncated"),
+        (17, 0x0E) => Some("Attachments"),
+        (17, 0x0F) => Some("Attachment"),
+        (17, 0x10) => Some("DisplayName"),
+        (17, 0x11) => Some("FileReference"),
+        (17, 0x12) => Some("Method"),
+        (17, 0x13) => Some("ContentId"),
+        (17, 0x14) => Some("ContentLocation"),
+        (17, 0x15) => Some("IsInline"),
+        (17, 0x17) => Some("ContentType"),
+        (17, 0x18) => Some("Preview"),
         (18, 0x06) => Some("Status"),
         (18, 0x08) => Some("Set"),
         (18, 0x16) => Some("DeviceInformation"),
@@ -425,11 +551,31 @@ fn name_for(page: u8, token: u8) -> Option<&'static str> {
         (18, 0x1C) => Some("PhoneNumber"),
         (18, 0x20) => Some("UserAgent"),
         (18, 0x22) => Some("MobileOperator"),
+        (20, 0x05) => Some("ItemOperations"),
+        (20, 0x06) => Some("Fetch"),
+        (20, 0x07) => Some("Store"),
+        (20, 0x08) => Some("Options"),
+        (20, 0x09) => Some("Range"),
+        (20, 0x0A) => Some("Total"),
+        (20, 0x0B) => Some("Properties"),
+        (20, 0x0C) => Some("Data"),
+        (20, 0x0D) => Some("Status"),
+        (20, 0x0E) => Some("Response"),
+        (20, 0x11) => Some("Part"),
         (21, 0x05) => Some("SendMail"),
+        (21, 0x06) => Some("SmartForward"),
+        (21, 0x07) => Some("SmartReply"),
         (21, 0x08) => Some("SaveInSentItems"),
+        (21, 0x09) => Some("ReplaceMime"),
+        (21, 0x0B) => Some("Source"),
+        (21, 0x0C) => Some("FolderId"),
+        (21, 0x0D) => Some("ItemId"),
+        (21, 0x0E) => Some("LongId"),
+        (21, 0x0F) => Some("InstanceId"),
         (21, 0x10) => Some("Mime"),
         (21, 0x11) => Some("ClientId"),
         (21, 0x12) => Some("Status"),
+        (21, 0x13) => Some("AccountId"),
         _ => None,
     }
 }

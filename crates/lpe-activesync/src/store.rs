@@ -1,8 +1,10 @@
 use anyhow::Result;
 use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
-    ActiveSyncItemState, ActiveSyncSyncState, AuditEntryInput, ClientContact, ClientEvent,
-    JmapEmail, JmapMailbox, SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage,
+    ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncItemState, ActiveSyncSyncState,
+    AuditEntryInput, ClientContact, ClientEvent, JmapEmail, JmapMailbox, SavedDraftMessage,
+    Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
+    UpsertClientEventInput,
 };
 use std::{future::Future, pin::Pin};
 use uuid::Uuid;
@@ -24,6 +26,12 @@ pub trait ActiveSyncStore: AccountAuthStore {
         account_id: Uuid,
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<JmapEmail>>;
+    fn fetch_latest_activesync_sync_state<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Option<ActiveSyncSyncState>>;
     fn fetch_activesync_email_states<'a>(
         &'a self,
         account_id: Uuid,
@@ -42,6 +50,16 @@ pub trait ActiveSyncStore: AccountAuthStore {
         account_id: Uuid,
         id: Uuid,
     ) -> StoreFuture<'a, Option<JmapEmail>>;
+    fn fetch_activesync_message_attachments<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ActiveSyncAttachment>>;
+    fn fetch_activesync_attachment_content<'a>(
+        &'a self,
+        account_id: Uuid,
+        file_reference: &'a str,
+    ) -> StoreFuture<'a, Option<ActiveSyncAttachmentContent>>;
     fn save_draft_message<'a>(
         &'a self,
         input: SubmitMessageInput,
@@ -65,12 +83,26 @@ pub trait ActiveSyncStore: AccountAuthStore {
         account_id: Uuid,
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<ClientContact>>;
+    fn upsert_client_contact<'a>(
+        &'a self,
+        input: UpsertClientContactInput,
+    ) -> StoreFuture<'a, ClientContact>;
+    fn delete_client_contact<'a>(
+        &'a self,
+        account_id: Uuid,
+        contact_id: Uuid,
+    ) -> StoreFuture<'a, ()>;
     fn fetch_client_events<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<ClientEvent>>;
     fn fetch_client_events_by_ids<'a>(
         &'a self,
         account_id: Uuid,
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<ClientEvent>>;
+    fn upsert_client_event<'a>(
+        &'a self,
+        input: UpsertClientEventInput,
+    ) -> StoreFuture<'a, ClientEvent>;
+    fn delete_client_event<'a>(&'a self, account_id: Uuid, event_id: Uuid) -> StoreFuture<'a, ()>;
     fn fetch_activesync_contact_states<'a>(
         &'a self,
         account_id: Uuid,
@@ -133,6 +165,18 @@ impl ActiveSyncStore for Storage {
         Box::pin(async move { self.fetch_jmap_emails(account_id, ids).await })
     }
 
+    fn fetch_latest_activesync_sync_state<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Option<ActiveSyncSyncState>> {
+        Box::pin(async move {
+            self.fetch_latest_activesync_sync_state(account_id, device_id, collection_id)
+                .await
+        })
+    }
+
     fn fetch_activesync_email_states<'a>(
         &'a self,
         account_id: Uuid,
@@ -164,6 +208,28 @@ impl ActiveSyncStore for Storage {
         id: Uuid,
     ) -> StoreFuture<'a, Option<JmapEmail>> {
         Box::pin(async move { self.fetch_jmap_draft(account_id, id).await })
+    }
+
+    fn fetch_activesync_message_attachments<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ActiveSyncAttachment>> {
+        Box::pin(async move {
+            self.fetch_activesync_message_attachments(account_id, message_id)
+                .await
+        })
+    }
+
+    fn fetch_activesync_attachment_content<'a>(
+        &'a self,
+        account_id: Uuid,
+        file_reference: &'a str,
+    ) -> StoreFuture<'a, Option<ActiveSyncAttachmentContent>> {
+        Box::pin(async move {
+            self.fetch_activesync_attachment_content(account_id, file_reference)
+                .await
+        })
     }
 
     fn save_draft_message<'a>(
@@ -209,6 +275,21 @@ impl ActiveSyncStore for Storage {
         Box::pin(async move { self.fetch_client_contacts_by_ids(account_id, ids).await })
     }
 
+    fn upsert_client_contact<'a>(
+        &'a self,
+        input: UpsertClientContactInput,
+    ) -> StoreFuture<'a, ClientContact> {
+        Box::pin(async move { self.upsert_client_contact(input).await })
+    }
+
+    fn delete_client_contact<'a>(
+        &'a self,
+        account_id: Uuid,
+        contact_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move { self.delete_client_contact(account_id, contact_id).await })
+    }
+
     fn fetch_client_events<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<ClientEvent>> {
         Box::pin(async move { self.fetch_client_events(account_id).await })
     }
@@ -219,6 +300,17 @@ impl ActiveSyncStore for Storage {
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<ClientEvent>> {
         Box::pin(async move { self.fetch_client_events_by_ids(account_id, ids).await })
+    }
+
+    fn upsert_client_event<'a>(
+        &'a self,
+        input: UpsertClientEventInput,
+    ) -> StoreFuture<'a, ClientEvent> {
+        Box::pin(async move { self.upsert_client_event(input).await })
+    }
+
+    fn delete_client_event<'a>(&'a self, account_id: Uuid, event_id: Uuid) -> StoreFuture<'a, ()> {
+        Box::pin(async move { self.delete_client_event(account_id, event_id).await })
     }
 
     fn fetch_activesync_contact_states<'a>(
@@ -251,7 +343,10 @@ impl ActiveSyncStore for Storage {
         account_id: Uuid,
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<ActiveSyncItemState>> {
-        Box::pin(async move { self.fetch_activesync_event_states_by_ids(account_id, ids).await })
+        Box::pin(async move {
+            self.fetch_activesync_event_states_by_ids(account_id, ids)
+                .await
+        })
     }
 
     fn store_activesync_sync_state<'a>(

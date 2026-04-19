@@ -42,6 +42,11 @@ Le MVP implemente un codec `WBXML` cible sur les code pages necessaires au perim
 - `FolderSync`
 - `Sync`
 - `SendMail`
+- `Search`
+- `ItemOperations`
+- `Ping`
+- `SmartReply`
+- `SmartForward`
 
 `Sync` tolere aussi plusieurs collections dans une meme requete et accepte sans erreur plusieurs options protocole frequentes dont le MVP n'exploite pas encore toute la semantique:
 
@@ -60,7 +65,14 @@ Le MVP implemente un codec `WBXML` cible sur les code pages necessaires au perim
 - exposition des collections `Contacts` et `Calendar`
 - sync des messages `Inbox`, `Sent`, `Drafts`
 - creation, modification et suppression de brouillons via `Sync` sur `Drafts`
+- mutations `Contacts` via `Sync` sur la collection `Contacts`
+- mutations `Calendar` via `Sync` sur la collection `Calendar`
 - envoi via `SendMail`, branche sur la soumission canonique `LPE`
+- pieces jointes `SendMail` validees par `Magika`, persistees dans le modele canonique et exposees via `Sync` + `ItemOperations`
+- recherche mailbox `Search` branchee sur la projection canonique `PostgreSQL`, y compris l'indexation texte des pieces jointes v1 deja supportees
+- recuperation `ItemOperations` des messages et pieces jointes par `FileReference`
+- `Ping` sur dossiers synchronises en comparant l'etat courant aux derniers `SyncKey` persistants du device
+- `SmartReply` et `SmartForward` branches sur la soumission canonique, avec reutilisation du message source `LPE` et reprise des pieces jointes source pour le forward
 - garantie qu'un message envoye depuis le client natif est visible dans `Sent`
 - persistance des `SyncKey` par compte, appareil et collection en base `PostgreSQL`
 - pagination `Sync` complete avec `WindowSize` et `MoreAvailable`, y compris la continuation d'un lot sur plusieurs `SyncKey`
@@ -68,9 +80,13 @@ Le MVP implemente un codec `WBXML` cible sur les code pages necessaires au perim
 
 ### Contacts et calendrier
 
-Le MVP expose `Contacts` et `Calendar` en lecture pour la synchronisation descendante.
+Le MVP expose `Contacts` et `Calendar` pour la synchronisation descendante et supporte maintenant les mutations de base cote client via `Sync`:
 
-La creation, modification et suppression cote client pour ces deux classes ne sont pas encore implementees afin de limiter le scope du premier adaptateur.
+- `Add`
+- `Change`
+- `Delete`
+
+Ces mutations restent branchees directement sur les modeles canoniques `contacts` et `calendar_events`.
 
 ### Regles importantes
 
@@ -83,10 +99,12 @@ La creation, modification et suppression cote client pour ces deux classes ne so
 ### Limitations connues
 
 - le MVP ne couvre pas `EWS`
-- le MVP ne couvre pas `SmartReply`, `SmartForward`, `ItemOperations`, `Ping`, `Search` ni les pieces jointes ActiveSync
 - le parseur `WBXML` est volontairement limite aux tags utilises par ce MVP
-- le parseur `MIME` de `SendMail` reste volontairement limite au MVP: il gere mieux les messages texte natifs, mais ne couvre pas encore les pieces jointes ni toute la richesse MIME
-- la sync `Contacts` et `Calendar` est descendante uniquement
+- la recherche `Search` reste volontairement limitee au store mailbox canonique `LPE`; elle ne couvre pas `GAL`, `DocumentLibrary` ni les operateurs de requete riches
+- `ItemOperations` est actuellement limite a `Fetch` pour les messages et les pieces jointes; les autres operations du namespace ne sont pas exposees
+- `Ping` est implemente comme un detecteur d'ecart entre l'etat courant et le dernier etat `Sync` persiste du device; le MVP ne maintient pas encore une boucle longue duree ni d'optimisation serveur sophistiquee
+- `SmartReply` et `SmartForward` restent cibles pour les usages Outlook/mobile prioritaires: ils reutilisent la soumission canonique et le message source, mais pas encore toute la richesse des variantes ComposeMail
+- le parseur `MIME` de `SendMail` reste volontairement limite au MVP: il gere maintenant les pieces jointes MIME usuelles, mais pas toute la richesse MIME
 - la gestion fine des mises a jour partielles cote client est actuellement concentree sur `Drafts`
 - la sync `Drafts` est ciblee pour un usage `ActiveSync 16.1`; les clients limites aux anciennes versions ne doivent pas etre consideres comme pleinement supportes pour ce point
 - le premier `Sync` avec `SyncKey = 0` suit un amorcage prudent: il etablit un nouvel etat serveur avant d'emettre les pages suivantes, ce qui est cible pour Outlook/mobile mais n'a pas encore ete eprouve contre toute la diversite des clients `ActiveSync`
@@ -134,6 +152,11 @@ The MVP implements a focused `WBXML` codec for the code pages needed by the curr
 - `FolderSync`
 - `Sync`
 - `SendMail`
+- `Search`
+- `ItemOperations`
+- `Ping`
+- `SmartReply`
+- `SmartForward`
 
 `Sync` also tolerates multiple collections in the same request and accepts several common protocol options without failing even when the MVP does not yet implement their full semantics:
 
@@ -152,7 +175,14 @@ The MVP implements a focused `WBXML` codec for the code pages needed by the curr
 - exposure of `Contacts` and `Calendar` collections
 - message synchronization for `Inbox`, `Sent`, and `Drafts`
 - draft creation, update, and deletion through `Sync` on `Drafts`
+- `Contacts` mutations through `Sync` on the `Contacts` collection
+- `Calendar` mutations through `Sync` on the `Calendar` collection
 - message submission through `SendMail`, wired to the canonical `LPE` submission workflow
+- `SendMail` attachments validated through `Magika`, persisted through the canonical model, and exposed back through `Sync` + `ItemOperations`
+- mailbox `Search` wired to the canonical `PostgreSQL` projection, including the v1 attachment text index already supported by `LPE`
+- `ItemOperations` retrieval for messages and attachment payloads through canonical `FileReference` values
+- `Ping` over synchronized folders by comparing current collection state against the device's latest persisted `SyncKey`
+- `SmartReply` and `SmartForward` wired to canonical submission, reusing the canonical source message and forwarding source attachments when needed
 - guarantee that a message sent from a native client becomes visible in the authoritative `Sent` view
 - persistent `SyncKey` storage in `PostgreSQL` per account, device, and collection
 - complete `Sync` pagination with `WindowSize` and `MoreAvailable`, including continuation of a server batch across multiple `SyncKey` values
@@ -161,9 +191,13 @@ The MVP implements a focused `WBXML` codec for the code pages needed by the curr
 
 ### Contacts and calendar
 
-The MVP exposes `Contacts` and `Calendar` for read-only downstream synchronization.
+The MVP exposes `Contacts` and `Calendar` for downstream synchronization and now supports basic client-originated mutations through `Sync`:
 
-Client-side create, update, and delete operations for those two classes are intentionally left out of the first adapter to keep the initial scope controlled.
+- `Add`
+- `Change`
+- `Delete`
+
+Those mutations still write directly into the canonical `contacts` and `calendar_events` models.
 
 ### Important rules
 
@@ -176,11 +210,13 @@ Client-side create, update, and delete operations for those two classes are inte
 ### Known limitations
 
 - the MVP does not implement `EWS`
-- the MVP does not implement `SmartReply`, `SmartForward`, `ItemOperations`, `Ping`, `Search`, or ActiveSync attachment retrieval
 - the MVP does not expose the `Tasks` class yet; future task support must build on `docs/architecture/tasks-mvp.md`
 - the `WBXML` parser is intentionally limited to the tags used by this MVP
-- the `SendMail` `MIME` parser is still intentionally limited to MVP needs: it handles native text-message cases better, but it does not yet cover attachments or full MIME richness
-- `Contacts` and `Calendar` synchronization is read-only in this first step
+- `Search` is intentionally limited to the canonical mailbox store; it does not cover `GAL`, `DocumentLibrary`, or richer search operators yet
+- `ItemOperations` is currently limited to `Fetch` for messages and attachments; the other namespace operations are not exposed
+- `Ping` is implemented as a lightweight delta detector against the device's latest persisted sync state; the MVP does not yet implement a sophisticated long-lived push loop
+- `SmartReply` and `SmartForward` are targeted at the highest-priority Outlook/mobile flows; they reuse canonical submission and source-message data, but they do not yet cover every ComposeMail variant
+- the `SendMail` `MIME` parser is still intentionally limited to MVP needs: it now covers common MIME attachments, but not the full MIME surface
 - fine-grained client-originated mutation handling is currently focused on `Drafts`
 - `Drafts` synchronization is targeted for `ActiveSync 16.1`; clients limited to older protocol versions should not be treated as fully supported for that capability
 - the first `Sync` with `SyncKey = 0` uses a conservative priming round-trip before emitting the paged server changes; this is targeted for Outlook/mobile but has not yet been validated against the full diversity of `ActiveSync` clients

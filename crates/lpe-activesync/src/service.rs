@@ -6,7 +6,8 @@ use lpe_magika::{
 };
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
-    ActiveSyncItemState, AuditEntryInput, SubmitMessageInput,
+    ActiveSyncItemState, AuditEntryInput, SubmitMessageInput, SubmittedRecipientInput,
+    UpsertClientContactInput, UpsertClientEventInput,
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -25,7 +26,9 @@ use crate::{
     constants::{
         CALENDAR_CLASS, CONTACTS_CLASS, FOLDER_SYNC_COLLECTION_ID, MAIL_CLASS, ROOT_FOLDER_ID,
     },
-    message::{draft_input_from_application_data, merged_draft_input, parse_mime_message},
+    message::{
+        draft_input_from_application_data, field_text, merged_draft_input, parse_mime_message,
+    },
     response::{empty_response, is_message_rfc822, policy_key, sync_status_node, wbxml_response},
     snapshot::{
         calendar_application_data, collection_window_size, contact_application_data,
@@ -90,8 +93,33 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 self.handle_sync(&principal, device_id, &protocol_version, &request)
                     .await
             }
+            "ItemOperations" => {
+                let request = decode_wbxml(body)?;
+                self.handle_item_operations(&principal, &protocol_version, &request)
+                    .await
+            }
+            "Ping" => {
+                let request = decode_wbxml(body)?;
+                self.handle_ping(&principal, device_id, &protocol_version, &request)
+                    .await
+            }
+            "Search" => {
+                let request = decode_wbxml(body)?;
+                self.handle_search(&principal, &protocol_version, &request)
+                    .await
+            }
             "SendMail" => {
                 self.handle_send_mail(&principal, &protocol_version, headers, body)
+                    .await
+            }
+            "SmartReply" => {
+                let request = decode_wbxml(body)?;
+                self.handle_smart_compose(&principal, &protocol_version, &request, "SmartReply")
+                    .await
+            }
+            "SmartForward" => {
+                let request = decode_wbxml(body)?;
+                self.handle_smart_compose(&principal, &protocol_version, &request, "SmartForward")
                     .await
             }
             other => bail!("unsupported ActiveSync command: {other}"),
@@ -373,6 +401,12 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         let client_responses = if drafts_collection(&collection) {
             self.apply_draft_sync_commands(principal, collection_node)
                 .await?
+        } else if collection.class_name == CONTACTS_CLASS {
+            self.apply_contact_sync_commands(principal, collection_node)
+                .await?
+        } else if collection.class_name == CALENDAR_CLASS {
+            self.apply_calendar_sync_commands(principal, collection_node)
+                .await?
         } else {
             Vec::new()
         };
@@ -438,11 +472,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     return Ok(sync_status_node(&collection.id, "9"));
                 }
                 let commands = self
-                    .build_commands(
-                        principal.account_id,
-                        &collection,
-                        &pending_page.0,
-                    )
+                    .build_commands(principal.account_id, &collection, &pending_page.0)
                     .await?;
                 let more_available = pending_page.1 < previous_state.pending_changes.len();
                 let stored_state = if more_available {
@@ -521,7 +551,9 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             let mailbox_id = parse_collection_mailbox_id(collection)?;
             self.fetch_all_mail_states(account_id, mailbox_id).await?
         } else if collection.class_name == CONTACTS_CLASS {
-            self.store.fetch_activesync_contact_states(account_id).await?
+            self.store
+                .fetch_activesync_contact_states(account_id)
+                .await?
         } else if collection.class_name == CALENDAR_CLASS {
             self.store.fetch_activesync_event_states(account_id).await?
         } else {
@@ -625,17 +657,32 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         let mut nodes = HashMap::new();
         if mail_collection(collection) {
             for email in self.store.fetch_jmap_emails(account_id, &ids).await? {
-                nodes.insert(email.id.to_string(), email_application_data(&email).pipe(value_to_wbxml));
+                let attachments = self
+                    .store
+                    .fetch_activesync_message_attachments(account_id, email.id)
+                    .await?;
+                nodes.insert(
+                    email.id.to_string(),
+                    email_application_data(&email, &attachments).pipe(value_to_wbxml),
+                );
             }
         } else if collection.class_name == CONTACTS_CLASS {
-            for contact in self.store.fetch_client_contacts_by_ids(account_id, &ids).await? {
+            for contact in self
+                .store
+                .fetch_client_contacts_by_ids(account_id, &ids)
+                .await?
+            {
                 nodes.insert(
                     contact.id.to_string(),
                     contact_application_data(&contact).pipe(value_to_wbxml),
                 );
             }
         } else if collection.class_name == CALENDAR_CLASS {
-            for event in self.store.fetch_client_events_by_ids(account_id, &ids).await? {
+            for event in self
+                .store
+                .fetch_client_events_by_ids(account_id, &ids)
+                .await?
+            {
                 nodes.insert(
                     event.id.to_string(),
                     calendar_application_data(&event).pipe(value_to_wbxml),
@@ -661,7 +708,9 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .iter()
             .map(|change| Uuid::parse_str(&change.server_id))
             .collect::<Result<Vec<_>, _>>()?;
-        let current_state = self.fetch_collection_states_by_ids(account_id, collection, &ids).await?;
+        let current_state = self
+            .fetch_collection_states_by_ids(account_id, collection, &ids)
+            .await?;
         let current_map = current_state
             .into_iter()
             .map(|entry| (entry.id.to_string(), entry.fingerprint))
@@ -825,6 +874,172 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         Ok(responses)
     }
 
+    async fn apply_contact_sync_commands(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        collection_node: &WbxmlNode,
+    ) -> Result<Vec<WbxmlNode>> {
+        let mut responses = Vec::new();
+        let Some(commands) = collection_node.child("Commands") else {
+            return Ok(responses);
+        };
+
+        for command in &commands.children {
+            match command.name.as_str() {
+                "Add" => {
+                    let client_id = command
+                        .child("ClientId")
+                        .map(|node| node.text_value().trim().to_string())
+                        .unwrap_or_else(|| Uuid::new_v4().to_string());
+                    let application_data = command
+                        .child("ApplicationData")
+                        .ok_or_else(|| anyhow!("contact add command is missing ApplicationData"))?;
+                    let created = self
+                        .store
+                        .upsert_client_contact(parse_contact_input(
+                            principal.account_id,
+                            None,
+                            None,
+                            application_data,
+                        )?)
+                        .await?;
+                    let mut add = WbxmlNode::new(0, "Add");
+                    add.push(WbxmlNode::with_text(0, "ClientId", client_id));
+                    add.push(WbxmlNode::with_text(0, "ServerId", created.id.to_string()));
+                    add.push(WbxmlNode::with_text(0, "Status", "1"));
+                    responses.push(add);
+                }
+                "Change" => {
+                    let server_id = command
+                        .child("ServerId")
+                        .map(|node| node.text_value().trim().to_string())
+                        .ok_or_else(|| anyhow!("contact change command is missing ServerId"))?;
+                    let contact_id = Uuid::parse_str(&server_id)?;
+                    let existing = self
+                        .store
+                        .fetch_client_contacts_by_ids(principal.account_id, &[contact_id])
+                        .await?
+                        .into_iter()
+                        .next();
+                    let application_data = command.child("ApplicationData").ok_or_else(|| {
+                        anyhow!("contact change command is missing ApplicationData")
+                    })?;
+                    self.store
+                        .upsert_client_contact(parse_contact_input(
+                            principal.account_id,
+                            Some(contact_id),
+                            existing.as_ref(),
+                            application_data,
+                        )?)
+                        .await?;
+                    let mut change = WbxmlNode::new(0, "Change");
+                    change.push(WbxmlNode::with_text(0, "ServerId", server_id));
+                    change.push(WbxmlNode::with_text(0, "Status", "1"));
+                    responses.push(change);
+                }
+                "Delete" => {
+                    let server_id = command
+                        .child("ServerId")
+                        .map(|node| node.text_value().trim().to_string())
+                        .ok_or_else(|| anyhow!("contact delete command is missing ServerId"))?;
+                    self.store
+                        .delete_client_contact(principal.account_id, Uuid::parse_str(&server_id)?)
+                        .await?;
+                    let mut delete = WbxmlNode::new(0, "Delete");
+                    delete.push(WbxmlNode::with_text(0, "ServerId", server_id));
+                    delete.push(WbxmlNode::with_text(0, "Status", "1"));
+                    responses.push(delete);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(responses)
+    }
+
+    async fn apply_calendar_sync_commands(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        collection_node: &WbxmlNode,
+    ) -> Result<Vec<WbxmlNode>> {
+        let mut responses = Vec::new();
+        let Some(commands) = collection_node.child("Commands") else {
+            return Ok(responses);
+        };
+
+        for command in &commands.children {
+            match command.name.as_str() {
+                "Add" => {
+                    let client_id = command
+                        .child("ClientId")
+                        .map(|node| node.text_value().trim().to_string())
+                        .unwrap_or_else(|| Uuid::new_v4().to_string());
+                    let application_data = command.child("ApplicationData").ok_or_else(|| {
+                        anyhow!("calendar add command is missing ApplicationData")
+                    })?;
+                    let created = self
+                        .store
+                        .upsert_client_event(parse_event_input(
+                            principal.account_id,
+                            None,
+                            None,
+                            application_data,
+                        )?)
+                        .await?;
+                    let mut add = WbxmlNode::new(0, "Add");
+                    add.push(WbxmlNode::with_text(0, "ClientId", client_id));
+                    add.push(WbxmlNode::with_text(0, "ServerId", created.id.to_string()));
+                    add.push(WbxmlNode::with_text(0, "Status", "1"));
+                    responses.push(add);
+                }
+                "Change" => {
+                    let server_id = command
+                        .child("ServerId")
+                        .map(|node| node.text_value().trim().to_string())
+                        .ok_or_else(|| anyhow!("calendar change command is missing ServerId"))?;
+                    let event_id = Uuid::parse_str(&server_id)?;
+                    let existing = self
+                        .store
+                        .fetch_client_events_by_ids(principal.account_id, &[event_id])
+                        .await?
+                        .into_iter()
+                        .next();
+                    let application_data = command.child("ApplicationData").ok_or_else(|| {
+                        anyhow!("calendar change command is missing ApplicationData")
+                    })?;
+                    self.store
+                        .upsert_client_event(parse_event_input(
+                            principal.account_id,
+                            Some(event_id),
+                            existing.as_ref(),
+                            application_data,
+                        )?)
+                        .await?;
+                    let mut change = WbxmlNode::new(0, "Change");
+                    change.push(WbxmlNode::with_text(0, "ServerId", server_id));
+                    change.push(WbxmlNode::with_text(0, "Status", "1"));
+                    responses.push(change);
+                }
+                "Delete" => {
+                    let server_id = command
+                        .child("ServerId")
+                        .map(|node| node.text_value().trim().to_string())
+                        .ok_or_else(|| anyhow!("calendar delete command is missing ServerId"))?;
+                    self.store
+                        .delete_client_event(principal.account_id, Uuid::parse_str(&server_id)?)
+                        .await?;
+                    let mut delete = WbxmlNode::new(0, "Delete");
+                    delete.push(WbxmlNode::with_text(0, "ServerId", server_id));
+                    delete.push(WbxmlNode::with_text(0, "Status", "1"));
+                    responses.push(delete);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(responses)
+    }
+
     async fn handle_send_mail(
         &self,
         principal: &AuthenticatedPrincipal,
@@ -873,7 +1088,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     internet_message_id: parsed.internet_message_id,
                     mime_blob_ref: Some(format!("activesync-mime:{}", Uuid::new_v4())),
                     size_octets: mime_payload.len() as i64,
-                    attachments: Vec::new(),
+                    attachments: parsed.attachments,
                 },
                 AuditEntryInput {
                     actor: principal.email.clone(),
@@ -888,6 +1103,379 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         } else {
             wbxml_response(protocol_version, Vec::new())
         }
+    }
+
+    async fn handle_item_operations(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        protocol_version: &str,
+        request: &WbxmlNode,
+    ) -> Result<Response> {
+        if request.name != "ItemOperations" {
+            bail!("invalid ItemOperations payload");
+        }
+
+        let mut root = WbxmlNode::new(20, "ItemOperations");
+        root.push(WbxmlNode::with_text(20, "Status", "1"));
+        let mut response = WbxmlNode::new(20, "Response");
+
+        for fetch in request.children_named("Fetch") {
+            response.push(
+                self.handle_item_operations_fetch(principal.account_id, fetch)
+                    .await?,
+            );
+        }
+
+        if !response.children.is_empty() {
+            root.push(response);
+        }
+
+        wbxml_response(protocol_version, encode_wbxml(&root))
+    }
+
+    async fn handle_item_operations_fetch(
+        &self,
+        account_id: Uuid,
+        fetch: &WbxmlNode,
+    ) -> Result<WbxmlNode> {
+        let mut node = WbxmlNode::new(20, "Fetch");
+        if let Some(file_reference) = fetch
+            .child("FileReference")
+            .map(|value| value.text_value().trim())
+        {
+            if let Some(attachment) = self
+                .store
+                .fetch_activesync_attachment_content(account_id, file_reference)
+                .await?
+            {
+                node.push(WbxmlNode::with_text(20, "Status", "1"));
+                node.push(WbxmlNode::with_text(
+                    17,
+                    "FileReference",
+                    &attachment.file_reference,
+                ));
+                let mut properties = WbxmlNode::new(20, "Properties");
+                properties.push(WbxmlNode::with_text(
+                    17,
+                    "ContentType",
+                    &attachment.media_type,
+                ));
+                properties.push(WbxmlNode::with_opaque(20, "Data", attachment.blob_bytes));
+                node.push(properties);
+            } else {
+                node.push(WbxmlNode::with_text(20, "Status", "6"));
+            }
+            return Ok(node);
+        }
+
+        let Some(server_id) = fetch
+            .child("ServerId")
+            .map(|value| value.text_value().trim())
+        else {
+            node.push(WbxmlNode::with_text(20, "Status", "2"));
+            return Ok(node);
+        };
+        let message_id = Uuid::parse_str(server_id)?;
+        let email = self
+            .store
+            .fetch_jmap_emails(account_id, &[message_id])
+            .await?
+            .into_iter()
+            .next();
+        if let Some(email) = email {
+            let attachments = self
+                .store
+                .fetch_activesync_message_attachments(account_id, email.id)
+                .await?;
+            node.push(WbxmlNode::with_text(20, "Status", "1"));
+            if let Some(collection_id) = fetch.child("CollectionId") {
+                node.push(WbxmlNode::with_text(
+                    0,
+                    "CollectionId",
+                    collection_id.text_value(),
+                ));
+            }
+            node.push(WbxmlNode::with_text(0, "ServerId", email.id.to_string()));
+            let mut properties = WbxmlNode::new(20, "Properties");
+            properties.push(email_application_data(&email, &attachments).pipe(value_to_wbxml));
+            node.push(properties);
+        } else {
+            node.push(WbxmlNode::with_text(20, "Status", "6"));
+        }
+
+        Ok(node)
+    }
+
+    async fn handle_ping(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        device_id: &str,
+        protocol_version: &str,
+        request: &WbxmlNode,
+    ) -> Result<Response> {
+        if request.name != "Ping" {
+            bail!("invalid Ping payload");
+        }
+
+        let folders = request
+            .child("Folders")
+            .map(|folders| folders.children_named("Folder"))
+            .unwrap_or_default();
+        if folders.is_empty() {
+            let mut response = WbxmlNode::new(13, "Ping");
+            response.push(WbxmlNode::with_text(13, "Status", "3"));
+            return wbxml_response(protocol_version, encode_wbxml(&response));
+        }
+
+        let collections = self.folder_collections(principal.account_id).await?;
+        let mut changed = Vec::new();
+        for folder in folders {
+            let Some(collection_id) = folder.child("Id").map(|node| node.text_value().trim())
+            else {
+                continue;
+            };
+            let Some(collection) = collections.iter().find(|entry| entry.id == collection_id)
+            else {
+                continue;
+            };
+            let current_state = self
+                .collection_state(principal.account_id, collection)
+                .await?;
+            let previous_state = self
+                .store
+                .fetch_latest_activesync_sync_state(principal.account_id, device_id, &collection.id)
+                .await?
+                .map(|state| decode_sync_state(&state.snapshot_json))
+                .transpose()?
+                .unwrap_or_default();
+            if !diff_collection_states(&previous_state.collection_state, &current_state).is_empty()
+            {
+                changed.push(collection.id.clone());
+            }
+        }
+
+        let mut response = WbxmlNode::new(13, "Ping");
+        response.push(WbxmlNode::with_text(
+            13,
+            "Status",
+            if changed.is_empty() { "1" } else { "2" },
+        ));
+        if !changed.is_empty() {
+            let mut folders_node = WbxmlNode::new(13, "Folders");
+            for collection_id in changed {
+                let mut folder = WbxmlNode::new(13, "Folder");
+                folder.push(WbxmlNode::with_text(13, "Id", collection_id));
+                folders_node.push(folder);
+            }
+            response.push(folders_node);
+        }
+
+        wbxml_response(protocol_version, encode_wbxml(&response))
+    }
+
+    async fn handle_search(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        protocol_version: &str,
+        request: &WbxmlNode,
+    ) -> Result<Response> {
+        if request.name != "Search" {
+            bail!("invalid Search payload");
+        }
+
+        let store = request
+            .child("Store")
+            .ok_or_else(|| anyhow!("Search payload is missing Store"))?;
+        let query_text = search_query_text(store);
+        let (start, end) = parse_range(
+            store
+                .child("Options")
+                .and_then(|options| options.child("Range"))
+                .or_else(|| store.child("Range"))
+                .map(|node| node.text_value()),
+        );
+        let limit = end.saturating_sub(start) + 1;
+        let query = self
+            .store
+            .query_jmap_email_ids(
+                principal.account_id,
+                None,
+                query_text.as_deref(),
+                start,
+                limit,
+            )
+            .await?;
+        let emails = self
+            .store
+            .fetch_jmap_emails(principal.account_id, &query.ids)
+            .await?;
+
+        let mut response = WbxmlNode::new(15, "Search");
+        response.push(WbxmlNode::with_text(15, "Status", "1"));
+        let mut response_store = WbxmlNode::new(15, "Store");
+        response_store.push(WbxmlNode::with_text(15, "Status", "1"));
+        response_store.push(WbxmlNode::with_text(15, "Name", "Mailbox"));
+        response_store.push(WbxmlNode::with_text(15, "Total", query.total.to_string()));
+        if !emails.is_empty() {
+            response_store.push(WbxmlNode::with_text(
+                15,
+                "Range",
+                format!("{}-{}", start, start + emails.len() as u64 - 1),
+            ));
+        }
+        for email in emails {
+            let attachments = self
+                .store
+                .fetch_activesync_message_attachments(principal.account_id, email.id)
+                .await?;
+            let mut result = WbxmlNode::new(15, "Result");
+            result.push(WbxmlNode::with_text(15, "LongId", email.id.to_string()));
+            let mut properties = WbxmlNode::new(15, "Properties");
+            properties.push(WbxmlNode::with_text(
+                0,
+                "CollectionId",
+                email.mailbox_id.to_string(),
+            ));
+            properties.push(WbxmlNode::with_text(0, "ServerId", email.id.to_string()));
+            properties.push(email_application_data(&email, &attachments).pipe(value_to_wbxml));
+            properties.push(WbxmlNode::with_text(
+                17,
+                "Preview",
+                trim_preview(&email.body_text),
+            ));
+            result.push(properties);
+            response_store.push(result);
+        }
+        let mut response_node = WbxmlNode::new(15, "Response");
+        response_node.push(response_store);
+        response.push(response_node);
+
+        wbxml_response(protocol_version, encode_wbxml(&response))
+    }
+
+    async fn handle_smart_compose(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        protocol_version: &str,
+        request: &WbxmlNode,
+        command_name: &str,
+    ) -> Result<Response> {
+        if request.name != command_name {
+            bail!("invalid {command_name} payload");
+        }
+
+        let source_message = self
+            .resolve_source_message(principal.account_id, request)
+            .await?;
+        let mime_payload = request
+            .child("Mime")
+            .map(|node| node.text_value().as_bytes().to_vec())
+            .ok_or_else(|| anyhow!("{command_name} is missing MIME content"))?;
+        validate_mime_attachments(&mime_payload)?;
+        let parsed = parse_mime_message(&mime_payload)?;
+
+        let (to, cc) =
+            if parsed.to.is_empty() && parsed.cc.is_empty() && command_name == "SmartReply" {
+                (
+                    reply_recipients(principal.email.as_str(), &source_message),
+                    Vec::new(),
+                )
+            } else {
+                (parsed.to, parsed.cc)
+            };
+        let mut attachments = parsed.attachments;
+        if command_name == "SmartForward" {
+            attachments.extend(
+                self.load_message_attachment_uploads(principal.account_id, source_message.id)
+                    .await?,
+            );
+        }
+
+        let subject = if parsed.subject.trim().is_empty() {
+            default_reply_subject(command_name, &source_message.subject)
+        } else {
+            parsed.subject
+        };
+        let body_text =
+            merge_smart_body(command_name, &parsed.body_text, &source_message.body_text);
+        self.store
+            .submit_message(
+                SubmitMessageInput {
+                    draft_message_id: None,
+                    account_id: principal.account_id,
+                    source: format!("activesync-{}", command_name.to_ascii_lowercase()),
+                    from_display: Some(principal.display_name.clone()),
+                    from_address: principal.email.clone(),
+                    to,
+                    cc,
+                    bcc: parsed.bcc,
+                    subject,
+                    body_text,
+                    body_html_sanitized: None,
+                    internet_message_id: parsed.internet_message_id,
+                    mime_blob_ref: Some(format!("activesync-mime:{}", Uuid::new_v4())),
+                    size_octets: mime_payload.len() as i64,
+                    attachments,
+                },
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: format!("activesync-{}", command_name.to_ascii_lowercase()),
+                    subject: source_message.id.to_string(),
+                },
+            )
+            .await?;
+
+        let mut response = WbxmlNode::new(21, command_name);
+        response.push(WbxmlNode::with_text(21, "Status", "1"));
+        wbxml_response(protocol_version, encode_wbxml(&response))
+    }
+
+    async fn resolve_source_message(
+        &self,
+        account_id: Uuid,
+        request: &WbxmlNode,
+    ) -> Result<lpe_storage::JmapEmail> {
+        let source = request
+            .child("Source")
+            .ok_or_else(|| anyhow!("compose command is missing Source"))?;
+        let message_id = source
+            .child("ItemId")
+            .or_else(|| source.child("LongId"))
+            .map(|node| node.text_value().trim().to_string())
+            .ok_or_else(|| anyhow!("compose command is missing ItemId"))?;
+        self.store
+            .fetch_jmap_emails(account_id, &[Uuid::parse_str(&message_id)?])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("source message not found"))
+    }
+
+    async fn load_message_attachment_uploads(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Vec<lpe_storage::AttachmentUploadInput>> {
+        let attachments = self
+            .store
+            .fetch_activesync_message_attachments(account_id, message_id)
+            .await?;
+        let mut uploads = Vec::with_capacity(attachments.len());
+        for attachment in attachments {
+            let Some(content) = self
+                .store
+                .fetch_activesync_attachment_content(account_id, &attachment.file_reference)
+                .await?
+            else {
+                continue;
+            };
+            uploads.push(lpe_storage::AttachmentUploadInput {
+                file_name: content.file_name,
+                media_type: content.media_type,
+                blob_bytes: content.blob_bytes,
+            });
+        }
+        Ok(uploads)
     }
 
     async fn folder_collections(&self, account_id: Uuid) -> Result<Vec<CollectionDefinition>> {
@@ -1029,6 +1617,265 @@ fn value_to_wbxml(value: Value) -> WbxmlNode {
     match value {
         Value::Object(map) => crate::snapshot::value_to_node(&map),
         _ => WbxmlNode::new(0, "ApplicationData"),
+    }
+}
+
+fn parse_contact_input(
+    account_id: Uuid,
+    id: Option<Uuid>,
+    existing: Option<&lpe_storage::ClientContact>,
+    application_data: &WbxmlNode,
+) -> Result<UpsertClientContactInput> {
+    let file_as = field_text(application_data, "FileAs");
+    let first_name = field_text(application_data, "FirstName").unwrap_or_default();
+    let last_name = field_text(application_data, "LastName").unwrap_or_default();
+    let derived_name = format!("{first_name} {last_name}").trim().to_string();
+    let name = file_as
+        .or_else(|| (!derived_name.is_empty()).then_some(derived_name))
+        .or_else(|| existing.map(|contact| contact.name.clone()))
+        .unwrap_or_default();
+    let email = field_text(application_data, "Email1Address")
+        .or_else(|| existing.map(|contact| contact.email.clone()))
+        .unwrap_or_default();
+    let phone = field_text(application_data, "MobilePhoneNumber")
+        .or_else(|| field_text(application_data, "HomePhoneNumber"))
+        .or_else(|| existing.map(|contact| contact.phone.clone()))
+        .unwrap_or_default();
+
+    Ok(UpsertClientContactInput {
+        id,
+        account_id,
+        name,
+        role: existing
+            .map(|contact| contact.role.clone())
+            .unwrap_or_default(),
+        email,
+        phone,
+        team: existing
+            .map(|contact| contact.team.clone())
+            .unwrap_or_default(),
+        notes: existing
+            .map(|contact| contact.notes.clone())
+            .unwrap_or_default(),
+    })
+}
+
+fn parse_event_input(
+    account_id: Uuid,
+    id: Option<Uuid>,
+    existing: Option<&lpe_storage::ClientEvent>,
+    application_data: &WbxmlNode,
+) -> Result<UpsertClientEventInput> {
+    let start = field_text(application_data, "StartTime")
+        .or_else(|| {
+            existing.map(|event| {
+                format!(
+                    "{}T{}:00Z",
+                    event.date.replace('-', ""),
+                    event.time.replace(':', "")
+                )
+            })
+        })
+        .unwrap_or_default();
+    let (date, time) = parse_compact_datetime(&start)?;
+    let end = field_text(application_data, "EndTime");
+    let duration_minutes = end
+        .as_deref()
+        .map(|value| duration_from_datetimes(&start, value))
+        .transpose()?
+        .or_else(|| existing.map(|event| event.duration_minutes))
+        .unwrap_or_default();
+    let attendees = field_text(application_data, "OrganizerName")
+        .or_else(|| attendees_from_nodes(application_data))
+        .or_else(|| existing.map(|event| event.attendees.clone()))
+        .unwrap_or_default();
+    let notes = application_data
+        .child("Body")
+        .and_then(|body| body.child("Data"))
+        .map(|node| node.text_value().trim().to_string())
+        .or_else(|| existing.map(|event| event.notes.clone()))
+        .unwrap_or_default();
+
+    Ok(UpsertClientEventInput {
+        id,
+        account_id,
+        date,
+        time,
+        time_zone: field_text(application_data, "TimeZone")
+            .or_else(|| existing.map(|event| event.time_zone.clone()))
+            .unwrap_or_default(),
+        duration_minutes,
+        recurrence_rule: existing
+            .map(|event| event.recurrence_rule.clone())
+            .unwrap_or_default(),
+        title: field_text(application_data, "Subject")
+            .or_else(|| existing.map(|event| event.title.clone()))
+            .unwrap_or_default(),
+        location: field_text(application_data, "Location")
+            .or_else(|| existing.map(|event| event.location.clone()))
+            .unwrap_or_default(),
+        attendees,
+        attendees_json: existing
+            .map(|event| event.attendees_json.clone())
+            .unwrap_or_default(),
+        notes,
+    })
+}
+
+fn parse_compact_datetime(value: &str) -> Result<(String, String)> {
+    let compact = value.trim().trim_end_matches('Z');
+    let (date_part, time_part) = compact
+        .split_once('T')
+        .ok_or_else(|| anyhow!("invalid ActiveSync datetime"))?;
+    if date_part.len() != 8 || time_part.len() < 4 {
+        bail!("invalid ActiveSync datetime");
+    }
+    Ok((
+        format!(
+            "{}-{}-{}",
+            &date_part[0..4],
+            &date_part[4..6],
+            &date_part[6..8]
+        ),
+        format!("{}:{}", &time_part[0..2], &time_part[2..4]),
+    ))
+}
+
+fn duration_from_datetimes(start: &str, end: &str) -> Result<i32> {
+    let (start_date, start_time) = parse_compact_datetime(start)?;
+    let (end_date, end_time) = parse_compact_datetime(end)?;
+    let start_minutes = date_time_to_minutes(&start_date, &start_time)?;
+    let end_minutes = date_time_to_minutes(&end_date, &end_time)?;
+    Ok((end_minutes - start_minutes).max(0) as i32)
+}
+
+fn date_time_to_minutes(date: &str, time: &str) -> Result<i64> {
+    let date_value = date.replace('-', "").parse::<i64>()?;
+    let time_value = time.replace(':', "").parse::<i64>()?;
+    Ok(date_value * 1440 + (time_value / 100) * 60 + (time_value % 100))
+}
+
+fn attendees_from_nodes(application_data: &WbxmlNode) -> Option<String> {
+    let attendees = application_data
+        .child("Attendees")?
+        .children_named("Attendee")
+        .into_iter()
+        .filter_map(|attendee| {
+            let email = attendee
+                .child("Email")
+                .map(|value| value.text_value().trim())
+                .unwrap_or("");
+            let name = attendee
+                .child("Name")
+                .map(|value| value.text_value().trim())
+                .unwrap_or("");
+            if !name.is_empty() && !email.is_empty() {
+                Some(format!("{name} <{email}>"))
+            } else if !name.is_empty() {
+                Some(name.to_string())
+            } else if !email.is_empty() {
+                Some(email.to_string())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    (!attendees.is_empty()).then(|| attendees.join(", "))
+}
+
+fn search_query_text(store: &WbxmlNode) -> Option<String> {
+    store
+        .child("Query")
+        .and_then(|query| {
+            field_text(query, "FreeText").or_else(|| {
+                let parts = query
+                    .children_named("Value")
+                    .into_iter()
+                    .map(|node| node.text_value().trim())
+                    .filter(|value| !value.is_empty())
+                    .collect::<Vec<_>>();
+                (!parts.is_empty()).then(|| parts.join(" "))
+            })
+        })
+        .or_else(|| field_text(store, "Query"))
+}
+
+fn parse_range(value: Option<&str>) -> (u64, u64) {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return (0, 49);
+    };
+    let Some((start, end)) = value.split_once('-') else {
+        return (0, 49);
+    };
+    let start = start.trim().parse::<u64>().unwrap_or(0);
+    let end = end.trim().parse::<u64>().unwrap_or(start + 49);
+    (start, end.max(start))
+}
+
+fn trim_preview(value: &str) -> String {
+    value
+        .split_whitespace()
+        .take(24)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn reply_recipients(
+    principal_email: &str,
+    source_message: &lpe_storage::JmapEmail,
+) -> Vec<SubmittedRecipientInput> {
+    if source_message
+        .from_address
+        .eq_ignore_ascii_case(principal_email)
+    {
+        return source_message
+            .to
+            .iter()
+            .filter(|recipient| !recipient.address.eq_ignore_ascii_case(principal_email))
+            .map(|recipient| SubmittedRecipientInput {
+                address: recipient.address.clone(),
+                display_name: recipient.display_name.clone(),
+            })
+            .collect();
+    }
+
+    vec![SubmittedRecipientInput {
+        address: source_message.from_address.clone(),
+        display_name: source_message.from_display.clone(),
+    }]
+}
+
+fn default_reply_subject(command_name: &str, original_subject: &str) -> String {
+    let normalized = original_subject.trim();
+    let prefix = if command_name == "SmartForward" {
+        "Fwd:"
+    } else {
+        "Re:"
+    };
+    if normalized
+        .to_ascii_lowercase()
+        .starts_with(&prefix[..2].to_ascii_lowercase())
+    {
+        normalized.to_string()
+    } else {
+        format!("{prefix} {normalized}").trim().to_string()
+    }
+}
+
+fn merge_smart_body(command_name: &str, composed: &str, original: &str) -> String {
+    let label = if command_name == "SmartForward" {
+        "Forwarded message"
+    } else {
+        "Original message"
+    };
+    let composed = composed.trim();
+    let original = original.trim();
+    if composed.is_empty() {
+        original.to_string()
+    } else if original.is_empty() {
+        composed.to_string()
+    } else {
+        format!("{composed}\n\n----- {label} -----\n{original}")
     }
 }
 

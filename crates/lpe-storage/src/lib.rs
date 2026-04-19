@@ -415,6 +415,24 @@ pub struct ClientAttachment {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ActiveSyncAttachment {
+    pub id: Uuid,
+    pub message_id: Uuid,
+    pub file_name: String,
+    pub media_type: String,
+    pub size_octets: u64,
+    pub file_reference: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ActiveSyncAttachmentContent {
+    pub file_reference: String,
+    pub file_name: String,
+    pub media_type: String,
+    pub blob_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ClientEvent {
     pub id: Uuid,
     pub date: String,
@@ -927,6 +945,15 @@ struct ClientAttachmentRow {
     id: Uuid,
     message_id: Uuid,
     name: String,
+    media_type: String,
+    size_octets: i64,
+}
+
+#[derive(Debug, FromRow)]
+struct ActiveSyncAttachmentRow {
+    id: Uuid,
+    message_id: Uuid,
+    file_name: String,
     media_type: String,
     size_octets: i64,
 }
@@ -5532,6 +5559,110 @@ impl Storage {
         Ok(rows.into_iter().map(map_task).collect())
     }
 
+    pub async fn fetch_latest_activesync_sync_state(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+        collection_id: &str,
+    ) -> Result<Option<ActiveSyncSyncState>> {
+        let row = sqlx::query_as::<_, ActiveSyncSyncStateRow>(
+            r#"
+            SELECT sync_key, snapshot_json
+            FROM activesync_sync_states
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND device_id = $3
+              AND collection_id = $4
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(device_id.trim())
+        .bind(collection_id.trim())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| ActiveSyncSyncState {
+            sync_key: row.sync_key,
+            snapshot_json: row.snapshot_json,
+        }))
+    }
+
+    pub async fn fetch_activesync_message_attachments(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Vec<ActiveSyncAttachment>> {
+        let rows = sqlx::query_as::<_, ActiveSyncAttachmentRow>(
+            r#"
+            SELECT a.id, a.message_id, a.file_name, a.media_type, a.size_octets
+            FROM attachments a
+            JOIN messages m ON m.id = a.message_id
+            WHERE a.tenant_id = $1
+              AND m.account_id = $2
+              AND a.message_id = $3
+            ORDER BY a.file_name ASC, a.id ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(message_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| ActiveSyncAttachment {
+                id: row.id,
+                message_id: row.message_id,
+                file_name: row.file_name,
+                media_type: row.media_type,
+                size_octets: row.size_octets.max(0) as u64,
+                file_reference: format!("attachment:{}:{}", row.message_id, row.id),
+            })
+            .collect())
+    }
+
+    pub async fn fetch_activesync_attachment_content(
+        &self,
+        account_id: Uuid,
+        file_reference: &str,
+    ) -> Result<Option<ActiveSyncAttachmentContent>> {
+        let Some((message_id, attachment_id)) = parse_activesync_file_reference(file_reference)
+        else {
+            return Ok(None);
+        };
+
+        let row = sqlx::query(
+            r#"
+            SELECT a.file_name, a.media_type, b.blob_bytes
+            FROM attachments a
+            JOIN messages m ON m.id = a.message_id
+            JOIN attachment_blobs b ON b.id = a.attachment_blob_id
+            WHERE a.tenant_id = $1
+              AND a.id = $2
+              AND a.message_id = $3
+              AND m.account_id = $4
+            LIMIT 1
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(attachment_id)
+        .bind(message_id)
+        .bind(account_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| ActiveSyncAttachmentContent {
+            file_reference: file_reference.trim().to_string(),
+            file_name: row.try_get("file_name").unwrap_or_default(),
+            media_type: row.try_get("media_type").unwrap_or_default(),
+            blob_bytes: row.try_get("blob_bytes").unwrap_or_default(),
+        }))
+    }
+
     async fn ingest_message_attachments_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
@@ -6018,6 +6149,19 @@ fn format_size(size_octets: i64) -> String {
     }
 }
 
+fn parse_activesync_file_reference(value: &str) -> Option<(Uuid, Uuid)> {
+    let mut parts = value.trim().split(':');
+    if parts.next()? != "attachment" {
+        return None;
+    }
+    let message_id = Uuid::parse_str(parts.next()?).ok()?;
+    let attachment_id = Uuid::parse_str(parts.next()?).ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((message_id, attachment_id))
+}
+
 fn map_event(row: ClientEventRow) -> ClientEvent {
     ClientEvent {
         id: row.id,
@@ -6271,7 +6415,10 @@ mod tests {
 
     #[test]
     fn task_status_accepts_vtodo_aligned_values() {
-        assert_eq!(normalize_task_status("needs-action").unwrap(), "needs-action");
+        assert_eq!(
+            normalize_task_status("needs-action").unwrap(),
+            "needs-action"
+        );
         assert_eq!(normalize_task_status("in-progress").unwrap(), "in-progress");
         assert_eq!(normalize_task_status("completed").unwrap(), "completed");
         assert_eq!(normalize_task_status("cancelled").unwrap(), "cancelled");
@@ -6281,7 +6428,6 @@ mod tests {
     fn task_status_rejects_unknown_values() {
         assert!(normalize_task_status("done").is_err());
     }
-
 }
 
 fn ensure_parent_directory(path: &str) -> Result<()> {

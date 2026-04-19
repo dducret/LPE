@@ -1,6 +1,9 @@
 use anyhow::{anyhow, bail, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use lpe_storage::{JmapEmail, JmapEmailAddress, SubmitMessageInput, SubmittedRecipientInput};
+use lpe_storage::{
+    mail::parse_message_attachments, AttachmentUploadInput, JmapEmail, JmapEmailAddress,
+    SubmitMessageInput, SubmittedRecipientInput,
+};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -21,6 +24,7 @@ pub(crate) struct ParsedMimeMessage {
     pub(crate) subject: String,
     pub(crate) body_text: String,
     pub(crate) internet_message_id: Option<String>,
+    pub(crate) attachments: Vec<AttachmentUploadInput>,
 }
 
 pub(crate) fn parse_mime_message(bytes: &[u8]) -> Result<ParsedMimeMessage> {
@@ -44,6 +48,7 @@ pub(crate) fn parse_mime_message(bytes: &[u8]) -> Result<ParsedMimeMessage> {
             .get("message-id")
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty()),
+        attachments: parse_message_attachments(bytes)?,
     })
 }
 
