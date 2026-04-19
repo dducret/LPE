@@ -73,6 +73,8 @@ Native Outlook compatibility is especially important for adoption.
 
 `LPE` should not assume that `IMAP` plus `SMTP` plus automatic account discovery is sufficient for Outlook users. The first targeted native Outlook and mobile compatibility layer is `ActiveSync` because it can cover mailbox, calendar, contact, synchronization, and mobile-client adoption needs through one coherent access model.
 
+Because `ActiveSync` is a chatty protocol and commonly relies on long-polling synchronization behavior, the proxying and publication layer in `LPE-CT` must support long timeouts and protocol-specific connection handling so that Outlook and iOS clients are not disconnected prematurely during idle-wait or sync-hold periods.
+
 `EWS` remains a future extension. It should be evaluated after the canonical `LPE` submission and synchronization model is stabilized, not implemented as an early parallel model.
 
 The architecture must therefore ensure that:
@@ -131,6 +133,8 @@ This means the architecture must separate clearly between:
 - tenant-scoped administrative capabilities
 - shared transport-edge infrastructure
 
+For a modern multi-tenant platform, native support for `OAuth2` and `OIDC` should be treated as a first-class identity requirement.
+
 ### Shared DMZ sorting infrastructure
 
 Sorting centers in the `DMZ` are the main shared infrastructure component across domains.
@@ -138,6 +142,10 @@ Sorting centers in the `DMZ` are the main shared infrastructure component across
 They are mutualized across tenants, but they must still enforce domain-aware routing, filtering policy application, and tenant isolation in administrative and operational workflows.
 
 Sorting centers have their own administrators, distinct from tenant administrators.
+
+`LPE-CT` should remain as stateless as possible in normal operation so it can be scaled horizontally behind `DNS` load balancing, `VRRP`, or equivalent upstream failover mechanisms.
+
+In practice, authoritative business state must remain in `LPE`, while any necessary edge state in `LPE-CT` should stay minimal, bounded, and operationally replaceable.
 
 ### Baseline external exposure model
 
@@ -276,6 +284,13 @@ The architecture currently anticipates controls such as:
 
 The exact implementation can evolve, but the architectural rule is stable: edge sorting centers are responsible for the first security and anti-abuse filtering pass before a message reaches a hosted mailbox.
 
+The scoring model should distinguish between:
+
+- a `Spam Score`, which remains probabilistic and oriented toward unwanted or abusive mail classification
+- a `Security Score`, which is oriented toward deterministic or policy-driven security findings such as injection patterns, dangerous file types, or other high-risk indicators
+
+A message may therefore be legitimate bulk mail, unwanted spam, or a direct security risk, and those categories must not be collapsed into one undifferentiated score.
+
 ### Mandatory incoming file-type validation with Magika
 
 Every file entering the platform through an external connection or through a client-facing workflow must be validated with Google `Magika` before it is accepted into normal processing.
@@ -293,6 +308,8 @@ Typical covered paths include:
 - `JMAP` blob upload paths
 - any future browser, API, or protocol-level file upload entry point
 
+If a message is encrypted end to end in a way that prevents content inspection, for example with `PGP` or `S/MIME`, the message should be marked as uninspectable rather than treated as fully trusted. In that case, the filtering model should retain a reduced confidence posture and make the inspection limitation explicit in trace and policy handling.
+
 Magika validation is an architecture-level content-type gate, not a UI hint.
 
 The platform must therefore:
@@ -303,6 +320,12 @@ The platform must therefore:
 - route the result into accept, restrict, quarantine, or reject policy decisions
 
 `Magika` classification must happen before attachment indexing, import processing, archive ingestion, or downstream content-specific parsing.
+
+For future scaling and SMTP-path protection, `Magika` should be able to run outside the critical SMTP receive thread, for example in a separated worker process or sidecar-style service, so that file classification does not unnecessarily block message intake.
+
+When `Magika` identifies exotic, suspicious, or policy-disallowed file types, the default architectural outcome should be direct quarantine in `LPE-CT`.
+
+A future version of `LPE-CT` may add dynamic-analysis sandboxing for quarantined suspicious payloads, but that is not part of the baseline architecture.
 
 ### Injection-oriented content inspection
 
@@ -342,6 +365,8 @@ The architectural principle is that sorting centers execute the inspection close
 
 The same policy plane should be able to govern how `Magika` validation mismatches and unsupported file-type outcomes are handled for each domain.
 
+Policy propagation should follow a push model from `LPE` toward `LPE-CT`, so the core platform remains the authoritative control plane and sorting centers receive effective domain policy updates from it.
+
 ## Traceability and Message History
 
 ### Unique message processing identifier
@@ -367,6 +392,7 @@ Sorting centers must retain at least the following metadata for each processed m
 - whether the message is encrypted
 - content inspection or injection-related score data when such inspection is enabled
 - `Magika` file-type validation outcomes when file payloads are present
+- correlation to the final delivery outcome returned by the core platform
 
 This history is required to support:
 
@@ -390,6 +416,10 @@ Delivery outcome states should be modeled explicitly so that trace search and op
 - temporarily deferred
 - permanently undeliverable
 
+Quarantine is physically retained in `LPE-CT`.
+
+The core `LPE` platform may request the release of a quarantined message through an explicit privileged control-plane action, but quarantine ownership remains in the sorting center.
+
 ## Responsibility Boundaries
 
 ### DMZ sorting layer
@@ -403,6 +433,7 @@ The DMZ sorting layer is responsible for:
 - retaining mail trace metadata
 - quarantining messages that are not delivered
 - routing accepted messages toward the internal mailbox platform
+- generating coherent bounce or `DSN` handling when final delivery fails after edge acceptance
 
 ### Core mailbox and collaboration layer
 
@@ -439,10 +470,31 @@ The architectural principle is:
 - `LPE` owns the mailbox state
 - the sorting center owns SMTP transport execution
 
+The unique trace identity must survive the full path between sorting center and core platform.
+
 In the current functional implementation, this split is made explicit through two internal contracts:
 
 - `LPE` hands outbound work to `LPE-CT` through an authenticated internal handoff API consumed by an outbound worker over `outbound_message_queue`
 - `LPE-CT` performs final inbound delivery to the core mailbox platform through an authenticated internal delivery API instead of LAN-facing mailbox `SMTP`
+
+For future evolution, the internal transport between `LPE-CT` and `LPE` should target `gRPC` as the preferred protocol for inter-service exchanges.
+
+This choice applies only to internal `LPE-CT <-> LPE` contracts. It does not change the external protocol surface exposed to clients or the Internet.
+
+The current preferred Rust implementation for this internal `gRPC` layer is `tonic`.
+
+This remains an implementation choice for the internal backbone only and must not be interpreted as a recommendation to expose `gRPC` directly to external clients.
+
+The architectural intent is:
+
+- use `gRPC` for strongly typed internal service contracts
+- support efficient streaming between sorting center and core platform
+- improve reliability and operational clarity for delivery, policy propagation, and status reporting
+- keep client-facing protocols unchanged, such as `HTTPS`, `JMAP`, `ActiveSync`, `IMAPS`, `SMTPS`, and inbound `SMTP`
+
+When the core platform rejects final delivery after edge acceptance, for example because a mailbox is full or unavailable, `LPE` must return the final delivery outcome to `LPE-CT` so that the sorting center can correlate that result with the original trace identifier and generate a coherent bounce or `DSN` when policy requires it.
+
+When delivery can proceed normally, the internal handoff between `LPE-CT` and `LPE` should support streaming so the same message does not need to be written to disk twice unnecessarily before final delivery.
 
 This separation must still guarantee that user-submitted outbound messages are recorded in the appropriate sent-mail view inside `LPE`.
 
@@ -709,6 +761,8 @@ The current v1 implementation uses a domain-scoped shared blob store for attachm
 
 When a message is deleted, the architecture should preserve auditability by reconstructing the message and storing it as deleted for audit purposes.
 
+Deleted production messages should be moved into a separated audit-oriented store so they do not pollute the production indexes and mailbox-search surfaces used by active end users.
+
 When a message is archived, the message must also be reconstructed together with its blobs as part of the archive process.
 
 Blob integrity revalidation must be performed for the mailbox concerned before each archive operation.
@@ -739,6 +793,10 @@ The indexing model must remain compatible with tenant isolation, archive access,
 
 In the current v1 implementation, attachment search is backed by `PostgreSQL` full-text search over message text plus extracted attachment text for supported formats only: `PDF`, `DOCX`, and `ODT`.
 
+Attachment text extraction must not happen in the synchronous SMTP reception path.
+
+The architecture should use background processing for attachment indexing and text extraction so that mail acceptance and final delivery are not slowed down by content-extraction workloads.
+
 ## Roles and IAM Model
 
 The architecture distinguishes the following roles:
@@ -757,6 +815,8 @@ Administrative authority must be aligned with tenant scope and operational separ
 The default administration-console pattern for manageable collections is a full-width management list with a single primary `New` or `Create` action in the list header.
 
 Selecting an existing item opens a right-side drawer-style modal containing the item's details and contextual actions. Creating a new item uses the same drawer pattern with an empty form. Persistent side-by-side create forms should be avoided for primary administration flows because they reduce list readability and make domain-scoped management harder to scan.
+
+These drawers should be deep-linkable so that a specific administrative object or record can be shared and reopened directly through the URL.
 
 This pattern applies by default to `LPE` and `LPE-CT` administration screens, especially domains, administrators, mailbox accounts, filtering rules, and future list-based control-plane objects. Exceptions are acceptable only when the object is not list-oriented or when a specialized operational view is clearly more efficient.
 

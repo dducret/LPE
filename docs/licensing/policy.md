@@ -49,10 +49,13 @@ Ces dependances sont courantes dans l'ecosysteme Rust et retenues provisoirement
 - `multer` (transitive dependency enabled by `axum` multipart upload support)
 - `tracing`
 - `docx-lite`
+- `tonic` for internal `LPE-CT <-> LPE` `gRPC` contracts only
 
 These dependencies are common in the Rust ecosystem and are kept provisionally to accelerate the bootstrap. A documented review must be maintained for each exception.
 
 `argon2` is used for administrator password hashing; the RustCrypto crate is available under `Apache-2.0 OR MIT`, which is compatible with the `Apache-2.0` preference.
 
 Google `Magika` is an acceptable candidate for file-type validation because its official project is published under `Apache-2.0`. As with every dependency, the selected integration path and its transitive dependencies must still be reviewed before adoption.
+
+`tonic` is accepted as a documented `MIT` exception for internal `gRPC` exchanges between `LPE-CT` and `LPE`. This exception is limited to the internal service backbone and does not change the rule that externally exposed product protocols remain those defined by the platform architecture.
 
