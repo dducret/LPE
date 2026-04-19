@@ -281,16 +281,34 @@ pub struct MimeAttachmentPart {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Debug)]
+struct ParsedVisiblePart {
+    content_type: String,
+    body_text: String,
+}
+
 pub fn collect_mime_attachment_parts(bytes: &[u8]) -> Result<Vec<MimeAttachmentPart>> {
     let mut attachments = Vec::new();
     collect_attachment_parts(bytes, &mut attachments)?;
     Ok(attachments)
 }
 
+pub fn parse_rfc822_header_value(bytes: &[u8], name: &str) -> Option<String> {
+    let (header_block, _) = split_headers_and_body_bytes(bytes);
+    let headers = parse_rfc822_headers_bytes(header_block);
+    headers
+        .get(&name.to_ascii_lowercase())
+        .map(|value| decode_rfc2047_words(value).trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+pub fn extract_visible_text(bytes: &[u8]) -> Result<String> {
+    Ok(parse_visible_part(bytes)?.body_text.trim().to_string())
+}
+
 fn collect_attachment_parts(bytes: &[u8], attachments: &mut Vec<MimeAttachmentPart>) -> Result<()> {
-    let raw = String::from_utf8_lossy(bytes);
-    let (header_block, body_block) = split_headers_and_body(raw.as_ref());
-    let headers = parse_rfc822_headers(header_block);
+    let (header_block, body_block) = split_headers_and_body_bytes(bytes);
+    let headers = parse_rfc822_headers_bytes(header_block);
     let content_type = headers
         .get("content-type")
         .cloned()
@@ -299,22 +317,14 @@ fn collect_attachment_parts(bytes: &[u8], attachments: &mut Vec<MimeAttachmentPa
         .get("content-transfer-encoding")
         .map(|value| value.to_ascii_lowercase())
         .unwrap_or_default();
-    let decoded_body = decode_transfer_encoding(body_block.as_bytes(), &transfer_encoding)?;
+    let decoded_body = decode_transfer_encoding(body_block, &transfer_encoding)?;
 
     if content_type.to_ascii_lowercase().starts_with("multipart/") {
         let Some(boundary) = content_type_parameter(&content_type, "boundary") else {
             return Ok(());
         };
-        let boundary_marker = format!("--{boundary}");
-        let raw_body = String::from_utf8_lossy(&decoded_body);
-        for part in raw_body.split(&boundary_marker).skip(1) {
-            let trimmed = part.trim();
-            if trimmed.is_empty() || trimmed == "--" {
-                continue;
-            }
-            let trimmed = trimmed.trim_start_matches("\r\n").trim_start_matches('\n');
-            let trimmed = trimmed.trim_end_matches("--").trim();
-            collect_attachment_parts(trimmed.as_bytes(), attachments)?;
+        for part in split_multipart_parts(&decoded_body, &boundary) {
+            collect_attachment_parts(&part, attachments)?;
         }
         return Ok(());
     }
@@ -337,6 +347,68 @@ fn collect_attachment_parts(bytes: &[u8], attachments: &mut Vec<MimeAttachmentPa
         });
     }
     Ok(())
+}
+
+fn parse_visible_part(bytes: &[u8]) -> Result<ParsedVisiblePart> {
+    let (header_block, body_block) = split_headers_and_body_bytes(bytes);
+    let headers = parse_rfc822_headers_bytes(header_block);
+    let content_type = headers
+        .get("content-type")
+        .cloned()
+        .unwrap_or_else(|| "text/plain".to_string());
+    let transfer_encoding = headers
+        .get("content-transfer-encoding")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let decoded_body = decode_transfer_encoding(body_block, &transfer_encoding)?;
+    let content_type_lower = content_type.to_ascii_lowercase();
+
+    let body_text = if content_type_lower.starts_with("multipart/") {
+        match content_type_parameter(&content_type, "boundary") {
+            Some(boundary) => {
+                let mut text_plain = None;
+                let mut text_html = None;
+
+                for part in split_multipart_parts(&decoded_body, &boundary) {
+                    let nested = parse_visible_part(&part)?;
+                    let nested_type = nested.content_type.to_ascii_lowercase();
+                    if nested_type.starts_with("text/plain")
+                        && !nested.body_text.trim().is_empty()
+                        && text_plain.is_none()
+                    {
+                        text_plain = Some(nested.body_text);
+                    } else if nested_type.starts_with("text/html")
+                        && !nested.body_text.trim().is_empty()
+                        && text_html.is_none()
+                    {
+                        text_html = Some(nested.body_text);
+                    } else if nested_type.starts_with("multipart/")
+                        && !nested.body_text.trim().is_empty()
+                        && text_plain.is_none()
+                        && text_html.is_none()
+                    {
+                        text_plain = Some(nested.body_text);
+                    }
+                }
+
+                text_plain.or(text_html).unwrap_or_default()
+            }
+            None => String::from_utf8_lossy(&decoded_body).to_string(),
+        }
+    } else if content_type_lower.starts_with("text/html") {
+        html_to_text(&String::from_utf8_lossy(&decoded_body))
+    } else if content_type_lower.starts_with("text/plain")
+        || content_type_lower.starts_with("message/rfc822")
+    {
+        String::from_utf8_lossy(&decoded_body).to_string()
+    } else {
+        String::new()
+    };
+
+    Ok(ParsedVisiblePart {
+        content_type,
+        body_text,
+    })
 }
 
 fn parse_detection_json(raw: Value) -> Result<MagikaDetection> {
@@ -592,10 +664,21 @@ fn file_extension(filename: &str) -> Option<String> {
         .map(|value| value.to_ascii_lowercase())
 }
 
-fn split_headers_and_body(raw: &str) -> (&str, &str) {
-    raw.split_once("\r\n\r\n")
-        .or_else(|| raw.split_once("\n\n"))
-        .unwrap_or((raw, ""))
+fn split_headers_and_body_bytes(raw: &[u8]) -> (&[u8], &[u8]) {
+    for delimiter in [b"\r\n\r\n".as_slice(), b"\n\n".as_slice()] {
+        if let Some(index) = raw
+            .windows(delimiter.len())
+            .position(|window| window == delimiter)
+        {
+            return (&raw[..index], &raw[index + delimiter.len()..]);
+        }
+    }
+    (raw, &[])
+}
+
+fn parse_rfc822_headers_bytes(block: &[u8]) -> HashMap<String, String> {
+    let raw = String::from_utf8_lossy(block);
+    parse_rfc822_headers(raw.as_ref())
 }
 
 fn parse_rfc822_headers(block: &str) -> HashMap<String, String> {
@@ -616,6 +699,60 @@ fn parse_rfc822_headers(block: &str) -> HashMap<String, String> {
         headers.insert(current_name.clone(), value.trim().to_string());
     }
     headers
+}
+
+fn split_multipart_parts(body: &[u8], boundary: &str) -> Vec<Vec<u8>> {
+    let boundary_marker = format!("--{boundary}").into_bytes();
+    let closing_marker = format!("--{boundary}--").into_bytes();
+    let mut parts = Vec::new();
+    let mut current = Vec::new();
+    let mut in_part = false;
+
+    for line in split_lines_inclusive(body) {
+        let trimmed = trim_ascii_line_end(line);
+        if trimmed == boundary_marker.as_slice() {
+            if in_part && !current.is_empty() {
+                parts.push(std::mem::take(&mut current));
+            }
+            in_part = true;
+            current.clear();
+            continue;
+        }
+        if trimmed == closing_marker.as_slice() {
+            if in_part && !current.is_empty() {
+                parts.push(std::mem::take(&mut current));
+            }
+            break;
+        }
+        if in_part {
+            current.extend_from_slice(line);
+        }
+    }
+
+    parts
+}
+
+fn split_lines_inclusive(bytes: &[u8]) -> Vec<&[u8]> {
+    let mut lines = Vec::new();
+    let mut start = 0usize;
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte == b'\n' {
+            lines.push(&bytes[start..=index]);
+            start = index + 1;
+        }
+    }
+    if start < bytes.len() {
+        lines.push(&bytes[start..]);
+    }
+    lines
+}
+
+fn trim_ascii_line_end(bytes: &[u8]) -> &[u8] {
+    let mut end = bytes.len();
+    while end > 0 && matches!(bytes[end - 1], b'\r' | b'\n') {
+        end -= 1;
+    }
+    &bytes[..end]
 }
 
 fn content_type_parameter(header_value: &str, parameter: &str) -> Option<String> {
@@ -671,6 +808,76 @@ fn decode_quoted_printable(body: &[u8]) -> Result<Vec<u8>> {
         }
     }
     Ok(output)
+}
+
+fn decode_rfc2047_words(value: &str) -> String {
+    let mut decoded = String::new();
+    let mut rest = value;
+    while let Some(start) = rest.find("=?") {
+        decoded.push_str(&rest[..start]);
+        let candidate = &rest[start + 2..];
+        let Some(charset_end) = candidate.find('?') else {
+            decoded.push_str(&rest[start..]);
+            return decoded;
+        };
+        let charset = &candidate[..charset_end];
+        let candidate = &candidate[charset_end + 1..];
+        let Some(encoding_end) = candidate.find('?') else {
+            decoded.push_str(&rest[start..]);
+            return decoded;
+        };
+        let encoding = &candidate[..encoding_end];
+        let candidate = &candidate[encoding_end + 1..];
+        let Some(payload_end) = candidate.find("?=") else {
+            decoded.push_str(&rest[start..]);
+            return decoded;
+        };
+        let payload = &candidate[..payload_end];
+        let segment = decode_rfc2047_word(charset, encoding, payload).unwrap_or_else(|| {
+            rest[start..start + 2 + charset_end + 1 + encoding_end + 1 + payload_end + 2]
+                .to_string()
+        });
+        decoded.push_str(&segment);
+        rest = &candidate[payload_end + 2..];
+    }
+    decoded.push_str(rest);
+    decoded
+}
+
+fn decode_rfc2047_word(charset: &str, encoding: &str, payload: &str) -> Option<String> {
+    if !charset.eq_ignore_ascii_case("utf-8") && !charset.eq_ignore_ascii_case("us-ascii") {
+        return None;
+    }
+    match encoding {
+        "B" | "b" => BASE64
+            .decode(payload)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok()),
+        "Q" | "q" => {
+            let qp = payload.replace('_', " ");
+            decode_quoted_printable(qp.as_bytes())
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+        }
+        _ => None,
+    }
+}
+
+fn html_to_text(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut in_tag = false;
+    for ch in value.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                output.push(' ');
+            }
+            _ if !in_tag => output.push(ch),
+            _ => {}
+        }
+    }
+    output.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn unix_timestamp() -> String {
@@ -776,5 +983,59 @@ mod tests {
             Some("application/pdf")
         );
         assert_eq!(attachments[0].bytes, b"PDF".to_vec());
+    }
+
+    #[test]
+    fn extract_visible_text_prefers_plaintext_from_multipart_alternative() {
+        let message = concat!(
+            "Subject: =?UTF-8?Q?Bonjour_=C3=A9quipe?=\r\n",
+            "Content-Type: multipart/alternative; boundary=\"b1\"\r\n",
+            "\r\n",
+            "--b1\r\n",
+            "Content-Type: text/plain; charset=utf-8\r\n",
+            "Content-Transfer-Encoding: quoted-printable\r\n",
+            "\r\n",
+            "Ligne=20un=0ALigne=20deux\r\n",
+            "--b1\r\n",
+            "Content-Type: text/html; charset=utf-8\r\n",
+            "\r\n",
+            "<p>Ignored</p>\r\n",
+            "--b1--\r\n"
+        );
+
+        assert_eq!(
+            parse_rfc822_header_value(message.as_bytes(), "subject").as_deref(),
+            Some("Bonjour équipe")
+        );
+        assert_eq!(
+            extract_visible_text(message.as_bytes()).unwrap(),
+            "Ligne un\nLigne deux"
+        );
+    }
+
+    #[test]
+    fn extract_visible_text_uses_html_when_plaintext_is_missing() {
+        let message = concat!(
+            "Content-Type: text/html; charset=utf-8\r\n",
+            "Content-Transfer-Encoding: base64\r\n",
+            "\r\n",
+            "PHA+SGVsbG88L3A+\r\n"
+        );
+
+        assert_eq!(extract_visible_text(message.as_bytes()).unwrap(), "Hello");
+    }
+
+    #[test]
+    fn collect_mime_attachment_parts_handles_non_utf8_body_bytes() {
+        let mut message = b"Content-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"blob.bin\"\r\n\r\n".to_vec();
+        message.extend_from_slice(&[0xff, 0xfe, 0x00, 0x41]);
+        message.extend_from_slice(b"\r\n--b1--\r\n");
+
+        let attachments = collect_mime_attachment_parts(&message).unwrap();
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(
+            attachments[0].bytes,
+            vec![0xff, 0xfe, 0x00, 0x41, b'\r', b'\n']
+        );
     }
 }

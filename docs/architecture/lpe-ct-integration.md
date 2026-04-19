@@ -73,7 +73,9 @@ Cote `LPE-CT`:
 ### Remarques d'implementation v1
 
 - le worker `LPE` effectue un handoff synchrone et met a jour l'etat ensuite
-- `LPE-CT` compose un message RFC 822 simple pour le relais sortant sans reinjecter `Bcc` dans les en-tetes visibles
+- `LPE-CT` conserve les octets SMTP bruts sur l'entree et les transporte jusqu'a la persistance et a la remise finale interne
+- `LPE-CT` extrait le texte visible entrant a partir du MIME decode (`multipart/alternative`, `quoted-printable`, `base64`, HTML) sans indexer brutement tout le body RFC 822
+- `LPE-CT` compose le relais sortant en RFC 822 avec `text/plain` seul ou `multipart/alternative` `text/plain` + `text/html` quand `body_html_sanitized` est disponible, sans reinjecter `Bcc` dans les en-tetes visibles
 - la remise finale entrante cree des copies `Inbox` par mailbox resolue dans `LPE`
 - la recherche standard et les projections visibles ne reinjectent pas `Bcc`
 
@@ -150,6 +152,8 @@ On the `LPE-CT` side:
 ### v1 implementation notes
 
 - the `LPE` worker performs synchronous handoff and updates state afterward
-- `LPE-CT` composes a simple RFC 822 message for outbound relay without reinjecting `Bcc` into visible headers
+- `LPE-CT` keeps raw SMTP bytes intact on ingress and carries them through persistence and internal final delivery
+- `LPE-CT` extracts inbound visible text from decoded MIME (`multipart/alternative`, `quoted-printable`, `base64`, HTML) instead of indexing the raw RFC 822 body blindly
+- `LPE-CT` composes outbound relay as RFC 822 with either plain `text/plain` or `multipart/alternative` `text/plain` + `text/html` when `body_html_sanitized` is available, without reinjecting `Bcc` into visible headers
 - inbound final delivery creates per-mailbox `Inbox` copies in `LPE`
 - standard search and visible projections do not reinject `Bcc`

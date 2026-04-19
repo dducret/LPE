@@ -1,5 +1,27 @@
+use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+mod base64_bytes {
+    use super::BASE64;
+    use base64::Engine;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&BASE64.encode(value))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let encoded = String::deserialize(deserializer)?;
+        BASE64.decode(encoded).map_err(serde::de::Error::custom)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AccountId(pub Uuid);
@@ -141,7 +163,8 @@ pub struct InboundDeliveryRequest {
     pub subject: String,
     pub body_text: String,
     pub internet_message_id: Option<String>,
-    pub raw_message: String,
+    #[serde(with = "base64_bytes")]
+    pub raw_message: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

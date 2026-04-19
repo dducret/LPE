@@ -1,11 +1,12 @@
 use anyhow::{anyhow, Context, Result};
-use lpe_magika::{
-    collect_mime_attachment_parts, Detector, ExpectedKind, IngressContext, PolicyDecision,
-    ValidationRequest, Validator,
-};
+use base64::engine::general_purpose::STANDARD as BASE64;
 use lpe_domain::{
     InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
     OutboundMessageHandoffResponse, TransportDeliveryStatus,
+};
+use lpe_magika::{
+    collect_mime_attachment_parts, extract_visible_text, parse_rfc822_header_value, Detector,
+    ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -48,7 +49,8 @@ struct QueuedMessage {
     relay_error: Option<String>,
     magika_summary: Option<String>,
     magika_decision: Option<String>,
-    data: String,
+    #[serde(with = "base64_bytes")]
+    data: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,7 +61,14 @@ enum InboundMagikaOutcome {
 }
 
 pub(crate) fn initialize_spool(spool_dir: &Path) -> Result<()> {
-    for queue in ["incoming", "deferred", "quarantine", "held", "sent", "outbound"] {
+    for queue in [
+        "incoming",
+        "deferred",
+        "quarantine",
+        "held",
+        "sent",
+        "outbound",
+    ] {
         fs::create_dir_all(spool_dir.join(queue))
             .with_context(|| format!("unable to create spool queue {queue}"))?;
     }
@@ -282,7 +291,7 @@ async fn receive_message(
     helo: String,
     mail_from: String,
     rcpt_to: Vec<String>,
-    data: String,
+    data: Vec<u8>,
 ) -> Result<QueuedMessage> {
     receive_message_with_validator(
         &Validator::from_env(),
@@ -305,7 +314,7 @@ async fn receive_message_with_validator<D: Detector>(
     helo: String,
     mail_from: String,
     rcpt_to: Vec<String>,
-    data: String,
+    data: Vec<u8>,
 ) -> Result<QueuedMessage> {
     let mut message = QueuedMessage {
         id: message_id("in"),
@@ -330,7 +339,7 @@ async fn receive_message_with_validator<D: Detector>(
         return Ok(message);
     }
 
-    match classify_inbound_message(validator, message.data.as_bytes()) {
+    match classify_inbound_message(validator, &message.data) {
         Ok(InboundMagikaOutcome::Accept) => {}
         Ok(InboundMagikaOutcome::Quarantine(reason)) => {
             message.status = "quarantined".to_string();
@@ -427,9 +436,9 @@ async fn deliver_inbound_message(
         "{}/internal/lpe-ct/inbound-deliveries",
         config.core_delivery_base_url.trim_end_matches('/')
     );
-    let subject = parse_header_value(&message.data, "subject").unwrap_or_default();
-    let internet_message_id = parse_header_value(&message.data, "message-id");
-    let body_text = extract_body_text(&message.data);
+    let subject = parse_rfc822_header_value(&message.data, "subject").unwrap_or_default();
+    let internet_message_id = parse_rfc822_header_value(&message.data, "message-id");
+    let body_text = extract_visible_text(&message.data)?;
     let request = InboundDeliveryRequest {
         trace_id: message.id.clone(),
         peer: message.peer.clone(),
@@ -469,7 +478,9 @@ async fn deliver_inbound_message(
 
 async fn relay_message(config: &RuntimeConfig, message: &QueuedMessage) -> Result<()> {
     if config.mutual_tls_required {
-        return Err(anyhow!("mutual TLS relay is configured but not implemented in LPE-CT v1"));
+        return Err(anyhow!(
+            "mutual TLS relay is configured but not implemented in LPE-CT v1"
+        ));
     }
 
     let mut last_error = None;
@@ -514,8 +525,8 @@ async fn relay_message_to_target(target: &str, message: &QueuedMessage) -> Resul
         .await?;
     }
     smtp_command(&mut reader, &mut writer, "DATA", 354).await?;
-    writer.write_all(message.data.as_bytes()).await?;
-    if !message.data.ends_with("\r\n") {
+    writer.write_all(&message.data).await?;
+    if !message.data.ends_with(b"\r\n") {
         writer.write_all(b"\r\n").await?;
     }
     writer.write_all(b".\r\n").await?;
@@ -554,7 +565,7 @@ async fn expect_smtp(reader: &mut BufReader<OwnedReadHalf>, expected: u16) -> Re
     }
 }
 
-async fn read_smtp_data(reader: &mut BufReader<OwnedReadHalf>, max_mb: u32) -> Result<String> {
+async fn read_smtp_data(reader: &mut BufReader<OwnedReadHalf>, max_mb: u32) -> Result<Vec<u8>> {
     let max_bytes = max_mb.max(1) as usize * 1024 * 1024;
     let mut data = Vec::new();
     let mut line = Vec::new();
@@ -575,7 +586,7 @@ async fn read_smtp_data(reader: &mut BufReader<OwnedReadHalf>, max_mb: u32) -> R
             return Err(anyhow!("message exceeds configured maximum size"));
         }
     }
-    Ok(String::from_utf8_lossy(&data).to_string())
+    Ok(data)
 }
 
 async fn write_smtp(writer: &mut OwnedWriteHalf, line: &str) -> Result<()> {
@@ -613,7 +624,9 @@ fn count_queue(spool_dir: &Path, queue: &str) -> Result<u32> {
     if !path.exists() {
         return Ok(0);
     }
-    Ok(fs::read_dir(path)?.filter_map(std::result::Result::ok).count() as u32)
+    Ok(fs::read_dir(path)?
+        .filter_map(std::result::Result::ok)
+        .count() as u32)
 }
 
 fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
@@ -655,8 +668,8 @@ fn u32_at(value: &Value, path: &[&str], fallback: u32) -> u32 {
         .unwrap_or(fallback)
 }
 
-fn should_quarantine(data: &str) -> bool {
-    data.lines().any(|line| {
+fn should_quarantine(data: &[u8]) -> bool {
+    String::from_utf8_lossy(data).lines().any(|line| {
         let lower = line.to_ascii_lowercase();
         lower.starts_with("x-lpe-ct-quarantine: yes") || lower.contains("[quarantine]")
     })
@@ -670,7 +683,7 @@ fn normalize_smtp_target(target: &str) -> String {
         .to_string()
 }
 
-fn compose_rfc822_message(payload: &OutboundMessageHandoffRequest) -> String {
+fn compose_rfc822_message(payload: &OutboundMessageHandoffRequest) -> Vec<u8> {
     let mut lines = Vec::new();
     lines.push(format!(
         "From: {}",
@@ -682,7 +695,10 @@ fn compose_rfc822_message(payload: &OutboundMessageHandoffRequest) -> String {
             payload
                 .to
                 .iter()
-                .map(|recipient| format_address(&recipient.address, recipient.display_name.as_deref()))
+                .map(|recipient| format_address(
+                    &recipient.address,
+                    recipient.display_name.as_deref()
+                ))
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
@@ -693,7 +709,10 @@ fn compose_rfc822_message(payload: &OutboundMessageHandoffRequest) -> String {
             payload
                 .cc
                 .iter()
-                .map(|recipient| format_address(&recipient.address, recipient.display_name.as_deref()))
+                .map(|recipient| format_address(
+                    &recipient.address,
+                    recipient.display_name.as_deref()
+                ))
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
@@ -707,63 +726,76 @@ fn compose_rfc822_message(payload: &OutboundMessageHandoffRequest) -> String {
             .unwrap_or_else(|| format!("<{}@lpe.local>", payload.message_id))
     ));
     lines.push("MIME-Version: 1.0".to_string());
-    lines.push("Content-Type: text/plain; charset=utf-8".to_string());
-    lines.push(String::new());
-    lines.push(payload.body_text.clone());
-    lines.join("\r\n")
+    if let Some(html) = payload
+        .body_html_sanitized
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let boundary = format!("lpe-alt-{}", payload.message_id);
+        lines.push(format!(
+            "Content-Type: multipart/alternative; boundary=\"{boundary}\""
+        ));
+        lines.push(String::new());
+        lines.push(format!("--{boundary}"));
+        lines.push("Content-Type: text/plain; charset=utf-8".to_string());
+        lines.push("Content-Transfer-Encoding: quoted-printable".to_string());
+        lines.push(String::new());
+        lines.push(encode_quoted_printable(&payload.body_text));
+        lines.push(format!("--{boundary}"));
+        lines.push("Content-Type: text/html; charset=utf-8".to_string());
+        lines.push("Content-Transfer-Encoding: quoted-printable".to_string());
+        lines.push(String::new());
+        lines.push(encode_quoted_printable(html));
+        lines.push(format!("--{boundary}--"));
+    } else {
+        lines.push("Content-Type: text/plain; charset=utf-8".to_string());
+        lines.push("Content-Transfer-Encoding: quoted-printable".to_string());
+        lines.push(String::new());
+        lines.push(encode_quoted_printable(&payload.body_text));
+    }
+    lines.join("\r\n").into_bytes()
 }
 
 fn format_address(address: &str, display_name: Option<&str>) -> String {
-    match display_name.map(str::trim).filter(|value| !value.is_empty()) {
+    match display_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         Some(display_name) => format!("{display_name} <{address}>"),
         None => address.to_string(),
     }
 }
 
-fn parse_header_value(raw_message: &str, name: &str) -> Option<String> {
-    let expected = format!("{}:", name.to_ascii_lowercase());
-    let mut current = String::new();
-
-    for line in raw_message.lines() {
-        if line.trim().is_empty() {
-            break;
-        }
-        if line.starts_with(' ') || line.starts_with('\t') {
-            current.push(' ');
-            current.push_str(line.trim());
-            continue;
-        }
-        if !current.is_empty() {
-            let lower = current.to_ascii_lowercase();
-            if lower.starts_with(&expected) {
-                return current
-                    .split_once(':')
-                    .map(|(_, value)| value.trim().to_string())
-                    .filter(|value| !value.is_empty());
+fn encode_quoted_printable(value: &str) -> String {
+    let mut encoded = String::new();
+    let mut line_len = 0usize;
+    for &byte in value.as_bytes() {
+        match byte {
+            b'\r' => {}
+            b'\n' => {
+                encoded.push_str("\r\n");
+                line_len = 0;
+            }
+            b'\t' | b' ' | 33..=60 | 62..=126 => {
+                if line_len >= 72 {
+                    encoded.push_str("=\r\n");
+                    line_len = 0;
+                }
+                encoded.push(byte as char);
+                line_len += 1;
+            }
+            _ => {
+                if line_len >= 70 {
+                    encoded.push_str("=\r\n");
+                    line_len = 0;
+                }
+                encoded.push_str(&format!("={byte:02X}"));
+                line_len += 3;
             }
         }
-        current = line.trim_end_matches('\r').to_string();
     }
-
-    if !current.is_empty() {
-        let lower = current.to_ascii_lowercase();
-        if lower.starts_with(&expected) {
-            return current
-                .split_once(':')
-                .map(|(_, value)| value.trim().to_string())
-                .filter(|value| !value.is_empty());
-        }
-    }
-
-    None
-}
-
-fn extract_body_text(raw_message: &str) -> String {
-    raw_message
-        .split_once("\r\n\r\n")
-        .or_else(|| raw_message.split_once("\n\n"))
-        .map(|(_, body)| body.to_string())
-        .unwrap_or_default()
+    encoded
 }
 
 fn is_permanent_relay_error(detail: &str) -> bool {
@@ -790,15 +822,16 @@ fn current_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_inbound_message, extract_body_text, initialize_spool, parse_header_value,
-        process_outbound_handoff, receive_message, receive_message_with_validator, RuntimeConfig,
+        classify_inbound_message, compose_rfc822_message, encode_quoted_printable,
+        initialize_spool, process_outbound_handoff, receive_message,
+        receive_message_with_validator, RuntimeConfig,
     };
     use axum::{routing::post, Json, Router};
-    use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
     use lpe_domain::{
         InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
         TransportDeliveryStatus, TransportRecipient,
     };
+    use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
     use std::{
         net::SocketAddr,
         path::PathBuf,
@@ -843,9 +876,7 @@ mod tests {
 
     impl Detector for FakeDetector {
         fn detect(&self, _source: DetectionSource<'_>) -> anyhow::Result<MagikaDetection> {
-            self.detection
-                .clone()
-                .map_err(anyhow::Error::msg)
+            self.detection.clone().map_err(anyhow::Error::msg)
         }
     }
 
@@ -881,8 +912,14 @@ mod tests {
         .unwrap();
 
         assert_eq!(response.status, TransportDeliveryStatus::Relayed);
-        assert!(spool.join("sent").join(format!("{}.json", response.trace_id)).exists());
-        assert!(captured.lock().unwrap().contains("Subject: Relay test"));
+        assert!(spool
+            .join("sent")
+            .join(format!("{}.json", response.trace_id))
+            .exists());
+        let raw = captured.lock().unwrap().clone();
+        assert!(raw.contains("Subject: Relay test"));
+        assert!(raw.contains("Content-Type: text/plain; charset=utf-8"));
+        assert!(raw.contains("Content-Transfer-Encoding: quoted-printable"));
     }
 
     #[tokio::test]
@@ -940,13 +977,16 @@ mod tests {
             "example.test".to_string(),
             "sender@example.test".to_string(),
             vec!["dest@example.test".to_string()],
-            "From: Sender <sender@example.test>\r\nSubject: Inbound\r\n\r\nBody".to_string(),
+            b"From: Sender <sender@example.test>\r\nSubject: Inbound\r\n\r\nBody".to_vec(),
         )
         .await
         .unwrap();
 
         assert_eq!(message.status, "sent");
-        assert!(spool.join("sent").join(format!("{}.json", message.id)).exists());
+        assert!(spool
+            .join("sent")
+            .join(format!("{}.json", message.id))
+            .exists());
         let request = captured.lock().unwrap().clone().unwrap();
         assert_eq!(request.subject, "Inbound");
         assert_eq!(request.body_text, "Body");
@@ -1013,7 +1053,8 @@ mod tests {
                 "%PDF-1.7\r\n",
                 "--abc--\r\n"
             )
-            .to_string(),
+            .as_bytes()
+            .to_vec(),
         )
         .await
         .unwrap();
@@ -1031,11 +1072,85 @@ mod tests {
     }
 
     #[test]
-    fn raw_message_parsing_extracts_headers_and_body() {
-        let raw = "Subject: Example\r\nMessage-Id: <id@test>\r\n\r\nBody";
-        assert_eq!(parse_header_value(raw, "subject").as_deref(), Some("Example"));
-        assert_eq!(parse_header_value(raw, "message-id").as_deref(), Some("<id@test>"));
-        assert_eq!(extract_body_text(raw), "Body");
+    fn outbound_handoff_builds_multipart_alternative_when_html_is_present() {
+        let raw = String::from_utf8(compose_rfc822_message(&OutboundMessageHandoffRequest {
+            queue_id: Uuid::nil(),
+            message_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            from_address: "sender@example.test".to_string(),
+            from_display: None,
+            to: vec![TransportRecipient {
+                address: "dest@example.test".to_string(),
+                display_name: None,
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "HTML".to_string(),
+            body_text: "Plain body".to_string(),
+            body_html_sanitized: Some("<p>HTML body</p>".to_string()),
+            internet_message_id: None,
+        }))
+        .unwrap();
+
+        assert!(raw.contains("Content-Type: multipart/alternative;"));
+        assert!(raw.contains("Content-Type: text/plain; charset=utf-8"));
+        assert!(raw.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(!raw.contains("\r\nBcc:"));
+    }
+
+    #[test]
+    fn quoted_printable_encoder_handles_utf8_and_line_breaks() {
+        let encoded = encode_quoted_printable("Bonjour équipe\nHTML");
+        assert!(encoded.contains("=C3=A9"));
+        assert!(encoded.contains("\r\n"));
+    }
+
+    #[tokio::test]
+    async fn inbound_message_keeps_non_utf8_raw_bytes() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let spool = temp_dir("inbound-non-utf8");
+        initialize_spool(&spool).unwrap();
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
+        let captured = Arc::new(Mutex::new(None::<InboundDeliveryRequest>));
+        let core_base_url = spawn_dummy_core(captured.clone()).await;
+        let validator = Validator::new(
+            FakeDetector {
+                detection: Ok(MagikaDetection {
+                    label: "bin".to_string(),
+                    mime_type: "application/octet-stream".to_string(),
+                    description: "Binary".to_string(),
+                    group: "binary".to_string(),
+                    extensions: vec!["bin".to_string()],
+                    score: Some(0.99),
+                }),
+            },
+            0.80,
+        );
+        let mut raw = b"From: Sender <sender@example.test>\r\nSubject: Binary\r\nContent-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nVisible body\r\n--b1\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"blob.bin\"\r\n\r\n".to_vec();
+        raw.extend_from_slice(&[0xff, 0xfe, 0x00, 0x41]);
+        raw.extend_from_slice(b"\r\n--b1--\r\n");
+
+        let message = receive_message_with_validator(
+            &validator,
+            &spool,
+            &runtime_config("127.0.0.1:9".to_string(), core_base_url),
+            "127.0.0.1:2525".to_string(),
+            "example.test".to_string(),
+            "sender@example.test".to_string(),
+            vec!["dest@example.test".to_string()],
+            raw.clone(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(message.status, "sent");
+        let request = captured.lock().unwrap().clone().unwrap();
+        assert_eq!(request.body_text, "Visible body");
+        assert_eq!(request.raw_message, raw);
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 
     async fn spawn_dummy_smtp(captured: Arc<Mutex<String>>) -> String {
@@ -1082,9 +1197,7 @@ mod tests {
         }
     }
 
-    async fn spawn_dummy_core(
-        captured: Arc<Mutex<Option<InboundDeliveryRequest>>>,
-    ) -> String {
+    async fn spawn_dummy_core(captured: Arc<Mutex<Option<InboundDeliveryRequest>>>) -> String {
         async fn accept(
             axum::extract::State(captured): axum::extract::State<
                 Arc<Mutex<Option<InboundDeliveryRequest>>>,
@@ -1111,5 +1224,26 @@ mod tests {
             axum::serve(listener, router).await.unwrap();
         });
         format!("http://{}", address)
+    }
+}
+
+mod base64_bytes {
+    use super::BASE64;
+    use base64::Engine;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&BASE64.encode(value))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let encoded = String::deserialize(deserializer)?;
+        BASE64.decode(encoded).map_err(serde::de::Error::custom)
     }
 }

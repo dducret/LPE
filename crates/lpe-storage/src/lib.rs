@@ -2899,7 +2899,7 @@ impl Storage {
         let mut stored_message_ids = Vec::new();
         let mut tx = self.pool.begin().await?;
         let thread_id = Uuid::new_v4();
-        let attachments = parse_message_attachments(request.raw_message.as_bytes())?;
+        let attachments = parse_message_attachments(&request.raw_message)?;
 
         for recipient in &rcpt_to {
             let Some(row) = account_rows.iter().find(|row| {
@@ -5134,7 +5134,7 @@ fn extract_supported_attachment_text(
     }
 }
 
-fn parse_header_recipients(raw_message: &str, header_name: &str) -> Vec<SubmittedRecipientInput> {
+fn parse_header_recipients(raw_message: &[u8], header_name: &str) -> Vec<SubmittedRecipientInput> {
     let expected = format!("{}:", header_name.to_ascii_lowercase());
     unfolded_headers(raw_message)
         .into_iter()
@@ -5153,11 +5153,11 @@ fn parse_header_recipients(raw_message: &str, header_name: &str) -> Vec<Submitte
         .unwrap_or_default()
 }
 
-fn unfolded_headers(raw_message: &str) -> Vec<String> {
+fn unfolded_headers(raw_message: &[u8]) -> Vec<String> {
     let mut headers = Vec::new();
     let mut current = String::new();
 
-    for line in raw_message.lines() {
+    for line in String::from_utf8_lossy(raw_message).lines() {
         if line.trim().is_empty() {
             break;
         }
@@ -5483,8 +5483,8 @@ mod tests {
             "Body\r\n"
         );
 
-        let to = parse_header_recipients(raw, "to");
-        let cc = parse_header_recipients(raw, "cc");
+        let to = parse_header_recipients(raw.as_bytes(), "to");
+        let cc = parse_header_recipients(raw.as_bytes(), "cc");
 
         assert_eq!(to.len(), 2);
         assert_eq!(to[0].address, "to@example.test");
@@ -5571,7 +5571,7 @@ mod tests {
         assert_eq!(attachments.len(), 1);
         assert_eq!(attachments[0].file_name, "report.pdf");
         assert_eq!(attachments[0].media_type, "application/pdf");
-        assert_eq!(attachments[0].blob_bytes, b"PDF-ATTACHMENT".to_vec());
+        assert_eq!(attachments[0].blob_bytes, b"PDF-ATTACHMENT\r\n".to_vec());
     }
 }
 

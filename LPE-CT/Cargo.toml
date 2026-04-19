@@ -9,6 +9,7 @@ description = "DMZ sorting center management plane for LPE"
 [dependencies]
 anyhow = "1.0"
 axum = "0.8"
+base64 = "0.22"
 lpe-domain = { path = "../crates/lpe-domain" }
 lpe-magika = { path = "../crates/lpe-magika" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

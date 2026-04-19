@@ -568,6 +568,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64",
  "lpe-domain",
  "lpe-magika",
  "reqwest",
@@ -583,6 +584,7 @@ dependencies = [
 name = "lpe-domain"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "serde",
  "serde_json",
  "uuid",
