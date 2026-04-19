@@ -14,6 +14,8 @@ pub(crate) struct ActiveSyncQuery {
     pub(crate) _device_type: Option<String>,
 }
 
+pub(crate) type AuthenticatedPrincipal = lpe_mail_auth::AccountPrincipal;
+
 #[derive(Debug, Clone)]
 pub(crate) struct CollectionDefinition {
     pub(crate) id: String,

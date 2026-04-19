@@ -271,6 +271,7 @@ pub fn router(storage: Storage) -> Router {
         .route("/console/settings/antispam", put(update_antispam_settings))
         .nest("/jmap", lpe_jmap::router())
         .merge(lpe_activesync::router())
+        .merge(lpe_dav::router())
         .layer(DefaultBodyLimit::max(pst_upload_max_bytes()))
         .with_state(storage)
 }

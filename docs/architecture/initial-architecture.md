@@ -22,6 +22,8 @@ Cela implique que tout envoi realise via un protocole client supporte, notamment
 
 `ActiveSync` est la premiere couche de compatibilite native Outlook/mobile visee. `EWS` reste une extension future, a evaluer apres stabilisation du modele canonique de soumission et de synchronisation.
 
+`CalDAV` et `CardDAV` sont des couches de compatibilite standards pour les donnees de collaboration. Ils doivent rester branches sur les modeles canoniques `LPE` pour les contacts et le calendrier, sans introduire de stockage, de droits ou de logique metier paralleles.
+
 Le modele de soumission initial est transactionnel cote coeur `LPE` et expose par l'API `/api/mail/messages/submit`:
 
 1. verifier le compte emetteur
@@ -44,9 +46,13 @@ Le detail du contrat est documente dans `docs/architecture/lpe-ct-integration.md
 
 Toutes les couches clientes doivent utiliser ce modele canonique de soumission et de synchronisation. Aucune couche cliente ne doit ecrire une logique `Sent` ou `Outbox` parallele.
 
+Tout fichier entrant via connexion externe ou via un client doit etre valide par Google `Magika` avant traitement normal. Cela s'applique a `LPE-CT` pour les flux externes et a `LPE` pour les uploads et imports clients.
+
 Le MVP `JMAP Mail` actuellement implemente dans `lpe-jmap` est aligne sur cette regle. `EmailSubmission/set` ne parle pas `SMTP`; il reutilise la soumission canonique existante apres lecture d'un brouillon persiste. `Mailbox/get`, `Email/query` et `Email/get` lisent la projection canonique sans reinjecter `Bcc` dans la recherche standard. Le scope supporte est detaille dans `docs/architecture/jmap-mail-mvp.md`.
 
 Le MVP `ActiveSync` actuellement implemente dans `lpe-activesync` est aligne sur la meme regle. `Provision`, `FolderSync`, `Sync` et `SendMail` sont implementes comme un adaptateur au-dessus de la meme authentification compte, de la meme persistance des brouillons, de la meme synchronisation mailbox et du meme modele canonique de soumission. `SendMail` ne contourne ni le workflow mailbox du coeur `LPE`, ni `LPE-CT`; il reutilise la soumission canonique pour que la copie autoritative `Sent` existe avant le relais sortant. Le scope supporte est detaille dans `docs/architecture/activesync-mvp.md`.
+
+Le MVP `DAV` actuellement implemente dans `lpe-dav` suit la meme approche d'adaptateur pour les usages contacts/calendrier. `CardDAV` et `CalDAV` reutilisent la meme authentification compte, exposent `contacts` et `calendar_events` via un mapping DAV minimal, puis mettent a jour directement ces tables canoniques sans logique metier specifique a DAV. Le scope supporte est detaille dans `docs/architecture/dav-mvp.md`.
 
 Le webmail utilise une authentification de compte distincte de l'administration. Le formulaire `/mail/` appelle `/api/mail/auth/login`, qui verifie le hash `argon2` stocke dans `account_credentials`, cree une session dans `account_sessions`, puis expose l'identite via `/api/mail/auth/me`.
 
@@ -87,6 +93,7 @@ Centre de tri distinct pour l'entree `SMTP` exposee, le relais sortant, le filtr
 - IMAP
 - transport `SMTP` entrant et sortant via `LPE-CT`
 - compatibilite Outlook/mobile native via `ActiveSync` en premiere cible
+- compatibilite contacts/calendrier via `CardDAV` et `CalDAV`
 - `EWS` comme extension future apres stabilisation du modele canonique de soumission et de synchronisation
 - coherence des messages envoyes entre protocoles clients et vue `Sent`
 - webmail HTTPS
@@ -118,6 +125,8 @@ This implies that every supported client submission path, especially `JMAP`, `IM
 
 `ActiveSync` is the first targeted native Outlook and mobile compatibility layer. `EWS` remains a future extension to evaluate after the canonical submission and synchronization model is stabilized.
 
+`CalDAV` and `CardDAV` are standards-based compatibility adapters for collaboration data. They must remain layered over the canonical `LPE` contact and calendar models, without introducing a separate DAV storage or rights model.
+
 The initial submission model is transactional in the `LPE` core and exposed by `/api/mail/messages/submit`:
 
 1. verify the submitting account
@@ -140,9 +149,13 @@ The detailed contract is documented in `docs/architecture/lpe-ct-integration.md`
 
 All client layers must use this canonical submission and synchronization model. No client layer may write its own parallel `Sent` or `Outbox` logic.
 
+Every file entering through an external connection or through a client must be validated with Google `Magika` before normal processing. This applies to `LPE-CT` for external ingress paths and to `LPE` for client-side uploads and imports.
+
 The currently implemented `JMAP Mail` MVP in `lpe-jmap` follows that rule. `EmailSubmission/set` does not speak `SMTP`; it reuses the existing canonical submission workflow after loading a persisted draft. `Mailbox/get`, `Email/query`, and `Email/get` read the canonical mailbox projection without reinjecting `Bcc` into standard search paths. The supported scope is detailed in `docs/architecture/jmap-mail-mvp.md`.
 
 The current `ActiveSync` MVP in `lpe-activesync` follows the same rule. `Provision`, `FolderSync`, `Sync`, and `SendMail` are implemented as an adapter over the same account authentication, draft persistence, mailbox synchronization, and canonical submission model. `SendMail` does not bypass the core mailbox workflow or `LPE-CT`; it reuses the canonical submission path so the authoritative `Sent` copy exists before outbound relay. The supported scope is detailed in `docs/architecture/activesync-mvp.md`.
+
+The current `DAV` MVP in `lpe-dav` follows the same adapter approach for collaboration compatibility. `CardDAV` and `CalDAV` reuse the same mailbox-account authentication, expose `contacts` and `calendar_events` through a minimal DAV collection model, and update those canonical tables directly instead of introducing DAV-only business logic. The supported scope is detailed in `docs/architecture/dav-mvp.md`.
 
 The webmail uses account authentication separate from administration. The `/mail/` form calls `/api/mail/auth/login`, which verifies the `argon2` hash stored in `account_credentials`, creates a session in `account_sessions`, and exposes the identity through `/api/mail/auth/me`.
 
@@ -183,6 +196,7 @@ Separate sorting center for exposed `SMTP` ingress, outbound relay, perimeter fi
 - IMAP
 - inbound and outbound `SMTP` transport through `LPE-CT`
 - native Outlook and mobile compatibility through `ActiveSync` as the first target
+- contacts and calendar compatibility through `CardDAV` and `CalDAV`
 - `EWS` as a future extension after stabilization of the canonical submission and synchronization model
 - sent-message consistency across client protocols and the `Sent` view
 - HTTPS webmail

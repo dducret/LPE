@@ -245,6 +245,34 @@ The architecture currently anticipates controls such as:
 
 The exact implementation can evolve, but the architectural rule is stable: edge sorting centers are responsible for the first security and anti-abuse filtering pass before a message reaches a hosted mailbox.
 
+### Mandatory incoming file-type validation with Magika
+
+Every file entering the platform through an external connection or through a client-facing workflow must be validated with Google `Magika` before it is accepted into normal processing.
+
+This rule applies to both:
+
+- `LPE-CT`, for files received through external ingress paths
+- `LPE`, for files submitted through client or API workflows
+
+Typical covered paths include:
+
+- email attachments received from external senders
+- files attached or imported through webmail or future native-client submission flows
+- `PST` import uploads
+- `JMAP` blob upload paths
+- any future browser, API, or protocol-level file upload entry point
+
+Magika validation is an architecture-level content-type gate, not a UI hint.
+
+The platform must therefore:
+
+- classify incoming file bytes using `Magika`
+- record the detected content type and confidence
+- compare detected type with declared MIME type, file extension, and workflow expectations
+- route the result into accept, restrict, quarantine, or reject policy decisions
+
+`Magika` classification must happen before attachment indexing, import processing, archive ingestion, or downstream content-specific parsing.
+
 ### Injection-oriented content inspection
 
 Sorting centers should also perform a first-pass inspection for dangerous or suspicious content patterns beyond traditional spam and malware categories.
@@ -281,6 +309,8 @@ Possible policy-driven outcomes may include:
 
 The architectural principle is that sorting centers execute the inspection close to the edge, while the authoritative policy and threshold configuration are managed centrally by `LPE` at domain scope.
 
+The same policy plane should be able to govern how `Magika` validation mismatches and unsupported file-type outcomes are handled for each domain.
+
 ## Traceability and Message History
 
 ### Unique message processing identifier
@@ -305,6 +335,7 @@ Sorting centers must retain at least the following metadata for each processed m
 - message size
 - whether the message is encrypted
 - content inspection or injection-related score data when such inspection is enabled
+- `Magika` file-type validation outcomes when file payloads are present
 
 This history is required to support:
 
@@ -401,6 +432,14 @@ The current `ActiveSync` MVP follows the same rule:
 - `SendMail` reuses canonical submission so the authoritative `Sent` copy exists before `LPE-CT` performs outbound relay
 - no `ActiveSync` path performs direct Internet-facing `SMTP`
 - the supported scope and limitations are documented in `docs/architecture/activesync-mvp.md`
+
+The current `CardDAV` and `CalDAV` MVP follows the same rule:
+
+- `CardDAV` and `CalDAV` are compatibility adapters over canonical collaboration data
+- account authentication is reused rather than duplicated
+- `contacts` and `calendar_events` remain the source of truth for the data exposed through DAV
+- the first adapter supports minimal collection discovery, resource reads, and full-resource replacement
+- the supported scope and limitations are documented in `docs/architecture/dav-mvp.md`
 
 ## Data and Storage Principles
 
@@ -775,6 +814,7 @@ The current architectural direction for the first product phases is:
 - a first `JMAP Mail` MVP with real session capabilities, `Mailbox/get`, `Email/query`, `Email/get`, draft-only `Email/set`, and canonical `EmailSubmission/set`
 - `IMAP` as a mailbox-access compatibility layer
 - an initial `ActiveSync` MVP adapter with `Provision`, `FolderSync`, `Sync`, and canonical `SendMail`
+- an initial `CardDAV` and `CalDAV` MVP adapter for contacts and calendar compatibility
 - `EWS` as a future extension after stabilization of the canonical submission and synchronization model
 - `PST` mailbox import and export for migration and interoperability
 - collaboration services for contacts, calendars, and to-do lists

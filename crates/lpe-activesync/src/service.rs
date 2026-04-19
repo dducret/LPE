@@ -18,7 +18,10 @@ use crate::{
         require_sync_collections, snapshot_map, snapshot_to_value,
     },
     store::ActiveSyncStore,
-    types::{ActiveSyncQuery, CollectionDefinition, SnapshotChange, SnapshotEntry, StoredSyncState},
+    types::{
+        ActiveSyncQuery, AuthenticatedPrincipal, CollectionDefinition, SnapshotChange,
+        SnapshotEntry, StoredSyncState,
+    },
     wbxml::{decode_wbxml, encode_wbxml, WbxmlNode},
 };
 

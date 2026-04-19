@@ -1,8 +1,8 @@
 use anyhow::Result;
+use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
-    AccountLogin, ActiveSyncSyncState, AuditEntryInput, AuthenticatedAccount, ClientContact,
-    ClientEvent, JmapEmail, JmapMailbox, SavedDraftMessage, Storage, SubmitMessageInput,
-    SubmittedMessage,
+    ActiveSyncSyncState, AuditEntryInput, ClientContact, ClientEvent, JmapEmail, JmapMailbox,
+    SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage,
 };
 use serde_json::Value;
 use std::{future::Future, pin::Pin};
@@ -10,12 +10,7 @@ use uuid::Uuid;
 
 pub(crate) type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
-pub trait ActiveSyncStore: Clone + Send + Sync + 'static {
-    fn fetch_account_session<'a>(
-        &'a self,
-        token: &'a str,
-    ) -> StoreFuture<'a, Option<AuthenticatedAccount>>;
-    fn fetch_account_login<'a>(&'a self, email: &'a str) -> StoreFuture<'a, Option<AccountLogin>>;
+pub trait ActiveSyncStore: AccountAuthStore {
     fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>>;
     fn query_jmap_email_ids<'a>(
         &'a self,
@@ -71,17 +66,6 @@ pub trait ActiveSyncStore: Clone + Send + Sync + 'static {
 }
 
 impl ActiveSyncStore for Storage {
-    fn fetch_account_session<'a>(
-        &'a self,
-        token: &'a str,
-    ) -> StoreFuture<'a, Option<AuthenticatedAccount>> {
-        Box::pin(async move { self.fetch_account_session(token).await })
-    }
-
-    fn fetch_account_login<'a>(&'a self, email: &'a str) -> StoreFuture<'a, Option<AccountLogin>> {
-        Box::pin(async move { self.fetch_account_login(email).await })
-    }
-
     fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
         Box::pin(async move { self.fetch_jmap_mailboxes(account_id).await })
     }

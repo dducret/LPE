@@ -3297,6 +3297,46 @@ impl Storage {
         Ok(map_event(row))
     }
 
+    pub async fn delete_client_contact(&self, account_id: Uuid, contact_id: Uuid) -> Result<()> {
+        let deleted = sqlx::query(
+            r#"
+            DELETE FROM contacts
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(contact_id)
+        .execute(&self.pool)
+        .await?;
+
+        if deleted.rows_affected() == 0 {
+            bail!("contact not found");
+        }
+
+        Ok(())
+    }
+
+    pub async fn delete_client_event(&self, account_id: Uuid, event_id: Uuid) -> Result<()> {
+        let deleted = sqlx::query(
+            r#"
+            DELETE FROM calendar_events
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(event_id)
+        .execute(&self.pool)
+        .await?;
+
+        if deleted.rows_affected() == 0 {
+            bail!("event not found");
+        }
+
+        Ok(())
+    }
+
     pub async fn submit_message(
         &self,
         input: SubmitMessageInput,
