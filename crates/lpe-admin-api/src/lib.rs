@@ -5,6 +5,7 @@ use argon2::{
 use axum::{
     extract::{DefaultBodyLimit, Multipart, Path as AxumPath, State},
     http::{HeaderMap, StatusCode},
+    middleware,
     response::Redirect,
     routing::{delete, get, post, put},
     Json, Router,
@@ -29,10 +30,12 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
+use tracing::info;
 use uuid::Uuid;
 
 mod client_config;
 mod oidc;
+mod observability;
 mod types;
 
 use crate::types::{
@@ -55,6 +58,7 @@ pub fn router(storage: Storage) -> Router {
         .route("/health", get(health))
         .route("/health/live", get(health_live))
         .route("/health/ready", get(health_ready))
+        .route("/metrics", get(observability::metrics_endpoint))
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
         .route("/auth/me", get(me))
@@ -1240,12 +1244,25 @@ async fn deliver_inbound_message(
     Json(request): Json<InboundDeliveryRequest>,
 ) -> ApiResult<InboundDeliveryResponse> {
     require_integration(&headers)?;
-    Ok(Json(
-        storage
-            .deliver_inbound_message(request)
-            .await
-            .map_err(bad_request_error)?,
-    ))
+    let trace_id = request.trace_id.clone();
+    let internet_message_id = request.internet_message_id.clone();
+    let recipient_count = request.rcpt_to.len();
+    let response = storage
+        .deliver_inbound_message(request)
+        .await
+        .map_err(bad_request_error)?;
+    observability::record_inbound_delivery(response.status.as_str());
+    info!(
+        trace_id = %trace_id,
+        status = response.status.as_str(),
+        accepted_recipients = response.accepted_recipients.len(),
+        rejected_recipients = response.rejected_recipients.len(),
+        stored_messages = response.stored_message_ids.len(),
+        recipient_count,
+        internet_message_id = internet_message_id.as_deref().unwrap_or(""),
+        "inbound delivery processed"
+    );
+    Ok(Json(response))
 }
 
 fn ensure_client_message_owner(

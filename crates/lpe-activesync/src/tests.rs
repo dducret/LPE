@@ -41,6 +41,7 @@ struct FakeStore {
 impl FakeStore {
     fn account() -> AuthenticatedAccount {
         AuthenticatedAccount {
+            tenant_id: "tenant-a".to_string(),
             account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
@@ -57,6 +58,7 @@ impl FakeStore {
 
     fn login() -> AccountLogin {
         AccountLogin {
+            tenant_id: "tenant-a".to_string(),
             account_id: Self::account().account_id,
             email: Self::account().email,
             display_name: Self::account().display_name,

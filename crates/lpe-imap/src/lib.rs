@@ -56,9 +56,7 @@ impl<S: ImapStore, D: Detector> ImapServer<S, D> {
         let mut reader = BufReader::new(read_half);
         let mut session = Session::new(self.store.clone(), self.validator.clone());
 
-        write_half
-            .write_all(b"* OK LPE IMAP ready\r\n")
-            .await?;
+        write_half.write_all(b"* OK LPE IMAP ready\r\n").await?;
         write_half.flush().await?;
 
         loop {
@@ -138,31 +136,59 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         let result = match request.command.as_str() {
             "CAPABILITY" => self.handle_capability(&request.tag, writer).await,
             "NOOP" => self.handle_noop(&request.tag, writer).await,
-            "LOGOUT" => self.handle_logout(&request.tag, writer).await.map(|_| false),
-            "LOGIN" => self.handle_login(&request.tag, &request.arguments, writer).await,
-            "LIST" => self.handle_list(&request.tag, writer).await,
-            "SELECT" => self.handle_select(&request.tag, &request.arguments, writer).await,
-            "FETCH" => {
-                self.handle_fetch(&request.tag, &request.arguments, writer, MessageRefKind::Sequence)
+            "LOGOUT" => self
+                .handle_logout(&request.tag, writer)
+                .await
+                .map(|_| false),
+            "LOGIN" => {
+                self.handle_login(&request.tag, &request.arguments, writer)
                     .await
+            }
+            "LIST" => self.handle_list(&request.tag, writer).await,
+            "SELECT" => {
+                self.handle_select(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "FETCH" => {
+                self.handle_fetch(
+                    &request.tag,
+                    &request.arguments,
+                    writer,
+                    MessageRefKind::Sequence,
+                )
+                .await
             }
             "STORE" => {
-                self.handle_store(&request.tag, &request.arguments, writer, MessageRefKind::Sequence)
-                    .await
+                self.handle_store(
+                    &request.tag,
+                    &request.arguments,
+                    writer,
+                    MessageRefKind::Sequence,
+                )
+                .await
             }
             "SEARCH" => {
-                self.handle_search(&request.tag, &request.arguments, writer, MessageRefKind::Sequence)
+                self.handle_search(
+                    &request.tag,
+                    &request.arguments,
+                    writer,
+                    MessageRefKind::Sequence,
+                )
+                .await
+            }
+            "UID" => {
+                self.handle_uid(reader, writer, &request.tag, &request.arguments)
                     .await
             }
-            "UID" => self
-                .handle_uid(reader, writer, &request.tag, &request.arguments)
-                .await,
-            "APPEND" => self
-                .handle_append(reader, writer, &request.tag, &request.arguments)
-                .await,
+            "APPEND" => {
+                self.handle_append(reader, writer, &request.tag, &request.arguments)
+                    .await
+            }
             other => {
                 writer
-                    .write_all(format!("{} BAD unsupported command {}\r\n", request.tag, other).as_bytes())
+                    .write_all(
+                        format!("{} BAD unsupported command {}\r\n", request.tag, other).as_bytes(),
+                    )
                     .await?;
                 writer.flush().await?;
                 Ok(true)
@@ -173,7 +199,14 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             Ok(keep_running) => Ok(keep_running),
             Err(error) => {
                 writer
-                    .write_all(format!("{} NO {}\r\n", request.tag, sanitize_imap_text(&error.to_string())).as_bytes())
+                    .write_all(
+                        format!(
+                            "{} NO {}\r\n",
+                            request.tag,
+                            sanitize_imap_text(&error.to_string())
+                        )
+                        .as_bytes(),
+                    )
                     .await?;
                 writer.flush().await?;
                 Ok(true)
@@ -186,7 +219,13 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         W: AsyncWriteExt + Unpin,
     {
         writer
-            .write_all(format!("* CAPABILITY {}\r\n{} OK CAPABILITY completed\r\n", CAPABILITIES, tag).as_bytes())
+            .write_all(
+                format!(
+                    "* CAPABILITY {}\r\n{} OK CAPABILITY completed\r\n",
+                    CAPABILITIES, tag
+                )
+                .as_bytes(),
+            )
             .await?;
         writer.flush().await?;
         Ok(true)
@@ -239,6 +278,7 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         }
 
         self.principal = Some(AccountPrincipal {
+            tenant_id: login.tenant_id,
             account_id: login.account_id,
             email: login.email,
             display_name: login.display_name,
@@ -257,7 +297,10 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         W: AsyncWriteExt + Unpin,
     {
         let principal = self.require_auth()?;
-        let mailboxes = self.store.ensure_imap_mailboxes(principal.account_id).await?;
+        let mailboxes = self
+            .store
+            .ensure_imap_mailboxes(principal.account_id)
+            .await?;
         for mailbox in mailboxes {
             writer
                 .write_all(
@@ -276,12 +319,7 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         Ok(true)
     }
 
-    async fn handle_select<W>(
-        &mut self,
-        tag: &str,
-        arguments: &str,
-        writer: &mut W,
-    ) -> Result<bool>
+    async fn handle_select<W>(&mut self, tag: &str, arguments: &str, writer: &mut W) -> Result<bool>
     where
         W: AsyncWriteExt + Unpin,
     {
@@ -290,7 +328,10 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             .into_iter()
             .next()
             .ok_or_else(|| anyhow!("SELECT expects a mailbox name"))?;
-        let mailboxes = self.store.ensure_imap_mailboxes(principal.account_id).await?;
+        let mailboxes = self
+            .store
+            .ensure_imap_mailboxes(principal.account_id)
+            .await?;
         let mailbox = mailboxes
             .into_iter()
             .find(|candidate| mailbox_name_matches(&candidate.name, &candidate.role, &mailbox_name))
@@ -311,16 +352,30 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             emails,
         });
 
-        writer.write_all(b"* FLAGS (\\Seen \\Flagged \\Draft)\r\n").await?;
+        writer
+            .write_all(b"* FLAGS (\\Seen \\Flagged \\Draft)\r\n")
+            .await?;
         writer
             .write_all(format!("* {} EXISTS\r\n", exists).as_bytes())
             .await?;
         writer.write_all(b"* 0 RECENT\r\n").await?;
         writer
-            .write_all(format!("* OK [UNSEEN {}] first unseen\r\n", if unseen == 0 { 0 } else { 1 }).as_bytes())
+            .write_all(
+                format!(
+                    "* OK [UNSEEN {}] first unseen\r\n",
+                    if unseen == 0 { 0 } else { 1 }
+                )
+                .as_bytes(),
+            )
             .await?;
         writer
-            .write_all(format!("* OK [UIDVALIDITY {}] stable uid validity\r\n", UID_VALIDITY).as_bytes())
+            .write_all(
+                format!(
+                    "* OK [UIDVALIDITY {}] stable uid validity\r\n",
+                    UID_VALIDITY
+                )
+                .as_bytes(),
+            )
             .await?;
         writer
             .write_all(format!("* OK [UIDNEXT {}] next uid\r\n", uid_next).as_bytes())
@@ -365,7 +420,13 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             let principal = self.require_auth()?;
             let mailbox_id = selected.mailbox_id;
             self.store
-                .update_imap_flags(principal.account_id, mailbox_id, &mark_seen_ids, Some(false), None)
+                .update_imap_flags(
+                    principal.account_id,
+                    mailbox_id,
+                    &mark_seen_ids,
+                    Some(false),
+                    None,
+                )
                 .await?;
             self.refresh_selected().await?;
         }
@@ -408,7 +469,13 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
 
         let principal = self.require_auth()?;
         self.store
-            .update_imap_flags(principal.account_id, selected.mailbox_id, &ids, unread, flagged)
+            .update_imap_flags(
+                principal.account_id,
+                selected.mailbox_id,
+                &ids,
+                unread,
+                flagged,
+            )
             .await?;
         self.refresh_selected().await?;
 
@@ -503,15 +570,18 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
     {
         let (command, rest) = split_two(arguments)?;
         match command.to_ascii_uppercase().as_str() {
-            "FETCH" => self
-                .handle_fetch(tag, rest, writer, MessageRefKind::Uid)
-                .await,
-            "STORE" => self
-                .handle_store(tag, rest, writer, MessageRefKind::Uid)
-                .await,
-            "SEARCH" => self
-                .handle_search(tag, rest, writer, MessageRefKind::Uid)
-                .await,
+            "FETCH" => {
+                self.handle_fetch(tag, rest, writer, MessageRefKind::Uid)
+                    .await
+            }
+            "STORE" => {
+                self.handle_store(tag, rest, writer, MessageRefKind::Uid)
+                    .await
+            }
+            "SEARCH" => {
+                self.handle_search(tag, rest, writer, MessageRefKind::Uid)
+                    .await
+            }
             other => bail!("UID {} is not supported", other),
         }
     }
@@ -599,7 +669,8 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             )
             .await?;
 
-        if matches!(self.selected.as_ref(), Some(selected) if selected.mailbox_name.eq_ignore_ascii_case("Drafts")) {
+        if matches!(self.selected.as_ref(), Some(selected) if selected.mailbox_name.eq_ignore_ascii_case("Drafts"))
+        {
             self.refresh_selected().await?;
         }
 
@@ -853,7 +924,11 @@ fn parse_fetch_attributes(input: &str) -> Result<FetchAttributes> {
     })
 }
 
-fn render_fetch_response(sequence: usize, email: &ImapEmail, requested: &FetchAttributes) -> Result<Vec<u8>> {
+fn render_fetch_response(
+    sequence: usize,
+    email: &ImapEmail,
+    requested: &FetchAttributes,
+) -> Result<Vec<u8>> {
     let mut output = Vec::new();
     output.extend_from_slice(format!("* {} FETCH (", sequence).as_bytes());
     let mut first = true;
@@ -870,9 +945,8 @@ fn render_fetch_response(sequence: usize, email: &ImapEmail, requested: &FetchAt
             "INTERNALDATE" => output.extend_from_slice(
                 format!("INTERNALDATE \"{}\"", format_internal_date(email)).as_bytes(),
             ),
-            "RFC822.SIZE" => {
-                output.extend_from_slice(format!("RFC822.SIZE {}", email.size_octets.max(0)).as_bytes())
-            }
+            "RFC822.SIZE" => output
+                .extend_from_slice(format!("RFC822.SIZE {}", email.size_octets.max(0)).as_bytes()),
             "BODY[HEADER]" | "BODY.PEEK[HEADER]" => {
                 append_literal(&mut output, item, render_header(email).as_bytes());
             }
@@ -910,8 +984,14 @@ fn render_flags(email: &ImapEmail, mailbox_name: &str) -> String {
 
 fn render_header(email: &ImapEmail) -> String {
     let mut lines = Vec::new();
-    lines.push(format!("Date: {}", email.sent_at.as_deref().unwrap_or(&email.received_at)));
-    lines.push(format!("From: {}", render_address_header(email.from_display.as_deref(), &email.from_address)));
+    lines.push(format!(
+        "Date: {}",
+        email.sent_at.as_deref().unwrap_or(&email.received_at)
+    ));
+    lines.push(format!(
+        "From: {}",
+        render_address_header(email.from_display.as_deref(), &email.from_address)
+    ));
     if !email.to.is_empty() {
         lines.push(format!("To: {}", render_recipient_header(&email.to)));
     }
@@ -935,13 +1015,18 @@ fn render_full_message(email: &ImapEmail) -> String {
 fn render_recipient_header(recipients: &[JmapEmailAddress]) -> String {
     recipients
         .iter()
-        .map(|recipient| render_address_header(recipient.display_name.as_deref(), &recipient.address))
+        .map(|recipient| {
+            render_address_header(recipient.display_name.as_deref(), &recipient.address)
+        })
         .collect::<Vec<_>>()
         .join(", ")
 }
 
 fn render_address_header(display_name: Option<&str>, address: &str) -> String {
-    match display_name.map(str::trim).filter(|value| !value.is_empty()) {
+    match display_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         Some(display) => format!("{} <{}>", display, address),
         None => address.to_string(),
     }
@@ -988,7 +1073,11 @@ fn resolve_message_indexes(
         if let Some((start, end)) = segment.split_once(':') {
             let start = resolve_set_value(start, emails, max_sequence, ref_kind)?;
             let end = resolve_set_value(end, emails, max_sequence, ref_kind)?;
-            let (from, to) = if start <= end { (start, end) } else { (end, start) };
+            let (from, to) = if start <= end {
+                (start, end)
+            } else {
+                (end, start)
+            };
             for value in from..=to {
                 if let Some(index) = find_message_index(emails, value, ref_kind) {
                     if !indexes.contains(&index) {
@@ -1025,7 +1114,10 @@ fn resolve_set_value(
 
 fn find_message_index(emails: &[ImapEmail], value: u32, ref_kind: MessageRefKind) -> Option<usize> {
     match ref_kind {
-        MessageRefKind::Sequence => value.checked_sub(1).map(|index| index as usize).filter(|index| *index < emails.len()),
+        MessageRefKind::Sequence => value
+            .checked_sub(1)
+            .map(|index| index as usize)
+            .filter(|index| *index < emails.len()),
         MessageRefKind::Uid => emails.iter().position(|email| email.uid == value),
     }
 }
@@ -1074,10 +1166,7 @@ fn parse_flag_list(token: &str) -> Result<HashSet<String>> {
 }
 
 fn parse_literal_size(token: &str) -> Result<usize> {
-    let value = token
-        .trim()
-        .trim_start_matches('{')
-        .trim_end_matches('}');
+    let value = token.trim().trim_start_matches('{').trim_end_matches('}');
     value.parse::<usize>().map_err(Into::into)
 }
 

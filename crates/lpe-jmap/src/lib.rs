@@ -2608,7 +2608,10 @@ fn calendar_event_to_value(event: &ClientEvent, properties: &HashSet<String>) ->
         if event.time_zone.trim().is_empty() {
             object.insert("timeZone".to_string(), Value::Null);
         } else {
-            object.insert("timeZone".to_string(), Value::String(event.time_zone.clone()));
+            object.insert(
+                "timeZone".to_string(),
+                Value::String(event.time_zone.clone()),
+            );
         }
     }
     if properties.contains("locations") && !event.location.trim().is_empty() {
@@ -2623,10 +2626,7 @@ fn calendar_event_to_value(event: &ClientEvent, properties: &HashSet<String>) ->
         );
     }
     if properties.contains("participants") && !event.attendees.trim().is_empty() {
-        object.insert(
-            "participants".to_string(),
-            participants_from_event(event),
-        );
+        object.insert("participants".to_string(), participants_from_event(event));
     }
     insert_if(properties, &mut object, "description", event.notes.clone());
     if properties.contains("calendarIds") {
@@ -3417,6 +3417,7 @@ mod tests {
     impl FakeStore {
         fn account() -> AuthenticatedAccount {
             AuthenticatedAccount {
+                tenant_id: "tenant-a".to_string(),
                 account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
                 email: "alice@example.test".to_string(),
                 display_name: "Alice".to_string(),

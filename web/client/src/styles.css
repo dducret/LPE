@@ -1581,8 +1581,9 @@ textarea {
   padding: 22px;
   border: 1px solid var(--line);
   border-radius: 24px;
-  background: rgba(255, 255, 255, 0.96);
+  background: #fff;
   box-shadow: 0 24px 60px rgba(17, 28, 39, 0.14);
+  backdrop-filter: none;
 }
 
 .editor-shell-header {

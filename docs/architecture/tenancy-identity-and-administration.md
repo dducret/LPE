@@ -14,6 +14,22 @@ Chaque tenant gere son domaine et les mailbox du domaine.
 
 Seul `LPE-CT` en `DMZ` est mutualise entre domaines.
 
+### Invariants runtime
+
+La multi-tenance runtime suit les invariants suivants:
+
+- le runtime ne doit jamais retomber sur un tenant implicite `"default"` pour les acces mailbox, message, contact, calendrier, tache, blob, session ou queue
+- le tenant est resolu a partir de l'objet runtime concret:
+  les logins et sessions de compte resolvent le tenant a partir du domaine de la mailbox
+  les lectures mailbox, message, draft, piece jointe et projection resolvent le tenant a partir du compte proprietaire ou de la ligne stockee
+  les administrateurs lies a un domaine resolvent leur tenant a partir du domaine gere
+- le scope global du plan de controle est explicite et separe des donnees tenant; il n'est pas reutilise pour l'isolation runtime des mailbox
+- les credentials de compte et d'administration sont uniques par `(tenant_id, email)`, pas globalement par email seul
+- les sessions de compte et d'administration sont rattachees au meme tenant que le credential qui les a creees
+- toute requete de stockage qui lit ou modifie des donnees runtime d'un tenant doit filtrer a la fois par `tenant_id` resolu et par le proprietaire ou l'identifiant de l'objet
+- la remise entrante doit resoudre le tenant independamment pour chaque destinataire accepte afin qu'une transaction `SMTP` unique ne fusionne pas plusieurs tenants dans un meme scope runtime
+- la deduplication des pieces jointes reste scopee par domaine et donc par tenant dans le modele runtime actuel un domaine par tenant
+
 ### Identite moderne
 
 Pour une plateforme multi-tenant moderne, le support natif de `OAuth2` et `OIDC` est requis.
@@ -84,6 +100,22 @@ This document describes the multi-tenant model, identity, and administration rol
 Each tenant manages its own domain and the mailboxes of that domain.
 
 Only `LPE-CT` in the `DMZ` is shared across domains.
+
+### Runtime invariants
+
+Runtime multi-tenancy follows these invariants:
+
+- the runtime must never fall back to an implicit `"default"` tenant for mailbox, message, contact, calendar, task, blob, session, or queue access
+- the tenant is resolved from the concrete runtime object:
+  account logins and account sessions resolve the tenant from the mailbox domain
+  mailbox, message, draft, attachment, and projection reads resolve the tenant from the owning account or stored row
+  domain-scoped administrators resolve their tenant from the managed domain
+- the control-plane global scope is explicit and separate from tenant data; it is not reused for mailbox runtime isolation
+- account and administrator credentials are unique per `(tenant_id, email)`, not globally by email alone
+- account and administrator sessions are bound to the same tenant as the credential that created them
+- every storage query that reads or mutates tenant-owned runtime data must filter by both the resolved `tenant_id` and the object owner or identifier
+- inbound delivery must resolve the tenant independently for each accepted recipient so one SMTP transaction cannot collapse multiple tenants into one runtime scope
+- attachment deduplication remains domain-scoped and therefore tenant-scoped in the current one-domain-per-tenant runtime model
 
 ### Modern identity
 

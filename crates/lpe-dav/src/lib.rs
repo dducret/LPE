@@ -359,7 +359,11 @@ impl<S: DavStore> DavService<S> {
         bail!("not found")
     }
 
-    async fn contact_for_path(&self, account_id: Uuid, path: &str) -> Result<Option<ClientContact>> {
+    async fn contact_for_path(
+        &self,
+        account_id: Uuid,
+        path: &str,
+    ) -> Result<Option<ClientContact>> {
         let Some(resource_id) = resource_id_for_contact_path(path) else {
             return Ok(None);
         };
@@ -535,9 +539,7 @@ fn collection_props(
     if let Some(extra) = extra {
         prop.push_str(&extra);
     }
-    format!(
-        "<d:propstat><d:prop>{prop}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>"
-    )
+    format!("<d:propstat><d:prop>{prop}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>")
 }
 
 fn collection_resourcetype(kind: &str) -> String {
@@ -623,7 +625,8 @@ fn status_with_etag(status: u16, etag: String) -> Response {
 
 fn error_response(error: anyhow::Error) -> Response {
     let message = error.to_string();
-    if message.contains("missing account authentication") || message.contains("invalid credentials") {
+    if message.contains("missing account authentication") || message.contains("invalid credentials")
+    {
         return Response::builder()
             .status(StatusCode::UNAUTHORIZED)
             .header("www-authenticate", "Basic realm=\"LPE DAV\"")
@@ -767,7 +770,11 @@ fn parse_vcard(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientCo
         let Some((left, raw_value)) = line.split_once(':') else {
             continue;
         };
-        let key = left.split(';').next().unwrap_or_default().to_ascii_uppercase();
+        let key = left
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_uppercase();
         let value = text_unescape(raw_value.trim());
         match key.as_str() {
             "FN" => name = value,
@@ -813,7 +820,11 @@ fn parse_ical(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientEve
         let Some((left, raw_value)) = line.split_once(':') else {
             continue;
         };
-        let key = left.split(';').next().unwrap_or_default().to_ascii_uppercase();
+        let key = left
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_uppercase();
         let value = text_unescape(raw_value.trim());
         match key.as_str() {
             "DTSTART" => {
@@ -937,11 +948,13 @@ fn property_parameter(left: &str, name: &str) -> Option<String> {
 }
 
 fn attendees_for_event(event: &ClientEvent) -> Vec<DavAttendee> {
-    let parsed = serde_json::from_str::<Vec<DavAttendee>>(&event.attendees_json).unwrap_or_default();
+    let parsed =
+        serde_json::from_str::<Vec<DavAttendee>>(&event.attendees_json).unwrap_or_default();
     if !parsed.is_empty() {
         return parsed;
     }
-    event.attendees
+    event
+        .attendees
         .split(',')
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -1014,7 +1027,10 @@ fn serialize_attendees_json(attendees: &[DavAttendee]) -> String {
 }
 
 fn param_escape(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "'").replace(';', "\\;")
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "'")
+        .replace(';', "\\;")
 }
 
 fn parse_report_filter(body: &[u8]) -> Result<ReportFilter> {
@@ -1084,7 +1100,12 @@ fn xml_attribute_value(xml: &str, element: &str, attribute: &str) -> Option<Stri
 }
 
 fn contact_matches_report(contact: &ClientContact, filter: &ReportFilter) -> bool {
-    if !filter.hrefs.is_empty() && !filter.hrefs.iter().any(|href| href == &contact_href(contact.id)) {
+    if !filter.hrefs.is_empty()
+        && !filter
+            .hrefs
+            .iter()
+            .any(|href| href == &contact_href(contact.id))
+    {
         return false;
     }
     if filter.text_terms.is_empty() {
@@ -1102,7 +1123,12 @@ fn contact_matches_report(contact: &ClientContact, filter: &ReportFilter) -> boo
 }
 
 fn event_matches_report(event: &ClientEvent, filter: &ReportFilter) -> bool {
-    if !filter.hrefs.is_empty() && !filter.hrefs.iter().any(|href| href == &event_href(event.id)) {
+    if !filter.hrefs.is_empty()
+        && !filter
+            .hrefs
+            .iter()
+            .any(|href| href == &event_href(event.id))
+    {
         return false;
     }
     if !filter.text_terms.is_empty() {
@@ -1181,7 +1207,10 @@ fn check_delete_preconditions(headers: &HeaderMap, current_etag: Option<String>)
     Ok(())
 }
 
-fn match_condition_header(header_value: Option<&axum::http::HeaderValue>, current_etag: &str) -> bool {
+fn match_condition_header(
+    header_value: Option<&axum::http::HeaderValue>,
+    current_etag: &str,
+) -> bool {
     let Some(header_value) = header_value.and_then(|value| value.to_str().ok()) else {
         return false;
     };
@@ -1252,6 +1281,7 @@ mod tests {
     impl FakeStore {
         fn account() -> AuthenticatedAccount {
             AuthenticatedAccount {
+                tenant_id: "tenant-a".to_string(),
                 account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
                 email: "alice@example.test".to_string(),
                 display_name: "Alice".to_string(),
@@ -1346,7 +1376,10 @@ mod tests {
             _account_id: Uuid,
             contact_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, ()> {
-            self.contacts.lock().unwrap().retain(|entry| entry.id != contact_id);
+            self.contacts
+                .lock()
+                .unwrap()
+                .retain(|entry| entry.id != contact_id);
             Box::pin(async move { Ok(()) })
         }
 
@@ -1355,7 +1388,10 @@ mod tests {
             _account_id: Uuid,
             event_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, ()> {
-            self.events.lock().unwrap().retain(|entry| entry.id != event_id);
+            self.events
+                .lock()
+                .unwrap()
+                .retain(|entry| entry.id != event_id);
             Box::pin(async move { Ok(()) })
         }
     }
@@ -1435,7 +1471,9 @@ mod tests {
         let response = service
             .handle(
                 &Method::GET,
-                &Uri::from_static("/dav/calendars/me/default/22222222-2222-2222-2222-222222222222.ics"),
+                &Uri::from_static(
+                    "/dav/calendars/me/default/22222222-2222-2222-2222-222222222222.ics",
+                ),
                 &bearer_headers(),
                 &[],
             )
@@ -1499,7 +1537,9 @@ mod tests {
         let response = service
             .handle(
                 &Method::DELETE,
-                &Uri::from_static("/dav/calendars/me/default/44444444-4444-4444-4444-444444444444.ics"),
+                &Uri::from_static(
+                    "/dav/calendars/me/default/44444444-4444-4444-4444-444444444444.ics",
+                ),
                 &bearer_headers(),
                 &[],
             )
@@ -1539,12 +1579,17 @@ mod tests {
         };
         let service = DavService::new(store);
         let mut headers = bearer_headers();
-        headers.insert("if-none-match", HeaderValue::from_str(&etag_for_event(&event)).unwrap());
+        headers.insert(
+            "if-none-match",
+            HeaderValue::from_str(&etag_for_event(&event)).unwrap(),
+        );
 
         let response = service
             .handle(
                 &Method::GET,
-                &Uri::from_static("/dav/calendars/me/default/55555555-5555-5555-5555-555555555555.ics"),
+                &Uri::from_static(
+                    "/dav/calendars/me/default/55555555-5555-5555-5555-555555555555.ics",
+                ),
                 &headers,
                 &[],
             )

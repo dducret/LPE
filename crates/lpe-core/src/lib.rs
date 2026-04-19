@@ -24,7 +24,7 @@ impl CoreService {
             participants: vec!["admin@example.test".to_string()],
             content_hash: "bootstrap-mail-projection".to_string(),
             scope: AccessScope {
-                tenant_id: "default".to_string(),
+                tenant_id: "__platform__".to_string(),
                 owner_account_id: lpe_domain::AccountId(owner_account_id),
                 acl_fingerprint: "owner-only".to_string(),
             },

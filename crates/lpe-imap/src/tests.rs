@@ -47,6 +47,7 @@ impl FakeStore {
         let account_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
         Self {
             login: AccountLogin {
+                tenant_id: "tenant-a".to_string(),
                 account_id,
                 email: "alice@example.test".to_string(),
                 display_name: "Alice".to_string(),
@@ -56,7 +57,12 @@ impl FakeStore {
             mailboxes: vec![
                 mailbox("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "inbox", "Inbox", 0),
                 mailbox("cccccccc-cccc-cccc-cccc-cccccccccccc", "sent", "Sent", 20),
-                mailbox("dddddddd-dddd-dddd-dddd-dddddddddddd", "drafts", "Drafts", 10),
+                mailbox(
+                    "dddddddd-dddd-dddd-dddd-dddddddddddd",
+                    "drafts",
+                    "Drafts",
+                    10,
+                ),
             ],
             emails: Arc::new(Mutex::new(vec![
                 email(
@@ -92,10 +98,7 @@ impl AccountAuthStore for FakeStore {
         Box::pin(async move { Ok(None) })
     }
 
-    fn fetch_account_login<'a>(
-        &'a self,
-        email: &'a str,
-    ) -> StoreFuture<'a, Option<AccountLogin>> {
+    fn fetch_account_login<'a>(&'a self, email: &'a str) -> StoreFuture<'a, Option<AccountLogin>> {
         let login = if email.eq_ignore_ascii_case(&self.login.email) {
             Some(self.login.clone())
         } else {
@@ -282,8 +285,12 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     assert!(fetch.contains("Subject: Welcome"));
     assert!(fetch.contains("Body Welcome"));
 
-    let store_response =
-        send_command(&mut stream, "A5 STORE 1 +FLAGS (\\Seen \\Flagged)\r\n", "A5").await;
+    let store_response = send_command(
+        &mut stream,
+        "A5 STORE 1 +FLAGS (\\Seen \\Flagged)\r\n",
+        "A5",
+    )
+    .await;
     assert!(store_response.contains("* 1 FETCH (FLAGS (\\Seen \\Flagged))"));
 
     let search = send_command(&mut stream, "A6 SEARCH SEEN TEXT Welcome\r\n", "A6").await;
@@ -309,12 +316,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     .await;
     assert!(append.contains("A8 OK APPEND completed"));
 
-    let drafts = send_command(
-        &mut stream,
-        "A9 UID SEARCH TEXT Draft\r\n",
-        "A9",
-    )
-    .await;
+    let drafts = send_command(&mut stream, "A9 UID SEARCH TEXT Draft\r\n", "A9").await;
     assert!(drafts.contains("* SEARCH 3"));
 
     task.abort();
@@ -403,7 +405,10 @@ async fn read_response(stream: &mut TcpStream, tag: Option<&str>) -> String {
         }
         output.push_str(&String::from_utf8_lossy(&buffer[..bytes]));
         match tag {
-            Some(tag) if output.contains(&format!("\r\n{tag} ")) || output.starts_with(&format!("{tag} ")) => {
+            Some(tag)
+                if output.contains(&format!("\r\n{tag} "))
+                    || output.starts_with(&format!("{tag} ")) =>
+            {
                 break;
             }
             None if output.ends_with("\r\n") => break,
