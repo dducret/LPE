@@ -31,6 +31,7 @@ pub enum PolicyDecision {
 pub enum IngressContext {
     JmapUpload,
     JmapEmailImport,
+    ImapAppend,
     PstUpload,
     PstProcessing,
     AttachmentParsing,
@@ -557,6 +558,7 @@ fn decide_policy(
         }
         IngressContext::JmapUpload
         | IngressContext::JmapEmailImport
+        | IngressContext::ImapAppend
         | IngressContext::ActiveSyncMimeSubmission => {
             if mismatch {
                 (

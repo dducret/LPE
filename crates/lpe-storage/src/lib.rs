@@ -560,6 +560,33 @@ pub struct JmapEmail {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ImapEmail {
+    pub id: Uuid,
+    pub uid: u32,
+    pub thread_id: Uuid,
+    pub mailbox_id: Uuid,
+    pub mailbox_role: String,
+    pub mailbox_name: String,
+    pub received_at: String,
+    pub sent_at: Option<String>,
+    pub from_address: String,
+    pub from_display: Option<String>,
+    pub to: Vec<JmapEmailAddress>,
+    pub cc: Vec<JmapEmailAddress>,
+    pub bcc: Vec<JmapEmailAddress>,
+    pub subject: String,
+    pub preview: String,
+    pub body_text: String,
+    pub body_html_sanitized: Option<String>,
+    pub unread: bool,
+    pub flagged: bool,
+    pub has_attachments: bool,
+    pub size_octets: i64,
+    pub internet_message_id: Option<String>,
+    pub delivery_status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct JmapEmailQuery {
     pub ids: Vec<Uuid>,
     pub total: u64,
@@ -705,6 +732,7 @@ struct JmapMailboxRow {
 #[derive(Debug, FromRow)]
 struct JmapEmailRow {
     id: Uuid,
+    imap_uid: i64,
     thread_id: Uuid,
     mailbox_id: Uuid,
     mailbox_role: String,
@@ -760,6 +788,13 @@ struct PendingOutboundQueueRow {
 
 #[derive(Debug, FromRow)]
 struct MessageBccRecipientRow {
+    address: String,
+    display_name: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct MessageBccRecipientRecordRow {
+    message_id: Uuid,
     address: String,
     display_name: Option<String>,
 }
@@ -2119,6 +2154,25 @@ impl Storage {
             .collect())
     }
 
+    pub async fn ensure_imap_mailboxes(&self, account_id: Uuid) -> Result<Vec<JmapMailbox>> {
+        let mut tx = self.pool.begin().await?;
+        self.ensure_account_exists(&mut tx, account_id).await?;
+        self.ensure_mailbox(&mut tx, account_id, "inbox", "Inbox", 0, 365)
+            .await?;
+        self.ensure_mailbox(&mut tx, account_id, "drafts", "Drafts", 10, 365)
+            .await?;
+        self.ensure_mailbox(&mut tx, account_id, "sent", "Sent", 20, 365)
+            .await?;
+        tx.commit().await?;
+
+        Ok(self
+            .fetch_jmap_mailboxes(account_id)
+            .await?
+            .into_iter()
+            .filter(|mailbox| matches!(mailbox.role.as_str(), "inbox" | "sent" | "drafts"))
+            .collect())
+    }
+
     pub async fn fetch_jmap_mailbox_ids(&self, account_id: Uuid) -> Result<Vec<Uuid>> {
         Ok(self
             .fetch_jmap_mailboxes(account_id)
@@ -2453,6 +2507,7 @@ impl Storage {
             r#"
             SELECT
                 m.id,
+                m.imap_uid,
                 m.thread_id,
                 m.mailbox_id,
                 mb.role AS mailbox_role,
@@ -2576,6 +2631,186 @@ impl Storage {
         }
 
         Ok(emails)
+    }
+
+    pub async fn fetch_imap_emails(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+    ) -> Result<Vec<ImapEmail>> {
+        let rows = sqlx::query_as::<_, JmapEmailRow>(
+            r#"
+            SELECT
+                m.id,
+                m.imap_uid,
+                m.thread_id,
+                m.mailbox_id,
+                mb.role AS mailbox_role,
+                mb.display_name AS mailbox_name,
+                to_char(m.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at,
+                CASE
+                    WHEN m.sent_at IS NULL THEN NULL
+                    ELSE to_char(m.sent_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS sent_at,
+                m.from_address,
+                NULLIF(m.from_display, '') AS from_display,
+                m.subject_normalized AS subject,
+                m.preview_text AS preview,
+                COALESCE(b.body_text, '') AS body_text,
+                b.body_html_sanitized,
+                m.unread,
+                m.flagged,
+                m.has_attachments,
+                m.size_octets,
+                m.internet_message_id,
+                m.delivery_status
+            FROM messages m
+            JOIN mailboxes mb ON mb.id = m.mailbox_id
+            LEFT JOIN message_bodies b ON b.message_id = m.id
+            WHERE m.tenant_id = $1
+              AND m.account_id = $2
+              AND m.mailbox_id = $3
+            ORDER BY m.imap_uid ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let message_ids = rows.iter().map(|row| row.id).collect::<Vec<_>>();
+        if message_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let recipient_rows = sqlx::query_as::<_, JmapEmailRecipientRow>(
+            r#"
+            SELECT
+                r.message_id,
+                r.kind,
+                r.address,
+                r.display_name,
+                r.ordinal AS _ordinal
+            FROM message_recipients r
+            JOIN messages m ON m.id = r.message_id
+            WHERE r.tenant_id = $1
+              AND m.account_id = $2
+              AND r.message_id = ANY($3)
+            ORDER BY r.message_id ASC, r.kind ASC, r.ordinal ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(&message_ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let bcc_rows = sqlx::query_as::<_, MessageBccRecipientRecordRow>(
+            r#"
+            SELECT message_id, address, display_name
+            FROM message_bcc_recipients
+            WHERE tenant_id = $1 AND message_id = ANY($2)
+            ORDER BY message_id ASC, ordinal ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(&message_ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let uid = u32::try_from(row.imap_uid)
+                    .map_err(|_| anyhow!("message IMAP UID is out of range"))?;
+                let to = recipient_rows
+                    .iter()
+                    .filter(|recipient| recipient.message_id == row.id && recipient.kind == "to")
+                    .map(|recipient| JmapEmailAddress {
+                        address: recipient.address.clone(),
+                        display_name: recipient.display_name.clone(),
+                    })
+                    .collect();
+                let cc = recipient_rows
+                    .iter()
+                    .filter(|recipient| recipient.message_id == row.id && recipient.kind == "cc")
+                    .map(|recipient| JmapEmailAddress {
+                        address: recipient.address.clone(),
+                        display_name: recipient.display_name.clone(),
+                    })
+                    .collect();
+                let bcc = bcc_rows
+                    .iter()
+                    .filter(|recipient| recipient.message_id == row.id)
+                    .map(|recipient| JmapEmailAddress {
+                        address: recipient.address.clone(),
+                        display_name: recipient.display_name.clone(),
+                    })
+                    .collect();
+
+                Ok(ImapEmail {
+                    id: row.id,
+                    uid,
+                    thread_id: row.thread_id,
+                    mailbox_id: row.mailbox_id,
+                    mailbox_role: row.mailbox_role,
+                    mailbox_name: row.mailbox_name,
+                    received_at: row.received_at,
+                    sent_at: row.sent_at,
+                    from_address: row.from_address,
+                    from_display: row.from_display,
+                    to,
+                    cc,
+                    bcc,
+                    subject: row.subject,
+                    preview: row.preview,
+                    body_text: row.body_text,
+                    body_html_sanitized: row.body_html_sanitized,
+                    unread: row.unread,
+                    flagged: row.flagged,
+                    has_attachments: row.has_attachments,
+                    size_octets: row.size_octets,
+                    internet_message_id: row.internet_message_id,
+                    delivery_status: row.delivery_status,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn update_imap_flags(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        message_ids: &[Uuid],
+        unread: Option<bool>,
+        flagged: Option<bool>,
+    ) -> Result<()> {
+        if message_ids.is_empty() {
+            return Ok(());
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE messages
+            SET
+                unread = COALESCE($4, unread),
+                flagged = COALESCE($5, flagged)
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND mailbox_id = $3
+              AND id = ANY($6)
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(unread)
+        .bind(flagged)
+        .bind(message_ids)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 
     pub async fn fetch_jmap_draft(&self, account_id: Uuid, id: Uuid) -> Result<Option<JmapEmail>> {

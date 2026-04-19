@@ -1422,6 +1422,7 @@ dependencies = [
  "axum",
  "lpe-admin-api",
  "lpe-domain",
+ "lpe-imap",
  "lpe-storage",
  "reqwest",
  "tokio",
@@ -1460,6 +1461,20 @@ dependencies = [
  "base64",
  "serde",
  "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "lpe-imap"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "argon2",
+ "base64",
+ "lpe-magika",
+ "lpe-mail-auth",
+ "lpe-storage",
+ "tokio",
  "uuid",
 ]
 

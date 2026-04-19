@@ -454,6 +454,14 @@ The current `JMAP Mail` MVP follows that rule explicitly:
 - no `JMAP` path performs direct Internet-facing `SMTP`
 - protected `Bcc` metadata remains structurally separate from ordinary mailbox search and query projections
 
+The current `IMAP` MVP follows the same rule:
+
+- `LOGIN`, `LIST`, `SELECT`, `FETCH`, `STORE`, `SEARCH`, and `UID` are implemented as a compatibility adapter in `crates/lpe-imap`
+- mailbox reads reuse the canonical mailbox store rather than a protocol-specific cache or duplicate model
+- `STORE` updates the canonical read and flagged state
+- `APPEND` is limited to `Drafts` and reuses canonical draft persistence
+- the supported scope and limitations are documented in `docs/architecture/imap-mvp.md`
+
 The current `ActiveSync` MVP follows the same rule:
 
 - `Provision`, `FolderSync`, `Sync`, and `SendMail` are implemented as an adapter in `crates/lpe-activesync`
@@ -856,5 +864,7 @@ The current architectural direction for the first product phases is:
 - mailbox growth management through storage tiers, dedicated databases, split-capable large mailbox handling, and online archive support
 
 The precise supported `JMAP Mail` MVP scope and its intentional limitations are documented in `docs/architecture/jmap-mail-mvp.md`.
+
+The precise supported `IMAP` MVP scope and its intentional limitations are documented in `docs/architecture/imap-mvp.md`.
 
 The precise supported `ActiveSync` MVP scope and its intentional limitations are documented in `docs/architecture/activesync-mvp.md`.

@@ -1,0 +1,17 @@
+[package]
+name = "lpe-imap"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+lpe-magika = { path = "../lpe-magika" }
+lpe-mail-auth = { path = "../lpe-mail-auth" }
+lpe-storage = { path = "../lpe-storage" }
+tokio.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+argon2.workspace = true
+base64.workspace = true

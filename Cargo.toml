@@ -9,6 +9,7 @@ members = [
     "crates/lpe-storage",
     "crates/lpe-activesync",
     "crates/lpe-dav",
+    "crates/lpe-imap",
     "crates/lpe-jmap",
     "crates/lpe-admin-api",
     "crates/lpe-cli",
