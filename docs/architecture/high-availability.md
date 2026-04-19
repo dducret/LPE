@@ -9,6 +9,19 @@ The strategy is intentionally incremental:
 - the design must stay compatible with `Debian Trixie`
 - the `DMZ` / core split remains strict
 
+## Implemented MVP Status
+
+The current codebase now implements the first operational HA step:
+
+- `systemd` restart remains the default local recovery line on both nodes
+- `LPE` and `LPE-CT` expose `/health`, `/health/live`, and `/health/ready`
+- readiness now supports optional HA role gating through a local role file
+- the role file accepts `active`, `standby`, `drain`, or `maintenance`
+- when HA role gating is enabled, only `active` returns `ready`
+- Debian examples now include readiness probes, role-switch scripts, and `keepalived` example configurations for both zones
+
+This keeps the single-node majority path unchanged while making the first `active/passive` failover implementable.
+
 ## Why This Strategy
 
 Most installations will run with a single `LPE` and a single `LPE-CT`.
@@ -162,6 +175,7 @@ Readiness is intentionally conservative:
 
 - `PostgreSQL` reachability
 - integration secret validity
+- optional HA role activation state from `LPE_HA_ROLE_FILE`
 - optional reachability of the `LPE-CT` API
 
 `LPE-CT` reachability is reported as a warning, not a hard readiness failure, because the core can still accept user traffic and queue outbound work while the `DMZ` side recovers.
@@ -171,6 +185,7 @@ Readiness is intentionally conservative:
 `LPE-CT` currently validates:
 
 - integration secret validity
+- optional HA role activation state from `LPE_CT_HA_ROLE_FILE`
 - presence of the local state file
 - presence of required spool directories
 - configured primary relay target
@@ -187,6 +202,7 @@ For both products:
 
 - `systemd` restart is the first line of recovery
 - health endpoints expose whether the restarted process is actually ready
+- when HA role gating is enabled, the local role file must be switched to `active` on the promoted node
 
 ### Core node recovery
 
@@ -194,19 +210,42 @@ If the active core node is lost:
 
 1. promote the `PostgreSQL` standby
 2. move the core VIP
-3. verify `curl http://<core-vip>:8080/health/ready`
-4. verify web and protocol publication through `nginx`
-5. verify outbound queue draining toward the `LPE-CT` VIP
+3. set the promoted node role file to `active`
+4. set the former active node role file to `standby` or `maintenance` before reusing it
+5. verify `curl http://<core-vip>:8080/health/ready`
+6. verify web and protocol publication through `nginx`
+7. verify outbound queue draining toward the `LPE-CT` VIP
+
+The outbound worker resumes naturally in this model because queue state stays in `PostgreSQL` and only the `active` node is considered ready for traffic.
 
 ### `DMZ` node recovery
 
 If the active `LPE-CT` node is lost:
 
 1. move the `DMZ` VIP or perimeter publication
-2. verify `curl http://<lpe-ct-vip>:8380/health/ready`
-3. verify SMTP banner and accepted spool writes
-4. verify final delivery toward the core VIP
-5. when the failed node returns, inspect its spool before reusing it
+2. set the promoted node role file to `active`
+3. set the former active node role file to `standby` or `maintenance` before reusing it
+4. verify `curl http://<lpe-ct-vip>:8380/health/ready`
+5. verify SMTP banner and accepted spool writes
+6. verify final delivery toward the core VIP
+7. when the failed node returns, inspect its spool before reusing it
+
+## Debian Trixie Operating Shape
+
+The first practical `Debian Trixie` operating model is:
+
+- one `keepalived` instance for the core VIP
+- one separate `keepalived` instance for the `DMZ` VIP
+- `check-lpe-ready.sh` and `check-lpe-ct-ready.sh` as tracked readiness probes
+- `lpe-ha-set-role.sh` and `lpe-ct-ha-set-role.sh` as role-switch hooks
+- one stable writer endpoint for `PostgreSQL`, promoted outside the application
+
+The example files are intentionally limited to the first HA step. They do not attempt to solve:
+
+- database promotion
+- fencing
+- split-brain prevention policy
+- perimeter routing specifics
 
 ## Explicit Non-Goals Of This First Iteration
 

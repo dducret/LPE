@@ -35,6 +35,8 @@ Pour un serveur de tri separe en `DMZ`, utiliser plutot `LPE-CT/installation/deb
 
 Les scripts `LPE-CT` installent aussi un listener SMTP, un spool local dans `/var/spool/lpe-ct`, et trois jeux de tests:
 
+Pour une premiere mise en oeuvre `active/passive` en `DMZ`, le repertoire `LPE-CT/installation/debian-trixie` fournit aussi `check-lpe-ct-ready.sh`, `lpe-ct-ha-set-role.sh` et `keepalived-lpe-ct.conf.example`.
+
 L'integration fonctionnelle `LPE` / `LPE-CT` demande aussi d'aligner `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL` et `LPE_INTEGRATION_SHARED_SECRET` entre les deux noeuds. `LPE_INTEGRATION_SHARED_SECRET` est maintenant obligatoire des deux cotes au demarrage, doit rester hors des interfaces publiques, et doit etre definie avec une valeur forte non triviale d'au moins `32` caracteres. Le contrat est documente dans `docs/architecture/lpe-ct-integration.md`.
 
 - `test-local-lpe-ct.sh` depuis le serveur `LPE-CT`
@@ -81,6 +83,9 @@ Fichiers:
 - `run-migrations.sh` applique les migrations SQL PostgreSQL du projet
 - `run-migrations.sh` applique aussi le schema persistant de la console d'administration
 - `check-lpe.sh` verifie l'installation, PostgreSQL, le service et les endpoints HTTP
+- `check-lpe-ready.sh` retourne `0` seulement quand le noeud local est pret pour le trafic actif
+- `lpe-ha-set-role.sh` ecrit le role HA local (`active`, `standby`, `drain`, `maintenance`)
+- `keepalived-lpe.conf.example` montre l'integration minimale avec une VIP coeur
 - `lpe.service` decrit le service systemd initial
 - `lpe.nginx.conf` sert de template pour le site `nginx` de la console d'administration
 - `lpe.env.example` fournit une base de configuration
@@ -172,6 +177,26 @@ Pour valider l'installation:
 
 1. executer `check-lpe.sh`
 
+### Premiere etape HA exploitable
+
+Cette premiere etape reste optionnelle et ne change rien au deploiement mono-noeud par defaut.
+
+Pour un coeur `LPE` en `active/passive`:
+
+1. definir `LPE_HA_ROLE_FILE=/var/lib/lpe/ha-role` dans `/etc/lpe/lpe.env`
+2. initialiser le noeud actif avec `installation/debian-trixie/lpe-ha-set-role.sh active`
+3. initialiser le noeud passif avec `installation/debian-trixie/lpe-ha-set-role.sh standby`
+4. utiliser `check-lpe-ready.sh` comme sonde de readiness pour `keepalived` ou un frontal equivalent
+5. pointer `DATABASE_URL` vers l'ecrivain PostgreSQL actif et `LPE_CT_API_BASE_URL` vers la VIP `DMZ`
+
+En cas de bascule:
+
+1. promouvoir PostgreSQL hors application
+2. deplacer la VIP coeur
+3. passer le nouveau noeud maitre a `active`
+4. passer l'ancien maitre a `standby` ou `maintenance`
+5. verifier `curl http://127.0.0.1:8080/health/ready`
+
 ## English
 
 ### Debian Trixie
@@ -206,6 +231,8 @@ Operating assumptions:
 For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI, without exposing the core back office on the DMZ server, and also provisions a pinned `Magika` CLI binary in `/opt/lpe-ct/bin/magika` for inbound SMTP validation.
 
 The `LPE-CT` scripts also install an SMTP listener, a local spool in `/var/spool/lpe-ct`, and three test suites:
+
+For the first `active/passive` `DMZ` deployment step, `LPE-CT/installation/debian-trixie` also provides `check-lpe-ct-ready.sh`, `lpe-ct-ha-set-role.sh`, and `keepalived-lpe-ct.conf.example`.
 
 The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL`, and `LPE_INTEGRATION_SHARED_SECRET` values across the two nodes. `LPE_INTEGRATION_SHARED_SECRET` is now mandatory on both sides at startup, must stay out of public interfaces, and must be set to a strong non-trivial value of at least `32` characters. The contract is documented in `docs/architecture/lpe-ct-integration.md`.
 
@@ -254,6 +281,8 @@ Files:
 - `run-migrations.sh` also applies the persistent schema for the administration console
 - `check-lpe.sh` verifies the installation, PostgreSQL, the service, and the HTTP endpoints
 - `check-lpe-ready.sh` returns success only when the local `LPE` node is ready for traffic
+- `lpe-ha-set-role.sh` writes the local HA role (`active`, `standby`, `drain`, `maintenance`)
+- `keepalived-lpe.conf.example` shows the minimal integration with a core-side VIP
 - `lpe.service` describes the initial systemd service
 - `lpe.nginx.conf` is the template used to generate the administration `nginx` site
 - `lpe.env.example` provides a base configuration
@@ -345,3 +374,23 @@ cd installation/debian-trixie
 To validate the installation:
 
 1. run `check-lpe.sh`
+
+### First Implementable HA Step
+
+This first HA step remains optional and does not change the default single-node deployment.
+
+For an `active/passive` `LPE` core pair:
+
+1. set `LPE_HA_ROLE_FILE=/var/lib/lpe/ha-role` in `/etc/lpe/lpe.env`
+2. initialize the active node with `installation/debian-trixie/lpe-ha-set-role.sh active`
+3. initialize the passive node with `installation/debian-trixie/lpe-ha-set-role.sh standby`
+4. use `check-lpe-ready.sh` as the readiness probe for `keepalived` or an equivalent front end
+5. point `DATABASE_URL` to the active PostgreSQL writer and `LPE_CT_API_BASE_URL` to the `DMZ` VIP
+
+During failover:
+
+1. promote PostgreSQL outside the application
+2. move the core VIP
+3. switch the new master node to `active`
+4. switch the former master to `standby` or `maintenance`
+5. verify `curl http://127.0.0.1:8080/health/ready`

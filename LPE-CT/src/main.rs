@@ -343,6 +343,8 @@ async fn health_ready(State(state): State<AppState>) -> Result<Json<ReadinessRes
         ),
     });
 
+    checks.push(ha_activation_check());
+
     checks.push(check_state_file(&state.state_file));
     checks.push(check_spool_layout(&state.spool_dir));
     checks.push(check_non_empty_value(
@@ -940,6 +942,60 @@ fn current_timestamp() -> String {
     }
 }
 
+fn ha_role_file() -> Option<PathBuf> {
+    env::var("LPE_CT_HA_ROLE_FILE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn read_ha_role() -> Result<Option<String>> {
+    let Some(path) = ha_role_file() else {
+        return Ok(None);
+    };
+
+    let role = fs::read_to_string(&path)
+        .with_context(|| format!("unable to read {}", path.display()))?;
+    let normalized = role.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        anyhow::bail!("HA role file {} is empty", path.display());
+    }
+    if !matches!(
+        normalized.as_str(),
+        "active" | "standby" | "drain" | "maintenance"
+    ) {
+        anyhow::bail!(
+            "HA role file {} contains unsupported role {}",
+            path.display(),
+            normalized
+        );
+    }
+
+    Ok(Some(normalized))
+}
+
+fn ha_activation_check() -> ReadinessCheck {
+    match read_ha_role() {
+        Ok(None) => readiness_ok(
+            "ha-role",
+            true,
+            "HA role gating disabled; node follows default single-node readiness",
+        ),
+        Ok(Some(role)) if role == "active" => readiness_ok(
+            "ha-role",
+            true,
+            "node is marked active for HA traffic",
+        ),
+        Ok(Some(role)) => readiness_failed(
+            "ha-role",
+            true,
+            format!("node is marked {role} and must not receive active traffic"),
+        ),
+        Err(error) => readiness_failed("ha-role", true, error.to_string()),
+    }
+}
+
 fn readiness_ok(name: &str, critical: bool, detail: impl Into<String>) -> ReadinessCheck {
     ReadinessCheck {
         name: name.to_string(),
@@ -1197,10 +1253,25 @@ fn is_known_weak_secret(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::integration_shared_secret;
-    use std::sync::Mutex;
+    use super::{ha_activation_check, integration_shared_secret};
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::Mutex,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn temp_file(name: &str) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("lpe-ct-ha-role-{suffix}"));
+        fs::create_dir_all(&dir).unwrap();
+        dir.join(name)
+    }
 
     #[test]
     fn integration_secret_must_be_present_and_strong() {
@@ -1220,5 +1291,29 @@ mod tests {
             "abcdef0123456789abcdef0123456789"
         );
         std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
+    }
+
+    #[test]
+    fn ha_role_check_accepts_only_active_role() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let role_file = temp_file("lpe-ct-ha-role");
+
+        std::env::set_var("LPE_CT_HA_ROLE_FILE", &role_file);
+
+        fs::write(&role_file, b"active\n").unwrap();
+        let active = ha_activation_check();
+        assert_eq!(active.status, "ok");
+
+        fs::write(&role_file, b"drain\n").unwrap();
+        let drain = ha_activation_check();
+        assert_eq!(drain.status, "failed");
+        assert!(drain.detail.contains("drain"));
+
+        fs::write(&role_file, b"unknown\n").unwrap();
+        let invalid = ha_activation_check();
+        assert_eq!(invalid.status, "failed");
+        assert!(invalid.detail.contains("unsupported role"));
+
+        std::env::remove_var("LPE_CT_HA_ROLE_FILE");
     }
 }

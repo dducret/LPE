@@ -1,0 +1,28 @@
+vrrp_script chk_lpe_ready {
+  script "/opt/lpe/src/installation/debian-trixie/check-lpe-ready.sh"
+  interval 2
+  timeout 2
+  fall 2
+  rise 2
+}
+
+vrrp_instance VI_LPE_CORE {
+  state BACKUP
+  interface eth0
+  virtual_router_id 41
+  priority 100
+  advert_int 1
+  authentication {
+    auth_type PASS
+    auth_pass CHANGE_ME_VRRP_SECRET
+  }
+  virtual_ipaddress {
+    10.20.0.40/24 dev eth0
+  }
+  track_script {
+    chk_lpe_ready
+  }
+  notify_master "/opt/lpe/src/installation/debian-trixie/lpe-ha-set-role.sh active"
+  notify_backup "/opt/lpe/src/installation/debian-trixie/lpe-ha-set-role.sh standby"
+  notify_fault "/opt/lpe/src/installation/debian-trixie/lpe-ha-set-role.sh maintenance"
+}

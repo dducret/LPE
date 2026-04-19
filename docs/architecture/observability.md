@@ -10,6 +10,7 @@ The observability layer must:
 - keep logs structured and correlation-friendly
 - separate business, transport, and security signals
 - preserve the architectural split between the core platform and the DMZ sorting center
+- support the first `active/passive` failover step without hiding which node is traffic-ready
 
 The implementation therefore exposes Prometheus-compatible text endpoints, structured `tracing` events, and stable correlation through `trace_id` and `message_id`.
 
@@ -142,5 +143,6 @@ Routes use the matched path when available so labels stay operationally useful w
 
 - Use JSON logs in production together with `RUST_LOG=info` or a stricter target-specific filter.
 - Scrape both `/metrics` endpoints; `LPE` and `LPE-CT` expose complementary signals rather than duplicates.
+- Probe `/health/ready` on both nodes when HA role gating is enabled; only the node marked `active` should be considered traffic-ready.
 - Use `trace_id` for request-chain correlation and `message_id` for canonical message correlation.
 - Alert primarily on sustained `deferred`, `failed`, `quarantined`, `rejected`, and spool-growth patterns rather than on single transient events.

@@ -35,22 +35,22 @@ use tracing::info;
 use uuid::Uuid;
 
 mod client_config;
-mod oidc;
 mod observability;
+mod oidc;
 mod totp;
 mod types;
 
 use crate::types::{
-    ApiResult, AttachmentSupportResponse, BootstrapAdminRequest, BootstrapAdminResponse,
-    ClientLoginResponse, CreateAccountRequest, CreateAliasRequest, CreateDomainRequest,
-    CreateFilterRuleRequest, CreateMailboxRequest, CreatePstTransferJobRequest,
-    CreateServerAdministratorRequest, EmailTraceSearchRequest, EnrollTotpRequest,
-    EnrollTotpResponse, LocalAiHealthResponse, LoginRequest, LoginResponse,
+    AdminAuthFactorsResponse, ApiResult, AttachmentSupportResponse, BootstrapAdminRequest,
+    BootstrapAdminResponse, ClientLoginResponse, CreateAccountRequest, CreateAliasRequest,
+    CreateDomainRequest, CreateFilterRuleRequest, CreateMailboxRequest,
+    CreatePstTransferJobRequest, CreateServerAdministratorRequest, EmailTraceSearchRequest,
+    EnrollTotpRequest, EnrollTotpResponse, LocalAiHealthResponse, LoginRequest, LoginResponse,
     OidcMetadataResponse, OidcStartResponse, ReadinessCheck, ReadinessResponse,
     SubmitMessageRequest, SubmitRecipientRequest, UpdateAccountRequest,
     UpdateAntispamSettingsRequest, UpdateLocalAiSettingsRequest, UpdateSecuritySettingsRequest,
     UpdateServerSettingsRequest, UpsertClientContactRequest, UpsertClientEventRequest,
-    UpsertClientTaskRequest, VerifyTotpRequest, AdminAuthFactorsResponse,
+    UpsertClientTaskRequest, VerifyTotpRequest,
 };
 
 const MIN_ADMIN_PASSWORD_LEN: usize = 12;
@@ -151,8 +151,11 @@ async fn health_ready(State(storage): State<Storage>) -> ApiResult<ReadinessResp
     let mut checks = Vec::new();
 
     checks.push(
-        match tokio::time::timeout(Duration::from_millis(1_500), storage.fetch_admin_dashboard())
-            .await
+        match tokio::time::timeout(
+            Duration::from_millis(1_500),
+            storage.fetch_admin_dashboard(),
+        )
+        .await
         {
             Ok(Ok(_)) => readiness_ok("postgresql", true, "primary metadata store reachable"),
             Ok(Err(error)) => readiness_failed(
@@ -180,6 +183,8 @@ async fn health_ready(State(storage): State<Storage>) -> ApiResult<ReadinessResp
             format!("integration secret is invalid: {error}"),
         ),
     });
+
+    checks.push(ha_activation_check());
 
     checks.push(
         check_optional_http_dependency(
@@ -389,7 +394,10 @@ async fn verify_totp_factor(
         .fetch_pending_admin_factor_secret(&admin.email, request.factor_id)
         .await
         .map_err(internal_error)?
-        .ok_or((StatusCode::NOT_FOUND, "pending factor not found".to_string()))?;
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            "pending factor not found".to_string(),
+        ))?;
     if !totp::verify_code(&secret, &request.code, totp::unix_time()) {
         return Err((StatusCode::UNAUTHORIZED, "invalid TOTP code".to_string()));
     }
@@ -1248,8 +1256,16 @@ async fn submit_message(
     let trace_id = observability::trace_id_from_headers(&headers);
     let subject_for_audit = request.subject.clone();
     let recipient_count = request.to.len()
-        + request.cc.as_ref().map(|entries| entries.len()).unwrap_or(0)
-        + request.bcc.as_ref().map(|entries| entries.len()).unwrap_or(0);
+        + request
+            .cc
+            .as_ref()
+            .map(|entries| entries.len())
+            .unwrap_or(0)
+        + request
+            .bcc
+            .as_ref()
+            .map(|entries| entries.len())
+            .unwrap_or(0);
     let internet_message_id = request.internet_message_id.clone();
     ensure_client_message_owner(&account, &request)?;
     let submitted = storage
@@ -1680,6 +1696,58 @@ fn lpe_ct_base_url() -> String {
         .to_string()
 }
 
+fn ha_role_file() -> Option<PathBuf> {
+    env::var("LPE_HA_ROLE_FILE")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn read_ha_role() -> anyhow::Result<Option<String>> {
+    let Some(path) = ha_role_file() else {
+        return Ok(None);
+    };
+
+    let role = std::fs::read_to_string(&path)
+        .map_err(|error| anyhow::anyhow!("unable to read {}: {error}", path.display()))?;
+    let normalized = role.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        anyhow::bail!("HA role file {} is empty", path.display());
+    }
+    if !matches!(
+        normalized.as_str(),
+        "active" | "standby" | "drain" | "maintenance"
+    ) {
+        anyhow::bail!(
+            "HA role file {} contains unsupported role {}",
+            path.display(),
+            normalized
+        );
+    }
+
+    Ok(Some(normalized))
+}
+
+fn ha_activation_check() -> ReadinessCheck {
+    match read_ha_role() {
+        Ok(None) => readiness_ok(
+            "ha-role",
+            true,
+            "HA role gating disabled; node follows default single-node readiness",
+        ),
+        Ok(Some(role)) if role == "active" => {
+            readiness_ok("ha-role", true, "node is marked active for HA traffic")
+        }
+        Ok(Some(role)) => readiness_failed(
+            "ha-role",
+            true,
+            format!("node is marked {role} and must not receive active traffic"),
+        ),
+        Err(error) => readiness_failed("ha-role", true, error.to_string()),
+    }
+}
+
 fn readiness_ok(name: &str, critical: bool, detail: impl Into<String>) -> ReadinessCheck {
     ReadinessCheck {
         name: name.to_string(),
@@ -1996,8 +2064,7 @@ fn is_known_weak_secret(value: &str) -> bool {
 mod tests {
     use super::{
         bootstrap_admin_request_from_env, bootstrap_admin_request_from_env_or_defaults,
-        integration_shared_secret,
-        validate_uploaded_pst_file_with_validator,
+        ha_activation_check, integration_shared_secret, validate_uploaded_pst_file_with_validator,
     };
     use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
     use std::{
@@ -2143,6 +2210,30 @@ mod tests {
         let request = bootstrap_admin_request_from_env_or_defaults().unwrap();
         assert_eq!(request.email, "admin@example.test");
         assert_eq!(request.password, "ChangeMeNow$");
+    }
+
+    #[test]
+    fn ha_role_check_accepts_only_active_role() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let role_file = temp_file("ha-role");
+
+        std::env::set_var("LPE_HA_ROLE_FILE", &role_file);
+
+        fs::write(&role_file, b"active\n").unwrap();
+        let active = ha_activation_check();
+        assert_eq!(active.status, "ok");
+
+        fs::write(&role_file, b"standby\n").unwrap();
+        let standby = ha_activation_check();
+        assert_eq!(standby.status, "failed");
+        assert!(standby.detail.contains("standby"));
+
+        fs::write(&role_file, b"broken\n").unwrap();
+        let invalid = ha_activation_check();
+        assert_eq!(invalid.status, "failed");
+        assert!(invalid.detail.contains("unsupported role"));
+
+        std::env::remove_var("LPE_HA_ROLE_FILE");
     }
 }
 
