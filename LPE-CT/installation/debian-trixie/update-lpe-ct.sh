@@ -15,6 +15,8 @@ SERVICE_GROUP="${SERVICE_GROUP:-lpe-ct}"
 NGINX_AVAILABLE_DIR="${NGINX_AVAILABLE_DIR:-/etc/nginx/sites-available}"
 NGINX_ENABLED_DIR="${NGINX_ENABLED_DIR:-/etc/nginx/sites-enabled}"
 NGINX_SITE_NAME="${NGINX_SITE_NAME:-lpe-ct.conf}"
+MAGIKA_VERSION="${MAGIKA_VERSION:-1.0.2}"
+MAGIKA_LINUX_X86_64_SHA256="${MAGIKA_LINUX_X86_64_SHA256:-4ce475c965cd20e724b5fc53e8a303a479b9d8649beef8721d05e9b3988fbab4}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "This script must be run as root." >&2
@@ -30,6 +32,21 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   echo "Environment file not found in ${ENV_FILE}. Run install-lpe-ct.sh first." >&2
   exit 1
 fi
+
+install_magika() {
+  local version="$1"
+  local expected_sha="$2"
+  local archive="magika-x86_64-unknown-linux-gnu.tar.xz"
+  local url="https://github.com/google/magika/releases/download/cli/v${version}/${archive}"
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "${temp_dir}"' RETURN
+
+  curl --proto '=https' --tlsv1.2 -LsSf "${url}" -o "${temp_dir}/${archive}"
+  echo "${expected_sha}  ${temp_dir}/${archive}" | sha256sum -c -
+  tar -xJf "${temp_dir}/${archive}" -C "${temp_dir}"
+  install -m 0755 "${temp_dir}/magika" "${BIN_DIR}/magika"
+}
 
 git config --global --add safe.directory "${SRC_DIR}" || true
 
@@ -64,6 +81,7 @@ cd "${SRC_DIR}"
 "${CARGO_BIN}" build --release --manifest-path "${SRC_DIR}/LPE-CT/Cargo.toml"
 
 install -m 0755 "${SRC_DIR}/LPE-CT/target/release/lpe-ct" "${BIN_DIR}/lpe-ct"
+install_magika "${MAGIKA_VERSION}" "${MAGIKA_LINUX_X86_64_SHA256}"
 install -m 0644 "${SRC_DIR}/LPE-CT/installation/debian-trixie/lpe-ct.service" "/etc/systemd/system/lpe-ct.service"
 install -d -o root -g root "${WEB_ROOT}"
 install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${SPOOL_DIR}" "${SPOOL_DIR}/incoming" "${SPOOL_DIR}/deferred" "${SPOOL_DIR}/quarantine" "${SPOOL_DIR}/held" "${SPOOL_DIR}/sent"

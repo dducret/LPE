@@ -1,4 +1,8 @@
 use anyhow::{anyhow, Context, Result};
+use lpe_magika::{
+    collect_mime_attachment_parts, DetectionSource, Detector, ExpectedKind, IngressContext,
+    MagikaDetection, PolicyDecision, ValidationRequest, Validator,
+};
 use lpe_domain::{
     InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
     OutboundMessageHandoffResponse, TransportDeliveryStatus,
@@ -40,7 +44,16 @@ struct QueuedMessage {
     rcpt_to: Vec<String>,
     status: String,
     relay_error: Option<String>,
+    magika_summary: Option<String>,
+    magika_decision: Option<String>,
     data: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum InboundMagikaOutcome {
+    Accept,
+    Quarantine(String),
+    Reject(String),
 }
 
 pub(crate) fn initialize_spool(spool_dir: &Path) -> Result<()> {
@@ -116,6 +129,8 @@ pub(crate) async fn process_outbound_handoff(
         rcpt_to: payload.envelope_recipients(),
         status: "outbound".to_string(),
         relay_error: None,
+        magika_summary: None,
+        magika_decision: None,
         data: compose_rfc822_message(&payload),
     };
 
@@ -227,7 +242,20 @@ async fn handle_smtp_session(
                 data,
             )
             .await?;
-            write_smtp(&mut writer, &format!("250 queued as {}", message.id)).await?;
+            if message.status == "rejected" {
+                write_smtp(
+                    &mut writer,
+                    &format!(
+                        "554 message rejected by Magika policy (trace {})",
+                        message.id
+                    ),
+                )
+                .await?;
+            } else if message.status == "quarantined" {
+                write_smtp(&mut writer, &format!("250 quarantined as {}", message.id)).await?;
+            } else {
+                write_smtp(&mut writer, &format!("250 queued as {}", message.id)).await?;
+            }
             mail_from.clear();
             rcpt_to.clear();
         } else if upper == "RSET" {
@@ -254,6 +282,29 @@ async fn receive_message(
     rcpt_to: Vec<String>,
     data: String,
 ) -> Result<QueuedMessage> {
+    receive_message_with_validator(
+        &Validator::from_env(),
+        spool_dir,
+        config,
+        peer,
+        helo,
+        mail_from,
+        rcpt_to,
+        data,
+    )
+    .await
+}
+
+async fn receive_message_with_validator<D: Detector>(
+    validator: &Validator<D>,
+    spool_dir: &Path,
+    config: &RuntimeConfig,
+    peer: String,
+    helo: String,
+    mail_from: String,
+    rcpt_to: Vec<String>,
+    data: String,
+) -> Result<QueuedMessage> {
     let mut message = QueuedMessage {
         id: message_id("in"),
         direction: "inbound".to_string(),
@@ -264,6 +315,8 @@ async fn receive_message(
         rcpt_to,
         status: "incoming".to_string(),
         relay_error: None,
+        magika_summary: None,
+        magika_decision: None,
         data,
     };
 
@@ -273,6 +326,31 @@ async fn receive_message(
         message.status = "held".to_string();
         move_message(spool_dir, &message, "incoming", "held").await?;
         return Ok(message);
+    }
+
+    match classify_inbound_message(validator, message.data.as_bytes()) {
+        Ok(InboundMagikaOutcome::Accept) => {}
+        Ok(InboundMagikaOutcome::Quarantine(reason)) => {
+            message.status = "quarantined".to_string();
+            message.magika_decision = Some("quarantine".to_string());
+            message.magika_summary = Some(reason);
+            move_message(spool_dir, &message, "incoming", "quarantine").await?;
+            return Ok(message);
+        }
+        Ok(InboundMagikaOutcome::Reject(reason)) => {
+            message.status = "rejected".to_string();
+            message.magika_decision = Some("reject".to_string());
+            message.magika_summary = Some(reason);
+            move_message(spool_dir, &message, "incoming", "quarantine").await?;
+            return Ok(message);
+        }
+        Err(error) => {
+            message.status = "quarantined".to_string();
+            message.magika_decision = Some("quarantine".to_string());
+            message.magika_summary = Some(format!("Magika validation failed: {error}"));
+            move_message(spool_dir, &message, "incoming", "quarantine").await?;
+            return Ok(message);
+        }
     }
 
     if config.quarantine_enabled && should_quarantine(&message.data) {
@@ -303,6 +381,40 @@ async fn receive_message(
     }
 
     Ok(message)
+}
+
+fn classify_inbound_message<D: Detector>(
+    validator: &Validator<D>,
+    message_bytes: &[u8],
+) -> Result<InboundMagikaOutcome> {
+    let attachments = collect_mime_attachment_parts(message_bytes)?;
+    for attachment in attachments {
+        let outcome = validator.validate_bytes(
+            ValidationRequest {
+                ingress_context: IngressContext::LpeCtInboundSmtp,
+                declared_mime: attachment.declared_mime.clone(),
+                filename: attachment.filename.clone(),
+                expected_kind: ExpectedKind::Any,
+            },
+            &attachment.bytes,
+        )?;
+        match outcome.policy_decision {
+            PolicyDecision::Accept => {}
+            PolicyDecision::Reject => {
+                return Ok(InboundMagikaOutcome::Reject(format!(
+                    "attachment {:?} rejected: {}",
+                    attachment.filename, outcome.reason
+                )));
+            }
+            PolicyDecision::Quarantine | PolicyDecision::Restrict => {
+                return Ok(InboundMagikaOutcome::Quarantine(format!(
+                    "attachment {:?} quarantined: {}",
+                    attachment.filename, outcome.reason
+                )));
+            }
+        }
+    }
+    Ok(InboundMagikaOutcome::Accept)
 }
 
 async fn deliver_inbound_message(
@@ -679,10 +791,11 @@ fn current_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_body_text, initialize_spool, parse_header_value, process_outbound_handoff,
-        receive_message, RuntimeConfig,
+        classify_inbound_message, extract_body_text, initialize_spool, parse_header_value,
+        process_outbound_handoff, receive_message, receive_message_with_validator, RuntimeConfig,
     };
     use axum::{routing::post, Json, Router};
+    use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
     use lpe_domain::{
         InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
         TransportDeliveryStatus, TransportRecipient,
@@ -719,6 +832,19 @@ mod tests {
             drain_mode: false,
             quarantine_enabled: true,
             max_message_size_mb: 16,
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct FakeDetector {
+        detection: Result<MagikaDetection, String>,
+    }
+
+    impl Detector for FakeDetector {
+        fn detect(&self, _source: DetectionSource<'_>) -> anyhow::Result<MagikaDetection> {
+            self.detection
+                .clone()
+                .map_err(anyhow::Error::msg)
         }
     }
 
@@ -820,6 +946,82 @@ mod tests {
         assert_eq!(request.subject, "Inbound");
         assert_eq!(request.body_text, "Body");
         assert_eq!(request.rcpt_to, vec!["dest@example.test".to_string()]);
+    }
+
+    #[test]
+    fn inbound_mismatch_is_rejected_before_delivery() {
+        let validator = Validator::new(
+            FakeDetector {
+                detection: Ok(MagikaDetection {
+                    label: "exe".to_string(),
+                    mime_type: "application/x-msdownload".to_string(),
+                    description: "Executable".to_string(),
+                    group: "binary".to_string(),
+                    extensions: vec!["exe".to_string()],
+                    score: Some(0.99),
+                }),
+            },
+            0.80,
+        );
+        let mime = concat!(
+            "Content-Type: multipart/mixed; boundary=\"abc\"\r\n",
+            "\r\n",
+            "--abc\r\n",
+            "Content-Type: application/pdf; name=\"invoice.pdf\"\r\n",
+            "Content-Disposition: attachment; filename=\"invoice.pdf\"\r\n",
+            "\r\n",
+            "%PDF-1.7\r\n",
+            "--abc--\r\n"
+        );
+
+        let outcome = classify_inbound_message(&validator, mime.as_bytes()).unwrap();
+        assert!(matches!(outcome, super::InboundMagikaOutcome::Reject(_)));
+    }
+
+    #[tokio::test]
+    async fn inbound_magika_failure_is_quarantined() {
+        let spool = temp_dir("inbound-quarantine-magika");
+        initialize_spool(&spool).unwrap();
+        let validator = Validator::new(
+            FakeDetector {
+                detection: Err("binary unavailable".to_string()),
+            },
+            0.80,
+        );
+
+        let message = receive_message_with_validator(
+            &validator,
+            &spool,
+            &runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string()),
+            "127.0.0.1:2525".to_string(),
+            "example.test".to_string(),
+            "sender@example.test".to_string(),
+            vec!["dest@example.test".to_string()],
+            concat!(
+                "Content-Type: multipart/mixed; boundary=\"abc\"\r\n",
+                "\r\n",
+                "--abc\r\n",
+                "Content-Type: application/pdf; name=\"invoice.pdf\"\r\n",
+                "Content-Disposition: attachment; filename=\"invoice.pdf\"\r\n",
+                "\r\n",
+                "%PDF-1.7\r\n",
+                "--abc--\r\n"
+            )
+            .to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(message.status, "quarantined");
+        assert!(message
+            .magika_summary
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Magika validation failed"));
+        assert!(spool
+            .join("quarantine")
+            .join(format!("{}.json", message.id))
+            .exists());
     }
 
     #[test]

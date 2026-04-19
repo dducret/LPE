@@ -3,6 +3,7 @@ members = [
     "crates/lpe-domain",
     "crates/lpe-core",
     "crates/lpe-ai",
+    "crates/lpe-magika",
     "crates/lpe-attachments",
     "crates/lpe-mail-auth",
     "crates/lpe-storage",

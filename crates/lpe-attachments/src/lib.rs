@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
+use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use std::fs::File;
@@ -14,25 +15,40 @@ pub enum AttachmentFormat {
 }
 
 impl AttachmentFormat {
-    pub fn from_path(path: &Path) -> Result<Self> {
-        match path
-            .extension()
-            .and_then(|value| value.to_str())
-            .map(|value| value.to_ascii_lowercase())
-            .as_deref()
-        {
-            Some("pdf") => Ok(Self::Pdf),
-            Some("docx") => Ok(Self::Docx),
-            Some("odt") => Ok(Self::Odt),
-            Some(other) => bail!("unsupported attachment format: {other}"),
-            None => bail!("attachment has no file extension"),
+    fn from_detected_mime(mime_type: &str) -> Result<Self> {
+        match mime_type {
+            "application/pdf" => Ok(Self::Pdf),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
+                Ok(Self::Docx)
+            }
+            "application/vnd.oasis.opendocument.text" => Ok(Self::Odt),
+            other => bail!("unsupported validated attachment format: {other}"),
         }
     }
 }
 
 pub fn extract_text_from_path(path: impl AsRef<Path>) -> Result<String> {
     let path = path.as_ref();
-    match AttachmentFormat::from_path(path)? {
+    let outcome = Validator::from_env().validate_path(
+        ValidationRequest {
+            ingress_context: IngressContext::AttachmentParsing,
+            declared_mime: None,
+            filename: path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(ToString::to_string),
+            expected_kind: ExpectedKind::SupportedAttachmentText,
+        },
+        path,
+    )?;
+    if outcome.policy_decision != PolicyDecision::Accept {
+        bail!(
+            "attachment validation blocked extraction: {}",
+            outcome.reason
+        );
+    }
+
+    match AttachmentFormat::from_detected_mime(&outcome.detected_mime)? {
         AttachmentFormat::Pdf => extract_pdf_text(path),
         AttachmentFormat::Docx => extract_docx_text(path),
         AttachmentFormat::Odt => extract_odt_text(path),
@@ -152,4 +168,30 @@ fn normalize_whitespace(input: &str) -> String {
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AttachmentFormat;
+
+    #[test]
+    fn validated_attachment_format_matches_supported_v1_scope() {
+        assert_eq!(
+            AttachmentFormat::from_detected_mime("application/pdf").unwrap(),
+            AttachmentFormat::Pdf
+        );
+        assert_eq!(
+            AttachmentFormat::from_detected_mime(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+            .unwrap(),
+            AttachmentFormat::Docx
+        );
+        assert_eq!(
+            AttachmentFormat::from_detected_mime("application/vnd.oasis.opendocument.text")
+                .unwrap(),
+            AttachmentFormat::Odt
+        );
+        assert!(AttachmentFormat::from_detected_mime("image/png").is_err());
+    }
 }

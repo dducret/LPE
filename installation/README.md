@@ -31,7 +31,7 @@ Hypothese d'exploitation:
 - shell root ou compte avec `sudo`
 - aucune dependance locale supposee au depart sauf l'acces reseau
 
-Pour un serveur de tri separe en `DMZ`, utiliser plutot `LPE-CT/installation/debian-trixie`. Ce sous-repertoire installe un composant distinct dans `/opt/lpe-ct` avec sa propre interface de management et sans exposer le back office coeur sur le serveur DMZ.
+Pour un serveur de tri separe en `DMZ`, utiliser plutot `LPE-CT/installation/debian-trixie`. Ce sous-repertoire installe un composant distinct dans `/opt/lpe-ct` avec sa propre interface de management, sans exposer le back office coeur sur le serveur DMZ, et provisionne aussi un binaire `Magika` CLI epingle dans `/opt/lpe-ct/bin/magika` pour la validation SMTP entrante.
 
 Les scripts `LPE-CT` installent aussi un listener SMTP, un spool local dans `/var/spool/lpe-ct`, et trois jeux de tests:
 
@@ -69,9 +69,11 @@ Les scripts `install-lpe.sh` et `update-lpe.sh` enregistrent automatiquement `/o
 Fichiers:
 
 - `install-lpe.sh` installe les prerequis, clone le depot, compile `lpe-cli` et installe le service systemd
+- `install-lpe.sh` provisionne aussi le binaire `Magika` CLI epingle, verifie par checksum, dans `/opt/lpe/bin/magika`
 - `install-lpe.sh` demarre aussi `lpe.service` a la fin de l'installation
 - `install-lpe.sh` installe aussi `nodejs`, `npm` et `nginx`, build `web/admin` et `web/client`, deploie les interfaces statiques et active le site `nginx`
 - `update-lpe.sh` met a jour le depot, applique les migrations SQL, recompile `lpe-cli` et redemarre le service
+- `update-lpe.sh` reprovisionne aussi la meme version epinglee de `Magika` pour garder une detection deterministe
 - `update-lpe.sh` rebuild aussi `web/admin` et `web/client`, redeploie les assets statiques et recharge `nginx`
 - `bootstrap-postgresql.sh` cree un role et une base PostgreSQL
 - `bootstrap-postgresql.sh` installe aussi PostgreSQL serveur si necessaire puis le demarre
@@ -97,7 +99,7 @@ Le client web demande une authentification utilisateur. Creer d'abord un compte 
 
 La console d'administration enregistre desormais ses comptes, mots de passe de comptes, boites, demandes d'import/export `PST`, domaines, alias, parametres, administrateurs delegues, objets antispam et evenements d'audit dans `PostgreSQL`. L'execution des migrations n'est donc plus optionnelle apres deploiement ou mise a jour du schema. `update-lpe.sh` les applique automatiquement apres le `git pull`, afin d'eviter de deployer une API plus recente que le schema PostgreSQL.
 
-Les imports `PST` peuvent etre envoyes depuis le navigateur. Le service stocke les fichiers recus dans `LPE_PST_IMPORT_DIR`, par defaut `/var/lib/lpe/imports`, puis cree la demande d'import `PST` avec le chemin serveur obtenu. La taille maximale acceptee par l'API est configuree par `LPE_PST_UPLOAD_MAX_BYTES`, par defaut `21474836480` octets. Le reverse proxy `nginx` est aligne avec `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, par defaut `20g`.
+Les imports `PST` peuvent etre envoyes depuis le navigateur. Le service valide d'abord chaque fichier entrant avec Google `Magika`, puis stocke les fichiers recus dans `LPE_PST_IMPORT_DIR`, par defaut `/var/lib/lpe/imports`, et cree la demande d'import `PST` avec le chemin serveur obtenu. La taille maximale acceptee par l'API est configuree par `LPE_PST_UPLOAD_MAX_BYTES`, par defaut `21474836480` octets. Le reverse proxy `nginx` est aligne avec `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, par defaut `20g`. Le chemin du binaire est configure via `LPE_MAGIKA_BIN`, par defaut `/opt/lpe/bin/magika`, et le seuil minimal via `LPE_MAGIKA_MIN_SCORE`.
 
 La premiere connexion cree automatiquement un administrateur de bootstrap si aucun identifiant n'existe encore. Les variables `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD` et `LPE_ADMIN_SESSION_MINUTES` doivent etre ajustees dans `/etc/lpe/lpe.env` avant exposition de la console.
 
@@ -174,7 +176,7 @@ Operating assumptions:
 - root shell or an account with `sudo`
 - no local dependency assumed at the start except network access
 
-For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI and without exposing the core back office on the DMZ server.
+For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI, without exposing the core back office on the DMZ server, and also provisions a pinned `Magika` CLI binary in `/opt/lpe-ct/bin/magika` for inbound SMTP validation.
 
 The `LPE-CT` scripts also install an SMTP listener, a local spool in `/var/spool/lpe-ct`, and three test suites:
 
@@ -212,9 +214,11 @@ The install and update scripts automatically register `/opt/lpe/src` as a Git `s
 Files:
 
 - `install-lpe.sh` installs prerequisites, clones the repository, builds `lpe-cli`, and installs the systemd service
+- `install-lpe.sh` also provisions the pinned `Magika` CLI binary with checksum verification into `/opt/lpe/bin/magika`
 - `install-lpe.sh` also starts `lpe.service` at the end of the installation
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
 - `update-lpe.sh` updates the repository, applies SQL migrations, rebuilds `lpe-cli`, and restarts the service
+- `update-lpe.sh` also re-provisions the same pinned `Magika` version so content validation stays deterministic
 - `update-lpe.sh` also rebuilds `web/admin` and `web/client`, redeploys static assets, and reloads `nginx`
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
@@ -240,7 +244,7 @@ The web client requires user authentication. First create an account and its pas
 
 The administration console now stores its accounts, account passwords, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Running migrations is therefore mandatory after deployment or any schema update. `update-lpe.sh` applies them automatically after `git pull` so the API is not deployed ahead of the PostgreSQL schema.
 
-`PST` imports can be uploaded from the browser. The service stores received files in `LPE_PST_IMPORT_DIR`, defaulting to `/var/lib/lpe/imports`, then creates the `PST` import request with the resulting server path. The maximum accepted API upload size is configured through `LPE_PST_UPLOAD_MAX_BYTES`, defaulting to `21474836480` bytes. The `nginx` reverse proxy is aligned through `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, defaulting to `20g`.
+`PST` imports can be uploaded from the browser. The service validates each incoming file with Google `Magika` before storing it in `LPE_PST_IMPORT_DIR`, defaulting to `/var/lib/lpe/imports`, and then creates the `PST` import request with the resulting server path. The maximum accepted API upload size is configured through `LPE_PST_UPLOAD_MAX_BYTES`, defaulting to `21474836480` bytes. The `nginx` reverse proxy is aligned through `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, defaulting to `20g`. The binary path is configured through `LPE_MAGIKA_BIN`, defaulting to `/opt/lpe/bin/magika`, and the minimum confidence threshold through `LPE_MAGIKA_MIN_SCORE`.
 
 The first sign-in automatically creates a bootstrap administrator if no credential exists yet. `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD`, and `LPE_ADMIN_SESSION_MINUTES` must be adjusted in `/etc/lpe/lpe.env` before exposing the console.
 

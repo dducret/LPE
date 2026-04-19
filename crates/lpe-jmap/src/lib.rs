@@ -7,6 +7,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
 use lpe_storage::{
     AuditEntryInput, AuthenticatedAccount, JmapEmail, JmapEmailAddress, JmapEmailQuery,
     JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
@@ -37,23 +38,38 @@ pub fn router() -> Router<Storage> {
         .route("/session", get(session_handler))
         .route("/api", post(api_handler))
         .route("/upload/{account_id}", post(upload_handler))
-        .route("/download/{account_id}/{blob_id}/{name}", get(download_handler))
+        .route(
+            "/download/{account_id}/{blob_id}/{name}",
+            get(download_handler),
+        )
 }
 
 #[derive(Clone)]
-pub struct JmapService<S> {
+pub struct JmapService<S, V = lpe_magika::SystemDetector> {
     store: S,
+    validator: Validator<V>,
 }
 
 impl<S> JmapService<S> {
     pub fn new(store: S) -> Self {
-        Self { store }
+        Self {
+            store,
+            validator: Validator::from_env(),
+        }
+    }
+}
+
+impl<S, V> JmapService<S, V> {
+    pub fn new_with_validator(store: S, validator: Validator<V>) -> Self {
+        Self { store, validator }
     }
 }
 
 pub trait JmapStore: Clone + Send + Sync + 'static {
-    fn fetch_account_session<'a>(&'a self, token: &'a str)
-        -> StoreFuture<'a, Option<AuthenticatedAccount>>;
+    fn fetch_account_session<'a>(
+        &'a self,
+        token: &'a str,
+    ) -> StoreFuture<'a, Option<AuthenticatedAccount>>;
     fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>>;
     fn fetch_jmap_mailbox_ids<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>>;
     fn create_jmap_mailbox<'a>(
@@ -191,7 +207,10 @@ impl JmapStore for Storage {
         mailbox_id: Uuid,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
-        Box::pin(async move { self.destroy_jmap_mailbox(account_id, mailbox_id, audit).await })
+        Box::pin(async move {
+            self.destroy_jmap_mailbox(account_id, mailbox_id, audit)
+                .await
+        })
     }
 
     fn fetch_all_jmap_email_ids<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>> {
@@ -236,7 +255,10 @@ impl JmapStore for Storage {
         media_type: &'a str,
         blob_bytes: &'a [u8],
     ) -> StoreFuture<'a, JmapUploadBlob> {
-        Box::pin(async move { self.save_jmap_upload_blob(account_id, media_type, blob_bytes).await })
+        Box::pin(async move {
+            self.save_jmap_upload_blob(account_id, media_type, blob_bytes)
+                .await
+        })
     }
 
     fn fetch_jmap_upload_blob<'a>(
@@ -261,7 +283,10 @@ impl JmapStore for Storage {
         message_id: Uuid,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
-        Box::pin(async move { self.delete_draft_message(account_id, message_id, audit).await })
+        Box::pin(async move {
+            self.delete_draft_message(account_id, message_id, audit)
+                .await
+        })
     }
 
     fn submit_draft_message<'a>(
@@ -558,7 +583,12 @@ async fn upload_handler(
         .unwrap_or("application/octet-stream")
         .to_string();
     let response = service
-        .handle_upload(authorization.as_deref(), &account_id, &content_type, body.as_ref())
+        .handle_upload(
+            authorization.as_deref(),
+            &account_id,
+            &content_type,
+            body.as_ref(),
+        )
         .await
         .map_err(http_error)?;
     Ok((StatusCode::CREATED, Json(response)))
@@ -566,7 +596,11 @@ async fn upload_handler(
 
 async fn download_handler(
     State(storage): State<Storage>,
-    axum::extract::Path((account_id, blob_id, _name)): axum::extract::Path<(String, String, String)>,
+    axum::extract::Path((account_id, blob_id, _name)): axum::extract::Path<(
+        String,
+        String,
+        String,
+    )>,
     headers: HeaderMap,
 ) -> std::result::Result<impl IntoResponse, (StatusCode, String)> {
     let service = JmapService::new(storage);
@@ -575,13 +609,10 @@ async fn download_handler(
         .handle_download(authorization.as_deref(), &account_id, &blob_id)
         .await
         .map_err(http_error)?;
-    Ok((
-        [("content-type", blob.media_type.clone())],
-        blob.blob_bytes,
-    ))
+    Ok(([("content-type", blob.media_type.clone())], blob.blob_bytes))
 }
 
-impl<S: JmapStore> JmapService<S> {
+impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     pub async fn session_document(&self, authorization: Option<&str>) -> Result<SessionDocument> {
         let account = self.authenticate(authorization).await?;
         let account_id = account.account_id.to_string();
@@ -630,25 +661,32 @@ impl<S: JmapStore> JmapService<S> {
                 "Mailbox/get" => self.handle_mailbox_get(&account, arguments).await,
                 "Mailbox/query" => self.handle_mailbox_query(&account, arguments).await,
                 "Mailbox/changes" => self.handle_mailbox_changes(&account, arguments).await,
-                "Mailbox/set" => self
-                    .handle_mailbox_set(&account, arguments, &mut created_ids)
-                    .await,
+                "Mailbox/set" => {
+                    self.handle_mailbox_set(&account, arguments, &mut created_ids)
+                        .await
+                }
                 "Email/query" => self.handle_email_query(&account, arguments).await,
                 "Email/get" => self.handle_email_get(&account, arguments).await,
                 "Email/changes" => self.handle_email_changes(&account, arguments).await,
-                "Email/set" => self
-                    .handle_email_set(&account, arguments, &mut created_ids)
-                    .await,
-                "Email/copy" => self
-                    .handle_email_copy(&account, arguments, &mut created_ids)
-                    .await,
-                "Email/import" => self
-                    .handle_email_import(&account, arguments, &mut created_ids)
-                    .await,
-                "EmailSubmission/get" => self.handle_email_submission_get(&account, arguments).await,
-                "EmailSubmission/set" => self
-                    .handle_email_submission_set(&account, arguments, &mut created_ids)
-                    .await,
+                "Email/set" => {
+                    self.handle_email_set(&account, arguments, &mut created_ids)
+                        .await
+                }
+                "Email/copy" => {
+                    self.handle_email_copy(&account, arguments, &mut created_ids)
+                        .await
+                }
+                "Email/import" => {
+                    self.handle_email_import(&account, arguments, &mut created_ids)
+                        .await
+                }
+                "EmailSubmission/get" => {
+                    self.handle_email_submission_get(&account, arguments).await
+                }
+                "EmailSubmission/set" => {
+                    self.handle_email_submission_set(&account, arguments, &mut created_ids)
+                        .await
+                }
                 "Identity/get" => self.handle_identity_get(&account, arguments).await,
                 "Thread/get" => self.handle_thread_get(&account, arguments).await,
                 "Thread/changes" => self.handle_thread_changes(&account, arguments).await,
@@ -718,7 +756,10 @@ impl<S: JmapStore> JmapService<S> {
         let mut mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
         mailboxes.sort_by_key(|mailbox| (mailbox.sort_order, mailbox.name.to_lowercase()));
         let position = arguments.position.unwrap_or(0) as usize;
-        let limit = arguments.limit.unwrap_or(DEFAULT_GET_LIMIT).min(MAX_QUERY_LIMIT) as usize;
+        let limit = arguments
+            .limit
+            .unwrap_or(DEFAULT_GET_LIMIT)
+            .min(MAX_QUERY_LIMIT) as usize;
         let ids = mailboxes
             .iter()
             .skip(position)
@@ -790,10 +831,7 @@ impl<S: JmapStore> JmapService<S> {
                         {
                             Ok(mailbox) => {
                                 created_ids.insert(creation_id.clone(), mailbox.id.to_string());
-                                created.insert(
-                                    creation_id,
-                                    json!({"id": mailbox.id.to_string()}),
-                                );
+                                created.insert(creation_id, json!({"id": mailbox.id.to_string()}));
                             }
                             Err(error) => {
                                 not_created.insert(creation_id, set_error(&error.to_string()));
@@ -809,7 +847,9 @@ impl<S: JmapStore> JmapService<S> {
 
         if let Some(update) = arguments.update {
             for (id, value) in update {
-                match parse_uuid(&id).and_then(|mailbox_id| parse_mailbox_update(value).map(|input| (mailbox_id, input))) {
+                match parse_uuid(&id).and_then(|mailbox_id| {
+                    parse_mailbox_update(value).map(|input| (mailbox_id, input))
+                }) {
                     Ok((mailbox_id, input)) => {
                         let audit = AuditEntryInput {
                             actor: account.email.clone(),
@@ -853,7 +893,11 @@ impl<S: JmapStore> JmapService<S> {
                             action: "jmap-mailbox-destroy".to_string(),
                             subject: id.clone(),
                         };
-                        match self.store.destroy_jmap_mailbox(account_id, mailbox_id, audit).await {
+                        match self
+                            .store
+                            .destroy_jmap_mailbox(account_id, mailbox_id, audit)
+                            .await
+                        {
                             Ok(()) => destroyed.push(Value::String(id)),
                             Err(error) => {
                                 not_destroyed.insert(id, set_error(&error.to_string()));
@@ -925,11 +969,12 @@ impl<S: JmapStore> JmapService<S> {
 
         let ids = match parse_uuid_list(arguments.ids)? {
             Some(ids) => ids,
-            None => self
-                .store
-                .query_jmap_email_ids(account_id, None, 0, DEFAULT_GET_LIMIT)
-                .await?
-                .ids,
+            None => {
+                self.store
+                    .query_jmap_email_ids(account_id, None, 0, DEFAULT_GET_LIMIT)
+                    .await?
+                    .ids
+            }
         };
 
         let emails = self.store.fetch_jmap_emails(account_id, &ids).await?;
@@ -1035,7 +1080,10 @@ impl<S: JmapStore> JmapService<S> {
         let mut not_created = Map::new();
 
         for (creation_id, value) in arguments.emails {
-            match self.parse_email_import(account, account_id, value, created_ids).await {
+            match self
+                .parse_email_import(account, account_id, value, created_ids)
+                .await
+            {
                 Ok(input) => {
                     let audit = AuditEntryInput {
                         actor: account.email.clone(),
@@ -1141,8 +1189,7 @@ impl<S: JmapStore> JmapService<S> {
                         {
                             Ok(()) => destroyed.push(Value::String(id)),
                             Err(error) => {
-                                not_destroyed
-                                    .insert(id, set_error(&error.to_string()));
+                                not_destroyed.insert(id, set_error(&error.to_string()));
                             }
                         }
                     }
@@ -1297,7 +1344,10 @@ impl<S: JmapStore> JmapService<S> {
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
         let properties = thread_properties(arguments.properties);
         let all_email_ids = self.store.fetch_all_jmap_email_ids(account_id).await?;
-        let emails = self.store.fetch_jmap_emails(account_id, &all_email_ids).await?;
+        let emails = self
+            .store
+            .fetch_jmap_emails(account_id, &all_email_ids)
+            .await?;
         let ids = arguments.ids.unwrap_or_else(|| {
             emails
                 .iter()
@@ -1405,6 +1455,21 @@ impl<S: JmapStore> JmapService<S> {
     ) -> Result<Value> {
         let account = self.authenticate(authorization).await?;
         let requested_account_id = requested_account_id(Some(account_id), &account)?;
+        let outcome = self.validator.validate_bytes(
+            ValidationRequest {
+                ingress_context: IngressContext::JmapUpload,
+                declared_mime: Some(media_type.to_string()),
+                filename: None,
+                expected_kind: ExpectedKind::Any,
+            },
+            body,
+        )?;
+        if outcome.policy_decision != PolicyDecision::Accept {
+            bail!(
+                "JMAP upload blocked by Magika validation: {}",
+                outcome.reason
+            );
+        }
         let blob = self
             .store
             .save_jmap_upload_blob(requested_account_id, media_type, body)
@@ -1563,13 +1628,32 @@ impl<S: JmapStore> JmapService<S> {
             .fetch_jmap_upload_blob(account_id, blob_id)
             .await?
             .ok_or_else(|| anyhow!("uploaded blob not found"))?;
+        let outcome = self.validator.validate_bytes(
+            ValidationRequest {
+                ingress_context: IngressContext::JmapEmailImport,
+                declared_mime: Some(blob.media_type.clone()),
+                filename: None,
+                expected_kind: ExpectedKind::Rfc822Message,
+            },
+            &blob.blob_bytes,
+        )?;
+        if outcome.policy_decision != PolicyDecision::Accept {
+            bail!(
+                "JMAP email import blocked by Magika validation: {}",
+                outcome.reason
+            );
+        }
         let parsed = parse_rfc822_message(&blob.blob_bytes)?;
 
         Ok(JmapImportedEmailInput {
             account_id,
             mailbox_id: target_mailbox_id,
             source: "jmap-import".to_string(),
-            from_display: parsed.from.as_ref().and_then(|from| from.name.clone()).or(Some(account.display_name.clone())),
+            from_display: parsed
+                .from
+                .as_ref()
+                .and_then(|from| from.name.clone())
+                .or(Some(account.display_name.clone())),
             from_address: parsed
                 .from
                 .map(|from| from.email)
@@ -1612,8 +1696,14 @@ fn bearer_token(authorization: Option<&str>) -> Option<&str> {
 
 fn http_error(error: anyhow::Error) -> (StatusCode, String) {
     let message = error.to_string();
-    let status = if message.contains("bearer token") || message.contains("expired account session") {
+    let status = if message.contains("bearer token") || message.contains("expired account session")
+    {
         StatusCode::UNAUTHORIZED
+    } else if message.contains("Magika command")
+        || message.contains("spawn Magika")
+        || message.contains("Magika stdin")
+    {
+        StatusCode::INTERNAL_SERVER_ERROR
     } else {
         StatusCode::BAD_REQUEST
     };
@@ -1689,20 +1779,21 @@ fn validate_query_sort(sort: Option<&[EmailQuerySort]>) -> Result<()> {
 }
 
 fn mailbox_properties(properties: Option<Vec<String>>) -> HashSet<String> {
-    properties.unwrap_or_else(|| {
-        vec![
-            "id".to_string(),
-            "name".to_string(),
-            "role".to_string(),
-            "sortOrder".to_string(),
-            "totalEmails".to_string(),
-            "unreadEmails".to_string(),
-            "isSubscribed".to_string(),
-            "myRights".to_string(),
-        ]
-    })
-    .into_iter()
-    .collect()
+    properties
+        .unwrap_or_else(|| {
+            vec![
+                "id".to_string(),
+                "name".to_string(),
+                "role".to_string(),
+                "sortOrder".to_string(),
+                "totalEmails".to_string(),
+                "unreadEmails".to_string(),
+                "isSubscribed".to_string(),
+                "myRights".to_string(),
+            ]
+        })
+        .into_iter()
+        .collect()
 }
 
 fn mailbox_to_value(mailbox: &JmapMailbox, properties: &HashSet<String>) -> Value {
@@ -1712,7 +1803,12 @@ fn mailbox_to_value(mailbox: &JmapMailbox, properties: &HashSet<String>) -> Valu
     insert_if(properties, &mut object, "role", mailbox.role.clone());
     insert_if(properties, &mut object, "sortOrder", mailbox.sort_order);
     insert_if(properties, &mut object, "totalEmails", mailbox.total_emails);
-    insert_if(properties, &mut object, "unreadEmails", mailbox.unread_emails);
+    insert_if(
+        properties,
+        &mut object,
+        "unreadEmails",
+        mailbox.unread_emails,
+    );
     insert_if(properties, &mut object, "isSubscribed", true);
     if properties.contains("myRights") {
         object.insert(
@@ -1769,64 +1865,67 @@ fn changes_response(
 }
 
 fn email_properties(properties: Option<Vec<String>>) -> HashSet<String> {
-    properties.unwrap_or_else(|| {
-        vec![
-            "id".to_string(),
-            "blobId".to_string(),
-            "threadId".to_string(),
-            "mailboxIds".to_string(),
-            "keywords".to_string(),
-            "size".to_string(),
-            "receivedAt".to_string(),
-            "sentAt".to_string(),
-            "messageId".to_string(),
-            "subject".to_string(),
-            "from".to_string(),
-            "to".to_string(),
-            "cc".to_string(),
-            "preview".to_string(),
-            "hasAttachment".to_string(),
-            "textBody".to_string(),
-            "htmlBody".to_string(),
-            "bodyValues".to_string(),
-        ]
-    })
-    .into_iter()
-    .collect()
+    properties
+        .unwrap_or_else(|| {
+            vec![
+                "id".to_string(),
+                "blobId".to_string(),
+                "threadId".to_string(),
+                "mailboxIds".to_string(),
+                "keywords".to_string(),
+                "size".to_string(),
+                "receivedAt".to_string(),
+                "sentAt".to_string(),
+                "messageId".to_string(),
+                "subject".to_string(),
+                "from".to_string(),
+                "to".to_string(),
+                "cc".to_string(),
+                "preview".to_string(),
+                "hasAttachment".to_string(),
+                "textBody".to_string(),
+                "htmlBody".to_string(),
+                "bodyValues".to_string(),
+            ]
+        })
+        .into_iter()
+        .collect()
 }
 
 fn email_submission_properties(properties: Option<Vec<String>>) -> HashSet<String> {
-    properties.unwrap_or_else(|| {
-        vec![
-            "id".to_string(),
-            "emailId".to_string(),
-            "threadId".to_string(),
-            "identityId".to_string(),
-            "envelope".to_string(),
-            "sendAt".to_string(),
-            "undoStatus".to_string(),
-            "deliveryStatus".to_string(),
-        ]
-    })
-    .into_iter()
-    .collect()
+    properties
+        .unwrap_or_else(|| {
+            vec![
+                "id".to_string(),
+                "emailId".to_string(),
+                "threadId".to_string(),
+                "identityId".to_string(),
+                "envelope".to_string(),
+                "sendAt".to_string(),
+                "undoStatus".to_string(),
+                "deliveryStatus".to_string(),
+            ]
+        })
+        .into_iter()
+        .collect()
 }
 
 fn identity_properties(properties: Option<Vec<String>>) -> HashSet<String> {
-    properties.unwrap_or_else(|| {
-        vec![
-            "id".to_string(),
-            "name".to_string(),
-            "email".to_string(),
-            "replyTo".to_string(),
-            "bcc".to_string(),
-            "textSignature".to_string(),
-            "htmlSignature".to_string(),
-            "mayDelete".to_string(),
-        ]
-    })
-    .into_iter()
-    .collect()
+    properties
+        .unwrap_or_else(|| {
+            vec![
+                "id".to_string(),
+                "name".to_string(),
+                "email".to_string(),
+                "replyTo".to_string(),
+                "bcc".to_string(),
+                "textSignature".to_string(),
+                "htmlSignature".to_string(),
+                "mayDelete".to_string(),
+            ]
+        })
+        .into_iter()
+        .collect()
 }
 
 fn thread_properties(properties: Option<Vec<String>>) -> HashSet<String> {
@@ -1839,8 +1938,18 @@ fn thread_properties(properties: Option<Vec<String>>) -> HashSet<String> {
 fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", email.id.to_string());
-    insert_if(properties, &mut object, "blobId", format!("message:{}", email.id));
-    insert_if(properties, &mut object, "threadId", email.thread_id.to_string());
+    insert_if(
+        properties,
+        &mut object,
+        "blobId",
+        format!("message:{}", email.id),
+    );
+    insert_if(
+        properties,
+        &mut object,
+        "threadId",
+        email.thread_id.to_string(),
+    );
     if properties.contains("mailboxIds") {
         let mut mailbox_ids = Map::new();
         mailbox_ids.insert(email.mailbox_id.to_string(), Value::Bool(true));
@@ -1850,7 +1959,12 @@ fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) -> Value {
         object.insert("keywords".to_string(), email_keywords(email));
     }
     insert_if(properties, &mut object, "size", email.size_octets);
-    insert_if(properties, &mut object, "receivedAt", email.received_at.clone());
+    insert_if(
+        properties,
+        &mut object,
+        "receivedAt",
+        email.received_at.clone(),
+    );
     if let Some(sent_at) = &email.sent_at {
         insert_if(properties, &mut object, "sentAt", sent_at.clone());
     }
@@ -1883,10 +1997,12 @@ fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) -> Value {
                 email
                     .to
                     .iter()
-                    .map(|recipient| address_value(&EmailAddressInput {
-                        email: recipient.address.clone(),
-                        name: recipient.display_name.clone(),
-                    }))
+                    .map(|recipient| {
+                        address_value(&EmailAddressInput {
+                            email: recipient.address.clone(),
+                            name: recipient.display_name.clone(),
+                        })
+                    })
                     .collect(),
             ),
         );
@@ -1898,10 +2014,12 @@ fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) -> Value {
                 email
                     .cc
                     .iter()
-                    .map(|recipient| address_value(&EmailAddressInput {
-                        email: recipient.address.clone(),
-                        name: recipient.display_name.clone(),
-                    }))
+                    .map(|recipient| {
+                        address_value(&EmailAddressInput {
+                            email: recipient.address.clone(),
+                            name: recipient.display_name.clone(),
+                        })
+                    })
                     .collect(),
             ),
         );
@@ -1913,16 +2031,23 @@ fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) -> Value {
                 email
                     .bcc
                     .iter()
-                    .map(|recipient| address_value(&EmailAddressInput {
-                        email: recipient.address.clone(),
-                        name: recipient.display_name.clone(),
-                    }))
+                    .map(|recipient| {
+                        address_value(&EmailAddressInput {
+                            email: recipient.address.clone(),
+                            name: recipient.display_name.clone(),
+                        })
+                    })
                     .collect(),
             ),
         );
     }
     insert_if(properties, &mut object, "preview", email.preview.clone());
-    insert_if(properties, &mut object, "hasAttachment", email.has_attachments);
+    insert_if(
+        properties,
+        &mut object,
+        "hasAttachment",
+        email.has_attachments,
+    );
 
     let mut body_values = Map::new();
     if !email.body_text.is_empty() {
@@ -1997,7 +2122,12 @@ fn email_submission_to_value(
             }),
         );
     }
-    insert_if(properties, &mut object, "sendAt", submission.send_at.clone());
+    insert_if(
+        properties,
+        &mut object,
+        "sendAt",
+        submission.send_at.clone(),
+    );
     insert_if(
         properties,
         &mut object,
@@ -2020,7 +2150,12 @@ fn identity_id_for(account: &AuthenticatedAccount) -> String {
 fn identity_to_value(account: &AuthenticatedAccount, properties: &HashSet<String>) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", identity_id_for(account));
-    insert_if(properties, &mut object, "name", account.display_name.clone());
+    insert_if(
+        properties,
+        &mut object,
+        "name",
+        account.display_name.clone(),
+    );
     insert_if(properties, &mut object, "email", account.email.clone());
     if properties.contains("replyTo") {
         object.insert("replyTo".to_string(), Value::Null);
@@ -2034,11 +2169,7 @@ fn identity_to_value(account: &AuthenticatedAccount, properties: &HashSet<String
     Value::Object(object)
 }
 
-fn thread_to_value(
-    thread_id: Uuid,
-    email_ids: Vec<String>,
-    properties: &HashSet<String>,
-) -> Value {
+fn thread_to_value(thread_id: Uuid, email_ids: Vec<String>, properties: &HashSet<String>) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", thread_id.to_string());
     if properties.contains("emailIds") {
@@ -2101,9 +2232,17 @@ fn email_keywords(email: &JmapEmail) -> Value {
     Value::Object(keywords)
 }
 
-fn insert_if<T: Serialize>(properties: &HashSet<String>, object: &mut Map<String, Value>, key: &str, value: T) {
+fn insert_if<T: Serialize>(
+    properties: &HashSet<String>,
+    object: &mut Map<String, Value>,
+    key: &str,
+    value: T,
+) {
     if properties.contains(key) {
-        object.insert(key.to_string(), serde_json::to_value(value).unwrap_or(Value::Null));
+        object.insert(
+            key.to_string(),
+            serde_json::to_value(value).unwrap_or(Value::Null),
+        );
     }
 }
 
@@ -2215,10 +2354,7 @@ fn parse_mailbox_update(value: Value) -> Result<MailboxUpdateInput> {
     Ok(MailboxUpdateInput { name, sort_order })
 }
 
-fn parse_email_copy(
-    value: Value,
-    created_ids: &HashMap<String, String>,
-) -> Result<(Uuid, Uuid)> {
+fn parse_email_copy(value: Value, created_ids: &HashMap<String, String>) -> Result<(Uuid, Uuid)> {
     let object = value
         .as_object()
         .ok_or_else(|| anyhow!("Email/copy create arguments must be an object"))?;
@@ -2243,8 +2379,8 @@ fn parse_email_copy(
 fn reject_unknown_email_properties(object: &Map<String, Value>) -> Result<()> {
     for key in object.keys() {
         match key.as_str() {
-            "from" | "to" | "cc" | "bcc" | "subject" | "textBody" | "htmlBody"
-            | "mailboxIds" | "keywords" => {}
+            "from" | "to" | "cc" | "bcc" | "subject" | "textBody" | "htmlBody" | "mailboxIds"
+            | "keywords" => {}
             _ => bail!("unsupported email property: {key}"),
         }
     }
@@ -2326,9 +2462,7 @@ fn map_recipients(input: Vec<EmailAddressInput>) -> Result<Vec<SubmittedRecipien
         .collect()
 }
 
-fn map_existing_recipients(
-    recipients: &[JmapEmailAddress],
-) -> Vec<SubmittedRecipientInput> {
+fn map_existing_recipients(recipients: &[JmapEmailAddress]) -> Vec<SubmittedRecipientInput> {
     recipients
         .iter()
         .map(|recipient| SubmittedRecipientInput {
@@ -2357,7 +2491,9 @@ fn parse_rfc822_message(bytes: &[u8]) -> Result<ParsedRfc822Message> {
     let headers = parse_headers(header_text);
 
     Ok(ParsedRfc822Message {
-        from: headers.get("from").and_then(|value| parse_single_address(value).ok()),
+        from: headers
+            .get("from")
+            .and_then(|value| parse_single_address(value).ok()),
         to: headers
             .get("to")
             .map(|value| parse_address_header(value))
@@ -2440,6 +2576,7 @@ fn parse_single_address(value: &str) -> Result<EmailAddressInput> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lpe_magika::{DetectionSource, Detector, MagikaDetection};
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
@@ -2450,6 +2587,47 @@ mod tests {
         uploads: Arc<Mutex<Vec<JmapUploadBlob>>>,
         saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
         submitted_drafts: Arc<Mutex<Vec<Uuid>>>,
+    }
+
+    #[derive(Clone)]
+    struct FakeDetector {
+        result: Result<MagikaDetection, String>,
+    }
+
+    impl Detector for FakeDetector {
+        fn detect(&self, _source: DetectionSource<'_>) -> Result<MagikaDetection> {
+            self.result.clone().map_err(anyhow::Error::msg)
+        }
+    }
+
+    fn validator_ok(
+        mime_type: &str,
+        label: &str,
+        extension: &str,
+        score: f32,
+    ) -> Validator<FakeDetector> {
+        Validator::new(
+            FakeDetector {
+                result: Ok(MagikaDetection {
+                    label: label.to_string(),
+                    mime_type: mime_type.to_string(),
+                    description: label.to_string(),
+                    group: "document".to_string(),
+                    extensions: vec![extension.to_string()],
+                    score: Some(score),
+                }),
+            },
+            0.80,
+        )
+    }
+
+    fn validator_error(message: &str) -> Validator<FakeDetector> {
+        Validator::new(
+            FakeDetector {
+                result: Err(message.to_string()),
+            },
+            0.80,
+        )
     }
 
     impl FakeStore {
@@ -2528,10 +2706,7 @@ mod tests {
             Box::pin(async move { Ok(mailboxes) })
         }
 
-        fn fetch_jmap_mailbox_ids<'a>(
-            &'a self,
-            _account_id: Uuid,
-        ) -> StoreFuture<'a, Vec<Uuid>> {
+        fn fetch_jmap_mailbox_ids<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>> {
             let ids = self.mailboxes.iter().map(|mailbox| mailbox.id).collect();
             Box::pin(async move { Ok(ids) })
         }
@@ -2560,10 +2735,7 @@ mod tests {
             })
         }
 
-        fn fetch_all_jmap_email_ids<'a>(
-            &'a self,
-            _account_id: Uuid,
-        ) -> StoreFuture<'a, Vec<Uuid>> {
+        fn fetch_all_jmap_email_ids<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>> {
             let ids = self.emails.iter().map(|email| email.id).collect();
             Box::pin(async move { Ok(ids) })
         }
@@ -2759,8 +2931,10 @@ mod tests {
                     message_id: Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap(),
                     thread_id: FakeStore::draft_email().thread_id,
                     account_id: FakeStore::account().account_id,
-                    sent_mailbox_id: Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap(),
-                    outbound_queue_id: Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap(),
+                    sent_mailbox_id: Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff")
+                        .unwrap(),
+                    outbound_queue_id: Uuid::parse_str("11111111-2222-3333-4444-555555555555")
+                        .unwrap(),
                     delivery_status: "queued".to_string(),
                 })
             })
@@ -2836,7 +3010,10 @@ mod tests {
             ..Default::default()
         });
 
-        let session = service.session_document(Some("Bearer token")).await.unwrap();
+        let session = service
+            .session_document(Some("Bearer token"))
+            .await
+            .unwrap();
 
         assert_eq!(session.username, "alice@example.test");
         assert_eq!(session.api_url, "/jmap/api");
@@ -2943,7 +3120,10 @@ mod tests {
             emails: vec![FakeStore::draft_email()],
             ..Default::default()
         };
-        let service = JmapService::new(store);
+        let service = JmapService::new_with_validator(
+            store,
+            validator_ok("message/rfc822", "eml", "eml", 0.99),
+        );
 
         let response = service
             .handle_api_request(
@@ -2985,7 +3165,10 @@ mod tests {
             emails: vec![FakeStore::draft_email()],
             ..Default::default()
         };
-        let service = JmapService::new(store);
+        let service = JmapService::new_with_validator(
+            store,
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
 
         let response = service
             .handle_api_request(
@@ -3036,7 +3219,10 @@ mod tests {
             emails: vec![FakeStore::draft_email()],
             ..Default::default()
         };
-        let service = JmapService::new(store);
+        let service = JmapService::new_with_validator(
+            store,
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
 
         let response = service
             .handle_api_request(
@@ -3074,7 +3260,10 @@ mod tests {
             octet_size: 82,
             blob_bytes: b"From: Alice <alice@example.test>\r\nTo: Bob <bob@example.test>\r\nSubject: Imported\r\n\r\nHello".to_vec(),
         });
-        let service = JmapService::new(store);
+        let service = JmapService::new_with_validator(
+            store,
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
 
         let response = service
             .handle_api_request(
@@ -3131,7 +3320,10 @@ mod tests {
             session: Some(FakeStore::account()),
             ..Default::default()
         };
-        let service = JmapService::new(store.clone());
+        let service = JmapService::new_with_validator(
+            store.clone(),
+            validator_ok("message/rfc822", "eml", "eml", 0.99),
+        );
 
         let upload = service
             .handle_upload(
@@ -3157,5 +3349,111 @@ mod tests {
             .unwrap();
         assert_eq!(blob.media_type, "message/rfc822");
         assert_eq!(blob.blob_bytes, b"Subject: Hello\r\n\r\nBody".to_vec());
+    }
+
+    #[tokio::test]
+    async fn upload_accepts_validated_matching_blob() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            ..Default::default()
+        };
+        let service = JmapService::new_with_validator(
+            store,
+            validator_ok("message/rfc822", "eml", "eml", 0.99),
+        );
+
+        let upload = service
+            .handle_upload(
+                Some("Bearer token"),
+                &FakeStore::account().account_id.to_string(),
+                "message/rfc822",
+                b"Subject: Hello\r\n\r\nBody",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(upload["type"], Value::String("message/rfc822".to_string()));
+    }
+
+    #[tokio::test]
+    async fn upload_rejects_declared_mime_mismatch() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            ..Default::default()
+        };
+        let service = JmapService::new_with_validator(
+            store,
+            validator_ok("application/pdf", "pdf", "pdf", 0.99),
+        );
+
+        let error = service
+            .handle_upload(
+                Some("Bearer token"),
+                &FakeStore::account().account_id.to_string(),
+                "message/rfc822",
+                b"%PDF-1.7",
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("JMAP upload blocked"));
+    }
+
+    #[tokio::test]
+    async fn upload_rejects_unknown_type() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            ..Default::default()
+        };
+        let service = JmapService::new_with_validator(
+            store,
+            Validator::new(
+                FakeDetector {
+                    result: Ok(MagikaDetection {
+                        label: "unknown_binary".to_string(),
+                        mime_type: "application/octet-stream".to_string(),
+                        description: "unknown".to_string(),
+                        group: "unknown".to_string(),
+                        extensions: Vec::new(),
+                        score: Some(0.99),
+                    }),
+                },
+                0.80,
+            ),
+        );
+
+        let error = service
+            .handle_upload(
+                Some("Bearer token"),
+                &FakeStore::account().account_id.to_string(),
+                "application/octet-stream",
+                b"\x00\x01\x02",
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("JMAP upload blocked"));
+    }
+
+    #[tokio::test]
+    async fn upload_surfaces_magika_failure_mode() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            ..Default::default()
+        };
+        let service =
+            JmapService::new_with_validator(store, validator_error("Magika command failed"));
+
+        let error = service
+            .handle_upload(
+                Some("Bearer token"),
+                &FakeStore::account().account_id.to_string(),
+                "message/rfc822",
+                b"Subject: Hello\r\n\r\nBody",
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("Magika command failed"));
     }
 }

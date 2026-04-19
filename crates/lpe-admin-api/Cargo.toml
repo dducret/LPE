@@ -14,8 +14,10 @@ lpe-core = { path = "../lpe-core" }
 lpe-dav = { path = "../lpe-dav" }
 lpe-domain = { path = "../lpe-domain" }
 lpe-jmap = { path = "../lpe-jmap" }
+lpe-magika = { path = "../lpe-magika" }
 lpe-storage = { path = "../lpe-storage" }
 serde.workspace = true
+serde_json.workspace = true
 argon2.workspace = true
 tokio.workspace = true
 tracing.workspace = true

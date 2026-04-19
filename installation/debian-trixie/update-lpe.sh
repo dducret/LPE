@@ -14,6 +14,8 @@ ENV_FILE="${ENV_FILE:-/etc/lpe/lpe.env}"
 NGINX_AVAILABLE_DIR="${NGINX_AVAILABLE_DIR:-/etc/nginx/sites-available}"
 NGINX_ENABLED_DIR="${NGINX_ENABLED_DIR:-/etc/nginx/sites-enabled}"
 NGINX_SITE_NAME="${NGINX_SITE_NAME:-lpe.conf}"
+MAGIKA_VERSION="${MAGIKA_VERSION:-1.0.2}"
+MAGIKA_LINUX_X86_64_SHA256="${MAGIKA_LINUX_X86_64_SHA256:-4ce475c965cd20e724b5fc53e8a303a479b9d8649beef8721d05e9b3988fbab4}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "This script must be run as root." >&2
@@ -29,6 +31,21 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   echo "Environment file not found in ${ENV_FILE}. Run install-lpe.sh first." >&2
   exit 1
 fi
+
+install_magika() {
+  local version="$1"
+  local expected_sha="$2"
+  local archive="magika-x86_64-unknown-linux-gnu.tar.xz"
+  local url="https://github.com/google/magika/releases/download/cli/v${version}/${archive}"
+  local temp_dir
+  temp_dir="$(mktemp -d)"
+  trap 'rm -rf "${temp_dir}"' RETURN
+
+  curl --proto '=https' --tlsv1.2 -LsSf "${url}" -o "${temp_dir}/${archive}"
+  echo "${expected_sha}  ${temp_dir}/${archive}" | sha256sum -c -
+  tar -xJf "${temp_dir}/${archive}" -C "${temp_dir}"
+  install -m 0755 "${temp_dir}/magika" "${BIN_DIR}/magika"
+}
 
 git config --global --add safe.directory "${SRC_DIR}" || true
 
@@ -78,6 +95,7 @@ npm ci
 npm run build
 
 install -m 0755 "${SRC_DIR}/target/release/lpe-cli" "${BIN_DIR}/lpe-cli"
+install_magika "${MAGIKA_VERSION}" "${MAGIKA_LINUX_X86_64_SHA256}"
 install -d -o root -g root "${ADMIN_WEB_ROOT}" "${CLIENT_WEB_ROOT}"
 cp -a "${SRC_DIR}/web/admin/dist/." "${ADMIN_WEB_ROOT}/"
 cp -a "${SRC_DIR}/web/client/dist/." "${CLIENT_WEB_ROOT}/"

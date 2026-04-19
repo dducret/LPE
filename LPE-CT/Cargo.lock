@@ -569,6 +569,7 @@ dependencies = [
  "anyhow",
  "axum",
  "lpe-domain",
+ "lpe-magika",
  "reqwest",
  "serde",
  "serde_json",
@@ -585,6 +586,16 @@ dependencies = [
  "serde",
  "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "lpe-magika"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

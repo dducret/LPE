@@ -1360,6 +1360,7 @@ dependencies = [
  "argon2",
  "axum",
  "base64",
+ "lpe-magika",
  "lpe-mail-auth",
  "lpe-storage",
  "serde",
@@ -1382,8 +1383,10 @@ dependencies = [
  "lpe-dav",
  "lpe-domain",
  "lpe-jmap",
+ "lpe-magika",
  "lpe-storage",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "uuid",
@@ -1405,6 +1408,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "docx-lite",
+ "lpe-magika",
  "pdf_oxide",
  "quick-xml 0.39.2",
  "zip 4.6.1",
@@ -1464,11 +1468,22 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "lpe-magika",
  "lpe-storage",
  "serde",
  "serde_json",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "lpe-magika"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1489,6 +1504,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "lpe-domain",
+ "lpe-magika",
  "serde",
  "serde_json",
  "sqlx",

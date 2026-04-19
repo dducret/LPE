@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 docx_lite.workspace = true
+lpe-magika = { path = "../lpe-magika" }
 pdf_oxide.workspace = true
 quick-xml.workspace = true
 zip.workspace = true

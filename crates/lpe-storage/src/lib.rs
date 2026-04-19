@@ -1,7 +1,11 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use lpe_domain::{
     InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
     TransportDeliveryStatus, TransportRecipient,
+};
+use lpe_magika::{
+    read_validation_record, ExpectedKind, IngressContext, PolicyDecision, ValidationRequest,
+    Validator,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -4235,6 +4239,8 @@ impl Storage {
     }
 
     async fn import_mailbox_from_pst(&self, job: &PendingPstJobRow) -> Result<u32> {
+        validate_pst_import_path(Path::new(&job.server_path))?;
+
         let file = File::open(&job.server_path)?;
         let mut reader = BufReader::new(file);
         let mut header = String::new();
@@ -4974,7 +4980,16 @@ fn participants_normalized(
 mod tests {
     use super::{
         normalize_bcc_recipients, normalize_visible_recipients, parse_header_recipients,
-        participants_normalized, SubmitMessageInput, SubmittedRecipientInput,
+        participants_normalized, validate_pst_import_path, SubmitMessageInput,
+        SubmittedRecipientInput,
+    };
+    use lpe_magika::{
+        write_validation_record, ExpectedKind, IngressContext, PolicyDecision, ValidationOutcome,
+        ValidationRequest,
+    };
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
     };
     use uuid::Uuid;
 
@@ -5058,6 +5073,51 @@ mod tests {
         assert_eq!(to[1].address, "second@example.test");
         assert_eq!(cc[0].address, "copy@example.test");
     }
+
+    #[test]
+    fn pst_processing_requires_prior_validation_record() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("lpe-pst-validation-{suffix}"));
+        fs::create_dir_all(&dir).unwrap();
+        let pst_path = dir.join("mailbox.pst");
+        fs::write(&pst_path, b"LPE-PST-V1\n").unwrap();
+
+        assert!(validate_pst_import_path(&pst_path).is_err());
+
+        let outcome = ValidationOutcome {
+            detected_label: "pst".to_string(),
+            detected_mime: "application/vnd.ms-outlook".to_string(),
+            description: "pst".to_string(),
+            group: "archive".to_string(),
+            extensions: vec!["pst".to_string()],
+            score: Some(0.99),
+            declared_mime: Some("application/vnd.ms-outlook".to_string()),
+            filename: Some("mailbox.pst".to_string()),
+            mismatch: false,
+            policy_decision: PolicyDecision::Accept,
+            reason: "file validated".to_string(),
+        };
+        write_validation_record(
+            &pst_path,
+            &ValidationRequest {
+                ingress_context: IngressContext::PstUpload,
+                declared_mime: Some("application/vnd.ms-outlook".to_string()),
+                filename: Some("mailbox.pst".to_string()),
+                expected_kind: ExpectedKind::Pst,
+            },
+            &outcome,
+            fs::metadata(&pst_path).unwrap().len(),
+        )
+        .unwrap();
+
+        std::env::set_var("LPE_MAGIKA_BIN", "missing-magika-binary-for-test");
+        let result = validate_pst_import_path(&pst_path);
+        std::env::remove_var("LPE_MAGIKA_BIN");
+        assert!(result.is_err());
+    }
 }
 
 fn ensure_parent_directory(path: &str) -> Result<()> {
@@ -5067,6 +5127,52 @@ fn ensure_parent_directory(path: &str) -> Result<()> {
             fs::create_dir_all(parent)?;
         }
     }
+    Ok(())
+}
+
+fn validate_pst_import_path(path: &Path) -> Result<()> {
+    let metadata = fs::metadata(path)?;
+    let record = read_validation_record(path).with_context(|| {
+        format!(
+            "missing or unreadable PST validation record for {}",
+            path.display()
+        )
+    })?;
+    if record.ingress_context != IngressContext::PstUpload {
+        bail!("PST validation record has an unexpected ingress context");
+    }
+    if record.expected_kind != ExpectedKind::Pst {
+        bail!("PST validation record does not describe a PST upload");
+    }
+    if record.policy_decision != PolicyDecision::Accept {
+        bail!(
+            "PST validation record is not accepted: {}",
+            record.outcome.reason
+        );
+    }
+    if record.file_size != metadata.len() {
+        bail!("PST validation record does not match the current file size");
+    }
+
+    let outcome = Validator::from_env().validate_path(
+        ValidationRequest {
+            ingress_context: IngressContext::PstProcessing,
+            declared_mime: record.outcome.declared_mime.clone(),
+            filename: path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(ToString::to_string),
+            expected_kind: ExpectedKind::Pst,
+        },
+        path,
+    )?;
+    if outcome.policy_decision != PolicyDecision::Accept {
+        bail!(
+            "PST processing blocked by Magika validation: {}",
+            outcome.reason
+        );
+    }
+
     Ok(())
 }
 

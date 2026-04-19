@@ -11,6 +11,10 @@ use axum::{
 use lpe_ai::{LocalModelProvider, StubLocalModelProvider};
 use lpe_core::CoreService;
 use lpe_domain::{InboundDeliveryRequest, InboundDeliveryResponse};
+use lpe_magika::{
+    write_validation_record, Detector, ExpectedKind, IngressContext, PolicyDecision,
+    ValidationRequest, Validator,
+};
 use lpe_storage::{
     AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput,
     AuthenticatedAccount, AuthenticatedAdmin, ClientContact, ClientEvent, ClientWorkspace,
@@ -668,12 +672,7 @@ async fn upload_pst_import(
         }
 
         let file_name = field.file_name().unwrap_or("mailbox.pst").to_string();
-        if !file_name.to_lowercase().ends_with(".pst") {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "uploaded mailbox import file must use the .pst extension".to_string(),
-            ));
-        }
+        let declared_mime = field.content_type().map(ToString::to_string);
 
         let upload_dir = pst_import_dir();
         tokio::fs::create_dir_all(&upload_dir)
@@ -695,6 +694,8 @@ async fn upload_pst_import(
                 .map_err(internal_error)?;
         }
         target_file.flush().await.map_err(internal_error)?;
+        validate_uploaded_pst_file(&target_path, &file_name, declared_mime.as_deref())
+            .map_err(bad_request_error)?;
         uploaded_path = Some(target_path);
     }
 
@@ -1337,6 +1338,44 @@ fn pst_upload_max_bytes() -> usize {
         .unwrap_or(20 * 1024 * 1024 * 1024)
 }
 
+fn validate_uploaded_pst_file(
+    path: &Path,
+    file_name: &str,
+    declared_mime: Option<&str>,
+) -> anyhow::Result<()> {
+    validate_uploaded_pst_file_with_validator(
+        &Validator::from_env(),
+        path,
+        file_name,
+        declared_mime,
+    )
+}
+
+fn validate_uploaded_pst_file_with_validator<D: Detector>(
+    validator: &Validator<D>,
+    path: &Path,
+    file_name: &str,
+    declared_mime: Option<&str>,
+) -> anyhow::Result<()> {
+    let request = ValidationRequest {
+        ingress_context: IngressContext::PstUpload,
+        declared_mime: declared_mime.map(ToString::to_string),
+        filename: Some(file_name.to_string()),
+        expected_kind: ExpectedKind::Pst,
+    };
+    let outcome = validator.validate_path(request.clone(), path)?;
+    if outcome.policy_decision != PolicyDecision::Accept {
+        let _ = std::fs::remove_file(path);
+        return Err(anyhow::anyhow!(
+            "PST upload blocked by Magika validation: {}",
+            outcome.reason
+        ));
+    }
+
+    write_validation_record(path, &request, &outcome, std::fs::metadata(path)?.len())?;
+    Ok(())
+}
+
 fn sanitize_upload_filename(file_name: &str) -> String {
     let basename = Path::new(file_name)
         .file_name()
@@ -1357,6 +1396,98 @@ fn sanitize_upload_filename(file_name: &str) -> String {
         "mailbox.pst".to_string()
     } else {
         sanitized
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_uploaded_pst_file_with_validator;
+    use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    #[derive(Debug, Clone)]
+    struct FakeDetector {
+        detection: MagikaDetection,
+    }
+
+    impl Detector for FakeDetector {
+        fn detect(&self, _source: DetectionSource<'_>) -> anyhow::Result<MagikaDetection> {
+            Ok(self.detection.clone())
+        }
+    }
+
+    fn temp_file(name: &str) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("lpe-pst-upload-{suffix}"));
+        fs::create_dir_all(&dir).unwrap();
+        dir.join(name)
+    }
+
+    #[test]
+    fn pst_upload_validation_accepts_valid_pst_like_file() {
+        let path = temp_file("mailbox.pst");
+        fs::write(&path, b"LPE-PST-V1\n").unwrap();
+        let validator = Validator::new(
+            FakeDetector {
+                detection: MagikaDetection {
+                    label: "pst".to_string(),
+                    mime_type: "application/vnd.ms-outlook".to_string(),
+                    description: "pst".to_string(),
+                    group: "archive".to_string(),
+                    extensions: vec!["pst".to_string()],
+                    score: Some(0.99),
+                },
+            },
+            0.80,
+        );
+
+        validate_uploaded_pst_file_with_validator(
+            &validator,
+            &path,
+            "mailbox.pst",
+            Some("application/vnd.ms-outlook"),
+        )
+        .unwrap();
+
+        assert!(path.exists());
+        assert!(path.with_extension("pst.magika.json").exists());
+    }
+
+    #[test]
+    fn pst_upload_validation_rejects_extension_and_type_mismatch() {
+        let path = temp_file("mailbox.pdf");
+        fs::write(&path, b"not a pst").unwrap();
+        let validator = Validator::new(
+            FakeDetector {
+                detection: MagikaDetection {
+                    label: "pdf".to_string(),
+                    mime_type: "application/pdf".to_string(),
+                    description: "pdf".to_string(),
+                    group: "document".to_string(),
+                    extensions: vec!["pdf".to_string()],
+                    score: Some(0.99),
+                },
+            },
+            0.80,
+        );
+
+        let error = validate_uploaded_pst_file_with_validator(
+            &validator,
+            &path,
+            "mailbox.pdf",
+            Some("application/pdf"),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("PST upload blocked"));
+        assert!(!path.exists());
     }
 }
 
