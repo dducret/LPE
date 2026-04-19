@@ -19,8 +19,10 @@
 
 - `tokio`
 - `axum`
-- `multer` (transitive dependency enabled by `axum` multipart upload support)
+- `multer` (dependance transitive activee par le support multipart de `axum`)
 - `tracing`
+- `tracing-subscriber`
+- `tracing-serde` (dependance transitive activee par la sortie `tracing` JSON structuree)
 - `docx-lite`
 
 Ces dependances sont courantes dans l'ecosysteme Rust et retenues provisoirement pour accelerer le demarrage. Une revue documentaire devra etre maintenue pour chaque exception.
@@ -48,6 +50,8 @@ Ces dependances sont courantes dans l'ecosysteme Rust et retenues provisoirement
 - `axum`
 - `multer` (transitive dependency enabled by `axum` multipart upload support)
 - `tracing`
+- `tracing-subscriber`
+- `tracing-serde` (transitive dependency enabled by structured JSON `tracing` output)
 - `docx-lite`
 - `tonic` for internal `LPE-CT <-> LPE` `gRPC` contracts only
 

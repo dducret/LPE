@@ -1057,10 +1057,9 @@ async fn submit_message(
     let account = require_account(&storage, &headers).await?;
     let trace_id = observability::trace_id_from_headers(&headers);
     let subject_for_audit = request.subject.clone();
-    let recipient_count =
-        request.to.as_ref().map(|entries| entries.len()).unwrap_or(0)
-            + request.cc.as_ref().map(|entries| entries.len()).unwrap_or(0)
-            + request.bcc.as_ref().map(|entries| entries.len()).unwrap_or(0);
+    let recipient_count = request.to.len()
+        + request.cc.as_ref().map(|entries| entries.len()).unwrap_or(0)
+        + request.bcc.as_ref().map(|entries| entries.len()).unwrap_or(0);
     let internet_message_id = request.internet_message_id.clone();
     ensure_client_message_owner(&account, &request)?;
     let submitted = storage

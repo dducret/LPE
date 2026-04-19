@@ -51,6 +51,7 @@ The important non-negotiable rules are:
 - `docs/architecture/high-availability.md`
 - `docs/architecture/lpe-ct-integration.md`
 - `docs/architecture/mail-security-and-traceability.md`
+- `docs/architecture/observability.md`
 - `docs/architecture/client-autoconfiguration.md`
 
 ### Protocols
@@ -71,7 +72,4 @@ The important non-negotiable rules are:
 
 The following topics are still intentionally deferred:
 
-- technical logging model
-- metrics model
-- correlation model around the unique trace identifier
 - administrative action journaling

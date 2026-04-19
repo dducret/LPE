@@ -167,6 +167,8 @@ On the `LPE` side:
 - `LPE_CT_API_BASE_URL`
 - `LPE_OUTBOUND_WORKER_INTERVAL_MS`
 - `LPE_OUTBOUND_WORKER_BATCH_SIZE`
+- `LPE_LOG_FORMAT`
+- `LPE_METRICS_ENABLED`
 - `LPE_INTEGRATION_SHARED_SECRET`
 
 On the `LPE-CT` side:
@@ -174,7 +176,23 @@ On the `LPE-CT` side:
 - `LPE_CT_CORE_DELIVERY_BASE_URL`
 - `LPE_CT_RELAY_PRIMARY`
 - `LPE_CT_RELAY_SECONDARY`
+- `LPE_CT_LOG_FORMAT`
+- `LPE_CT_METRICS_ENABLED`
 - `LPE_INTEGRATION_SHARED_SECRET`
+
+### Observability
+
+The two services now expose a Prometheus-compatible `GET /metrics` endpoint on their local HTTP API.
+
+Correlation rules are:
+
+- the initiating service sets or propagates `x-trace-id`
+- the receiving service returns `x-trace-id` in the HTTP response
+- transport logs include `message_id` and `internet_message_id` when available
+- `LPE` records business metrics, worker transport metrics, and security events
+- `LPE-CT` records spool gauges, SMTP-edge metrics, relay metrics, and security decisions
+
+The detailed metric families and logging behavior are documented in `docs/architecture/observability.md`.
 
 ### v1 implementation notes
 

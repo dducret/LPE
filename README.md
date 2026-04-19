@@ -166,6 +166,8 @@ The backend now exposes an initial canonical submission model through `/api/mail
 
 The working integration between `LPE` and `LPE-CT` now relies on an explicit internal HTTP contract: an `LPE` worker consumes `outbound_message_queue` and calls `LPE-CT` for outbound handoff, while `LPE-CT` calls back into `LPE` for final inbound delivery into LAN-hosted mailboxes. That contract now also covers richer retries, `DSN`/bounce feedback, outbound routing rules, outbound throttling, and a structured technical status persisted on the `LPE` side. The contract and its environment variables are documented in `docs/architecture/lpe-ct-integration.md`.
 
+`LPE` and `LPE-CT` now also expose a first modern observability layer: Prometheus-compatible `/metrics` endpoints, structured tracing with optional JSON logs, and cross-service correlation through `trace_id` and `message_id`. The operational model is documented in `docs/architecture/observability.md`.
+
 All client layers must use the canonical `LPE` submission and synchronization model. No client layer may write its own parallel `Sent` or `Outbox` logic.
 
 Every file entering through an external connection or through a client must be validated with Google `Magika` before normal processing. This validation applies in particular to mail attachments, browser uploads, `JMAP` blobs, `PST` imports, and future file-ingress workflows; it is used to compare the detected content type with the declared MIME type and extension before accept, restrict, quarantine, or reject decisions.
