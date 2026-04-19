@@ -43,6 +43,15 @@ Le MVP implemente un codec `WBXML` cible sur les code pages necessaires au perim
 - `Sync`
 - `SendMail`
 
+`Sync` tolere aussi plusieurs collections dans une meme requete et accepte sans erreur plusieurs options protocole frequentes dont le MVP n'exploite pas encore toute la semantique:
+
+- `GetChanges`
+- `DeletesAsMoves`
+- `WindowSize`
+- `Options`
+- `BodyPreference`
+- `Fetch` non mutant cote brouillons
+
 ### Perimetre MVP supporte
 
 - authentification compte
@@ -54,6 +63,7 @@ Le MVP implemente un codec `WBXML` cible sur les code pages necessaires au perim
 - envoi via `SendMail`, branche sur la soumission canonique `LPE`
 - garantie qu'un message envoye depuis le client natif est visible dans `Sent`
 - persistance des `SyncKey` par compte, appareil et collection en base `PostgreSQL`
+- parsing `SendMail` durci pour les clients natifs: en-tetes replies, sujets et noms affiches RFC 2047, corps texte `quoted-printable`, `base64` et `multipart/alternative`
 
 ### Contacts et calendrier
 
@@ -74,10 +84,11 @@ La creation, modification et suppression cote client pour ces deux classes ne so
 - le MVP ne couvre pas `EWS`
 - le MVP ne couvre pas `SmartReply`, `SmartForward`, `ItemOperations`, `Ping`, `Search` ni les pieces jointes ActiveSync
 - le parseur `WBXML` est volontairement limite aux tags utilises par ce MVP
-- le parseur `MIME` de `SendMail` est minimal: il traite `To`, `Cc`, `Bcc`, `Subject`, `Message-Id` et le corps texte
+- le parseur `MIME` de `SendMail` reste volontairement limite au MVP: il gere mieux les messages texte natifs, mais ne couvre pas encore les pieces jointes ni toute la richesse MIME
 - la sync `Contacts` et `Calendar` est descendante uniquement
 - la gestion fine des mises a jour partielles cote client est actuellement concentree sur `Drafts`
 - la sync `Drafts` est ciblee pour un usage `ActiveSync 16.1`; les clients limites aux anciennes versions ne doivent pas etre consideres comme pleinement supportes pour ce point
+- `WindowSize` est accepte pour limiter le lot lu dans la projection courante, mais le MVP ne gere pas encore une pagination `MoreAvailable` complete sur de tres grosses collections
 
 ## English
 
@@ -122,6 +133,15 @@ The MVP implements a focused `WBXML` codec for the code pages needed by the curr
 - `Sync`
 - `SendMail`
 
+`Sync` also tolerates multiple collections in the same request and accepts several common protocol options without failing even when the MVP does not yet implement their full semantics:
+
+- `GetChanges`
+- `DeletesAsMoves`
+- `WindowSize`
+- `Options`
+- `BodyPreference`
+- non-mutating draft-side `Fetch`
+
 ### Supported MVP scope
 
 - account authentication
@@ -133,6 +153,7 @@ The MVP implements a focused `WBXML` codec for the code pages needed by the curr
 - message submission through `SendMail`, wired to the canonical `LPE` submission workflow
 - guarantee that a message sent from a native client becomes visible in the authoritative `Sent` view
 - persistent `SyncKey` storage in `PostgreSQL` per account, device, and collection
+- hardened `SendMail` parsing for native clients: folded headers, RFC 2047 encoded subjects and display names, `quoted-printable`, `base64`, and `multipart/alternative` text bodies
 
 ### Contacts and calendar
 
@@ -153,7 +174,8 @@ Client-side create, update, and delete operations for those two classes are inte
 - the MVP does not implement `EWS`
 - the MVP does not implement `SmartReply`, `SmartForward`, `ItemOperations`, `Ping`, `Search`, or ActiveSync attachment retrieval
 - the `WBXML` parser is intentionally limited to the tags used by this MVP
-- the `SendMail` `MIME` parser is minimal and currently handles `To`, `Cc`, `Bcc`, `Subject`, `Message-Id`, and plain-text body
+- the `SendMail` `MIME` parser is still intentionally limited to MVP needs: it handles native text-message cases better, but it does not yet cover attachments or full MIME richness
 - `Contacts` and `Calendar` synchronization is read-only in this first step
 - fine-grained client-originated mutation handling is currently focused on `Drafts`
 - `Drafts` synchronization is targeted for `ActiveSync 16.1`; clients limited to older protocol versions should not be treated as fully supported for that capability
+- `WindowSize` is accepted to cap the current projection batch, but the MVP does not yet implement full `MoreAvailable` pagination for very large collections
