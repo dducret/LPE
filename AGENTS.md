@@ -23,6 +23,7 @@ Depending on the task, also read the relevant specialized documentation, especia
 
 - `docs/architecture/local-llm.md`
 - `docs/architecture/attachments-v1.md`
+- `docs/architecture/web-design.md` for any UI, layout, navigation, `Tailwind`, or shared component work
 - `installation/README.md`
 
 The agent must not assume the architecture, license policy, or product scope without checking the documentation.
@@ -166,6 +167,7 @@ AI pipelines must not expose protected data such as `Bcc` or audit-only metadata
 - if a change affects behavior, scope, prerequisites, installation, or architecture, update the relevant documentation in the same work
 - if a new durable rule appears, also update `AGENTS.md`
 - if a structural decision is made, prefer updating architecture documentation rather than leaving the assumption implicit in code
+- for any task that changes the UI, layout, navigation, `Tailwind`, shared components, drawers, dialogs, or responsive behavior, read `docs/architecture/web-design.md` before editing code
 - for frontend work, `Tailwind CSS` is the normalization base for both `web/admin` and `web/client`; changes should converge on a shared design system with centralized tokens and reusable components rather than one-off utility sprawl
 - for administration UI lists in `LPE` and `LPE-CT`, use the default management pattern: full-width list, primary `New` or `Create` action in the list header, and a right-side drawer modal for item creation, details, and contextual actions
 - avoid persistent side-by-side create forms for primary list management unless the object is not list-oriented or a specialized operational view is clearly more efficient
@@ -207,6 +209,7 @@ Selon la tache, lire aussi les documents specialises pertinents, notamment:
 
 - `docs/architecture/local-llm.md`
 - `docs/architecture/attachments-v1.md`
+- `docs/architecture/web-design.md` pour toute tache qui touche l'UI, le layout, la navigation, `Tailwind` ou les composants partages
 - `installation/README.md`
 
 L'agent ne doit pas supposer l'architecture, la politique de licences ou le perimetre produit sans verification dans la documentation.
@@ -350,6 +353,7 @@ Les pipelines IA ne doivent pas exposer de donnees protegees comme `Bcc` ou des 
 - si une modification change le comportement, le perimetre, les prerequis, l'installation ou l'architecture, mettre a jour la documentation correspondante dans le meme travail
 - si une nouvelle regle durable apparait, mettre a jour aussi `AGENTS.md`
 - si une decision structurelle est prise, preferer une mise a jour de la documentation d'architecture plutot qu'une hypothese implicite dans le code
+- pour toute tache qui modifie l'UI, le layout, la navigation, `Tailwind`, les composants partages, les drawers, les dialogs ou le responsive, lire `docs/architecture/web-design.md` avant de modifier le code
 - pour le frontend, `Tailwind CSS` est la base de normalisation pour `web/admin` et `web/client`; les changements doivent converger vers un design system partage avec tokens centralises et composants reutilisables, pas vers une dispersion de classes utilitaires au cas par cas
 - pour les listes d'administration dans `LPE` et `LPE-CT`, utiliser le pattern de gestion par defaut: liste pleine largeur, action principale `New` ou `Create` dans l'entete de liste, et drawer modal lateral droit pour la creation, les details et les actions contextuelles
 - eviter les formulaires de creation persistants cote a cote pour la gestion principale des listes, sauf si l'objet n'est pas oriente liste ou si une vue operationnelle specialisee est clairement plus efficace

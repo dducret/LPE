@@ -41,8 +41,7 @@ The important non-negotiable rules are:
 
 - `docs/architecture/initial-architecture.md`
 - `docs/architecture/tenancy-identity-and-administration.md`
-- `docs/architecture/admin-web-design.md`
-- `docs/architecture/web-tailwind-design-system.md`
+- `docs/architecture/web-design.md`
 - `docs/architecture/local-llm.md`
 
 ### Edge, transport, and security
