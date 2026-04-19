@@ -63,6 +63,7 @@ Le MVP implemente un codec `WBXML` cible sur les code pages necessaires au perim
 - envoi via `SendMail`, branche sur la soumission canonique `LPE`
 - garantie qu'un message envoye depuis le client natif est visible dans `Sent`
 - persistance des `SyncKey` par compte, appareil et collection en base `PostgreSQL`
+- pagination `Sync` complete avec `WindowSize` et `MoreAvailable`, y compris la continuation d'un lot sur plusieurs `SyncKey`
 - parsing `SendMail` durci pour les clients natifs: en-tetes replies, sujets et noms affiches RFC 2047, corps texte `quoted-printable`, `base64` et `multipart/alternative`
 
 ### Contacts et calendrier
@@ -88,7 +89,7 @@ La creation, modification et suppression cote client pour ces deux classes ne so
 - la sync `Contacts` et `Calendar` est descendante uniquement
 - la gestion fine des mises a jour partielles cote client est actuellement concentree sur `Drafts`
 - la sync `Drafts` est ciblee pour un usage `ActiveSync 16.1`; les clients limites aux anciennes versions ne doivent pas etre consideres comme pleinement supportes pour ce point
-- `WindowSize` est accepte pour limiter le lot lu dans la projection courante, mais le MVP ne gere pas encore une pagination `MoreAvailable` complete sur de tres grosses collections
+- le premier `Sync` avec `SyncKey = 0` suit un amorcage prudent: il etablit un nouvel etat serveur avant d'emettre les pages suivantes, ce qui est cible pour Outlook/mobile mais n'a pas encore ete eprouve contre toute la diversite des clients `ActiveSync`
 
 ## English
 
@@ -153,6 +154,7 @@ The MVP implements a focused `WBXML` codec for the code pages needed by the curr
 - message submission through `SendMail`, wired to the canonical `LPE` submission workflow
 - guarantee that a message sent from a native client becomes visible in the authoritative `Sent` view
 - persistent `SyncKey` storage in `PostgreSQL` per account, device, and collection
+- complete `Sync` pagination with `WindowSize` and `MoreAvailable`, including continuation of a server batch across multiple `SyncKey` values
 - hardened `SendMail` parsing for native clients: folded headers, RFC 2047 encoded subjects and display names, `quoted-printable`, `base64`, and `multipart/alternative` text bodies
 
 ### Contacts and calendar
@@ -178,4 +180,4 @@ Client-side create, update, and delete operations for those two classes are inte
 - `Contacts` and `Calendar` synchronization is read-only in this first step
 - fine-grained client-originated mutation handling is currently focused on `Drafts`
 - `Drafts` synchronization is targeted for `ActiveSync 16.1`; clients limited to older protocol versions should not be treated as fully supported for that capability
-- `WindowSize` is accepted to cap the current projection batch, but the MVP does not yet implement full `MoreAvailable` pagination for very large collections
+- the first `Sync` with `SyncKey = 0` uses a conservative priming round-trip before emitting the paged server changes; this is targeted for Outlook/mobile but has not yet been validated against the full diversity of `ActiveSync` clients

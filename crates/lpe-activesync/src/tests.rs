@@ -4,7 +4,9 @@ use argon2::{
     password_hash::{rand_core::OsRng, SaltString},
     Argon2, PasswordHasher,
 };
+use axum::body::to_bytes;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
     AccountLogin, ActiveSyncSyncState, AuditEntryInput, AuthenticatedAccount, ClientContact,
     ClientEvent, JmapEmail, JmapEmailAddress, JmapEmailQuery, JmapMailbox, SavedDraftMessage,
@@ -124,7 +126,7 @@ impl FakeStore {
     }
 }
 
-impl ActiveSyncStore for FakeStore {
+impl AccountAuthStore for FakeStore {
     fn fetch_account_session<'a>(
         &'a self,
         token: &'a str,
@@ -141,7 +143,9 @@ impl ActiveSyncStore for FakeStore {
         let login = self.login.clone();
         Box::pin(async move { Ok(login) })
     }
+}
 
+impl ActiveSyncStore for FakeStore {
     fn fetch_jmap_mailboxes<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
         let mailboxes = self.mailboxes.clone();
         Box::pin(async move { Ok(mailboxes) })
@@ -151,22 +155,22 @@ impl ActiveSyncStore for FakeStore {
         &'a self,
         _account_id: Uuid,
         mailbox_id: Option<Uuid>,
-        _position: u64,
+        position: u64,
         limit: u64,
     ) -> StoreFuture<'a, JmapEmailQuery> {
-        let ids = self
+        let filtered = self
             .emails
             .iter()
             .filter(|email| mailbox_id.is_none() || Some(email.mailbox_id) == mailbox_id)
-            .take(limit as usize)
             .map(|email| email.id)
             .collect::<Vec<_>>();
-        Box::pin(async move {
-            Ok(JmapEmailQuery {
-                total: ids.len() as u64,
-                ids,
-            })
-        })
+        let total = filtered.len() as u64;
+        let ids = filtered
+            .into_iter()
+            .skip(position as usize)
+            .take(limit as usize)
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(JmapEmailQuery { total, ids }) })
     }
 
     fn fetch_jmap_emails<'a>(
@@ -307,6 +311,27 @@ fn mime_headers() -> HeaderMap {
         HeaderValue::from_static("message/rfc822"),
     );
     headers
+}
+
+async fn decode_response_body(response: axum::response::Response) -> WbxmlNode {
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    decode_wbxml(&bytes).unwrap()
+}
+
+fn collection_sync_key(sync: &WbxmlNode, collection_id: &str) -> String {
+    sync.child("Collections")
+        .unwrap()
+        .children_named("Collection")
+        .into_iter()
+        .find(|collection| {
+            collection
+                .child("CollectionId")
+                .map(|node| node.text_value() == collection_id)
+                .unwrap_or(false)
+        })
+        .and_then(|collection| collection.child("SyncKey"))
+        .map(|node| node.text_value().to_string())
+        .unwrap()
 }
 
 #[test]
@@ -479,6 +504,194 @@ async fn sync_handles_multiple_collections_and_common_optional_tokens() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn sync_key_zero_primes_then_returns_paged_more_available_changes() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: vec![
+            FakeStore::inbox_email(
+                "11111111-1111-1111-1111-111111111111",
+                inbox.id,
+                "inbox",
+                "One",
+            ),
+            FakeStore::inbox_email(
+                "22222222-2222-2222-2222-222222222222",
+                inbox.id,
+                "inbox",
+                "Two",
+            ),
+            FakeStore::inbox_email(
+                "33333333-3333-3333-3333-333333333333",
+                inbox.id,
+                "inbox",
+                "Three",
+            ),
+        ],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let priming_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", "0"));
+        collection.push(WbxmlNode::with_text(
+            0,
+            "CollectionId",
+            inbox.id.to_string(),
+        ));
+        collection.push(WbxmlNode::with_text(0, "WindowSize", "2"));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+
+    let priming_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &priming_request,
+        )
+        .await
+        .unwrap();
+    let priming_sync = decode_response_body(priming_response).await;
+    let priming_collection = priming_sync
+        .child("Collections")
+        .unwrap()
+        .child("Collection")
+        .unwrap();
+    assert!(priming_collection.child("Commands").is_none());
+    assert!(priming_collection.child("MoreAvailable").is_none());
+
+    let first_key = collection_sync_key(&priming_sync, &inbox.id.to_string());
+    let first_page_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", &first_key));
+        collection.push(WbxmlNode::with_text(
+            0,
+            "CollectionId",
+            inbox.id.to_string(),
+        ));
+        collection.push(WbxmlNode::with_text(0, "WindowSize", "2"));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+
+    let first_page_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &first_page_request,
+        )
+        .await
+        .unwrap();
+    let first_page_sync = decode_response_body(first_page_response).await;
+    let first_page_collection = first_page_sync
+        .child("Collections")
+        .unwrap()
+        .child("Collection")
+        .unwrap();
+    let first_commands = first_page_collection.child("Commands").unwrap();
+    assert_eq!(first_commands.children.len(), 2);
+    assert!(first_page_collection.child("MoreAvailable").is_some());
+
+    let second_key = collection_sync_key(&first_page_sync, &inbox.id.to_string());
+    let second_page_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", &second_key));
+        collection.push(WbxmlNode::with_text(
+            0,
+            "CollectionId",
+            inbox.id.to_string(),
+        ));
+        collection.push(WbxmlNode::with_text(0, "WindowSize", "2"));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+
+    let second_page_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &second_page_request,
+        )
+        .await
+        .unwrap();
+    let second_page_sync = decode_response_body(second_page_response).await;
+    let second_page_collection = second_page_sync
+        .child("Collections")
+        .unwrap()
+        .child("Collection")
+        .unwrap();
+    let second_commands = second_page_collection.child("Commands").unwrap();
+    assert_eq!(second_commands.children.len(), 1);
+    assert!(second_page_collection.child("MoreAvailable").is_none());
+
+    let stable_key = collection_sync_key(&second_page_sync, &inbox.id.to_string());
+    let stable_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", &stable_key));
+        collection.push(WbxmlNode::with_text(
+            0,
+            "CollectionId",
+            inbox.id.to_string(),
+        ));
+        collection.push(WbxmlNode::with_text(0, "WindowSize", "2"));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+
+    let stable_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &stable_request,
+        )
+        .await
+        .unwrap();
+    let stable_sync = decode_response_body(stable_response).await;
+    let stable_collection = stable_sync
+        .child("Collections")
+        .unwrap()
+        .child("Collection")
+        .unwrap();
+    assert!(stable_collection.child("Commands").is_none());
+    assert!(stable_collection.child("MoreAvailable").is_none());
 }
 
 #[tokio::test]

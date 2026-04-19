@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -12,13 +12,6 @@ pub(crate) struct ActiveSyncQuery {
     pub(crate) device_id: Option<String>,
     #[serde(rename = "DeviceType")]
     pub(crate) _device_type: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct AuthenticatedPrincipal {
-    pub(crate) account_id: Uuid,
-    pub(crate) email: String,
-    pub(crate) display_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -37,8 +30,16 @@ pub(crate) struct SnapshotEntry {
     pub(crate) data: Value,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SnapshotChange {
     pub(crate) kind: String,
     pub(crate) server_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct StoredSyncState {
+    pub(crate) baseline_snapshot: Value,
+    pub(crate) target_snapshot: Value,
+    pub(crate) pending_changes: Vec<SnapshotChange>,
+    pub(crate) next_offset: usize,
 }

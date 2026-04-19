@@ -1,13 +1,12 @@
 use anyhow::{anyhow, bail, Result};
 use axum::{http::HeaderMap, response::Response};
+use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{AuditEntryInput, ClientContact, ClientEvent, JmapEmail, SubmitMessageInput};
-use serde_json::json;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::{
-    auth::{
-        basic_credentials, bearer_token, normalize_login_name, protocol_version, verify_password,
-    },
+    auth::protocol_version,
     constants::{
         CALENDAR_CLASS, CONTACTS_CLASS, FOLDER_SYNC_COLLECTION_ID, MAIL_CLASS, ROOT_FOLDER_ID,
     },
@@ -19,7 +18,7 @@ use crate::{
         require_sync_collections, snapshot_map, snapshot_to_value,
     },
     store::ActiveSyncStore,
-    types::{ActiveSyncQuery, AuthenticatedPrincipal, CollectionDefinition, SnapshotEntry},
+    types::{ActiveSyncQuery, CollectionDefinition, SnapshotChange, SnapshotEntry, StoredSyncState},
     wbxml::{decode_wbxml, encode_wbxml, WbxmlNode},
 };
 
@@ -84,34 +83,8 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         &self,
         hinted_user: Option<&str>,
         headers: &HeaderMap,
-    ) -> Result<AuthenticatedPrincipal> {
-        if let Some(token) = bearer_token(headers) {
-            if let Some(account) = self.store.fetch_account_session(&token).await? {
-                return Ok(AuthenticatedPrincipal {
-                    account_id: account.account_id,
-                    email: account.email,
-                    display_name: account.display_name,
-                });
-            }
-        }
-
-        if let Some((username, password)) = basic_credentials(headers)? {
-            let login = self
-                .store
-                .fetch_account_login(&normalize_login_name(&username, hinted_user))
-                .await?
-                .ok_or_else(|| anyhow!("invalid credentials"))?;
-            if login.status != "active" || !verify_password(&login.password_hash, &password) {
-                bail!("invalid credentials");
-            }
-            return Ok(AuthenticatedPrincipal {
-                account_id: login.account_id,
-                email: login.email,
-                display_name: login.display_name,
-            });
-        }
-
-        bail!("missing account authentication");
+    ) -> Result<AccountPrincipal> {
+        authenticate_account(&self.store, hinted_user, headers).await
     }
 
     async fn handle_provision(
@@ -358,7 +331,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             return Ok(sync_status_node(&collection_id, "9"));
         };
 
-        let previous_snapshot = if sync_key == "0" || sync_key.is_empty() {
+        let previous_state = if sync_key == "0" || sync_key.is_empty() {
             None
         } else {
             self.store
@@ -369,10 +342,10 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     &sync_key,
                 )
                 .await?
-                .map(|state| state.snapshot)
+                .map(|state| decode_sync_state(&state.snapshot))
         };
 
-        if !sync_key.is_empty() && sync_key != "0" && previous_snapshot.is_none() {
+        if !sync_key.is_empty() && sync_key != "0" && previous_state.is_none() {
             return Ok(sync_status_node(&collection.id, "9"));
         }
 
@@ -384,24 +357,12 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         };
 
         let final_snapshot = self
-            .collection_snapshot(principal.account_id, &collection, window_size)
+            .collection_snapshot(principal.account_id, &collection)
             .await?;
         let next_key = Uuid::new_v4().to_string();
-        self.store
-            .store_activesync_sync_state(
-                principal.account_id,
-                device_id,
-                &collection.id,
-                &next_key,
-                final_snapshot.clone(),
-            )
-            .await?;
-
-        let changed_items = diff_snapshots(previous_snapshot.as_ref(), &final_snapshot);
-        let current_items = snapshot_map(&final_snapshot);
         let mut response_collection = WbxmlNode::new(0, "Collection");
         response_collection.push(WbxmlNode::with_text(0, "Class", &collection.class_name));
-        response_collection.push(WbxmlNode::with_text(0, "SyncKey", next_key));
+        response_collection.push(WbxmlNode::with_text(0, "SyncKey", &next_key));
         response_collection.push(WbxmlNode::with_text(0, "CollectionId", &collection.id));
         response_collection.push(WbxmlNode::with_text(0, "Status", "1"));
 
@@ -413,37 +374,156 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             response_collection.push(responses);
         }
 
-        if !changed_items.is_empty() {
-            let mut commands = WbxmlNode::new(0, "Commands");
-            for change in changed_items {
-                match change.kind.as_str() {
-                    "Add" | "Update" => {
-                        if let Some(item) = current_items.get(&change.server_id) {
-                            let mut node = WbxmlNode::new(
-                                0,
-                                if change.kind == "Add" {
-                                    "Add"
-                                } else {
-                                    "Change"
-                                },
-                            );
-                            node.push(WbxmlNode::with_text(0, "ServerId", &change.server_id));
-                            node.push(item.clone());
-                            commands.push(node);
-                        }
-                    }
-                    "Delete" => {
-                        let mut node = WbxmlNode::new(0, "Delete");
-                        node.push(WbxmlNode::with_text(0, "ServerId", &change.server_id));
-                        commands.push(node);
-                    }
-                    _ => {}
+        if sync_key == "0" && !has_client_commands(collection_node) {
+            let pending_changes = diff_snapshots(Some(&empty_snapshot()), &final_snapshot);
+            let stored_state = if pending_changes.is_empty() {
+                completed_sync_state(final_snapshot.clone())
+            } else {
+                StoredSyncState {
+                    baseline_snapshot: empty_snapshot(),
+                    target_snapshot: final_snapshot,
+                    pending_changes,
+                    next_offset: 0,
                 }
-            }
+            };
+            self.store_sync_state(
+                principal.account_id,
+                device_id,
+                &collection.id,
+                &next_key,
+                &stored_state,
+            )
+            .await?;
+            return Ok(response_collection);
+        }
+
+        let previous_state = previous_state.unwrap_or_else(|| StoredSyncState {
+            baseline_snapshot: empty_snapshot(),
+            target_snapshot: empty_snapshot(),
+            pending_changes: Vec::new(),
+            next_offset: 0,
+        });
+
+        let (commands, more_available, stored_state) =
+            if previous_state.next_offset < previous_state.pending_changes.len() {
+                let current_items = snapshot_map(&previous_state.target_snapshot);
+                let (commands, next_offset) = paged_commands(
+                    &previous_state.pending_changes,
+                    previous_state.next_offset,
+                    window_size,
+                    &current_items,
+                );
+                let more_available = next_offset < previous_state.pending_changes.len();
+                let stored_state = if more_available {
+                    StoredSyncState {
+                        next_offset,
+                        ..previous_state.clone()
+                    }
+                } else {
+                    completed_sync_state(previous_state.target_snapshot.clone())
+                };
+                (commands, more_available, stored_state)
+            } else {
+                let changed_items =
+                    diff_snapshots(Some(&previous_state.target_snapshot), &final_snapshot);
+                let current_items = snapshot_map(&final_snapshot);
+                let (commands, next_offset) =
+                    paged_commands(&changed_items, 0, window_size, &current_items);
+                let more_available = next_offset < changed_items.len();
+                let stored_state = if more_available {
+                    StoredSyncState {
+                        baseline_snapshot: previous_state.target_snapshot,
+                        target_snapshot: final_snapshot,
+                        pending_changes: changed_items,
+                        next_offset,
+                    }
+                } else {
+                    completed_sync_state(final_snapshot)
+                };
+                (commands, more_available, stored_state)
+            };
+
+        self.store_sync_state(
+            principal.account_id,
+            device_id,
+            &collection.id,
+            &next_key,
+            &stored_state,
+        )
+        .await?;
+
+        if !commands.children.is_empty() {
             response_collection.push(commands);
+        }
+        if more_available {
+            response_collection.push(WbxmlNode::new(0, "MoreAvailable"));
         }
 
         Ok(response_collection)
+    }
+
+    async fn store_sync_state(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+        collection_id: &str,
+        sync_key: &str,
+        state: &StoredSyncState,
+    ) -> Result<()> {
+        self.store
+            .store_activesync_sync_state(
+                account_id,
+                device_id,
+                collection_id,
+                sync_key,
+                serde_json::to_value(state)?,
+            )
+            .await
+    }
+
+    async fn collection_snapshot(
+        &self,
+        account_id: Uuid,
+        collection: &CollectionDefinition,
+    ) -> Result<serde_json::Value> {
+        let emails = if mail_collection(collection) {
+            let mailbox_id = parse_collection_mailbox_id(collection)?;
+            let ids = self.fetch_all_email_ids(account_id, mailbox_id).await?;
+            self.store.fetch_jmap_emails(account_id, &ids).await?
+        } else {
+            Vec::<JmapEmail>::new()
+        };
+        let contacts = if collection.class_name == CONTACTS_CLASS {
+            self.store.fetch_client_contacts(account_id).await?
+        } else {
+            Vec::<ClientContact>::new()
+        };
+        let events = if collection.class_name == CALENDAR_CLASS {
+            self.store.fetch_client_events(account_id).await?
+        } else {
+            Vec::<ClientEvent>::new()
+        };
+        collection_entries(collection, emails, contacts, events)
+    }
+
+    async fn fetch_all_email_ids(&self, account_id: Uuid, mailbox_id: Uuid) -> Result<Vec<Uuid>> {
+        let mut ids = Vec::new();
+        let mut position = 0;
+
+        loop {
+            let page = self
+                .store
+                .query_jmap_email_ids(account_id, Some(mailbox_id), position, 512)
+                .await?;
+            let batch_len = page.ids.len() as u64;
+            ids.extend(page.ids);
+            if batch_len == 0 || ids.len() as u64 >= page.total {
+                break;
+            }
+            position += batch_len;
+        }
+
+        Ok(ids)
     }
 
     async fn apply_draft_sync_commands(
@@ -675,34 +755,66 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .into_iter()
             .find(|collection| collection.id == collection_id))
     }
+}
 
-    async fn collection_snapshot(
-        &self,
-        account_id: Uuid,
-        collection: &CollectionDefinition,
-        window_size: u64,
-    ) -> Result<serde_json::Value> {
-        let emails = if mail_collection(collection) {
-            let mailbox_id = parse_collection_mailbox_id(collection)?;
-            let ids = self
-                .store
-                .query_jmap_email_ids(account_id, Some(mailbox_id), 0, window_size)
-                .await?
-                .ids;
-            self.store.fetch_jmap_emails(account_id, &ids).await?
-        } else {
-            Vec::<JmapEmail>::new()
-        };
-        let contacts = if collection.class_name == CONTACTS_CLASS {
-            self.store.fetch_client_contacts(account_id).await?
-        } else {
-            Vec::<ClientContact>::new()
-        };
-        let events = if collection.class_name == CALENDAR_CLASS {
-            self.store.fetch_client_events(account_id).await?
-        } else {
-            Vec::<ClientEvent>::new()
-        };
-        collection_entries(collection, emails, contacts, events)
+fn decode_sync_state(snapshot: &Value) -> StoredSyncState {
+    serde_json::from_value::<StoredSyncState>(snapshot.clone())
+        .unwrap_or_else(|_| completed_sync_state(snapshot.clone()))
+}
+
+fn completed_sync_state(snapshot: Value) -> StoredSyncState {
+    StoredSyncState {
+        baseline_snapshot: snapshot.clone(),
+        target_snapshot: snapshot,
+        pending_changes: Vec::new(),
+        next_offset: 0,
     }
+}
+
+fn empty_snapshot() -> Value {
+    Value::Array(Vec::new())
+}
+
+fn has_client_commands(collection_node: &WbxmlNode) -> bool {
+    collection_node
+        .child("Commands")
+        .map(|commands| !commands.children.is_empty())
+        .unwrap_or(false)
+}
+
+fn paged_commands(
+    changes: &[SnapshotChange],
+    offset: usize,
+    window_size: u64,
+    current_items: &std::collections::HashMap<String, WbxmlNode>,
+) -> (WbxmlNode, usize) {
+    let mut commands = WbxmlNode::new(0, "Commands");
+    let end = (offset + window_size as usize).min(changes.len());
+    for change in &changes[offset..end] {
+        match change.kind.as_str() {
+            "Add" | "Update" => {
+                if let Some(item) = current_items.get(&change.server_id) {
+                    let mut node = WbxmlNode::new(
+                        0,
+                        if change.kind == "Add" {
+                            "Add"
+                        } else {
+                            "Change"
+                        },
+                    );
+                    node.push(WbxmlNode::with_text(0, "ServerId", &change.server_id));
+                    node.push(item.clone());
+                    commands.push(node);
+                }
+            }
+            "Delete" => {
+                let mut node = WbxmlNode::new(0, "Delete");
+                node.push(WbxmlNode::with_text(0, "ServerId", &change.server_id));
+                commands.push(node);
+            }
+            _ => {}
+        }
+    }
+
+    (commands, end)
 }
