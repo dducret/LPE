@@ -54,3 +54,5 @@ These dependencies are common in the Rust ecosystem and are kept provisionally t
 
 `argon2` is used for administrator password hashing; the RustCrypto crate is available under `Apache-2.0 OR MIT`, which is compatible with the `Apache-2.0` preference.
 
+Google `Magika` is an acceptable candidate for file-type validation because its official project is published under `Apache-2.0`. As with every dependency, the selected integration path and its transitive dependencies must still be reviewed before adoption.
+

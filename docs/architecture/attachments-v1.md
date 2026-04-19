@@ -27,12 +27,17 @@ Les autres formats bureautiques restent hors perimetre v1.
 
 ### Strategie
 
-1. detecter le format de la piece jointe
-2. extraire le texte brut
-3. normaliser le texte
-4. stocker le texte dans `attachments.extracted_text`
-5. alimenter `attachments.extracted_text_tsv`
-6. agreger ensuite la recherche message et pieces jointes
+1. valider le type de fichier entrant avec Google `Magika` a partir des bytes reels
+2. comparer le type detecte avec le MIME declare et l'extension
+3. appliquer la politique d'acceptation, de restriction, de quarantaine ou de rejet
+4. detecter le format de la piece jointe retenue
+5. extraire le texte brut
+6. normaliser le texte
+7. stocker le texte dans `attachments.extracted_text`
+8. alimenter `attachments.extracted_text_tsv`
+9. agreger ensuite la recherche message et pieces jointes
+
+La validation `Magika` est obligatoire pour toute piece jointe ou fichier entrant via connexion externe ou via un client avant indexation, import, ou parsing specialise.
 
 ### Hors perimetre v1
 
@@ -67,12 +72,17 @@ Other office formats remain out of scope for v1.
 
 ### Strategy
 
-1. detect the attachment format
-2. extract raw text
-3. normalize the text
-4. store text in `attachments.extracted_text`
-5. populate `attachments.extracted_text_tsv`
-6. aggregate message and attachment search afterward
+1. validate the incoming file type with Google `Magika` from the actual bytes
+2. compare the detected type with the declared MIME type and extension
+3. apply the acceptance, restriction, quarantine, or rejection policy
+4. detect the attachment format for the retained file
+5. extract raw text
+6. normalize the text
+7. store text in `attachments.extracted_text`
+8. populate `attachments.extracted_text_tsv`
+9. aggregate message and attachment search afterward
+
+`Magika` validation is mandatory for every attachment or file entering through an external connection or through a client before indexing, import, or specialized parsing.
 
 ### Out of scope for v1
 

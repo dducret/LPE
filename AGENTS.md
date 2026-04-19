@@ -106,6 +106,8 @@ Any message sent from Outlook, iPhone Mail, or another native client must be cor
 
 Every client layer must use the canonical `LPE` submission and synchronization model. No client layer may write its own parallel `Sent` or `Outbox` logic.
 
+Every file entering through an external connection or through a client must be validated with Google `Magika` before normal processing. This applies to both `LPE-CT` and `LPE`, including mail attachments, browser uploads, `JMAP` blobs, `PST` imports, and future file-ingress paths.
+
 ### Storage and data constraints
 
 The primary store is `PostgreSQL`.
@@ -284,6 +286,8 @@ Une simple combinaison `IMAP` + `SMTP` + autodiscover ne doit pas etre supposee 
 Tout envoi effectue depuis un client Outlook, iPhone Mail ou autre client natif doit etre enregistre correctement dans `LPE` et visible dans la vue `Sent`.
 
 Toutes les couches clientes doivent utiliser le modele canonique `LPE` de soumission et de synchronisation. Aucune couche cliente ne doit ecrire une logique `Sent` ou `Outbox` parallele.
+
+Tout fichier entrant via connexion externe ou via un client doit etre valide par Google `Magika` avant traitement normal. Cela s'applique a la fois a `LPE-CT` et a `LPE`, y compris aux pieces jointes mail, uploads navigateur, blobs `JMAP`, imports `PST` et futurs points d'entree de fichiers.
 
 ### Contraintes de stockage et donnees
 
