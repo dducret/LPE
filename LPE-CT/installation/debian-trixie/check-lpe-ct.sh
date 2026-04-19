@@ -66,6 +66,14 @@ health_body="$(curl --silent --show-error --fail "$API_HEALTH_URL")" || fail "He
 [[ "$health_body" == *"\"status\":\"ok\""* ]] || fail "Unexpected health response: $health_body"
 pass "Management API health endpoint responded correctly"
 
+health_live_body="$(curl --silent --show-error --fail "http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/health/live")" || fail "Health live request failed"
+[[ "$health_live_body" == *"\"status\":\"ok\""* ]] || fail "Unexpected live health response: $health_live_body"
+pass "Management API live health endpoint responded correctly"
+
+health_ready_body="$(curl --silent --show-error --fail "http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/health/ready")" || fail "Health ready request failed"
+[[ "$health_ready_body" == *"\"status\":\"ready\""* ]] || fail "Unexpected readiness response: $health_ready_body"
+pass "Management API readiness endpoint responded correctly"
+
 dashboard_body="$(curl --silent --show-error --fail "$API_DASHBOARD_URL")" || fail "Dashboard request failed: $API_DASHBOARD_URL"
 [[ "$dashboard_body" == *"dmz-sorting-center"* ]] || fail "Unexpected dashboard response: $dashboard_body"
 pass "Dashboard endpoint responded correctly"

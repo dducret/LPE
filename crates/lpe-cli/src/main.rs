@@ -1,6 +1,8 @@
 use anyhow::Result;
 use lpe_admin_api::{
-    bootstrap_admin, bootstrap_admin_request_from_env, integration_shared_secret, router,
+    bootstrap_admin, bootstrap_admin_request_from_env, init_observability,
+    integration_shared_secret, observe_outbound_worker_dispatch, observe_outbound_worker_poll,
+    router,
 };
 use lpe_domain::{OutboundMessageHandoffRequest, OutboundMessageHandoffResponse};
 use lpe_imap::ImapServer;
@@ -8,13 +10,10 @@ use lpe_storage::Storage;
 use std::{env, time::Duration};
 use tokio::{net::TcpListener, time::sleep};
 use tracing::{info, warn};
-use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    init_observability("lpe");
 
     if env::args().nth(1).as_deref() == Some("bootstrap-admin") {
         return run_bootstrap_admin_command().await;
@@ -91,6 +90,7 @@ async fn run_outbound_worker(storage: Storage) -> Result<()> {
 
     loop {
         let batch = storage.fetch_outbound_handoff_batch(batch_size).await?;
+        observe_outbound_worker_poll(batch.len());
         if batch.is_empty() {
             sleep(Duration::from_millis(interval_ms)).await;
             continue;
@@ -113,28 +113,62 @@ async fn dispatch_outbound_message(
 ) {
     let endpoint = format!("{base_url}/api/v1/integration/outbound-messages");
     let queue_id = item.queue_id;
-    let subject = item.subject.clone();
+    let message_id = item.message_id;
+    let trace_id = format!("lpe-outbound-{queue_id}");
 
-    match send_outbound_handoff(client, &endpoint, integration_key, &item).await {
+    info!(
+        trace_id = %trace_id,
+        queue_id = %queue_id,
+        message_id = %message_id,
+        attempt_count = item.attempt_count,
+        internet_message_id = item.internet_message_id.as_deref().unwrap_or(""),
+        recipient_count = item.envelope_recipients().len(),
+        "dispatching outbound message to lpe-ct"
+    );
+
+    match send_outbound_handoff(client, &endpoint, integration_key, &trace_id, &item).await {
         Ok(response) => {
             let status = response.status.clone();
             if let Err(error) = storage.update_outbound_queue_status(&response).await {
-                warn!("unable to persist outbound status for {queue_id}: {error}");
+                warn!(
+                    trace_id = %response.trace_id,
+                    queue_id = %queue_id,
+                    message_id = %message_id,
+                    error = %error,
+                    "unable to persist outbound status"
+                );
             } else {
+                observe_outbound_worker_dispatch(status.as_str());
                 info!(
-                    "outbound queue {queue_id} updated to {} for subject {:?}",
-                    status.as_str(),
-                    subject
+                    trace_id = %response.trace_id,
+                    queue_id = %queue_id,
+                    message_id = %message_id,
+                    status = status.as_str(),
+                    remote_message_ref = response.remote_message_ref.as_deref().unwrap_or(""),
+                    "outbound queue updated"
                 );
             }
         }
         Err(error) => {
-            warn!("outbound handoff failed for {queue_id}: {error}");
+            observe_outbound_worker_dispatch("failed");
+            warn!(
+                trace_id = %trace_id,
+                queue_id = %queue_id,
+                message_id = %message_id,
+                error = %error,
+                "outbound handoff failed"
+            );
             if let Err(update_error) = storage
                 .mark_outbound_queue_attempt_failure(queue_id, &error)
                 .await
             {
-                warn!("unable to mark queue {queue_id} as deferred: {update_error}");
+                warn!(
+                    trace_id = %trace_id,
+                    queue_id = %queue_id,
+                    message_id = %message_id,
+                    error = %update_error,
+                    "unable to mark queue as deferred"
+                );
             }
         }
     }
@@ -144,11 +178,13 @@ async fn send_outbound_handoff(
     client: &reqwest::Client,
     endpoint: &str,
     integration_key: &str,
+    trace_id: &str,
     item: &OutboundMessageHandoffRequest,
 ) -> std::result::Result<OutboundMessageHandoffResponse, String> {
     let response = client
         .post(endpoint)
         .header("x-lpe-integration-key", integration_key)
+        .header("x-trace-id", trace_id)
         .json(item)
         .send()
         .await
@@ -241,6 +277,7 @@ mod tests {
             &client,
             &format!("http://{address}/api/v1/integration/outbound-messages"),
             "shared-secret",
+            "trace-1",
             &request,
         )
         .await

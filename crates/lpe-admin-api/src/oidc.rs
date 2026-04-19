@@ -98,8 +98,8 @@ pub async fn exchange_code_for_claims(
         .ok_or_else(|| anyhow!("OIDC userinfo does not contain the configured subject claim"))?;
     let email = claim_string(&userinfo, &settings.oidc_claim_email)
         .ok_or_else(|| anyhow!("OIDC userinfo does not contain the configured email claim"))?;
-    let display_name = claim_string(&userinfo, &settings.oidc_claim_display_name)
-        .unwrap_or_else(|| email.clone());
+    let display_name =
+        claim_string(&userinfo, &settings.oidc_claim_display_name).unwrap_or_else(|| email.clone());
 
     Ok(AdminOidcClaims {
         issuer_url,

@@ -32,7 +32,7 @@ use tokio::{
 };
 use tracing::{info, warn};
 
-use crate::integration_shared_secret;
+use crate::{integration_shared_secret, observability};
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
@@ -251,7 +251,8 @@ pub(crate) async fn run_smtp_listener(
         let spool_dir = spool_dir.clone();
         tokio::spawn(async move {
             if let Err(error) = handle_smtp_session(stream, peer, state_file, spool_dir).await {
-                warn!("smtp session failed for {peer}: {error}");
+                observability::record_smtp_session("failed");
+                warn!(peer = %peer, error = %error, "smtp session failed");
             }
         });
     }
@@ -310,6 +311,8 @@ pub(crate) async fn process_outbound_handoff(
     config: &RuntimeConfig,
     payload: OutboundMessageHandoffRequest,
 ) -> Result<OutboundMessageHandoffResponse> {
+    let message_id = payload.message_id;
+    let internet_message_id = payload.internet_message_id.clone();
     let route = resolve_outbound_route(config, &payload);
     let mut message = QueuedMessage {
         id: format!("lpe-ct-out-{}", payload.queue_id),
@@ -352,6 +355,14 @@ pub(crate) async fn process_outbound_handoff(
             detail: "message matched local quarantine policy".to_string(),
         });
         move_message(spool_dir, &message, "outbound", "quarantine").await?;
+        observability::record_security_event("outbound_quarantine");
+        info!(
+            trace_id = %message.id,
+            message_id = %message_id,
+            internet_message_id = internet_message_id.as_deref().unwrap_or(""),
+            status = "quarantined",
+            "outbound handoff quarantined by lpe-ct policy"
+        );
         return Ok(OutboundMessageHandoffResponse {
             queue_id: payload.queue_id,
             status: TransportDeliveryStatus::Quarantined,
@@ -387,6 +398,14 @@ pub(crate) async fn process_outbound_handoff(
             ),
         });
         move_message(spool_dir, &message, "outbound", "deferred").await?;
+        info!(
+            trace_id = %message.id,
+            message_id = %message_id,
+            internet_message_id = internet_message_id.as_deref().unwrap_or(""),
+            status = "deferred",
+            throttle_scope = %throttle.scope,
+            "outbound handoff deferred by lpe-ct throttle"
+        );
         return Ok(OutboundMessageHandoffResponse {
             queue_id: payload.queue_id,
             status: TransportDeliveryStatus::Deferred,
@@ -437,6 +456,25 @@ pub(crate) async fn process_outbound_handoff(
     } else {
         move_message(spool_dir, &message, "outbound", destination).await?;
     }
+    if matches!(
+        execution.status,
+        TransportDeliveryStatus::Quarantined | TransportDeliveryStatus::Bounced | TransportDeliveryStatus::Failed
+    ) {
+        observability::record_security_event(match execution.status {
+            TransportDeliveryStatus::Quarantined => "outbound_quarantine",
+            TransportDeliveryStatus::Bounced => "outbound_bounce",
+            TransportDeliveryStatus::Failed => "outbound_failure",
+            _ => "outbound_transport",
+        });
+    }
+    info!(
+        trace_id = %message.id,
+        message_id = %message_id,
+        internet_message_id = internet_message_id.as_deref().unwrap_or(""),
+        status = execution.status.as_str(),
+        relay_target = route.relay_target.as_deref().unwrap_or(""),
+        "outbound handoff completed"
+    );
 
     Ok(OutboundMessageHandoffResponse {
         queue_id: payload.queue_id,
@@ -756,6 +794,7 @@ async fn receive_message_with_validator<D: Detector>(
     match classify_inbound_message(validator, &message.data) {
         Ok(InboundMagikaOutcome::Accept) => {}
         Ok(InboundMagikaOutcome::Quarantine(reason)) => {
+            observability::record_security_event("magika_quarantine");
             message.status = "quarantined".to_string();
             message.magika_decision = Some("quarantine".to_string());
             message.magika_summary = Some(reason);
@@ -766,9 +805,15 @@ async fn receive_message_with_validator<D: Detector>(
                 detail: message.magika_summary.clone().unwrap_or_default(),
             });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
+            info!(
+                trace_id = %message.id,
+                status = %message.status,
+                "inbound message quarantined by Magika"
+            );
             return Ok(message);
         }
         Ok(InboundMagikaOutcome::Reject(reason)) => {
+            observability::record_security_event("magika_reject");
             message.status = "rejected".to_string();
             message.magika_decision = Some("reject".to_string());
             message.magika_summary = Some(reason);
@@ -779,9 +824,15 @@ async fn receive_message_with_validator<D: Detector>(
                 detail: message.magika_summary.clone().unwrap_or_default(),
             });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
+            info!(
+                trace_id = %message.id,
+                status = %message.status,
+                "inbound message rejected by Magika"
+            );
             return Ok(message);
         }
         Err(error) => {
+            observability::record_security_event("magika_quarantine");
             message.status = "quarantined".to_string();
             message.magika_decision = Some("quarantine".to_string());
             message.magika_summary = Some(format!("Magika validation failed: {error}"));
@@ -792,6 +843,11 @@ async fn receive_message_with_validator<D: Detector>(
                 detail: message.magika_summary.clone().unwrap_or_default(),
             });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
+            info!(
+                trace_id = %message.id,
+                status = %message.status,
+                "inbound message quarantined after Magika failure"
+            );
             return Ok(message);
         }
     }
@@ -819,6 +875,7 @@ async fn receive_message_with_validator<D: Detector>(
                 });
                 move_message(spool_dir, &message, "incoming", "sent").await?;
                 update_reputation(spool_dir, &message, FilterAction::Accept)?;
+                observability::record_smtp_session("delivered");
             }
             Err(error) => {
                 message.status = if config.fallback_to_hold_queue {
@@ -839,25 +896,41 @@ async fn receive_message_with_validator<D: Detector>(
                 };
                 move_message(spool_dir, &message, "incoming", destination).await?;
                 update_reputation(spool_dir, &message, FilterAction::Defer)?;
+                observability::record_security_event("inbound_delivery_deferred");
+                observability::record_smtp_session("deferred");
             }
         },
         FilterAction::Quarantine => {
+            observability::record_security_event("inbound_quarantine");
             message.status = "quarantined".to_string();
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             update_reputation(spool_dir, &message, FilterAction::Quarantine)?;
+            observability::record_smtp_session("quarantined");
         }
         FilterAction::Reject => {
+            observability::record_security_event("inbound_reject");
             message.status = "rejected".to_string();
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             update_reputation(spool_dir, &message, FilterAction::Reject)?;
+            observability::record_smtp_session("rejected");
         }
         FilterAction::Defer => {
+            observability::record_security_event("inbound_defer");
             message.status = "deferred".to_string();
             move_message(spool_dir, &message, "incoming", "deferred").await?;
             update_reputation(spool_dir, &message, FilterAction::Defer)?;
+            observability::record_smtp_session("deferred");
         }
     }
 
+    info!(
+        trace_id = %message.id,
+        status = %message.status,
+        peer = %message.peer,
+        sender = %message.mail_from,
+        recipient_count = message.rcpt_to.len(),
+        "smtp message processed"
+    );
     Ok(message)
 }
 
@@ -1436,6 +1509,7 @@ async fn deliver_inbound_message(
     let response = client
         .post(endpoint)
         .header("x-lpe-integration-key", integration_secret)
+        .header("x-trace-id", request.trace_id.clone())
         .json(&request)
         .send()
         .await?;
@@ -1448,11 +1522,21 @@ async fn deliver_inbound_message(
 
     let delivery: InboundDeliveryResponse = response.json().await?;
     if delivery.accepted_recipients.is_empty() {
+        observability::record_inbound_delivery("failed");
         return Err(anyhow!(
             "core delivery rejected all recipients: {:?}",
             delivery.rejected_recipients
         ));
     }
+    observability::record_inbound_delivery(delivery.status.as_str());
+    info!(
+        trace_id = %delivery.trace_id,
+        status = delivery.status.as_str(),
+        accepted_recipients = delivery.accepted_recipients.len(),
+        rejected_recipients = delivery.rejected_recipients.len(),
+        internet_message_id = request.internet_message_id.as_deref().unwrap_or(""),
+        "inbound message delivered to lpe core"
+    );
     Ok(delivery)
 }
 

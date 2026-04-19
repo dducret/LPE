@@ -41,7 +41,10 @@ pub fn parse_message_attachments(bytes: &[u8]) -> Result<Vec<AttachmentUploadInp
         .collect()
 }
 
-pub fn parse_header_recipients(raw_message: &[u8], header_name: &str) -> Vec<SubmittedRecipientInput> {
+pub fn parse_header_recipients(
+    raw_message: &[u8],
+    header_name: &str,
+) -> Vec<SubmittedRecipientInput> {
     let expected = format!("{}:", header_name.to_ascii_lowercase());
     unfolded_headers(raw_message)
         .into_iter()
@@ -70,13 +73,13 @@ pub fn parse_header_recipients(raw_message: &[u8], header_name: &str) -> Vec<Sub
 
 pub fn parse_rfc822_message(bytes: &[u8]) -> Result<ParsedRfc822Message> {
     let raw = String::from_utf8_lossy(bytes).replace("\r\n", "\n");
-    let (header_text, body_text) = raw
-        .split_once("\n\n")
-        .unwrap_or((raw.as_str(), ""));
+    let (header_text, body_text) = raw.split_once("\n\n").unwrap_or((raw.as_str(), ""));
     let headers = parse_headers(header_text);
 
     Ok(ParsedRfc822Message {
-        from: headers.get("from").and_then(|value| parse_single_address(value)),
+        from: headers
+            .get("from")
+            .and_then(|value| parse_single_address(value)),
         to: headers
             .get("to")
             .map(|value| parse_address_list(value))
@@ -162,10 +165,7 @@ fn unfolded_headers(raw_message: &[u8]) -> Vec<String> {
 }
 
 fn parse_address_list(value: &str) -> Vec<ParsedMailAddress> {
-    value
-        .split(',')
-        .filter_map(parse_single_address)
-        .collect()
+    value.split(',').filter_map(parse_single_address).collect()
 }
 
 fn parse_single_address(value: &str) -> Option<ParsedMailAddress> {

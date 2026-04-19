@@ -29,9 +29,9 @@ pub fn router() -> Router<Storage> {
 }
 
 async fn thunderbird_autoconfig(headers: HeaderMap) -> Response {
-    xml_response(render_thunderbird_autoconfig(&PublishedEndpoints::from_headers(
-        &headers, None,
-    )))
+    xml_response(render_thunderbird_autoconfig(
+        &PublishedEndpoints::from_headers(&headers, None),
+    ))
 }
 
 async fn outlook_autodiscover_get(headers: HeaderMap) -> Response {
@@ -71,19 +71,24 @@ impl PublishedEndpoints {
             .and_then(email_domain)
             .unwrap_or_else(|| public_host_name.clone());
 
-        let imap_host = env::var("LPE_AUTOCONFIG_IMAP_HOST").unwrap_or_else(|_| public_host_name.clone());
+        let imap_host =
+            env::var("LPE_AUTOCONFIG_IMAP_HOST").unwrap_or_else(|_| public_host_name.clone());
         let imap_port = read_u16_env("LPE_AUTOCONFIG_IMAP_PORT", 993);
 
-        let smtp_host = env::var("LPE_AUTOCONFIG_SMTP_HOST").ok().map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
+        let smtp_host = env::var("LPE_AUTOCONFIG_SMTP_HOST")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
         let smtp_port = smtp_host
             .as_ref()
             .map(|_| read_u16_env("LPE_AUTOCONFIG_SMTP_PORT", 465));
-        let smtp_socket_type = smtp_host
-            .as_ref()
-            .map(|_| env::var("LPE_AUTOCONFIG_SMTP_SOCKET_TYPE").unwrap_or_else(|_| "SSL".to_string()));
+        let smtp_socket_type = smtp_host.as_ref().map(|_| {
+            env::var("LPE_AUTOCONFIG_SMTP_SOCKET_TYPE").unwrap_or_else(|_| "SSL".to_string())
+        });
 
-        let activesync_url = env::var("LPE_AUTODISCOVER_ACTIVESYNC_URL")
-            .unwrap_or_else(|_| format!("{public_scheme}://{public_host}/Microsoft-Server-ActiveSync"));
+        let activesync_url = env::var("LPE_AUTODISCOVER_ACTIVESYNC_URL").unwrap_or_else(|_| {
+            format!("{public_scheme}://{public_host}/Microsoft-Server-ActiveSync")
+        });
         let jmap_session_url = env::var("LPE_AUTOCONFIG_JMAP_SESSION_URL")
             .unwrap_or_else(|_| format!("{public_scheme}://{public_host}/api/jmap/session"));
 
@@ -219,7 +224,12 @@ fn public_scheme(headers: &HeaderMap) -> String {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .or_else(|| header_value(headers, "x-forwarded-proto"))
-        .and_then(|value| value.split(',').next().map(|entry| entry.trim().to_string()))
+        .and_then(|value| {
+            value
+                .split(',')
+                .next()
+                .map(|entry| entry.trim().to_string())
+        })
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "https".to_string())
 }
@@ -234,12 +244,17 @@ fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {
 }
 
 fn host_without_port(value: &str) -> String {
-    if let Some(inner) = value.strip_prefix('[').and_then(|rest| rest.split_once(']')) {
+    if let Some(inner) = value
+        .strip_prefix('[')
+        .and_then(|rest| rest.split_once(']'))
+    {
         return inner.0.to_string();
     }
 
     match value.rsplit_once(':') {
-        Some((host, port)) if !host.contains(':') && port.parse::<u16>().is_ok() => host.to_string(),
+        Some((host, port)) if !host.contains(':') && port.parse::<u16>().is_ok() => {
+            host.to_string()
+        }
         _ => value.to_string(),
     }
 }
@@ -252,7 +267,10 @@ fn read_u16_env(name: &str, default: u16) -> u16 {
 }
 
 fn email_domain(email: &str) -> Option<String> {
-    email.rsplit_once('@').map(|(_, domain)| domain.trim().to_string()).filter(|value| !value.is_empty())
+    email
+        .rsplit_once('@')
+        .map(|(_, domain)| domain.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn escape_xml(value: &str) -> String {
@@ -329,9 +347,9 @@ mod tests {
         let xml = render_outlook_autodiscover(&sample_config(), Some("alice@example.test"));
 
         assert!(xml.contains("<Type>MobileSync</Type>"));
-        assert!(xml.contains(
-            "<ASUrl>https://mail.example.test/Microsoft-Server-ActiveSync</ASUrl>"
-        ));
+        assert!(
+            xml.contains("<ASUrl>https://mail.example.test/Microsoft-Server-ActiveSync</ASUrl>")
+        );
         assert!(xml.contains("<EMailAddress>alice@example.test</EMailAddress>"));
     }
 

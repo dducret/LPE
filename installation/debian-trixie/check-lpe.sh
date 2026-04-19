@@ -86,9 +86,13 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.searcha
 pass "Found view public.searchable_mail_documents"
 
 check_http_json_field "$HTTP_BASE/health" '"status":"ok"'
+check_http_json_field "$HTTP_BASE/health/live" '"status":"ok"'
+check_http_json_field "$HTTP_BASE/health/ready" '"status":"ready"'
 check_http_json_field "$HTTP_BASE/bootstrap/admin" '"email":"admin@example.test"'
 check_http_json_field "$HTTP_BASE/health/local-ai" '"provider":"stub-local"'
 check_http_json_field "http://127.0.0.1/api/health" '"status":"ok"'
+check_http_json_field "http://127.0.0.1/api/health/live" '"status":"ok"'
+check_http_json_field "http://127.0.0.1/api/health/ready" '"status":"ready"'
 check_http_json_field "http://127.0.0.1/api/bootstrap/admin" '"email":"admin@example.test"'
 
 autoconfig_body="$(curl --silent --show-error --fail "http://127.0.0.1/autoconfig/mail/config-v1.1.xml")" \

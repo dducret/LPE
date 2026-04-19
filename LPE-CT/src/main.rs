@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
+    middleware,
     routing::{get, post, put},
     Json, Router,
 };
@@ -11,12 +12,12 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::net::TcpListener;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
 
+mod observability;
 mod smtp;
 
 const MIN_INTEGRATION_SECRET_LEN: usize = 32;
@@ -162,6 +163,24 @@ struct HealthResponse {
     role: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ReadinessCheck {
+    name: String,
+    status: String,
+    critical: bool,
+    detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ReadinessResponse {
+    status: String,
+    service: String,
+    node_name: String,
+    role: String,
+    warnings: u32,
+    checks: Vec<ReadinessCheck>,
+}
+
 #[derive(Clone)]
 struct AppState {
     store: Arc<Mutex<DashboardState>>,
@@ -171,9 +190,7 @@ struct AppState {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    observability::init_tracing("lpe-ct");
 
     let bind_address =
         env::var("LPE_CT_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8380".to_string());
@@ -224,6 +241,14 @@ async fn main() -> Result<()> {
 fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/health/live", get(health_live))
+        .route("/health/ready", get(health_ready))
+        .route(
+            "/metrics",
+            get(|State(state): State<AppState>| async move {
+                observability::metrics_endpoint(state.spool_dir.clone()).await
+            }),
+        )
         .route("/api/v1/dashboard", get(dashboard))
         .route("/api/v1/site", put(update_site))
         .route("/api/v1/relay", put(update_relay))
@@ -234,6 +259,7 @@ fn router(state: AppState) -> Router {
             "/api/v1/integration/outbound-messages",
             post(outbound_handoff),
         )
+        .layer(middleware::from_fn(observability::observe_http))
         .with_state(state)
 }
 
@@ -244,6 +270,69 @@ async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse>, A
         service: "lpe-ct".to_string(),
         node_name: snapshot.site.node_name,
         role: snapshot.site.role,
+    }))
+}
+
+async fn health_live(State(state): State<AppState>) -> Result<Json<HealthResponse>, ApiError> {
+    health(State(state)).await
+}
+
+async fn health_ready(State(state): State<AppState>) -> Result<Json<ReadinessResponse>, ApiError> {
+    let snapshot = read_state(&state)?;
+    let mut checks = Vec::new();
+
+    checks.push(match integration_shared_secret() {
+        Ok(_) => readiness_ok(
+            "integration-secret",
+            true,
+            "shared LPE/LPE-CT integration secret is configured",
+        ),
+        Err(error) => readiness_failed(
+            "integration-secret",
+            true,
+            format!("integration secret is invalid: {error}"),
+        ),
+    });
+
+    checks.push(check_state_file(&state.state_file));
+    checks.push(check_spool_layout(&state.spool_dir));
+    checks.push(check_non_empty_value(
+        "primary-relay",
+        true,
+        &snapshot.relay.primary_upstream,
+        "primary relay is configured",
+        "primary relay is missing",
+    ));
+    checks.push(check_non_empty_value(
+        "core-delivery-base-url",
+        true,
+        &snapshot.relay.core_delivery_base_url,
+        "core delivery base URL is configured",
+        "core delivery base URL is missing",
+    ));
+    checks.push(
+        check_optional_http_dependency(
+            "core-delivery-api",
+            &format!(
+                "{}/health/live",
+                snapshot.relay.core_delivery_base_url.trim_end_matches('/')
+            ),
+            &format!(
+                "core delivery API reachable at {}",
+                snapshot.relay.core_delivery_base_url
+            ),
+            "core delivery API unreachable; inbound mail will remain queued locally until recovery",
+        )
+        .await,
+    );
+
+    Ok(Json(ReadinessResponse {
+        status: readiness_status(&checks).to_string(),
+        service: "lpe-ct".to_string(),
+        node_name: snapshot.site.node_name,
+        role: snapshot.site.role,
+        warnings: checks.iter().filter(|check| check.status == "warn").count() as u32,
+        checks,
     }))
 }
 
@@ -304,12 +393,26 @@ async fn outbound_handoff(
     headers: HeaderMap,
     Json(payload): Json<OutboundMessageHandoffRequest>,
 ) -> Result<Json<OutboundMessageHandoffResponse>, ApiError> {
+    let request_trace_id = observability::trace_id_from_headers(&headers);
+    let queue_id = payload.queue_id;
+    let message_id = payload.message_id;
+    let internet_message_id = payload.internet_message_id.clone();
     require_integration_key(&headers)?;
     let snapshot = read_state(&state)?;
     let runtime = smtp::runtime_config_from_dashboard(&snapshot);
     let response = smtp::process_outbound_handoff(&state.spool_dir, &runtime, payload)
         .await
         .map_err(ApiError::from)?;
+    observability::record_outbound_handoff(response.status.as_str());
+    info!(
+        trace_id = %response.trace_id,
+        upstream_trace_id = %request_trace_id,
+        queue_id = %queue_id,
+        message_id = %message_id,
+        status = response.status.as_str(),
+        internet_message_id = internet_message_id.as_deref().unwrap_or(""),
+        "outbound handoff processed"
+    );
     Ok(Json(response))
 }
 
@@ -588,6 +691,131 @@ fn current_timestamp() -> String {
     }
 }
 
+fn readiness_ok(name: &str, critical: bool, detail: impl Into<String>) -> ReadinessCheck {
+    ReadinessCheck {
+        name: name.to_string(),
+        status: "ok".to_string(),
+        critical,
+        detail: detail.into(),
+    }
+}
+
+fn readiness_warn(name: &str, detail: impl Into<String>) -> ReadinessCheck {
+    ReadinessCheck {
+        name: name.to_string(),
+        status: "warn".to_string(),
+        critical: false,
+        detail: detail.into(),
+    }
+}
+
+fn readiness_failed(name: &str, critical: bool, detail: impl Into<String>) -> ReadinessCheck {
+    ReadinessCheck {
+        name: name.to_string(),
+        status: "failed".to_string(),
+        critical,
+        detail: detail.into(),
+    }
+}
+
+fn readiness_status(checks: &[ReadinessCheck]) -> &'static str {
+    if checks
+        .iter()
+        .any(|check| check.critical && check.status == "failed")
+    {
+        "failed"
+    } else {
+        "ready"
+    }
+}
+
+fn check_non_empty_value(
+    name: &str,
+    critical: bool,
+    value: &str,
+    ok_detail: &str,
+    failed_detail: &str,
+) -> ReadinessCheck {
+    if value.trim().is_empty() {
+        readiness_failed(name, critical, failed_detail)
+    } else {
+        readiness_ok(name, critical, ok_detail)
+    }
+}
+
+fn check_state_file(path: &Path) -> ReadinessCheck {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => readiness_ok(
+            "state-file",
+            true,
+            format!("state file is present at {}", path.display()),
+        ),
+        Ok(_) => readiness_failed(
+            "state-file",
+            true,
+            format!("state path is not a regular file: {}", path.display()),
+        ),
+        Err(error) => readiness_failed(
+            "state-file",
+            true,
+            format!("unable to access state file {}: {error}", path.display()),
+        ),
+    }
+}
+
+fn check_spool_layout(path: &Path) -> ReadinessCheck {
+    let required = ["incoming", "deferred", "quarantine", "held", "sent"];
+    let missing = required
+        .iter()
+        .map(|entry| path.join(entry))
+        .filter(|entry| !entry.is_dir())
+        .map(|entry| entry.display().to_string())
+        .collect::<Vec<_>>();
+
+    if missing.is_empty() {
+        readiness_ok(
+            "spool-layout",
+            true,
+            format!("required spool directories exist under {}", path.display()),
+        )
+    } else {
+        readiness_failed(
+            "spool-layout",
+            true,
+            format!("missing spool directories: {}", missing.join(", ")),
+        )
+    }
+}
+
+async fn check_optional_http_dependency(
+    name: &str,
+    url: &str,
+    ok_detail: &str,
+    warn_detail: &str,
+) -> ReadinessCheck {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_millis(1_500))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            return readiness_warn(
+                name,
+                format!("unable to initialize HTTP client for {url}: {error}"),
+            );
+        }
+    };
+
+    match client.get(url).send().await {
+        Ok(response) if response.status().is_success() => readiness_ok(name, false, ok_detail),
+        Ok(response) => readiness_warn(
+            name,
+            format!("{warn_detail} ({url} returned HTTP {})", response.status()),
+        ),
+        Err(error) => readiness_warn(name, format!("{warn_detail} ({url}: {error})")),
+    }
+}
+
 struct ApiError {
     status: StatusCode,
     message: String,
@@ -620,12 +848,16 @@ fn require_integration_key(headers: &HeaderMap) -> Result<(), ApiError> {
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "missing integration key"))?;
+        .ok_or_else(|| {
+            observability::record_security_event("integration_auth_failure");
+            ApiError::new(StatusCode::UNAUTHORIZED, "missing integration key")
+        })?;
     let expected = integration_shared_secret()
         .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
     if provided == expected {
         Ok(())
     } else {
+        observability::record_security_event("integration_auth_failure");
         Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid integration key",

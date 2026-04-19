@@ -120,6 +120,7 @@ pub fn router(storage: Storage) -> Router {
         .nest("/jmap", lpe_jmap::router())
         .merge(lpe_activesync::router())
         .merge(lpe_dav::router())
+        .layer(middleware::from_fn(observability::observe_http))
         .layer(DefaultBodyLimit::max(pst_upload_max_bytes()))
         .with_state(storage)
 }
@@ -1054,7 +1055,13 @@ async fn submit_message(
     Json(request): Json<SubmitMessageRequest>,
 ) -> ApiResult<SubmittedMessage> {
     let account = require_account(&storage, &headers).await?;
+    let trace_id = observability::trace_id_from_headers(&headers);
     let subject_for_audit = request.subject.clone();
+    let recipient_count =
+        request.to.as_ref().map(|entries| entries.len()).unwrap_or(0)
+            + request.cc.as_ref().map(|entries| entries.len()).unwrap_or(0)
+            + request.bcc.as_ref().map(|entries| entries.len()).unwrap_or(0);
+    let internet_message_id = request.internet_message_id.clone();
     ensure_client_message_owner(&account, &request)?;
     let submitted = storage
         .submit_message(
@@ -1067,6 +1074,15 @@ async fn submit_message(
         )
         .await
         .map_err(internal_error)?;
+    observability::record_mail_submission("api");
+    info!(
+        trace_id = %trace_id,
+        account_id = %account.account_id,
+        message_id = %submitted.message_id,
+        internet_message_id = internet_message_id.as_deref().unwrap_or(""),
+        recipient_count,
+        "mail submission accepted"
+    );
 
     Ok(Json(submitted))
 }
@@ -1325,14 +1341,18 @@ fn require_integration(headers: &HeaderMap) -> std::result::Result<(), (StatusCo
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or((
-            StatusCode::UNAUTHORIZED,
-            "missing integration key".to_string(),
-        ))?;
+        .ok_or_else(|| {
+            observability::record_security_event("integration_auth_failure");
+            (
+                StatusCode::UNAUTHORIZED,
+                "missing integration key".to_string(),
+            )
+        })?;
     let expected = integration_shared_secret().map_err(internal_error)?;
     if provided == expected {
         Ok(())
     } else {
+        observability::record_security_event("integration_auth_failure");
         Err((
             StatusCode::UNAUTHORIZED,
             "invalid integration key".to_string(),
@@ -1679,6 +1699,18 @@ pub fn integration_shared_secret() -> anyhow::Result<String> {
     let secret = required_env("LPE_INTEGRATION_SHARED_SECRET")?;
     validate_shared_secret("LPE_INTEGRATION_SHARED_SECRET", &secret)?;
     Ok(secret)
+}
+
+pub fn init_observability(service_name: &str) {
+    observability::init_tracing(service_name);
+}
+
+pub fn observe_outbound_worker_poll(batch_size: usize) {
+    observability::record_outbound_worker_poll(batch_size);
+}
+
+pub fn observe_outbound_worker_dispatch(status: &str) {
+    observability::record_outbound_dispatch(status);
 }
 
 fn required_env(name: &str) -> anyhow::Result<String> {

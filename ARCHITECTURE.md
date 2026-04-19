@@ -48,6 +48,7 @@ The important non-negotiable rules are:
 ### Edge, transport, and security
 
 - `docs/architecture/edge-and-protocol-exposure.md`
+- `docs/architecture/high-availability.md`
 - `docs/architecture/lpe-ct-integration.md`
 - `docs/architecture/mail-security-and-traceability.md`
 - `docs/architecture/client-autoconfiguration.md`
@@ -70,7 +71,6 @@ The important non-negotiable rules are:
 
 The following topics are still intentionally deferred:
 
-- high availability and degraded-mode behavior
 - technical logging model
 - metrics model
 - correlation model around the unique trace identifier

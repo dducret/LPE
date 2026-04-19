@@ -254,9 +254,11 @@ Files:
 - `run-migrations.sh` applies the project's PostgreSQL SQL migrations
 - `run-migrations.sh` also applies the persistent schema for the administration console
 - `check-lpe.sh` verifies the installation, PostgreSQL, the service, and the HTTP endpoints
+- `check-lpe-ready.sh` returns success only when the local `LPE` node is ready for traffic
 - `lpe.service` describes the initial systemd service
 - `lpe.nginx.conf` is the template used to generate the administration `nginx` site
 - `lpe.env.example` provides a base configuration
+- `high-availability.md` documents the first active/passive runbook for `LPE` and `LPE-CT` on `Debian Trixie`
 
 Recommended order:
 

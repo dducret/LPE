@@ -33,6 +33,22 @@ pub struct AttachmentSupportResponse {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ReadinessCheck {
+    pub name: String,
+    pub status: String,
+    pub critical: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReadinessResponse {
+    pub service: String,
+    pub status: String,
+    pub warnings: u32,
+    pub checks: Vec<ReadinessCheck>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct LoginResponse {
     pub token: String,
     pub admin: AuthenticatedAdmin,

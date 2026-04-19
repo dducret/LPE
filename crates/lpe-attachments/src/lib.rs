@@ -122,8 +122,7 @@ fn extract_docx_text(path: &Path) -> Result<String> {
 }
 
 fn extract_docx_text_from_bytes(bytes: &[u8]) -> Result<String> {
-    let text =
-        docx_lite::extract_text_from_bytes(bytes).context("extract DOCX text from bytes")?;
+    let text = docx_lite::extract_text_from_bytes(bytes).context("extract DOCX text from bytes")?;
     Ok(normalize_whitespace(&text))
 }
 
