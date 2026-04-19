@@ -189,6 +189,115 @@ pub struct QuotaGetArguments {
     pub ids: Option<Vec<String>>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddressBookGetArguments {
+    pub account_id: Option<String>,
+    pub ids: Option<Vec<String>>,
+    pub properties: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddressBookQueryArguments {
+    pub account_id: Option<String>,
+    pub position: Option<u64>,
+    pub limit: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactCardGetArguments {
+    pub account_id: Option<String>,
+    pub ids: Option<Vec<String>>,
+    pub properties: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactCardQueryArguments {
+    pub account_id: Option<String>,
+    pub position: Option<u64>,
+    pub limit: Option<u64>,
+    pub filter: Option<ContactCardQueryFilter>,
+    pub sort: Option<Vec<EntityQuerySort>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactCardQueryFilter {
+    pub in_address_book: Option<String>,
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContactCardSetArguments {
+    pub account_id: Option<String>,
+    pub create: Option<HashMap<String, Value>>,
+    pub update: Option<HashMap<String, Value>>,
+    pub destroy: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarGetArguments {
+    pub account_id: Option<String>,
+    pub ids: Option<Vec<String>>,
+    pub properties: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarQueryArguments {
+    pub account_id: Option<String>,
+    pub position: Option<u64>,
+    pub limit: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarEventGetArguments {
+    pub account_id: Option<String>,
+    pub ids: Option<Vec<String>>,
+    pub properties: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarEventQueryArguments {
+    pub account_id: Option<String>,
+    pub position: Option<u64>,
+    pub limit: Option<u64>,
+    pub filter: Option<CalendarEventQueryFilter>,
+    pub sort: Option<Vec<EntityQuerySort>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarEventQueryFilter {
+    pub in_calendar: Option<String>,
+    pub text: Option<String>,
+    pub after: Option<String>,
+    pub before: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarEventSetArguments {
+    pub account_id: Option<String>,
+    pub create: Option<HashMap<String, Value>>,
+    pub update: Option<HashMap<String, Value>>,
+    pub destroy: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntityQuerySort {
+    pub property: String,
+    pub is_ascending: Option<bool>,
+}
+
 #[derive(Debug)]
 pub struct MailboxCreateInput {
     pub name: String,

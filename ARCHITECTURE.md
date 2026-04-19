@@ -543,6 +543,14 @@ The current `CardDAV` and `CalDAV` MVP follows the same rule:
 - the first adapter supports minimal collection discovery, resource reads, and full-resource replacement
 - the supported scope and limitations are documented in `docs/architecture/dav-mvp.md`
 
+The current `JMAP Contacts` and `JMAP Calendars` MVP follows the same rule:
+
+- `AddressBook`, `ContactCard`, `Calendar`, and `CalendarEvent` are exposed above the existing canonical collaboration tables
+- `contacts` and `calendar_events` remain the source of truth for the data exposed through `JMAP`
+- one virtual `default` address book and one virtual `default` calendar are exposed per authenticated account
+- account rights remain bounded by the authenticated mailbox account rather than introducing a `JMAP`-specific sharing model
+- the supported scope and limitations are documented in `docs/architecture/jmap-contacts-calendars-mvp.md`
+
 ## Data and Storage Principles
 
 - `PostgreSQL` is the primary persistent store for platform metadata and operational data

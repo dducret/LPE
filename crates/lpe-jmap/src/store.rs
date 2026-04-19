@@ -1,8 +1,9 @@
 use anyhow::Result;
 use lpe_storage::{
-    AuditEntryInput, AuthenticatedAccount, JmapEmail, JmapEmailQuery, JmapEmailSubmission,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput,
-    JmapQuota, JmapUploadBlob, SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage,
+    AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, JmapEmail, JmapEmailQuery,
+    JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob, SavedDraftMessage, Storage,
+    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
 };
 use uuid::Uuid;
 
@@ -86,6 +87,23 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         input: JmapImportedEmailInput,
         audit: AuditEntryInput,
     ) -> Result<JmapEmail>;
+    async fn fetch_client_contacts(&self, account_id: Uuid) -> Result<Vec<ClientContact>>;
+    async fn fetch_client_contacts_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientContact>>;
+    async fn upsert_client_contact(&self, input: UpsertClientContactInput)
+        -> Result<ClientContact>;
+    async fn delete_client_contact(&self, account_id: Uuid, contact_id: Uuid) -> Result<()>;
+    async fn fetch_client_events(&self, account_id: Uuid) -> Result<Vec<ClientEvent>>;
+    async fn fetch_client_events_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientEvent>>;
+    async fn upsert_client_event(&self, input: UpsertClientEventInput) -> Result<ClientEvent>;
+    async fn delete_client_event(&self, account_id: Uuid, event_id: Uuid) -> Result<()>;
 }
 
 impl JmapStore for Storage {
@@ -123,7 +141,8 @@ impl JmapStore for Storage {
         mailbox_id: Uuid,
         audit: AuditEntryInput,
     ) -> Result<()> {
-        self.destroy_jmap_mailbox(account_id, mailbox_id, audit).await
+        self.destroy_jmap_mailbox(account_id, mailbox_id, audit)
+            .await
     }
 
     async fn query_jmap_email_ids(
@@ -198,7 +217,8 @@ impl JmapStore for Storage {
         message_id: Uuid,
         audit: AuditEntryInput,
     ) -> Result<()> {
-        self.delete_draft_message(account_id, message_id, audit).await
+        self.delete_draft_message(account_id, message_id, audit)
+            .await
     }
 
     async fn submit_draft_message(
@@ -229,5 +249,48 @@ impl JmapStore for Storage {
         audit: AuditEntryInput,
     ) -> Result<JmapEmail> {
         self.import_jmap_email(input, audit).await
+    }
+
+    async fn fetch_client_contacts(&self, account_id: Uuid) -> Result<Vec<ClientContact>> {
+        self.fetch_client_contacts(account_id).await
+    }
+
+    async fn fetch_client_contacts_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientContact>> {
+        self.fetch_client_contacts_by_ids(account_id, ids).await
+    }
+
+    async fn upsert_client_contact(
+        &self,
+        input: UpsertClientContactInput,
+    ) -> Result<ClientContact> {
+        self.upsert_client_contact(input).await
+    }
+
+    async fn delete_client_contact(&self, account_id: Uuid, contact_id: Uuid) -> Result<()> {
+        self.delete_client_contact(account_id, contact_id).await
+    }
+
+    async fn fetch_client_events(&self, account_id: Uuid) -> Result<Vec<ClientEvent>> {
+        self.fetch_client_events(account_id).await
+    }
+
+    async fn fetch_client_events_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientEvent>> {
+        self.fetch_client_events_by_ids(account_id, ids).await
+    }
+
+    async fn upsert_client_event(&self, input: UpsertClientEventInput) -> Result<ClientEvent> {
+        self.upsert_client_event(input).await
+    }
+
+    async fn delete_client_event(&self, account_id: Uuid, event_id: Uuid) -> Result<()> {
+        self.delete_client_event(account_id, event_id).await
     }
 }

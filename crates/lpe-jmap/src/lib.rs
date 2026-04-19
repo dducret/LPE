@@ -7,15 +7,13 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use lpe_magika::{
-    ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator,
-};
+use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
 use lpe_storage::{
-    mail::parse_rfc822_message,
-    AuditEntryInput, AuthenticatedAccount, JmapEmail, JmapEmailAddress, JmapEmailSubmission,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput,
-    JmapQuota, JmapUploadBlob, SavedDraftMessage, Storage, SubmitMessageInput,
-    SubmittedRecipientInput,
+    mail::parse_rfc822_message, AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent,
+    JmapEmail, JmapEmailAddress, JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob, SavedDraftMessage,
+    Storage, SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput,
+    UpsertClientEventInput,
 };
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -29,22 +27,29 @@ mod protocol;
 mod store;
 
 use crate::protocol::{
-    ChangesArguments, DraftMutation, EmailAddressInput, EmailCopyArguments, EmailGetArguments,
-    EmailImportArguments, EmailQueryArguments, EmailQuerySort,
-    EmailSetArguments, EmailSubmissionGetArguments, EmailSubmissionSetArguments,
-    IdentityGetArguments, JmapApiRequest, JmapApiResponse, JmapMethodCall,
-    JmapMethodResponse, MailboxCreateInput, MailboxGetArguments, MailboxQueryArguments,
-    MailboxSetArguments, MailboxUpdateInput, QuotaGetArguments, SearchSnippetGetArguments,
-    SessionAccount, SessionDocument, ThreadGetArguments,
+    AddressBookGetArguments, AddressBookQueryArguments, CalendarEventGetArguments,
+    CalendarEventQueryArguments, CalendarEventQueryFilter, CalendarEventSetArguments,
+    CalendarGetArguments, CalendarQueryArguments, ChangesArguments, ContactCardGetArguments,
+    ContactCardQueryArguments, ContactCardQueryFilter, ContactCardSetArguments, DraftMutation,
+    EmailAddressInput, EmailCopyArguments, EmailGetArguments, EmailImportArguments,
+    EmailQueryArguments, EmailQuerySort, EmailSetArguments, EmailSubmissionGetArguments,
+    EmailSubmissionSetArguments, EntityQuerySort, IdentityGetArguments, JmapApiRequest,
+    JmapApiResponse, JmapMethodCall, JmapMethodResponse, MailboxCreateInput, MailboxGetArguments,
+    MailboxQueryArguments, MailboxSetArguments, MailboxUpdateInput, QuotaGetArguments,
+    SearchSnippetGetArguments, SessionAccount, SessionDocument, ThreadGetArguments,
 };
 use crate::store::JmapStore;
 
 const JMAP_CORE_CAPABILITY: &str = "urn:ietf:params:jmap:core";
 const JMAP_MAIL_CAPABILITY: &str = "urn:ietf:params:jmap:mail";
 const JMAP_SUBMISSION_CAPABILITY: &str = "urn:ietf:params:jmap:submission";
+const JMAP_CONTACTS_CAPABILITY: &str = "urn:ietf:params:jmap:contacts";
+const JMAP_CALENDARS_CAPABILITY: &str = "urn:ietf:params:jmap:calendars";
 const SESSION_STATE: &str = "mvp-1";
 const MAX_QUERY_LIMIT: u64 = 250;
 const DEFAULT_GET_LIMIT: u64 = 100;
+const DEFAULT_ADDRESS_BOOK_ID: &str = "default";
+const DEFAULT_CALENDAR_ID: &str = "default";
 
 type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 
@@ -172,6 +177,8 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         primary_accounts.insert(JMAP_CORE_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_MAIL_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_SUBMISSION_CAPABILITY.to_string(), account_id.clone());
+        primary_accounts.insert(JMAP_CONTACTS_CAPABILITY.to_string(), account_id.clone());
+        primary_accounts.insert(JMAP_CALENDARS_CAPABILITY.to_string(), account_id.clone());
 
         Ok(SessionDocument {
             capabilities,
@@ -225,6 +232,33 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 }
                 "EmailSubmission/set" => {
                     self.handle_email_submission_set(&account, arguments, &mut created_ids)
+                        .await
+                }
+                "AddressBook/get" => self.handle_address_book_get(&account, arguments).await,
+                "AddressBook/query" => self.handle_address_book_query(&account, arguments).await,
+                "AddressBook/changes" => {
+                    self.handle_address_book_changes(&account, arguments).await
+                }
+                "ContactCard/get" => self.handle_contact_get(&account, arguments).await,
+                "ContactCard/query" => self.handle_contact_query(&account, arguments).await,
+                "ContactCard/changes" => self.handle_contact_changes(&account, arguments).await,
+                "ContactCard/set" => {
+                    self.handle_contact_set(&account, arguments, &mut created_ids)
+                        .await
+                }
+                "Calendar/get" => self.handle_calendar_get(&account, arguments).await,
+                "Calendar/query" => self.handle_calendar_query(&account, arguments).await,
+                "Calendar/changes" => self.handle_calendar_changes(&account, arguments).await,
+                "CalendarEvent/get" => self.handle_calendar_event_get(&account, arguments).await,
+                "CalendarEvent/query" => {
+                    self.handle_calendar_event_query(&account, arguments).await
+                }
+                "CalendarEvent/changes" => {
+                    self.handle_calendar_event_changes(&account, arguments)
+                        .await
+                }
+                "CalendarEvent/set" => {
+                    self.handle_calendar_event_set(&account, arguments, &mut created_ids)
                         .await
                 }
                 "Identity/get" => self.handle_identity_get(&account, arguments).await,
@@ -329,7 +363,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             account_id,
             &arguments.since_state,
             arguments.max_changes,
-            ids,
+            ids.into_iter().map(|id| id.to_string()).collect(),
         ))
     }
 
@@ -464,6 +498,525 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         }))
     }
 
+    async fn handle_address_book_get(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: AddressBookGetArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let properties = address_book_properties(arguments.properties);
+        let requested_ids = arguments.ids.unwrap_or_default();
+        let include_default = requested_ids.is_empty()
+            || requested_ids.iter().any(|id| id == DEFAULT_ADDRESS_BOOK_ID);
+        let list = if include_default {
+            vec![address_book_to_value(&properties)]
+        } else {
+            Vec::new()
+        };
+        let not_found = requested_ids
+            .into_iter()
+            .filter(|id| id != DEFAULT_ADDRESS_BOOK_ID)
+            .map(Value::String)
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "state": SESSION_STATE,
+            "list": list,
+            "notFound": not_found,
+        }))
+    }
+
+    async fn handle_address_book_query(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: AddressBookQueryArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let position = arguments.position.unwrap_or(0).min(1) as usize;
+        let limit = arguments
+            .limit
+            .unwrap_or(DEFAULT_GET_LIMIT)
+            .min(MAX_QUERY_LIMIT) as usize;
+        let ids = [DEFAULT_ADDRESS_BOOK_ID.to_string()]
+            .into_iter()
+            .skip(position)
+            .take(limit)
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "queryState": SESSION_STATE,
+            "canCalculateChanges": true,
+            "position": position,
+            "ids": ids,
+            "total": 1,
+        }))
+    }
+
+    async fn handle_address_book_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: ChangesArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        Ok(changes_response(
+            account_id,
+            &arguments.since_state,
+            arguments.max_changes,
+            vec![DEFAULT_ADDRESS_BOOK_ID.to_string()],
+        ))
+    }
+
+    async fn handle_contact_get(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: ContactCardGetArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let properties = contact_properties(arguments.properties);
+        let requested_ids = parse_uuid_list(arguments.ids)?;
+        let contacts = if let Some(ids) = requested_ids.as_ref() {
+            self.store
+                .fetch_client_contacts_by_ids(account_id, &ids)
+                .await?
+        } else {
+            self.store.fetch_client_contacts(account_id).await?
+        };
+        let requested_set = requested_ids
+            .as_ref()
+            .map(|ids| ids.iter().copied().collect::<HashSet<Uuid>>())
+            .unwrap_or_default();
+
+        let list = contacts
+            .iter()
+            .filter(|contact| requested_ids.is_none() || requested_set.contains(&contact.id))
+            .map(|contact| contact_to_value(contact, &properties))
+            .collect::<Vec<_>>();
+        let not_found = requested_ids
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|id| !contacts.iter().any(|contact| contact.id == *id))
+            .map(|id| Value::String(id.to_string()))
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "state": SESSION_STATE,
+            "list": list,
+            "notFound": not_found,
+        }))
+    }
+
+    async fn handle_contact_query(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: ContactCardQueryArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        validate_entity_sort(arguments.sort.as_deref(), "name", true)?;
+        validate_contact_filter(arguments.filter.as_ref())?;
+
+        let mut contacts = self.store.fetch_client_contacts(account_id).await?;
+        if let Some(filter) = arguments.filter.as_ref() {
+            contacts.retain(|contact| contact_matches_filter(contact, filter));
+        }
+        contacts.sort_by_key(|contact| contact.name.to_lowercase());
+
+        let position = arguments.position.unwrap_or(0) as usize;
+        let limit = arguments
+            .limit
+            .unwrap_or(DEFAULT_GET_LIMIT)
+            .min(MAX_QUERY_LIMIT) as usize;
+        let ids = contacts
+            .iter()
+            .skip(position)
+            .take(limit)
+            .map(|contact| contact.id.to_string())
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "queryState": SESSION_STATE,
+            "canCalculateChanges": true,
+            "position": position,
+            "ids": ids,
+            "total": contacts.len(),
+        }))
+    }
+
+    async fn handle_contact_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: ChangesArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let ids = self
+            .store
+            .fetch_client_contacts(account_id)
+            .await?
+            .into_iter()
+            .map(|contact| contact.id.to_string())
+            .collect::<Vec<_>>();
+        Ok(changes_response(
+            account_id,
+            &arguments.since_state,
+            arguments.max_changes,
+            ids,
+        ))
+    }
+
+    async fn handle_contact_set(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        created_ids: &mut HashMap<String, String>,
+    ) -> Result<Value> {
+        let arguments: ContactCardSetArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let mut created = Map::new();
+        let mut not_created = Map::new();
+        let mut updated = Map::new();
+        let mut not_updated = Map::new();
+        let mut destroyed = Vec::new();
+        let mut not_destroyed = Map::new();
+
+        if let Some(create) = arguments.create {
+            for (creation_id, value) in create {
+                match parse_contact_input(None, account_id, value) {
+                    Ok(input) => match self.store.upsert_client_contact(input).await {
+                        Ok(contact) => {
+                            created_ids.insert(creation_id.clone(), contact.id.to_string());
+                            created.insert(creation_id, json!({ "id": contact.id.to_string() }));
+                        }
+                        Err(error) => {
+                            not_created.insert(creation_id, set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_created.insert(creation_id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        if let Some(update) = arguments.update {
+            for (id, value) in update {
+                match parse_uuid(&id)
+                    .and_then(|contact_id| parse_contact_input(Some(contact_id), account_id, value))
+                {
+                    Ok(input) => match self.store.upsert_client_contact(input).await {
+                        Ok(_) => {
+                            updated.insert(id, Value::Object(Map::new()));
+                        }
+                        Err(error) => {
+                            not_updated.insert(id, set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_updated.insert(id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        if let Some(ids) = arguments.destroy {
+            for id in ids {
+                match parse_uuid(&id) {
+                    Ok(contact_id) => match self
+                        .store
+                        .delete_client_contact(account_id, contact_id)
+                        .await
+                    {
+                        Ok(()) => destroyed.push(Value::String(id)),
+                        Err(error) => {
+                            not_destroyed.insert(id, set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_destroyed.insert(id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "oldState": SESSION_STATE,
+            "newState": SESSION_STATE,
+            "created": Value::Object(created),
+            "notCreated": Value::Object(not_created),
+            "updated": Value::Object(updated),
+            "notUpdated": Value::Object(not_updated),
+            "destroyed": destroyed,
+            "notDestroyed": Value::Object(not_destroyed),
+        }))
+    }
+
+    async fn handle_calendar_get(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: CalendarGetArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let properties = calendar_properties(arguments.properties);
+        let requested_ids = arguments.ids.unwrap_or_default();
+        let include_default =
+            requested_ids.is_empty() || requested_ids.iter().any(|id| id == DEFAULT_CALENDAR_ID);
+        let list = if include_default {
+            vec![calendar_to_value(&properties)]
+        } else {
+            Vec::new()
+        };
+        let not_found = requested_ids
+            .into_iter()
+            .filter(|id| id != DEFAULT_CALENDAR_ID)
+            .map(Value::String)
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "state": SESSION_STATE,
+            "list": list,
+            "notFound": not_found,
+        }))
+    }
+
+    async fn handle_calendar_query(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: CalendarQueryArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let position = arguments.position.unwrap_or(0).min(1) as usize;
+        let limit = arguments
+            .limit
+            .unwrap_or(DEFAULT_GET_LIMIT)
+            .min(MAX_QUERY_LIMIT) as usize;
+        let ids = [DEFAULT_CALENDAR_ID.to_string()]
+            .into_iter()
+            .skip(position)
+            .take(limit)
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "queryState": SESSION_STATE,
+            "canCalculateChanges": true,
+            "position": position,
+            "ids": ids,
+            "total": 1,
+        }))
+    }
+
+    async fn handle_calendar_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: ChangesArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        Ok(changes_response(
+            account_id,
+            &arguments.since_state,
+            arguments.max_changes,
+            vec![DEFAULT_CALENDAR_ID.to_string()],
+        ))
+    }
+
+    async fn handle_calendar_event_get(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: CalendarEventGetArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let properties = calendar_event_properties(arguments.properties);
+        let requested_ids = parse_uuid_list(arguments.ids)?;
+        let events = if let Some(ids) = requested_ids.as_ref() {
+            self.store
+                .fetch_client_events_by_ids(account_id, ids)
+                .await?
+        } else {
+            self.store.fetch_client_events(account_id).await?
+        };
+        let requested_set = requested_ids
+            .as_ref()
+            .map(|ids| ids.iter().copied().collect::<HashSet<Uuid>>())
+            .unwrap_or_default();
+        let list = events
+            .iter()
+            .filter(|event| requested_ids.is_none() || requested_set.contains(&event.id))
+            .map(|event| calendar_event_to_value(event, &properties))
+            .collect::<Vec<_>>();
+        let not_found = requested_ids
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|id| !events.iter().any(|event| event.id == *id))
+            .map(|id| Value::String(id.to_string()))
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "state": SESSION_STATE,
+            "list": list,
+            "notFound": not_found,
+        }))
+    }
+
+    async fn handle_calendar_event_query(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: CalendarEventQueryArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        validate_entity_sort(arguments.sort.as_deref(), "start", true)?;
+        validate_calendar_event_filter(arguments.filter.as_ref())?;
+
+        let mut events = self.store.fetch_client_events(account_id).await?;
+        if let Some(filter) = arguments.filter.as_ref() {
+            events.retain(|event| event_matches_filter(event, filter));
+        }
+        events.sort_by_key(calendar_event_sort_key);
+
+        let position = arguments.position.unwrap_or(0) as usize;
+        let limit = arguments
+            .limit
+            .unwrap_or(DEFAULT_GET_LIMIT)
+            .min(MAX_QUERY_LIMIT) as usize;
+        let ids = events
+            .iter()
+            .skip(position)
+            .take(limit)
+            .map(|event| event.id.to_string())
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "queryState": SESSION_STATE,
+            "canCalculateChanges": true,
+            "position": position,
+            "ids": ids,
+            "total": events.len(),
+        }))
+    }
+
+    async fn handle_calendar_event_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: ChangesArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let ids = self
+            .store
+            .fetch_client_events(account_id)
+            .await?
+            .into_iter()
+            .map(|event| event.id.to_string())
+            .collect::<Vec<_>>();
+        Ok(changes_response(
+            account_id,
+            &arguments.since_state,
+            arguments.max_changes,
+            ids,
+        ))
+    }
+
+    async fn handle_calendar_event_set(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        created_ids: &mut HashMap<String, String>,
+    ) -> Result<Value> {
+        let arguments: CalendarEventSetArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let mut created = Map::new();
+        let mut not_created = Map::new();
+        let mut updated = Map::new();
+        let mut not_updated = Map::new();
+        let mut destroyed = Vec::new();
+        let mut not_destroyed = Map::new();
+
+        if let Some(create) = arguments.create {
+            for (creation_id, value) in create {
+                match parse_calendar_event_input(None, account_id, value) {
+                    Ok(input) => match self.store.upsert_client_event(input).await {
+                        Ok(event) => {
+                            created_ids.insert(creation_id.clone(), event.id.to_string());
+                            created.insert(creation_id, json!({ "id": event.id.to_string() }));
+                        }
+                        Err(error) => {
+                            not_created.insert(creation_id, set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_created.insert(creation_id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        if let Some(update) = arguments.update {
+            for (id, value) in update {
+                match parse_uuid(&id).and_then(|event_id| {
+                    parse_calendar_event_input(Some(event_id), account_id, value)
+                }) {
+                    Ok(input) => match self.store.upsert_client_event(input).await {
+                        Ok(_) => {
+                            updated.insert(id, Value::Object(Map::new()));
+                        }
+                        Err(error) => {
+                            not_updated.insert(id, set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_updated.insert(id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        if let Some(ids) = arguments.destroy {
+            for id in ids {
+                match parse_uuid(&id) {
+                    Ok(event_id) => {
+                        match self.store.delete_client_event(account_id, event_id).await {
+                            Ok(()) => destroyed.push(Value::String(id)),
+                            Err(error) => {
+                                not_destroyed.insert(id, set_error(&error.to_string()));
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        not_destroyed.insert(id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "oldState": SESSION_STATE,
+            "newState": SESSION_STATE,
+            "created": Value::Object(created),
+            "notCreated": Value::Object(not_created),
+            "updated": Value::Object(updated),
+            "notUpdated": Value::Object(not_updated),
+            "destroyed": destroyed,
+            "notDestroyed": Value::Object(not_destroyed),
+        }))
+    }
+
     async fn handle_email_query(
         &self,
         account: &AuthenticatedAccount,
@@ -549,7 +1102,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             account_id,
             &arguments.since_state,
             arguments.max_changes,
-            ids,
+            ids.into_iter().map(|id| id.to_string()).collect(),
         ))
     }
 
@@ -938,7 +1491,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             account_id,
             &arguments.since_state,
             arguments.max_changes,
-            ids,
+            ids.into_iter().map(|id| id.to_string()).collect(),
         ))
     }
 
@@ -1285,6 +1838,18 @@ fn session_capabilities() -> HashMap<String, Value> {
                 "maxDelayedSend": 0,
             }),
         ),
+        (
+            JMAP_CONTACTS_CAPABILITY.to_string(),
+            json!({
+                "maxAddressBooksPerCard": 1,
+            }),
+        ),
+        (
+            JMAP_CALENDARS_CAPABILITY.to_string(),
+            json!({
+                "maxCalendarsPerEvent": 1,
+            }),
+        ),
     ])
 }
 
@@ -1326,6 +1891,54 @@ fn validate_query_sort(sort: Option<&[EmailQuerySort]>) -> Result<()> {
     Ok(())
 }
 
+fn validate_entity_sort(
+    sort: Option<&[EntityQuerySort]>,
+    expected_property: &str,
+    ascending: bool,
+) -> Result<()> {
+    if let Some(sort) = sort {
+        for item in sort {
+            if item.property != expected_property || item.is_ascending.unwrap_or(true) != ascending
+            {
+                let direction = if ascending { "ascending" } else { "descending" };
+                bail!("only {expected_property} {direction} sort is supported");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_contact_filter(filter: Option<&ContactCardQueryFilter>) -> Result<()> {
+    if let Some(filter) = filter {
+        if let Some(address_book_id) = filter.in_address_book.as_deref() {
+            require_default_collection_id(address_book_id, "addressBook")?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_calendar_event_filter(filter: Option<&CalendarEventQueryFilter>) -> Result<()> {
+    if let Some(filter) = filter {
+        if let Some(calendar_id) = filter.in_calendar.as_deref() {
+            require_default_collection_id(calendar_id, "calendar")?;
+        }
+        if let Some(after) = filter.after.as_deref() {
+            parse_local_datetime(after)?;
+        }
+        if let Some(before) = filter.before.as_deref() {
+            parse_local_datetime(before)?;
+        }
+    }
+    Ok(())
+}
+
+fn require_default_collection_id(value: &str, kind: &str) -> Result<()> {
+    if value != DEFAULT_ADDRESS_BOOK_ID && value != DEFAULT_CALENDAR_ID {
+        bail!("unsupported {kind} id");
+    }
+    Ok(())
+}
+
 fn mailbox_properties(properties: Option<Vec<String>>) -> HashSet<String> {
     properties
         .unwrap_or_else(|| {
@@ -1342,6 +1955,84 @@ fn mailbox_properties(properties: Option<Vec<String>>) -> HashSet<String> {
         })
         .into_iter()
         .collect()
+}
+
+fn address_book_properties(properties: Option<Vec<String>>) -> HashSet<String> {
+    properties
+        .unwrap_or_else(|| {
+            vec![
+                "id".to_string(),
+                "name".to_string(),
+                "sortOrder".to_string(),
+                "isSubscribed".to_string(),
+                "myRights".to_string(),
+            ]
+        })
+        .into_iter()
+        .collect()
+}
+
+fn address_book_to_value(properties: &HashSet<String>) -> Value {
+    let mut object = Map::new();
+    insert_if(properties, &mut object, "id", DEFAULT_ADDRESS_BOOK_ID);
+    insert_if(properties, &mut object, "name", "Contacts");
+    insert_if(properties, &mut object, "sortOrder", 0);
+    insert_if(properties, &mut object, "isSubscribed", true);
+    if properties.contains("myRights") {
+        object.insert(
+            "myRights".to_string(),
+            json!({
+                "mayRead": true,
+                "mayAddItems": true,
+                "mayModifyItems": true,
+                "mayRemoveItems": true,
+                "mayRename": false,
+                "mayDelete": false,
+                "mayAdmin": false,
+            }),
+        );
+    }
+    Value::Object(object)
+}
+
+fn calendar_properties(properties: Option<Vec<String>>) -> HashSet<String> {
+    properties
+        .unwrap_or_else(|| {
+            vec![
+                "id".to_string(),
+                "name".to_string(),
+                "sortOrder".to_string(),
+                "isSubscribed".to_string(),
+                "isVisible".to_string(),
+                "myRights".to_string(),
+            ]
+        })
+        .into_iter()
+        .collect()
+}
+
+fn calendar_to_value(properties: &HashSet<String>) -> Value {
+    let mut object = Map::new();
+    insert_if(properties, &mut object, "id", DEFAULT_CALENDAR_ID);
+    insert_if(properties, &mut object, "name", "Calendar");
+    insert_if(properties, &mut object, "sortOrder", 0);
+    insert_if(properties, &mut object, "isSubscribed", true);
+    insert_if(properties, &mut object, "isVisible", true);
+    if properties.contains("myRights") {
+        object.insert(
+            "myRights".to_string(),
+            json!({
+                "mayRead": true,
+                "mayAddItems": true,
+                "mayModifyItems": true,
+                "mayRemoveItems": true,
+                "mayRename": false,
+                "mayDelete": false,
+                "mayAdmin": false,
+            }),
+        );
+    }
+    Value::Object(object)
 }
 
 fn mailbox_to_value(mailbox: &JmapMailbox, properties: &HashSet<String>) -> Value {
@@ -1381,7 +2072,7 @@ fn changes_response(
     account_id: Uuid,
     since_state: &str,
     max_changes: Option<u64>,
-    ids: Vec<Uuid>,
+    ids: Vec<String>,
 ) -> Value {
     let max_changes = max_changes.unwrap_or(u64::MAX) as usize;
     if since_state == SESSION_STATE {
@@ -1395,11 +2086,7 @@ fn changes_response(
             "destroyed": Vec::<String>::new(),
         })
     } else {
-        let created = ids
-            .into_iter()
-            .take(max_changes)
-            .map(|id| id.to_string())
-            .collect::<Vec<_>>();
+        let created = ids.into_iter().take(max_changes).collect::<Vec<_>>();
         json!({
             "accountId": account_id.to_string(),
             "oldState": since_state,
@@ -1434,6 +2121,47 @@ fn email_properties(properties: Option<Vec<String>>) -> HashSet<String> {
                 "textBody".to_string(),
                 "htmlBody".to_string(),
                 "bodyValues".to_string(),
+            ]
+        })
+        .into_iter()
+        .collect()
+}
+
+fn contact_properties(properties: Option<Vec<String>>) -> HashSet<String> {
+    properties
+        .unwrap_or_else(|| {
+            vec![
+                "id".to_string(),
+                "uid".to_string(),
+                "kind".to_string(),
+                "name".to_string(),
+                "emails".to_string(),
+                "phones".to_string(),
+                "organizations".to_string(),
+                "titles".to_string(),
+                "notes".to_string(),
+                "addressBookIds".to_string(),
+            ]
+        })
+        .into_iter()
+        .collect()
+}
+
+fn calendar_event_properties(properties: Option<Vec<String>>) -> HashSet<String> {
+    properties
+        .unwrap_or_else(|| {
+            vec![
+                "id".to_string(),
+                "uid".to_string(),
+                "@type".to_string(),
+                "title".to_string(),
+                "start".to_string(),
+                "duration".to_string(),
+                "timeZone".to_string(),
+                "locations".to_string(),
+                "participants".to_string(),
+                "description".to_string(),
+                "calendarIds".to_string(),
             ]
         })
         .into_iter()
@@ -1771,6 +2499,233 @@ fn email_keywords(email: &JmapEmail) -> Value {
     Value::Object(keywords)
 }
 
+fn contact_to_value(contact: &ClientContact, properties: &HashSet<String>) -> Value {
+    let mut object = Map::new();
+    insert_if(properties, &mut object, "id", contact.id.to_string());
+    insert_if(properties, &mut object, "uid", contact.id.to_string());
+    insert_if(properties, &mut object, "kind", "individual");
+    if properties.contains("name") {
+        object.insert(
+            "name".to_string(),
+            json!({
+                "@type": "Name",
+                "full": contact.name,
+            }),
+        );
+    }
+    if properties.contains("emails") && !contact.email.trim().is_empty() {
+        object.insert(
+            "emails".to_string(),
+            json!({
+                "main": {
+                    "@type": "EmailAddress",
+                    "address": contact.email,
+                    "contexts": {"work": true},
+                    "pref": 1,
+                }
+            }),
+        );
+    }
+    if properties.contains("phones") && !contact.phone.trim().is_empty() {
+        object.insert(
+            "phones".to_string(),
+            json!({
+                "main": {
+                    "@type": "Phone",
+                    "number": contact.phone,
+                    "contexts": {"work": true},
+                }
+            }),
+        );
+    }
+    if properties.contains("organizations") && !contact.team.trim().is_empty() {
+        object.insert(
+            "organizations".to_string(),
+            json!({
+                "main": {
+                    "@type": "Organization",
+                    "name": contact.team,
+                    "contexts": {"work": true},
+                }
+            }),
+        );
+    }
+    if properties.contains("titles") && !contact.role.trim().is_empty() {
+        object.insert(
+            "titles".to_string(),
+            json!({
+                "main": {
+                    "@type": "Title",
+                    "kind": "title",
+                    "name": contact.role,
+                }
+            }),
+        );
+    }
+    if properties.contains("notes") && !contact.notes.trim().is_empty() {
+        object.insert(
+            "notes".to_string(),
+            json!({
+                "main": {
+                    "@type": "Note",
+                    "note": contact.notes,
+                }
+            }),
+        );
+    }
+    if properties.contains("addressBookIds") {
+        object.insert(
+            "addressBookIds".to_string(),
+            json!({DEFAULT_ADDRESS_BOOK_ID: true}),
+        );
+    }
+    Value::Object(object)
+}
+
+fn calendar_event_to_value(event: &ClientEvent, properties: &HashSet<String>) -> Value {
+    let mut object = Map::new();
+    insert_if(properties, &mut object, "id", event.id.to_string());
+    insert_if(properties, &mut object, "uid", event.id.to_string());
+    insert_if(properties, &mut object, "@type", "Event");
+    insert_if(properties, &mut object, "title", event.title.clone());
+    insert_if(
+        properties,
+        &mut object,
+        "start",
+        format!("{}T{}:00", event.date, event.time),
+    );
+    insert_if(properties, &mut object, "duration", "PT0S");
+    if properties.contains("timeZone") {
+        object.insert("timeZone".to_string(), Value::Null);
+    }
+    if properties.contains("locations") && !event.location.trim().is_empty() {
+        object.insert(
+            "locations".to_string(),
+            json!({
+                "main": {
+                    "@type": "Location",
+                    "name": event.location,
+                }
+            }),
+        );
+    }
+    if properties.contains("participants") && !event.attendees.trim().is_empty() {
+        object.insert(
+            "participants".to_string(),
+            participants_from_attendees(&event.attendees),
+        );
+    }
+    insert_if(properties, &mut object, "description", event.notes.clone());
+    if properties.contains("calendarIds") {
+        object.insert(
+            "calendarIds".to_string(),
+            json!({DEFAULT_CALENDAR_ID: true}),
+        );
+    }
+    Value::Object(object)
+}
+
+fn participants_from_attendees(attendees: &str) -> Value {
+    let participants = attendees
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .enumerate()
+        .map(|(index, value)| {
+            let key = format!("p{}", index + 1);
+            let participant = if value.contains('@') {
+                json!({
+                    "@type": "Participant",
+                    "name": value,
+                    "email": value,
+                    "roles": {"attendee": true},
+                })
+            } else {
+                json!({
+                    "@type": "Participant",
+                    "name": value,
+                    "roles": {"attendee": true},
+                })
+            };
+            (key, participant)
+        })
+        .collect::<Map<String, Value>>();
+    Value::Object(participants)
+}
+
+fn contact_matches_filter(contact: &ClientContact, filter: &ContactCardQueryFilter) -> bool {
+    if filter.in_address_book.is_some() {
+        // Only one virtual address book is exposed in the MVP.
+    }
+    if let Some(text) = filter.text.as_deref() {
+        let needle = text.trim().to_lowercase();
+        if !needle.is_empty() {
+            let haystack = format!(
+                "{} {} {} {} {} {}",
+                contact.name,
+                contact.email,
+                contact.role,
+                contact.phone,
+                contact.team,
+                contact.notes
+            )
+            .to_lowercase();
+            if !haystack.contains(&needle) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn event_matches_filter(event: &ClientEvent, filter: &CalendarEventQueryFilter) -> bool {
+    if filter.in_calendar.is_some() {
+        // Only one virtual calendar is exposed in the MVP.
+    }
+    if let Some(after) = filter.after.as_deref() {
+        let start = calendar_event_start(event);
+        if let Ok(after) = parse_local_datetime_value(after) {
+            if start < after {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    if let Some(before) = filter.before.as_deref() {
+        let start = calendar_event_start(event);
+        if let Ok(before) = parse_local_datetime_value(before) {
+            if start >= before {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    if let Some(text) = filter.text.as_deref() {
+        let needle = text.trim().to_lowercase();
+        if !needle.is_empty() {
+            let haystack = format!(
+                "{} {} {} {}",
+                event.title, event.location, event.attendees, event.notes
+            )
+            .to_lowercase();
+            if !haystack.contains(&needle) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn calendar_event_sort_key(event: &ClientEvent) -> String {
+    calendar_event_start(event)
+}
+
+fn calendar_event_start(event: &ClientEvent) -> String {
+    format!("{}T{}:00", event.date, event.time)
+}
+
 fn insert_if<T: Serialize>(
     properties: &HashSet<String>,
     object: &mut Map<String, Value>,
@@ -1893,6 +2848,91 @@ fn parse_mailbox_update(value: Value) -> Result<MailboxUpdateInput> {
     Ok(MailboxUpdateInput { name, sort_order })
 }
 
+fn parse_contact_input(
+    id: Option<Uuid>,
+    account_id: Uuid,
+    value: Value,
+) -> Result<UpsertClientContactInput> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("contact card arguments must be an object"))?;
+    reject_unknown_contact_properties(object)?;
+    validate_address_book_ids(object.get("addressBookIds"))?;
+
+    let kind = object
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("individual");
+    if kind != "individual" {
+        bail!("only kind=individual is supported");
+    }
+
+    Ok(UpsertClientContactInput {
+        id,
+        account_id,
+        name: parse_contact_name(object.get("name"))?,
+        role: parse_contact_title(object.get("titles"))?,
+        email: parse_contact_email(object.get("emails"))?,
+        phone: parse_contact_phone(object.get("phones"))?,
+        team: parse_contact_organization(object.get("organizations"))?,
+        notes: parse_contact_note(object.get("notes"))?,
+    })
+}
+
+fn parse_calendar_event_input(
+    id: Option<Uuid>,
+    account_id: Uuid,
+    value: Value,
+) -> Result<UpsertClientEventInput> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("calendar event arguments must be an object"))?;
+    reject_unknown_calendar_event_properties(object)?;
+    validate_calendar_ids(object.get("calendarIds"))?;
+
+    let event_type = object
+        .get("@type")
+        .and_then(Value::as_str)
+        .unwrap_or("Event");
+    if event_type != "Event" {
+        bail!("only @type=Event is supported");
+    }
+    if let Some(uid) = object.get("uid").and_then(Value::as_str) {
+        if uid.trim().is_empty() {
+            bail!("uid must not be empty");
+        }
+    }
+
+    let (date, time) = parse_local_datetime(
+        object
+            .get("start")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("start is required"))?,
+    )?;
+
+    if let Some(duration) = object.get("duration").and_then(Value::as_str) {
+        if duration != "PT0S" {
+            bail!("only duration=PT0S is supported");
+        }
+    }
+    if let Some(time_zone) = object.get("timeZone") {
+        if !time_zone.is_null() {
+            bail!("timeZone is not supported in the MVP");
+        }
+    }
+
+    Ok(UpsertClientEventInput {
+        id,
+        account_id,
+        date,
+        time,
+        title: parse_required_string(object.get("title"), "title")?,
+        location: parse_calendar_location(object.get("locations"))?,
+        attendees: parse_calendar_participants(object.get("participants"))?,
+        notes: parse_optional_string(object.get("description"))?.unwrap_or_default(),
+    })
+}
+
 fn parse_email_copy(value: Value, created_ids: &HashMap<String, String>) -> Result<(Uuid, Uuid)> {
     let object = value
         .as_object()
@@ -1915,6 +2955,56 @@ fn parse_email_copy(value: Value, created_ids: &HashMap<String, String>) -> Resu
     Ok((parse_uuid(&email_id)?, mailbox_id))
 }
 
+fn reject_unknown_contact_properties(object: &Map<String, Value>) -> Result<()> {
+    for key in object.keys() {
+        match key.as_str() {
+            "uid" | "kind" | "name" | "emails" | "phones" | "organizations" | "titles"
+            | "notes" | "addressBookIds" => {}
+            _ => bail!("unsupported contact card property: {key}"),
+        }
+    }
+    Ok(())
+}
+
+fn reject_unknown_calendar_event_properties(object: &Map<String, Value>) -> Result<()> {
+    for key in object.keys() {
+        match key.as_str() {
+            "@type" | "uid" | "title" | "start" | "duration" | "timeZone" | "locations"
+            | "participants" | "description" | "calendarIds" => {}
+            _ => bail!("unsupported calendar event property: {key}"),
+        }
+    }
+    Ok(())
+}
+
+fn validate_address_book_ids(value: Option<&Value>) -> Result<()> {
+    if let Some(value) = value {
+        let object = value
+            .as_object()
+            .ok_or_else(|| anyhow!("addressBookIds must be an object"))?;
+        if object.len() != 1
+            || object.get(DEFAULT_ADDRESS_BOOK_ID).and_then(Value::as_bool) != Some(true)
+        {
+            bail!("only the default addressBookId is supported");
+        }
+    }
+    Ok(())
+}
+
+fn validate_calendar_ids(value: Option<&Value>) -> Result<()> {
+    if let Some(value) = value {
+        let object = value
+            .as_object()
+            .ok_or_else(|| anyhow!("calendarIds must be an object"))?;
+        if object.len() != 1
+            || object.get(DEFAULT_CALENDAR_ID).and_then(Value::as_bool) != Some(true)
+        {
+            bail!("only the default calendarId is supported");
+        }
+    }
+    Ok(())
+}
+
 fn reject_unknown_email_properties(object: &Map<String, Value>) -> Result<()> {
     for key in object.keys() {
         match key.as_str() {
@@ -1924,6 +3014,99 @@ fn reject_unknown_email_properties(object: &Map<String, Value>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn normalize_email(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
+fn parse_contact_name(value: Option<&Value>) -> Result<String> {
+    let value = value.ok_or_else(|| anyhow!("name is required"))?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("name must be an object"))?;
+    if let Some(full) = object.get("full").and_then(Value::as_str) {
+        let full = full.trim();
+        if full.is_empty() {
+            bail!("name.full is required");
+        }
+        return Ok(full.to_string());
+    }
+    bail!("name.full is required")
+}
+
+fn parse_contact_email(value: Option<&Value>) -> Result<String> {
+    parse_first_property_object_string(value, "emails", "address")
+        .map(|email| normalize_email(&email))
+}
+
+fn parse_contact_phone(value: Option<&Value>) -> Result<String> {
+    parse_first_property_object_string(value, "phones", "number")
+}
+
+fn parse_contact_organization(value: Option<&Value>) -> Result<String> {
+    parse_first_property_object_string(value, "organizations", "name")
+}
+
+fn parse_contact_title(value: Option<&Value>) -> Result<String> {
+    parse_first_property_object_string(value, "titles", "name")
+}
+
+fn parse_contact_note(value: Option<&Value>) -> Result<String> {
+    parse_first_property_object_string(value, "notes", "note")
+}
+
+fn parse_calendar_location(value: Option<&Value>) -> Result<String> {
+    parse_first_property_object_string(value, "locations", "name")
+}
+
+fn parse_calendar_participants(value: Option<&Value>) -> Result<String> {
+    let Some(value) = value else {
+        return Ok(String::new());
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("participants must be an object"))?;
+    let attendees = object
+        .values()
+        .filter_map(Value::as_object)
+        .map(|participant| {
+            participant
+                .get("email")
+                .and_then(Value::as_str)
+                .or_else(|| participant.get("name").and_then(Value::as_str))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .ok_or_else(|| anyhow!("participant name or email is required"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(attendees.join(", "))
+}
+
+fn parse_first_property_object_string(
+    value: Option<&Value>,
+    property_name: &str,
+    field_name: &str,
+) -> Result<String> {
+    let Some(value) = value else {
+        return Ok(String::new());
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("{property_name} must be an object"))?;
+    let Some(first) = object.values().next() else {
+        return Ok(String::new());
+    };
+    let first = first
+        .as_object()
+        .ok_or_else(|| anyhow!("{property_name} entries must be objects"))?;
+    Ok(first
+        .get(field_name)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string())
 }
 
 fn parse_address_list(value: Option<&Value>) -> Result<Option<Vec<EmailAddressInput>>> {
@@ -1943,6 +3126,15 @@ fn parse_optional_string(value: Option<&Value>) -> Result<Option<String>> {
     }
 }
 
+fn parse_required_string(value: Option<&Value>, field_name: &str) -> Result<String> {
+    let value = value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("{field_name} is required"))?;
+    Ok(value.to_string())
+}
+
 fn parse_optional_nullable_string(value: Option<&Value>) -> Result<Option<Option<String>>> {
     match value {
         None => Ok(None),
@@ -1950,6 +3142,31 @@ fn parse_optional_nullable_string(value: Option<&Value>) -> Result<Option<Option
         Some(Value::String(value)) => Ok(Some(Some(value.clone()))),
         _ => bail!("string or null property expected"),
     }
+}
+
+fn parse_local_datetime(value: &str) -> Result<(String, String)> {
+    let trimmed = value.trim();
+    let (date, time) = trimmed
+        .split_once('T')
+        .ok_or_else(|| anyhow!("invalid local date-time"))?;
+    if date.len() != 10 || time.len() < 5 {
+        bail!("invalid local date-time");
+    }
+    let time = time.trim_end_matches('Z');
+    let hhmm = if let Some((hours_minutes, _seconds)) = time.split_once(':') {
+        if hours_minutes.len() != 2 {
+            bail!("invalid local date-time");
+        }
+        format!("{hours_minutes}:{}", &time[3..5])
+    } else {
+        bail!("invalid local date-time");
+    };
+    Ok((date.to_string(), hhmm))
+}
+
+fn parse_local_datetime_value(value: &str) -> Result<String> {
+    let (date, time) = parse_local_datetime(value)?;
+    Ok(format!("{date}T{time}:00"))
 }
 
 fn select_from_address(
@@ -2034,6 +3251,8 @@ mod tests {
         session: Option<AuthenticatedAccount>,
         mailboxes: Vec<JmapMailbox>,
         emails: Vec<JmapEmail>,
+        contacts: Arc<Mutex<Vec<ClientContact>>>,
+        events: Arc<Mutex<Vec<ClientEvent>>>,
         uploads: Arc<Mutex<Vec<JmapUploadBlob>>>,
         saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
         submitted_drafts: Arc<Mutex<Vec<Uuid>>>,
@@ -2165,6 +3384,30 @@ mod tests {
                 delivery_status: "draft".to_string(),
             }
         }
+
+        fn contact() -> ClientContact {
+            ClientContact {
+                id: Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap(),
+                name: "Bob Example".to_string(),
+                role: "Sales".to_string(),
+                email: "bob@example.test".to_string(),
+                phone: "+33123456789".to_string(),
+                team: "North".to_string(),
+                notes: "VIP".to_string(),
+            }
+        }
+
+        fn event() -> ClientEvent {
+            ClientEvent {
+                id: Uuid::parse_str("34343434-3434-3434-3434-343434343434").unwrap(),
+                date: "2026-04-20".to_string(),
+                time: "09:30".to_string(),
+                title: "Standup".to_string(),
+                location: "Room A".to_string(),
+                attendees: "alice@example.test, bob@example.test".to_string(),
+                notes: "Daily sync".to_string(),
+            }
+        }
     }
 
     impl JmapStore for FakeStore {
@@ -2260,7 +3503,11 @@ mod tests {
             Ok(())
         }
 
-        async fn fetch_jmap_emails(&self, _account_id: Uuid, ids: &[Uuid]) -> Result<Vec<JmapEmail>> {
+        async fn fetch_jmap_emails(
+            &self,
+            _account_id: Uuid,
+            ids: &[Uuid],
+        ) -> Result<Vec<JmapEmail>> {
             Ok(ids
                 .iter()
                 .filter_map(|id| self.emails.iter().find(|email| email.id == *id).cloned())
@@ -2436,6 +3683,99 @@ mod tests {
                 internet_message_id: input.internet_message_id,
                 delivery_status: "stored".to_string(),
             })
+        }
+
+        async fn fetch_client_contacts(&self, _account_id: Uuid) -> Result<Vec<ClientContact>> {
+            Ok(self.contacts.lock().unwrap().clone())
+        }
+
+        async fn fetch_client_contacts_by_ids(
+            &self,
+            _account_id: Uuid,
+            ids: &[Uuid],
+        ) -> Result<Vec<ClientContact>> {
+            Ok(self
+                .contacts
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|contact| ids.contains(&contact.id))
+                .cloned()
+                .collect())
+        }
+
+        async fn upsert_client_contact(
+            &self,
+            input: UpsertClientContactInput,
+        ) -> Result<ClientContact> {
+            let contact = ClientContact {
+                id: input.id.unwrap_or_else(Uuid::new_v4),
+                name: input.name,
+                role: input.role,
+                email: input.email,
+                phone: input.phone,
+                team: input.team,
+                notes: input.notes,
+            };
+            let mut contacts = self.contacts.lock().unwrap();
+            contacts.retain(|entry| entry.id != contact.id);
+            contacts.push(contact.clone());
+            Ok(contact)
+        }
+
+        async fn delete_client_contact(&self, _account_id: Uuid, contact_id: Uuid) -> Result<()> {
+            let mut contacts = self.contacts.lock().unwrap();
+            let original_len = contacts.len();
+            contacts.retain(|entry| entry.id != contact_id);
+            if contacts.len() == original_len {
+                bail!("contact not found");
+            }
+            Ok(())
+        }
+
+        async fn fetch_client_events(&self, _account_id: Uuid) -> Result<Vec<ClientEvent>> {
+            Ok(self.events.lock().unwrap().clone())
+        }
+
+        async fn fetch_client_events_by_ids(
+            &self,
+            _account_id: Uuid,
+            ids: &[Uuid],
+        ) -> Result<Vec<ClientEvent>> {
+            Ok(self
+                .events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| ids.contains(&event.id))
+                .cloned()
+                .collect())
+        }
+
+        async fn upsert_client_event(&self, input: UpsertClientEventInput) -> Result<ClientEvent> {
+            let event = ClientEvent {
+                id: input.id.unwrap_or_else(Uuid::new_v4),
+                date: input.date,
+                time: input.time,
+                title: input.title,
+                location: input.location,
+                attendees: input.attendees,
+                notes: input.notes,
+            };
+            let mut events = self.events.lock().unwrap();
+            events.retain(|entry| entry.id != event.id);
+            events.push(event.clone());
+            Ok(event)
+        }
+
+        async fn delete_client_event(&self, _account_id: Uuid, event_id: Uuid) -> Result<()> {
+            let mut events = self.events.lock().unwrap();
+            let original_len = events.len();
+            events.retain(|entry| entry.id != event_id);
+            if events.len() == original_len {
+                bail!("event not found");
+            }
+            Ok(())
         }
     }
 
@@ -2748,6 +4088,154 @@ mod tests {
             response.method_responses[3].1["list"][0]["hardLimit"],
             Value::Number(100.into())
         );
+    }
+
+    #[tokio::test]
+    async fn session_exposes_contacts_and_calendars_capabilities() {
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            ..Default::default()
+        });
+
+        let session = service
+            .session_document(Some("Bearer token"))
+            .await
+            .unwrap();
+
+        assert!(session.capabilities.contains_key(JMAP_CONTACTS_CAPABILITY));
+        assert!(session.capabilities.contains_key(JMAP_CALENDARS_CAPABILITY));
+        assert_eq!(
+            session.primary_accounts[JMAP_CONTACTS_CAPABILITY],
+            FakeStore::account().account_id.to_string()
+        );
+        assert_eq!(
+            session.primary_accounts[JMAP_CALENDARS_CAPABILITY],
+            FakeStore::account().account_id.to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn contacts_methods_use_canonical_contact_store() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            contacts: Arc::new(Mutex::new(vec![FakeStore::contact()])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_CONTACTS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall("AddressBook/get".to_string(), json!({}), "c1".to_string()),
+                        JmapMethodCall(
+                            "ContactCard/get".to_string(),
+                            json!({"ids": [FakeStore::contact().id.to_string()]}),
+                            "c2".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "ContactCard/set".to_string(),
+                            json!({
+                                "create": {
+                                    "new1": {
+                                        "name": {"full": "Carol Example"},
+                                        "emails": {"main": {"address": "carol@example.test"}},
+                                        "phones": {"main": {"number": "+339999"}},
+                                        "organizations": {"main": {"name": "Ops"}},
+                                        "titles": {"main": {"name": "Manager"}},
+                                        "notes": {"main": {"note": "Priority"}},
+                                        "addressBookIds": {"default": true}
+                                    }
+                                }
+                            }),
+                            "c3".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["list"][0]["id"],
+            Value::String("default".to_string())
+        );
+        assert_eq!(
+            response.method_responses[1].1["list"][0]["name"]["full"],
+            Value::String("Bob Example".to_string())
+        );
+        assert!(response.created_ids.contains_key("new1"));
+        let contacts = store.contacts.lock().unwrap();
+        assert_eq!(contacts.len(), 2);
+        assert!(contacts
+            .iter()
+            .any(|contact| contact.email == "carol@example.test"));
+    }
+
+    #[tokio::test]
+    async fn calendar_methods_use_canonical_event_store() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            events: Arc::new(Mutex::new(vec![FakeStore::event()])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_CALENDARS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall("Calendar/get".to_string(), json!({}), "c1".to_string()),
+                        JmapMethodCall(
+                            "CalendarEvent/query".to_string(),
+                            json!({"filter": {"inCalendar": "default"}}),
+                            "c2".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/set".to_string(),
+                            json!({
+                                "create": {
+                                    "ev1": {
+                                        "@type": "Event",
+                                        "title": "Planning",
+                                        "start": "2026-04-21T11:00:00",
+                                        "duration": "PT0S",
+                                        "locations": {"main": {"name": "Room B"}},
+                                        "participants": {"p1": {"name": "alice@example.test", "email": "alice@example.test"}},
+                                        "description": "Weekly planning",
+                                        "calendarIds": {"default": true}
+                                    }
+                                }
+                            }),
+                            "c3".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["list"][0]["id"],
+            Value::String("default".to_string())
+        );
+        assert_eq!(
+            response.method_responses[1].1["ids"][0],
+            Value::String(FakeStore::event().id.to_string())
+        );
+        let events = store.events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert!(events.iter().any(|event| event.title == "Planning"));
     }
 
     #[tokio::test]

@@ -60,6 +60,8 @@ L'autoconfiguration client publie des endpoints reels seulement. En v1, `Thunder
 
 Le MVP `DAV` actuellement implemente dans `lpe-dav` suit la meme approche d'adaptateur pour les usages contacts/calendrier. `CardDAV` et `CalDAV` reutilisent la meme authentification compte, exposent `contacts` et `calendar_events` via un mapping DAV minimal, puis mettent a jour directement ces tables canoniques sans logique metier specifique a DAV. Le scope supporte est detaille dans `docs/architecture/dav-mvp.md`.
 
+Le MVP `JMAP Contacts` et `JMAP Calendars` actuellement implemente dans `lpe-jmap` suit la meme approche. `AddressBook`, `ContactCard`, `Calendar` et `CalendarEvent` sont exposes au-dessus des tables canoniques `contacts` et `calendar_events`, avec un carnet d'adresses virtuel `default` et un calendrier virtuel `default` par compte, des droits bornes au compte authentifie, et sans stockage ni logique metier paralleles. Le scope supporte est detaille dans `docs/architecture/jmap-contacts-calendars-mvp.md`.
+
 Le MVP `tasks` actuellement implemente suit la meme logique canonique. Les taches personnelles sont stockees dans `tasks`, exposees par des endpoints comptes `/api/mail/tasks`, et rechargees via `/api/mail/workspace`, afin de preparer plus tard `JMAP Tasks`, `DAV` et le mobile sur la meme base. Le scope supporte est detaille dans `docs/architecture/tasks-mvp.md`.
 
 Le webmail utilise une authentification de compte distincte de l'administration. Le formulaire `/mail/` appelle `/api/mail/auth/login`, qui verifie le hash `argon2` stocke dans `account_credentials`, cree une session dans `account_sessions`, puis expose l'identite via `/api/mail/auth/me`.
@@ -171,6 +173,8 @@ The current `ActiveSync` MVP in `lpe-activesync` follows the same rule. `Provisi
 Client auto-configuration must publish only real endpoints. In v1, `Thunderbird` may receive `IMAP` settings and must advertise `SMTP` submission only when an authenticated client-submission endpoint is explicitly exposed; the internal `LPE -> LPE-CT` relay must never be described as a client-submission service. For `Outlook`, minimal autodiscovery must point to the real `ActiveSync` endpoint and must not advertise `EWS`.
 
 The current `DAV` MVP in `lpe-dav` follows the same adapter approach for collaboration compatibility. `CardDAV` and `CalDAV` reuse the same mailbox-account authentication, expose `contacts` and `calendar_events` through a minimal DAV collection model, and update those canonical tables directly instead of introducing DAV-only business logic. The supported scope is detailed in `docs/architecture/dav-mvp.md`.
+
+The current `JMAP Contacts` and `JMAP Calendars` MVP in `lpe-jmap` follows the same approach. `AddressBook`, `ContactCard`, `Calendar`, and `CalendarEvent` are exposed above the canonical `contacts` and `calendar_events` tables, with one virtual `default` address book and one virtual `default` calendar per account, rights bounded by the authenticated account, and no parallel storage or business logic. The supported scope is detailed in `docs/architecture/jmap-contacts-calendars-mvp.md`.
 
 The current `tasks` MVP follows the same canonical approach. Personal tasks are stored in `tasks`, exposed through account-scoped `/api/mail/tasks` endpoints, and included in `/api/mail/workspace` so future `JMAP Tasks`, `DAV`, and mobile adapters can reuse the same base. The supported scope is detailed in `docs/architecture/tasks-mvp.md`.
 
