@@ -419,9 +419,13 @@ pub struct ClientEvent {
     pub id: Uuid,
     pub date: String,
     pub time: String,
+    pub time_zone: String,
+    pub duration_minutes: i32,
+    pub recurrence_rule: String,
     pub title: String,
     pub location: String,
     pub attendees: String,
+    pub attendees_json: String,
     pub notes: String,
 }
 
@@ -466,9 +470,13 @@ pub struct UpsertClientEventInput {
     pub account_id: Uuid,
     pub date: String,
     pub time: String,
+    pub time_zone: String,
+    pub duration_minutes: i32,
+    pub recurrence_rule: String,
     pub title: String,
     pub location: String,
     pub attendees: String,
+    pub attendees_json: String,
     pub notes: String,
 }
 
@@ -928,9 +936,13 @@ struct ClientEventRow {
     id: Uuid,
     date: String,
     time: String,
+    time_zone: String,
+    duration_minutes: i32,
+    recurrence_rule: String,
     title: String,
     location: String,
     attendees: String,
+    attendees_json: String,
     notes: String,
 }
 
@@ -3634,15 +3646,20 @@ impl Storage {
             r#"
             INSERT INTO calendar_events (
                 id, tenant_id, account_id, event_date, event_time,
-                title, location, attendees, notes
+                time_zone, duration_minutes, recurrence_rule,
+                title, location, attendees, attendees_json, notes
             )
-            VALUES ($1, $2, $3, $4::date, $5::time, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4::date, $5::time, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT (id) DO UPDATE SET
                 event_date = EXCLUDED.event_date,
                 event_time = EXCLUDED.event_time,
+                time_zone = EXCLUDED.time_zone,
+                duration_minutes = EXCLUDED.duration_minutes,
+                recurrence_rule = EXCLUDED.recurrence_rule,
                 title = EXCLUDED.title,
                 location = EXCLUDED.location,
                 attendees = EXCLUDED.attendees,
+                attendees_json = EXCLUDED.attendees_json,
                 notes = EXCLUDED.notes,
                 updated_at = NOW()
             WHERE calendar_events.tenant_id = EXCLUDED.tenant_id
@@ -3651,9 +3668,13 @@ impl Storage {
                 id,
                 to_char(event_date, 'YYYY-MM-DD') AS date,
                 to_char(event_time, 'HH24:MI') AS time,
+                time_zone,
+                duration_minutes,
+                recurrence_rule,
                 title,
                 location,
                 attendees,
+                attendees_json,
                 notes
             "#,
         )
@@ -3662,9 +3683,13 @@ impl Storage {
         .bind(input.account_id)
         .bind(input.date.trim())
         .bind(input.time.trim())
+        .bind(input.time_zone.trim())
+        .bind(input.duration_minutes.max(0))
+        .bind(input.recurrence_rule.trim())
         .bind(input.title.trim())
         .bind(input.location.trim())
         .bind(input.attendees.trim())
+        .bind(input.attendees_json.trim())
         .bind(input.notes.trim())
         .fetch_one(&self.pool)
         .await?;
@@ -5315,9 +5340,13 @@ impl Storage {
                 id,
                 to_char(event_date, 'YYYY-MM-DD') AS date,
                 to_char(event_time, 'HH24:MI') AS time,
+                time_zone,
+                duration_minutes,
+                recurrence_rule,
                 title,
                 location,
                 attendees,
+                attendees_json,
                 notes
             FROM calendar_events
             WHERE tenant_id = $1 AND account_id = $2
@@ -5347,9 +5376,13 @@ impl Storage {
                 id,
                 to_char(event_date, 'YYYY-MM-DD') AS date,
                 to_char(event_time, 'HH24:MI') AS time,
+                time_zone,
+                duration_minutes,
+                recurrence_rule,
                 title,
                 location,
                 attendees,
+                attendees_json,
                 notes
             FROM calendar_events
             WHERE tenant_id = $1
@@ -5990,9 +6023,13 @@ fn map_event(row: ClientEventRow) -> ClientEvent {
         id: row.id,
         date: row.date,
         time: row.time,
+        time_zone: row.time_zone,
+        duration_minutes: row.duration_minutes,
+        recurrence_rule: row.recurrence_rule,
         title: row.title,
         location: row.location,
         attendees: row.attendees,
+        attendees_json: row.attendees_json,
         notes: row.notes,
     }
 }

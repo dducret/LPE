@@ -197,9 +197,17 @@ pub struct UpsertClientEventRequest {
     pub id: Option<Uuid>,
     pub date: String,
     pub time: String,
+    #[serde(default)]
+    pub time_zone: String,
+    #[serde(default)]
+    pub duration_minutes: i32,
+    #[serde(default)]
+    pub recurrence_rule: String,
     pub title: String,
     pub location: String,
     pub attendees: String,
+    #[serde(default)]
+    pub attendees_json: String,
     pub notes: String,
 }
 

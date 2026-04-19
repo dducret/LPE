@@ -2594,9 +2594,22 @@ fn calendar_event_to_value(event: &ClientEvent, properties: &HashSet<String>) ->
         "start",
         format!("{}T{}:00", event.date, event.time),
     );
-    insert_if(properties, &mut object, "duration", "PT0S");
+    insert_if(
+        properties,
+        &mut object,
+        "duration",
+        if event.duration_minutes <= 0 {
+            "PT0S".to_string()
+        } else {
+            format!("PT{}M", event.duration_minutes)
+        },
+    );
     if properties.contains("timeZone") {
-        object.insert("timeZone".to_string(), Value::Null);
+        if event.time_zone.trim().is_empty() {
+            object.insert("timeZone".to_string(), Value::Null);
+        } else {
+            object.insert("timeZone".to_string(), Value::String(event.time_zone.clone()));
+        }
     }
     if properties.contains("locations") && !event.location.trim().is_empty() {
         object.insert(
@@ -2612,7 +2625,7 @@ fn calendar_event_to_value(event: &ClientEvent, properties: &HashSet<String>) ->
     if properties.contains("participants") && !event.attendees.trim().is_empty() {
         object.insert(
             "participants".to_string(),
-            participants_from_attendees(&event.attendees),
+            participants_from_event(event),
         );
     }
     insert_if(properties, &mut object, "description", event.notes.clone());
@@ -2623,6 +2636,48 @@ fn calendar_event_to_value(event: &ClientEvent, properties: &HashSet<String>) ->
         );
     }
     Value::Object(object)
+}
+
+fn participants_from_event(event: &ClientEvent) -> Value {
+    if let Ok(value) = serde_json::from_str::<Value>(&event.attendees_json) {
+        if value.is_object() {
+            return value;
+        }
+        if let Some(entries) = value.as_array() {
+            let participants = entries
+                .iter()
+                .filter_map(Value::as_object)
+                .enumerate()
+                .map(|(index, attendee)| {
+                    let key = format!("p{}", index + 1);
+                    let name = attendee
+                        .get("common_name")
+                        .and_then(Value::as_str)
+                        .filter(|value| !value.trim().is_empty())
+                        .or_else(|| attendee.get("email").and_then(Value::as_str))
+                        .unwrap_or_default();
+                    let email = attendee
+                        .get("email")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let participant = json!({
+                        "@type": "Participant",
+                        "name": name,
+                        "email": email,
+                        "roles": {"attendee": true},
+                        "participationStatus": attendee
+                            .get("partstat")
+                            .and_then(Value::as_str)
+                            .unwrap_or("needs-action")
+                            .to_ascii_lowercase(),
+                    });
+                    (key, participant)
+                })
+                .collect::<Map<String, Value>>();
+            return Value::Object(participants);
+        }
+    }
+    participants_from_attendees(&event.attendees)
 }
 
 fn participants_from_attendees(attendees: &str) -> Value {
@@ -2910,25 +2965,18 @@ fn parse_calendar_event_input(
             .ok_or_else(|| anyhow!("start is required"))?,
     )?;
 
-    if let Some(duration) = object.get("duration").and_then(Value::as_str) {
-        if duration != "PT0S" {
-            bail!("only duration=PT0S is supported");
-        }
-    }
-    if let Some(time_zone) = object.get("timeZone") {
-        if !time_zone.is_null() {
-            bail!("timeZone is not supported in the MVP");
-        }
-    }
-
     Ok(UpsertClientEventInput {
         id,
         account_id,
         date,
         time,
+        time_zone: parse_optional_string(object.get("timeZone"))?.unwrap_or_default(),
+        duration_minutes: parse_calendar_duration(object.get("duration"))?,
+        recurrence_rule: String::new(),
         title: parse_required_string(object.get("title"), "title")?,
         location: parse_calendar_location(object.get("locations"))?,
         attendees: parse_calendar_participants(object.get("participants"))?,
+        attendees_json: parse_calendar_participants_json(object.get("participants"))?,
         notes: parse_optional_string(object.get("description"))?.unwrap_or_default(),
     })
 }
@@ -3082,6 +3130,41 @@ fn parse_calendar_participants(value: Option<&Value>) -> Result<String> {
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(attendees.join(", "))
+}
+
+fn parse_calendar_participants_json(value: Option<&Value>) -> Result<String> {
+    let Some(value) = value else {
+        return Ok("{}".to_string());
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("participants must be an object"))?;
+    Ok(Value::Object(object.clone()).to_string())
+}
+
+fn parse_calendar_duration(value: Option<&Value>) -> Result<i32> {
+    let Some(value) = value.and_then(Value::as_str) else {
+        return Ok(0);
+    };
+    if value == "PT0S" {
+        return Ok(0);
+    }
+    let Some(value) = value.strip_prefix("PT") else {
+        bail!("duration must use PT...");
+    };
+    if let Some(hours) = value.strip_suffix('H') {
+        return hours
+            .parse::<i32>()
+            .map(|value| value.max(0) * 60)
+            .map_err(|_| anyhow!("invalid duration"));
+    }
+    if let Some(minutes) = value.strip_suffix('M') {
+        return minutes
+            .parse::<i32>()
+            .map(|value| value.max(0))
+            .map_err(|_| anyhow!("invalid duration"));
+    }
+    bail!("invalid duration")
 }
 
 fn parse_first_property_object_string(
@@ -3402,9 +3485,13 @@ mod tests {
                 id: Uuid::parse_str("34343434-3434-3434-3434-343434343434").unwrap(),
                 date: "2026-04-20".to_string(),
                 time: "09:30".to_string(),
+                time_zone: "".to_string(),
+                duration_minutes: 0,
+                recurrence_rule: "".to_string(),
                 title: "Standup".to_string(),
                 location: "Room A".to_string(),
                 attendees: "alice@example.test, bob@example.test".to_string(),
+                attendees_json: "[]".to_string(),
                 notes: "Daily sync".to_string(),
             }
         }
@@ -3757,9 +3844,13 @@ mod tests {
                 id: input.id.unwrap_or_else(Uuid::new_v4),
                 date: input.date,
                 time: input.time,
+                time_zone: input.time_zone,
+                duration_minutes: input.duration_minutes,
+                recurrence_rule: input.recurrence_rule,
                 title: input.title,
                 location: input.location,
                 attendees: input.attendees,
+                attendees_json: input.attendees_json,
                 notes: input.notes,
             };
             let mut events = self.events.lock().unwrap();

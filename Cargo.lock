@@ -1450,6 +1450,8 @@ dependencies = [
  "axum",
  "lpe-mail-auth",
  "lpe-storage",
+ "serde",
+ "serde_json",
  "tokio",
  "uuid",
 ]

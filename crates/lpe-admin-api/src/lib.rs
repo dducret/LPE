@@ -929,9 +929,13 @@ async fn upsert_client_event(
                 account_id: account.account_id,
                 date: request.date,
                 time: request.time,
+                time_zone: request.time_zone,
+                duration_minutes: request.duration_minutes,
+                recurrence_rule: request.recurrence_rule,
                 title: request.title,
                 location: request.location,
                 attendees: request.attendees,
+                attendees_json: request.attendees_json,
                 notes: request.notes,
             })
             .await

@@ -11,6 +11,7 @@ use lpe_mail_auth::{authenticate_account, AccountAuthStore, AccountPrincipal};
 use lpe_storage::{
     ClientContact, ClientEvent, Storage, UpsertClientContactInput, UpsertClientEventInput,
 };
+use serde::{Deserialize, Serialize};
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
@@ -23,6 +24,23 @@ const ADDRESSBOOK_HOME_PATH: &str = "/dav/addressbooks/me/";
 const ADDRESSBOOK_COLLECTION_PATH: &str = "/dav/addressbooks/me/default/";
 const CALENDAR_HOME_PATH: &str = "/dav/calendars/me/";
 const CALENDAR_COLLECTION_PATH: &str = "/dav/calendars/me/default/";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct DavAttendee {
+    email: String,
+    common_name: String,
+    role: String,
+    partstat: String,
+    rsvp: bool,
+}
+
+#[derive(Debug, Default)]
+struct ReportFilter {
+    hrefs: Vec<String>,
+    text_terms: Vec<String>,
+    time_range_start: Option<String>,
+    time_range_end: Option<String>,
+}
 
 pub fn router() -> Router<Storage> {
     Router::new()
@@ -156,10 +174,10 @@ impl<S: DavStore> DavService<S> {
         let principal = authenticate_account(&self.store, None, headers).await?;
         match method.as_str() {
             "PROPFIND" => self.handle_propfind(&principal, &path, headers).await,
-            "REPORT" => self.handle_report(&principal, &path).await,
-            "GET" => self.handle_get(&principal, &path).await,
-            "PUT" => self.handle_put(&principal, &path, body).await,
-            "DELETE" => self.handle_delete(&principal, &path).await,
+            "REPORT" => self.handle_report(&principal, &path, body).await,
+            "GET" => self.handle_get(&principal, &path, headers).await,
+            "PUT" => self.handle_put(&principal, &path, headers, body).await,
+            "DELETE" => self.handle_delete(&principal, &path, headers).await,
             _ => bail!("method not allowed"),
         }
     }
@@ -226,13 +244,20 @@ impl<S: DavStore> DavService<S> {
         Ok(multistatus_response(entries))
     }
 
-    async fn handle_report(&self, principal: &AccountPrincipal, path: &str) -> Result<Response> {
+    async fn handle_report(
+        &self,
+        principal: &AccountPrincipal,
+        path: &str,
+        body: &[u8],
+    ) -> Result<Response> {
+        let filter = parse_report_filter(body)?;
         let entries = match path {
             ADDRESSBOOK_COLLECTION_PATH => self
                 .store
                 .fetch_client_contacts(principal.account_id)
                 .await?
                 .into_iter()
+                .filter(|contact| contact_matches_report(contact, &filter))
                 .map(contact_report_entry)
                 .collect(),
             CALENDAR_COLLECTION_PATH => self
@@ -240,6 +265,7 @@ impl<S: DavStore> DavService<S> {
                 .fetch_client_events(principal.account_id)
                 .await?
                 .into_iter()
+                .filter(|event| event_matches_report(event, &filter))
                 .map(event_report_entry)
                 .collect(),
             _ => bail!("not found"),
@@ -247,17 +273,32 @@ impl<S: DavStore> DavService<S> {
         Ok(multistatus_response(entries))
     }
 
-    async fn handle_get(&self, principal: &AccountPrincipal, path: &str) -> Result<Response> {
+    async fn handle_get(
+        &self,
+        principal: &AccountPrincipal,
+        path: &str,
+        headers: &HeaderMap,
+    ) -> Result<Response> {
         if let Some(contact) = self.contact_for_path(principal.account_id, path).await? {
+            let body = serialize_vcard(&contact);
+            if precondition_not_modified(headers, &etag(&body)) {
+                return Ok(status_only(304));
+            }
             return Ok(text_response(
                 "text/vcard; charset=utf-8",
-                serialize_vcard(&contact),
+                body,
+                Some(etag_for_contact(&contact)),
             ));
         }
         if let Some(event) = self.event_for_path(principal.account_id, path).await? {
+            let body = serialize_ical(&event);
+            if precondition_not_modified(headers, &etag(&body)) {
+                return Ok(status_only(304));
+            }
             return Ok(text_response(
                 "text/calendar; charset=utf-8",
-                serialize_ical(&event),
+                body,
+                Some(etag_for_event(&event)),
             ));
         }
         bail!("not found")
@@ -267,31 +308,49 @@ impl<S: DavStore> DavService<S> {
         &self,
         principal: &AccountPrincipal,
         path: &str,
+        headers: &HeaderMap,
         body: &[u8],
     ) -> Result<Response> {
         if let Some(resource_id) = resource_id_for_contact_path(path) {
-            let existing = self.contact_for_path(principal.account_id, path).await?.is_some();
+            let existing = self.contact_for_path(principal.account_id, path).await?;
+            check_write_preconditions(headers, existing.as_ref().map(etag_for_contact))?;
             let parsed = parse_vcard(resource_id, principal.account_id, body)?;
-            self.store.upsert_client_contact(parsed).await?;
-            return Ok(status_only(if existing { 204 } else { 201 }));
+            let contact = self.store.upsert_client_contact(parsed).await?;
+            return Ok(status_with_etag(
+                if existing.is_some() { 204 } else { 201 },
+                etag_for_contact(&contact),
+            ));
         }
         if let Some(resource_id) = resource_id_for_event_path(path) {
-            let existing = self.event_for_path(principal.account_id, path).await?.is_some();
+            let existing = self.event_for_path(principal.account_id, path).await?;
+            check_write_preconditions(headers, existing.as_ref().map(etag_for_event))?;
             let parsed = parse_ical(resource_id, principal.account_id, body)?;
-            self.store.upsert_client_event(parsed).await?;
-            return Ok(status_only(if existing { 204 } else { 201 }));
+            let event = self.store.upsert_client_event(parsed).await?;
+            return Ok(status_with_etag(
+                if existing.is_some() { 204 } else { 201 },
+                etag_for_event(&event),
+            ));
         }
         bail!("not found")
     }
 
-    async fn handle_delete(&self, principal: &AccountPrincipal, path: &str) -> Result<Response> {
+    async fn handle_delete(
+        &self,
+        principal: &AccountPrincipal,
+        path: &str,
+        headers: &HeaderMap,
+    ) -> Result<Response> {
         if let Some(resource_id) = resource_id_for_contact_path(path) {
+            let existing = self.contact_for_path(principal.account_id, path).await?;
+            check_delete_preconditions(headers, existing.as_ref().map(etag_for_contact))?;
             self.store
                 .delete_client_contact(principal.account_id, resource_id)
                 .await?;
             return Ok(status_only(204));
         }
         if let Some(resource_id) = resource_id_for_event_path(path) {
+            let existing = self.event_for_path(principal.account_id, path).await?;
+            check_delete_preconditions(headers, existing.as_ref().map(etag_for_event))?;
             self.store
                 .delete_client_event(principal.account_id, resource_id)
                 .await?;
@@ -371,7 +430,9 @@ fn addressbook_collection_entry() -> String {
             "<d:collection/><card:addressbook/>",
             None,
             None,
-            None,
+            Some(
+                "<d:supported-report-set><d:supported-report><d:report><card:addressbook-query/></d:report></d:supported-report><d:supported-report><d:report><card:addressbook-multiget/></d:report></d:supported-report></d:supported-report-set>".to_string(),
+            ),
         ),
     )
 }
@@ -384,7 +445,9 @@ fn calendar_collection_entry() -> String {
             "<d:collection/><cal:calendar/>",
             None,
             None,
-            None,
+            Some(
+                "<d:supported-report-set><d:supported-report><d:report><cal:calendar-query/></d:report></d:supported-report><d:supported-report><d:report><cal:calendar-multiget/></d:report></d:supported-report></d:supported-report-set>".to_string(),
+            ),
         ),
     )
 }
@@ -520,8 +583,12 @@ fn redirect_response(location: &str) -> Response {
         .unwrap()
 }
 
-fn text_response(content_type: &str, body: String) -> Response {
-    response_with_headers(200, content_type, body, &[("dav", "1, addressbook, calendar-access")])
+fn text_response(content_type: &str, body: String, etag: Option<String>) -> Response {
+    let mut headers = vec![("dav", "1, addressbook, calendar-access")];
+    if let Some(ref value) = etag {
+        headers.push(("etag", value.as_str()));
+    }
+    response_with_headers(200, content_type, body, &headers)
 }
 
 fn response_with_headers(
@@ -546,6 +613,14 @@ fn status_only(status: u16) -> Response {
         .unwrap()
 }
 
+fn status_with_etag(status: u16, etag: String) -> Response {
+    Response::builder()
+        .status(StatusCode::from_u16(status).unwrap())
+        .header("etag", etag)
+        .body(axum::body::Body::empty())
+        .unwrap()
+}
+
 fn error_response(error: anyhow::Error) -> Response {
     let message = error.to_string();
     if message.contains("missing account authentication") || message.contains("invalid credentials") {
@@ -564,6 +639,12 @@ fn error_response(error: anyhow::Error) -> Response {
     if message.contains("method not allowed") {
         return Response::builder()
             .status(StatusCode::METHOD_NOT_ALLOWED)
+            .body(axum::body::Body::from(message))
+            .unwrap();
+    }
+    if message.contains("precondition failed") {
+        return Response::builder()
+            .status(StatusCode::PRECONDITION_FAILED)
             .body(axum::body::Body::from(message))
             .unwrap();
     }
@@ -612,6 +693,14 @@ fn etag(value: &str) -> String {
     format!("\"{:x}\"", hasher.finish())
 }
 
+fn etag_for_contact(contact: &ClientContact) -> String {
+    etag(&serialize_vcard(contact))
+}
+
+fn etag_for_event(event: &ClientEvent) -> String {
+    etag(&serialize_ical(event))
+}
+
 fn serialize_vcard(contact: &ClientContact) -> String {
     let mut lines = vec![
         "BEGIN:VCARD".to_string(),
@@ -629,23 +718,31 @@ fn serialize_vcard(contact: &ClientContact) -> String {
 }
 
 fn serialize_ical(event: &ClientEvent) -> String {
-    let dtstart = format!(
-        "{}T{}00",
-        event.date.replace('-', ""),
-        event.time.replace(':', "")
-    );
+    let dtstart = format_ical_datetime(&event.date, &event.time);
+    let attendees = attendees_for_event(event);
     let mut lines = vec![
         "BEGIN:VCALENDAR".to_string(),
         "VERSION:2.0".to_string(),
-        "PRODID:-//LPE//DAV MVP//EN".to_string(),
+        "PRODID:-//LPE//DAV Adapter//EN".to_string(),
+        "CALSCALE:GREGORIAN".to_string(),
         "BEGIN:VEVENT".to_string(),
         format!("UID:{}", event.id),
-        format!("DTSTART:{dtstart}"),
+        format!(
+            "{}:{dtstart}",
+            property_name_with_tz("DTSTART", &event.time_zone)
+        ),
+        format!("DURATION:{}", format_duration(event.duration_minutes)),
         format!("SUMMARY:{}", text_escape(&event.title)),
     ];
     push_line(&mut lines, "LOCATION", &event.location);
     push_line(&mut lines, "DESCRIPTION", &event.notes);
-    push_line(&mut lines, "X-LPE-ATTENDEES", &event.attendees);
+    push_line(&mut lines, "RRULE", &event.recurrence_rule);
+    for attendee in &attendees {
+        lines.push(serialize_attendee(attendee));
+    }
+    if attendees.is_empty() {
+        push_line(&mut lines, "X-LPE-ATTENDEES", &event.attendees);
+    }
     lines.push("END:VEVENT".to_string());
     lines.push("END:VCALENDAR".to_string());
     lines.join("\r\n")
@@ -703,9 +800,13 @@ fn parse_ical(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientEve
     let content = std::str::from_utf8(body)?;
     let mut date = String::new();
     let mut time = String::new();
+    let mut time_zone = String::new();
+    let mut duration_minutes = 0;
+    let mut recurrence_rule = String::new();
     let mut title = String::new();
     let mut location = String::new();
     let mut attendees = String::new();
+    let mut attendee_entries = Vec::new();
     let mut notes = String::new();
 
     for line in unfolded_lines(content) {
@@ -719,11 +820,15 @@ fn parse_ical(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientEve
                 let (parsed_date, parsed_time) = parse_ical_datetime(&value)?;
                 date = parsed_date;
                 time = parsed_time;
+                time_zone = property_parameter(left, "TZID").unwrap_or_default();
             }
+            "DURATION" => duration_minutes = parse_ical_duration(&value)?,
+            "RRULE" => recurrence_rule = value,
             "SUMMARY" => title = value,
             "LOCATION" => location = value,
             "DESCRIPTION" => notes = value,
             "X-LPE-ATTENDEES" => attendees = value,
+            "ATTENDEE" => attendee_entries.push(parse_attendee(left, &value)?),
             _ => {}
         }
     }
@@ -732,14 +837,26 @@ fn parse_ical(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientEve
         bail!("event date, time, and title are required");
     }
 
+    if !attendee_entries.is_empty() {
+        attendees = attendee_entries
+            .iter()
+            .map(attendee_label)
+            .collect::<Vec<_>>()
+            .join(", ");
+    }
+
     Ok(UpsertClientEventInput {
         id: Some(id),
         account_id,
         date,
         time,
+        time_zone,
+        duration_minutes,
+        recurrence_rule,
         title,
         location,
         attendees,
+        attendees_json: serialize_attendees_json(&attendee_entries),
         notes,
     })
 }
@@ -761,6 +878,317 @@ fn parse_ical_datetime(value: &str) -> Result<(String, String)> {
         ),
         format!("{}:{}", &time_part[0..2], &time_part[2..4]),
     ))
+}
+
+fn format_ical_datetime(date: &str, time: &str) -> String {
+    format!("{}T{}00", date.replace('-', ""), time.replace(':', ""))
+}
+
+fn format_duration(minutes: i32) -> String {
+    if minutes <= 0 {
+        return "PT0S".to_string();
+    }
+    if minutes % 60 == 0 {
+        return format!("PT{}H", minutes / 60);
+    }
+    format!("PT{}M", minutes)
+}
+
+fn parse_ical_duration(value: &str) -> Result<i32> {
+    let value = value.trim();
+    if value == "PT0S" {
+        return Ok(0);
+    }
+    let Some(value) = value.strip_prefix("PT") else {
+        bail!("invalid DURATION");
+    };
+    if let Some(hours) = value.strip_suffix('H') {
+        return hours
+            .parse::<i32>()
+            .map(|value| value.max(0) * 60)
+            .map_err(|_| anyhow!("invalid DURATION"));
+    }
+    if let Some(minutes) = value.strip_suffix('M') {
+        return minutes
+            .parse::<i32>()
+            .map(|value| value.max(0))
+            .map_err(|_| anyhow!("invalid DURATION"));
+    }
+    bail!("invalid DURATION")
+}
+
+fn property_name_with_tz(name: &str, time_zone: &str) -> String {
+    let time_zone = time_zone.trim();
+    if time_zone.is_empty() {
+        return name.to_string();
+    }
+    format!("{name};TZID={time_zone}")
+}
+
+fn property_parameter(left: &str, name: &str) -> Option<String> {
+    left.split(';').skip(1).find_map(|segment| {
+        let (key, value) = segment.split_once('=')?;
+        if key.eq_ignore_ascii_case(name) {
+            Some(text_unescape(value.trim_matches('"')))
+        } else {
+            None
+        }
+    })
+}
+
+fn attendees_for_event(event: &ClientEvent) -> Vec<DavAttendee> {
+    let parsed = serde_json::from_str::<Vec<DavAttendee>>(&event.attendees_json).unwrap_or_default();
+    if !parsed.is_empty() {
+        return parsed;
+    }
+    event.attendees
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| DavAttendee {
+            email: value.to_string(),
+            common_name: String::new(),
+            role: "REQ-PARTICIPANT".to_string(),
+            partstat: "NEEDS-ACTION".to_string(),
+            rsvp: false,
+        })
+        .collect()
+}
+
+fn serialize_attendee(attendee: &DavAttendee) -> String {
+    let mut property = "ATTENDEE".to_string();
+    if !attendee.common_name.trim().is_empty() {
+        property.push_str(&format!(";CN={}", param_escape(&attendee.common_name)));
+    }
+    if !attendee.role.trim().is_empty() {
+        property.push_str(&format!(";ROLE={}", attendee.role.trim()));
+    }
+    if !attendee.partstat.trim().is_empty() {
+        property.push_str(&format!(";PARTSTAT={}", attendee.partstat.trim()));
+    }
+    if attendee.rsvp {
+        property.push_str(";RSVP=TRUE");
+    }
+    let value = if attendee.email.trim().is_empty() {
+        "mailto:unknown@example.invalid".to_string()
+    } else if attendee.email.to_ascii_lowercase().starts_with("mailto:") {
+        attendee.email.clone()
+    } else {
+        format!("mailto:{}", attendee.email.trim())
+    };
+    format!("{property}:{value}")
+}
+
+fn parse_attendee(left: &str, value: &str) -> Result<DavAttendee> {
+    let email = value
+        .trim()
+        .strip_prefix("mailto:")
+        .unwrap_or(value.trim())
+        .trim()
+        .to_string();
+    if email.is_empty() {
+        bail!("ATTENDEE email is required");
+    }
+    Ok(DavAttendee {
+        email,
+        common_name: property_parameter(left, "CN").unwrap_or_default(),
+        role: property_parameter(left, "ROLE").unwrap_or_else(|| "REQ-PARTICIPANT".to_string()),
+        partstat: property_parameter(left, "PARTSTAT")
+            .unwrap_or_else(|| "NEEDS-ACTION".to_string()),
+        rsvp: property_parameter(left, "RSVP")
+            .map(|value| value.eq_ignore_ascii_case("TRUE"))
+            .unwrap_or(false),
+    })
+}
+
+fn attendee_label(attendee: &DavAttendee) -> String {
+    if !attendee.common_name.trim().is_empty() {
+        attendee.common_name.trim().to_string()
+    } else {
+        attendee.email.trim().to_string()
+    }
+}
+
+fn serialize_attendees_json(attendees: &[DavAttendee]) -> String {
+    serde_json::to_string(attendees).unwrap_or_else(|_| "[]".to_string())
+}
+
+fn param_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "'").replace(';', "\\;")
+}
+
+fn parse_report_filter(body: &[u8]) -> Result<ReportFilter> {
+    if body.is_empty() {
+        return Ok(ReportFilter::default());
+    }
+    let xml = std::str::from_utf8(body)?;
+    Ok(ReportFilter {
+        hrefs: xml_tag_values(xml, "href"),
+        text_terms: xml_text_match_values(xml),
+        time_range_start: xml_attribute_value(xml, "time-range", "start"),
+        time_range_end: xml_attribute_value(xml, "time-range", "end"),
+    })
+}
+
+fn xml_tag_values(xml: &str, local_name: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let needle = format!(":{local_name}>");
+    let mut remaining = xml;
+    while let Some(index) = remaining.find(&needle) {
+        let value_start = index + needle.len();
+        let rest = &remaining[value_start..];
+        let Some(value_end) = rest.find('<') else {
+            break;
+        };
+        let value = rest[..value_end].trim();
+        if !value.is_empty() {
+            values.push(value.to_string());
+        }
+        remaining = &rest[value_end..];
+    }
+    values
+}
+
+fn xml_text_match_values(xml: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut remaining = xml;
+    while let Some(index) = remaining.find(":text-match") {
+        let Some(open_end) = remaining[index..].find('>') else {
+            break;
+        };
+        let rest = &remaining[index + open_end + 1..];
+        let Some(close_index) = rest.find("</") else {
+            break;
+        };
+        let value = rest[..close_index].trim();
+        if !value.is_empty() {
+            values.push(value.to_string());
+        }
+        remaining = &rest[close_index + 2..];
+    }
+    values
+}
+
+fn xml_attribute_value(xml: &str, element: &str, attribute: &str) -> Option<String> {
+    let needle = format!(":{element}");
+    let index = xml.find(&needle)?;
+    let rest = &xml[index..];
+    let open_end = rest.find('>')?;
+    let element_text = &rest[..open_end];
+    let attr = format!("{attribute}=\"");
+    let attr_index = element_text.find(&attr)?;
+    let value_start = attr_index + attr.len();
+    let value = &element_text[value_start..];
+    let value_end = value.find('"')?;
+    Some(value[..value_end].to_string())
+}
+
+fn contact_matches_report(contact: &ClientContact, filter: &ReportFilter) -> bool {
+    if !filter.hrefs.is_empty() && !filter.hrefs.iter().any(|href| href == &contact_href(contact.id)) {
+        return false;
+    }
+    if filter.text_terms.is_empty() {
+        return true;
+    }
+    let haystack = format!(
+        "{} {} {} {} {} {}",
+        contact.name, contact.email, contact.role, contact.phone, contact.team, contact.notes
+    )
+    .to_lowercase();
+    filter
+        .text_terms
+        .iter()
+        .all(|term| haystack.contains(&term.trim().to_lowercase()))
+}
+
+fn event_matches_report(event: &ClientEvent, filter: &ReportFilter) -> bool {
+    if !filter.hrefs.is_empty() && !filter.hrefs.iter().any(|href| href == &event_href(event.id)) {
+        return false;
+    }
+    if !filter.text_terms.is_empty() {
+        let haystack = format!(
+            "{} {} {} {}",
+            event.title, event.location, event.attendees, event.notes
+        )
+        .to_lowercase();
+        if !filter
+            .text_terms
+            .iter()
+            .all(|term| haystack.contains(&term.trim().to_lowercase()))
+        {
+            return false;
+        }
+    }
+    let start = format_ical_datetime(&event.date, &event.time);
+    if let Some(range_start) = filter.time_range_start.as_deref() {
+        if normalize_time_range_value(range_start).as_deref() > Some(start.as_str()) {
+            return false;
+        }
+    }
+    if let Some(range_end) = filter.time_range_end.as_deref() {
+        if normalize_time_range_value(range_end).as_deref() <= Some(start.as_str()) {
+            return false;
+        }
+    }
+    true
+}
+
+fn normalize_time_range_value(value: &str) -> Option<String> {
+    let value = value.trim_end_matches('Z');
+    if value.len() < 15 {
+        return None;
+    }
+    Some(value[..15].to_string())
+}
+
+fn precondition_not_modified(headers: &HeaderMap, current_etag: &str) -> bool {
+    match_condition_header(headers.get("if-none-match"), current_etag)
+}
+
+fn check_write_preconditions(headers: &HeaderMap, current_etag: Option<String>) -> Result<()> {
+    if let Some(if_match) = headers.get("if-match") {
+        let Some(current_etag) = current_etag.as_deref() else {
+            bail!("precondition failed");
+        };
+        if !match_condition_header(Some(if_match), current_etag) {
+            bail!("precondition failed");
+        }
+    }
+    if let Some(if_none_match) = headers.get("if-none-match") {
+        if let Some(current_etag) = current_etag.as_deref() {
+            if match_condition_header(Some(if_none_match), current_etag) {
+                bail!("precondition failed");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_delete_preconditions(headers: &HeaderMap, current_etag: Option<String>) -> Result<()> {
+    let Some(current_etag) = current_etag else {
+        bail!("not found");
+    };
+    if let Some(if_match) = headers.get("if-match") {
+        if !match_condition_header(Some(if_match), &current_etag) {
+            bail!("precondition failed");
+        }
+    }
+    if let Some(if_none_match) = headers.get("if-none-match") {
+        if match_condition_header(Some(if_none_match), &current_etag) {
+            bail!("precondition failed");
+        }
+    }
+    Ok(())
+}
+
+fn match_condition_header(header_value: Option<&axum::http::HeaderValue>, current_etag: &str) -> bool {
+    let Some(header_value) = header_value.and_then(|value| value.to_str().ok()) else {
+        return false;
+    };
+    header_value
+        .split(',')
+        .map(str::trim)
+        .any(|candidate| candidate == "*" || candidate == current_etag)
 }
 
 fn unfolded_lines(content: &str) -> Vec<String> {
@@ -899,9 +1327,13 @@ mod tests {
                 id: input.id.unwrap(),
                 date: input.date,
                 time: input.time,
+                time_zone: input.time_zone,
+                duration_minutes: input.duration_minutes,
+                recurrence_rule: input.recurrence_rule,
                 title: input.title,
                 location: input.location,
                 attendees: input.attendees,
+                attendees_json: input.attendees_json,
                 notes: input.notes,
             };
             events.retain(|entry| entry.id != event.id);
@@ -987,9 +1419,13 @@ mod tests {
                 id: event_id,
                 date: "2026-04-20".to_string(),
                 time: "09:30".to_string(),
+                time_zone: "".to_string(),
+                duration_minutes: 0,
+                recurrence_rule: "".to_string(),
                 title: "Standup".to_string(),
                 location: "Room A".to_string(),
                 attendees: "alice@example.test".to_string(),
+                attendees_json: "[]".to_string(),
                 notes: "Daily".to_string(),
             }])),
             ..Default::default()
@@ -1047,9 +1483,13 @@ mod tests {
                 id: event_id,
                 date: "2026-04-21".to_string(),
                 time: "11:00".to_string(),
+                time_zone: "".to_string(),
+                duration_minutes: 0,
+                recurrence_rule: "".to_string(),
                 title: "Review".to_string(),
                 location: "".to_string(),
                 attendees: "".to_string(),
+                attendees_json: "[]".to_string(),
                 notes: "".to_string(),
             }])),
             ..Default::default()
@@ -1068,5 +1508,166 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         assert!(store.events.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_returns_not_modified_when_if_none_match_matches() {
+        let event_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+        let event = ClientEvent {
+            id: event_id,
+            date: "2026-04-22".to_string(),
+            time: "14:00".to_string(),
+            time_zone: "Europe/Berlin".to_string(),
+            duration_minutes: 45,
+            recurrence_rule: "FREQ=WEEKLY;BYDAY=WE".to_string(),
+            title: "Planning".to_string(),
+            location: "Room B".to_string(),
+            attendees: "Alice".to_string(),
+            attendees_json: serialize_attendees_json(&[DavAttendee {
+                email: "alice@example.test".to_string(),
+                common_name: "Alice".to_string(),
+                role: "REQ-PARTICIPANT".to_string(),
+                partstat: "ACCEPTED".to_string(),
+                rsvp: true,
+            }]),
+            notes: "Weekly planning".to_string(),
+        };
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            events: Arc::new(Mutex::new(vec![event.clone()])),
+            ..Default::default()
+        };
+        let service = DavService::new(store);
+        let mut headers = bearer_headers();
+        headers.insert("if-none-match", HeaderValue::from_str(&etag_for_event(&event)).unwrap());
+
+        let response = service
+            .handle(
+                &Method::GET,
+                &Uri::from_static("/dav/calendars/me/default/55555555-5555-5555-5555-555555555555.ics"),
+                &headers,
+                &[],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+    }
+
+    #[tokio::test]
+    async fn report_filters_collection_by_text_and_href() {
+        let first_id = Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap();
+        let second_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            contacts: Arc::new(Mutex::new(vec![
+                ClientContact {
+                    id: first_id,
+                    name: "Bob Example".to_string(),
+                    role: "Sales".to_string(),
+                    email: "bob@example.test".to_string(),
+                    phone: "".to_string(),
+                    team: "".to_string(),
+                    notes: "".to_string(),
+                },
+                ClientContact {
+                    id: second_id,
+                    name: "Carol Example".to_string(),
+                    role: "Ops".to_string(),
+                    email: "carol@example.test".to_string(),
+                    phone: "".to_string(),
+                    team: "".to_string(),
+                    notes: "".to_string(),
+                },
+            ])),
+            ..Default::default()
+        };
+        let service = DavService::new(store);
+        let body = format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\
+<card:addressbook-query xmlns:d=\"DAV:\" xmlns:card=\"urn:ietf:params:xml:ns:carddav\">\
+<d:prop><d:getetag/><card:address-data/></d:prop>\
+<card:filter><card:prop-filter name=\"FN\"><card:text-match>bob</card:text-match></card:prop-filter></card:filter>\
+<d:href>{}</d:href>\
+</card:addressbook-query>",
+            contact_href(first_id)
+        );
+
+        let response = service
+            .handle(
+                &Method::from_bytes(b"REPORT").unwrap(),
+                &Uri::from_static(ADDRESSBOOK_COLLECTION_PATH),
+                &bearer_headers(),
+                body.as_bytes(),
+            )
+            .await
+            .unwrap();
+
+        let payload = response_text(response).await;
+        assert!(payload.contains(&contact_href(first_id)));
+        assert!(!payload.contains(&contact_href(second_id)));
+    }
+
+    #[tokio::test]
+    async fn put_rejects_stale_if_match() {
+        let contact_id = Uuid::parse_str("88888888-8888-8888-8888-888888888888").unwrap();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            contacts: Arc::new(Mutex::new(vec![ClientContact {
+                id: contact_id,
+                name: "Dora".to_string(),
+                role: "".to_string(),
+                email: "dora@example.test".to_string(),
+                phone: "".to_string(),
+                team: "".to_string(),
+                notes: "".to_string(),
+            }])),
+            ..Default::default()
+        };
+        let service = DavService::new(store);
+        let mut headers = bearer_headers();
+        headers.insert("if-match", HeaderValue::from_static("\"stale\""));
+
+        let error = service
+            .handle(
+                &Method::PUT,
+                &Uri::from_static("/dav/addressbooks/me/default/88888888-8888-8888-8888-888888888888.vcf"),
+                &headers,
+                b"BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Dora Updated\r\nEMAIL:dora@example.test\r\nEND:VCARD",
+            )
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("precondition failed"));
+    }
+
+    #[tokio::test]
+    async fn put_parses_structured_calendar_metadata() {
+        let event_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            ..Default::default()
+        };
+        let service = DavService::new(store.clone());
+
+        let response = service
+            .handle(
+                &Method::PUT,
+                &Uri::from_static("/dav/calendars/me/default/99999999-9999-9999-9999-999999999999.ics"),
+                &bearer_headers(),
+                b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:99999999-9999-9999-9999-999999999999\r\nDTSTART;TZID=Europe/Berlin:20260423T103000\r\nDURATION:PT45M\r\nRRULE:FREQ=WEEKLY;BYDAY=TH\r\nSUMMARY:Interop review\r\nATTENDEE;CN=Alice Example;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE:mailto:alice@example.test\r\nDESCRIPTION:Calendar interop\r\nEND:VEVENT\r\nEND:VCALENDAR",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let events = store.events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].id, event_id);
+        assert_eq!(events[0].time_zone, "Europe/Berlin");
+        assert_eq!(events[0].duration_minutes, 45);
+        assert_eq!(events[0].recurrence_rule, "FREQ=WEEKLY;BYDAY=TH");
+        assert_eq!(events[0].attendees, "Alice Example");
+        assert!(events[0].attendees_json.contains("alice@example.test"));
     }
 }
