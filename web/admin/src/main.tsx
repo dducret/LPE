@@ -49,6 +49,8 @@ function App() {
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
+  const [sidebarMobileOpen, setSidebarMobileOpen] = React.useState(false);
   const [token, setToken] = React.useState<string | null>(() => window.localStorage.getItem("lpe.admin.token"));
   const [oidcMetadata, setOidcMetadata] = React.useState<OidcMetadataResponse | null>(null);
   const [loginForm, setLoginForm] = React.useState({ email: "admin@example.test", password: "" });
@@ -293,6 +295,10 @@ function App() {
     { key: "operations", label: copy.pageOperations, icon: "05" }
   ];
 
+  React.useEffect(() => {
+    setSidebarMobileOpen(false);
+  }, [page]);
+
   if (!token) {
     return <main className="console-shell login-shell">
       <section className="login-card card form-stack">
@@ -313,18 +319,20 @@ function App() {
     </main>;
   }
 
-  return <main className="console-shell">
-    <aside className="sidebar">
+  return <main className={sidebarCollapsed ? "console-shell is-sidebar-collapsed" : "console-shell"}>
+    {sidebarMobileOpen ? <button className="sidebar-backdrop" type="button" aria-label={copy.close} onClick={() => setSidebarMobileOpen(false)} /> : null}
+    <aside className={sidebarCollapsed ? sidebarMobileOpen ? "sidebar is-collapsed is-mobile-open" : "sidebar is-collapsed" : sidebarMobileOpen ? "sidebar is-mobile-open" : "sidebar"}>
       <div className="sidebar-stack">
-        <div><p className="eyebrow">{copy.eyebrow}</p><h1>{copy.title}</h1><p className="sidebar-text">{copy.subtitle}</p></div>
-        <nav className="page-list">{sidebarPages.map((entry) => <button key={entry.key} type="button" className={page === entry.key ? "page-button is-active" : "page-button"} onClick={() => setPage(entry.key)}><span className="page-icon">{entry.icon}</span><span>{entry.label}</span></button>)}</nav>
+        <div className="sidebar-header"><div><p className="eyebrow">{copy.eyebrow}</p><h1>{copy.title}</h1><p className="sidebar-text">{copy.subtitle}</p></div><button className="icon-button sidebar-toggle" type="button" aria-label={sidebarCollapsed ? copy.open : copy.close} title={sidebarCollapsed ? copy.open : copy.close} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? "→" : "←"}</button></div>
+        <nav className="page-list">{sidebarPages.map((entry) => <button key={entry.key} type="button" title={entry.label} aria-label={entry.label} className={page === entry.key ? "page-button is-active" : "page-button"} onClick={() => setPage(entry.key)}><span className="page-icon">{entry.icon}</span><span className="sidebar-label">{entry.label}</span></button>)}</nav>
       </div>
       <div className="sidebar-footer">
         <label className="locale-picker"><span>{copy.languageLabel}</span><select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>{supportedLocales.map((entry) => <option key={entry} value={entry}>{localeLabels[entry]}</option>)}</select></label>
+        <button className="secondary-button sidebar-mobile-close" type="button" onClick={() => setSidebarMobileOpen(false)}>{copy.close}</button>
       </div>
     </aside>
     <section className="workspace">
-      <header className="topbar"><div className="topbar-copy"><h2>{sidebarPages.find((entry) => entry.key === page)?.label}</h2><p>{adminIdentity ? `${copy.banner} · ${adminIdentity.email}` : copy.banner}</p></div><div className="topbar-actions"><span className="pill">{adminIdentity?.role ?? "admin"}</span><div className="inline-form"><button className="secondary-button" type="button" onClick={() => void load()}>{copy.refresh}</button><button className="secondary-button" type="button" onClick={() => { setToken(null); setState(null); }}>{copy.logout}</button></div></div></header>
+      <header className="topbar"><div className="topbar-copy"><div className="topbar-heading"><button className="icon-button shell-toggle" type="button" aria-label={sidebarMobileOpen ? copy.close : copy.open} aria-expanded={sidebarMobileOpen} onClick={() => setSidebarMobileOpen((value) => !value)}>☰</button><h2>{sidebarPages.find((entry) => entry.key === page)?.label}</h2></div><p>{adminIdentity ? `${copy.banner} · ${adminIdentity.email}` : copy.banner}</p></div><div className="topbar-actions"><span className="pill">{adminIdentity?.role ?? "admin"}</span><div className="inline-form"><button className="secondary-button" type="button" onClick={() => void load()}>{copy.refresh}</button><button className="secondary-button" type="button" onClick={() => { setToken(null); setState(null); }}>{copy.logout}</button></div></div></header>
       {error ? <p className="feedback error">{error}</p> : null}
       {notice ? <p className="feedback notice">{notice}</p> : null}
       {!state ? <p className="feedback muted">{busy === "load" ? copy.loading : copy.noData}</p> : null}

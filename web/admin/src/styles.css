@@ -23,6 +23,7 @@
   --radius-sm: 14px;
   --radius-md: 20px;
   --radius-lg: 28px;
+  --focus-ring: 0 0 0 4px rgba(30, 111, 216, 0.14);
   --spring: cubic-bezier(0.2, 0.8, 0.2, 1);
   font-family: "Segoe UI", "Aptos", "Helvetica Neue", sans-serif;
 }
@@ -54,6 +55,11 @@ select {
 
 button {
   cursor: pointer;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 button,
@@ -88,9 +94,17 @@ select:focus {
 }
 
 .console-shell {
+  --sidebar-min: 264px;
+  --sidebar-max: 320px;
   min-height: 100vh;
   display: grid;
-  grid-template-columns: minmax(264px, 320px) 1fr;
+  grid-template-columns: minmax(var(--sidebar-min), var(--sidebar-max)) 1fr;
+  transition: grid-template-columns 180ms var(--spring);
+}
+
+.console-shell.is-sidebar-collapsed {
+  --sidebar-min: 98px;
+  --sidebar-max: 112px;
 }
 
 .login-shell {
@@ -111,6 +125,36 @@ select:focus {
   border-right: 1px solid rgba(255, 255, 255, 0.65);
   box-shadow: inset -1px 0 0 var(--border);
   backdrop-filter: blur(20px);
+  transition:
+    transform 180ms var(--spring),
+    width 180ms var(--spring);
+}
+
+.sidebar-header,
+.topbar-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.topbar-heading {
+  align-items: center;
+}
+
+.sidebar-toggle,
+.shell-toggle,
+.sidebar-mobile-close {
+  display: none;
+}
+
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  border: 0;
+  padding: 0;
+  background: rgba(19, 35, 56, 0.24);
+  backdrop-filter: blur(8px);
 }
 
 .sidebar-stack,
@@ -152,6 +196,19 @@ select:focus {
 .sidebar h1 {
   font-size: 1.85rem;
   letter-spacing: -0.03em;
+}
+
+.is-collapsed h1,
+.is-collapsed .sidebar-text,
+.is-collapsed .locale-picker span,
+.is-collapsed .sidebar-label,
+.is-collapsed .eyebrow,
+.is-collapsed .sidebar-mobile-close {
+  display: none;
+}
+
+.is-collapsed .sidebar-header {
+  justify-content: center;
 }
 
 .sidebar-text,
@@ -207,6 +264,11 @@ select:focus {
   width: 100%;
   text-align: left;
   color: var(--text);
+}
+
+.is-collapsed .page-button {
+  justify-content: center;
+  padding-inline: 10px;
 }
 
 .page-button:hover,
@@ -520,6 +582,10 @@ select:focus {
   border-color: transparent;
 }
 
+.shell-toggle {
+  flex: none;
+}
+
 .side-panel-header p {
   margin: 6px 0 0;
 }
@@ -618,10 +684,44 @@ select:focus {
   }
 
   .sidebar {
-    position: static;
-    height: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
+    position: fixed;
+    inset: 24px auto 24px 24px;
+    z-index: 40;
+    width: min(360px, calc(100vw - 48px));
+    height: calc(100vh - 48px);
+    border-right: 1px solid rgba(255, 255, 255, 0.65);
+    border-bottom: 0;
+    border-radius: 28px;
+    transform: translateX(calc(-100% - 32px));
+  }
+
+  .sidebar.is-mobile-open {
+    transform: translateX(0);
+  }
+
+  .sidebar-toggle,
+  .shell-toggle,
+  .sidebar-mobile-close {
+    display: inline-grid;
+  }
+
+  .console-shell.is-sidebar-collapsed {
+    --sidebar-min: 1fr;
+    --sidebar-max: 1fr;
+  }
+
+  .sidebar.is-collapsed h1,
+  .sidebar.is-collapsed .sidebar-text,
+  .sidebar.is-collapsed .locale-picker span,
+  .sidebar.is-collapsed .sidebar-label,
+  .sidebar.is-collapsed .eyebrow,
+  .sidebar.is-collapsed .sidebar-mobile-close {
+    display: revert;
+  }
+
+  .sidebar.is-collapsed .page-button {
+    justify-content: flex-start;
+    padding-inline: 14px;
   }
 
   .grid.two,

@@ -36,6 +36,8 @@ export function App() {
   const [loginError, setLoginError] = React.useState("");
   const [loginBusy, setLoginBusy] = React.useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = React.useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
+  const [sidebarMobileOpen, setSidebarMobileOpen] = React.useState(false);
   const accountMenuRef = React.useRef<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
@@ -80,6 +82,10 @@ export function App() {
     window.addEventListener("pointerdown", handlePointerDown);
     return () => window.removeEventListener("pointerdown", handlePointerDown);
   }, [accountMenuOpen]);
+
+  React.useEffect(() => {
+    setSidebarMobileOpen(false);
+  }, [workspace.section, workspace.folder]);
 
   async function loginClient(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -161,8 +167,12 @@ export function App() {
     <main className="app-shell">
       <header className="app-header">
         <div className="app-header-left">
+          <button className="header-action shell-toggle" type="button" aria-label={sidebarMobileOpen ? copy.editorActions.cancel : copy.accountMenuLabel} aria-expanded={sidebarMobileOpen} onClick={() => setSidebarMobileOpen((value) => !value)}>☰</button>
           <span className="header-app-icon">▦</span>
-          <strong>{copy.productTitle}</strong>
+          <div className="header-product">
+            <strong>{copy.productTitle}</strong>
+            <span>{copy.productSubtitle}</span>
+          </div>
         </div>
         <div className="search-shell is-header">
           <span className="search-icon">⌕</span>
@@ -187,7 +197,8 @@ export function App() {
         </div>
       </header>
 
-      <div className="shell-row">
+      {sidebarMobileOpen ? <button className="shell-overlay" type="button" aria-label={copy.editorActions.cancel} onClick={() => setSidebarMobileOpen(false)} /> : null}
+      <div className={sidebarCollapsed ? "shell-row is-sidebar-collapsed" : "shell-row"}>
         <Sidebar
           copy={copy}
           section={workspace.section}
@@ -202,6 +213,10 @@ export function App() {
           onCompose={() => workspace.openComposer("new")}
           onCloseComposer={workspace.closeComposer}
           onAuxAction={workspace.notifyFeaturePending}
+          collapsed={sidebarCollapsed}
+          mobileOpen={sidebarMobileOpen}
+          onToggleCollapse={() => setSidebarCollapsed((value) => !value)}
+          onCloseMobile={() => setSidebarMobileOpen(false)}
         />
 
         <section className="workspace">
