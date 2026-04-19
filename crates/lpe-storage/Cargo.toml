@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+lpe-domain = { path = "../lpe-domain" }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

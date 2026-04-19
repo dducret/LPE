@@ -2,7 +2,7 @@
 
 ## Francais
 
-`LPE-CT` est le centre de tri `LPE` pour un serveur separe place en `DMZ`. Ce composant isole l'entree SMTP, les politiques de quarantaine, le relais vers le coeur `LPE` en `LAN`, et son interface de management dediee.
+`LPE-CT` est le centre de tri `LPE` pour un serveur separe place en `DMZ`. Ce composant isole l'entree SMTP, les politiques de quarantaine, le relais sortant, la remise finale vers le coeur `LPE` en `LAN` via contrat interne explicite, et son interface de management dediee.
 
 ### Objectifs
 
@@ -28,7 +28,9 @@ cargo run --manifest-path LPE-CT/Cargo.toml
 
 - listener SMTP minimal `EHLO` / `MAIL FROM` / `RCPT TO` / `DATA` / `QUIT`
 - spool local dans `incoming`, `deferred`, `quarantine`, `held` et `sent`
-- relais SMTP simple vers un upstream LAN primaire puis secondaire
+- handoff HTTP interne recu depuis `LPE` pour les messages sortants
+- relais SMTP simple vers un upstream primaire puis secondaire pour la sortie
+- remise finale des messages entrants vers `LPE` via `POST /internal/lpe-ct/inbound-deliveries`
 - quarantaine de test via l'en-tete `X-LPE-CT-Quarantine: yes` ou un sujet contenant `[quarantine]`
 - mode drainage qui accepte les messages et les place en `held`
 - metriques de files exposees dans le dashboard de management
@@ -58,8 +60,10 @@ systemctl restart lpe-ct.service
 Configurer au minimum:
 
 - `LPE_CT_SMTP_BIND_ADDRESS`, par defaut `0.0.0.0:25`
+- `LPE_CT_CORE_DELIVERY_BASE_URL`, par exemple `http://10.20.0.20:8080`
 - `LPE_CT_RELAY_PRIMARY`, par exemple `smtp://10.20.0.12:2525`
-- `LPE_CT_RELAY_SECONDARY` si un second relais LAN existe
+- `LPE_CT_RELAY_SECONDARY` si un second relais sortant existe
+- `LPE_INTEGRATION_SHARED_SECRET`
 - `LPE_CT_MUTUAL_TLS_REQUIRED=false` pour la v1 fonctionnelle actuelle
 
 ### Jeux de tests
@@ -78,7 +82,7 @@ CT_PUBLIC_HOST=mx1.example.test ./test-from-internet.sh
 
 ## English
 
-`LPE-CT` is the `LPE` sorting center for a separate server placed in a `DMZ`. This component isolates SMTP ingress, quarantine policies, relay flows toward the core `LPE` services in the `LAN`, and its dedicated management interface.
+`LPE-CT` is the `LPE` sorting center for a separate server placed in a `DMZ`. This component isolates SMTP ingress, quarantine policies, outbound relay, final delivery toward the core `LPE` services in the `LAN` through an explicit internal contract, and its dedicated management interface.
 
 ### Goals
 
@@ -104,7 +108,9 @@ cargo run --manifest-path LPE-CT/Cargo.toml
 
 - minimal SMTP listener for `EHLO` / `MAIL FROM` / `RCPT TO` / `DATA` / `QUIT`
 - local spool in `incoming`, `deferred`, `quarantine`, `held`, and `sent`
-- simple SMTP relay to a primary then secondary LAN upstream
+- internal HTTP handoff received from `LPE` for outbound messages
+- simple SMTP relay to a primary then secondary upstream for outbound transport
+- final delivery of accepted inbound messages to `LPE` through `POST /internal/lpe-ct/inbound-deliveries`
 - test quarantine through the `X-LPE-CT-Quarantine: yes` header or a subject containing `[quarantine]`
 - drain mode that accepts messages and places them in `held`
 - queue metrics exposed in the management dashboard
@@ -134,8 +140,10 @@ systemctl restart lpe-ct.service
 Configure at least:
 
 - `LPE_CT_SMTP_BIND_ADDRESS`, default `0.0.0.0:25`
+- `LPE_CT_CORE_DELIVERY_BASE_URL`, for example `http://10.20.0.20:8080`
 - `LPE_CT_RELAY_PRIMARY`, for example `smtp://10.20.0.12:2525`
-- `LPE_CT_RELAY_SECONDARY` if a second LAN relay exists
+- `LPE_CT_RELAY_SECONDARY` if a second outbound relay exists
+- `LPE_INTEGRATION_SHARED_SECRET`
 - `LPE_CT_MUTUAL_TLS_REQUIRED=false` for the current functional v1
 
 ### Test suites

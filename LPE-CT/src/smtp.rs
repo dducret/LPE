@@ -1,4 +1,8 @@
 use anyhow::{anyhow, Context, Result};
+use lpe_domain::{
+    InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
+    OutboundMessageHandoffResponse, TransportDeliveryStatus,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -14,9 +18,10 @@ use tokio::{
 use tracing::{info, warn};
 
 #[derive(Debug, Clone)]
-struct RuntimeConfig {
+pub(crate) struct RuntimeConfig {
     primary_upstream: String,
     secondary_upstream: String,
+    core_delivery_base_url: String,
     mutual_tls_required: bool,
     fallback_to_hold_queue: bool,
     drain_mode: bool,
@@ -27,6 +32,7 @@ struct RuntimeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct QueuedMessage {
     id: String,
+    direction: String,
     received_at: String,
     peer: String,
     helo: String,
@@ -38,14 +44,17 @@ struct QueuedMessage {
 }
 
 pub(crate) fn initialize_spool(spool_dir: &Path) -> Result<()> {
-    for queue in ["incoming", "deferred", "quarantine", "held", "sent"] {
+    for queue in ["incoming", "deferred", "quarantine", "held", "sent", "outbound"] {
         fs::create_dir_all(spool_dir.join(queue))
             .with_context(|| format!("unable to create spool queue {queue}"))?;
     }
     Ok(())
 }
 
-pub(crate) fn queue_metrics(spool_dir: &Path, upstream_reachable: bool) -> Result<super::QueueMetrics> {
+pub(crate) fn queue_metrics(
+    spool_dir: &Path,
+    upstream_reachable: bool,
+) -> Result<super::QueueMetrics> {
     Ok(super::QueueMetrics {
         inbound_messages: count_queue(spool_dir, "incoming")? + count_queue(spool_dir, "sent")?,
         deferred_messages: count_queue(spool_dir, "deferred")?,
@@ -76,6 +85,90 @@ pub(crate) async fn run_smtp_listener(
                 warn!("smtp session failed for {peer}: {error}");
             }
         });
+    }
+}
+
+pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -> RuntimeConfig {
+    RuntimeConfig {
+        primary_upstream: dashboard.relay.primary_upstream.clone(),
+        secondary_upstream: dashboard.relay.secondary_upstream.clone(),
+        core_delivery_base_url: dashboard.relay.core_delivery_base_url.clone(),
+        mutual_tls_required: dashboard.relay.mutual_tls_required,
+        fallback_to_hold_queue: dashboard.relay.fallback_to_hold_queue,
+        drain_mode: dashboard.policies.drain_mode,
+        quarantine_enabled: dashboard.policies.quarantine_enabled,
+        max_message_size_mb: dashboard.policies.max_message_size_mb,
+    }
+}
+
+pub(crate) async fn process_outbound_handoff(
+    spool_dir: &Path,
+    config: &RuntimeConfig,
+    payload: OutboundMessageHandoffRequest,
+) -> Result<OutboundMessageHandoffResponse> {
+    let mut message = QueuedMessage {
+        id: format!("lpe-ct-out-{}", payload.queue_id),
+        direction: "outbound".to_string(),
+        received_at: current_timestamp(),
+        peer: "lpe-core".to_string(),
+        helo: "lpe-core".to_string(),
+        mail_from: payload.from_address.clone(),
+        rcpt_to: payload.envelope_recipients(),
+        status: "outbound".to_string(),
+        relay_error: None,
+        data: compose_rfc822_message(&payload),
+    };
+
+    persist_message(spool_dir, "outbound", &message).await?;
+
+    if config.quarantine_enabled && should_quarantine(&message.data) {
+        message.status = "quarantined".to_string();
+        move_message(spool_dir, &message, "outbound", "quarantine").await?;
+        return Ok(OutboundMessageHandoffResponse {
+            queue_id: payload.queue_id,
+            status: TransportDeliveryStatus::Quarantined,
+            trace_id: message.id,
+            detail: Some("message matched quarantine policy".to_string()),
+        });
+    }
+
+    match relay_message(config, &message).await {
+        Ok(()) => {
+            message.status = "sent".to_string();
+            move_message(spool_dir, &message, "outbound", "sent").await?;
+            Ok(OutboundMessageHandoffResponse {
+                queue_id: payload.queue_id,
+                status: TransportDeliveryStatus::Relayed,
+                trace_id: message.id,
+                detail: None,
+            })
+        }
+        Err(error) => {
+            let detail = error.to_string();
+            let final_status = if is_permanent_relay_error(&detail) {
+                TransportDeliveryStatus::Failed
+            } else {
+                TransportDeliveryStatus::Deferred
+            };
+            message.status = match final_status {
+                TransportDeliveryStatus::Failed => "held".to_string(),
+                TransportDeliveryStatus::Deferred => "deferred".to_string(),
+                _ => "held".to_string(),
+            };
+            message.relay_error = Some(detail.clone());
+            let destination = if final_status == TransportDeliveryStatus::Deferred {
+                "deferred"
+            } else {
+                "held"
+            };
+            move_message(spool_dir, &message, "outbound", destination).await?;
+            Ok(OutboundMessageHandoffResponse {
+                queue_id: payload.queue_id,
+                status: final_status,
+                trace_id: message.id,
+                detail: Some(detail),
+            })
+        }
     }
 }
 
@@ -162,7 +255,8 @@ async fn receive_message(
     data: String,
 ) -> Result<QueuedMessage> {
     let mut message = QueuedMessage {
-        id: message_id(),
+        id: message_id("in"),
+        direction: "inbound".to_string(),
         received_at: current_timestamp(),
         peer,
         helo,
@@ -187,8 +281,8 @@ async fn receive_message(
         return Ok(message);
     }
 
-    match relay_message(config, &message).await {
-        Ok(()) => {
+    match deliver_inbound_message(config, &message).await {
+        Ok(_) => {
             message.status = "sent".to_string();
             move_message(spool_dir, &message, "incoming", "sent").await?;
         }
@@ -209,6 +303,57 @@ async fn receive_message(
     }
 
     Ok(message)
+}
+
+async fn deliver_inbound_message(
+    config: &RuntimeConfig,
+    message: &QueuedMessage,
+) -> Result<InboundDeliveryResponse> {
+    let endpoint = format!(
+        "{}/internal/lpe-ct/inbound-deliveries",
+        config.core_delivery_base_url.trim_end_matches('/')
+    );
+    let subject = parse_header_value(&message.data, "subject").unwrap_or_default();
+    let internet_message_id = parse_header_value(&message.data, "message-id");
+    let body_text = extract_body_text(&message.data);
+    let request = InboundDeliveryRequest {
+        trace_id: message.id.clone(),
+        peer: message.peer.clone(),
+        helo: message.helo.clone(),
+        mail_from: message.mail_from.clone(),
+        rcpt_to: message.rcpt_to.clone(),
+        subject,
+        body_text,
+        internet_message_id,
+        raw_message: message.data.clone(),
+    };
+
+    let client = reqwest::Client::builder().build()?;
+    let response = client
+        .post(endpoint)
+        .header(
+            "x-lpe-integration-key",
+            std::env::var("LPE_INTEGRATION_SHARED_SECRET")
+                .unwrap_or_else(|_| "change-me".to_string()),
+        )
+        .json(&request)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(anyhow!("core delivery endpoint returned {status}: {body}"));
+    }
+
+    let delivery: InboundDeliveryResponse = response.json().await?;
+    if delivery.accepted_recipients.is_empty() {
+        return Err(anyhow!(
+            "core delivery rejected all recipients: {:?}",
+            delivery.rejected_recipients
+        ));
+    }
+    Ok(delivery)
 }
 
 async fn relay_message(config: &RuntimeConfig, message: &QueuedMessage) -> Result<()> {
@@ -367,6 +512,7 @@ fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
     Ok(RuntimeConfig {
         primary_upstream: string_at(&value, &["relay", "primary_upstream"]),
         secondary_upstream: string_at(&value, &["relay", "secondary_upstream"]),
+        core_delivery_base_url: string_at(&value, &["relay", "core_delivery_base_url"]),
         mutual_tls_required: bool_at(&value, &["relay", "mutual_tls_required"], false),
         fallback_to_hold_queue: bool_at(&value, &["relay", "fallback_to_hold_queue"], false),
         drain_mode: bool_at(&value, &["policies", "drain_mode"], false),
@@ -413,17 +559,349 @@ fn normalize_smtp_target(target: &str) -> String {
         .to_string()
 }
 
-fn message_id() -> String {
+fn compose_rfc822_message(payload: &OutboundMessageHandoffRequest) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "From: {}",
+        format_address(&payload.from_address, payload.from_display.as_deref())
+    ));
+    if !payload.to.is_empty() {
+        lines.push(format!(
+            "To: {}",
+            payload
+                .to
+                .iter()
+                .map(|recipient| format_address(&recipient.address, recipient.display_name.as_deref()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if !payload.cc.is_empty() {
+        lines.push(format!(
+            "Cc: {}",
+            payload
+                .cc
+                .iter()
+                .map(|recipient| format_address(&recipient.address, recipient.display_name.as_deref()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    lines.push(format!("Subject: {}", payload.subject));
+    lines.push(format!(
+        "Message-Id: {}",
+        payload
+            .internet_message_id
+            .clone()
+            .unwrap_or_else(|| format!("<{}@lpe.local>", payload.message_id))
+    ));
+    lines.push("MIME-Version: 1.0".to_string());
+    lines.push("Content-Type: text/plain; charset=utf-8".to_string());
+    lines.push(String::new());
+    lines.push(payload.body_text.clone());
+    lines.join("\r\n")
+}
+
+fn format_address(address: &str, display_name: Option<&str>) -> String {
+    match display_name.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(display_name) => format!("{display_name} <{address}>"),
+        None => address.to_string(),
+    }
+}
+
+fn parse_header_value(raw_message: &str, name: &str) -> Option<String> {
+    let expected = format!("{}:", name.to_ascii_lowercase());
+    let mut current = String::new();
+
+    for line in raw_message.lines() {
+        if line.trim().is_empty() {
+            break;
+        }
+        if line.starts_with(' ') || line.starts_with('\t') {
+            current.push(' ');
+            current.push_str(line.trim());
+            continue;
+        }
+        if !current.is_empty() {
+            let lower = current.to_ascii_lowercase();
+            if lower.starts_with(&expected) {
+                return current
+                    .split_once(':')
+                    .map(|(_, value)| value.trim().to_string())
+                    .filter(|value| !value.is_empty());
+            }
+        }
+        current = line.trim_end_matches('\r').to_string();
+    }
+
+    if !current.is_empty() {
+        let lower = current.to_ascii_lowercase();
+        if lower.starts_with(&expected) {
+            return current
+                .split_once(':')
+                .map(|(_, value)| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+        }
+    }
+
+    None
+}
+
+fn extract_body_text(raw_message: &str) -> String {
+    raw_message
+        .split_once("\r\n\r\n")
+        .or_else(|| raw_message.split_once("\n\n"))
+        .map(|(_, body)| body.to_string())
+        .unwrap_or_default()
+}
+
+fn is_permanent_relay_error(detail: &str) -> bool {
+    let lower = detail.to_ascii_lowercase();
+    lower.contains("no relay target configured")
+        || lower.contains("mutual tls relay is configured but not implemented")
+}
+
+fn message_id(prefix: &str) -> String {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
-    format!("lpe-ct-{nanos}-{}", std::process::id())
+    format!("lpe-ct-{prefix}-{nanos}-{}", std::process::id())
 }
 
 fn current_timestamp() -> String {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => format!("unix:{}", duration.as_secs()),
         Err(_) => "unix:0".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        extract_body_text, initialize_spool, parse_header_value, process_outbound_handoff,
+        receive_message, RuntimeConfig,
+    };
+    use axum::{routing::post, Json, Router};
+    use lpe_domain::{
+        InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
+        TransportDeliveryStatus, TransportRecipient,
+    };
+    use std::{
+        net::SocketAddr,
+        path::PathBuf,
+        sync::{Arc, Mutex},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    use tokio::{
+        io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+        net::{TcpListener, TcpStream},
+    };
+    use uuid::Uuid;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("lpe-ct-{label}-{suffix}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn runtime_config(primary_upstream: String, core_delivery_base_url: String) -> RuntimeConfig {
+        RuntimeConfig {
+            primary_upstream,
+            secondary_upstream: String::new(),
+            core_delivery_base_url,
+            mutual_tls_required: false,
+            fallback_to_hold_queue: false,
+            drain_mode: false,
+            quarantine_enabled: true,
+            max_message_size_mb: 16,
+        }
+    }
+
+    #[tokio::test]
+    async fn outbound_handoff_relays_message() {
+        let spool = temp_dir("outbound-relay");
+        initialize_spool(&spool).unwrap();
+        let captured = Arc::new(Mutex::new(String::new()));
+        let smtp_address = spawn_dummy_smtp(captured.clone()).await;
+
+        let response = process_outbound_handoff(
+            &spool,
+            &runtime_config(smtp_address.clone(), "http://127.0.0.1:9".to_string()),
+            OutboundMessageHandoffRequest {
+                queue_id: Uuid::new_v4(),
+                message_id: Uuid::new_v4(),
+                account_id: Uuid::new_v4(),
+                from_address: "sender@example.test".to_string(),
+                from_display: Some("Sender".to_string()),
+                to: vec![TransportRecipient {
+                    address: "dest@example.test".to_string(),
+                    display_name: Some("Dest".to_string()),
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Relay test".to_string(),
+                body_text: "Body".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: Some("<relay@test>".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status, TransportDeliveryStatus::Relayed);
+        assert!(spool.join("sent").join(format!("{}.json", response.trace_id)).exists());
+        assert!(captured.lock().unwrap().contains("Subject: Relay test"));
+    }
+
+    #[tokio::test]
+    async fn outbound_handoff_quarantines_message() {
+        let spool = temp_dir("outbound-quarantine");
+        initialize_spool(&spool).unwrap();
+
+        let response = process_outbound_handoff(
+            &spool,
+            &runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string()),
+            OutboundMessageHandoffRequest {
+                queue_id: Uuid::new_v4(),
+                message_id: Uuid::new_v4(),
+                account_id: Uuid::new_v4(),
+                from_address: "sender@example.test".to_string(),
+                from_display: None,
+                to: vec![TransportRecipient {
+                    address: "dest@example.test".to_string(),
+                    display_name: None,
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "[quarantine] Test".to_string(),
+                body_text: "Body".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status, TransportDeliveryStatus::Quarantined);
+        assert!(spool
+            .join("quarantine")
+            .join(format!("{}.json", response.trace_id))
+            .exists());
+    }
+
+    #[tokio::test]
+    async fn inbound_message_posts_to_core_delivery_api() {
+        let spool = temp_dir("inbound-delivery");
+        initialize_spool(&spool).unwrap();
+        std::env::set_var("LPE_INTEGRATION_SHARED_SECRET", "integration-test");
+        let captured = Arc::new(Mutex::new(None::<InboundDeliveryRequest>));
+        let core_base_url = spawn_dummy_core(captured.clone()).await;
+
+        let message = receive_message(
+            &spool,
+            &runtime_config("127.0.0.1:9".to_string(), core_base_url),
+            "127.0.0.1:2525".to_string(),
+            "example.test".to_string(),
+            "sender@example.test".to_string(),
+            vec!["dest@example.test".to_string()],
+            "From: Sender <sender@example.test>\r\nSubject: Inbound\r\n\r\nBody".to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(message.status, "sent");
+        assert!(spool.join("sent").join(format!("{}.json", message.id)).exists());
+        let request = captured.lock().unwrap().clone().unwrap();
+        assert_eq!(request.subject, "Inbound");
+        assert_eq!(request.body_text, "Body");
+        assert_eq!(request.rcpt_to, vec!["dest@example.test".to_string()]);
+    }
+
+    #[test]
+    fn raw_message_parsing_extracts_headers_and_body() {
+        let raw = "Subject: Example\r\nMessage-Id: <id@test>\r\n\r\nBody";
+        assert_eq!(parse_header_value(raw, "subject").as_deref(), Some("Example"));
+        assert_eq!(parse_header_value(raw, "message-id").as_deref(), Some("<id@test>"));
+        assert_eq!(extract_body_text(raw), "Body");
+    }
+
+    async fn spawn_dummy_smtp(captured: Arc<Mutex<String>>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            handle_dummy_smtp(stream, captured).await;
+        });
+        address.to_string()
+    }
+
+    async fn handle_dummy_smtp(stream: TcpStream, captured: Arc<Mutex<String>>) {
+        let (reader, mut writer) = stream.into_split();
+        let mut reader = BufReader::new(reader);
+        writer.write_all(b"220 dummy\r\n").await.unwrap();
+
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if reader.read_line(&mut line).await.unwrap() == 0 {
+                break;
+            }
+            let trimmed = line.trim_end().to_string();
+            if trimmed == "DATA" {
+                writer.write_all(b"354 data\r\n").await.unwrap();
+                let mut data = String::new();
+                loop {
+                    line.clear();
+                    reader.read_line(&mut line).await.unwrap();
+                    if line == ".\r\n" {
+                        break;
+                    }
+                    data.push_str(&line);
+                }
+                *captured.lock().unwrap() = data;
+                writer.write_all(b"250 stored\r\n").await.unwrap();
+            } else if trimmed == "QUIT" {
+                writer.write_all(b"221 bye\r\n").await.unwrap();
+                break;
+            } else {
+                writer.write_all(b"250 ok\r\n").await.unwrap();
+            }
+        }
+    }
+
+    async fn spawn_dummy_core(
+        captured: Arc<Mutex<Option<InboundDeliveryRequest>>>,
+    ) -> String {
+        async fn accept(
+            axum::extract::State(captured): axum::extract::State<
+                Arc<Mutex<Option<InboundDeliveryRequest>>>,
+            >,
+            Json(request): Json<InboundDeliveryRequest>,
+        ) -> Json<InboundDeliveryResponse> {
+            *captured.lock().unwrap() = Some(request.clone());
+            Json(InboundDeliveryResponse {
+                trace_id: request.trace_id,
+                status: TransportDeliveryStatus::Relayed,
+                accepted_recipients: request.rcpt_to.clone(),
+                rejected_recipients: Vec::new(),
+                stored_message_ids: Vec::new(),
+                detail: None,
+            })
+        }
+
+        let router = Router::new()
+            .route("/internal/lpe-ct/inbound-deliveries", post(accept))
+            .with_state(captured);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address: SocketAddr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        format!("http://{}", address)
     }
 }

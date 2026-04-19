@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
 use axum::{
     extract::State,
-    http::StatusCode,
-    routing::{get, put},
+    http::{HeaderMap, StatusCode},
+    routing::{get, post, put},
     Json, Router,
 };
+use lpe_domain::{OutboundMessageHandoffRequest, OutboundMessageHandoffResponse};
 use serde::{Deserialize, Serialize};
 use std::{
     env, fs,
@@ -34,6 +35,8 @@ struct SiteProfile {
 struct RelaySettings {
     primary_upstream: String,
     secondary_upstream: String,
+    #[serde(default = "default_core_delivery_base_url")]
+    core_delivery_base_url: String,
     mutual_tls_required: bool,
     fallback_to_hold_queue: bool,
     sync_interval_seconds: u32,
@@ -176,6 +179,10 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/network", put(update_network))
         .route("/api/v1/policies", put(update_policies))
         .route("/api/v1/updates", put(update_updates))
+        .route(
+            "/api/v1/integration/outbound-messages",
+            post(outbound_handoff),
+        )
         .with_state(state)
 }
 
@@ -239,6 +246,20 @@ async fn update_updates(
     mutate_state(&state, "update-updates", move |dashboard| {
         dashboard.updates = payload;
     })
+}
+
+async fn outbound_handoff(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<OutboundMessageHandoffRequest>,
+) -> Result<Json<OutboundMessageHandoffResponse>, ApiError> {
+    require_integration_key(&headers)?;
+    let snapshot = read_state(&state)?;
+    let runtime = smtp::runtime_config_from_dashboard(&snapshot);
+    let response = smtp::process_outbound_handoff(&state.spool_dir, &runtime, payload)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(response))
 }
 
 fn mutate_state<F>(
@@ -316,6 +337,9 @@ fn apply_env_overrides(state: &mut DashboardState) {
     if let Ok(value) = env::var("LPE_CT_RELAY_SECONDARY") {
         state.relay.secondary_upstream = value;
     }
+    if let Ok(value) = env::var("LPE_CT_CORE_DELIVERY_BASE_URL") {
+        state.relay.core_delivery_base_url = value;
+    }
     if let Ok(value) = env::var("LPE_CT_MUTUAL_TLS_REQUIRED") {
         state.relay.mutual_tls_required = parse_bool(&value);
     }
@@ -351,6 +375,7 @@ fn default_state() -> DashboardState {
         relay: RelaySettings {
             primary_upstream: "smtp://10.20.0.12:2525".to_string(),
             secondary_upstream: "smtp://10.20.0.13:2525".to_string(),
+            core_delivery_base_url: default_core_delivery_base_url(),
             mutual_tls_required: false,
             fallback_to_hold_queue: false,
             sync_interval_seconds: 30,
@@ -410,6 +435,10 @@ fn default_state() -> DashboardState {
     }
 }
 
+fn default_core_delivery_base_url() -> String {
+    "http://10.20.0.20:8080".to_string()
+}
+
 fn current_timestamp() -> String {
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => format!("unix:{}", duration.as_secs()),
@@ -440,5 +469,24 @@ impl From<anyhow::Error> for ApiError {
 impl axum::response::IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
         (self.status, self.message).into_response()
+    }
+}
+
+fn require_integration_key(headers: &HeaderMap) -> Result<(), ApiError> {
+    let provided = headers
+        .get("x-lpe-integration-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ApiError::new(StatusCode::UNAUTHORIZED, "missing integration key"))?;
+    let expected =
+        env::var("LPE_INTEGRATION_SHARED_SECRET").unwrap_or_else(|_| "change-me".to_string());
+    if provided == expected {
+        Ok(())
+    } else {
+        Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "invalid integration key",
+        ))
     }
 }

@@ -1,4 +1,8 @@
 use anyhow::{bail, Result};
+use lpe_domain::{
+    InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
+    TransportDeliveryStatus, TransportRecipient,
+};
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::{FromRow, Pool, Postgres, Row};
@@ -482,6 +486,14 @@ pub struct SavedDraftMessage {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct OutboundQueueStatusUpdate {
+    pub queue_id: Uuid,
+    pub message_id: Uuid,
+    pub status: String,
+    pub remote_message_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct JmapMailbox {
     pub id: Uuid,
     pub role: String,
@@ -706,6 +718,25 @@ struct JmapEmailSubmissionRow {
     send_at: String,
     queue_status: String,
     delivery_status: String,
+}
+
+#[derive(Debug, FromRow)]
+struct PendingOutboundQueueRow {
+    queue_id: Uuid,
+    message_id: Uuid,
+    account_id: Uuid,
+    from_address: String,
+    from_display: Option<String>,
+    subject: String,
+    body_text: String,
+    body_html_sanitized: Option<String>,
+    internet_message_id: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct MessageBccRecipientRow {
+    address: String,
+    display_name: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -2031,7 +2062,8 @@ impl Storage {
         audit: AuditEntryInput,
     ) -> Result<JmapMailbox> {
         let mut tx = self.pool.begin().await?;
-        self.ensure_account_exists(&mut tx, input.account_id).await?;
+        self.ensure_account_exists(&mut tx, input.account_id)
+            .await?;
 
         let name = input.name.trim();
         if name.is_empty() {
@@ -2323,7 +2355,11 @@ impl Storage {
             .collect()
     }
 
-    pub async fn fetch_jmap_emails(&self, account_id: Uuid, ids: &[Uuid]) -> Result<Vec<JmapEmail>> {
+    pub async fn fetch_jmap_emails(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<JmapEmail>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -2565,6 +2601,344 @@ impl Storage {
             name: "Mail".to_string(),
             used: (row.used_mb.max(0) as u64) * 1024 * 1024,
             hard_limit: (row.quota_mb.max(0) as u64) * 1024 * 1024,
+        })
+    }
+
+    pub async fn fetch_outbound_handoff_batch(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<OutboundMessageHandoffRequest>> {
+        let rows = sqlx::query_as::<_, PendingOutboundQueueRow>(
+            r#"
+            SELECT
+                q.id AS queue_id,
+                q.message_id,
+                q.account_id,
+                m.from_address,
+                m.from_display,
+                m.subject_normalized AS subject,
+                b.body_text,
+                b.body_html_sanitized,
+                m.internet_message_id
+            FROM outbound_message_queue q
+            JOIN messages m ON m.id = q.message_id
+            JOIN message_bodies b ON b.message_id = m.id
+            WHERE q.tenant_id = $1
+              AND q.status IN ('queued', 'deferred')
+              AND q.next_attempt_at <= NOW()
+            ORDER BY q.created_at ASC, q.id ASC
+            LIMIT $2
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(limit.max(1))
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut items = Vec::with_capacity(rows.len());
+        for row in rows {
+            let recipients = sqlx::query_as::<_, JmapEmailRecipientRow>(
+                r#"
+                SELECT
+                    r.message_id,
+                    r.kind,
+                    r.address,
+                    r.display_name,
+                    r.ordinal AS _ordinal
+                FROM message_recipients r
+                WHERE r.tenant_id = $1
+                  AND r.message_id = $2
+                ORDER BY r.kind ASC, r.ordinal ASC
+                "#,
+            )
+            .bind(DEFAULT_TENANT_ID)
+            .bind(row.message_id)
+            .fetch_all(&self.pool)
+            .await?;
+
+            let bcc = sqlx::query_as::<_, MessageBccRecipientRow>(
+                r#"
+                SELECT address, display_name
+                FROM message_bcc_recipients
+                WHERE tenant_id = $1 AND message_id = $2
+                ORDER BY ordinal ASC
+                "#,
+            )
+            .bind(DEFAULT_TENANT_ID)
+            .bind(row.message_id)
+            .fetch_all(&self.pool)
+            .await?;
+
+            let to = recipients
+                .iter()
+                .filter(|recipient| recipient.kind == "to")
+                .map(|recipient| TransportRecipient {
+                    address: recipient.address.clone(),
+                    display_name: recipient.display_name.clone(),
+                })
+                .collect();
+            let cc = recipients
+                .iter()
+                .filter(|recipient| recipient.kind == "cc")
+                .map(|recipient| TransportRecipient {
+                    address: recipient.address.clone(),
+                    display_name: recipient.display_name.clone(),
+                })
+                .collect();
+            let bcc = bcc
+                .into_iter()
+                .map(|recipient| TransportRecipient {
+                    address: recipient.address,
+                    display_name: recipient.display_name,
+                })
+                .collect();
+
+            items.push(OutboundMessageHandoffRequest {
+                queue_id: row.queue_id,
+                message_id: row.message_id,
+                account_id: row.account_id,
+                from_address: row.from_address,
+                from_display: row.from_display,
+                to,
+                cc,
+                bcc,
+                subject: row.subject,
+                body_text: row.body_text,
+                body_html_sanitized: row.body_html_sanitized,
+                internet_message_id: row.internet_message_id,
+            });
+        }
+
+        Ok(items)
+    }
+
+    pub async fn update_outbound_queue_status(
+        &self,
+        queue_id: Uuid,
+        status: TransportDeliveryStatus,
+        remote_message_ref: Option<&str>,
+        detail: Option<&str>,
+    ) -> Result<OutboundQueueStatusUpdate> {
+        let status_value = status.as_str().to_string();
+        let row = sqlx::query(
+            r#"
+            UPDATE outbound_message_queue
+            SET status = $3,
+                attempts = attempts + 1,
+                next_attempt_at = CASE
+                    WHEN $3 = 'deferred'
+                        THEN NOW() + make_interval(mins => LEAST(60, GREATEST(1, attempts + 1) * 5))
+                    ELSE NOW()
+                END,
+                last_error = CASE
+                    WHEN $3 = 'relayed' THEN NULL
+                    ELSE $4
+                END,
+                remote_message_ref = COALESCE($5, remote_message_ref),
+                updated_at = NOW()
+            WHERE tenant_id = $1 AND id = $2
+            RETURNING message_id, status, remote_message_ref
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(queue_id)
+        .bind(&status_value)
+        .bind(detail)
+        .bind(remote_message_ref)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("outbound queue item not found"))?;
+
+        let message_id: Uuid = row.try_get("message_id")?;
+        let stored_status: String = row.try_get("status")?;
+        let stored_remote_message_ref: Option<String> = row.try_get("remote_message_ref")?;
+
+        sqlx::query(
+            r#"
+            UPDATE messages
+            SET delivery_status = $3
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(message_id)
+        .bind(&stored_status)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(OutboundQueueStatusUpdate {
+            queue_id,
+            message_id,
+            status: stored_status,
+            remote_message_ref: stored_remote_message_ref,
+        })
+    }
+
+    pub async fn deliver_inbound_message(
+        &self,
+        request: InboundDeliveryRequest,
+    ) -> Result<InboundDeliveryResponse> {
+        let mail_from = normalize_email(&request.mail_from);
+        let subject = normalize_subject(&request.subject);
+        let body_text = request.body_text.trim().to_string();
+        let rcpt_to = request
+            .rcpt_to
+            .iter()
+            .map(|recipient| normalize_email(recipient))
+            .filter(|recipient| !recipient.is_empty())
+            .collect::<Vec<_>>();
+
+        if mail_from.is_empty() {
+            bail!("mail_from is required");
+        }
+        if rcpt_to.is_empty() {
+            bail!("at least one recipient is required");
+        }
+
+        let visible_to = parse_header_recipients(&request.raw_message, "to");
+        let visible_cc = parse_header_recipients(&request.raw_message, "cc");
+        let mut visible_recipients = Vec::with_capacity(visible_to.len() + visible_cc.len());
+        push_recipients(&mut visible_recipients, "to", &visible_to);
+        push_recipients(&mut visible_recipients, "cc", &visible_cc);
+        let participants = participants_normalized(&mail_from, &visible_recipients);
+        let preview = preview_text(&body_text);
+        let size_octets = request.raw_message.len() as i64;
+
+        let account_rows = sqlx::query(
+            r#"
+            SELECT id, primary_email
+            FROM accounts
+            WHERE tenant_id = $1
+              AND lower(primary_email) = ANY($2)
+            ORDER BY primary_email ASC
+            "#,
+        )
+        .bind(DEFAULT_TENANT_ID)
+        .bind(&rcpt_to)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut accepted = Vec::new();
+        let mut rejected = Vec::new();
+        let mut stored_message_ids = Vec::new();
+        let mut tx = self.pool.begin().await?;
+        let thread_id = Uuid::new_v4();
+
+        for recipient in &rcpt_to {
+            let Some(row) = account_rows.iter().find(|row| {
+                row.try_get::<String, _>("primary_email")
+                    .map(|value| normalize_email(&value) == *recipient)
+                    .unwrap_or(false)
+            }) else {
+                rejected.push(recipient.clone());
+                continue;
+            };
+
+            let account_id: Uuid = row.try_get("id")?;
+            let inbox_mailbox_id = self
+                .ensure_mailbox(&mut tx, account_id, "inbox", "Inbox", 0, 365)
+                .await?;
+            let message_id = Uuid::new_v4();
+            let mime_blob_ref = format!("lpe-ct-inbound:{}:{message_id}", request.trace_id);
+
+            sqlx::query(
+                r#"
+                INSERT INTO messages (
+                    id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
+                    received_at, sent_at, from_display, from_address, subject_normalized,
+                    preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
+                    submission_source, delivery_status
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5, $6,
+                    NOW(), NULL, NULL, $7, $8,
+                    $9, TRUE, FALSE, FALSE, $10, $11,
+                    'lpe-ct', 'stored'
+                )
+                "#,
+            )
+            .bind(message_id)
+            .bind(DEFAULT_TENANT_ID)
+            .bind(account_id)
+            .bind(inbox_mailbox_id)
+            .bind(thread_id)
+            .bind(request.internet_message_id.as_deref())
+            .bind(&mail_from)
+            .bind(&subject)
+            .bind(&preview)
+            .bind(size_octets.max(0))
+            .bind(&mime_blob_ref)
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query(
+                r#"
+                INSERT INTO message_bodies (
+                    message_id, body_text, body_html_sanitized, participants_normalized,
+                    language_code, content_hash, search_vector
+                )
+                VALUES ($1, $2, NULL, $3, NULL, $4, to_tsvector('simple', $5))
+                "#,
+            )
+            .bind(message_id)
+            .bind(&body_text)
+            .bind(&participants)
+            .bind(format!("inbound:{}:{message_id}", request.trace_id))
+            .bind(format!("{subject} {body_text} {participants}"))
+            .execute(&mut *tx)
+            .await?;
+
+            for (ordinal, (kind, recipient_value)) in visible_recipients.iter().enumerate() {
+                sqlx::query(
+                    r#"
+                    INSERT INTO message_recipients (
+                        id, tenant_id, message_id, kind, address, display_name, ordinal
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    "#,
+                )
+                .bind(Uuid::new_v4())
+                .bind(DEFAULT_TENANT_ID)
+                .bind(message_id)
+                .bind(*kind)
+                .bind(&recipient_value.address)
+                .bind(recipient_value.display_name.as_deref())
+                .bind(ordinal as i32)
+                .execute(&mut *tx)
+                .await?;
+            }
+
+            accepted.push(recipient.clone());
+            stored_message_ids.push(message_id);
+        }
+
+        let audit_action = if accepted.is_empty() {
+            "mail.inbound.delivery-rejected"
+        } else {
+            "mail.inbound.delivered"
+        };
+        self.insert_audit(
+            &mut tx,
+            AuditEntryInput {
+                actor: "lpe-ct".to_string(),
+                action: audit_action.to_string(),
+                subject: request.trace_id.clone(),
+            },
+        )
+        .await?;
+        tx.commit().await?;
+
+        Ok(InboundDeliveryResponse {
+            trace_id: request.trace_id,
+            status: if accepted.is_empty() {
+                TransportDeliveryStatus::Failed
+            } else {
+                TransportDeliveryStatus::Relayed
+            },
+            accepted_recipients: accepted,
+            rejected_recipients: rejected,
+            stored_message_ids,
+            detail: None,
         })
     }
 
@@ -3415,7 +3789,8 @@ impl Storage {
         };
 
         let mut tx = self.pool.begin().await?;
-        self.ensure_account_exists(&mut tx, input.account_id).await?;
+        self.ensure_account_exists(&mut tx, input.account_id)
+            .await?;
         sqlx::query(
             r#"
             INSERT INTO messages (
@@ -3463,7 +3838,12 @@ impl Storage {
         .bind(input.body_html_sanitized)
         .bind(&participants)
         .bind(format!("import:{message_id}"))
-        .bind(format!("{} {} {}", normalize_subject(&input.subject), input.body_text, participants))
+        .bind(format!(
+            "{} {} {}",
+            normalize_subject(&input.subject),
+            input.body_text,
+            participants
+        ))
         .execute(&mut *tx)
         .await?;
 
@@ -4290,6 +4670,90 @@ fn normalize_subject(value: &str) -> String {
     value.trim().to_string()
 }
 
+fn parse_header_recipients(raw_message: &str, header_name: &str) -> Vec<SubmittedRecipientInput> {
+    let expected = format!("{}:", header_name.to_ascii_lowercase());
+    unfolded_headers(raw_message)
+        .into_iter()
+        .find_map(|line| {
+            let lower = line.to_ascii_lowercase();
+            if lower.starts_with(&expected) {
+                Some(parse_address_list(
+                    line.split_once(':')
+                        .map(|(_, value)| value)
+                        .unwrap_or_default(),
+                ))
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default()
+}
+
+fn unfolded_headers(raw_message: &str) -> Vec<String> {
+    let mut headers = Vec::new();
+    let mut current = String::new();
+
+    for line in raw_message.lines() {
+        if line.trim().is_empty() {
+            break;
+        }
+
+        if line.starts_with(' ') || line.starts_with('\t') {
+            current.push(' ');
+            current.push_str(line.trim());
+        } else {
+            if !current.is_empty() {
+                headers.push(current);
+            }
+            current = line.trim_end_matches('\r').to_string();
+        }
+    }
+
+    if !current.is_empty() {
+        headers.push(current);
+    }
+
+    headers
+}
+
+fn parse_address_list(value: &str) -> Vec<SubmittedRecipientInput> {
+    value
+        .split(',')
+        .filter_map(|part| {
+            let trimmed = part.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+
+            if let Some((display, address)) = trimmed.split_once('<') {
+                let normalized = normalize_email(address.trim().trim_end_matches('>'));
+                if normalized.is_empty() {
+                    return None;
+                }
+                let display_name = display.trim().trim_matches('"').trim().to_string();
+                Some(SubmittedRecipientInput {
+                    address: normalized,
+                    display_name: if display_name.is_empty() {
+                        None
+                    } else {
+                        Some(display_name)
+                    },
+                })
+            } else {
+                let normalized = normalize_email(trimmed.trim_matches(['<', '>']));
+                if normalized.is_empty() {
+                    None
+                } else {
+                    Some(SubmittedRecipientInput {
+                        address: normalized,
+                        display_name: None,
+                    })
+                }
+            }
+        })
+        .collect()
+}
+
 fn preview_text(body_text: &str) -> String {
     let preview = body_text
         .split_whitespace()
@@ -4469,8 +4933,8 @@ fn participants_normalized(
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_bcc_recipients, normalize_visible_recipients, participants_normalized,
-        SubmitMessageInput, SubmittedRecipientInput,
+        normalize_bcc_recipients, normalize_visible_recipients, parse_header_recipients,
+        participants_normalized, SubmitMessageInput, SubmittedRecipientInput,
     };
     use uuid::Uuid;
 
@@ -4532,6 +4996,27 @@ mod tests {
         assert!(participants.contains("to@example.test"));
         assert!(participants.contains("cc@example.test"));
         assert!(!participants.contains("bcc@example.test"));
+    }
+
+    #[test]
+    fn parse_header_recipients_unfolds_and_normalizes_addresses() {
+        let raw = concat!(
+            "From: Sender <sender@example.test>\r\n",
+            "To: Primary <to@example.test>,\r\n",
+            "  Secondary <second@example.test>\r\n",
+            "Cc: copy@example.test\r\n",
+            "\r\n",
+            "Body\r\n"
+        );
+
+        let to = parse_header_recipients(raw, "to");
+        let cc = parse_header_recipients(raw, "cc");
+
+        assert_eq!(to.len(), 2);
+        assert_eq!(to[0].address, "to@example.test");
+        assert_eq!(to[0].display_name.as_deref(), Some("Primary"));
+        assert_eq!(to[1].address, "second@example.test");
+        assert_eq!(cc[0].address, "copy@example.test");
     }
 }
 

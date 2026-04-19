@@ -10,10 +10,11 @@ Le centre de tri:
 
 - recoit le trafic SMTP expose publiquement
 - applique des politiques de filtrage, quarantaine et drainage
-- relaie les messages acceptes vers le coeur `LPE` cote `LAN`
+- remet les messages entrants acceptes vers le coeur `LPE` cote `LAN` via une API interne explicite
+- recoit aussi les handoffs sortants emis par `LPE`, puis execute le relais `SMTP`
 - expose une interface de management via `nginx` et une API locale Rust
 
-La v1 fonctionnelle inclut un listener SMTP minimal, un spool local, une quarantaine simple, un mode drainage et un relais SMTP vers un upstream LAN. Le `mTLS` est conserve comme politique de configuration mais n'est pas active par defaut dans cette v1 tant que le choix TLS conforme aux licences n'est pas documente.
+La v1 fonctionnelle inclut un listener SMTP minimal, un spool local, une quarantaine simple, un mode drainage, un endpoint de handoff interne pour la sortie, et une remise finale HTTP vers `LPE` pour l'entree. Le `mTLS` est conserve comme politique de configuration mais n'est pas active par defaut dans cette v1 tant que le choix TLS conforme aux licences n'est pas documente.
 
 ### Positionnement d'architecture
 
@@ -33,7 +34,7 @@ Flux autorises depuis Internet vers la `DMZ`:
 
 Flux autorises de la `DMZ` vers le `LAN`:
 
-- relais SMTP vers les noeuds coeur designes
+- remise finale HTTP authentifiee vers les noeuds coeur designes
 - trafic de management strictement borne aux adresses et segments autorises
 
 Flux interdits par defaut:
@@ -83,10 +84,11 @@ The sorting center:
 
 - receives publicly exposed SMTP traffic
 - applies filtering, quarantine, and drain policies
-- relays accepted messages to the core `LPE` services on the `LAN`
+- delivers accepted inbound messages to the core `LPE` services on the `LAN` through an explicit internal API
+- also receives outbound handoffs emitted by `LPE`, then executes `SMTP` relay
 - exposes a management interface through `nginx` and a local Rust API
 
-The functional v1 includes a minimal SMTP listener, local spool, simple quarantine, drain mode, and SMTP relay to a LAN upstream. `mTLS` remains a configuration policy but is not enabled by default in this v1 until the license-compliant TLS choice is documented.
+The functional v1 includes a minimal SMTP listener, local spool, simple quarantine, drain mode, an internal handoff endpoint for outbound work, and HTTP final delivery into `LPE` for inbound mail. `mTLS` remains a configuration policy but is not enabled by default in this v1 until the license-compliant TLS choice is documented.
 
 ### Architecture position
 
@@ -106,7 +108,7 @@ Flows allowed from the Internet to the `DMZ`:
 
 Flows allowed from the `DMZ` to the `LAN`:
 
-- SMTP relay toward designated core nodes
+- authenticated HTTP final delivery toward designated core nodes
 - management traffic strictly limited to authorized addresses and segments
 
 Flows denied by default:

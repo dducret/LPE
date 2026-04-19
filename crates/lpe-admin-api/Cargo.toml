@@ -11,6 +11,7 @@ lpe-activesync = { path = "../lpe-activesync" }
 lpe-ai = { path = "../lpe-ai" }
 lpe-attachments = { path = "../lpe-attachments" }
 lpe-core = { path = "../lpe-core" }
+lpe-domain = { path = "../lpe-domain" }
 lpe-jmap = { path = "../lpe-jmap" }
 lpe-storage = { path = "../lpe-storage" }
 serde.workspace = true

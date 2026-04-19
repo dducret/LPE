@@ -34,6 +34,14 @@ Le modele de soumission initial est transactionnel cote coeur `LPE` et expose pa
 
 Cette sequence donne a `Sent` le statut de source autoritative avant meme la remise SMTP effective par le centre de tri.
 
+L'integration fonctionnelle v1 entre le coeur et le centre de tri est maintenant explicite:
+
+- un worker `LPE` lit `outbound_message_queue` et appelle `LPE-CT`
+- `LPE-CT` retourne un statut de transport parmi `queued`, `relayed`, `deferred`, `quarantined`, `failed`
+- `LPE-CT` remet les messages entrants acceptes vers `LPE` via une API interne de livraison finale
+
+Le detail du contrat est documente dans `docs/architecture/lpe-ct-integration.md`.
+
 Toutes les couches clientes doivent utiliser ce modele canonique de soumission et de synchronisation. Aucune couche cliente ne doit ecrire une logique `Sent` ou `Outbox` parallele.
 
 Le MVP `JMAP Mail` actuellement implemente dans `lpe-jmap` est aligne sur cette regle. `EmailSubmission/set` ne parle pas `SMTP`; il reutilise la soumission canonique existante apres lecture d'un brouillon persiste. `Mailbox/get`, `Email/query` et `Email/get` lisent la projection canonique sans reinjecter `Bcc` dans la recherche standard. Le scope supporte est detaille dans `docs/architecture/jmap-mail-mvp.md`.
@@ -121,6 +129,14 @@ The initial submission model is transactional in the `LPE` core and exposed by `
 7. record the action in `audit_events`
 
 This sequence makes `Sent` authoritative before the sorting center performs the actual SMTP delivery.
+
+The functional v1 integration between the core platform and the sorting center is now explicit:
+
+- an `LPE` worker reads `outbound_message_queue` and calls `LPE-CT`
+- `LPE-CT` returns one of `queued`, `relayed`, `deferred`, `quarantined`, or `failed`
+- `LPE-CT` delivers accepted inbound messages into `LPE` through an internal final-delivery API
+
+The detailed contract is documented in `docs/architecture/lpe-ct-integration.md`.
 
 All client layers must use this canonical submission and synchronization model. No client layer may write its own parallel `Sent` or `Outbox` logic.
 

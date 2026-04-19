@@ -170,6 +170,8 @@ The architecture should therefore assume:
 
 In practice, inter-node trust must be based on strong mutual authentication rather than on network location alone.
 
+The current functional integration contract is documented in `docs/architecture/lpe-ct-integration.md`. In v1, that contract uses mutually trusted internal HTTP endpoints with a shared integration key, while keeping Internet-facing `SMTP` strictly on `LPE-CT`.
+
 The preferred trust model is machine or service identity with strong attestation rather than a traditional PKI-heavy operational model.
 
 This preference exists to avoid introducing unnecessary certificate-management infrastructure while still requiring a high-assurance identity model between trusted nodes.
@@ -374,6 +376,11 @@ The architectural principle is:
 
 - `LPE` owns the mailbox state
 - the sorting center owns SMTP transport execution
+
+In the current functional implementation, this split is made explicit through two internal contracts:
+
+- `LPE` hands outbound work to `LPE-CT` through an authenticated internal handoff API consumed by an outbound worker over `outbound_message_queue`
+- `LPE-CT` performs final inbound delivery to the core mailbox platform through an authenticated internal delivery API instead of LAN-facing mailbox `SMTP`
 
 This separation must still guarantee that user-submitted outbound messages are recorded in the appropriate sent-mail view inside `LPE`.
 

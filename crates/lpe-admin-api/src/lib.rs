@@ -10,6 +10,7 @@ use axum::{
 };
 use lpe_ai::{LocalModelProvider, StubLocalModelProvider};
 use lpe_core::CoreService;
+use lpe_domain::{InboundDeliveryRequest, InboundDeliveryResponse};
 use lpe_storage::{
     AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput,
     AuthenticatedAccount, AuthenticatedAdmin, ClientContact, ClientEvent, ClientWorkspace,
@@ -250,6 +251,10 @@ pub fn router(storage: Storage) -> Router {
         )
         .route("/mail/messages/submit", post(submit_message))
         .route("/mail/messages/draft", post(save_draft_message))
+        .route(
+            "/internal/lpe-ct/inbound-deliveries",
+            post(deliver_inbound_message),
+        )
         .route(
             "/mail/messages/{message_id}/draft",
             delete(delete_draft_message),
@@ -1134,6 +1139,20 @@ async fn upsert_client_event(
     ))
 }
 
+async fn deliver_inbound_message(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<InboundDeliveryRequest>,
+) -> ApiResult<InboundDeliveryResponse> {
+    require_integration(&headers)?;
+    Ok(Json(
+        storage
+            .deliver_inbound_message(request)
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
 fn ensure_client_message_owner(
     account: &AuthenticatedAccount,
     request: &SubmitMessageRequest,
@@ -1185,6 +1204,28 @@ fn internal_error(error: impl ToString) -> (StatusCode, String) {
 
 fn bad_request_error(error: impl ToString) -> (StatusCode, String) {
     (StatusCode::BAD_REQUEST, error.to_string())
+}
+
+fn require_integration(headers: &HeaderMap) -> std::result::Result<(), (StatusCode, String)> {
+    let provided = headers
+        .get("x-lpe-integration-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            "missing integration key".to_string(),
+        ))?;
+    let expected =
+        env::var("LPE_INTEGRATION_SHARED_SECRET").unwrap_or_else(|_| "change-me".to_string());
+    if provided == expected {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::UNAUTHORIZED,
+            "invalid integration key".to_string(),
+        ))
+    }
 }
 
 async fn require_admin(

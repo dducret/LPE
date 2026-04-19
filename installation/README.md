@@ -35,6 +35,8 @@ Pour un serveur de tri separe en `DMZ`, utiliser plutot `LPE-CT/installation/deb
 
 Les scripts `LPE-CT` installent aussi un listener SMTP, un spool local dans `/var/spool/lpe-ct`, et trois jeux de tests:
 
+L'integration fonctionnelle `LPE` / `LPE-CT` demande aussi d'aligner `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL` et `LPE_INTEGRATION_SHARED_SECRET` entre les deux noeuds. Le contrat est documente dans `docs/architecture/lpe-ct-integration.md`.
+
 - `test-local-lpe-ct.sh` depuis le serveur `LPE-CT`
 - `test-from-lpe.sh` depuis le LAN ou le serveur coeur
 - `test-from-internet.sh` depuis une machine externe
@@ -175,6 +177,8 @@ Operating assumptions:
 For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI and without exposing the core back office on the DMZ server.
 
 The `LPE-CT` scripts also install an SMTP listener, a local spool in `/var/spool/lpe-ct`, and three test suites:
+
+The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL`, and `LPE_INTEGRATION_SHARED_SECRET` values across the two nodes. The contract is documented in `docs/architecture/lpe-ct-integration.md`.
 
 - `test-local-lpe-ct.sh` from the `LPE-CT` server
 - `test-from-lpe.sh` from the LAN or core server

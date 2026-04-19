@@ -80,6 +80,8 @@ The sorting center is responsible for:
 
 - SMTP ingress from the Internet
 - outbound relay
+- authenticated outbound handoff reception from `LPE`
+- authenticated final delivery toward `LPE`
 - `DKIM` signing
 - `SPF` and `DMARC` related policies
 - retries
@@ -257,6 +259,8 @@ Le centre de tri est responsable de:
 
 - entree SMTP depuis Internet
 - relais sortant
+- reception authentifiee du handoff sortant depuis `LPE`
+- remise finale authentifiee vers `LPE`
 - signature `DKIM`
 - politiques liees a `SPF` et `DMARC`
 - retries
