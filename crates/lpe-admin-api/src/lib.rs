@@ -24,214 +24,26 @@ use lpe_storage::{
     ServerSettings, Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
     UpdateAccount, UpsertClientContactInput, UpsertClientEventInput,
 };
-use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
+mod types;
+
+use crate::types::{
+    ApiResult, AttachmentSupportResponse, BootstrapAdminRequest, BootstrapAdminResponse,
+    ClientLoginResponse, CreateAccountRequest, CreateAliasRequest, CreateDomainRequest,
+    CreateFilterRuleRequest, CreateMailboxRequest, CreatePstTransferJobRequest,
+    CreateServerAdministratorRequest, EmailTraceSearchRequest, LocalAiHealthResponse,
+    LoginRequest, LoginResponse, SubmitMessageRequest, SubmitRecipientRequest,
+    UpdateAccountRequest, UpdateAntispamSettingsRequest, UpdateLocalAiSettingsRequest,
+    UpdateSecuritySettingsRequest, UpdateServerSettingsRequest, UpsertClientContactRequest,
+    UpsertClientEventRequest,
+};
+
 const MIN_ADMIN_PASSWORD_LEN: usize = 12;
 const MIN_INTEGRATION_SECRET_LEN: usize = 32;
-
-#[derive(Debug, Clone)]
-pub struct BootstrapAdminRequest {
-    pub email: String,
-    pub display_name: String,
-    pub password: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct BootstrapAdminResponse {
-    pub email: String,
-    pub display_name: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct LocalAiHealthResponse {
-    provider: String,
-    models: Vec<String>,
-    bootstrap_summary_payload: String,
-    enabled: bool,
-    offline_only: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct AttachmentSupportResponse {
-    formats: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct LoginResponse {
-    token: String,
-    admin: AuthenticatedAdmin,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ClientLoginResponse {
-    token: String,
-    account: AuthenticatedAccount,
-}
-
-#[derive(Debug, Deserialize)]
-struct LoginRequest {
-    email: String,
-    password: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateAccountRequest {
-    email: String,
-    display_name: String,
-    quota_mb: u32,
-    password: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateAccountRequest {
-    display_name: String,
-    quota_mb: u32,
-    status: String,
-    password: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateMailboxRequest {
-    account_id: Uuid,
-    display_name: String,
-    role: String,
-    retention_days: u16,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreatePstTransferJobRequest {
-    mailbox_id: Uuid,
-    direction: String,
-    server_path: String,
-    requested_by: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateDomainRequest {
-    name: String,
-    default_quota_mb: u32,
-    inbound_enabled: bool,
-    outbound_enabled: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateAliasRequest {
-    source: String,
-    target: String,
-    kind: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateServerSettingsRequest {
-    primary_hostname: String,
-    admin_bind_address: String,
-    smtp_bind_address: String,
-    imap_bind_address: String,
-    jmap_bind_address: String,
-    default_locale: String,
-    max_message_size_mb: u32,
-    tls_mode: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateSecuritySettingsRequest {
-    password_login_enabled: bool,
-    mfa_required_for_admins: bool,
-    session_timeout_minutes: u32,
-    audit_retention_days: u32,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateLocalAiSettingsRequest {
-    enabled: bool,
-    provider: String,
-    model: String,
-    offline_only: bool,
-    indexing_enabled: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateAntispamSettingsRequest {
-    content_filtering_enabled: bool,
-    spam_engine: String,
-    quarantine_enabled: bool,
-    quarantine_retention_days: u32,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateServerAdministratorRequest {
-    domain_id: Option<Uuid>,
-    email: String,
-    display_name: String,
-    role: String,
-    rights_summary: String,
-    password: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateFilterRuleRequest {
-    name: String,
-    scope: String,
-    action: String,
-    status: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct EmailTraceSearchRequest {
-    query: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct SubmitMessageRequest {
-    draft_message_id: Option<Uuid>,
-    account_id: Uuid,
-    source: Option<String>,
-    from_display: Option<String>,
-    from_address: String,
-    to: Vec<SubmitRecipientRequest>,
-    cc: Option<Vec<SubmitRecipientRequest>>,
-    bcc: Option<Vec<SubmitRecipientRequest>>,
-    subject: String,
-    body_text: String,
-    body_html_sanitized: Option<String>,
-    internet_message_id: Option<String>,
-    mime_blob_ref: Option<String>,
-    size_octets: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SubmitRecipientRequest {
-    address: String,
-    display_name: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpsertClientContactRequest {
-    id: Option<Uuid>,
-    name: String,
-    role: String,
-    email: String,
-    phone: String,
-    team: String,
-    notes: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpsertClientEventRequest {
-    id: Option<Uuid>,
-    date: String,
-    time: String,
-    title: String,
-    location: String,
-    attendees: String,
-    notes: String,
-}
-
-type ApiResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 
 pub fn router(storage: Storage) -> Router {
     Router::new()

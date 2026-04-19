@@ -8,23 +8,36 @@ use axum::{
     Json, Router,
 };
 use lpe_magika::{
-    collect_mime_attachment_parts, ExpectedKind, IngressContext, PolicyDecision,
-    ValidationRequest, Validator,
+    ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator,
 };
 use lpe_storage::{
-    AttachmentUploadInput, AuditEntryInput, AuthenticatedAccount, JmapEmail, JmapEmailAddress,
-    JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob,
-    SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    mail::parse_rfc822_message,
+    AuditEntryInput, AuthenticatedAccount, JmapEmail, JmapEmailAddress, JmapEmailSubmission,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput,
+    JmapQuota, JmapUploadBlob, SavedDraftMessage, Storage, SubmitMessageInput,
+    SubmittedRecipientInput,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Map, Value};
-use std::{
-    collections::{HashMap, HashSet},
-    future::Future,
-    pin::Pin,
-};
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
+
+#[cfg(test)]
+use lpe_storage::{JmapEmailQuery, SubmittedMessage};
+
+mod protocol;
+mod store;
+
+use crate::protocol::{
+    ChangesArguments, DraftMutation, EmailAddressInput, EmailCopyArguments, EmailGetArguments,
+    EmailImportArguments, EmailQueryArguments, EmailQuerySort,
+    EmailSetArguments, EmailSubmissionGetArguments, EmailSubmissionSetArguments,
+    IdentityGetArguments, JmapApiRequest, JmapApiResponse, JmapMethodCall,
+    JmapMethodResponse, MailboxCreateInput, MailboxGetArguments, MailboxQueryArguments,
+    MailboxSetArguments, MailboxUpdateInput, QuotaGetArguments, SearchSnippetGetArguments,
+    SessionAccount, SessionDocument, ThreadGetArguments,
+};
+use crate::store::JmapStore;
 
 const JMAP_CORE_CAPABILITY: &str = "urn:ietf:params:jmap:core";
 const JMAP_MAIL_CAPABILITY: &str = "urn:ietf:params:jmap:mail";
@@ -33,7 +46,6 @@ const SESSION_STATE: &str = "mvp-1";
 const MAX_QUERY_LIMIT: u64 = 250;
 const DEFAULT_GET_LIMIT: u64 = 100;
 
-type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 
 pub fn router() -> Router<Storage> {
@@ -66,484 +78,6 @@ impl<S, V> JmapService<S, V> {
     pub fn new_with_validator(store: S, validator: Validator<V>) -> Self {
         Self { store, validator }
     }
-}
-
-pub trait JmapStore: Clone + Send + Sync + 'static {
-    fn fetch_account_session<'a>(
-        &'a self,
-        token: &'a str,
-    ) -> StoreFuture<'a, Option<AuthenticatedAccount>>;
-    fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>>;
-    fn fetch_jmap_mailbox_ids<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>>;
-    fn create_jmap_mailbox<'a>(
-        &'a self,
-        input: JmapMailboxCreateInput,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, JmapMailbox>;
-    fn update_jmap_mailbox<'a>(
-        &'a self,
-        input: JmapMailboxUpdateInput,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, JmapMailbox>;
-    fn destroy_jmap_mailbox<'a>(
-        &'a self,
-        account_id: Uuid,
-        mailbox_id: Uuid,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, ()>;
-    fn query_jmap_email_ids<'a>(
-        &'a self,
-        account_id: Uuid,
-        mailbox_id: Option<Uuid>,
-        search_text: Option<&'a str>,
-        position: u64,
-        limit: u64,
-    ) -> StoreFuture<'a, JmapEmailQuery>;
-    fn fetch_all_jmap_email_ids<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>>;
-    fn fetch_all_jmap_thread_ids<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>>;
-    fn fetch_jmap_emails<'a>(
-        &'a self,
-        account_id: Uuid,
-        ids: &'a [Uuid],
-    ) -> StoreFuture<'a, Vec<JmapEmail>>;
-    fn fetch_jmap_draft<'a>(
-        &'a self,
-        account_id: Uuid,
-        id: Uuid,
-    ) -> StoreFuture<'a, Option<JmapEmail>>;
-    fn fetch_jmap_email_submissions<'a>(
-        &'a self,
-        account_id: Uuid,
-        ids: &'a [Uuid],
-    ) -> StoreFuture<'a, Vec<JmapEmailSubmission>>;
-    fn fetch_jmap_quota<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, JmapQuota>;
-    fn save_jmap_upload_blob<'a>(
-        &'a self,
-        account_id: Uuid,
-        media_type: &'a str,
-        blob_bytes: &'a [u8],
-    ) -> StoreFuture<'a, JmapUploadBlob>;
-    fn fetch_jmap_upload_blob<'a>(
-        &'a self,
-        account_id: Uuid,
-        blob_id: Uuid,
-    ) -> StoreFuture<'a, Option<JmapUploadBlob>>;
-    fn save_draft_message<'a>(
-        &'a self,
-        input: SubmitMessageInput,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, SavedDraftMessage>;
-    fn delete_draft_message<'a>(
-        &'a self,
-        account_id: Uuid,
-        message_id: Uuid,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, ()>;
-    fn submit_draft_message<'a>(
-        &'a self,
-        account_id: Uuid,
-        draft_message_id: Uuid,
-        source: &'a str,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, SubmittedMessage>;
-    fn copy_jmap_email<'a>(
-        &'a self,
-        account_id: Uuid,
-        message_id: Uuid,
-        target_mailbox_id: Uuid,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, JmapEmail>;
-    fn import_jmap_email<'a>(
-        &'a self,
-        input: JmapImportedEmailInput,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, JmapEmail>;
-}
-
-impl JmapStore for Storage {
-    fn fetch_account_session<'a>(
-        &'a self,
-        token: &'a str,
-    ) -> StoreFuture<'a, Option<AuthenticatedAccount>> {
-        Box::pin(async move { self.fetch_account_session(token).await })
-    }
-
-    fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
-        Box::pin(async move { self.fetch_jmap_mailboxes(account_id).await })
-    }
-
-    fn query_jmap_email_ids<'a>(
-        &'a self,
-        account_id: Uuid,
-        mailbox_id: Option<Uuid>,
-        search_text: Option<&'a str>,
-        position: u64,
-        limit: u64,
-    ) -> StoreFuture<'a, JmapEmailQuery> {
-        Box::pin(async move {
-            self.query_jmap_email_ids(account_id, mailbox_id, search_text, position, limit)
-                .await
-        })
-    }
-
-    fn fetch_jmap_mailbox_ids<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>> {
-        Box::pin(async move { self.fetch_jmap_mailbox_ids(account_id).await })
-    }
-
-    fn create_jmap_mailbox<'a>(
-        &'a self,
-        input: JmapMailboxCreateInput,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, JmapMailbox> {
-        Box::pin(async move { self.create_jmap_mailbox(input, audit).await })
-    }
-
-    fn update_jmap_mailbox<'a>(
-        &'a self,
-        input: JmapMailboxUpdateInput,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, JmapMailbox> {
-        Box::pin(async move { self.update_jmap_mailbox(input, audit).await })
-    }
-
-    fn destroy_jmap_mailbox<'a>(
-        &'a self,
-        account_id: Uuid,
-        mailbox_id: Uuid,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, ()> {
-        Box::pin(async move {
-            self.destroy_jmap_mailbox(account_id, mailbox_id, audit)
-                .await
-        })
-    }
-
-    fn fetch_all_jmap_email_ids<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>> {
-        Box::pin(async move { self.fetch_all_jmap_email_ids(account_id).await })
-    }
-
-    fn fetch_all_jmap_thread_ids<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>> {
-        Box::pin(async move { self.fetch_all_jmap_thread_ids(account_id).await })
-    }
-
-    fn fetch_jmap_emails<'a>(
-        &'a self,
-        account_id: Uuid,
-        ids: &'a [Uuid],
-    ) -> StoreFuture<'a, Vec<JmapEmail>> {
-        Box::pin(async move { self.fetch_jmap_emails(account_id, ids).await })
-    }
-
-    fn fetch_jmap_draft<'a>(
-        &'a self,
-        account_id: Uuid,
-        id: Uuid,
-    ) -> StoreFuture<'a, Option<JmapEmail>> {
-        Box::pin(async move { self.fetch_jmap_draft(account_id, id).await })
-    }
-
-    fn fetch_jmap_email_submissions<'a>(
-        &'a self,
-        account_id: Uuid,
-        ids: &'a [Uuid],
-    ) -> StoreFuture<'a, Vec<JmapEmailSubmission>> {
-        Box::pin(async move { self.fetch_jmap_email_submissions(account_id, ids).await })
-    }
-
-    fn fetch_jmap_quota<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, JmapQuota> {
-        Box::pin(async move { self.fetch_jmap_quota(account_id).await })
-    }
-
-    fn save_jmap_upload_blob<'a>(
-        &'a self,
-        account_id: Uuid,
-        media_type: &'a str,
-        blob_bytes: &'a [u8],
-    ) -> StoreFuture<'a, JmapUploadBlob> {
-        Box::pin(async move {
-            self.save_jmap_upload_blob(account_id, media_type, blob_bytes)
-                .await
-        })
-    }
-
-    fn fetch_jmap_upload_blob<'a>(
-        &'a self,
-        account_id: Uuid,
-        blob_id: Uuid,
-    ) -> StoreFuture<'a, Option<JmapUploadBlob>> {
-        Box::pin(async move { self.fetch_jmap_upload_blob(account_id, blob_id).await })
-    }
-
-    fn save_draft_message<'a>(
-        &'a self,
-        input: SubmitMessageInput,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, SavedDraftMessage> {
-        Box::pin(async move { self.save_draft_message(input, audit).await })
-    }
-
-    fn delete_draft_message<'a>(
-        &'a self,
-        account_id: Uuid,
-        message_id: Uuid,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, ()> {
-        Box::pin(async move {
-            self.delete_draft_message(account_id, message_id, audit)
-                .await
-        })
-    }
-
-    fn submit_draft_message<'a>(
-        &'a self,
-        account_id: Uuid,
-        draft_message_id: Uuid,
-        source: &'a str,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, SubmittedMessage> {
-        Box::pin(async move {
-            self.submit_draft_message(account_id, draft_message_id, source, audit)
-                .await
-        })
-    }
-
-    fn copy_jmap_email<'a>(
-        &'a self,
-        account_id: Uuid,
-        message_id: Uuid,
-        target_mailbox_id: Uuid,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, JmapEmail> {
-        Box::pin(async move {
-            self.copy_jmap_email(account_id, message_id, target_mailbox_id, audit)
-                .await
-        })
-    }
-
-    fn import_jmap_email<'a>(
-        &'a self,
-        input: JmapImportedEmailInput,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, JmapEmail> {
-        Box::pin(async move { self.import_jmap_email(input, audit).await })
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct JmapApiRequest {
-    #[serde(rename = "using", default)]
-    using_capabilities: Vec<String>,
-    #[serde(rename = "methodCalls", default)]
-    method_calls: Vec<JmapMethodCall>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct JmapMethodCall(pub String, pub Value, pub String);
-
-#[derive(Debug, Serialize)]
-pub struct JmapApiResponse {
-    #[serde(rename = "methodResponses")]
-    method_responses: Vec<JmapMethodResponse>,
-    #[serde(rename = "createdIds", skip_serializing_if = "HashMap::is_empty")]
-    created_ids: HashMap<String, String>,
-    #[serde(rename = "sessionState")]
-    session_state: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct JmapMethodResponse(pub String, pub Value, pub String);
-
-#[derive(Debug, Serialize)]
-pub struct SessionDocument {
-    capabilities: HashMap<String, Value>,
-    accounts: HashMap<String, SessionAccount>,
-    #[serde(rename = "primaryAccounts")]
-    primary_accounts: HashMap<String, String>,
-    username: String,
-    #[serde(rename = "apiUrl")]
-    api_url: String,
-    #[serde(rename = "downloadUrl")]
-    download_url: String,
-    #[serde(rename = "uploadUrl")]
-    upload_url: String,
-    #[serde(rename = "eventSourceUrl")]
-    event_source_url: Option<String>,
-    state: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SessionAccount {
-    name: String,
-    #[serde(rename = "isPersonal")]
-    is_personal: bool,
-    #[serde(rename = "isReadOnly")]
-    is_read_only: bool,
-    #[serde(rename = "accountCapabilities")]
-    account_capabilities: HashMap<String, Value>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MailboxGetArguments {
-    account_id: Option<String>,
-    ids: Option<Vec<String>>,
-    properties: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MailboxQueryArguments {
-    account_id: Option<String>,
-    position: Option<u64>,
-    limit: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct MailboxSetArguments {
-    account_id: Option<String>,
-    create: Option<HashMap<String, Value>>,
-    update: Option<HashMap<String, Value>>,
-    destroy: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ChangesArguments {
-    account_id: Option<String>,
-    since_state: String,
-    max_changes: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EmailGetArguments {
-    account_id: Option<String>,
-    ids: Option<Vec<String>>,
-    properties: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EmailQueryArguments {
-    account_id: Option<String>,
-    position: Option<u64>,
-    limit: Option<u64>,
-    filter: Option<EmailQueryFilter>,
-    sort: Option<Vec<EmailQuerySort>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EmailQueryFilter {
-    in_mailbox: Option<String>,
-    text: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EmailQuerySort {
-    property: String,
-    is_ascending: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EmailSetArguments {
-    account_id: Option<String>,
-    create: Option<HashMap<String, Value>>,
-    update: Option<HashMap<String, Value>>,
-    destroy: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EmailSubmissionSetArguments {
-    account_id: Option<String>,
-    create: Option<HashMap<String, Value>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EmailSubmissionGetArguments {
-    account_id: Option<String>,
-    ids: Option<Vec<String>>,
-    properties: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct IdentityGetArguments {
-    account_id: Option<String>,
-    ids: Option<Vec<String>>,
-    properties: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ThreadGetArguments {
-    account_id: Option<String>,
-    ids: Option<Vec<String>>,
-    properties: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SearchSnippetGetArguments {
-    account_id: Option<String>,
-    email_ids: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EmailCopyArguments {
-    from_account_id: String,
-    account_id: Option<String>,
-    create: HashMap<String, Value>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EmailImportArguments {
-    account_id: Option<String>,
-    emails: HashMap<String, Value>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct QuotaGetArguments {
-    account_id: Option<String>,
-    ids: Option<Vec<String>>,
-}
-
-#[derive(Debug)]
-struct MailboxCreateInput {
-    name: String,
-    sort_order: Option<i32>,
-}
-
-#[derive(Debug)]
-struct MailboxUpdateInput {
-    name: Option<String>,
-    sort_order: Option<i32>,
-}
-
-#[derive(Debug, Default, Clone)]
-struct DraftMutation {
-    from: Option<Vec<EmailAddressInput>>,
-    to: Option<Vec<EmailAddressInput>>,
-    cc: Option<Vec<EmailAddressInput>>,
-    bcc: Option<Vec<EmailAddressInput>>,
-    subject: Option<String>,
-    text_body: Option<String>,
-    html_body: Option<Option<String>>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-struct EmailAddressInput {
-    email: String,
-    #[serde(default)]
-    name: Option<String>,
 }
 
 async fn session_handler(
@@ -1665,14 +1199,14 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             from_display: parsed
                 .from
                 .as_ref()
-                .and_then(|from| from.name.clone())
+                .and_then(|from| from.display_name.clone())
                 .or(Some(account.display_name.clone())),
             from_address: parsed
                 .from
                 .map(|from| from.email)
                 .unwrap_or_else(|| account.email.clone()),
-            to: map_recipients(parsed.to)?,
-            cc: map_recipients(parsed.cc)?,
+            to: map_parsed_recipients(parsed.to),
+            cc: map_parsed_recipients(parsed.cc),
             bcc: Vec::new(),
             subject: parsed.subject,
             body_text: parsed.body_text,
@@ -1998,10 +1532,10 @@ fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) -> Value {
     if properties.contains("from") {
         object.insert(
             "from".to_string(),
-            Value::Array(vec![address_value(&EmailAddressInput {
-                email: email.from_address.clone(),
-                name: email.from_display.clone(),
-            })]),
+            Value::Array(vec![address_value(
+                &email.from_address,
+                email.from_display.as_deref(),
+            )]),
         );
     }
     if properties.contains("to") {
@@ -2012,10 +1546,7 @@ fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) -> Value {
                     .to
                     .iter()
                     .map(|recipient| {
-                        address_value(&EmailAddressInput {
-                            email: recipient.address.clone(),
-                            name: recipient.display_name.clone(),
-                        })
+                        address_value(&recipient.address, recipient.display_name.as_deref())
                     })
                     .collect(),
             ),
@@ -2029,10 +1560,7 @@ fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) -> Value {
                     .cc
                     .iter()
                     .map(|recipient| {
-                        address_value(&EmailAddressInput {
-                            email: recipient.address.clone(),
-                            name: recipient.display_name.clone(),
-                        })
+                        address_value(&recipient.address, recipient.display_name.as_deref())
                     })
                     .collect(),
             ),
@@ -2046,10 +1574,7 @@ fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) -> Value {
                     .bcc
                     .iter()
                     .map(|recipient| {
-                        address_value(&EmailAddressInput {
-                            email: recipient.address.clone(),
-                            name: recipient.display_name.clone(),
-                        })
+                        address_value(&recipient.address, recipient.display_name.as_deref())
                     })
                     .collect(),
             ),
@@ -2260,10 +1785,10 @@ fn insert_if<T: Serialize>(
     }
 }
 
-fn address_value(address: &EmailAddressInput) -> Value {
+fn address_value(email: &str, name: Option<&str>) -> Value {
     json!({
-        "email": address.email,
-        "name": address.name,
+        "email": email,
+        "name": name,
     })
 }
 
@@ -2486,119 +2011,16 @@ fn map_existing_recipients(recipients: &[JmapEmailAddress]) -> Vec<SubmittedReci
         .collect()
 }
 
-#[derive(Debug)]
-struct ParsedRfc822Message {
-    from: Option<EmailAddressInput>,
-    to: Vec<EmailAddressInput>,
-    cc: Vec<EmailAddressInput>,
-    subject: String,
-    message_id: Option<String>,
-    body_text: String,
-    attachments: Vec<AttachmentUploadInput>,
-}
-
-fn parse_rfc822_message(bytes: &[u8]) -> Result<ParsedRfc822Message> {
-    let raw = String::from_utf8_lossy(bytes).replace("\r\n", "\n");
-    let (header_text, body_text) = raw
-        .split_once("\n\n")
-        .map(|(headers, body)| (headers, body))
-        .unwrap_or((raw.as_str(), ""));
-    let headers = parse_headers(header_text);
-
-    Ok(ParsedRfc822Message {
-        from: headers
-            .get("from")
-            .and_then(|value| parse_single_address(value).ok()),
-        to: headers
-            .get("to")
-            .map(|value| parse_address_header(value))
-            .transpose()?
-            .unwrap_or_default(),
-        cc: headers
-            .get("cc")
-            .map(|value| parse_address_header(value))
-            .transpose()?
-            .unwrap_or_default(),
-        subject: headers.get("subject").cloned().unwrap_or_default(),
-        message_id: headers.get("message-id").cloned(),
-        body_text: body_text.trim().to_string(),
-        attachments: collect_mime_attachment_parts(bytes)?
-            .into_iter()
-            .enumerate()
-            .map(|(index, attachment)| AttachmentUploadInput {
-                file_name: attachment
-                    .filename
-                    .unwrap_or_else(|| format!("attachment-{}.bin", index + 1)),
-                media_type: attachment
-                    .declared_mime
-                    .unwrap_or_else(|| "application/octet-stream".to_string()),
-                blob_bytes: attachment.bytes,
-            })
-            .collect(),
-    })
-}
-
-fn parse_headers(input: &str) -> HashMap<String, String> {
-    let mut headers = HashMap::new();
-    let mut current_name: Option<String> = None;
-    let mut current_value = String::new();
-
-    for line in input.lines() {
-        if line.starts_with(' ') || line.starts_with('\t') {
-            if !current_value.is_empty() {
-                current_value.push(' ');
-            }
-            current_value.push_str(line.trim());
-            continue;
-        }
-
-        if let Some(name) = current_name.take() {
-            headers.insert(name, current_value.trim().to_string());
-            current_value.clear();
-        }
-
-        if let Some((name, value)) = line.split_once(':') {
-            current_name = Some(name.trim().to_lowercase());
-            current_value.push_str(value.trim());
-        }
-    }
-
-    if let Some(name) = current_name {
-        headers.insert(name, current_value.trim().to_string());
-    }
-
-    headers
-}
-
-fn parse_address_header(value: &str) -> Result<Vec<EmailAddressInput>> {
-    value
-        .split(',')
-        .map(parse_single_address)
-        .filter(|result| match result {
-            Ok(address) => !address.email.is_empty(),
-            Err(_) => true,
+fn map_parsed_recipients(
+    recipients: Vec<lpe_storage::mail::ParsedMailAddress>,
+) -> Vec<SubmittedRecipientInput> {
+    recipients
+        .into_iter()
+        .map(|recipient| SubmittedRecipientInput {
+            address: recipient.email,
+            display_name: recipient.display_name,
         })
         .collect()
-}
-
-    fn parse_single_address(value: &str) -> Result<EmailAddressInput> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        bail!("email address is empty");
-    }
-
-    if let Some((name, email)) = trimmed.rsplit_once('<') {
-        let email = email.trim_end_matches('>').trim();
-        return Ok(EmailAddressInput {
-            email: email.to_lowercase(),
-            name: Some(name.trim().trim_matches('"').to_string()).filter(|value| !value.is_empty()),
-        });
-    }
-
-    Ok(EmailAddressInput {
-        email: trimmed.trim_matches('"').to_lowercase(),
-        name: None,
-    })
 }
 
 #[cfg(test)]
@@ -2746,147 +2168,114 @@ mod tests {
     }
 
     impl JmapStore for FakeStore {
-        fn fetch_account_session<'a>(
-            &'a self,
-            token: &'a str,
-        ) -> StoreFuture<'a, Option<AuthenticatedAccount>> {
-            let session = if token == "token" {
+        async fn fetch_account_session(&self, token: &str) -> Result<Option<AuthenticatedAccount>> {
+            Ok(if token == "token" {
                 self.session.clone()
             } else {
                 None
-            };
-            Box::pin(async move { Ok(session) })
-        }
-
-        fn fetch_jmap_mailboxes<'a>(
-            &'a self,
-            _account_id: Uuid,
-        ) -> StoreFuture<'a, Vec<JmapMailbox>> {
-            let mailboxes = self.mailboxes.clone();
-            Box::pin(async move { Ok(mailboxes) })
-        }
-
-        fn fetch_jmap_mailbox_ids<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>> {
-            let ids = self.mailboxes.iter().map(|mailbox| mailbox.id).collect();
-            Box::pin(async move { Ok(ids) })
-        }
-
-        fn query_jmap_email_ids<'a>(
-            &'a self,
-            _account_id: Uuid,
-            mailbox_id: Option<Uuid>,
-            _search_text: Option<&'a str>,
-            position: u64,
-            limit: u64,
-        ) -> StoreFuture<'a, JmapEmailQuery> {
-            let emails = self.emails.clone();
-            Box::pin(async move {
-                let mut ids = emails
-                    .into_iter()
-                    .filter(|email| mailbox_id.is_none() || Some(email.mailbox_id) == mailbox_id)
-                    .map(|email| email.id)
-                    .collect::<Vec<_>>();
-                let total = ids.len() as u64;
-                ids = ids
-                    .into_iter()
-                    .skip(position as usize)
-                    .take(limit as usize)
-                    .collect();
-                Ok(JmapEmailQuery { ids, total })
             })
         }
 
-        fn fetch_all_jmap_email_ids<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>> {
-            let ids = self.emails.iter().map(|email| email.id).collect();
-            Box::pin(async move { Ok(ids) })
+        async fn fetch_jmap_mailboxes(&self, _account_id: Uuid) -> Result<Vec<JmapMailbox>> {
+            Ok(self.mailboxes.clone())
         }
 
-        fn fetch_all_jmap_thread_ids<'a>(
-            &'a self,
+        async fn fetch_jmap_mailbox_ids(&self, _account_id: Uuid) -> Result<Vec<Uuid>> {
+            Ok(self.mailboxes.iter().map(|mailbox| mailbox.id).collect())
+        }
+
+        async fn query_jmap_email_ids(
+            &self,
             _account_id: Uuid,
-        ) -> StoreFuture<'a, Vec<Uuid>> {
-            let ids = self
+            mailbox_id: Option<Uuid>,
+            _search_text: Option<&str>,
+            position: u64,
+            limit: u64,
+        ) -> Result<JmapEmailQuery> {
+            let mut ids = self
+                .emails
+                .iter()
+                .filter(|email| mailbox_id.is_none() || Some(email.mailbox_id) == mailbox_id)
+                .map(|email| email.id)
+                .collect::<Vec<_>>();
+            let total = ids.len() as u64;
+            ids = ids
+                .into_iter()
+                .skip(position as usize)
+                .take(limit as usize)
+                .collect();
+            Ok(JmapEmailQuery { ids, total })
+        }
+
+        async fn fetch_all_jmap_email_ids(&self, _account_id: Uuid) -> Result<Vec<Uuid>> {
+            Ok(self.emails.iter().map(|email| email.id).collect())
+        }
+
+        async fn fetch_all_jmap_thread_ids(&self, _account_id: Uuid) -> Result<Vec<Uuid>> {
+            Ok(self
                 .emails
                 .iter()
                 .map(|email| email.thread_id)
                 .collect::<HashSet<_>>()
                 .into_iter()
-                .collect();
-            Box::pin(async move { Ok(ids) })
+                .collect())
         }
 
-        fn create_jmap_mailbox<'a>(
-            &'a self,
+        async fn create_jmap_mailbox(
+            &self,
             input: JmapMailboxCreateInput,
             _audit: AuditEntryInput,
-        ) -> StoreFuture<'a, JmapMailbox> {
-            Box::pin(async move {
-                Ok(JmapMailbox {
-                    id: Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap(),
-                    role: "".to_string(),
-                    name: input.name,
-                    sort_order: input.sort_order.unwrap_or(99),
-                    total_emails: 0,
-                    unread_emails: 0,
-                })
+        ) -> Result<JmapMailbox> {
+            Ok(JmapMailbox {
+                id: Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap(),
+                role: "".to_string(),
+                name: input.name,
+                sort_order: input.sort_order.unwrap_or(99),
+                total_emails: 0,
+                unread_emails: 0,
             })
         }
 
-        fn update_jmap_mailbox<'a>(
-            &'a self,
+        async fn update_jmap_mailbox(
+            &self,
             input: JmapMailboxUpdateInput,
             _audit: AuditEntryInput,
-        ) -> StoreFuture<'a, JmapMailbox> {
-            Box::pin(async move {
-                Ok(JmapMailbox {
-                    id: input.mailbox_id,
-                    role: "".to_string(),
-                    name: input.name.unwrap_or_else(|| "Updated".to_string()),
-                    sort_order: input.sort_order.unwrap_or(10),
-                    total_emails: 0,
-                    unread_emails: 0,
-                })
+        ) -> Result<JmapMailbox> {
+            Ok(JmapMailbox {
+                id: input.mailbox_id,
+                role: "".to_string(),
+                name: input.name.unwrap_or_else(|| "Updated".to_string()),
+                sort_order: input.sort_order.unwrap_or(10),
+                total_emails: 0,
+                unread_emails: 0,
             })
         }
 
-        fn destroy_jmap_mailbox<'a>(
-            &'a self,
+        async fn destroy_jmap_mailbox(
+            &self,
             _account_id: Uuid,
             _mailbox_id: Uuid,
             _audit: AuditEntryInput,
-        ) -> StoreFuture<'a, ()> {
-            Box::pin(async move { Ok(()) })
+        ) -> Result<()> {
+            Ok(())
         }
 
-        fn fetch_jmap_emails<'a>(
-            &'a self,
-            _account_id: Uuid,
-            ids: &'a [Uuid],
-        ) -> StoreFuture<'a, Vec<JmapEmail>> {
-            let emails = self.emails.clone();
-            let ids = ids.to_vec();
-            Box::pin(async move {
-                Ok(ids
-                    .into_iter()
-                    .filter_map(|id| emails.iter().find(|email| email.id == id).cloned())
-                    .collect())
-            })
+        async fn fetch_jmap_emails(&self, _account_id: Uuid, ids: &[Uuid]) -> Result<Vec<JmapEmail>> {
+            Ok(ids
+                .iter()
+                .filter_map(|id| self.emails.iter().find(|email| email.id == *id).cloned())
+                .collect())
         }
 
-        fn fetch_jmap_draft<'a>(
-            &'a self,
-            _account_id: Uuid,
-            id: Uuid,
-        ) -> StoreFuture<'a, Option<JmapEmail>> {
-            let draft = self.emails.iter().find(|email| email.id == id).cloned();
-            Box::pin(async move { Ok(draft) })
+        async fn fetch_jmap_draft(&self, _account_id: Uuid, id: Uuid) -> Result<Option<JmapEmail>> {
+            Ok(self.emails.iter().find(|email| email.id == id).cloned())
         }
 
-        fn fetch_jmap_email_submissions<'a>(
-            &'a self,
+        async fn fetch_jmap_email_submissions(
+            &self,
             _account_id: Uuid,
-            ids: &'a [Uuid],
-        ) -> StoreFuture<'a, Vec<JmapEmailSubmission>> {
+            ids: &[Uuid],
+        ) -> Result<Vec<JmapEmailSubmission>> {
             let submissions = vec![JmapEmailSubmission {
                 id: Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap(),
                 email_id: Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap(),
@@ -2898,36 +2287,31 @@ mod tests {
                 undo_status: "final".to_string(),
                 delivery_status: "queued".to_string(),
             }];
-            let ids = ids.to_vec();
-            Box::pin(async move {
-                if ids.is_empty() {
-                    Ok(submissions)
-                } else {
-                    Ok(submissions
-                        .into_iter()
-                        .filter(|submission| ids.contains(&submission.id))
-                        .collect())
-                }
+            if ids.is_empty() {
+                Ok(submissions)
+            } else {
+                Ok(submissions
+                    .into_iter()
+                    .filter(|submission| ids.contains(&submission.id))
+                    .collect())
+            }
+        }
+
+        async fn fetch_jmap_quota(&self, _account_id: Uuid) -> Result<JmapQuota> {
+            Ok(JmapQuota {
+                id: "mail".to_string(),
+                name: "Mail".to_string(),
+                used: 10,
+                hard_limit: 100,
             })
         }
 
-        fn fetch_jmap_quota<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, JmapQuota> {
-            Box::pin(async move {
-                Ok(JmapQuota {
-                    id: "mail".to_string(),
-                    name: "Mail".to_string(),
-                    used: 10,
-                    hard_limit: 100,
-                })
-            })
-        }
-
-        fn save_jmap_upload_blob<'a>(
-            &'a self,
+        async fn save_jmap_upload_blob(
+            &self,
             account_id: Uuid,
-            media_type: &'a str,
-            blob_bytes: &'a [u8],
-        ) -> StoreFuture<'a, JmapUploadBlob> {
+            media_type: &str,
+            blob_bytes: &[u8],
+        ) -> Result<JmapUploadBlob> {
             let blob = JmapUploadBlob {
                 id: Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap(),
                 account_id,
@@ -2936,130 +2320,121 @@ mod tests {
                 blob_bytes: blob_bytes.to_vec(),
             };
             self.uploads.lock().unwrap().push(blob.clone());
-            Box::pin(async move { Ok(blob) })
+            Ok(blob)
         }
 
-        fn fetch_jmap_upload_blob<'a>(
-            &'a self,
+        async fn fetch_jmap_upload_blob(
+            &self,
             _account_id: Uuid,
             blob_id: Uuid,
-        ) -> StoreFuture<'a, Option<JmapUploadBlob>> {
-            let blob = self
+        ) -> Result<Option<JmapUploadBlob>> {
+            Ok(self
                 .uploads
                 .lock()
                 .unwrap()
                 .iter()
                 .find(|blob| blob.id == blob_id)
-                .cloned();
-            Box::pin(async move { Ok(blob) })
+                .cloned())
         }
 
-        fn save_draft_message<'a>(
-            &'a self,
+        async fn save_draft_message(
+            &self,
             input: SubmitMessageInput,
             _audit: AuditEntryInput,
-        ) -> StoreFuture<'a, SavedDraftMessage> {
+        ) -> Result<SavedDraftMessage> {
             self.saved_drafts.lock().unwrap().push(input.clone());
-            Box::pin(async move {
-                Ok(SavedDraftMessage {
-                    message_id: input.draft_message_id.unwrap_or_else(Uuid::new_v4),
-                    account_id: input.account_id,
-                    draft_mailbox_id: FakeStore::draft_mailbox().id,
-                    delivery_status: "draft".to_string(),
-                })
+            Ok(SavedDraftMessage {
+                message_id: input.draft_message_id.unwrap_or_else(Uuid::new_v4),
+                account_id: input.account_id,
+                draft_mailbox_id: FakeStore::draft_mailbox().id,
+                delivery_status: "draft".to_string(),
             })
         }
 
-        fn delete_draft_message<'a>(
-            &'a self,
+        async fn delete_draft_message(
+            &self,
             _account_id: Uuid,
             _message_id: Uuid,
             _audit: AuditEntryInput,
-        ) -> StoreFuture<'a, ()> {
-            Box::pin(async move { Ok(()) })
+        ) -> Result<()> {
+            Ok(())
         }
 
-        fn submit_draft_message<'a>(
-            &'a self,
+        async fn submit_draft_message(
+            &self,
             _account_id: Uuid,
             draft_message_id: Uuid,
-            _source: &'a str,
+            _source: &str,
             _audit: AuditEntryInput,
-        ) -> StoreFuture<'a, SubmittedMessage> {
+        ) -> Result<SubmittedMessage> {
             self.submitted_drafts.lock().unwrap().push(draft_message_id);
-            Box::pin(async move {
-                Ok(SubmittedMessage {
-                    message_id: Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap(),
-                    thread_id: FakeStore::draft_email().thread_id,
-                    account_id: FakeStore::account().account_id,
-                    sent_mailbox_id: Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff")
-                        .unwrap(),
-                    outbound_queue_id: Uuid::parse_str("11111111-2222-3333-4444-555555555555")
-                        .unwrap(),
-                    delivery_status: "queued".to_string(),
-                })
+            Ok(SubmittedMessage {
+                message_id: Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap(),
+                thread_id: FakeStore::draft_email().thread_id,
+                account_id: FakeStore::account().account_id,
+                sent_mailbox_id: Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap(),
+                outbound_queue_id: Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap(),
+                delivery_status: "queued".to_string(),
             })
         }
 
-        fn copy_jmap_email<'a>(
-            &'a self,
+        async fn copy_jmap_email(
+            &self,
             _account_id: Uuid,
             _message_id: Uuid,
             target_mailbox_id: Uuid,
             _audit: AuditEntryInput,
-        ) -> StoreFuture<'a, JmapEmail> {
+        ) -> Result<JmapEmail> {
             let mut email = FakeStore::draft_email();
             email.id = Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap();
             email.mailbox_id = target_mailbox_id;
             email.mailbox_role = "".to_string();
             email.mailbox_name = "Archive".to_string();
-            Box::pin(async move { Ok(email) })
+            Ok(email)
         }
 
-        fn import_jmap_email<'a>(
-            &'a self,
+        async fn import_jmap_email(
+            &self,
             input: JmapImportedEmailInput,
             _audit: AuditEntryInput,
-        ) -> StoreFuture<'a, JmapEmail> {
-            Box::pin(async move {
-                Ok(JmapEmail {
-                    id: Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap(),
-                    thread_id: Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap(),
-                    mailbox_id: input.mailbox_id,
-                    mailbox_role: "".to_string(),
-                    mailbox_name: "Imported".to_string(),
-                    received_at: "2026-04-18T10:05:00Z".to_string(),
-                    sent_at: None,
-                    from_address: input.from_address,
-                    from_display: input.from_display,
-                    to: input
-                        .to
-                        .into_iter()
-                        .map(|recipient| JmapEmailAddress {
-                            address: recipient.address,
-                            display_name: recipient.display_name,
-                        })
-                        .collect(),
-                    cc: input
-                        .cc
-                        .into_iter()
-                        .map(|recipient| JmapEmailAddress {
-                            address: recipient.address,
-                            display_name: recipient.display_name,
-                        })
-                        .collect(),
-                    bcc: Vec::new(),
-                    subject: input.subject,
-                    preview: "Imported".to_string(),
-                    body_text: input.body_text,
-                    body_html_sanitized: None,
-                    unread: false,
-                    flagged: false,
-                    has_attachments: false,
-                    size_octets: input.size_octets,
-                    internet_message_id: input.internet_message_id,
-                    delivery_status: "stored".to_string(),
-                })
+        ) -> Result<JmapEmail> {
+            Ok(JmapEmail {
+                id: Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap(),
+                thread_id: Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap(),
+                mailbox_id: input.mailbox_id,
+                mailbox_role: "".to_string(),
+                mailbox_name: "Imported".to_string(),
+                received_at: "2026-04-18T10:05:00Z".to_string(),
+                sent_at: None,
+                from_address: input.from_address,
+                from_display: input.from_display,
+                to: input
+                    .to
+                    .into_iter()
+                    .map(|recipient| JmapEmailAddress {
+                        address: recipient.address,
+                        display_name: recipient.display_name,
+                    })
+                    .collect(),
+                cc: input
+                    .cc
+                    .into_iter()
+                    .map(|recipient| JmapEmailAddress {
+                        address: recipient.address,
+                        display_name: recipient.display_name,
+                    })
+                    .collect(),
+                bcc: Vec::new(),
+                subject: input.subject,
+                preview: "Imported".to_string(),
+                body_text: input.body_text,
+                body_html_sanitized: None,
+                unread: false,
+                flagged: false,
+                has_attachments: false,
+                size_octets: input.size_octets,
+                internet_message_id: input.internet_message_id,
+                delivery_status: "stored".to_string(),
             })
         }
     }

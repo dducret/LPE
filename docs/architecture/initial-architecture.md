@@ -67,7 +67,7 @@ Types metier partages.
 Regles applicatives et orchestration du domaine.
 
 3. `lpe-storage`
-Adaptateur de persistance `PostgreSQL` et stockage blobs plus tard.
+Adaptateur de persistance `PostgreSQL`, stockage blobs plus tard, et helpers partages de parsing mail (`RFC822`, en-tetes, adresses) reutilises par les couches d'import et les adaptateurs protocolaires quand ils doivent reconstruire le modele canonique sans dupliquer la logique.
 
 4. `lpe-ai`
 Contrats et services pour une IA locale future avec provenance.
@@ -170,7 +170,7 @@ Shared business types.
 Application rules and domain orchestration.
 
 3. `lpe-storage`
-`PostgreSQL` persistence adapter and later blob storage.
+`PostgreSQL` persistence adapter, later blob storage, and shared mail parsing helpers (`RFC822`, headers, addresses) reused by import paths and protocol adapters when they need to rebuild the canonical model without duplicating parsing logic.
 
 4. `lpe-ai`
 Contracts and services for future local AI with provenance.

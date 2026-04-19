@@ -19,7 +19,7 @@
 
 ### Structure
 
-- `crates/` services et bibliotheques Rust
+- `crates/` services et bibliotheques Rust, avec `lpe-storage` qui centralise aussi le parsing mail partage utilise par les imports et les adaptateurs protocolaires
 - `web/admin` back office React/TypeScript
 - `web/client` client web type Outlook Web avec shell mail, liste de messages et panneau de lecture
 - `LPE-CT/` centre de tri DMZ separe avec sa propre documentation et ses scripts Debian
@@ -114,7 +114,7 @@ Les interfaces web supportent en v1:
 
 ### Structure
 
-- `crates/` Rust services and libraries
+- `crates/` Rust services and libraries, with `lpe-storage` also centralizing shared mail parsing used by imports and protocol adapters
 - `web/admin` React/TypeScript back office
 - `web/client` Outlook Web style client with a mail shell, message list, and reading pane
 - `LPE-CT/` separate DMZ sorting center with its own documentation and Debian scripts

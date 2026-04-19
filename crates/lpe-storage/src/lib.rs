@@ -6,8 +6,8 @@ use lpe_domain::{
     TransportDeliveryStatus, TransportRecipient,
 };
 use lpe_magika::{
-    collect_mime_attachment_parts, read_validation_record, ExpectedKind, IngressContext,
-    PolicyDecision, ValidationRequest, Validator,
+    read_validation_record, ExpectedKind, IngressContext, PolicyDecision, ValidationRequest,
+    Validator,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -16,6 +16,10 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use uuid::Uuid;
+
+pub mod mail;
+
+use crate::mail::{parse_header_recipients, parse_message_attachments};
 
 const DEFAULT_TENANT_ID: &str = "default";
 
@@ -5426,26 +5430,6 @@ fn domain_from_email(email: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("account email does not contain a domain"))
 }
 
-fn parse_message_attachments(bytes: &[u8]) -> Result<Vec<AttachmentUploadInput>> {
-    collect_mime_attachment_parts(bytes)?
-        .into_iter()
-        .enumerate()
-        .map(|(index, attachment)| {
-            let file_name = attachment
-                .filename
-                .unwrap_or_else(|| format!("attachment-{}.bin", index + 1));
-            let media_type = attachment
-                .declared_mime
-                .unwrap_or_else(|| "application/octet-stream".to_string());
-            Ok(AttachmentUploadInput {
-                file_name,
-                media_type,
-                blob_bytes: attachment.bytes,
-            })
-        })
-        .collect()
-}
-
 fn extract_supported_attachment_text(
     media_type: &str,
     file_name: &str,
@@ -5464,90 +5448,6 @@ fn extract_supported_attachment_text(
             }
         }
     }
-}
-
-fn parse_header_recipients(raw_message: &[u8], header_name: &str) -> Vec<SubmittedRecipientInput> {
-    let expected = format!("{}:", header_name.to_ascii_lowercase());
-    unfolded_headers(raw_message)
-        .into_iter()
-        .find_map(|line| {
-            let lower = line.to_ascii_lowercase();
-            if lower.starts_with(&expected) {
-                Some(parse_address_list(
-                    line.split_once(':')
-                        .map(|(_, value)| value)
-                        .unwrap_or_default(),
-                ))
-            } else {
-                None
-            }
-        })
-        .unwrap_or_default()
-}
-
-fn unfolded_headers(raw_message: &[u8]) -> Vec<String> {
-    let mut headers = Vec::new();
-    let mut current = String::new();
-
-    for line in String::from_utf8_lossy(raw_message).lines() {
-        if line.trim().is_empty() {
-            break;
-        }
-
-        if line.starts_with(' ') || line.starts_with('\t') {
-            current.push(' ');
-            current.push_str(line.trim());
-        } else {
-            if !current.is_empty() {
-                headers.push(current);
-            }
-            current = line.trim_end_matches('\r').to_string();
-        }
-    }
-
-    if !current.is_empty() {
-        headers.push(current);
-    }
-
-    headers
-}
-
-fn parse_address_list(value: &str) -> Vec<SubmittedRecipientInput> {
-    value
-        .split(',')
-        .filter_map(|part| {
-            let trimmed = part.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-
-            if let Some((display, address)) = trimmed.split_once('<') {
-                let normalized = normalize_email(address.trim().trim_end_matches('>'));
-                if normalized.is_empty() {
-                    return None;
-                }
-                let display_name = display.trim().trim_matches('"').trim().to_string();
-                Some(SubmittedRecipientInput {
-                    address: normalized,
-                    display_name: if display_name.is_empty() {
-                        None
-                    } else {
-                        Some(display_name)
-                    },
-                })
-            } else {
-                let normalized = normalize_email(trimmed.trim_matches(['<', '>']));
-                if normalized.is_empty() {
-                    None
-                } else {
-                    Some(SubmittedRecipientInput {
-                        address: normalized,
-                        display_name: None,
-                    })
-                }
-            }
-        })
-        .collect()
 }
 
 fn preview_text(body_text: &str) -> String {
@@ -5730,8 +5630,8 @@ fn participants_normalized(
 mod tests {
     use super::{
         domain_from_email, normalize_bcc_recipients, normalize_visible_recipients,
-        parse_header_recipients, parse_message_attachments, participants_normalized,
-        validate_pst_import_path, SubmitMessageInput, SubmittedRecipientInput,
+        participants_normalized, validate_pst_import_path, SubmitMessageInput,
+        SubmittedRecipientInput,
     };
     use lpe_magika::{
         write_validation_record, ExpectedKind, IngressContext, PolicyDecision, ValidationOutcome,
@@ -5805,27 +5705,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_header_recipients_unfolds_and_normalizes_addresses() {
-        let raw = concat!(
-            "From: Sender <sender@example.test>\r\n",
-            "To: Primary <to@example.test>,\r\n",
-            "  Secondary <second@example.test>\r\n",
-            "Cc: copy@example.test\r\n",
-            "\r\n",
-            "Body\r\n"
-        );
-
-        let to = parse_header_recipients(raw.as_bytes(), "to");
-        let cc = parse_header_recipients(raw.as_bytes(), "cc");
-
-        assert_eq!(to.len(), 2);
-        assert_eq!(to[0].address, "to@example.test");
-        assert_eq!(to[0].display_name.as_deref(), Some("Primary"));
-        assert_eq!(to[1].address, "second@example.test");
-        assert_eq!(cc[0].address, "copy@example.test");
-    }
-
-    #[test]
     fn pst_processing_requires_prior_validation_record() {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -5878,33 +5757,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn mime_attachment_parsing_keeps_filename_mime_and_bytes() {
-        let message = concat!(
-            "From: Sender <sender@example.test>\r\n",
-            "To: Recipient <recipient@example.test>\r\n",
-            "Subject: Indexed attachment\r\n",
-            "Content-Type: multipart/mixed; boundary=\"boundary42\"\r\n",
-            "\r\n",
-            "--boundary42\r\n",
-            "Content-Type: text/plain; charset=utf-8\r\n",
-            "\r\n",
-            "Body\r\n",
-            "--boundary42\r\n",
-            "Content-Type: application/pdf\r\n",
-            "Content-Disposition: attachment; filename=\"report.pdf\"\r\n",
-            "\r\n",
-            "PDF-ATTACHMENT\r\n",
-            "--boundary42--\r\n"
-        );
-
-        let attachments = parse_message_attachments(message.as_bytes()).unwrap();
-
-        assert_eq!(attachments.len(), 1);
-        assert_eq!(attachments[0].file_name, "report.pdf");
-        assert_eq!(attachments[0].media_type, "application/pdf");
-        assert_eq!(attachments[0].blob_bytes, b"PDF-ATTACHMENT\r\n".to_vec());
-    }
 }
 
 fn ensure_parent_directory(path: &str) -> Result<()> {
