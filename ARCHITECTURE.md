@@ -98,6 +98,13 @@ This includes standards or de facto standards used by desktop and mobile clients
 
 Autodiscovery must describe the selected `LPE` access protocols and the sorting-center submission or relay path without weakening the architectural separation between mailbox access and SMTP transport.
 
+In practice, v1 publication must stay aligned with the actually exposed product surface:
+
+- Thunderbird autoconfiguration may publish `IMAP` access and only publish `SMTP` submission when a real authenticated client-submission endpoint is explicitly exposed
+- the internal `LPE -> LPE-CT` relay contract must never be advertised as a desktop-client submission endpoint
+- Outlook autodiscovery should prefer the implemented `ActiveSync` endpoint instead of describing unimplemented `EWS`
+- `JMAP` publication should point to the real `LPE` `JMAP` session endpoint and must not claim unsupported well-known discovery variants
+
 ### Physical mail analogy
 
 The inbound mail architecture follows a model close in principle to historical physical mail handling.
@@ -157,7 +164,9 @@ The baseline role split is:
 
 - `LPE-CT` receives inbound `SMTP` on port `25`
 - `LPE-CT` acts as the HTTPS reverse proxy for the `LPE` web client on port `443` under `/mail`
-- `LPE-CT` acts as the HTTPS reverse proxy for `ActiveSync` under `/activesync`
+- `LPE-CT` acts as the HTTPS reverse proxy for `ActiveSync` under `/Microsoft-Server-ActiveSync`
+- `LPE-CT` acts as the HTTPS reverse proxy for Outlook autodiscovery under `/autodiscover/autodiscover.xml` and `/Autodiscover/Autodiscover.xml`
+- `LPE-CT` acts as the HTTPS reverse proxy for Thunderbird autoconfiguration under `/autoconfig/mail/config-v1.1.xml` and `/.well-known/autoconfig/mail/config-v1.1.xml`
 - `LPE-CT` acts as the TLS entry proxy for exposed `JMAP` endpoints toward `LPE`
 - secure `JMAP` WebSocket support is a future extension and is not part of the baseline implementation
 - `LPE-CT` acts as the proxy for `IMAPS`

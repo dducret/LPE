@@ -26,7 +26,7 @@ Le crate `crates/lpe-activesync` expose un sous-ensemble pragmatique de `Exchang
 
 Sans reverse proxy Debian, ces routes sont exposees directement par le service Rust.
 
-Avec le reverse proxy `/api/` documente dans le projet, elles sont atteignables via `/api/Microsoft-Server-ActiveSync`.
+Avec le reverse proxy Debian documente dans le projet, elles sont publiees sur `/Microsoft-Server-ActiveSync`. Le path historique `/api/Microsoft-Server-ActiveSync` reste disponible uniquement si un frontal local continue a tout prefixer sous `/api/`.
 
 ### Authentification
 
@@ -117,7 +117,7 @@ The `crates/lpe-activesync` crate exposes a pragmatic subset of `Exchange Active
 
 Without the Debian reverse proxy, these routes are exposed directly by the Rust service.
 
-With the documented `/api/` reverse proxy, they are reachable through `/api/Microsoft-Server-ActiveSync`.
+With the documented Debian reverse proxy, they are published on `/Microsoft-Server-ActiveSync`. The historical `/api/Microsoft-Server-ActiveSync` path remains available only when a local front end still prefixes every upstream route under `/api/`.
 
 ### Authentication
 

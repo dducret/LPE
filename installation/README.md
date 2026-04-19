@@ -122,6 +122,18 @@ Par defaut:
 - `nginx` expose la console d'administration sur le port `80`
 - `nginx` expose le client web sur `/mail/`
 - `nginx` reverse-proxy `/api/` vers le service Rust local
+- `nginx` publie aussi `/Microsoft-Server-ActiveSync`
+- `nginx` publie aussi `/autodiscover/autodiscover.xml` et `/Autodiscover/Autodiscover.xml`
+- `nginx` publie aussi `/autoconfig/mail/config-v1.1.xml` et `/.well-known/autoconfig/mail/config-v1.1.xml`
+
+Pour l'autoconfiguration client publique, le frontal expose doit rester `LPE-CT` ou un frontal HTTPS equivalent. En v1:
+
+- `Thunderbird` recupere un profil `IMAP`
+- `Outlook` recupere un profil `ActiveSync`
+- aucun endpoint `SMTP` client n'est annonce par defaut, car le depot ne publie pas encore de soumission client authentifiee `465/587`
+- le relais interne `LPE -> LPE-CT` ne doit jamais etre annonce comme endpoint de soumission client
+
+Les variables `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE` et `LPE_AUTODISCOVER_ACTIVESYNC_URL` permettent d'aligner la publication HTTP/XML avec le hostname public reel. Le detail du comportement est documente dans `docs/architecture/client-autoconfiguration.md`.
 
 Si `LPE_BIND_ADDRESS` ou `LPE_SERVER_NAME` changent dans `/etc/lpe/lpe.env`, relancer `update-lpe.sh` pour regenerer la configuration `nginx`.
 
@@ -268,6 +280,18 @@ By default:
 - `nginx` exposes the administration console on port `80`
 - `nginx` exposes the web client on `/mail/`
 - `nginx` reverse-proxies `/api/` to the local Rust service
+- `nginx` also publishes `/Microsoft-Server-ActiveSync`
+- `nginx` also publishes `/autodiscover/autodiscover.xml` and `/Autodiscover/Autodiscover.xml`
+- `nginx` also publishes `/autoconfig/mail/config-v1.1.xml` and `/.well-known/autoconfig/mail/config-v1.1.xml`
+
+For public client auto-configuration, the exposed front end must remain `LPE-CT` or an equivalent HTTPS publication layer. In v1:
+
+- `Thunderbird` receives an `IMAP` profile
+- `Outlook` receives an `ActiveSync` profile
+- no client `SMTP` endpoint is advertised by default because the repository does not yet expose authenticated `465/587` client submission
+- the internal `LPE -> LPE-CT` relay must never be advertised as a client-submission endpoint
+
+The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, and `LPE_AUTODISCOVER_ACTIVESYNC_URL` variables let you align the published HTTP/XML settings with the real public hostname. The detailed behavior is documented in `docs/architecture/client-autoconfiguration.md`.
 
 If `LPE_BIND_ADDRESS` or `LPE_SERVER_NAME` changes in `/etc/lpe/lpe.env`, run `update-lpe.sh` again to regenerate the `nginx` configuration.
 

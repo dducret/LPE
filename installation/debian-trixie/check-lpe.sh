@@ -91,6 +91,27 @@ check_http_json_field "$HTTP_BASE/health/local-ai" '"provider":"stub-local"'
 check_http_json_field "http://127.0.0.1/api/health" '"status":"ok"'
 check_http_json_field "http://127.0.0.1/api/bootstrap/admin" '"email":"admin@example.test"'
 
+autoconfig_body="$(curl --silent --show-error --fail "http://127.0.0.1/autoconfig/mail/config-v1.1.xml")" \
+  || fail "HTTP request failed: http://127.0.0.1/autoconfig/mail/config-v1.1.xml"
+[[ "$autoconfig_body" == *"<incomingServer type=\"imap\">"* ]] \
+  || fail "Thunderbird autoconfig endpoint does not publish IMAP"
+pass "Thunderbird autoconfig endpoint is published by nginx"
+
+well_known_autoconfig_body="$(curl --silent --show-error --fail "http://127.0.0.1/.well-known/autoconfig/mail/config-v1.1.xml")" \
+  || fail "HTTP request failed: http://127.0.0.1/.well-known/autoconfig/mail/config-v1.1.xml"
+[[ "$well_known_autoconfig_body" == *"<clientConfig version=\"1.1\">"* ]] \
+  || fail "Unexpected Thunderbird well-known autoconfig content"
+pass "Thunderbird well-known autoconfig endpoint is published by nginx"
+
+autodiscover_body="$(curl --silent --show-error --fail \
+  --header 'Content-Type: application/xml' \
+  --data '<?xml version="1.0" encoding="utf-8"?><Autodiscover><Request><EMailAddress>alice@example.test</EMailAddress></Request></Autodiscover>' \
+  "http://127.0.0.1/autodiscover/autodiscover.xml")" \
+  || fail "HTTP request failed: http://127.0.0.1/autodiscover/autodiscover.xml"
+[[ "$autodiscover_body" == *"<Type>MobileSync</Type>"* ]] \
+  || fail "Autodiscover endpoint does not publish ActiveSync"
+pass "Outlook autodiscover endpoint is published by nginx"
+
 admin_index="$(curl --silent --show-error --fail "http://127.0.0.1/")" \
   || fail "HTTP request failed: http://127.0.0.1/"
 [[ "$admin_index" == *"LPE Administration Console"* ]] || fail "Unexpected admin index content from nginx"

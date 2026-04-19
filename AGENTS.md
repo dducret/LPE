@@ -90,6 +90,8 @@ The sorting center is responsible for:
 
 The core `LPE` server remains responsible for the canonical sent-message copy in the `Sent` view.
 
+Client autoconfiguration and autodiscovery must publish only endpoints that are really implemented and exposed. The internal `LPE -> LPE-CT` relay must never be advertised as a client `SMTP` submission endpoint unless a real authenticated client-submission service is explicitly deployed and documented.
+
 ### Outlook and adoption
 
 Native Outlook and mobile support is critical for `LPE` adoption.
@@ -286,6 +288,8 @@ Une simple combinaison `IMAP` + `SMTP` + autodiscover ne doit pas etre supposee 
 Tout envoi effectue depuis un client Outlook, iPhone Mail ou autre client natif doit etre enregistre correctement dans `LPE` et visible dans la vue `Sent`.
 
 Toutes les couches clientes doivent utiliser le modele canonique `LPE` de soumission et de synchronisation. Aucune couche cliente ne doit ecrire une logique `Sent` ou `Outbox` parallele.
+
+L'autoconfiguration et l'autodiscover clients ne doivent publier que des endpoints reellement implementes et exposes. Le relais interne `LPE -> LPE-CT` ne doit jamais etre annonce comme endpoint `SMTP` de soumission client sauf si un service authentifie de soumission client est explicitement deploie et documente.
 
 Tout fichier entrant via connexion externe ou via un client doit etre valide par Google `Magika` avant traitement normal. Cela s'applique a la fois a `LPE-CT` et a `LPE`, y compris aux pieces jointes mail, uploads navigateur, blobs `JMAP`, imports `PST` et futurs points d'entree de fichiers.
 
