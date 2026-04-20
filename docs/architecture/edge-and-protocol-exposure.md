@@ -54,6 +54,8 @@ The `LPE-CT` front layer must therefore support:
 
 Necessary edge state such as spool or quarantine must remain bounded, explicit, and operationally replaceable.
 
+`LPE-CT` may still use dedicated local technical databases when bounded file-based state is no longer sufficient, for example for Bayesian filtering, reputation, or cluster coordination. Those databases remain sorting-center-local stores and must not become a second canonical product database.
+
 ### Internal transport `LPE-CT <-> LPE`
 
 The target protocol for internal `LPE-CT` to `LPE` exchanges is `gRPC`.
@@ -63,5 +65,7 @@ This choice is strictly limited to the internal backbone and does not change the
 The preferred Rust implementation for that internal layer is `tonic`.
 
 The current functional v1 contract remains documented separately in `docs/architecture/lpe-ct-integration.md`.
+
+The dedicated local-store boundary for `LPE-CT`, including private `5432` use, is documented in `docs/architecture/lpe-ct-local-data-stores.md`.
 
 

@@ -23,6 +23,8 @@ The perimeter pipeline now also executes:
 - anti-spam scoring and simple local reputation
 - detailed decision tracing persisted in the spool
 
+`LPE-CT` may also use dedicated local technical data stores for perimeter-owned state such as Bayesian filtering, reputation, greylisting, quarantine indexes, or cluster coordination. Those stores must remain local to the sorting center and must not become canonical mailbox or collaboration storage.
+
 For outbound `LPE -> LPE-CT` handoff, the sorting center now also covers:
 
 - local outbound routing rules
@@ -38,6 +40,8 @@ For outbound `LPE -> LPE-CT` handoff, the sorting center now also covers:
 - `PostgreSQL` remains the primary store for the core product
 - `LPE-CT` keeps only minimal local operational state for configuration and operations
 - the modern product axis remains `JMAP` on the core `LPE` side
+
+The dedicated local-store rules for `LPE-CT` are documented in `docs/architecture/lpe-ct-local-data-stores.md`.
 
 ### Network flows
 
@@ -56,6 +60,8 @@ Flows denied by default:
 - direct `DMZ` access to the core `PostgreSQL` databases
 - exposing the core back office on the DMZ server
 - sending data to an external AI service
+
+If `LPE-CT` uses a local `PostgreSQL` service for technical state, `5432` must remain private to the local host, backend segment, or dedicated `LPE-CT` cluster network and must never be Internet-facing.
 
 ### Management interface
 

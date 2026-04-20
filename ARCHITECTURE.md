@@ -50,6 +50,7 @@ The important non-negotiable rules are:
 - `docs/architecture/edge-and-protocol-exposure.md`
 - `docs/architecture/high-availability.md`
 - `docs/architecture/lpe-ct-integration.md`
+- `docs/architecture/lpe-ct-local-data-stores.md`
 - `docs/architecture/mail-security-and-traceability.md`
 - `docs/architecture/observability.md`
 - `docs/architecture/client-autoconfiguration.md`

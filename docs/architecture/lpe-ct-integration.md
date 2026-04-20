@@ -84,6 +84,8 @@ On the `LPE-CT` side:
 - `LPE_CT_METRICS_ENABLED`
 - `LPE_INTEGRATION_SHARED_SECRET`
 
+Any dedicated local database used by `LPE-CT` remains a sorting-center-private technical store. It must not require direct access from the `DMZ` to the core `LPE` `PostgreSQL` database and must not hold canonical mailbox or collaboration state. The full boundary is documented in `docs/architecture/lpe-ct-local-data-stores.md`.
+
 ### Observability
 
 The two services now expose a Prometheus-compatible `GET /metrics` endpoint on their local HTTP API.

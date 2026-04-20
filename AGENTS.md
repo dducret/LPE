@@ -69,6 +69,8 @@ The sorting center is responsible for:
 
 The core `LPE` server remains responsible for the canonical sent-message copy in `Sent`.
 
+`LPE-CT` may use dedicated local technical data stores, including a local database, only for perimeter-owned operational state such as Bayesian filtering, reputation, greylisting, quarantine indexes, and cluster coordination. Those stores must never become canonical mailbox, collaboration, rights, or user-visible state.
+
 ## Outlook and Native Client Rules
 
 Native Outlook and mobile support is a first-class requirement.
