@@ -17,7 +17,7 @@ The inbound perimeter pipeline is now explicitly staged as:
 1. ingress trace creation
 2. SMTP protocol/envelope capture
 3. `RBL` / DNS checks plus `SPF` / `DKIM` / `DMARC`
-4. local Bayesian scoring plus a placeholder hook for the future virus engine
+4. local Bayesian scoring plus a configurable antivirus provider chain in `LPE-CT`
 5. final score calculation
 6. accept, defer, reject, or quarantine
 

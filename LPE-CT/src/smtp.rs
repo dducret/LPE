@@ -33,6 +33,7 @@ use std::{
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{tcp::OwnedReadHalf, tcp::OwnedWriteHalf, TcpListener, TcpStream},
+    process::Command,
 };
 use tracing::{info, warn};
 
@@ -48,6 +49,10 @@ pub(crate) struct RuntimeConfig {
     drain_mode: bool,
     quarantine_enabled: bool,
     greylisting_enabled: bool,
+    antivirus_enabled: bool,
+    antivirus_fail_closed: bool,
+    antivirus_provider_chain: Vec<String>,
+    antivirus_providers: Vec<AntivirusProviderConfig>,
     bayespam_enabled: bool,
     bayespam_auto_learn: bool,
     bayespam_score_weight: f32,
@@ -171,6 +176,47 @@ struct QueuedMessage {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct ThrottleState {
     hits: Vec<u64>,
+}
+
+#[derive(Debug, Clone)]
+struct AntivirusProviderConfig {
+    id: String,
+    display_name: String,
+    command: String,
+    args: Vec<String>,
+    infected_markers: Vec<String>,
+    suspicious_markers: Vec<String>,
+    clean_markers: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct AntivirusVerdict {
+    action: FilterAction,
+    reason: Option<String>,
+    spam_score_delta: f32,
+    security_score_delta: f32,
+    decision_trace: Vec<DecisionTraceEntry>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AntivirusProviderDecision {
+    Clean,
+    Suspicious,
+    Infected,
+}
+
+#[derive(Debug, Clone)]
+struct AntivirusScanTarget {
+    root: PathBuf,
+    attachment_count: usize,
+}
+
+#[derive(Debug, Clone)]
+struct AntivirusScanOutcome {
+    provider_id: String,
+    provider_name: String,
+    decision: AntivirusProviderDecision,
+    summary: String,
 }
 
 #[derive(Debug, Clone)]
@@ -381,6 +427,12 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
         drain_mode: dashboard.policies.drain_mode,
         quarantine_enabled: dashboard.policies.quarantine_enabled,
         greylisting_enabled: dashboard.policies.greylisting_enabled,
+        antivirus_enabled: dashboard.policies.antivirus_enabled,
+        antivirus_fail_closed: dashboard.policies.antivirus_fail_closed,
+        antivirus_provider_chain: dashboard.policies.antivirus_provider_chain.clone(),
+        antivirus_providers: load_antivirus_providers(
+            &dashboard.policies.antivirus_provider_chain,
+        ),
         bayespam_enabled: dashboard.policies.bayespam_enabled,
         bayespam_auto_learn: dashboard.policies.bayespam_auto_learn,
         bayespam_score_weight: dashboard.policies.bayespam_score_weight,
@@ -430,6 +482,92 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty()),
     }
+}
+
+fn load_antivirus_providers(provider_chain: &[String]) -> Vec<AntivirusProviderConfig> {
+    provider_chain
+        .iter()
+        .filter_map(|provider_id| antivirus_provider_from_env(provider_id))
+        .collect()
+}
+
+fn antivirus_provider_from_env(provider_id: &str) -> Option<AntivirusProviderConfig> {
+    let normalized = provider_id.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    if normalized == "takeri" {
+        return Some(AntivirusProviderConfig {
+            id: normalized,
+            display_name: "takeri".to_string(),
+            command: env::var("LPE_CT_ANTIVIRUS_TAKERI_BIN")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "/opt/lpe-ct/bin/Shuhari-CyberForge-CLI".to_string()),
+            args: env::var("LPE_CT_ANTIVIRUS_TAKERI_ARGS")
+                .ok()
+                .map(|value| parse_csv_env(&value))
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| vec!["takeri".to_string(), "scan".to_string()]),
+            infected_markers: vec![
+                "status: infected".to_string(),
+                "infected files detected".to_string(),
+                "infected files:".to_string(),
+                "critical: malware detected".to_string(),
+            ],
+            suspicious_markers: vec![
+                "status: suspicious".to_string(),
+                "suspicious files:".to_string(),
+            ],
+            clean_markers: vec![
+                "status: clean".to_string(),
+                "no threats detected".to_string(),
+            ],
+        });
+    }
+
+    let env_key = normalized.replace('-', "_").to_ascii_uppercase();
+    let command = env::var(format!("LPE_CT_ANTIVIRUS_{env_key}_BIN"))
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let args = env::var(format!("LPE_CT_ANTIVIRUS_{env_key}_ARGS"))
+        .ok()
+        .map(|value| parse_csv_env(&value))
+        .unwrap_or_default();
+    let infected_markers = env::var(format!("LPE_CT_ANTIVIRUS_{env_key}_INFECTED_MARKERS"))
+        .ok()
+        .map(|value| parse_csv_env(&value))
+        .unwrap_or_else(|| vec!["infected".to_string(), "malware".to_string()]);
+    let suspicious_markers = env::var(format!("LPE_CT_ANTIVIRUS_{env_key}_SUSPICIOUS_MARKERS"))
+        .ok()
+        .map(|value| parse_csv_env(&value))
+        .unwrap_or_else(|| vec!["suspicious".to_string()]);
+    let clean_markers = env::var(format!("LPE_CT_ANTIVIRUS_{env_key}_CLEAN_MARKERS"))
+        .ok()
+        .map(|value| parse_csv_env(&value))
+        .unwrap_or_else(|| vec!["clean".to_string(), "ok".to_string()]);
+
+    Some(AntivirusProviderConfig {
+        id: normalized.clone(),
+        display_name: normalized,
+        command,
+        args,
+        infected_markers,
+        suspicious_markers,
+        clean_markers,
+    })
+}
+
+fn parse_csv_env(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 pub(crate) async fn process_outbound_handoff(
@@ -540,15 +678,45 @@ pub(crate) async fn process_outbound_handoff(
             });
         }
     }
-    message.decision_trace.push(DecisionTraceEntry {
-        stage: "virus-scan".to_string(),
-        outcome: "pending".to_string(),
-        detail: "Virus scanning hook reserved for a later implementation".to_string(),
-    });
+    let antivirus_verdict = evaluate_antivirus_policy(config, "outbound", &message.data).await?;
+    message.spam_score += antivirus_verdict.spam_score_delta;
+    message.security_score += antivirus_verdict.security_score_delta;
+    message
+        .decision_trace
+        .extend(antivirus_verdict.decision_trace.clone());
+    if antivirus_verdict.action == FilterAction::Quarantine {
+        message.status = "quarantined".to_string();
+        message.relay_error = antivirus_verdict.reason;
+        message.decision_trace.push(DecisionTraceEntry {
+            stage: "outbound-policy".to_string(),
+            outcome: "quarantine".to_string(),
+            detail: message.relay_error.clone().unwrap_or_else(|| {
+                "antivirus provider requested quarantine".to_string()
+            }),
+        });
+        move_message(spool_dir, &message, "outbound", "quarantine").await?;
+        persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
+        observability::record_security_event("outbound_quarantine");
+        return Ok(OutboundMessageHandoffResponse {
+            queue_id: payload.queue_id,
+            status: TransportDeliveryStatus::Quarantined,
+            trace_id: message.id,
+            detail: message.relay_error,
+            remote_message_ref: None,
+            retry: None,
+            dsn: None,
+            technical: None,
+            route: Some(route),
+            throttle: None,
+        });
+    }
     message.decision_trace.push(DecisionTraceEntry {
         stage: "final-score".to_string(),
         outcome: "calculated".to_string(),
-        detail: format!("outbound spam_score={:.2}", message.spam_score),
+        detail: format!(
+            "outbound spam_score={:.2} security_score={:.2}",
+            message.spam_score, message.security_score
+        ),
     });
 
     persist_message(spool_dir, "outbound", &message).await?;
@@ -1239,6 +1407,314 @@ fn classify_inbound_message<D: Detector>(
     Ok(InboundMagikaOutcome::Accept)
 }
 
+async fn evaluate_antivirus_policy(
+    config: &RuntimeConfig,
+    direction: &str,
+    message_bytes: &[u8],
+) -> Result<AntivirusVerdict> {
+    let mut decision_trace = Vec::new();
+    if !config.antivirus_enabled {
+        decision_trace.push(DecisionTraceEntry {
+            stage: "virus-scan".to_string(),
+            outcome: "disabled".to_string(),
+            detail: "antivirus chain disabled by local policy".to_string(),
+        });
+        return Ok(AntivirusVerdict {
+            action: FilterAction::Accept,
+            reason: None,
+            spam_score_delta: 0.0,
+            security_score_delta: 0.0,
+            decision_trace,
+        });
+    }
+
+    if config.antivirus_provider_chain.is_empty() {
+        let detail =
+            "antivirus chain enabled but no providers are configured in LPE_CT_ANTIVIRUS_PROVIDER_CHAIN"
+                .to_string();
+        decision_trace.push(DecisionTraceEntry {
+            stage: "virus-scan".to_string(),
+            outcome: if config.antivirus_fail_closed {
+                "quarantine"
+            } else {
+                "skipped"
+            }
+            .to_string(),
+            detail: detail.clone(),
+        });
+        return Ok(AntivirusVerdict {
+            action: if config.antivirus_fail_closed {
+                FilterAction::Quarantine
+            } else {
+                FilterAction::Accept
+            },
+            reason: config.antivirus_fail_closed.then_some(detail),
+            spam_score_delta: 0.0,
+            security_score_delta: if config.antivirus_fail_closed { 2.0 } else { 0.0 },
+            decision_trace,
+        });
+    }
+
+    if config.antivirus_providers.is_empty() {
+        let detail = format!(
+            "antivirus chain references unsupported or incomplete providers: {}",
+            config.antivirus_provider_chain.join(", ")
+        );
+        decision_trace.push(DecisionTraceEntry {
+            stage: "virus-scan".to_string(),
+            outcome: if config.antivirus_fail_closed {
+                "quarantine"
+            } else {
+                "skipped"
+            }
+            .to_string(),
+            detail: detail.clone(),
+        });
+        return Ok(AntivirusVerdict {
+            action: if config.antivirus_fail_closed {
+                FilterAction::Quarantine
+            } else {
+                FilterAction::Accept
+            },
+            reason: config.antivirus_fail_closed.then_some(detail),
+            spam_score_delta: 0.0,
+            security_score_delta: if config.antivirus_fail_closed { 2.0 } else { 0.0 },
+            decision_trace,
+        });
+    }
+
+    let target = prepare_antivirus_scan_target(direction, message_bytes)?;
+    for provider in &config.antivirus_providers {
+        match run_antivirus_provider(provider, &target).await {
+            Ok(outcome) => {
+                decision_trace.push(DecisionTraceEntry {
+                    stage: "virus-scan".to_string(),
+                    outcome: match outcome.decision {
+                        AntivirusProviderDecision::Clean => "clean",
+                        AntivirusProviderDecision::Suspicious => "suspicious",
+                        AntivirusProviderDecision::Infected => "infected",
+                    }
+                    .to_string(),
+                    detail: format!(
+                        "{}: {}",
+                        outcome.provider_name, outcome.summary
+                    ),
+                });
+                match outcome.decision {
+                    AntivirusProviderDecision::Clean => {}
+                    AntivirusProviderDecision::Suspicious => {
+                        cleanup_antivirus_scan_target(&target);
+                        return Ok(AntivirusVerdict {
+                            action: FilterAction::Quarantine,
+                            reason: Some(format!(
+                                "antivirus provider {} flagged suspicious content",
+                                outcome.provider_id
+                            )),
+                            spam_score_delta: 0.5,
+                            security_score_delta: 4.0,
+                            decision_trace,
+                        });
+                    }
+                    AntivirusProviderDecision::Infected => {
+                        cleanup_antivirus_scan_target(&target);
+                        return Ok(AntivirusVerdict {
+                            action: FilterAction::Quarantine,
+                            reason: Some(format!(
+                                "antivirus provider {} detected malware",
+                                outcome.provider_id
+                            )),
+                            spam_score_delta: 1.0,
+                            security_score_delta: 8.0,
+                            decision_trace,
+                        });
+                    }
+                }
+            }
+            Err(error) => {
+                let detail = format!(
+                    "{} execution failed for {} attachment artifact(s): {error}",
+                    provider.display_name, target.attachment_count
+                );
+                decision_trace.push(DecisionTraceEntry {
+                    stage: "virus-scan".to_string(),
+                    outcome: if config.antivirus_fail_closed {
+                        "quarantine"
+                    } else {
+                        "error"
+                    }
+                    .to_string(),
+                    detail: detail.clone(),
+                });
+                if config.antivirus_fail_closed {
+                    cleanup_antivirus_scan_target(&target);
+                    return Ok(AntivirusVerdict {
+                        action: FilterAction::Quarantine,
+                        reason: Some(detail),
+                        spam_score_delta: 0.0,
+                        security_score_delta: 3.0,
+                        decision_trace,
+                    });
+                }
+            }
+        }
+    }
+
+    cleanup_antivirus_scan_target(&target);
+    Ok(AntivirusVerdict {
+        action: FilterAction::Accept,
+        reason: None,
+        spam_score_delta: 0.0,
+        security_score_delta: 0.0,
+        decision_trace,
+    })
+}
+
+fn prepare_antivirus_scan_target(
+    direction: &str,
+    message_bytes: &[u8],
+) -> Result<AntivirusScanTarget> {
+    let root = env::temp_dir().join(format!(
+        "lpe-ct-av-{}-{}",
+        direction,
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir_all(&root)
+        .with_context(|| format!("unable to create antivirus scan target {}", root.display()))?;
+    fs::write(root.join("message.eml"), message_bytes)
+        .with_context(|| format!("unable to write antivirus message artifact {}", root.display()))?;
+
+    let attachments = collect_mime_attachment_parts(message_bytes)?;
+    for (index, attachment) in attachments.iter().enumerate() {
+        let original_name = attachment.filename.as_deref().unwrap_or("attachment");
+        let extension = attachment
+            .filename
+            .as_deref()
+            .and_then(|filename| Path::new(filename).extension())
+            .and_then(|value| value.to_str())
+            .map(|value| format!(".{}", sanitize_attachment_component(value)))
+            .unwrap_or_default();
+        let file_name = Path::new(original_name)
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .map(sanitize_attachment_component)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| format!("attachment-{}", index + 1));
+        fs::write(root.join(format!("{:02}-{}{}", index + 1, file_name, extension)), &attachment.bytes)
+            .with_context(|| format!("unable to write antivirus attachment artifact {}", root.display()))?;
+    }
+
+    Ok(AntivirusScanTarget {
+        root,
+        attachment_count: attachments.len(),
+    })
+}
+
+fn sanitize_attachment_component(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn cleanup_antivirus_scan_target(target: &AntivirusScanTarget) {
+    let _ = fs::remove_dir_all(&target.root);
+}
+
+async fn run_antivirus_provider(
+    provider: &AntivirusProviderConfig,
+    target: &AntivirusScanTarget,
+) -> Result<AntivirusScanOutcome> {
+    let mut command = Command::new(&provider.command);
+    let target_path = target.root.to_string_lossy().to_string();
+    let mut path_explicitly_bound = false;
+    for arg in &provider.args {
+        if arg.contains("{path}") {
+            path_explicitly_bound = true;
+        }
+        command.arg(arg.replace("{path}", &target_path));
+    }
+    if !path_explicitly_bound {
+        command.arg(&target.root);
+    }
+    let output = command
+        .output()
+        .await
+        .with_context(|| format!("unable to execute antivirus provider {}", provider.display_name))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    parse_antivirus_output(provider, &stdout, &stderr, output.status.code())
+}
+
+fn parse_antivirus_output(
+    provider: &AntivirusProviderConfig,
+    stdout: &str,
+    stderr: &str,
+    exit_code: Option<i32>,
+) -> Result<AntivirusScanOutcome> {
+    let combined = format!("{stdout}\n{stderr}");
+    let normalized = combined.to_ascii_lowercase();
+    let infected = marker_matches(&normalized, &provider.infected_markers)
+        || takeri_summary_count(&normalized, "infected files:") > 0;
+    let suspicious = marker_matches(&normalized, &provider.suspicious_markers)
+        || takeri_summary_count(&normalized, "suspicious files:") > 0;
+    let clean = marker_matches(&normalized, &provider.clean_markers);
+
+    let decision = if infected {
+        AntivirusProviderDecision::Infected
+    } else if suspicious {
+        AntivirusProviderDecision::Suspicious
+    } else if clean || exit_code == Some(0) {
+        AntivirusProviderDecision::Clean
+    } else {
+        anyhow::bail!(
+            "provider {} returned exit code {:?} without a parsable verdict",
+            provider.display_name,
+            exit_code
+        );
+    };
+
+    let summary = combined
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("provider produced no output")
+        .to_string();
+
+    Ok(AntivirusScanOutcome {
+        provider_id: provider.id.clone(),
+        provider_name: provider.display_name.clone(),
+        decision,
+        summary,
+    })
+}
+
+fn marker_matches(output: &str, markers: &[String]) -> bool {
+    markers
+        .iter()
+        .map(|marker| marker.trim().to_ascii_lowercase())
+        .filter(|marker| !marker.is_empty())
+        .any(|marker| output.contains(&marker))
+}
+
+fn takeri_summary_count(output: &str, prefix: &str) -> usize {
+    output
+        .lines()
+        .find_map(|line| {
+            let trimmed = line.trim();
+            let normalized = trimmed.to_ascii_lowercase();
+            normalized
+                .strip_prefix(prefix)
+                .and_then(|value| value.trim().parse::<usize>().ok())
+        })
+        .unwrap_or(0)
+}
+
 async fn evaluate_inbound_policy(
     spool_dir: &Path,
     config: &RuntimeConfig,
@@ -1285,7 +1761,7 @@ async fn evaluate_inbound_policy(
     decision_trace.push(DecisionTraceEntry {
         stage: "pipeline".to_string(),
         outcome: "start".to_string(),
-        detail: "running inbound edge pipeline: rbl/dns, bayespam, virus scan placeholder, final scoring".to_string(),
+        detail: "running inbound edge pipeline: rbl/dns, bayespam, antivirus chain, final scoring".to_string(),
     });
 
     if let Some(ip) = peer_ip {
@@ -1417,11 +1893,15 @@ async fn evaluate_inbound_policy(
             });
         }
     }
-    decision_trace.push(DecisionTraceEntry {
-        stage: "virus-scan".to_string(),
-        outcome: "pending".to_string(),
-        detail: "Virus scanning hook reserved for a later implementation".to_string(),
-    });
+    let antivirus_verdict = evaluate_antivirus_policy(config, "inbound", message_bytes).await?;
+    spam_score += antivirus_verdict.spam_score_delta;
+    security_score += antivirus_verdict.security_score_delta;
+    if antivirus_verdict.action == FilterAction::Quarantine {
+        if let Some(reason) = antivirus_verdict.reason.clone() {
+        quarantine_reasons.push(reason);
+        }
+    }
+    decision_trace.extend(antivirus_verdict.decision_trace);
 
     if reputation_score < 0 {
         spam_score += (-reputation_score) as f32 * 0.35;
@@ -2752,6 +3232,22 @@ fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
         drain_mode: bool_at(&value, &["policies", "drain_mode"], false),
         quarantine_enabled: bool_at(&value, &["policies", "quarantine_enabled"], true),
         greylisting_enabled: bool_at(&value, &["policies", "greylisting_enabled"], true),
+        antivirus_enabled: bool_at(&value, &["policies", "antivirus_enabled"], false),
+        antivirus_fail_closed: bool_at(
+            &value,
+            &["policies", "antivirus_fail_closed"],
+            true,
+        ),
+        antivirus_provider_chain: strings_at(
+            &value,
+            &["policies", "antivirus_provider_chain"],
+            &["takeri"],
+        ),
+        antivirus_providers: load_antivirus_providers(&strings_at(
+            &value,
+            &["policies", "antivirus_provider_chain"],
+            &["takeri"],
+        )),
         bayespam_enabled: bool_at(&value, &["policies", "bayespam_enabled"], true),
         bayespam_auto_learn: bool_at(&value, &["policies", "bayespam_auto_learn"], true),
         bayespam_score_weight: f32_at(&value, &["policies", "bayespam_score_weight"], 6.0),
@@ -3243,10 +3739,11 @@ mod tests {
     use super::{
         apply_authentication_scores, classify_inbound_message, compose_rfc822_message,
         dkim_disposition, dnsbl_query_name, encode_quoted_printable, evaluate_greylisting,
-        initialize_spool, load_bayespam_corpus, load_reputation_score, parse_peer_ip,
-        process_outbound_handoff, receive_message, receive_message_with_validator,
-        retry_after_seconds, score_bayespam, spf_disposition, stable_key_id, summarize_dkim,
-        summarize_dmarc, summarize_spf, train_bayespam, unix_now, update_reputation, AuthSummary,
+        initialize_spool, load_antivirus_providers, load_bayespam_corpus, load_reputation_score,
+        parse_antivirus_output, parse_peer_ip, process_outbound_handoff, receive_message,
+        receive_message_with_validator, retry_after_seconds, score_bayespam, spf_disposition,
+        stable_key_id, summarize_dkim, summarize_dmarc, summarize_spf, train_bayespam, unix_now,
+        update_reputation, AntivirusProviderConfig, AntivirusProviderDecision, AuthSummary,
         AuthenticationAssessment, BayesLabel, DkimDisposition, FilterAction, GreylistEntry,
         OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig, SpfDisposition,
     };
@@ -3291,6 +3788,10 @@ mod tests {
             drain_mode: false,
             quarantine_enabled: true,
             greylisting_enabled: false,
+            antivirus_enabled: false,
+            antivirus_fail_closed: true,
+            antivirus_provider_chain: vec!["takeri".to_string()],
+            antivirus_providers: load_antivirus_providers(&["takeri".to_string()]),
             bayespam_enabled: true,
             bayespam_auto_learn: true,
             bayespam_score_weight: 6.0,
@@ -3906,6 +4407,59 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("bayespam score"));
+    }
+
+    #[test]
+    fn takeri_provider_loads_with_default_command_and_args() {
+        let providers = load_antivirus_providers(&["takeri".to_string()]);
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].id, "takeri");
+        assert_eq!(providers[0].command, "/opt/lpe-ct/bin/Shuhari-CyberForge-CLI");
+        assert_eq!(providers[0].args, vec!["takeri".to_string(), "scan".to_string()]);
+    }
+
+    #[test]
+    fn antivirus_output_parser_detects_takeri_infections_and_suspicious_files() {
+        let provider = AntivirusProviderConfig {
+            id: "takeri".to_string(),
+            display_name: "takeri".to_string(),
+            command: "/opt/lpe-ct/bin/Shuhari-CyberForge-CLI".to_string(),
+            args: vec!["takeri".to_string(), "scan".to_string()],
+            infected_markers: vec![
+                "status: infected".to_string(),
+                "infected files detected".to_string(),
+                "infected files:".to_string(),
+            ],
+            suspicious_markers: vec![
+                "status: suspicious".to_string(),
+                "suspicious files:".to_string(),
+            ],
+            clean_markers: vec![
+                "status: clean".to_string(),
+                "no threats detected".to_string(),
+            ],
+        };
+
+        let infected = parse_antivirus_output(
+            &provider,
+            "-------Scan Summary-------\nInfected files: 1\nSuspicious files: 0\n",
+            "",
+            Some(0),
+        )
+        .unwrap();
+        assert_eq!(infected.decision, AntivirusProviderDecision::Infected);
+
+        let suspicious = parse_antivirus_output(
+            &provider,
+            "-------Scan Result-------\nStatus: SUSPICIOUS\n",
+            "",
+            Some(0),
+        )
+        .unwrap();
+        assert_eq!(suspicious.decision, AntivirusProviderDecision::Suspicious);
+
+        let clean = parse_antivirus_output(&provider, "No threats detected.\n", "", Some(0)).unwrap();
+        assert_eq!(clean.decision, AntivirusProviderDecision::Clean);
     }
 
     #[test]

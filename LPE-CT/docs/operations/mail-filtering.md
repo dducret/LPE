@@ -18,7 +18,7 @@ Inbound messages now go through these stages:
 6. `DNSBL` / `RBL` lookups on the connecting IP
 7. SPF, DKIM, and DMARC evaluation
 8. `bayespam` scoring on subject, visible text, sender, and `HELO`
-9. virus-scan placeholder stage recorded as pending
+9. antivirus provider chain execution on extracted MIME attachments and a raw `.eml` artifact
 10. sender reputation weighting and final score calculation
 11. final decision: `accept`, `defer`, `quarantine`, or `reject`
 
@@ -56,6 +56,54 @@ When the optional local PostgreSQL store is enabled, quarantined messages are al
 
 - default: `256`
 - caps the number of unique tokens used per message for training and scoring
+
+`LPE_CT_ANTIVIRUS_ENABLED`
+
+- default: `true` in the Debian example environment
+- enables the antivirus provider chain inside the `LPE-CT` SMTP pipeline
+
+`LPE_CT_ANTIVIRUS_FAIL_CLOSED`
+
+- default: `true`
+- quarantines the message when an enabled antivirus chain is misconfigured or a provider execution fails
+
+`LPE_CT_ANTIVIRUS_PROVIDER_CHAIN`
+
+- default: `takeri`
+- ordered comma-separated provider ids; `LPE-CT` executes them in sequence and stops on the first suspicious or infected result
+
+`LPE_CT_ANTIVIRUS_TAKERI_BIN`
+
+- default: `/opt/lpe-ct/bin/Shuhari-CyberForge-CLI`
+- `takeri` preset executable built from the upstream Git checkout
+
+`LPE_CT_ANTIVIRUS_TAKERI_ARGS`
+
+- default: `takeri,scan`
+- argument prefix passed before the scan target path for the `takeri` preset
+
+`LPE_CT_ANTIVIRUS_TAKERI_REPO_URL`
+
+- default: `https://github.com/AnimeForLife191/Shuhari-CyberForge.git`
+- upstream repository synchronized by the Debian helper script
+
+`LPE_CT_ANTIVIRUS_TAKERI_BRANCH`
+
+- default: `main`
+- upstream branch used by the Git synchronization helper
+
+`LPE_CT_ANTIVIRUS_TAKERI_SYNC_DIR`
+
+- default: `/opt/lpe-ct/vendor/takeri-src`
+- sparse Git checkout used to rebuild the `takeri` CLI during install and update
+
+Additional command-style providers can be chained after `takeri` with:
+
+- `LPE_CT_ANTIVIRUS_<PROVIDER>_BIN`
+- `LPE_CT_ANTIVIRUS_<PROVIDER>_ARGS`
+- `LPE_CT_ANTIVIRUS_<PROVIDER>_INFECTED_MARKERS`
+- `LPE_CT_ANTIVIRUS_<PROVIDER>_SUSPICIOUS_MARKERS`
+- `LPE_CT_ANTIVIRUS_<PROVIDER>_CLEAN_MARKERS`
 
 `LPE_CT_REQUIRE_SPF`
 
@@ -183,8 +231,11 @@ The decision matrix is now intentionally stricter:
 - authentication temporary failures can produce `451` when `LPE_CT_DEFER_ON_AUTH_TEMPFAIL=true`
 - poor sender/IP reputation can force quarantine or reject before spam-score thresholds are reached
 - multiple triggered causes are accumulated in the final decision trace instead of keeping only the first matching rule
+- antivirus detections or suspicious provider outcomes force quarantine in `LPE-CT`
+- when `LPE_CT_ANTIVIRUS_FAIL_CLOSED=true`, provider execution failures also force quarantine
 - quarantined or rejected spam sessions can be terminated immediately after the final `SMTP` reply so the edge stops the transaction cleanly
 - outbound handoff now also runs through `bayespam`; high-scoring outbound content is quarantined before relay
+- outbound handoff now also runs through the same antivirus provider chain before relay
 
 ## Operational recommendations
 
@@ -198,7 +249,7 @@ The decision matrix is now intentionally stricter:
 
 ## Current scope
 
-This implementation executes inbound SPF, DKIM, and DMARC verification, DNSBL checks, greylisting, Bayesian spam scoring with spool-first auto-learning, a placeholder stage for future virus scanning, reputation weighting, and detailed trace persistence.
+This implementation executes inbound SPF, DKIM, and DMARC verification, DNSBL checks, greylisting, Bayesian spam scoring with spool-first auto-learning, a configurable antivirus provider chain, reputation weighting, and detailed trace persistence.
 
 It also now executes outbound routing selection, local throttling, retry backoff aware of the previous attempt count, and SMTP-result classification into `relayed`, `deferred`, `bounced`, or `failed`, with structured `DSN`/technical trace feedback for the `LPE` worker.
 

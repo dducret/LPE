@@ -31,7 +31,7 @@ Operating assumptions:
 - root shell or an account with `sudo`
 - no local dependency assumed at the start except network access
 
-For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI, without exposing the core back office on the DMZ server, and also provisions a pinned `Magika` CLI binary in `/opt/lpe-ct/bin/magika` for inbound SMTP validation.
+For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI, without exposing the core back office on the DMZ server, also provisions a pinned `Magika` CLI binary in `/opt/lpe-ct/bin/magika` for inbound SMTP validation, and now also performs a Git-based sparse synchronization of `takeri` from `https://github.com/AnimeForLife191/Shuhari-CyberForge.git` before building `/opt/lpe-ct/bin/Shuhari-CyberForge-CLI` as the default antivirus provider.
 
 The `LPE-CT` scripts also install an SMTP listener, a local spool in `/var/spool/lpe-ct`, and three test suites:
 
@@ -42,6 +42,7 @@ The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_D
 - `test-local-lpe-ct.sh` from the `LPE-CT` server
 - `test-from-lpe.sh` from the LAN or core server
 - `test-from-internet.sh` from an external machine
+- `test-antivirus-lpe-ct.sh` from the `LPE-CT` server to validate quarantine on an `EICAR` attachment
 
 ### Initial preparation on a bare Debian server
 

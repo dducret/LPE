@@ -7,6 +7,7 @@ INSTALL_ROOT="${INSTALL_ROOT:-/opt/lpe-ct}"
 SRC_DIR="${SRC_DIR:-$INSTALL_ROOT/src}"
 BIN_DIR="${BIN_DIR:-$INSTALL_ROOT/bin}"
 WEB_ROOT="${WEB_ROOT:-$INSTALL_ROOT/www/management}"
+VENDOR_DIR="${VENDOR_DIR:-$INSTALL_ROOT/vendor}"
 ENV_DIR="${ENV_DIR:-/etc/lpe-ct}"
 STATE_DIR="${STATE_DIR:-/var/lib/lpe-ct}"
 SPOOL_DIR="${SPOOL_DIR:-/var/spool/lpe-ct}"
@@ -18,6 +19,10 @@ NGINX_ENABLED_DIR="${NGINX_ENABLED_DIR:-/etc/nginx/sites-enabled}"
 NGINX_SITE_NAME="${NGINX_SITE_NAME:-lpe-ct.conf}"
 MAGIKA_VERSION="${MAGIKA_VERSION:-1.0.2}"
 MAGIKA_LINUX_X86_64_SHA256="${MAGIKA_LINUX_X86_64_SHA256:-4ce475c965cd20e724b5fc53e8a303a479b9d8649beef8721d05e9b3988fbab4}"
+TAKERI_REPO_URL="${TAKERI_REPO_URL:-https://github.com/AnimeForLife191/Shuhari-CyberForge.git}"
+TAKERI_BRANCH="${TAKERI_BRANCH:-main}"
+TAKERI_SYNC_DIR="${TAKERI_SYNC_DIR:-$VENDOR_DIR/takeri-src}"
+TAKERI_BIN_PATH="${TAKERI_BIN_PATH:-$BIN_DIR/Shuhari-CyberForge-CLI}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "This script must be run as root." >&2
@@ -57,7 +62,7 @@ if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
   useradd --system --home-dir "${INSTALL_ROOT}" --create-home --shell /usr/sbin/nologin "${SERVICE_USER}"
 fi
 
-install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${INSTALL_ROOT}" "${SRC_DIR}" "${BIN_DIR}" "${STATE_DIR}" "${SPOOL_DIR}"
+install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${INSTALL_ROOT}" "${SRC_DIR}" "${BIN_DIR}" "${VENDOR_DIR}" "${STATE_DIR}" "${SPOOL_DIR}"
 install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${SPOOL_DIR}/incoming" "${SPOOL_DIR}/deferred" "${SPOOL_DIR}/quarantine" "${SPOOL_DIR}/held" "${SPOOL_DIR}/sent"
 install -d -o root -g root "${WEB_ROOT}" "${ENV_DIR}"
 
@@ -90,6 +95,12 @@ cd "${SRC_DIR}"
 "${CARGO_BIN}" build --release --manifest-path "${SRC_DIR}/LPE-CT/Cargo.toml"
 
 install -m 0755 "${SRC_DIR}/LPE-CT/target/release/lpe-ct" "${BIN_DIR}/lpe-ct"
+TAKERI_REPO_URL="${TAKERI_REPO_URL}" \
+TAKERI_BRANCH="${TAKERI_BRANCH}" \
+TAKERI_SYNC_DIR="${TAKERI_SYNC_DIR}" \
+TAKERI_BIN_PATH="${TAKERI_BIN_PATH}" \
+CARGO_BIN="${CARGO_BIN}" \
+bash "${SRC_DIR}/LPE-CT/installation/debian-trixie/sync-takeri.sh"
 install_magika "${MAGIKA_VERSION}" "${MAGIKA_LINUX_X86_64_SHA256}"
 install -m 0644 "${SRC_DIR}/LPE-CT/installation/debian-trixie/lpe-ct.service" "${SYSTEMD_DIR}/lpe-ct.service"
 
@@ -118,6 +129,7 @@ nginx -t
 
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${STATE_DIR}"
 chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${SPOOL_DIR}"
+chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${VENDOR_DIR}"
 systemctl daemon-reload
 systemctl enable lpe-ct.service
 systemctl enable nginx

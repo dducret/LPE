@@ -21,7 +21,7 @@ The perimeter pipeline now also executes:
 - `DNSBL/RBL` lookups
 - `SPF`, `DKIM`, and `DMARC` verification
 - local `bayespam` scoring with spool-first corpus learning
-- explicit virus-scan placeholder stage recorded in the decision trace
+- a configurable antivirus provider chain, with `takeri` as the default Git-synchronized Debian profile
 - anti-spam scoring and simple local reputation
 - detailed decision tracing persisted in the spool
 

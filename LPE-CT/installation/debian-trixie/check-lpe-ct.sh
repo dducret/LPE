@@ -10,6 +10,7 @@ STATE_FILE="${STATE_FILE:-/var/lib/lpe-ct/state.json}"
 SPOOL_DIR="${SPOOL_DIR:-/var/spool/lpe-ct}"
 SERVICE_NAME="${SERVICE_NAME:-lpe-ct.service}"
 NGINX_SITE_PATH="${NGINX_SITE_PATH:-/etc/nginx/sites-available/lpe-ct.conf}"
+TAKERI_BIN_PATH="${TAKERI_BIN_PATH:-$INSTALL_ROOT/bin/Shuhari-CyberForge-CLI}"
 
 fail() {
   echo "[FAIL] $*" >&2
@@ -50,6 +51,11 @@ set +a
 
 [[ -n "${LPE_CT_BOOTSTRAP_ADMIN_EMAIL:-}" ]] || fail "LPE_CT_BOOTSTRAP_ADMIN_EMAIL is not set in $ENV_FILE"
 pass "Bootstrap management email is configured"
+
+if [[ "${LPE_CT_ANTIVIRUS_ENABLED:-false}" == "true" ]]; then
+  check_file "${LPE_CT_ANTIVIRUS_TAKERI_BIN:-$TAKERI_BIN_PATH}"
+  pass "Antivirus provider chain is configured"
+fi
 
 API_HEALTH_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/health"
 API_DASHBOARD_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/api/v1/dashboard"

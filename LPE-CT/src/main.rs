@@ -133,6 +133,12 @@ struct PolicySettings {
     drain_mode: bool,
     quarantine_enabled: bool,
     greylisting_enabled: bool,
+    #[serde(default = "default_antivirus_enabled")]
+    antivirus_enabled: bool,
+    #[serde(default = "default_antivirus_fail_closed")]
+    antivirus_fail_closed: bool,
+    #[serde(default = "default_antivirus_provider_chain")]
+    antivirus_provider_chain: Vec<String>,
     #[serde(default = "default_bayespam_enabled")]
     bayespam_enabled: bool,
     #[serde(default = "default_bayespam_auto_learn")]
@@ -732,6 +738,15 @@ fn apply_env_overrides(state: &mut DashboardState) {
     if let Ok(value) = env::var("LPE_CT_GREYLISTING_ENABLED") {
         state.policies.greylisting_enabled = parse_bool(&value);
     }
+    if let Ok(value) = env::var("LPE_CT_ANTIVIRUS_ENABLED") {
+        state.policies.antivirus_enabled = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_ANTIVIRUS_FAIL_CLOSED") {
+        state.policies.antivirus_fail_closed = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_ANTIVIRUS_PROVIDER_CHAIN") {
+        state.policies.antivirus_provider_chain = parse_csv(&value);
+    }
     if let Ok(value) = env::var("LPE_CT_BAYESPAM_ENABLED") {
         state.policies.bayespam_enabled = parse_bool(&value);
     }
@@ -834,6 +849,18 @@ fn apply_env_overrides(state: &mut DashboardState) {
 }
 
 fn normalize_policy_settings(policies: &mut PolicySettings) {
+    let mut antivirus_provider_chain = policies
+        .antivirus_provider_chain
+        .iter()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    let mut seen = std::collections::BTreeSet::new();
+    antivirus_provider_chain.retain(|value| seen.insert(value.clone()));
+    if policies.antivirus_enabled && antivirus_provider_chain.is_empty() {
+        antivirus_provider_chain = default_antivirus_provider_chain();
+    }
+    policies.antivirus_provider_chain = antivirus_provider_chain;
     if policies.bayespam_min_token_length < 2 {
         policies.bayespam_min_token_length = 2;
     }
@@ -1037,6 +1064,9 @@ fn default_state() -> DashboardState {
             drain_mode: false,
             quarantine_enabled: true,
             greylisting_enabled: true,
+            antivirus_enabled: default_antivirus_enabled(),
+            antivirus_fail_closed: default_antivirus_fail_closed(),
+            antivirus_provider_chain: default_antivirus_provider_chain(),
             bayespam_enabled: default_bayespam_enabled(),
             bayespam_auto_learn: default_bayespam_auto_learn(),
             bayespam_score_weight: default_bayespam_score_weight(),
@@ -1154,6 +1184,18 @@ fn normalize_local_db_network_scope(value: &str) -> String {
 
 fn default_dnsbl_enabled() -> bool {
     true
+}
+
+fn default_antivirus_enabled() -> bool {
+    false
+}
+
+fn default_antivirus_fail_closed() -> bool {
+    true
+}
+
+fn default_antivirus_provider_chain() -> Vec<String> {
+    vec!["takeri".to_string()]
 }
 
 fn default_bayespam_enabled() -> bool {
