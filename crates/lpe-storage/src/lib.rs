@@ -3510,7 +3510,7 @@ impl Storage {
         .bind(tenant_id)
         .bind(token)
         .bind(normalize_email(email))
-        .bind(auth_method.trim().to_lowercase())
+        .bind(normalize_admin_session_auth_method(auth_method))
         .bind(session_timeout_minutes.max(5) as i32)
         .execute(&self.pool)
         .await?;
@@ -10797,6 +10797,15 @@ fn normalize_email(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
+fn normalize_admin_session_auth_method(value: &str) -> &'static str {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "oidc" => "oidc",
+        // The persisted admin session tracks the broad login family so
+        // password+totp continues to work against the 0.1.3 schema.
+        _ => "password",
+    }
+}
+
 fn normalize_subject(value: &str) -> String {
     value.trim().to_string()
 }
@@ -11404,9 +11413,10 @@ fn env_bind_address(name: &str, fallback: &str) -> String {
 mod tests {
     use super::{
         attachment_kind, default_permissions_for_role, domain_from_email,
-        normalize_admin_permissions, normalize_bcc_recipients, normalize_task_status,
-        normalize_visible_recipients, participants_normalized, validate_pst_import_path,
-        SubmitMessageInput, SubmittedRecipientInput,
+        normalize_admin_permissions, normalize_admin_session_auth_method,
+        normalize_bcc_recipients, normalize_task_status, normalize_visible_recipients,
+        participants_normalized, validate_pst_import_path, SubmitMessageInput,
+        SubmittedRecipientInput,
     };
     use lpe_magika::{
         write_validation_record, ExpectedKind, IngressContext, PolicyDecision, ValidationOutcome,
@@ -11592,6 +11602,16 @@ mod tests {
         );
 
         assert_eq!(permissions, vec!["audit", "dashboard", "mail"]);
+    }
+
+    #[test]
+    fn admin_session_auth_method_collapses_totp_to_password_family() {
+        assert_eq!(normalize_admin_session_auth_method("password"), "password");
+        assert_eq!(
+            normalize_admin_session_auth_method("password+totp"),
+            "password"
+        );
+        assert_eq!(normalize_admin_session_auth_method("oidc"), "oidc");
     }
 }
 

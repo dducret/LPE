@@ -48,7 +48,7 @@ The admin password flow is now:
 1. the administrator submits email and password
 2. `LPE` verifies the local `argon2` credential
 3. when an active admin `TOTP` factor exists, a valid `TOTP` code is required
-4. `LPE` creates an internal admin session with auth method `password` or `password+totp`
+4. `LPE` creates an internal admin session in the `password` or `oidc` family; successful sign-in audit events keep the finer `password+totp` detail
 5. `LPE` records success and failure in the internal audit log
 
 ### Authorization rules
