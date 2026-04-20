@@ -9,8 +9,8 @@ use axum::{
 };
 use lpe_mail_auth::{authenticate_account, AccountAuthStore, AccountPrincipal};
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, CollaborationCollection, Storage,
-    UpsertClientContactInput, UpsertClientEventInput,
+    AccessibleContact, AccessibleEvent, CollaborationCollection, DavTask, Storage,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -28,6 +28,8 @@ const ADDRESSBOOK_COLLECTION_PATH: &str = "/dav/addressbooks/me/default/";
 const CALENDAR_HOME_PATH: &str = "/dav/calendars/me/";
 const CALENDAR_COLLECTION_PREFIX: &str = "/dav/calendars/me/";
 const CALENDAR_COLLECTION_PATH: &str = "/dav/calendars/me/default/";
+const TASK_COLLECTION_ID: &str = "tasks";
+const TASK_COLLECTION_PATH: &str = "/dav/calendars/me/tasks/";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct DavAttendee {
@@ -81,6 +83,15 @@ pub trait DavStore: AccountAuthStore {
         principal_account_id: Uuid,
         collection_id: &'a str,
     ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleEvent>>;
+    fn fetch_dav_tasks<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<DavTask>>;
+    fn fetch_dav_tasks_by_ids<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<DavTask>>;
     fn create_accessible_contact<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -105,6 +116,10 @@ pub trait DavStore: AccountAuthStore {
         event_id: Uuid,
         input: UpsertClientEventInput,
     ) -> lpe_mail_auth::StoreFuture<'a, AccessibleEvent>;
+    fn upsert_dav_task<'a>(
+        &'a self,
+        input: UpsertClientTaskInput,
+    ) -> lpe_mail_auth::StoreFuture<'a, DavTask>;
     fn delete_accessible_contact<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -115,6 +130,11 @@ pub trait DavStore: AccountAuthStore {
         principal_account_id: Uuid,
         event_id: Uuid,
     ) -> lpe_mail_auth::StoreFuture<'a, ()>;
+    fn delete_dav_task<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        task_id: Uuid,
+    ) -> lpe_mail_auth::StoreFuture<'a, ()>;
 }
 
 impl DavStore for Storage {
@@ -122,14 +142,20 @@ impl DavStore for Storage {
         &'a self,
         principal_account_id: Uuid,
     ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>> {
-        Box::pin(async move { self.fetch_accessible_contact_collections(principal_account_id).await })
+        Box::pin(async move {
+            self.fetch_accessible_contact_collections(principal_account_id)
+                .await
+        })
     }
 
     fn fetch_accessible_calendar_collections<'a>(
         &'a self,
         principal_account_id: Uuid,
     ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>> {
-        Box::pin(async move { self.fetch_accessible_calendar_collections(principal_account_id).await })
+        Box::pin(async move {
+            self.fetch_accessible_calendar_collections(principal_account_id)
+                .await
+        })
     }
 
     fn fetch_accessible_contacts<'a>(
@@ -166,6 +192,21 @@ impl DavStore for Storage {
             self.fetch_accessible_events_in_collection(principal_account_id, collection_id)
                 .await
         })
+    }
+
+    fn fetch_dav_tasks<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<DavTask>> {
+        Box::pin(async move { self.fetch_dav_tasks(principal_account_id).await })
+    }
+
+    fn fetch_dav_tasks_by_ids<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<DavTask>> {
+        Box::pin(async move { self.fetch_dav_tasks_by_ids(principal_account_id, ids).await })
     }
 
     fn create_accessible_contact<'a>(
@@ -216,6 +257,13 @@ impl DavStore for Storage {
         })
     }
 
+    fn upsert_dav_task<'a>(
+        &'a self,
+        input: UpsertClientTaskInput,
+    ) -> lpe_mail_auth::StoreFuture<'a, DavTask> {
+        Box::pin(async move { self.upsert_dav_task(input).await })
+    }
+
     fn delete_accessible_contact<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -236,6 +284,14 @@ impl DavStore for Storage {
             self.delete_accessible_event(principal_account_id, event_id)
                 .await
         })
+    }
+
+    fn delete_dav_task<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        task_id: Uuid,
+    ) -> lpe_mail_auth::StoreFuture<'a, ()> {
+        Box::pin(async move { self.delete_dav_task(principal_account_id, task_id).await })
     }
 }
 
@@ -333,6 +389,7 @@ impl<S: DavStore> DavService<S> {
                     collection_resourcetype("collection"),
                 )];
                 if depth == "1" {
+                    entries.push(task_collection_entry());
                     entries.extend(
                         self.store
                             .fetch_accessible_calendar_collections(principal.account_id)
@@ -346,6 +403,8 @@ impl<S: DavStore> DavService<S> {
             _ => {
                 if let Some(contact) = self.contact_for_path(principal.account_id, path).await? {
                     vec![contact_resource_entry(contact)]
+                } else if let Some(task) = self.task_for_path(principal.account_id, path).await? {
+                    vec![task_resource_entry(task)]
                 } else if let Some(event) = self.event_for_path(principal.account_id, path).await? {
                     vec![event_resource_entry(event)]
                 } else if let Some(collection_id) = collection_id_from_contact_path(path) {
@@ -368,6 +427,18 @@ impl<S: DavStore> DavService<S> {
                                 .await?
                                 .into_iter()
                                 .map(contact_resource_entry),
+                        );
+                    }
+                    entries
+                } else if is_task_collection_path(path) {
+                    let mut entries = vec![task_collection_entry()];
+                    if depth == "1" {
+                        entries.extend(
+                            self.store
+                                .fetch_dav_tasks(principal.account_id)
+                                .await?
+                                .into_iter()
+                                .map(task_resource_entry),
                         );
                     }
                     entries
@@ -417,6 +488,14 @@ impl<S: DavStore> DavService<S> {
                 .filter(|contact| contact_matches_report(contact, &filter))
                 .map(contact_report_entry)
                 .collect()
+        } else if is_task_collection_path(path) {
+            self.store
+                .fetch_dav_tasks(principal.account_id)
+                .await?
+                .into_iter()
+                .filter(|task| task_matches_report(task, &filter))
+                .map(task_report_entry)
+                .collect()
         } else if let Some(collection_id) = collection_id_from_event_path(path) {
             self.store
                 .fetch_accessible_events_in_collection(principal.account_id, &collection_id)
@@ -446,6 +525,17 @@ impl<S: DavStore> DavService<S> {
                 "text/vcard; charset=utf-8",
                 body,
                 Some(etag_for_contact(&contact)),
+            ));
+        }
+        if let Some(task) = self.task_for_path(principal.account_id, path).await? {
+            let body = serialize_vtodo(&task);
+            if precondition_not_modified(headers, &etag(&body)) {
+                return Ok(status_only(304));
+            }
+            return Ok(text_response(
+                "text/calendar; charset=utf-8",
+                body,
+                Some(etag_for_task(&task)),
             ));
         }
         if let Some(event) = self.event_for_path(principal.account_id, path).await? {
@@ -487,6 +577,18 @@ impl<S: DavStore> DavService<S> {
                 etag_for_contact(&contact),
             ));
         }
+        if let Some(resource_id) = resource_id_for_task_path(path) {
+            let existing = self.task_for_path(principal.account_id, path).await?;
+            check_write_preconditions(headers, existing.as_ref().map(etag_for_task))?;
+            let task = self
+                .store
+                .upsert_dav_task(parse_vtodo(resource_id, principal.account_id, body)?)
+                .await?;
+            return Ok(status_with_etag(
+                if existing.is_some() { 204 } else { 201 },
+                etag_for_task(&task),
+            ));
+        }
         if let Some((collection_id, resource_id)) = resource_id_for_event_path(path) {
             let existing = self.event_for_path(principal.account_id, path).await?;
             check_write_preconditions(headers, existing.as_ref().map(etag_for_event))?;
@@ -522,6 +624,14 @@ impl<S: DavStore> DavService<S> {
                 .await?;
             return Ok(status_only(204));
         }
+        if let Some(resource_id) = resource_id_for_task_path(path) {
+            let existing = self.task_for_path(principal.account_id, path).await?;
+            check_delete_preconditions(headers, existing.as_ref().map(etag_for_task))?;
+            self.store
+                .delete_dav_task(principal.account_id, resource_id)
+                .await?;
+            return Ok(status_only(204));
+        }
         if let Some((_, resource_id)) = resource_id_for_event_path(path) {
             let existing = self.event_for_path(principal.account_id, path).await?;
             check_delete_preconditions(headers, existing.as_ref().map(etag_for_event))?;
@@ -549,7 +659,11 @@ impl<S: DavStore> DavService<S> {
             .find(|contact| contact.id == resource_id))
     }
 
-    async fn event_for_path(&self, account_id: Uuid, path: &str) -> Result<Option<AccessibleEvent>> {
+    async fn event_for_path(
+        &self,
+        account_id: Uuid,
+        path: &str,
+    ) -> Result<Option<AccessibleEvent>> {
         let Some((collection_id, resource_id)) = resource_id_for_event_path(path) else {
             return Ok(None);
         };
@@ -559,6 +673,18 @@ impl<S: DavStore> DavService<S> {
             .await?
             .into_iter()
             .find(|event| event.id == resource_id))
+    }
+
+    async fn task_for_path(&self, account_id: Uuid, path: &str) -> Result<Option<DavTask>> {
+        let Some(resource_id) = resource_id_for_task_path(path) else {
+            return Ok(None);
+        };
+        Ok(self
+            .store
+            .fetch_dav_tasks_by_ids(account_id, &[resource_id])
+            .await?
+            .into_iter()
+            .next())
     }
 }
 
@@ -615,6 +741,21 @@ fn addressbook_collection_entry(collection: CollaborationCollection) -> String {
     )
 }
 
+fn task_collection_entry() -> String {
+    response_entry(
+        TASK_COLLECTION_PATH,
+        collection_props(
+            "Tasks",
+            "<d:collection/><cal:calendar/>",
+            None,
+            None,
+            Some(
+                "<d:supported-report-set><d:supported-report><d:report><cal:calendar-query/></d:report></d:supported-report><d:supported-report><d:report><cal:calendar-multiget/></d:report></d:supported-report></d:supported-report-set><cal:supported-calendar-component-set><cal:comp name=\"VTODO\"/></cal:supported-calendar-component-set>".to_string(),
+            ),
+        ),
+    )
+}
+
 fn calendar_collection_entry(collection: CollaborationCollection) -> String {
     response_entry(
         &event_collection_href(&collection.id),
@@ -665,12 +806,38 @@ fn event_resource_entry(event: AccessibleEvent) -> String {
     )
 }
 
+fn task_resource_entry(task: DavTask) -> String {
+    let body = serialize_vtodo(&task);
+    response_entry(
+        &task_href(task.id),
+        collection_props(
+            &task.title,
+            "",
+            Some("text/calendar; charset=utf-8"),
+            Some(etag(&body)),
+            None,
+        ),
+    )
+}
+
 fn contact_report_entry(contact: AccessibleContact) -> String {
     let body = serialize_vcard(&contact);
     response_entry(
         &contact_href(&contact.collection_id, contact.id),
         format!(
             "<d:propstat><d:prop><d:getetag>{}</d:getetag><card:address-data>{}</card:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>",
+            xml_escape(&etag(&body)),
+            xml_escape(&body)
+        ),
+    )
+}
+
+fn task_report_entry(task: DavTask) -> String {
+    let body = serialize_vtodo(&task);
+    response_entry(
+        &task_href(task.id),
+        format!(
+            "<d:propstat><d:prop><d:getetag>{}</d:getetag><cal:calendar-data>{}</cal:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>",
             xml_escape(&etag(&body)),
             xml_escape(&body)
         ),
@@ -845,6 +1012,10 @@ fn event_collection_href(collection_id: &str) -> String {
     format!("{CALENDAR_COLLECTION_PREFIX}{collection_id}/")
 }
 
+fn task_collection_href() -> &'static str {
+    TASK_COLLECTION_PATH
+}
+
 fn contact_href(collection_id: &str, id: Uuid) -> String {
     format!("{}{id}.vcf", contact_collection_href(collection_id))
 }
@@ -853,12 +1024,24 @@ fn event_href(collection_id: &str, id: Uuid) -> String {
     format!("{}{id}.ics", event_collection_href(collection_id))
 }
 
+fn task_href(id: Uuid) -> String {
+    format!("{}{id}.ics", task_collection_href())
+}
+
 fn collection_id_from_contact_path(path: &str) -> Option<String> {
     collection_id_from_path(path, ADDRESSBOOK_COLLECTION_PREFIX)
 }
 
 fn collection_id_from_event_path(path: &str) -> Option<String> {
-    collection_id_from_path(path, CALENDAR_COLLECTION_PREFIX)
+    let collection_id = collection_id_from_path(path, CALENDAR_COLLECTION_PREFIX)?;
+    if collection_id == TASK_COLLECTION_ID {
+        return None;
+    }
+    Some(collection_id)
+}
+
+fn is_task_collection_path(path: &str) -> bool {
+    collection_id_from_path(path, CALENDAR_COLLECTION_PREFIX).as_deref() == Some(TASK_COLLECTION_ID)
 }
 
 fn collection_id_from_path(path: &str, prefix: &str) -> Option<String> {
@@ -876,6 +1059,16 @@ fn resource_id_for_contact_path(path: &str) -> Option<(String, Uuid)> {
 
 fn resource_id_for_event_path(path: &str) -> Option<(String, Uuid)> {
     resource_id_for_path(path, CALENDAR_COLLECTION_PREFIX, ".ics")
+}
+
+fn resource_id_for_task_path(path: &str) -> Option<Uuid> {
+    let (collection_id, resource_id) =
+        resource_id_for_path(path, CALENDAR_COLLECTION_PREFIX, ".ics")?;
+    if collection_id == TASK_COLLECTION_ID {
+        Some(resource_id)
+    } else {
+        None
+    }
 }
 
 fn resource_id_for_path(path: &str, prefix: &str, suffix: &str) -> Option<(String, Uuid)> {
@@ -909,6 +1102,10 @@ fn etag_for_contact(contact: &AccessibleContact) -> String {
 
 fn etag_for_event(event: &AccessibleEvent) -> String {
     etag(&serialize_ical(event))
+}
+
+fn etag_for_task(task: &DavTask) -> String {
+    etag(&serialize_vtodo(task))
 }
 
 fn serialize_vcard(contact: &AccessibleContact) -> String {
@@ -954,6 +1151,31 @@ fn serialize_ical(event: &AccessibleEvent) -> String {
         push_line(&mut lines, "X-LPE-ATTENDEES", &event.attendees);
     }
     lines.push("END:VEVENT".to_string());
+    lines.push("END:VCALENDAR".to_string());
+    lines.join("\r\n")
+}
+
+fn serialize_vtodo(task: &DavTask) -> String {
+    let mut lines = vec![
+        "BEGIN:VCALENDAR".to_string(),
+        "VERSION:2.0".to_string(),
+        "PRODID:-//LPE//DAV Adapter//EN".to_string(),
+        "CALSCALE:GREGORIAN".to_string(),
+        "BEGIN:VTODO".to_string(),
+        format!("UID:{}", task.id),
+        format!("SUMMARY:{}", text_escape(&task.title)),
+        format!("STATUS:{}", vtodo_status_from_task_status(&task.status)),
+        format!("LAST-MODIFIED:{}", format_ical_timestamp(&task.updated_at)),
+        format!("X-LPE-SORT-ORDER:{}", task.sort_order),
+    ];
+    push_line(&mut lines, "DESCRIPTION", &task.description);
+    if let Some(due_at) = task.due_at.as_deref() {
+        lines.push(format!("DUE:{}", format_ical_timestamp(due_at)));
+    }
+    if let Some(completed_at) = task.completed_at.as_deref() {
+        lines.push(format!("COMPLETED:{}", format_ical_timestamp(completed_at)));
+    }
+    lines.push("END:VTODO".to_string());
     lines.push("END:VCALENDAR".to_string());
     lines.join("\r\n")
 }
@@ -1079,6 +1301,56 @@ fn parse_ical(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientEve
     })
 }
 
+fn parse_vtodo(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientTaskInput> {
+    let content = std::str::from_utf8(body)?;
+    let mut title = String::new();
+    let mut description = String::new();
+    let mut status = String::new();
+    let mut due_at = None;
+    let mut completed_at = None;
+    let mut sort_order = 0;
+
+    for line in unfolded_lines(content) {
+        let Some((left, raw_value)) = line.split_once(':') else {
+            continue;
+        };
+        let key = left
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_uppercase();
+        let value = text_unescape(raw_value.trim());
+        match key.as_str() {
+            "SUMMARY" => title = value,
+            "DESCRIPTION" => description = value,
+            "STATUS" => status = task_status_from_vtodo_status(&value)?,
+            "DUE" => due_at = Some(parse_ical_timestamp(&value)?),
+            "COMPLETED" => completed_at = Some(parse_ical_timestamp(&value)?),
+            "X-LPE-SORT-ORDER" => {
+                sort_order = value
+                    .parse::<i32>()
+                    .map_err(|_| anyhow!("invalid X-LPE-SORT-ORDER"))?;
+            }
+            _ => {}
+        }
+    }
+
+    if title.trim().is_empty() {
+        bail!("VTODO summary is required");
+    }
+
+    Ok(UpsertClientTaskInput {
+        id: Some(id),
+        account_id,
+        title,
+        description,
+        status,
+        due_at,
+        completed_at,
+        sort_order,
+    })
+}
+
 fn parse_ical_datetime(value: &str) -> Result<(String, String)> {
     let compact = value.trim_end_matches('Z');
     let (date_part, time_part) = compact
@@ -1100,6 +1372,28 @@ fn parse_ical_datetime(value: &str) -> Result<(String, String)> {
 
 fn format_ical_datetime(date: &str, time: &str) -> String {
     format!("{}T{}00", date.replace('-', ""), time.replace(':', ""))
+}
+
+fn format_ical_timestamp(value: &str) -> String {
+    value
+        .replace('-', "")
+        .replace(':', "")
+        .trim_end_matches(".000")
+        .to_string()
+}
+
+fn parse_ical_timestamp(value: &str) -> Result<String> {
+    let value = value.trim().trim_end_matches('Z');
+    if value.len() == 8 {
+        return Ok(format!(
+            "{}-{}-{}T00:00:00Z",
+            &value[0..4],
+            &value[4..6],
+            &value[6..8]
+        ));
+    }
+    let (date, time) = parse_ical_datetime(value)?;
+    Ok(format!("{date}T{}:00Z", time))
 }
 
 fn format_duration(minutes: i32) -> String {
@@ -1231,6 +1525,30 @@ fn attendee_label(attendee: &DavAttendee) -> String {
 
 fn serialize_attendees_json(attendees: &[DavAttendee]) -> String {
     serde_json::to_string(attendees).unwrap_or_else(|_| "[]".to_string())
+}
+
+fn vtodo_status_from_task_status(status: &str) -> &'static str {
+    match status {
+        "needs-action" => "NEEDS-ACTION",
+        "in-progress" => "IN-PROCESS",
+        "completed" => "COMPLETED",
+        "cancelled" => "CANCELLED",
+        _ => "NEEDS-ACTION",
+    }
+}
+
+fn task_status_from_vtodo_status(status: &str) -> Result<String> {
+    let normalized = status.trim();
+    if normalized.is_empty() {
+        return Ok("needs-action".to_string());
+    }
+    match normalized.to_ascii_uppercase().as_str() {
+        "NEEDS-ACTION" => Ok("needs-action".to_string()),
+        "IN-PROCESS" => Ok("in-progress".to_string()),
+        "COMPLETED" => Ok("completed".to_string()),
+        "CANCELLED" => Ok("cancelled".to_string()),
+        _ => bail!("invalid VTODO STATUS"),
+    }
 }
 
 fn param_escape(value: &str) -> String {
@@ -1366,6 +1684,41 @@ fn event_matches_report(event: &AccessibleEvent, filter: &ReportFilter) -> bool 
     true
 }
 
+fn task_matches_report(task: &DavTask, filter: &ReportFilter) -> bool {
+    if !filter.hrefs.is_empty() && !filter.hrefs.iter().any(|href| href == &task_href(task.id)) {
+        return false;
+    }
+    if !filter.text_terms.is_empty() {
+        let haystack =
+            format!("{} {} {}", task.title, task.description, task.status).to_lowercase();
+        if !filter
+            .text_terms
+            .iter()
+            .all(|term| haystack.contains(&term.trim().to_lowercase()))
+        {
+            return false;
+        }
+    }
+    if filter.time_range_start.is_some() || filter.time_range_end.is_some() {
+        let Some(due_at) = task.due_at.as_deref() else {
+            return false;
+        };
+        let due = normalize_time_range_value(&format_ical_timestamp(due_at))
+            .unwrap_or_else(|| format_ical_timestamp(due_at));
+        if let Some(range_start) = filter.time_range_start.as_deref() {
+            if normalize_time_range_value(range_start).as_deref() > Some(due.as_str()) {
+                return false;
+            }
+        }
+        if let Some(range_end) = filter.time_range_end.as_deref() {
+            if normalize_time_range_value(range_end).as_deref() <= Some(due.as_str()) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 fn normalize_time_range_value(value: &str) -> Option<String> {
     let value = value.trim_end_matches('Z');
     if value.len() < 15 {
@@ -1486,6 +1839,7 @@ mod tests {
         login: Option<AccountLogin>,
         contacts: Arc<Mutex<Vec<ClientContact>>>,
         events: Arc<Mutex<Vec<ClientEvent>>>,
+        tasks: Arc<Mutex<Vec<DavTask>>>,
     }
 
     impl FakeStore {
@@ -1521,6 +1875,20 @@ mod tests {
                 owner_email: account.email.clone(),
                 owner_display_name: account.display_name.clone(),
                 display_name: "Calendar".to_string(),
+                is_owned: true,
+                rights: Self::full_rights(),
+            }
+        }
+
+        fn task_collection() -> CollaborationCollection {
+            let account = Self::account();
+            CollaborationCollection {
+                id: TASK_COLLECTION_ID.to_string(),
+                kind: "calendar".to_string(),
+                owner_account_id: account.account_id,
+                owner_email: account.email.clone(),
+                owner_display_name: account.display_name.clone(),
+                display_name: "Tasks".to_string(),
                 is_owned: true,
                 rights: Self::full_rights(),
             }
@@ -1566,6 +1934,19 @@ mod tests {
             }
         }
 
+        fn task(id: Uuid, title: &str) -> DavTask {
+            DavTask {
+                id,
+                title: title.to_string(),
+                description: String::new(),
+                status: "needs-action".to_string(),
+                due_at: None,
+                completed_at: None,
+                sort_order: 0,
+                updated_at: "2026-04-20T09:00:00Z".to_string(),
+            }
+        }
+
         fn account() -> AuthenticatedAccount {
             AuthenticatedAccount {
                 tenant_id: "tenant-a".to_string(),
@@ -1597,6 +1978,29 @@ mod tests {
             let login = self.login.clone();
             Box::pin(async move { Ok(login) })
         }
+
+        fn fetch_active_account_app_passwords<'a>(
+            &'a self,
+            _email: &'a str,
+        ) -> lpe_mail_auth::StoreFuture<'a, Vec<lpe_storage::StoredAccountAppPassword>> {
+            Box::pin(async move { Ok(Vec::new()) })
+        }
+
+        fn touch_account_app_password<'a>(
+            &'a self,
+            _email: &'a str,
+            _app_password_id: Uuid,
+        ) -> lpe_mail_auth::StoreFuture<'a, ()> {
+            Box::pin(async move { Ok(()) })
+        }
+
+        fn append_audit_event<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _entry: lpe_storage::AuditEntryInput,
+        ) -> lpe_mail_auth::StoreFuture<'a, ()> {
+            Box::pin(async move { Ok(()) })
+        }
     }
 
     impl DavStore for FakeStore {
@@ -1611,7 +2015,7 @@ mod tests {
             &'a self,
             _principal_account_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>> {
-            Box::pin(async move { Ok(vec![Self::calendar_collection()]) })
+            Box::pin(async move { Ok(vec![Self::calendar_collection(), Self::task_collection()]) })
         }
 
         fn fetch_accessible_contacts<'a>(
@@ -1658,6 +2062,30 @@ mod tests {
             _collection_id: &'a str,
         ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleEvent>> {
             self.fetch_accessible_events(principal_account_id)
+        }
+
+        fn fetch_dav_tasks<'a>(
+            &'a self,
+            _principal_account_id: Uuid,
+        ) -> lpe_mail_auth::StoreFuture<'a, Vec<DavTask>> {
+            let tasks = self.tasks.lock().unwrap().clone();
+            Box::pin(async move { Ok(tasks) })
+        }
+
+        fn fetch_dav_tasks_by_ids<'a>(
+            &'a self,
+            _principal_account_id: Uuid,
+            ids: &'a [Uuid],
+        ) -> lpe_mail_auth::StoreFuture<'a, Vec<DavTask>> {
+            let tasks = self
+                .tasks
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|task| ids.contains(&task.id))
+                .cloned()
+                .collect();
+            Box::pin(async move { Ok(tasks) })
         }
 
         fn create_accessible_contact<'a>(
@@ -1726,6 +2154,33 @@ mod tests {
             self.create_accessible_event(principal_account_id, Some(DEFAULT_COLLECTION_ID), input)
         }
 
+        fn upsert_dav_task<'a>(
+            &'a self,
+            input: UpsertClientTaskInput,
+        ) -> lpe_mail_auth::StoreFuture<'a, DavTask> {
+            let mut tasks = self.tasks.lock().unwrap();
+            let task = DavTask {
+                id: input.id.unwrap(),
+                title: input.title,
+                description: input.description,
+                status: if input.status.trim().is_empty() {
+                    "needs-action".to_string()
+                } else {
+                    input.status
+                },
+                due_at: input.due_at,
+                completed_at: match input.completed_at {
+                    Some(value) if !value.trim().is_empty() => Some(value),
+                    _ => None,
+                },
+                sort_order: input.sort_order,
+                updated_at: "2026-04-20T09:00:00Z".to_string(),
+            };
+            tasks.retain(|entry| entry.id != task.id);
+            tasks.push(task.clone());
+            Box::pin(async move { Ok(task) })
+        }
+
         fn delete_accessible_contact<'a>(
             &'a self,
             _principal_account_id: Uuid,
@@ -1747,6 +2202,18 @@ mod tests {
                 .lock()
                 .unwrap()
                 .retain(|entry| entry.id != event_id);
+            Box::pin(async move { Ok(()) })
+        }
+
+        fn delete_dav_task<'a>(
+            &'a self,
+            _principal_account_id: Uuid,
+            task_id: Uuid,
+        ) -> lpe_mail_auth::StoreFuture<'a, ()> {
+            self.tasks
+                .lock()
+                .unwrap()
+                .retain(|entry| entry.id != task_id);
             Box::pin(async move { Ok(()) })
         }
     }
@@ -2070,5 +2537,141 @@ mod tests {
         assert_eq!(events[0].recurrence_rule, "FREQ=WEEKLY;BYDAY=TH");
         assert_eq!(events[0].attendees, "Alice Example");
         assert!(events[0].attendees_json.contains("alice@example.test"));
+    }
+
+    #[tokio::test]
+    async fn propfind_lists_task_collection_and_resources() {
+        let task_id = Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            tasks: Arc::new(Mutex::new(vec![DavTask {
+                id: task_id,
+                title: "Prepare launch".to_string(),
+                description: "Review the last checklist".to_string(),
+                status: "in-progress".to_string(),
+                due_at: Some("2026-04-25T08:30:00Z".to_string()),
+                completed_at: None,
+                sort_order: 7,
+                updated_at: "2026-04-20T09:00:00Z".to_string(),
+            }])),
+            ..Default::default()
+        };
+        let service = DavService::new(store);
+        let mut headers = bearer_headers();
+        headers.insert("depth", HeaderValue::from_static("1"));
+
+        let response = service
+            .handle(
+                &Method::from_bytes(b"PROPFIND").unwrap(),
+                &Uri::from_static(TASK_COLLECTION_PATH),
+                &headers,
+                &[],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::from_u16(207).unwrap());
+        let body = response_text(response).await;
+        assert!(body.contains(TASK_COLLECTION_PATH));
+        assert!(body.contains(&task_href(task_id)));
+        assert!(body.contains("VTODO"));
+    }
+
+    #[tokio::test]
+    async fn get_returns_vtodo_for_existing_task() {
+        let task_id = Uuid::parse_str("13131313-1313-1313-1313-131313131313").unwrap();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            tasks: Arc::new(Mutex::new(vec![DavTask {
+                id: task_id,
+                title: "File quarterly report".to_string(),
+                description: "Publish before the board review".to_string(),
+                status: "completed".to_string(),
+                due_at: Some("2026-04-30T10:00:00Z".to_string()),
+                completed_at: Some("2026-04-28T16:45:00Z".to_string()),
+                sort_order: 3,
+                updated_at: "2026-04-20T09:00:00Z".to_string(),
+            }])),
+            ..Default::default()
+        };
+        let service = DavService::new(store);
+
+        let response = service
+            .handle(
+                &Method::GET,
+                &Uri::from_static(
+                    "/dav/calendars/me/tasks/13131313-1313-1313-1313-131313131313.ics",
+                ),
+                &bearer_headers(),
+                &[],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_text(response).await;
+        assert!(body.contains("BEGIN:VTODO"));
+        assert!(body.contains("SUMMARY:File quarterly report"));
+        assert!(body.contains("STATUS:COMPLETED"));
+        assert!(body.contains("X-LPE-SORT-ORDER:3"));
+    }
+
+    #[tokio::test]
+    async fn put_upserts_task_from_vtodo() {
+        let task_id = Uuid::parse_str("14141414-1414-1414-1414-141414141414").unwrap();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            ..Default::default()
+        };
+        let service = DavService::new(store.clone());
+
+        let response = service
+            .handle(
+                &Method::PUT,
+                &Uri::from_static(
+                    "/dav/calendars/me/tasks/14141414-1414-1414-1414-141414141414.ics",
+                ),
+                &bearer_headers(),
+                b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:14141414-1414-1414-1414-141414141414\r\nSUMMARY:Prepare migration\r\nDESCRIPTION:Freeze tenant changes before the window\r\nSTATUS:IN-PROCESS\r\nDUE:20260501T083000Z\r\nX-LPE-SORT-ORDER:5\r\nEND:VTODO\r\nEND:VCALENDAR",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let tasks = store.tasks.lock().unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, task_id);
+        assert_eq!(tasks[0].status, "in-progress");
+        assert_eq!(tasks[0].due_at.as_deref(), Some("2026-05-01T08:30:00Z"));
+        assert_eq!(tasks[0].sort_order, 5);
+    }
+
+    #[tokio::test]
+    async fn delete_removes_task() {
+        let task_id = Uuid::parse_str("15151515-1515-1515-1515-151515151515").unwrap();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            tasks: Arc::new(Mutex::new(vec![FakeStore::task(
+                task_id,
+                "Retire old export",
+            )])),
+            ..Default::default()
+        };
+        let service = DavService::new(store.clone());
+
+        let response = service
+            .handle(
+                &Method::DELETE,
+                &Uri::from_static(
+                    "/dav/calendars/me/tasks/15151515-1515-1515-1515-151515151515.ics",
+                ),
+                &bearer_headers(),
+                &[],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert!(store.tasks.lock().unwrap().is_empty());
     }
 }

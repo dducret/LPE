@@ -704,6 +704,19 @@ pub struct ClientTask {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DavTask {
+    pub id: Uuid,
+    pub title: String,
+    pub description: String,
+    pub status: String,
+    pub due_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub sort_order: i32,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct UpsertClientEventInput {
     pub id: Option<Uuid>,
@@ -1353,6 +1366,18 @@ struct AccountIdentity {
 
 #[derive(Debug, FromRow)]
 struct ClientTaskRow {
+    id: Uuid,
+    title: String,
+    description: String,
+    status: String,
+    due_at: Option<String>,
+    completed_at: Option<String>,
+    sort_order: i32,
+    updated_at: String,
+}
+
+#[derive(Debug, FromRow)]
+struct DavTaskRow {
     id: Uuid,
     title: String,
     description: String,
@@ -6472,6 +6497,114 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn fetch_dav_tasks(&self, account_id: Uuid) -> Result<Vec<DavTask>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let rows = sqlx::query_as::<_, DavTaskRow>(
+            r#"
+            SELECT
+                id,
+                title,
+                description,
+                status,
+                CASE
+                    WHEN due_at IS NULL THEN NULL
+                    ELSE to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS due_at,
+                CASE
+                    WHEN completed_at IS NULL THEN NULL
+                    ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS completed_at,
+                sort_order,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM tasks
+            WHERE tenant_id = $1 AND account_id = $2
+            ORDER BY
+                CASE status
+                    WHEN 'completed' THEN 2
+                    WHEN 'cancelled' THEN 3
+                    ELSE 1
+                END ASC,
+                due_at ASC NULLS LAST,
+                sort_order ASC,
+                created_at ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_dav_task).collect())
+    }
+
+    pub async fn fetch_dav_tasks_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<DavTask>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let rows = sqlx::query_as::<_, DavTaskRow>(
+            r#"
+            SELECT
+                id,
+                title,
+                description,
+                status,
+                CASE
+                    WHEN due_at IS NULL THEN NULL
+                    ELSE to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS due_at,
+                CASE
+                    WHEN completed_at IS NULL THEN NULL
+                    ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS completed_at,
+                sort_order,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM tasks
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND id = ANY($3)
+            ORDER BY
+                CASE status
+                    WHEN 'completed' THEN 2
+                    WHEN 'cancelled' THEN 3
+                    ELSE 1
+                END ASC,
+                due_at ASC NULLS LAST,
+                sort_order ASC,
+                created_at ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_dav_task).collect())
+    }
+
+    pub async fn upsert_dav_task(&self, input: UpsertClientTaskInput) -> Result<DavTask> {
+        let task = self.upsert_client_task(input).await?;
+        Ok(DavTask {
+            id: task.id,
+            title: task.title,
+            description: task.description,
+            status: task.status,
+            due_at: task.due_at,
+            completed_at: task.completed_at,
+            sort_order: task.sort_order,
+            updated_at: task.updated_at,
+        })
+    }
+
+    pub async fn delete_dav_task(&self, account_id: Uuid, task_id: Uuid) -> Result<()> {
+        self.delete_client_task(account_id, task_id).await
+    }
+
     pub async fn submit_message(
         &self,
         input: SubmitMessageInput,
@@ -9635,6 +9768,19 @@ fn map_collaboration_grant(row: CollaborationGrantRow) -> CollaborationGrant {
 
 fn map_task(row: ClientTaskRow) -> ClientTask {
     ClientTask {
+        id: row.id,
+        title: row.title,
+        description: row.description,
+        status: row.status,
+        due_at: row.due_at,
+        completed_at: row.completed_at,
+        sort_order: row.sort_order,
+        updated_at: row.updated_at,
+    }
+}
+
+fn map_dav_task(row: DavTaskRow) -> DavTask {
+    DavTask {
         id: row.id,
         title: row.title,
         description: row.description,

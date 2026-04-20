@@ -61,7 +61,7 @@ The `/api/mail/workspace` payload now also includes `tasks` so clients can load 
 The MVP explicitly prepares:
 
 - a canonical projection reusable by future `JMAP Tasks`
-- a storage base compatible with a future `DAV` `VTODO` layer
+- a storage base reusable by the first `DAV` `VTODO` layer without a DAV-specific store
 - future mobile and `ActiveSync` reuse without reshaping the storage model
 - future incremental synchronization through `updated_at` and `sort_order`
 
@@ -110,6 +110,60 @@ The MVP keeps the canonical task status set unchanged:
 
 This preserves a direct bridge to future `VTODO` `STATUS` mapping and to later mobile compatibility layers.
 
+### DAV `VTODO` adapter MVP
+
+The first `DAV` task adapter now ships in `lpe-dav`.
+
+It remains a thin compatibility layer above the canonical `tasks` table:
+
+- the canonical `tasks` row remains the single source of truth
+- there is no DAV-specific task table, sync state, or rights store
+- mailbox-account authentication is reused directly
+- MVP task rights remain bounded to the authenticated account only
+- the `DAV` layer exposes one owner-only `VTODO` collection and does not introduce shared task collections
+
+#### DAV collection model
+
+The MVP exposes one synthetic task collection per authenticated account:
+
+- collection path: `/dav/calendars/me/tasks/`
+- collection display name: `Tasks`
+- collection component set: `VTODO`
+- collection rights: read, create, update, and delete for the authenticated account only
+
+The task collection is intentionally separate from the default `VEVENT` collection so the first interoperability layer stays predictable for clients and for future protocol adapters.
+
+#### Canonical mapping
+
+The first `tasks` to `VTODO` mapping is:
+
+- `tasks.id` -> `UID`
+- `tasks.title` -> `SUMMARY`
+- `tasks.description` -> `DESCRIPTION`
+- `tasks.status` -> `STATUS` using `needs-action -> NEEDS-ACTION`, `in-progress -> IN-PROCESS`, `completed -> COMPLETED`, `cancelled -> CANCELLED`
+- `tasks.due_at` -> `DUE` as a UTC timestamp
+- `tasks.completed_at` -> `COMPLETED` as a UTC timestamp
+- `tasks.updated_at` -> `LAST-MODIFIED` as a UTC timestamp
+- `tasks.sort_order` -> `X-LPE-SORT-ORDER`
+
+The reverse mapping follows the same contract:
+
+- `UID` remains the canonical task `id`
+- missing `STATUS` is normalized to `needs-action`
+- missing `COMPLETED` for a `COMPLETED` task is filled by the canonical task rules, not by DAV storage
+- unsupported `VTODO` properties are ignored in the MVP instead of creating parallel canonical fields
+
+#### Implemented DAV task operations
+
+The first adapter implements:
+
+- `PROPFIND` for task-collection discovery and item listing
+- `REPORT` for multiget-style `href` targeting, simple text-match filtering, and minimal `time-range` filtering on `DUE`
+- `GET` for one `VTODO` resource
+- `PUT` for full-resource create or replace of one `VTODO`
+- `DELETE` for one task resource
+- `ETag`, `If-Match`, and `If-None-Match` handling on task resources
+
 #### Implemented JMAP methods
 
 The first adapter implements:
@@ -147,6 +201,9 @@ The MVP sync contract is:
 - subtasks
 - task attachments
 - reminders and alarms
-- exposed `JMAP Tasks`, `VTODO`, or `ActiveSync Tasks` protocol adapters
+- shared DAV task collections
+- partial `VTODO` patch semantics
+- alarms, organizers, attendees, recurrence, and scheduling workflows on `VTODO`
+- `ActiveSync Tasks`
 
 
