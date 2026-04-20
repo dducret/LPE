@@ -9,10 +9,12 @@ use axum::{
 };
 use lpe_mail_auth::{authenticate_account, AccountAuthStore, AccountPrincipal};
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, CollaborationCollection, DavTask, Storage,
+    calendar_attendee_labels, normalize_calendar_email, normalize_calendar_participation_status,
+    parse_calendar_participants_metadata, serialize_calendar_participants_metadata,
+    AccessibleContact, AccessibleEvent, CalendarOrganizerMetadata, CalendarParticipantMetadata,
+    CalendarParticipantsMetadata, CollaborationCollection, DavTask, Storage,
     UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
-use serde::{Deserialize, Serialize};
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
@@ -30,15 +32,6 @@ const CALENDAR_COLLECTION_PREFIX: &str = "/dav/calendars/me/";
 const CALENDAR_COLLECTION_PATH: &str = "/dav/calendars/me/default/";
 const TASK_COLLECTION_ID: &str = "tasks";
 const TASK_COLLECTION_PATH: &str = "/dav/calendars/me/tasks/";
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct DavAttendee {
-    email: String,
-    common_name: String,
-    role: String,
-    partstat: String,
-    rsvp: bool,
-}
 
 #[derive(Debug, Default)]
 struct ReportFilter {
@@ -1126,7 +1119,7 @@ fn serialize_vcard(contact: &AccessibleContact) -> String {
 
 fn serialize_ical(event: &AccessibleEvent) -> String {
     let dtstart = format_ical_datetime(&event.date, &event.time);
-    let attendees = attendees_for_event(event);
+    let metadata = parse_calendar_participants_metadata(&event.attendees_json);
     let mut lines = vec![
         "BEGIN:VCALENDAR".to_string(),
         "VERSION:2.0".to_string(),
@@ -1144,10 +1137,13 @@ fn serialize_ical(event: &AccessibleEvent) -> String {
     push_line(&mut lines, "LOCATION", &event.location);
     push_line(&mut lines, "DESCRIPTION", &event.notes);
     push_line(&mut lines, "RRULE", &event.recurrence_rule);
-    for attendee in &attendees {
+    if let Some(organizer) = metadata.organizer.as_ref() {
+        lines.push(serialize_organizer(organizer));
+    }
+    for attendee in &metadata.attendees {
         lines.push(serialize_attendee(attendee));
     }
-    if attendees.is_empty() {
+    if metadata.attendees.is_empty() {
         push_line(&mut lines, "X-LPE-ATTENDEES", &event.attendees);
     }
     lines.push("END:VEVENT".to_string());
@@ -1242,7 +1238,7 @@ fn parse_ical(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientEve
     let mut title = String::new();
     let mut location = String::new();
     let mut attendees = String::new();
-    let mut attendee_entries = Vec::new();
+    let mut metadata = CalendarParticipantsMetadata::default();
     let mut notes = String::new();
 
     for line in unfolded_lines(content) {
@@ -1268,7 +1264,8 @@ fn parse_ical(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientEve
             "LOCATION" => location = value,
             "DESCRIPTION" => notes = value,
             "X-LPE-ATTENDEES" => attendees = value,
-            "ATTENDEE" => attendee_entries.push(parse_attendee(left, &value)?),
+            "ORGANIZER" => metadata.organizer = parse_organizer(left, &value)?,
+            "ATTENDEE" => metadata.attendees.push(parse_attendee(left, &value)?),
             _ => {}
         }
     }
@@ -1277,12 +1274,8 @@ fn parse_ical(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientEve
         bail!("event date, time, and title are required");
     }
 
-    if !attendee_entries.is_empty() {
-        attendees = attendee_entries
-            .iter()
-            .map(attendee_label)
-            .collect::<Vec<_>>()
-            .join(", ");
+    if !metadata.attendees.is_empty() {
+        attendees = calendar_attendee_labels(&metadata);
     }
 
     Ok(UpsertClientEventInput {
@@ -1296,7 +1289,7 @@ fn parse_ical(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientEve
         title,
         location,
         attendees,
-        attendees_json: serialize_attendees_json(&attendee_entries),
+        attendees_json: serialize_calendar_participants_metadata(&metadata),
         notes,
     })
 }
@@ -1448,28 +1441,22 @@ fn property_parameter(left: &str, name: &str) -> Option<String> {
     })
 }
 
-fn attendees_for_event(event: &AccessibleEvent) -> Vec<DavAttendee> {
-    let parsed =
-        serde_json::from_str::<Vec<DavAttendee>>(&event.attendees_json).unwrap_or_default();
-    if !parsed.is_empty() {
-        return parsed;
+fn serialize_organizer(organizer: &CalendarOrganizerMetadata) -> String {
+    let mut property = "ORGANIZER".to_string();
+    if !organizer.common_name.trim().is_empty() {
+        property.push_str(&format!(";CN={}", param_escape(&organizer.common_name)));
     }
-    event
-        .attendees
-        .split(',')
-        .map(str::trim)
-        .filter(|value: &&str| !value.is_empty())
-        .map(|value: &str| DavAttendee {
-            email: value.to_string(),
-            common_name: String::new(),
-            role: "REQ-PARTICIPANT".to_string(),
-            partstat: "NEEDS-ACTION".to_string(),
-            rsvp: false,
-        })
-        .collect()
+    let value = if organizer.email.trim().is_empty() {
+        "mailto:unknown@example.invalid".to_string()
+    } else if organizer.email.to_ascii_lowercase().starts_with("mailto:") {
+        organizer.email.clone()
+    } else {
+        format!("mailto:{}", organizer.email.trim())
+    };
+    format!("{property}:{value}")
 }
 
-fn serialize_attendee(attendee: &DavAttendee) -> String {
+fn serialize_attendee(attendee: &CalendarParticipantMetadata) -> String {
     let mut property = "ATTENDEE".to_string();
     if !attendee.common_name.trim().is_empty() {
         property.push_str(&format!(";CN={}", param_escape(&attendee.common_name)));
@@ -1478,7 +1465,10 @@ fn serialize_attendee(attendee: &DavAttendee) -> String {
         property.push_str(&format!(";ROLE={}", attendee.role.trim()));
     }
     if !attendee.partstat.trim().is_empty() {
-        property.push_str(&format!(";PARTSTAT={}", attendee.partstat.trim()));
+        property.push_str(&format!(
+            ";PARTSTAT={}",
+            attendee.partstat.trim().to_ascii_uppercase()
+        ));
     }
     if attendee.rsvp {
         property.push_str(";RSVP=TRUE");
@@ -1493,38 +1483,31 @@ fn serialize_attendee(attendee: &DavAttendee) -> String {
     format!("{property}:{value}")
 }
 
-fn parse_attendee(left: &str, value: &str) -> Result<DavAttendee> {
-    let email = value
-        .trim()
-        .strip_prefix("mailto:")
-        .unwrap_or(value.trim())
-        .trim()
-        .to_string();
+fn parse_organizer(left: &str, value: &str) -> Result<Option<CalendarOrganizerMetadata>> {
+    let email = normalize_calendar_email(value);
+    let common_name = property_parameter(left, "CN").unwrap_or_default();
+    if email.is_empty() && common_name.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(CalendarOrganizerMetadata { email, common_name }))
+}
+
+fn parse_attendee(left: &str, value: &str) -> Result<CalendarParticipantMetadata> {
+    let email = normalize_calendar_email(value);
     if email.is_empty() {
         bail!("ATTENDEE email is required");
     }
-    Ok(DavAttendee {
+    Ok(CalendarParticipantMetadata {
         email,
         common_name: property_parameter(left, "CN").unwrap_or_default(),
         role: property_parameter(left, "ROLE").unwrap_or_else(|| "REQ-PARTICIPANT".to_string()),
-        partstat: property_parameter(left, "PARTSTAT")
-            .unwrap_or_else(|| "NEEDS-ACTION".to_string()),
+        partstat: normalize_calendar_participation_status(
+            &property_parameter(left, "PARTSTAT").unwrap_or_else(|| "NEEDS-ACTION".to_string()),
+        ),
         rsvp: property_parameter(left, "RSVP")
             .map(|value| value.eq_ignore_ascii_case("TRUE"))
             .unwrap_or(false),
     })
-}
-
-fn attendee_label(attendee: &DavAttendee) -> String {
-    if !attendee.common_name.trim().is_empty() {
-        attendee.common_name.trim().to_string()
-    } else {
-        attendee.email.trim().to_string()
-    }
-}
-
-fn serialize_attendees_json(attendees: &[DavAttendee]) -> String {
-    serde_json::to_string(attendees).unwrap_or_else(|_| "[]".to_string())
 }
 
 fn vtodo_status_from_task_status(status: &str) -> &'static str {
@@ -2385,13 +2368,21 @@ mod tests {
             title: "Planning".to_string(),
             location: "Room B".to_string(),
             attendees: "Alice".to_string(),
-            attendees_json: serialize_attendees_json(&[DavAttendee {
-                email: "alice@example.test".to_string(),
-                common_name: "Alice".to_string(),
-                role: "REQ-PARTICIPANT".to_string(),
-                partstat: "ACCEPTED".to_string(),
-                rsvp: true,
-            }]),
+            attendees_json: serialize_calendar_participants_metadata(
+                &CalendarParticipantsMetadata {
+                    organizer: Some(CalendarOrganizerMetadata {
+                        email: "organizer@example.test".to_string(),
+                        common_name: "Organizer".to_string(),
+                    }),
+                    attendees: vec![CalendarParticipantMetadata {
+                        email: "alice@example.test".to_string(),
+                        common_name: "Alice".to_string(),
+                        role: "REQ-PARTICIPANT".to_string(),
+                        partstat: "accepted".to_string(),
+                        rsvp: true,
+                    }],
+                },
+            ),
             notes: "Weekly planning".to_string(),
         };
         let store = FakeStore {
@@ -2523,7 +2514,7 @@ mod tests {
                 &Method::PUT,
                 &Uri::from_static("/dav/calendars/me/default/99999999-9999-9999-9999-999999999999.ics"),
                 &bearer_headers(),
-                b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:99999999-9999-9999-9999-999999999999\r\nDTSTART;TZID=Europe/Berlin:20260423T103000\r\nDURATION:PT45M\r\nRRULE:FREQ=WEEKLY;BYDAY=TH\r\nSUMMARY:Interop review\r\nATTENDEE;CN=Alice Example;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE:mailto:alice@example.test\r\nDESCRIPTION:Calendar interop\r\nEND:VEVENT\r\nEND:VCALENDAR",
+                b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:99999999-9999-9999-9999-999999999999\r\nDTSTART;TZID=Europe/Berlin:20260423T103000\r\nDURATION:PT45M\r\nRRULE:FREQ=WEEKLY;BYDAY=TH\r\nSUMMARY:Interop review\r\nORGANIZER;CN=Owner Example:mailto:owner@example.test\r\nATTENDEE;CN=Alice Example;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE:mailto:alice@example.test\r\nDESCRIPTION:Calendar interop\r\nEND:VEVENT\r\nEND:VCALENDAR",
             )
             .await
             .unwrap();
@@ -2536,7 +2527,66 @@ mod tests {
         assert_eq!(events[0].duration_minutes, 45);
         assert_eq!(events[0].recurrence_rule, "FREQ=WEEKLY;BYDAY=TH");
         assert_eq!(events[0].attendees, "Alice Example");
+        assert!(events[0].attendees_json.contains("\"organizer\""));
+        assert!(events[0].attendees_json.contains("owner@example.test"));
         assert!(events[0].attendees_json.contains("alice@example.test"));
+    }
+
+    #[tokio::test]
+    async fn get_serializes_organizer_and_participant_status() {
+        let event_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            events: Arc::new(Mutex::new(vec![ClientEvent {
+                id: event_id,
+                date: "2026-04-24".to_string(),
+                time: "15:00".to_string(),
+                time_zone: "Europe/Berlin".to_string(),
+                duration_minutes: 30,
+                recurrence_rule: "".to_string(),
+                title: "Status review".to_string(),
+                location: "".to_string(),
+                attendees: "Bob".to_string(),
+                attendees_json: serialize_calendar_participants_metadata(
+                    &CalendarParticipantsMetadata {
+                        organizer: Some(CalendarOrganizerMetadata {
+                            email: "owner@example.test".to_string(),
+                            common_name: "Owner Example".to_string(),
+                        }),
+                        attendees: vec![CalendarParticipantMetadata {
+                            email: "bob@example.test".to_string(),
+                            common_name: "Bob".to_string(),
+                            role: "REQ-PARTICIPANT".to_string(),
+                            partstat: "declined".to_string(),
+                            rsvp: true,
+                        }],
+                    },
+                ),
+                notes: "".to_string(),
+            }])),
+            ..Default::default()
+        };
+        let service = DavService::new(store);
+
+        let response = service
+            .handle(
+                &Method::GET,
+                &Uri::from_static(
+                    "/dav/calendars/me/default/abababab-abab-abab-abab-abababababab.ics",
+                ),
+                &bearer_headers(),
+                &[],
+            )
+            .await
+            .unwrap();
+
+        let body = response_text(response).await;
+        assert!(body.contains("ORGANIZER;CN=Owner Example:mailto:owner@example.test"));
+        assert!(
+            body.contains(
+                "ATTENDEE;CN=Bob;ROLE=REQ-PARTICIPANT;PARTSTAT=DECLINED;RSVP=TRUE:mailto:bob@example.test"
+            )
+        );
     }
 
     #[tokio::test]

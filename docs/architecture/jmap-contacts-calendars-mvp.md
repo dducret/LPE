@@ -89,15 +89,22 @@ The `JMAP` to `calendar_events` mapping is:
 - `title` -> `calendar_events.title`
 - `start` (`YYYY-MM-DDTHH:MM:SS`) -> `calendar_events.date` + `calendar_events.time`
 - `locations.*.name` -> `calendar_events.location`
-- `participants` -> `calendar_events.attendees` as normalized text
+- `participants` -> canonical structured participant metadata stored in `calendar_events.attendees_json`, with attendee labels mirrored into `calendar_events.attendees`
 - `description` -> `calendar_events.notes`
 - `calendarIds.{collectionId}` -> an owned or shared virtual collection resolved through the canonical ACL model
+
+Organizer and participant status are exposed through `participants`:
+
+- one participant with `roles.owner=true` is treated as the canonical organizer for the event
+- attendee participants keep their `participationStatus` and `expectReply` flags in the canonical event metadata
+- attendee labels remain mirrored into `calendar_events.attendees` so older filters and compatibility fallbacks keep working
 
 ### Important MVP rules
 
 - `ContactCard/set` directly creates, replaces, or deletes canonical `contacts` rows
 - `CalendarEvent/set` directly creates, replaces, or deletes canonical `calendar_events` rows
 - `JMAP` reads use the same canonical objects as `CardDAV`, `CalDAV`, and `ActiveSync`
+- organizer and attendee status updates are stored only in canonical `calendar_events` metadata; there is no `JMAP`-only scheduling state
 - the owner keeps full rights on its `default` collection
 - an account in the same tenant may read or mutate a shared collection only through a canonical grant
 - cross-tenant access is not supported
@@ -116,8 +123,8 @@ The `JMAP` to `calendar_events` mapping is:
 - `CalendarEvent/set` accepts only `duration=PT0S`
 - `timeZone` must be `null` or absent
 - updates are full-resource replacements; fine-grained property patches are not implemented
-- calendar participants are still stored in the canonical model as text and re-exposed as minimal `Participant` objects
-- no recurrence, alarms, free/busy, participant status, organizer model, calendar attachments, or extended `VCARD` or `VCALENDAR` semantics
+- calendar participants are still mirrored as text for legacy fallback, but the canonical event metadata now stores one organizer plus attendee status and RSVP intent for interoperable adapters
+- no recurrence, alarms, free/busy, calendar attachments, or extended `VCARD` or `VCALENDAR` semantics
 - `AddressBook` and `Calendar` objects are virtual and cannot be modified through `set`
 - no user-specific renaming of shared collections
 - no fine-grained ACL history or real-time rights-change notifications

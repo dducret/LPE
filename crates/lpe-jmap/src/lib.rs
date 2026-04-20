@@ -13,8 +13,11 @@ use axum::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
 use lpe_storage::{
-    mail::parse_rfc822_message, AccessibleContact, AccessibleEvent, AuditEntryInput,
-    AuthenticatedAccount, ClientTask, CollaborationCollection, JmapEmail, JmapEmailAddress,
+    calendar_attendee_labels, mail::parse_rfc822_message, normalize_calendar_email,
+    normalize_calendar_participation_status, parse_calendar_participants_metadata,
+    serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent, AuditEntryInput,
+    AuthenticatedAccount, CalendarOrganizerMetadata, CalendarParticipantMetadata,
+    CalendarParticipantsMetadata, ClientTask, CollaborationCollection, JmapEmail, JmapEmailAddress,
     JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob, SavedDraftMessage, Storage,
     SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
@@ -4342,8 +4345,15 @@ fn calendar_event_to_value(event: &AccessibleEvent, properties: &HashSet<String>
             }),
         );
     }
-    if properties.contains("participants") && !event.attendees.trim().is_empty() {
-        object.insert("participants".to_string(), participants_from_event(event));
+    if properties.contains("participants") {
+        let participants = participants_from_event(event);
+        if participants
+            .as_object()
+            .map(|entries| !entries.is_empty())
+            .unwrap_or(false)
+        {
+            object.insert("participants".to_string(), participants);
+        }
     }
     insert_if(properties, &mut object, "description", event.notes.clone());
     if properties.contains("calendarIds") {
@@ -4387,43 +4397,39 @@ fn task_to_value(task: &ClientTask, properties: &HashSet<String>) -> Value {
 }
 
 fn participants_from_event(event: &AccessibleEvent) -> Value {
-    if let Ok(value) = serde_json::from_str::<Value>(&event.attendees_json) {
-        if value.is_object() {
-            return value;
+    let metadata = parse_calendar_participants_metadata(&event.attendees_json);
+    if metadata.organizer.is_some() || !metadata.attendees.is_empty() {
+        let mut participants = Map::new();
+        if let Some(organizer) = metadata.organizer {
+            participants.insert(
+                "owner".to_string(),
+                participant_value(
+                    &organizer.common_name,
+                    &organizer.email,
+                    json!({"owner": true}),
+                    None,
+                    false,
+                ),
+            );
         }
-        if let Some(entries) = value.as_array() {
-            let participants = entries
-                .iter()
-                .filter_map(Value::as_object)
-                .enumerate()
-                .map(|(index, attendee)| {
-                    let key = format!("p{}", index + 1);
-                    let name = attendee
-                        .get("common_name")
-                        .and_then(Value::as_str)
-                        .filter(|value| !value.trim().is_empty())
-                        .or_else(|| attendee.get("email").and_then(Value::as_str))
-                        .unwrap_or_default();
-                    let email = attendee
-                        .get("email")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default();
-                    let participant = json!({
-                        "@type": "Participant",
-                        "name": name,
-                        "email": email,
-                        "roles": {"attendee": true},
-                        "participationStatus": attendee
-                            .get("partstat")
-                            .and_then(Value::as_str)
-                            .unwrap_or("needs-action")
-                            .to_ascii_lowercase(),
-                    });
-                    (key, participant)
-                })
-                .collect::<Map<String, Value>>();
-            return Value::Object(participants);
+        for (index, attendee) in metadata.attendees.iter().enumerate() {
+            let mut roles = Map::new();
+            roles.insert("attendee".to_string(), Value::Bool(true));
+            if attendee.role.eq_ignore_ascii_case("OPT-PARTICIPANT") {
+                roles.insert("optional".to_string(), Value::Bool(true));
+            }
+            participants.insert(
+                format!("p{}", index + 1),
+                participant_value(
+                    &attendee.common_name,
+                    &attendee.email,
+                    Value::Object(roles),
+                    Some(&attendee.partstat),
+                    attendee.rsvp,
+                ),
+            );
         }
+        return Value::Object(participants);
     }
     participants_from_attendees(&event.attendees)
 }
@@ -4454,6 +4460,41 @@ fn participants_from_attendees(attendees: &str) -> Value {
         })
         .collect::<Map<String, Value>>();
     Value::Object(participants)
+}
+
+fn participant_value(
+    name: &str,
+    email: &str,
+    roles: Value,
+    participation_status: Option<&str>,
+    expect_reply: bool,
+) -> Value {
+    let mut participant = Map::new();
+    participant.insert(
+        "@type".to_string(),
+        Value::String("Participant".to_string()),
+    );
+    if !name.trim().is_empty() {
+        participant.insert("name".to_string(), Value::String(name.trim().to_string()));
+    }
+    if !email.trim().is_empty() {
+        participant.insert("email".to_string(), Value::String(email.trim().to_string()));
+        participant.insert(
+            "sendTo".to_string(),
+            json!({"imip": format!("mailto:{}", email.trim())}),
+        );
+    }
+    participant.insert("roles".to_string(), roles);
+    if let Some(status) = participation_status {
+        participant.insert(
+            "participationStatus".to_string(),
+            Value::String(normalize_calendar_participation_status(status)),
+        );
+    }
+    if expect_reply {
+        participant.insert("expectReply".to_string(), Value::Bool(true));
+    }
+    Value::Object(participant)
 }
 
 fn contact_matches_filter(contact: &AccessibleContact, filter: &ContactCardQueryFilter) -> bool {
@@ -4991,37 +5032,97 @@ fn parse_calendar_location(value: Option<&Value>) -> Result<String> {
 }
 
 fn parse_calendar_participants(value: Option<&Value>) -> Result<String> {
-    let Some(value) = value else {
-        return Ok(String::new());
-    };
-    let object = value
-        .as_object()
-        .ok_or_else(|| anyhow!("participants must be an object"))?;
-    let attendees = object
-        .values()
-        .filter_map(Value::as_object)
-        .map(|participant| {
-            participant
-                .get("email")
-                .and_then(Value::as_str)
-                .or_else(|| participant.get("name").and_then(Value::as_str))
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string)
-                .ok_or_else(|| anyhow!("participant name or email is required"))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(attendees.join(", "))
+    Ok(calendar_attendee_labels(&parse_jmap_calendar_participants(
+        value,
+    )?))
 }
 
 fn parse_calendar_participants_json(value: Option<&Value>) -> Result<String> {
+    Ok(serialize_calendar_participants_metadata(
+        &parse_jmap_calendar_participants(value)?,
+    ))
+}
+
+fn parse_jmap_calendar_participants(value: Option<&Value>) -> Result<CalendarParticipantsMetadata> {
     let Some(value) = value else {
-        return Ok("{}".to_string());
+        return Ok(CalendarParticipantsMetadata::default());
     };
     let object = value
         .as_object()
         .ok_or_else(|| anyhow!("participants must be an object"))?;
-    Ok(Value::Object(object.clone()).to_string())
+    let mut metadata = CalendarParticipantsMetadata::default();
+    for participant in object.values() {
+        let participant = participant
+            .as_object()
+            .ok_or_else(|| anyhow!("participants entries must be objects"))?;
+        let common_name = participant
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let roles = participant.get("roles").and_then(Value::as_object);
+        let is_owner = roles
+            .and_then(|roles| roles.get("owner"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let email = participant_email(participant, is_owner)?;
+        if email.is_empty() && common_name.is_empty() {
+            bail!("participant name or email is required");
+        }
+        if is_owner {
+            if metadata.organizer.is_some() {
+                bail!("only one organizer participant is supported");
+            }
+            metadata.organizer = Some(CalendarOrganizerMetadata { email, common_name });
+            continue;
+        }
+        metadata.attendees.push(CalendarParticipantMetadata {
+            email,
+            common_name,
+            role: if roles
+                .and_then(|roles| roles.get("optional"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                "OPT-PARTICIPANT".to_string()
+            } else {
+                "REQ-PARTICIPANT".to_string()
+            },
+            partstat: normalize_calendar_participation_status(
+                participant
+                    .get("participationStatus")
+                    .and_then(Value::as_str)
+                    .unwrap_or("needs-action"),
+            ),
+            rsvp: participant
+                .get("expectReply")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        });
+    }
+    Ok(metadata)
+}
+
+fn participant_email(participant: &Map<String, Value>, owner: bool) -> Result<String> {
+    if let Some(email) = participant.get("email").and_then(Value::as_str) {
+        let normalized = normalize_calendar_email(email);
+        if !normalized.is_empty() {
+            return Ok(normalized);
+        }
+    }
+    if let Some(send_to) = participant.get("sendTo").and_then(Value::as_object) {
+        if let Some(email) = send_to.get("imip").and_then(Value::as_str) {
+            let normalized = normalize_calendar_email(email);
+            if !normalized.is_empty() {
+                return Ok(normalized);
+            }
+        }
+    }
+    if owner {
+        bail!("organizer participant email is required");
+    }
+    Ok(String::new())
 }
 
 fn parse_calendar_duration(value: Option<&Value>) -> Result<i32> {
@@ -5511,8 +5612,22 @@ mod tests {
                 recurrence_rule: "".to_string(),
                 title: "Standup".to_string(),
                 location: "Room A".to_string(),
-                attendees: "alice@example.test, bob@example.test".to_string(),
-                attendees_json: "[]".to_string(),
+                attendees: "bob@example.test".to_string(),
+                attendees_json: serialize_calendar_participants_metadata(
+                    &CalendarParticipantsMetadata {
+                        organizer: Some(CalendarOrganizerMetadata {
+                            email: "alice@example.test".to_string(),
+                            common_name: "Alice".to_string(),
+                        }),
+                        attendees: vec![CalendarParticipantMetadata {
+                            email: "bob@example.test".to_string(),
+                            common_name: "Bob".to_string(),
+                            role: "REQ-PARTICIPANT".to_string(),
+                            partstat: "tentative".to_string(),
+                            rsvp: true,
+                        }],
+                    },
+                ),
                 notes: "Daily sync".to_string(),
             }
         }
@@ -7007,7 +7122,20 @@ mod tests {
                                         "start": "2026-04-21T11:00:00",
                                         "duration": "PT0S",
                                         "locations": {"main": {"name": "Room B"}},
-                                        "participants": {"p1": {"name": "alice@example.test", "email": "alice@example.test"}},
+                                        "participants": {
+                                            "owner": {
+                                                "name": "Alice",
+                                                "email": "alice@example.test",
+                                                "roles": {"owner": true}
+                                            },
+                                            "p1": {
+                                                "name": "Bob",
+                                                "email": "bob@example.test",
+                                                "roles": {"attendee": true},
+                                                "participationStatus": "accepted",
+                                                "expectReply": true
+                                            }
+                                        },
                                         "description": "Weekly planning",
                                         "calendarIds": {"default": true}
                                     }
@@ -7032,6 +7160,58 @@ mod tests {
         let events = store.events.lock().unwrap();
         assert_eq!(events.len(), 2);
         assert!(events.iter().any(|event| event.title == "Planning"));
+        let created = events
+            .iter()
+            .find(|event| event.title == "Planning")
+            .unwrap();
+        assert_eq!(created.attendees, "Bob");
+        assert!(created.attendees_json.contains("\"organizer\""));
+        assert!(created.attendees_json.contains("\"partstat\":\"accepted\""));
+        assert!(created.attendees_json.contains("\"rsvp\":true"));
+    }
+
+    #[tokio::test]
+    async fn calendar_event_get_exposes_owner_and_participation_status() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            events: Arc::new(Mutex::new(vec![FakeStore::event()])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_CALENDARS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "CalendarEvent/get".to_string(),
+                        json!({
+                            "ids": [FakeStore::event().id.to_string()],
+                            "properties": ["id", "participants"]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let event = &response.method_responses[0].1["list"][0];
+        assert_eq!(
+            event["participants"]["owner"]["email"],
+            "alice@example.test"
+        );
+        assert_eq!(event["participants"]["owner"]["roles"]["owner"], true);
+        assert_eq!(event["participants"]["p1"]["email"], "bob@example.test");
+        assert_eq!(
+            event["participants"]["p1"]["participationStatus"],
+            "tentative"
+        );
+        assert_eq!(event["participants"]["p1"]["expectReply"], true);
     }
 
     #[tokio::test]

@@ -68,6 +68,7 @@ The MVP supports:
 - calendar sharing between accounts in the same tenant
 - contact sharing between accounts in the same tenant
 - minimal read/write/delete/share delegation over the full collection
+- organizer and attendee-status interoperability on shared calendar collections through the same canonical event rows
 - coherent exposure of the same rights through `JMAP` and `DAV`
 - minimal audit of grant changes
 
@@ -89,6 +90,7 @@ The MVP does not yet support:
 - the authenticated account's `default` collection
 - accessible shared collections through `AddressBook/*` and `Calendar/*`
 - `myRights` values derived from canonical grants
+- organizer and attendee status remain part of the same canonical shared event record; no separate `JMAP` delegation state exists
 
 `ContactCard/set` and `CalendarEvent/set` may create into a shared collection when `may_write=true`.
 
@@ -101,7 +103,7 @@ The MVP does not yet support:
 
 DAV home `PROPFIND` depth `1` returns every accessible collection.
 
-DAV reads and writes apply the same canonical grants as `JMAP`.
+DAV reads and writes apply the same canonical grants as `JMAP`, including organizer and attendee-status updates on accessible shared calendar collections.
 
 ### MVP audit
 

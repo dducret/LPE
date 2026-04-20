@@ -83,6 +83,7 @@ The implementation keeps discovery and synchronization intentionally minimal:
 - `title` -> `SUMMARY`
 - `location` -> `LOCATION`
 - `notes` -> `DESCRIPTION`
+- canonical organizer metadata -> `ORGANIZER`
 - structured attendee metadata -> `ATTENDEE`
 - legacy plain attendee text remains available through `X-LPE-ATTENDEES` only when no structured attendee metadata is stored
 
@@ -132,6 +133,7 @@ The canonical task model still belongs to `LPE`. The DAV adapter does not mainta
   - `TZID` on `DTSTART`
   - `DURATION`
   - `RRULE` preservation
+  - `ORGANIZER` with `CN`
   - structured `ATTENDEE` lines with `CN`, `ROLE`, `PARTSTAT`, and `RSVP`
 - task serialization and parsing for:
   - `SUMMARY`
@@ -148,7 +150,7 @@ The canonical task model still belongs to `LPE`. The DAV adapter does not mainta
 - tenant, owner, and grantee scoping continue to be enforced by the canonical `LPE` account model
 - DAV compatibility does not create a separate collaboration authority outside `LPE`
 - the adapter does not reuse any `Stalwart` code
-- the adapter stores interoperability metadata only in canonical `LPE` event fields; there is still no DAV-only storage layer
+- the adapter stores organizer and attendee interoperability metadata only in canonical `LPE` event fields; there is still no DAV-only storage layer
 - task compatibility reuses mailbox-account scoping directly; there is still no DAV-only task rights layer
 - rights for contacts and calendar events come from the canonical collection-grant model shared with `JMAP`
 
@@ -167,5 +169,5 @@ The canonical task model still belongs to `LPE`. The DAV adapter does not mainta
 - `REPORT` filtering remains intentionally small and does not implement the full CardDAV or CalDAV filter grammar
 - calendar time-range filtering currently evaluates the canonical event start and does not expand recurrence sets
 - task `time-range` filtering currently evaluates canonical `due_at` only
-- organizers, alarms, free-busy, `VALARM`, and scheduling workflows are not implemented
+- alarms, free-busy, `VALARM`, and scheduling workflows are not implemented
 - `VTODO` recurrence, attendees, alarms, organizers, priorities, categories, percent-complete, and scheduling workflows are not implemented
