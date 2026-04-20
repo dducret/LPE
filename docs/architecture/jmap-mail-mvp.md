@@ -25,9 +25,11 @@ The `JMAP` session is real: it is built from the authenticated mailbox account a
 
 - `Mailbox/get`
 - `Mailbox/query`
+- `Mailbox/queryChanges`
 - `Mailbox/changes`
 - `Mailbox/set`
 - `Email/query`
+- `Email/queryChanges`
 - `Email/get`
 - `Email/changes`
 - `Email/set` for draft creation, update, and deletion
@@ -36,6 +38,7 @@ The `JMAP` session is real: it is built from the authenticated mailbox account a
 - `EmailSubmission/get`
 - `EmailSubmission/set` for draft submission through the canonical `LPE` submission model
 - `Identity/get`
+- `Thread/query`
 - `Thread/get`
 - `Thread/changes`
 - `Quota/get`
@@ -58,24 +61,27 @@ Additional supported `JMAP` routes:
 
 ### Accepted MVP limitations
 
-- `Email/query` supports only descending `receivedAt` sort
+- `Email/query` and `Thread/query` support only descending `receivedAt` sort
 - `Email/query` supports only the `inMailbox` filter
+- `Email/queryChanges` and `Mailbox/queryChanges` use a stateless snapshot `queryState` token derived from the ordered result set instead of a durable per-query history table
+- `queryChanges` currently compares full ordered snapshots returned by the adapter and is intended for incremental client refresh, not for long-lived durable sync cursors
 - `Email/get` exposes a practical subset of `JMAP Mail` properties
 - one `LPE` email currently belongs to one `LPE` mailbox, so `mailboxIds` contains one entry
 - `EmailSubmission/set` currently supports only `create`
 - `EmailSubmission/set` expects an existing draft through `emailId` or a resolved creation reference in the same request
 - `Mailbox/set` cannot modify or delete system mailboxes (`Inbox`, `Sent`, `Drafts`, etc.)
 - `Email/copy` currently supports only same-account copy
-- `Email/import` consumes a `message/rfc822` blob and applies a minimal `RFC822` parser for `From`, `To`, `Cc`, `Subject`, `Message-Id`, and plain-text body
-- `Blob/upload` currently stores temporary blobs in `PostgreSQL`
+- `Email/import` consumes a validated `message/rfc822` blob, extracts visible multipart text with plaintext preference, preserves a first HTML body when available, and imports multipart attachments into the canonical attachment pipeline
+- `Blob/upload` currently stores temporary upload blobs in `PostgreSQL`
+- message `blobId` values now prefer the canonical `mime_blob_ref` when one already exists, especially for imported MIME uploads, and fall back to adapter-scoped opaque identifiers for messages that do not yet expose a persistent downloadable MIME blob
+- no `JMAP Blob/get`, blob copy, or persistent message download contract is advertised yet; the current blob model is intentionally limited to uploaded-imported MIME reuse and internal canonical references
+- the session keeps `eventSourceUrl` empty and does not advertise any WebSocket capability; the adapter code now keeps query-state handling and blob references separated so a future `JMAP WebSocket` transport can reuse the same canonical query and state logic without changing the storage model
 
 ### Next methods to add
 
 - `Blob/copy`
-- `Email/queryChanges`
-- `Mailbox/queryChanges`
-- `Thread/query`
 - `VacationResponse/get`
-- fuller MIME import with multipart and attachment support
+- persistent message-blob retrieval beyond temporary uploaded blobs
+- real-time state transport for `JMAP WebSocket` once an actual server endpoint exists
 
 

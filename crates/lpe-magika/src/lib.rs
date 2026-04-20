@@ -282,6 +282,12 @@ pub struct MimeAttachmentPart {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisibleBodyParts {
+    pub text_body: String,
+    pub html_body: Option<String>,
+}
+
 #[derive(Debug)]
 struct ParsedVisiblePart {
     content_type: String,
@@ -305,6 +311,32 @@ pub fn parse_rfc822_header_value(bytes: &[u8], name: &str) -> Option<String> {
 
 pub fn extract_visible_text(bytes: &[u8]) -> Result<String> {
     Ok(parse_visible_part(bytes)?.body_text.trim().to_string())
+}
+
+pub fn extract_visible_body_parts(bytes: &[u8]) -> Result<VisibleBodyParts> {
+    let part = parse_visible_part(bytes)?;
+    let html_body = if part
+        .content_type
+        .to_ascii_lowercase()
+        .starts_with("text/html")
+    {
+        let body = String::from_utf8_lossy(&decode_transfer_encoding(
+            split_headers_and_body_bytes(bytes).1,
+            &parse_rfc822_headers_bytes(split_headers_and_body_bytes(bytes).0)
+                .get("content-transfer-encoding")
+                .map(|value| value.to_ascii_lowercase())
+                .unwrap_or_default(),
+        )?)
+        .trim()
+        .to_string();
+        (!body.is_empty()).then_some(body)
+    } else {
+        first_html_part(bytes)?
+    };
+    Ok(VisibleBodyParts {
+        text_body: part.body_text.trim().to_string(),
+        html_body,
+    })
 }
 
 fn collect_attachment_parts(bytes: &[u8], attachments: &mut Vec<MimeAttachmentPart>) -> Result<()> {
@@ -410,6 +442,41 @@ fn parse_visible_part(bytes: &[u8]) -> Result<ParsedVisiblePart> {
         content_type,
         body_text,
     })
+}
+
+fn first_html_part(bytes: &[u8]) -> Result<Option<String>> {
+    let (header_block, body_block) = split_headers_and_body_bytes(bytes);
+    let headers = parse_rfc822_headers_bytes(header_block);
+    let content_type = headers
+        .get("content-type")
+        .cloned()
+        .unwrap_or_else(|| "text/plain".to_string());
+    let transfer_encoding = headers
+        .get("content-transfer-encoding")
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let decoded_body = decode_transfer_encoding(body_block, &transfer_encoding)?;
+    let content_type_lower = content_type.to_ascii_lowercase();
+
+    if content_type_lower.starts_with("multipart/") {
+        if let Some(boundary) = content_type_parameter(&content_type, "boundary") {
+            for part in split_multipart_parts(&decoded_body, &boundary) {
+                if let Some(html) = first_html_part(&part)? {
+                    if !html.trim().is_empty() {
+                        return Ok(Some(html));
+                    }
+                }
+            }
+        }
+        return Ok(None);
+    }
+
+    if content_type_lower.starts_with("text/html") {
+        let html = String::from_utf8_lossy(&decoded_body).trim().to_string();
+        return Ok((!html.is_empty()).then_some(html));
+    }
+
+    Ok(None)
 }
 
 fn parse_detection_json(raw: Value) -> Result<MagikaDetection> {

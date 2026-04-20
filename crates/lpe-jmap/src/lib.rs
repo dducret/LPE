@@ -7,16 +7,16 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
 use lpe_storage::{
     mail::parse_rfc822_message, AccessibleContact, AccessibleEvent, AuditEntryInput,
     AuthenticatedAccount, CollaborationCollection, JmapEmail, JmapEmailAddress,
     JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob, SavedDraftMessage, Storage,
-    SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput,
-    UpsertClientEventInput,
+    SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -33,11 +33,12 @@ use crate::protocol::{
     CalendarGetArguments, CalendarQueryArguments, ChangesArguments, ContactCardGetArguments,
     ContactCardQueryArguments, ContactCardQueryFilter, ContactCardSetArguments, DraftMutation,
     EmailAddressInput, EmailCopyArguments, EmailGetArguments, EmailImportArguments,
-    EmailQueryArguments, EmailQuerySort, EmailSetArguments, EmailSubmissionGetArguments,
-    EmailSubmissionSetArguments, EntityQuerySort, IdentityGetArguments, JmapApiRequest,
-    JmapApiResponse, JmapMethodCall, JmapMethodResponse, MailboxCreateInput, MailboxGetArguments,
-    MailboxQueryArguments, MailboxSetArguments, MailboxUpdateInput, QuotaGetArguments,
-    SearchSnippetGetArguments, SessionAccount, SessionDocument, ThreadGetArguments,
+    EmailQueryArguments, EmailQueryFilter, EmailQuerySort, EmailSetArguments,
+    EmailSubmissionGetArguments, EmailSubmissionSetArguments, EntityQuerySort,
+    IdentityGetArguments, JmapApiRequest, JmapApiResponse, JmapMethodCall, JmapMethodResponse,
+    MailboxCreateInput, MailboxGetArguments, MailboxQueryArguments, MailboxSetArguments,
+    MailboxUpdateInput, QueryChangesArguments, QuotaGetArguments, SearchSnippetGetArguments,
+    SessionAccount, SessionDocument, ThreadGetArguments, ThreadQueryArguments,
 };
 use crate::store::JmapStore;
 
@@ -46,11 +47,27 @@ const JMAP_MAIL_CAPABILITY: &str = "urn:ietf:params:jmap:mail";
 const JMAP_SUBMISSION_CAPABILITY: &str = "urn:ietf:params:jmap:submission";
 const JMAP_CONTACTS_CAPABILITY: &str = "urn:ietf:params:jmap:contacts";
 const JMAP_CALENDARS_CAPABILITY: &str = "urn:ietf:params:jmap:calendars";
-const SESSION_STATE: &str = "mvp-1";
+const SESSION_STATE: &str = "mvp-2";
+const QUERY_STATE_VERSION: &str = "mvp-2";
 const MAX_QUERY_LIMIT: u64 = 250;
 const DEFAULT_GET_LIMIT: u64 = 100;
 
 type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct QueryStateToken {
+    version: String,
+    kind: String,
+    filter: Option<Value>,
+    sort: Option<Vec<Value>>,
+    ids: Vec<String>,
+}
+
+#[derive(Debug, Default)]
+struct QueryDiff {
+    removed: Vec<String>,
+    added: Vec<Value>,
+}
 
 pub fn router() -> Router<Storage> {
     Router::new()
@@ -206,12 +223,16 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             let response = match method_name.as_str() {
                 "Mailbox/get" => self.handle_mailbox_get(&account, arguments).await,
                 "Mailbox/query" => self.handle_mailbox_query(&account, arguments).await,
+                "Mailbox/queryChanges" => {
+                    self.handle_mailbox_query_changes(&account, arguments).await
+                }
                 "Mailbox/changes" => self.handle_mailbox_changes(&account, arguments).await,
                 "Mailbox/set" => {
                     self.handle_mailbox_set(&account, arguments, &mut created_ids)
                         .await
                 }
                 "Email/query" => self.handle_email_query(&account, arguments).await,
+                "Email/queryChanges" => self.handle_email_query_changes(&account, arguments).await,
                 "Email/get" => self.handle_email_get(&account, arguments).await,
                 "Email/changes" => self.handle_email_changes(&account, arguments).await,
                 "Email/set" => {
@@ -261,6 +282,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         .await
                 }
                 "Identity/get" => self.handle_identity_get(&account, arguments).await,
+                "Thread/query" => self.handle_thread_query(&account, arguments).await,
                 "Thread/get" => self.handle_thread_get(&account, arguments).await,
                 "Thread/changes" => self.handle_thread_changes(&account, arguments).await,
                 "Quota/get" => self.handle_quota_get(&account, arguments).await,
@@ -339,15 +361,42 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .take(limit)
             .map(|mailbox| mailbox.id.to_string())
             .collect::<Vec<_>>();
+        let query_state = encode_query_state("Mailbox/query", None, None, ids.clone())?;
 
         Ok(json!({
             "accountId": account_id.to_string(),
-            "queryState": SESSION_STATE,
+            "queryState": query_state,
             "canCalculateChanges": true,
             "position": position,
             "ids": ids,
             "total": mailboxes.len(),
         }))
+    }
+
+    async fn handle_mailbox_query_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: QueryChangesArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let mut mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
+        mailboxes.sort_by_key(|mailbox| (mailbox.sort_order, mailbox.name.to_lowercase()));
+        let current_ids = mailboxes
+            .into_iter()
+            .map(|mailbox| mailbox.id.to_string())
+            .collect::<Vec<_>>();
+        let total = current_ids.len() as u64;
+        query_changes_response(
+            account_id,
+            "Mailbox/query",
+            arguments.since_query_state,
+            arguments.filter,
+            arguments.sort.map(|sort| sort.into_iter().collect()),
+            current_ids,
+            total,
+            arguments.max_changes,
+        )
     }
 
     async fn handle_mailbox_changes(
@@ -506,7 +555,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
         let properties = address_book_properties(arguments.properties);
         let requested_ids = arguments.ids.unwrap_or_default();
-        let collections = self.store.fetch_accessible_contact_collections(account_id).await?;
+        let collections = self
+            .store
+            .fetch_accessible_contact_collections(account_id)
+            .await?;
         let list = collections
             .iter()
             .filter(|collection| requested_ids.is_empty() || requested_ids.contains(&collection.id))
@@ -533,7 +585,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: AddressBookQueryArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
-        let collections = self.store.fetch_accessible_contact_collections(account_id).await?;
+        let collections = self
+            .store
+            .fetch_accessible_contact_collections(account_id)
+            .await?;
         let position = arguments.position.unwrap_or(0) as usize;
         let limit = arguments
             .limit
@@ -563,12 +618,18 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
-        let collections = self.store.fetch_accessible_contact_collections(account_id).await?;
+        let collections = self
+            .store
+            .fetch_accessible_contact_collections(account_id)
+            .await?;
         Ok(changes_response(
             account_id,
             &arguments.since_state,
             arguments.max_changes,
-            collections.into_iter().map(|collection| collection.id).collect(),
+            collections
+                .into_iter()
+                .map(|collection| collection.id)
+                .collect(),
         ))
     }
 
@@ -713,9 +774,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if let Some(update) = arguments.update {
             for (id, value) in update {
-                match parse_uuid(&id)
-                    .and_then(|contact_id| parse_contact_input(Some(contact_id), account_id, value).map(|(_, input)| (contact_id, input)))
-                {
+                match parse_uuid(&id).and_then(|contact_id| {
+                    parse_contact_input(Some(contact_id), account_id, value)
+                        .map(|(_, input)| (contact_id, input))
+                }) {
                     Ok((contact_id, input)) => match self
                         .store
                         .update_accessible_contact(account_id, contact_id, input)
@@ -777,7 +839,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
         let properties = calendar_properties(arguments.properties);
         let requested_ids = arguments.ids.unwrap_or_default();
-        let collections = self.store.fetch_accessible_calendar_collections(account_id).await?;
+        let collections = self
+            .store
+            .fetch_accessible_calendar_collections(account_id)
+            .await?;
         let list = collections
             .iter()
             .filter(|collection| requested_ids.is_empty() || requested_ids.contains(&collection.id))
@@ -804,7 +869,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: CalendarQueryArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
-        let collections = self.store.fetch_accessible_calendar_collections(account_id).await?;
+        let collections = self
+            .store
+            .fetch_accessible_calendar_collections(account_id)
+            .await?;
         let position = arguments.position.unwrap_or(0) as usize;
         let limit = arguments
             .limit
@@ -834,12 +902,18 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
-        let collections = self.store.fetch_accessible_calendar_collections(account_id).await?;
+        let collections = self
+            .store
+            .fetch_accessible_calendar_collections(account_id)
+            .await?;
         Ok(changes_response(
             account_id,
             &arguments.since_state,
             arguments.max_changes,
-            collections.into_iter().map(|collection| collection.id).collect(),
+            collections
+                .into_iter()
+                .map(|collection| collection.id)
+                .collect(),
         ))
     }
 
@@ -1010,7 +1084,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             for id in ids {
                 match parse_uuid(&id) {
                     Ok(event_id) => {
-                        match self.store.delete_accessible_event(account_id, event_id).await {
+                        match self
+                            .store
+                            .delete_accessible_event(account_id, event_id)
+                            .await
+                        {
                             Ok(()) => destroyed.push(Value::String(id)),
                             Err(error) => {
                                 not_destroyed.insert(id, set_error(&error.to_string()));
@@ -1065,15 +1143,83 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .store
             .query_jmap_email_ids(account_id, mailbox_id, search_text, position, limit)
             .await?;
+        let ids = query
+            .ids
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>();
+        let query_state = encode_query_state(
+            "Email/query",
+            arguments
+                .filter
+                .as_ref()
+                .map(serialize_email_query_filter)
+                .transpose()?,
+            arguments
+                .sort
+                .as_ref()
+                .map(|sort| serialize_email_query_sort(sort))
+                .transpose()?,
+            ids.clone(),
+        )?;
 
         Ok(json!({
             "accountId": account_id.to_string(),
-            "queryState": SESSION_STATE,
-            "canCalculateChanges": false,
+            "queryState": query_state,
+            "canCalculateChanges": true,
             "position": position,
-            "ids": query.ids.into_iter().map(|id| id.to_string()).collect::<Vec<_>>(),
+            "ids": ids,
             "total": query.total,
         }))
+    }
+
+    async fn handle_email_query_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: QueryChangesArguments<EmailQueryFilter, EmailQuerySort> =
+            serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        validate_query_sort(arguments.sort.as_deref())?;
+
+        let mailbox_id = arguments
+            .filter
+            .as_ref()
+            .and_then(|filter| filter.in_mailbox.as_deref())
+            .map(parse_uuid)
+            .transpose()?;
+        let search_text = arguments
+            .filter
+            .as_ref()
+            .and_then(|filter| filter.text.as_deref());
+        let query = self
+            .store
+            .query_jmap_email_ids(account_id, mailbox_id, search_text, 0, MAX_QUERY_LIMIT)
+            .await?;
+        let current_ids = query
+            .ids
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>();
+        query_changes_response(
+            account_id,
+            "Email/query",
+            arguments.since_query_state,
+            arguments
+                .filter
+                .as_ref()
+                .map(serialize_email_query_filter)
+                .transpose()?,
+            arguments
+                .sort
+                .as_ref()
+                .map(|sort| serialize_email_query_sort(sort))
+                .transpose()?,
+            current_ids,
+            query.total,
+            arguments.max_changes,
+        )
     }
 
     async fn handle_email_get(
@@ -1160,7 +1306,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                                 creation_id,
                                 json!({
                                     "id": email.id.to_string(),
-                                    "blobId": format!("message:{}", email.id),
+                                    "blobId": blob_id_for_message(&email),
                                     "threadId": email.thread_id.to_string(),
                                 }),
                             );
@@ -1215,7 +1361,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                                 creation_id,
                                 json!({
                                     "id": email.id.to_string(),
-                                    "blobId": format!("message:{}", email.id),
+                                    "blobId": blob_id_for_message(&email),
                                     "threadId": email.thread_id.to_string(),
                                 }),
                             );
@@ -1450,6 +1596,64 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             "state": SESSION_STATE,
             "list": list,
             "notFound": not_found,
+        }))
+    }
+
+    async fn handle_thread_query(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: ThreadQueryArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        validate_query_sort(arguments.sort.as_deref())?;
+
+        let mailbox_id = arguments
+            .filter
+            .as_ref()
+            .and_then(|filter| filter.in_mailbox.as_deref())
+            .map(parse_uuid)
+            .transpose()?;
+        let search_text = arguments
+            .filter
+            .as_ref()
+            .and_then(|filter| filter.text.as_deref());
+        let position = arguments.position.unwrap_or(0);
+        let limit = arguments
+            .limit
+            .unwrap_or(DEFAULT_GET_LIMIT)
+            .min(MAX_QUERY_LIMIT);
+        let query = self
+            .store
+            .query_jmap_thread_ids(account_id, mailbox_id, search_text, position, limit)
+            .await?;
+        let ids = query
+            .ids
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>();
+        let query_state = encode_query_state(
+            "Thread/query",
+            arguments
+                .filter
+                .as_ref()
+                .map(serialize_email_query_filter)
+                .transpose()?,
+            arguments
+                .sort
+                .as_ref()
+                .map(|sort| serialize_email_query_sort(sort))
+                .transpose()?,
+            ids.clone(),
+        )?;
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "queryState": query_state,
+            "canCalculateChanges": true,
+            "position": position,
+            "ids": ids,
+            "total": query.total,
         }))
     }
 
@@ -1783,7 +1987,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             bcc: Vec::new(),
             subject: parsed.subject,
             body_text: parsed.body_text,
-            body_html_sanitized: None,
+            body_html_sanitized: parsed.body_html_sanitized,
             internet_message_id: parsed.message_id,
             mime_blob_ref: format!("upload:{}", blob.id),
             size_octets: blob.octet_size as i64,
@@ -1998,7 +2202,12 @@ fn address_book_to_value(
 ) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", collection.id.clone());
-    insert_if(properties, &mut object, "name", collection.display_name.clone());
+    insert_if(
+        properties,
+        &mut object,
+        "name",
+        collection.display_name.clone(),
+    );
     insert_if(properties, &mut object, "sortOrder", 0);
     insert_if(properties, &mut object, "isSubscribed", true);
     if properties.contains("myRights") {
@@ -2037,7 +2246,12 @@ fn calendar_properties(properties: Option<Vec<String>>) -> HashSet<String> {
 fn calendar_to_value(collection: &CollaborationCollection, properties: &HashSet<String>) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", collection.id.clone());
-    insert_if(properties, &mut object, "name", collection.display_name.clone());
+    insert_if(
+        properties,
+        &mut object,
+        "name",
+        collection.display_name.clone(),
+    );
     insert_if(properties, &mut object, "sortOrder", 0);
     insert_if(properties, &mut object, "isSubscribed", true);
     insert_if(properties, &mut object, "isVisible", true);
@@ -2120,6 +2334,122 @@ fn changes_response(
             "destroyed": Vec::<String>::new(),
         })
     }
+}
+
+fn encode_query_state(
+    kind: &str,
+    filter: Option<Value>,
+    sort: Option<Vec<Value>>,
+    ids: Vec<String>,
+) -> Result<String> {
+    let token = QueryStateToken {
+        version: QUERY_STATE_VERSION.to_string(),
+        kind: kind.to_string(),
+        filter,
+        sort,
+        ids,
+    };
+    Ok(URL_SAFE_NO_PAD.encode(serde_json::to_vec(&token)?))
+}
+
+fn decode_query_state(value: &str) -> Result<QueryStateToken> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| anyhow!("invalid queryState"))?;
+    let token: QueryStateToken =
+        serde_json::from_slice(&bytes).map_err(|_| anyhow!("invalid queryState"))?;
+    if token.version != QUERY_STATE_VERSION {
+        bail!("unsupported queryState version");
+    }
+    Ok(token)
+}
+
+fn query_changes_response(
+    account_id: Uuid,
+    kind: &str,
+    since_query_state: String,
+    filter: Option<Value>,
+    sort: Option<Vec<Value>>,
+    current_ids: Vec<String>,
+    total: u64,
+    max_changes: Option<u64>,
+) -> Result<Value> {
+    let previous = decode_query_state(&since_query_state)?;
+    if previous.kind != kind {
+        bail!("queryState does not match requested method");
+    }
+    if previous.filter != filter || previous.sort != sort {
+        bail!("queryState does not match requested filter or sort");
+    }
+
+    let next_query_state = encode_query_state(kind, filter, sort, current_ids.clone())?;
+    let diff = compute_query_diff(&previous.ids, &current_ids, max_changes);
+    let change_count = diff.removed.len() + diff.added.len();
+    let change_limit = max_changes.unwrap_or(u64::MAX) as usize;
+
+    Ok(json!({
+        "accountId": account_id.to_string(),
+        "oldQueryState": since_query_state,
+        "newQueryState": next_query_state,
+        "removed": diff.removed,
+        "added": diff.added,
+        "total": total,
+        "hasMoreChanges": change_count >= change_limit && change_limit != usize::MAX,
+    }))
+}
+
+fn compute_query_diff(
+    previous_ids: &[String],
+    current_ids: &[String],
+    max_changes: Option<u64>,
+) -> QueryDiff {
+    let mut removed = Vec::new();
+    let mut added = Vec::new();
+    let max_changes = max_changes.unwrap_or(u64::MAX) as usize;
+
+    for id in previous_ids {
+        if !current_ids.contains(id) {
+            removed.push(id.clone());
+            if removed.len() + added.len() >= max_changes {
+                return QueryDiff { removed, added };
+            }
+        }
+    }
+
+    for (index, id) in current_ids.iter().enumerate() {
+        if !previous_ids.contains(id) {
+            added.push(json!({
+                "id": id,
+                "index": index,
+            }));
+            if removed.len() + added.len() >= max_changes {
+                break;
+            }
+        }
+    }
+
+    QueryDiff { removed, added }
+}
+
+fn serialize_email_query_filter(filter: &EmailQueryFilter) -> Result<Value> {
+    Ok(serde_json::to_value(filter)?)
+}
+
+fn serialize_email_query_sort(sort: &[EmailQuerySort]) -> Result<Vec<Value>> {
+    sort.iter()
+        .map(serde_json::to_value)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(Into::into)
+}
+
+fn blob_id_for_message(email: &JmapEmail) -> String {
+    email
+        .mime_blob_ref
+        .as_deref()
+        .and_then(|value| value.strip_prefix("upload:"))
+        .filter(|value| !value.trim().is_empty())
+        .map(ToString::to_string)
+        .unwrap_or_else(|| format!("message:{}", email.id))
 }
 
 fn email_properties(properties: Option<Vec<String>>) -> HashSet<String> {
@@ -2241,7 +2571,7 @@ fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) -> Value {
         properties,
         &mut object,
         "blobId",
-        format!("message:{}", email.id),
+        blob_id_for_message(email),
     );
     insert_if(
         properties,
@@ -3585,7 +3915,52 @@ mod tests {
                 has_attachments: false,
                 size_octets: 42,
                 internet_message_id: Some("<draft@example.test>".to_string()),
+                mime_blob_ref: Some(
+                    "draft-message:cccccccc-cccc-cccc-cccc-cccccccccccc".to_string(),
+                ),
                 delivery_status: "draft".to_string(),
+            }
+        }
+
+        fn inbox_mailbox() -> JmapMailbox {
+            JmapMailbox {
+                id: Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap(),
+                role: "inbox".to_string(),
+                name: "Inbox".to_string(),
+                sort_order: 0,
+                total_emails: 1,
+                unread_emails: 1,
+            }
+        }
+
+        fn inbox_email() -> JmapEmail {
+            JmapEmail {
+                id: Uuid::parse_str("edededed-eded-eded-eded-edededededed").unwrap(),
+                thread_id: Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap(),
+                mailbox_id: Self::inbox_mailbox().id,
+                mailbox_role: "inbox".to_string(),
+                mailbox_name: "Inbox".to_string(),
+                received_at: "2026-04-19T08:00:00Z".to_string(),
+                sent_at: Some("2026-04-19T07:59:00Z".to_string()),
+                from_address: "carol@example.test".to_string(),
+                from_display: Some("Carol".to_string()),
+                to: vec![lpe_storage::JmapEmailAddress {
+                    address: "alice@example.test".to_string(),
+                    display_name: Some("Alice".to_string()),
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Inbox subject".to_string(),
+                preview: "Inbox preview".to_string(),
+                body_text: "Inbox body".to_string(),
+                body_html_sanitized: Some("<p>Inbox body</p>".to_string()),
+                unread: true,
+                flagged: false,
+                has_attachments: false,
+                size_octets: 84,
+                internet_message_id: Some("<inbox@example.test>".to_string()),
+                mime_blob_ref: Some("upload:88888888-8888-8888-8888-888888888888".to_string()),
+                delivery_status: "stored".to_string(),
             }
         }
 
@@ -3670,6 +4045,33 @@ mod tests {
                 .collect::<HashSet<_>>()
                 .into_iter()
                 .collect())
+        }
+
+        async fn query_jmap_thread_ids(
+            &self,
+            _account_id: Uuid,
+            mailbox_id: Option<Uuid>,
+            _search_text: Option<&str>,
+            position: u64,
+            limit: u64,
+        ) -> Result<lpe_storage::JmapThreadQuery> {
+            let mut ids = self
+                .emails
+                .iter()
+                .filter(|email| mailbox_id.is_none() || Some(email.mailbox_id) == mailbox_id)
+                .map(|email| email.thread_id)
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
+            ids.sort();
+            ids.reverse();
+            let total = ids.len() as u64;
+            ids = ids
+                .into_iter()
+                .skip(position as usize)
+                .take(limit as usize)
+                .collect();
+            Ok(lpe_storage::JmapThreadQuery { ids, total })
         }
 
         async fn create_jmap_mailbox(
@@ -3889,6 +4291,7 @@ mod tests {
                 has_attachments: false,
                 size_octets: input.size_octets,
                 internet_message_id: input.internet_message_id,
+                mime_blob_ref: Some(input.mime_blob_ref),
                 delivery_status: "stored".to_string(),
             })
         }
@@ -4219,6 +4622,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mailbox_and_email_query_changes_replay_snapshot_differences() {
+        let initial = JmapService::new_with_validator(
+            FakeStore {
+                session: Some(FakeStore::account()),
+                mailboxes: vec![FakeStore::draft_mailbox()],
+                emails: vec![FakeStore::draft_email()],
+                ..Default::default()
+            },
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
+        let initial_response = initial
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![
+                        JmapMethodCall("Mailbox/query".to_string(), json!({}), "c1".to_string()),
+                        JmapMethodCall("Email/query".to_string(), json!({}), "c2".to_string()),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        let mailbox_query_state = initial_response.method_responses[0].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let email_query_state = initial_response.method_responses[1].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let updated = JmapService::new_with_validator(
+            FakeStore {
+                session: Some(FakeStore::account()),
+                mailboxes: vec![FakeStore::inbox_mailbox(), FakeStore::draft_mailbox()],
+                emails: vec![FakeStore::inbox_email(), FakeStore::draft_email()],
+                ..Default::default()
+            },
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
+        let response = updated
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Mailbox/queryChanges".to_string(),
+                            json!({"sinceQueryState": mailbox_query_state}),
+                            "c1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Email/queryChanges".to_string(),
+                            json!({"sinceQueryState": email_query_state}),
+                            "c2".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.method_responses[0].1["removed"], json!([]));
+        assert_eq!(
+            response.method_responses[0].1["added"][0]["id"],
+            Value::String(FakeStore::inbox_mailbox().id.to_string())
+        );
+        assert_eq!(
+            response.method_responses[1].1["added"][0]["id"],
+            Value::String(FakeStore::inbox_email().id.to_string())
+        );
+    }
+
+    #[tokio::test]
     async fn identity_thread_and_submission_reads_are_available() {
         let store = FakeStore {
             session: Some(FakeStore::account()),
@@ -4270,6 +4749,45 @@ mod tests {
             response.method_responses[2].1["list"][0]["deliveryStatus"],
             Value::String("queued".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn thread_query_returns_distinct_threads_for_filtered_emails() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::inbox_mailbox(), FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::inbox_email(), FakeStore::draft_email()],
+            ..Default::default()
+        };
+        let service = JmapService::new_with_validator(
+            store,
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Thread/query".to_string(),
+                        json!({"filter": {"inMailbox": FakeStore::inbox_mailbox().id.to_string()}}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["ids"][0],
+            Value::String(FakeStore::inbox_email().thread_id.to_string())
+        );
+        assert_eq!(
+            response.method_responses[0].1["total"],
+            Value::Number(1.into())
+        );
+        assert!(response.method_responses[0].1["queryState"].is_string());
     }
 
     #[tokio::test]
@@ -4368,6 +4886,10 @@ mod tests {
         assert_eq!(
             response.method_responses[2].1["created"]["i1"]["id"],
             Value::String("55555555-5555-5555-5555-555555555555".to_string())
+        );
+        assert_eq!(
+            response.method_responses[2].1["created"]["i1"]["blobId"],
+            Value::String("77777777-7777-7777-7777-777777777777".to_string())
         );
         assert_eq!(
             response.method_responses[3].1["list"][0]["hardLimit"],

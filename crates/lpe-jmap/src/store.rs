@@ -2,8 +2,8 @@ use anyhow::Result;
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount,
     CollaborationCollection, JmapEmail, JmapEmailQuery, JmapEmailSubmission,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput,
-    JmapQuota, JmapUploadBlob, SavedDraftMessage, Storage, SubmitMessageInput,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
+    JmapThreadQuery, JmapUploadBlob, SavedDraftMessage, Storage, SubmitMessageInput,
     SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
 };
 use uuid::Uuid;
@@ -39,6 +39,14 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
     ) -> Result<JmapEmailQuery>;
     async fn fetch_all_jmap_email_ids(&self, account_id: Uuid) -> Result<Vec<Uuid>>;
     async fn fetch_all_jmap_thread_ids(&self, account_id: Uuid) -> Result<Vec<Uuid>>;
+    async fn query_jmap_thread_ids(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        search_text: Option<&str>,
+        position: u64,
+        limit: u64,
+    ) -> Result<JmapThreadQuery>;
     async fn fetch_jmap_emails(&self, account_id: Uuid, ids: &[Uuid]) -> Result<Vec<JmapEmail>>;
     async fn fetch_jmap_draft(&self, account_id: Uuid, id: Uuid) -> Result<Option<JmapEmail>>;
     async fn fetch_jmap_email_submissions(
@@ -207,6 +215,18 @@ impl JmapStore for Storage {
 
     async fn fetch_all_jmap_thread_ids(&self, account_id: Uuid) -> Result<Vec<Uuid>> {
         self.fetch_all_jmap_thread_ids(account_id).await
+    }
+
+    async fn query_jmap_thread_ids(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        search_text: Option<&str>,
+        position: u64,
+        limit: u64,
+    ) -> Result<JmapThreadQuery> {
+        self.query_jmap_thread_ids(account_id, mailbox_id, search_text, position, limit)
+            .await
     }
 
     async fn fetch_jmap_emails(&self, account_id: Uuid, ids: &[Uuid]) -> Result<Vec<JmapEmail>> {

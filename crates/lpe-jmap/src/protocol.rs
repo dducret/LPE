@@ -73,6 +73,16 @@ pub struct MailboxQueryArguments {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct QueryChangesArguments<F = Value, S = Value> {
+    pub account_id: Option<String>,
+    pub since_query_state: String,
+    pub max_changes: Option<u64>,
+    pub filter: Option<F>,
+    pub sort: Option<Vec<S>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MailboxSetArguments {
     pub account_id: Option<String>,
     pub create: Option<HashMap<String, Value>>,
@@ -106,14 +116,14 @@ pub struct EmailQueryArguments {
     pub sort: Option<Vec<EmailQuerySort>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EmailQueryFilter {
     pub in_mailbox: Option<String>,
     pub text: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EmailQuerySort {
     pub property: String,
@@ -158,6 +168,16 @@ pub struct ThreadGetArguments {
     pub account_id: Option<String>,
     pub ids: Option<Vec<String>>,
     pub properties: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadQueryArguments {
+    pub account_id: Option<String>,
+    pub position: Option<u64>,
+    pub limit: Option<u64>,
+    pub filter: Option<EmailQueryFilter>,
+    pub sort: Option<Vec<EmailQuerySort>>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -793,6 +793,7 @@ pub struct JmapEmail {
     pub has_attachments: bool,
     pub size_octets: i64,
     pub internet_message_id: Option<String>,
+    pub mime_blob_ref: Option<String>,
     pub delivery_status: String,
 }
 
@@ -825,6 +826,12 @@ pub struct ImapEmail {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct JmapEmailQuery {
+    pub ids: Vec<Uuid>,
+    pub total: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct JmapThreadQuery {
     pub ids: Vec<Uuid>,
     pub total: u64,
 }
@@ -987,6 +994,7 @@ struct JmapEmailRow {
     has_attachments: bool,
     size_octets: i64,
     internet_message_id: Option<String>,
+    mime_blob_ref: Option<String>,
     delivery_status: String,
 }
 
@@ -3679,6 +3687,83 @@ impl Storage {
             .collect()
     }
 
+    pub async fn query_jmap_thread_ids(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        search_text: Option<&str>,
+        position: u64,
+        limit: u64,
+    ) -> Result<JmapThreadQuery> {
+        let normalized_search = search_text
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string);
+        let ids = sqlx::query(
+            r#"
+            WITH matched_threads AS (
+                SELECT
+                    m.thread_id,
+                    MAX(s.received_at) AS latest_received_at
+                FROM searchable_mail_documents s
+                JOIN messages m ON m.id = s.message_id
+                WHERE s.account_id = $1
+                  AND ($2::uuid IS NULL OR s.mailbox_id = $2)
+                  AND (
+                    $3::text IS NULL
+                    OR (s.message_search_vector || s.attachment_search_vector)
+                        @@ websearch_to_tsquery('simple', $3)
+                  )
+                GROUP BY m.thread_id
+            )
+            SELECT thread_id
+            FROM matched_threads
+            ORDER BY latest_received_at DESC, thread_id DESC
+            OFFSET $4
+            LIMIT $5
+            "#,
+        )
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(normalized_search.as_deref())
+        .bind(position as i64)
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|row| row.try_get("thread_id"))
+        .collect::<std::result::Result<Vec<Uuid>, sqlx::Error>>()?;
+
+        let total: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*)
+            FROM (
+                SELECT m.thread_id
+                FROM searchable_mail_documents s
+                JOIN messages m ON m.id = s.message_id
+                WHERE s.account_id = $1
+                  AND ($2::uuid IS NULL OR s.mailbox_id = $2)
+                  AND (
+                    $3::text IS NULL
+                    OR (s.message_search_vector || s.attachment_search_vector)
+                        @@ websearch_to_tsquery('simple', $3)
+                  )
+                GROUP BY m.thread_id
+            ) matched_threads
+            "#,
+        )
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(normalized_search.as_deref())
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(JmapThreadQuery {
+            ids,
+            total: total.max(0) as u64,
+        })
+    }
+
     pub async fn fetch_jmap_emails(
         &self,
         account_id: Uuid,
@@ -3714,6 +3799,7 @@ impl Storage {
                 m.has_attachments,
                 m.size_octets,
                 m.internet_message_id,
+                m.mime_blob_ref,
                 m.delivery_status
             FROM messages m
             JOIN mailboxes mb ON mb.id = m.mailbox_id
@@ -3811,6 +3897,7 @@ impl Storage {
                     has_attachments: row.has_attachments,
                     size_octets: row.size_octets,
                     internet_message_id: row.internet_message_id.clone(),
+                    mime_blob_ref: row.mime_blob_ref.clone(),
                     delivery_status: row.delivery_status.clone(),
                 });
             }
@@ -3850,6 +3937,7 @@ impl Storage {
                 m.has_attachments,
                 m.size_octets,
                 m.internet_message_id,
+                m.mime_blob_ref,
                 m.delivery_status
             FROM messages m
             JOIN mailboxes mb ON mb.id = m.mailbox_id
@@ -5373,7 +5461,9 @@ impl Storage {
         input: CollaborationGrantInput,
         audit: AuditEntryInput,
     ) -> Result<CollaborationGrant> {
-        let tenant_id = self.tenant_id_for_account_id(input.owner_account_id).await?;
+        let tenant_id = self
+            .tenant_id_for_account_id(input.owner_account_id)
+            .await?;
         let grantee_email = normalize_email(&input.grantee_email);
         validate_collaboration_rights(
             input.may_read,

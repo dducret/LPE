@@ -1,5 +1,5 @@
 use anyhow::Result;
-use lpe_magika::collect_mime_attachment_parts;
+use lpe_magika::{collect_mime_attachment_parts, extract_visible_body_parts};
 use std::collections::HashMap;
 
 use crate::{AttachmentUploadInput, SubmittedRecipientInput};
@@ -18,6 +18,7 @@ pub struct ParsedRfc822Message {
     pub subject: String,
     pub message_id: Option<String>,
     pub body_text: String,
+    pub body_html_sanitized: Option<String>,
     pub attachments: Vec<AttachmentUploadInput>,
 }
 
@@ -73,8 +74,9 @@ pub fn parse_header_recipients(
 
 pub fn parse_rfc822_message(bytes: &[u8]) -> Result<ParsedRfc822Message> {
     let raw = String::from_utf8_lossy(bytes).replace("\r\n", "\n");
-    let (header_text, body_text) = raw.split_once("\n\n").unwrap_or((raw.as_str(), ""));
+    let (header_text, _) = raw.split_once("\n\n").unwrap_or((raw.as_str(), ""));
     let headers = parse_headers(header_text);
+    let visible = extract_visible_body_parts(bytes)?;
 
     Ok(ParsedRfc822Message {
         from: headers
@@ -90,7 +92,8 @@ pub fn parse_rfc822_message(bytes: &[u8]) -> Result<ParsedRfc822Message> {
             .unwrap_or_default(),
         subject: headers.get("subject").cloned().unwrap_or_default(),
         message_id: headers.get("message-id").cloned(),
-        body_text: body_text.trim().to_string(),
+        body_text: visible.text_body,
+        body_html_sanitized: visible.html_body,
         attachments: parse_message_attachments(bytes)?
             .into_iter()
             .map(|mut attachment| {
@@ -286,6 +289,7 @@ mod tests {
         assert_eq!(parsed.message_id.as_deref(), Some("<id@example.test>"));
         assert_eq!(parsed.from.unwrap().email, "alice@example.test");
         assert_eq!(parsed.to.len(), 1);
+        assert_eq!(parsed.body_text, "Hello");
         assert_eq!(parsed.attachments.len(), 1);
         assert_eq!(parsed.attachments[0].file_name, "notes.odt");
         assert_eq!(
@@ -293,5 +297,31 @@ mod tests {
             "application/vnd.oasis.opendocument.text"
         );
         assert_eq!(parsed.attachments[0].blob_bytes, b"ODT-DATA".to_vec());
+    }
+
+    #[test]
+    fn parse_rfc822_message_prefers_plaintext_but_keeps_html_body() {
+        let message = concat!(
+            "Subject: Multipart\r\n",
+            "Content-Type: multipart/alternative; boundary=\"b1\"\r\n",
+            "\r\n",
+            "--b1\r\n",
+            "Content-Type: text/plain; charset=utf-8\r\n",
+            "\r\n",
+            "Plain body\r\n",
+            "--b1\r\n",
+            "Content-Type: text/html; charset=utf-8\r\n",
+            "\r\n",
+            "<p>HTML body</p>\r\n",
+            "--b1--\r\n"
+        );
+
+        let parsed = parse_rfc822_message(message.as_bytes()).unwrap();
+
+        assert_eq!(parsed.body_text, "Plain body");
+        assert_eq!(
+            parsed.body_html_sanitized.as_deref(),
+            Some("<p>HTML body</p>")
+        );
     }
 }
