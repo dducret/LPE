@@ -28,7 +28,7 @@ The `crates/lpe-jmap` crate acts as a `JMAP` adapter on top of the canonical mod
 - `urn:ietf:params:jmap:contacts`
 - `urn:ietf:params:jmap:calendars`
 
-The `JMAP` session exposes the same `accountId` as the other protocol adapters. Address books and calendars are virtual at the `JMAP` layer, but remain wired to the authenticated account's canonical data and to accessible shared collections inside the same tenant.
+The `JMAP` session exposes the authenticated mailbox account as the primary account and may expose additional accessible shared mailbox accounts in the session account map. Address books and calendars are virtual at the `JMAP` layer, but remain wired to canonical owned or shared data inside the same tenant.
 
 ### Supported methods
 
@@ -134,5 +134,6 @@ Organizer and participant status are exposed through `participants`:
 - `CardDAV` and `CalDAV` remain DAV compatibility layers over the same canonical tables
 - `ActiveSync` remains the native Outlook/mobile layer over the same canonical tables
 - `JMAP Contacts` and `JMAP Calendars` become the primary modern access path over those same models
+- mailbox delegation and sender authorization for `JMAP Mail` also reuse the same canonical mailbox-access and canonical submission model; there is no `JMAP`-specific shared-mailbox or sender-right state
 
 

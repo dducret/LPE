@@ -19,6 +19,7 @@ pub(crate) type AuthenticatedPrincipal = lpe_mail_auth::AccountPrincipal;
 #[derive(Debug, Clone)]
 pub(crate) struct CollectionDefinition {
     pub(crate) id: String,
+    pub(crate) account_id: Uuid,
     pub(crate) class_name: String,
     pub(crate) display_name: String,
     pub(crate) folder_type: String,

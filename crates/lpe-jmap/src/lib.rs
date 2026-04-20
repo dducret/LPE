@@ -19,9 +19,9 @@ use lpe_storage::{
     AuthenticatedAccount, CalendarOrganizerMetadata, CalendarParticipantMetadata,
     CalendarParticipantsMetadata, ClientTask, CollaborationCollection, JmapEmail, JmapEmailAddress,
     JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob, SavedDraftMessage, Storage,
-    SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientTaskInput,
+    JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage,
+    SenderIdentity, Storage, SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientTaskInput,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -234,26 +234,49 @@ async fn websocket_handler(
 }
 
 impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
+    async fn requested_account_access(
+        &self,
+        account: &AuthenticatedAccount,
+        requested_account_id: Option<&str>,
+    ) -> Result<MailboxAccountAccess> {
+        let requested_id = match requested_account_id {
+            Some(value) => parse_uuid(value)?,
+            None => account.account_id,
+        };
+        self.store
+            .fetch_accessible_mailbox_accounts(account.account_id)
+            .await?
+            .into_iter()
+            .find(|entry| entry.account_id == requested_id)
+            .ok_or_else(|| anyhow!("accountId is not accessible"))
+    }
+
     pub async fn session_document(
         &self,
         authorization: Option<&str>,
         websocket_url: Option<&str>,
     ) -> Result<SessionDocument> {
         let account = self.authenticate(authorization).await?;
-        let account_id = account.account_id.to_string();
         let capabilities = session_capabilities(websocket_url.unwrap_or("ws://localhost/jmap/ws"));
+        let accessible_accounts = self
+            .store
+            .fetch_accessible_mailbox_accounts(account.account_id)
+            .await?;
         let mut accounts = HashMap::new();
-        accounts.insert(
-            account_id.clone(),
-            SessionAccount {
-                name: account.email.clone(),
-                is_personal: true,
-                is_read_only: false,
-                account_capabilities: capabilities.clone(),
-            },
-        );
+        for accessible in &accessible_accounts {
+            accounts.insert(
+                accessible.account_id.to_string(),
+                SessionAccount {
+                    name: accessible.email.clone(),
+                    is_personal: accessible.is_owned,
+                    is_read_only: false,
+                    account_capabilities: capabilities.clone(),
+                },
+            );
+        }
 
         let mut primary_accounts = HashMap::new();
+        let account_id = account.account_id.to_string();
         primary_accounts.insert(JMAP_CORE_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_MAIL_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_SUBMISSION_CAPABILITY.to_string(), account_id.clone());
@@ -770,7 +793,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
     ) -> Result<Value> {
         let arguments: MailboxGetArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let properties = mailbox_properties(arguments.properties);
         let mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
 
@@ -808,7 +834,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
     ) -> Result<Value> {
         let arguments: MailboxQueryArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let mut mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
         mailboxes.sort_by_key(|mailbox| (mailbox.sort_order, mailbox.name.to_lowercase()));
         let position = arguments.position.unwrap_or(0) as usize;
@@ -844,7 +873,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
     ) -> Result<Value> {
         let arguments: QueryChangesArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let mut mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
         mailboxes.sort_by_key(|mailbox| (mailbox.sort_order, mailbox.name.to_lowercase()));
         let current_ids = mailboxes
@@ -870,7 +902,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
     ) -> Result<Value> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let entries = self.object_state_entries(account_id, "Mailbox").await?;
         Ok(changes_response(
             account_id,
@@ -888,7 +923,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         created_ids: &mut HashMap<String, String>,
     ) -> Result<Value> {
         let arguments: MailboxSetArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let old_state = self.object_state(account_id, "Mailbox").await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
@@ -1929,7 +1967,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
     ) -> Result<Value> {
         let arguments: EmailQueryArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         validate_query_sort(arguments.sort.as_deref())?;
 
         let mailbox_id = arguments
@@ -1991,7 +2032,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: QueryChangesArguments<EmailQueryFilter, EmailQuerySort> =
             serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         validate_query_sort(arguments.sort.as_deref())?;
 
         let mailbox_id = arguments
@@ -2037,7 +2081,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
     ) -> Result<Value> {
         let arguments: EmailGetArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let properties = email_properties(arguments.properties);
 
         let ids = match parse_uuid_list(arguments.ids)? {
@@ -2072,7 +2119,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
     ) -> Result<Value> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let entries = self.object_state_entries(account_id, "Email").await?;
         Ok(changes_response(
             account_id,
@@ -2090,8 +2140,14 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         created_ids: &mut HashMap<String, String>,
     ) -> Result<Value> {
         let arguments: EmailCopyArguments = serde_json::from_value(arguments)?;
-        let from_account_id = requested_account_id(Some(&arguments.from_account_id), account)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let from_account_access = self
+            .requested_account_access(account, Some(&arguments.from_account_id))
+            .await?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let from_account_id = from_account_access.account_id;
+        let account_id = account_access.account_id;
         if from_account_id != account_id {
             bail!("cross-account Email/copy is not supported");
         }
@@ -2152,14 +2208,17 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         created_ids: &mut HashMap<String, String>,
     ) -> Result<Value> {
         let arguments: EmailImportArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let old_state = self.object_state(account_id, "Email").await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
 
         for (creation_id, value) in arguments.emails {
             match self
-                .parse_email_import(account, account_id, value, created_ids)
+                .parse_email_import(account, &account_access, value, created_ids)
                 .await
             {
                 Ok(input) => {
@@ -2208,7 +2267,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         created_ids: &mut HashMap<String, String>,
     ) -> Result<Value> {
         let arguments: EmailSetArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let old_state = self.object_state(account_id, "Email").await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
@@ -2220,7 +2282,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         if let Some(create) = arguments.create {
             for (creation_id, value) in create {
                 match self
-                    .create_draft(account, account_id, value, creation_id.as_str())
+                    .create_draft(account, &account_access, value, creation_id.as_str())
                     .await
                 {
                     Ok(saved) => {
@@ -2242,7 +2304,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if let Some(update) = arguments.update {
             for (id, value) in update {
-                match self.update_draft(account, account_id, &id, value).await {
+                match self
+                    .update_draft(account, &account_access, &id, value)
+                    .await
+                {
                     Ok(_) => {
                         updated.insert(id, Value::Object(Map::new()));
                     }
@@ -2301,7 +2366,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         created_ids: &mut HashMap<String, String>,
     ) -> Result<Value> {
         let arguments: EmailSubmissionSetArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let old_state = self.object_state(account_id, "Email").await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
@@ -2367,7 +2435,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
     ) -> Result<Value> {
         let arguments: EmailSubmissionGetArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let ids = parse_uuid_list(arguments.ids)?;
         let properties = email_submission_properties(arguments.properties);
         let ids_ref = ids.as_deref().unwrap_or(&[]);
@@ -2397,15 +2468,26 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
     ) -> Result<Value> {
         let arguments: IdentityGetArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let properties = identity_properties(arguments.properties);
-        let identity_id = identity_id_for(account);
-        let ids = arguments.ids.unwrap_or_else(|| vec![identity_id.clone()]);
+        let identities = self
+            .store
+            .fetch_sender_identities(account.account_id, account_id)
+            .await?;
+        let ids = arguments.ids.unwrap_or_else(|| {
+            identities
+                .iter()
+                .map(|identity| identity.id.clone())
+                .collect::<Vec<_>>()
+        });
         let mut list = Vec::new();
         let mut not_found = Vec::new();
         for id in ids {
-            if id == identity_id {
-                list.push(identity_to_value(account, &properties));
+            if let Some(identity) = identities.iter().find(|identity| identity.id == id) {
+                list.push(identity_to_value(identity, &properties));
             } else {
                 not_found.push(Value::String(id));
             }
@@ -2425,7 +2507,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
     ) -> Result<Value> {
         let arguments: ThreadQueryArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         validate_query_sort(arguments.sort.as_deref())?;
 
         let mailbox_id = arguments
@@ -2486,7 +2571,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
     ) -> Result<Value> {
         let arguments: ThreadGetArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let properties = thread_properties(arguments.properties);
         let all_email_ids = self.store.fetch_all_jmap_email_ids(account_id).await?;
         let emails = self
@@ -2533,7 +2621,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
     ) -> Result<Value> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let entries = self.object_state_entries(account_id, "Thread").await?;
         Ok(changes_response(
             account_id,
@@ -2550,7 +2641,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
     ) -> Result<Value> {
         let arguments: QuotaGetArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let quota = self.store.fetch_jmap_quota(account_id).await?;
         let ids = arguments.ids.unwrap_or_else(|| vec![quota.id.clone()]);
         let mut list = Vec::new();
@@ -2577,7 +2671,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         arguments: Value,
     ) -> Result<Value> {
         let arguments: SearchSnippetGetArguments = serde_json::from_value(arguments)?;
-        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
         let ids = parse_uuid_list(Some(arguments.email_ids))?.unwrap_or_default();
         let emails = self.store.fetch_jmap_emails(account_id, &ids).await?;
         let not_found = ids
@@ -2601,7 +2698,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         body: &[u8],
     ) -> Result<Value> {
         let account = self.authenticate(authorization).await?;
-        let requested_account_id = requested_account_id(Some(account_id), &account)?;
+        let requested_account = self
+            .requested_account_access(&account, Some(account_id))
+            .await?;
+        let requested_account_id = requested_account.account_id;
         let outcome = self.validator.validate_bytes(
             ValidationRequest {
                 ingress_context: IngressContext::JmapUpload,
@@ -2637,7 +2737,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         blob_id: &str,
     ) -> Result<JmapUploadBlob> {
         let account = self.authenticate(authorization).await?;
-        let requested_account_id = requested_account_id(Some(account_id), &account)?;
+        let requested_account = self
+            .requested_account_access(&account, Some(account_id))
+            .await?;
+        let requested_account_id = requested_account.account_id;
         let blob_id = parse_upload_blob_id(blob_id)?;
         self.store
             .fetch_jmap_upload_blob(requested_account_id, blob_id)
@@ -2698,12 +2801,13 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     async fn create_draft(
         &self,
         account: &AuthenticatedAccount,
-        account_id: Uuid,
+        account_access: &MailboxAccountAccess,
         value: Value,
         creation_id: &str,
     ) -> Result<SavedDraftMessage> {
         let mutation = parse_draft_mutation(value)?;
-        let from = select_from_address(mutation.from, account)?;
+        let (from, sender) =
+            select_from_addresses(mutation.from, mutation.sender, account, account_access)?;
         let audit = AuditEntryInput {
             actor: account.email.clone(),
             action: "jmap-email-draft-create".to_string(),
@@ -2713,10 +2817,13 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .save_draft_message(
                 SubmitMessageInput {
                     draft_message_id: None,
-                    account_id,
+                    account_id: account_access.account_id,
+                    submitted_by_account_id: account.account_id,
                     source: "jmap".to_string(),
                     from_display: from.name,
                     from_address: from.email,
+                    sender_display: sender.as_ref().and_then(|value| value.name.clone()),
+                    sender_address: sender.map(|value| value.email),
                     to: map_recipients(mutation.to.unwrap_or_default())?,
                     cc: map_recipients(mutation.cc.unwrap_or_default())?,
                     bcc: map_recipients(mutation.bcc.unwrap_or_default())?,
@@ -2738,24 +2845,19 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     async fn update_draft(
         &self,
         account: &AuthenticatedAccount,
-        account_id: Uuid,
+        account_access: &MailboxAccountAccess,
         id: &str,
         value: Value,
     ) -> Result<SavedDraftMessage> {
         let message_id = parse_uuid(id)?;
         let existing = self
             .store
-            .fetch_jmap_draft(account_id, message_id)
+            .fetch_jmap_draft(account_access.account_id, message_id)
             .await?
             .ok_or_else(|| anyhow!("draft not found"))?;
         let mutation = parse_draft_mutation(value)?;
-        let from = match mutation.from {
-            Some(from) => select_from_address(Some(from), account)?,
-            None => EmailAddressInput {
-                email: existing.from_address,
-                name: existing.from_display,
-            },
-        };
+        let (from, sender) =
+            select_from_addresses(mutation.from, mutation.sender, account, account_access)?;
         let audit = AuditEntryInput {
             actor: account.email.clone(),
             action: "jmap-email-draft-update".to_string(),
@@ -2766,10 +2868,20 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .save_draft_message(
                 SubmitMessageInput {
                     draft_message_id: Some(message_id),
-                    account_id,
+                    account_id: account_access.account_id,
+                    submitted_by_account_id: account.account_id,
                     source: "jmap".to_string(),
-                    from_display: from.name,
-                    from_address: from.email,
+                    from_display: from.name.or(existing.from_display.clone()),
+                    from_address: if from.email.trim().is_empty() {
+                        existing.from_address
+                    } else {
+                        from.email
+                    },
+                    sender_display: sender
+                        .as_ref()
+                        .and_then(|value| value.name.clone())
+                        .or(existing.sender_display),
+                    sender_address: sender.map(|value| value.email).or(existing.sender_address),
                     to: mutation
                         .to
                         .map(map_recipients)
@@ -2803,7 +2915,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     async fn parse_email_import(
         &self,
         account: &AuthenticatedAccount,
-        account_id: Uuid,
+        account_access: &MailboxAccountAccess,
         value: Value,
         created_ids: &HashMap<String, String>,
     ) -> Result<JmapImportedEmailInput> {
@@ -2828,7 +2940,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .ok_or_else(|| anyhow!("one target mailboxId is required"))?;
         let blob = self
             .store
-            .fetch_jmap_upload_blob(account_id, blob_id)
+            .fetch_jmap_upload_blob(account_access.account_id, blob_id)
             .await?
             .ok_or_else(|| anyhow!("uploaded blob not found"))?;
         let outcome = self.validator.validate_bytes(
@@ -2850,18 +2962,21 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         self.validate_imported_attachments(&parsed.attachments)?;
 
         Ok(JmapImportedEmailInput {
-            account_id,
+            account_id: account_access.account_id,
+            submitted_by_account_id: account.account_id,
             mailbox_id: target_mailbox_id,
             source: "jmap-import".to_string(),
             from_display: parsed
                 .from
                 .as_ref()
                 .and_then(|from| from.display_name.clone())
-                .or(Some(account.display_name.clone())),
+                .or(Some(account_access.display_name.clone())),
             from_address: parsed
                 .from
                 .map(|from| from.email)
-                .unwrap_or_else(|| account.email.clone()),
+                .unwrap_or_else(|| account_access.email.clone()),
+            sender_display: None,
+            sender_address: None,
             to: map_parsed_recipients(parsed.to),
             cc: map_parsed_recipients(parsed.cc),
             bcc: Vec::new(),
@@ -3813,6 +3928,7 @@ fn email_properties(properties: Option<Vec<String>>) -> HashSet<String> {
                 "messageId".to_string(),
                 "subject".to_string(),
                 "from".to_string(),
+                "sender".to_string(),
                 "to".to_string(),
                 "cc".to_string(),
                 "preview".to_string(),
@@ -3986,6 +4102,15 @@ fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) -> Value {
             )]),
         );
     }
+    if properties.contains("sender") && email.sender_address.is_some() {
+        object.insert(
+            "sender".to_string(),
+            Value::Array(vec![address_value(
+                email.sender_address.as_deref().unwrap_or_default(),
+                email.sender_display.as_deref(),
+            )]),
+        );
+    }
     if properties.contains("to") {
         object.insert(
             "to".to_string(),
@@ -4098,7 +4223,7 @@ fn email_submission_to_value(
         properties,
         &mut object,
         "identityId",
-        submission.identity_email.clone(),
+        submission.identity_id.clone(),
     );
     if properties.contains("envelope") {
         object.insert(
@@ -4130,20 +4255,16 @@ fn email_submission_to_value(
     Value::Object(object)
 }
 
-fn identity_id_for(account: &AuthenticatedAccount) -> String {
-    account.email.to_lowercase()
-}
-
-fn identity_to_value(account: &AuthenticatedAccount, properties: &HashSet<String>) -> Value {
+fn identity_to_value(identity: &SenderIdentity, properties: &HashSet<String>) -> Value {
     let mut object = Map::new();
-    insert_if(properties, &mut object, "id", identity_id_for(account));
+    insert_if(properties, &mut object, "id", identity.id.clone());
     insert_if(
         properties,
         &mut object,
         "name",
-        account.display_name.clone(),
+        identity.display_name.clone(),
     );
-    insert_if(properties, &mut object, "email", account.email.clone());
+    insert_if(properties, &mut object, "email", identity.email.clone());
     if properties.contains("replyTo") {
         object.insert("replyTo".to_string(), Value::Null);
     }
@@ -4679,6 +4800,7 @@ fn parse_draft_mutation(value: Value) -> Result<DraftMutation> {
 
     Ok(DraftMutation {
         from: parse_address_list(object.get("from"))?,
+        sender: parse_address_list(object.get("sender"))?,
         to: parse_address_list(object.get("to"))?,
         cc: parse_address_list(object.get("cc"))?,
         bcc: parse_address_list(object.get("bcc"))?,
@@ -4979,8 +5101,8 @@ fn validate_task_list_id(value: Option<&Value>) -> Result<()> {
 fn reject_unknown_email_properties(object: &Map<String, Value>) -> Result<()> {
     for key in object.keys() {
         match key.as_str() {
-            "from" | "to" | "cc" | "bcc" | "subject" | "textBody" | "htmlBody" | "mailboxIds"
-            | "keywords" => {}
+            "from" | "sender" | "to" | "cc" | "bcc" | "subject" | "textBody" | "htmlBody"
+            | "mailboxIds" | "keywords" => {}
             _ => bail!("unsupported email property: {key}"),
         }
     }
@@ -5235,30 +5357,52 @@ fn parse_local_datetime_value(value: &str) -> Result<String> {
     Ok(format!("{date}T{time}:00"))
 }
 
-fn select_from_address(
+fn select_from_addresses(
     from: Option<Vec<EmailAddressInput>>,
+    sender: Option<Vec<EmailAddressInput>>,
     account: &AuthenticatedAccount,
-) -> Result<EmailAddressInput> {
-    match from {
-        None => Ok(EmailAddressInput {
-            email: account.email.clone(),
-            name: Some(account.display_name.clone()),
-        }),
+    account_access: &MailboxAccountAccess,
+) -> Result<(EmailAddressInput, Option<EmailAddressInput>)> {
+    let from = match from {
+        None => EmailAddressInput {
+            email: account_access.email.clone(),
+            name: Some(account_access.display_name.clone()),
+        },
         Some(mut addresses) => {
             if addresses.len() != 1 {
                 bail!("exactly one from address is required");
             }
             let address = addresses.remove(0);
-            if address.email.trim().eq_ignore_ascii_case(&account.email) {
-                Ok(EmailAddressInput {
-                    email: account.email.clone(),
-                    name: address.name,
-                })
-            } else {
-                bail!("from email must match authenticated account");
+            let normalized = address.email.trim().to_lowercase();
+            if normalized != account_access.email {
+                bail!("from email must match the selected mailbox account");
+            }
+            EmailAddressInput {
+                email: account_access.email.clone(),
+                name: address.name,
             }
         }
-    }
+    };
+
+    let sender = match sender {
+        None => None,
+        Some(mut addresses) => {
+            if addresses.len() != 1 {
+                bail!("exactly one sender address is required");
+            }
+            let address = addresses.remove(0);
+            let normalized = address.email.trim().to_lowercase();
+            if normalized != account.email {
+                bail!("sender email must match authenticated account");
+            }
+            Some(EmailAddressInput {
+                email: account.email.clone(),
+                name: address.name.or_else(|| Some(account.display_name.clone())),
+            })
+        }
+    };
+
+    Ok((from, sender))
 }
 
 fn map_recipients(input: Vec<EmailAddressInput>) -> Result<Vec<SubmittedRecipientInput>> {
@@ -5312,7 +5456,7 @@ mod tests {
     use lpe_magika::{DetectionSource, Detector, MagikaDetection};
     use lpe_storage::{
         AccessibleContact, AccessibleEvent, ClientContact, ClientEvent, CollaborationCollection,
-        CollaborationRights, JmapImportedEmailInput,
+        CollaborationRights, JmapImportedEmailInput, MailboxAccountAccess, SenderIdentity,
     };
     use std::sync::{Arc, Mutex};
 
@@ -5321,6 +5465,8 @@ mod tests {
         session: Option<AuthenticatedAccount>,
         mailboxes: Vec<JmapMailbox>,
         emails: Vec<JmapEmail>,
+        accessible_mailbox_accounts: Vec<MailboxAccountAccess>,
+        sender_identities: Vec<SenderIdentity>,
         contacts: Arc<Mutex<Vec<ClientContact>>>,
         events: Arc<Mutex<Vec<ClientEvent>>>,
         tasks: Arc<Mutex<Vec<ClientTask>>>,
@@ -5523,6 +5669,10 @@ mod tests {
                 sent_at: None,
                 from_address: "alice@example.test".to_string(),
                 from_display: Some("Alice".to_string()),
+                sender_address: None,
+                sender_display: None,
+                sender_authorization_kind: "self".to_string(),
+                submitted_by_account_id: Self::account().account_id,
                 to: vec![lpe_storage::JmapEmailAddress {
                     address: "bob@example.test".to_string(),
                     display_name: Some("Bob".to_string()),
@@ -5570,6 +5720,10 @@ mod tests {
                 sent_at: Some("2026-04-19T07:59:00Z".to_string()),
                 from_address: "carol@example.test".to_string(),
                 from_display: Some("Carol".to_string()),
+                sender_address: None,
+                sender_display: None,
+                sender_authorization_kind: "self".to_string(),
+                submitted_by_account_id: Self::account().account_id,
                 to: vec![lpe_storage::JmapEmailAddress {
                     address: "alice@example.test".to_string(),
                     display_name: Some("Alice".to_string()),
@@ -5644,6 +5798,60 @@ mod tests {
                 updated_at: "2026-04-20T15:00:00Z".to_string(),
             }
         }
+
+        fn shared_account() -> AuthenticatedAccount {
+            AuthenticatedAccount {
+                tenant_id: "tenant-a".to_string(),
+                account_id: Uuid::parse_str("bbbbbbbb-1111-2222-3333-444444444444").unwrap(),
+                email: "shared@example.test".to_string(),
+                display_name: "Shared Mailbox".to_string(),
+                expires_at: "2099-01-01T00:00:00Z".to_string(),
+            }
+        }
+
+        fn mailbox_access() -> MailboxAccountAccess {
+            let account = Self::account();
+            MailboxAccountAccess {
+                account_id: account.account_id,
+                email: account.email,
+                display_name: account.display_name,
+                is_owned: true,
+                may_read: true,
+                may_write: true,
+                may_send_as: true,
+                may_send_on_behalf: true,
+            }
+        }
+
+        fn shared_mailbox_access(
+            may_send_as: bool,
+            may_send_on_behalf: bool,
+        ) -> MailboxAccountAccess {
+            let account = Self::shared_account();
+            MailboxAccountAccess {
+                account_id: account.account_id,
+                email: account.email,
+                display_name: account.display_name,
+                is_owned: false,
+                may_read: true,
+                may_write: true,
+                may_send_as,
+                may_send_on_behalf,
+            }
+        }
+
+        fn sender_identity() -> SenderIdentity {
+            let account = Self::account();
+            SenderIdentity {
+                id: format!("self:{}", account.account_id),
+                owner_account_id: account.account_id,
+                email: account.email,
+                display_name: account.display_name,
+                authorization_kind: "self".to_string(),
+                sender_address: None,
+                sender_display: None,
+            }
+        }
     }
 
     impl JmapStore for FakeStore {
@@ -5657,6 +5865,33 @@ mod tests {
 
         async fn fetch_jmap_mailboxes(&self, _account_id: Uuid) -> Result<Vec<JmapMailbox>> {
             Ok(self.mailboxes.clone())
+        }
+
+        async fn fetch_accessible_mailbox_accounts(
+            &self,
+            _principal_account_id: Uuid,
+        ) -> Result<Vec<MailboxAccountAccess>> {
+            if self.accessible_mailbox_accounts.is_empty() {
+                Ok(vec![Self::mailbox_access()])
+            } else {
+                Ok(self.accessible_mailbox_accounts.clone())
+            }
+        }
+
+        async fn fetch_sender_identities(
+            &self,
+            _principal_account_id: Uuid,
+            target_account_id: Uuid,
+        ) -> Result<Vec<SenderIdentity>> {
+            let identities = if self.sender_identities.is_empty() {
+                vec![Self::sender_identity()]
+            } else {
+                self.sender_identities.clone()
+            };
+            Ok(identities
+                .into_iter()
+                .filter(|identity| identity.owner_account_id == target_account_id)
+                .collect())
         }
 
         async fn fetch_jmap_mailbox_ids(&self, _account_id: Uuid) -> Result<Vec<Uuid>> {
@@ -5790,6 +6025,7 @@ mod tests {
                 id: Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap(),
                 email_id: Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap(),
                 thread_id: FakeStore::draft_email().thread_id,
+                identity_id: format!("self:{}", FakeStore::account().account_id),
                 identity_email: FakeStore::account().email,
                 envelope_mail_from: "alice@example.test".to_string(),
                 envelope_rcpt_to: vec!["bob@example.test".to_string()],
@@ -5856,6 +6092,7 @@ mod tests {
             Ok(SavedDraftMessage {
                 message_id: input.draft_message_id.unwrap_or_else(Uuid::new_v4),
                 account_id: input.account_id,
+                submitted_by_account_id: input.submitted_by_account_id,
                 draft_mailbox_id: FakeStore::draft_mailbox().id,
                 delivery_status: "draft".to_string(),
             })
@@ -5882,6 +6119,7 @@ mod tests {
                 message_id: Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap(),
                 thread_id: FakeStore::draft_email().thread_id,
                 account_id: FakeStore::account().account_id,
+                submitted_by_account_id: FakeStore::account().account_id,
                 sent_mailbox_id: Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap(),
                 outbound_queue_id: Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap(),
                 delivery_status: "queued".to_string(),
@@ -5919,6 +6157,10 @@ mod tests {
                 sent_at: None,
                 from_address: input.from_address,
                 from_display: input.from_display,
+                sender_address: input.sender_address,
+                sender_display: input.sender_display,
+                sender_authorization_kind: "self".to_string(),
+                submitted_by_account_id: input.submitted_by_account_id,
                 to: input
                     .to
                     .into_iter()
@@ -6202,6 +6444,75 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_and_identity_include_accessible_shared_mailbox_accounts() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(true, true),
+            ],
+            sender_identities: vec![
+                FakeStore::sender_identity(),
+                SenderIdentity {
+                    id: format!("send-as:{}", FakeStore::shared_account().account_id),
+                    owner_account_id: FakeStore::shared_account().account_id,
+                    email: FakeStore::shared_account().email,
+                    display_name: FakeStore::shared_account().display_name,
+                    authorization_kind: "send-as".to_string(),
+                    sender_address: None,
+                    sender_display: None,
+                },
+                SenderIdentity {
+                    id: format!("send-on-behalf:{}", FakeStore::shared_account().account_id),
+                    owner_account_id: FakeStore::shared_account().account_id,
+                    email: FakeStore::shared_account().email,
+                    display_name: FakeStore::shared_account().display_name,
+                    authorization_kind: "send-on-behalf".to_string(),
+                    sender_address: Some(FakeStore::account().email),
+                    sender_display: Some(FakeStore::account().display_name),
+                },
+            ],
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let session = service
+            .session_document(Some("Bearer token"), None)
+            .await
+            .unwrap();
+        assert!(session
+            .accounts
+            .contains_key(&FakeStore::shared_account().account_id.to_string()));
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Identity/get".to_string(),
+                        json!({"accountId": FakeStore::shared_account().account_id.to_string()}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["list"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[tokio::test]
     async fn email_set_creates_draft_through_canonical_storage() {
         let store = FakeStore {
             session: Some(FakeStore::account()),
@@ -6243,6 +6554,105 @@ mod tests {
         assert_eq!(saved[0].from_address, "alice@example.test");
         assert_eq!(saved[0].bcc.len(), 1);
         assert!(response.created_ids.contains_key("k1"));
+    }
+
+    #[tokio::test]
+    async fn email_set_creates_delegated_shared_mailbox_draft() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, true),
+            ],
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/set".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "create": {
+                                "k1": {
+                                    "from": [{"email": "shared@example.test", "name": "Shared Mailbox"}],
+                                    "sender": [{"email": "alice@example.test", "name": "Alice"}],
+                                    "to": [{"email": "bob@example.test"}],
+                                    "subject": "Delegated",
+                                    "textBody": "Shared draft"
+                                }
+                            }
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let saved = store.saved_drafts.lock().unwrap();
+        assert_eq!(saved[0].account_id, FakeStore::shared_account().account_id);
+        assert_eq!(
+            saved[0].submitted_by_account_id,
+            FakeStore::account().account_id
+        );
+        assert_eq!(saved[0].from_address, "shared@example.test");
+        assert_eq!(
+            saved[0].sender_address.as_deref(),
+            Some("alice@example.test")
+        );
+    }
+
+    #[tokio::test]
+    async fn email_set_rejects_inaccessible_account_id() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![FakeStore::mailbox_access()],
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/set".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "create": {
+                                "k1": {
+                                    "from": [{"email": "shared@example.test"}],
+                                    "to": [{"email": "bob@example.test"}],
+                                    "subject": "No access",
+                                    "textBody": "Denied"
+                                }
+                            }
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["type"],
+            Value::String("invalidArguments".to_string())
+        );
     }
 
     #[tokio::test]

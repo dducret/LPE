@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lpe_storage::{
     mail::parse_message_attachments, AttachmentUploadInput, JmapEmail, JmapEmailAddress,
-    SubmitMessageInput, SubmittedRecipientInput,
+    MailboxAccountAccess, SubmitMessageInput, SubmittedRecipientInput,
 };
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -18,6 +18,7 @@ pub(crate) struct ParsedMailbox {
 #[derive(Debug)]
 pub(crate) struct ParsedMimeMessage {
     pub(crate) from: Option<ParsedMailbox>,
+    pub(crate) sender: Option<ParsedMailbox>,
     pub(crate) to: Vec<SubmittedRecipientInput>,
     pub(crate) cc: Vec<SubmittedRecipientInput>,
     pub(crate) bcc: Vec<SubmittedRecipientInput>,
@@ -33,6 +34,10 @@ pub(crate) fn parse_mime_message(bytes: &[u8]) -> Result<ParsedMimeMessage> {
         from: message
             .headers
             .get("from")
+            .and_then(|value| parse_mailbox(value).ok().flatten()),
+        sender: message
+            .headers
+            .get("sender")
             .and_then(|value| parse_mailbox(value).ok().flatten()),
         to: parse_address_list(message.headers.get("to").map(String::as_str).unwrap_or("")),
         cc: parse_address_list(message.headers.get("cc").map(String::as_str).unwrap_or("")),
@@ -333,23 +338,33 @@ pub(crate) fn format_email_address(address: &JmapEmailAddress) -> String {
 
 pub(crate) fn merged_draft_input(
     principal: &AuthenticatedPrincipal,
+    mailbox_access: &MailboxAccountAccess,
     draft_id: Uuid,
     existing: &JmapEmail,
     application_data: &WbxmlNode,
 ) -> SubmitMessageInput {
     let from_mailbox =
         field_text(application_data, "From").and_then(|value| parse_mailbox(&value).ok().flatten());
+    let (sender_display, sender_address) = default_sender(
+        mailbox_access,
+        principal,
+        existing.sender_display.clone(),
+        existing.sender_address.clone(),
+    );
     SubmitMessageInput {
         draft_message_id: Some(draft_id),
-        account_id: principal.account_id,
+        account_id: mailbox_access.account_id,
+        submitted_by_account_id: principal.account_id,
         source: "activesync-sync-change".to_string(),
         from_display: from_mailbox
             .as_ref()
             .and_then(|mailbox| mailbox.display_name.clone())
-            .or_else(|| Some(principal.display_name.clone())),
+            .or_else(|| Some(mailbox_access.display_name.clone())),
         from_address: from_mailbox
             .map(|mailbox| mailbox.address)
-            .unwrap_or_else(|| existing.from_address.clone()),
+            .unwrap_or_else(|| mailbox_access.email.clone()),
+        sender_display,
+        sender_address,
         to: field_text(application_data, "To")
             .map(|value| parse_address_list(&value))
             .unwrap_or_else(|| {
@@ -401,23 +416,28 @@ pub(crate) fn merged_draft_input(
 
 pub(crate) fn draft_input_from_application_data(
     principal: &AuthenticatedPrincipal,
+    mailbox_access: &MailboxAccountAccess,
     draft_message_id: Option<Uuid>,
     application_data: &WbxmlNode,
     source: &str,
 ) -> SubmitMessageInput {
     let from_mailbox =
         field_text(application_data, "From").and_then(|value| parse_mailbox(&value).ok().flatten());
+    let (sender_display, sender_address) = default_sender(mailbox_access, principal, None, None);
     SubmitMessageInput {
         draft_message_id,
-        account_id: principal.account_id,
+        account_id: mailbox_access.account_id,
+        submitted_by_account_id: principal.account_id,
         source: source.to_string(),
         from_display: from_mailbox
             .as_ref()
             .and_then(|mailbox| mailbox.display_name.clone())
-            .or_else(|| Some(principal.display_name.clone())),
+            .or_else(|| Some(mailbox_access.display_name.clone())),
         from_address: from_mailbox
             .map(|mailbox| mailbox.address)
-            .unwrap_or_else(|| principal.email.clone()),
+            .unwrap_or_else(|| mailbox_access.email.clone()),
+        sender_display,
+        sender_address,
         to: field_text(application_data, "To")
             .map(|value| parse_address_list(&value))
             .unwrap_or_default(),
@@ -439,6 +459,29 @@ pub(crate) fn draft_input_from_application_data(
         flagged: Some(false),
         attachments: Vec::new(),
     }
+}
+
+pub(crate) fn default_sender(
+    mailbox_access: &MailboxAccountAccess,
+    principal: &AuthenticatedPrincipal,
+    current_display: Option<String>,
+    current_address: Option<String>,
+) -> (Option<String>, Option<String>) {
+    if let Some(address) = current_address {
+        return (current_display, Some(address));
+    }
+
+    if mailbox_access.account_id != principal.account_id
+        && mailbox_access.may_send_on_behalf
+        && !mailbox_access.may_send_as
+    {
+        return (
+            Some(principal.display_name.clone()),
+            Some(principal.email.clone()),
+        );
+    }
+
+    (current_display, None)
 }
 
 pub(crate) fn field_text(node: &WbxmlNode, name: &str) -> Option<String> {

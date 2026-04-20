@@ -27,7 +27,8 @@ use crate::{
         CALENDAR_CLASS, CONTACTS_CLASS, FOLDER_SYNC_COLLECTION_ID, MAIL_CLASS, ROOT_FOLDER_ID,
     },
     message::{
-        draft_input_from_application_data, field_text, merged_draft_input, parse_mime_message,
+        default_sender, draft_input_from_application_data, field_text, merged_draft_input,
+        parse_mime_message,
     },
     response::{empty_response, is_message_rfc822, policy_key, sync_status_node, wbxml_response},
     snapshot::{
@@ -56,6 +57,49 @@ impl<S> ActiveSyncService<S> {
 }
 
 impl<S: ActiveSyncStore> ActiveSyncService<S> {
+    async fn mailbox_accesses(
+        &self,
+        principal: &AuthenticatedPrincipal,
+    ) -> Result<Vec<lpe_storage::MailboxAccountAccess>> {
+        self.store
+            .fetch_accessible_mailbox_accounts(principal.account_id)
+            .await
+    }
+
+    async fn mailbox_access_for_account(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        target_account_id: Uuid,
+    ) -> Result<lpe_storage::MailboxAccountAccess> {
+        self.mailbox_accesses(principal)
+            .await?
+            .into_iter()
+            .find(|access| access.account_id == target_account_id)
+            .ok_or_else(|| anyhow!("mailbox account is not accessible"))
+    }
+
+    async fn mailbox_access_for_from_address(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        from_address: Option<&str>,
+    ) -> Result<lpe_storage::MailboxAccountAccess> {
+        let normalized = from_address
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty());
+        let accesses = self.mailbox_accesses(principal).await?;
+        if let Some(from_address) = normalized {
+            accesses
+                .into_iter()
+                .find(|access| access.email == from_address)
+                .ok_or_else(|| anyhow!("from email is not accessible"))
+        } else {
+            accesses
+                .into_iter()
+                .find(|access| access.account_id == principal.account_id)
+                .ok_or_else(|| anyhow!("primary mailbox account is not accessible"))
+        }
+    }
+
     pub(crate) async fn handle_request(
         &self,
         query: ActiveSyncQuery,
@@ -399,7 +443,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         }
 
         let client_responses = if drafts_collection(&collection) {
-            self.apply_draft_sync_commands(principal, collection_node)
+            self.apply_draft_sync_commands(principal, &collection, collection_node)
                 .await?
         } else if collection.class_name == CONTACTS_CLASS {
             self.apply_contact_sync_commands(principal, collection_node)
@@ -549,7 +593,8 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
     ) -> Result<Vec<CollectionStateEntry>> {
         let mut state = if mail_collection(collection) {
             let mailbox_id = parse_collection_mailbox_id(collection)?;
-            self.fetch_all_mail_states(account_id, mailbox_id).await?
+            self.fetch_all_mail_states(collection.account_id, mailbox_id)
+                .await?
         } else if collection.class_name == CONTACTS_CLASS {
             self.store
                 .fetch_activesync_contact_states(account_id)
@@ -656,10 +701,14 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
 
         let mut nodes = HashMap::new();
         if mail_collection(collection) {
-            for email in self.store.fetch_jmap_emails(account_id, &ids).await? {
+            for email in self
+                .store
+                .fetch_jmap_emails(collection.account_id, &ids)
+                .await?
+            {
                 let attachments = self
                     .store
-                    .fetch_activesync_message_attachments(account_id, email.id)
+                    .fetch_activesync_message_attachments(collection.account_id, email.id)
                     .await?;
                 nodes.insert(
                     email.id.to_string(),
@@ -751,7 +800,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         if mail_collection(collection) {
             let mailbox_id = parse_collection_mailbox_id(collection)?;
             self.store
-                .fetch_activesync_email_states_by_ids(account_id, mailbox_id, ids)
+                .fetch_activesync_email_states_by_ids(collection.account_id, mailbox_id, ids)
                 .await
         } else if collection.class_name == CONTACTS_CLASS {
             self.store
@@ -769,12 +818,16 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
     async fn apply_draft_sync_commands(
         &self,
         principal: &AuthenticatedPrincipal,
+        collection: &CollectionDefinition,
         collection_node: &WbxmlNode,
     ) -> Result<Vec<WbxmlNode>> {
         let mut responses = Vec::new();
         let Some(commands) = collection_node.child("Commands") else {
             return Ok(responses);
         };
+        let mailbox_access = self
+            .mailbox_access_for_account(principal, collection.account_id)
+            .await?;
 
         for command in &commands.children {
             match command.name.as_str() {
@@ -788,6 +841,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                         .ok_or_else(|| anyhow!("draft add command is missing ApplicationData"))?;
                     let input = draft_input_from_application_data(
                         principal,
+                        &mailbox_access,
                         None,
                         application_data,
                         "activesync-sync-add",
@@ -821,14 +875,19 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     let draft_id = Uuid::parse_str(&server_id)?;
                     let existing = self
                         .store
-                        .fetch_jmap_draft(principal.account_id, draft_id)
+                        .fetch_jmap_draft(collection.account_id, draft_id)
                         .await?
                         .ok_or_else(|| anyhow!("draft not found"))?;
                     let application_data = command.child("ApplicationData").ok_or_else(|| {
                         anyhow!("draft change command is missing ApplicationData")
                     })?;
-                    let input =
-                        merged_draft_input(principal, draft_id, &existing, application_data);
+                    let input = merged_draft_input(
+                        principal,
+                        &mailbox_access,
+                        draft_id,
+                        &existing,
+                        application_data,
+                    );
                     self.store
                         .save_draft_message(
                             input,
@@ -852,7 +911,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     let draft_id = Uuid::parse_str(&server_id)?;
                     self.store
                         .delete_draft_message(
-                            principal.account_id,
+                            collection.account_id,
                             draft_id,
                             AuditEntryInput {
                                 actor: principal.email.clone(),
@@ -1062,23 +1121,36 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
 
         let parsed = parse_mime_message(&mime_payload)?;
         validate_mime_attachments(&mime_payload)?;
+        let mailbox_access = self
+            .mailbox_access_for_from_address(
+                principal,
+                parsed.from.as_ref().map(|mailbox| mailbox.address.as_str()),
+            )
+            .await?;
         let from_display = parsed
             .from
             .as_ref()
             .and_then(|mailbox| mailbox.display_name.clone())
-            .or_else(|| Some(principal.display_name.clone()));
+            .or_else(|| Some(mailbox_access.display_name.clone()));
         let from_address = parsed
             .from
             .map(|mailbox| mailbox.address)
-            .unwrap_or_else(|| principal.email.clone());
+            .unwrap_or_else(|| mailbox_access.email.clone());
+        let (sender_display, sender_address) = match parsed.sender {
+            Some(sender) => (sender.display_name, Some(sender.address)),
+            None => default_sender(&mailbox_access, principal, None, None),
+        };
         self.store
             .submit_message(
                 SubmitMessageInput {
                     draft_message_id: None,
-                    account_id: principal.account_id,
+                    account_id: mailbox_access.account_id,
+                    submitted_by_account_id: principal.account_id,
                     source: "activesync-sendmail".to_string(),
                     from_display,
                     from_address,
+                    sender_display,
+                    sender_address,
                     to: parsed.to,
                     cc: parsed.cc,
                     bcc: parsed.bcc,
@@ -1122,10 +1194,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         let mut response = WbxmlNode::new(20, "Response");
 
         for fetch in request.children_named("Fetch") {
-            response.push(
-                self.handle_item_operations_fetch(principal.account_id, fetch)
-                    .await?,
-            );
+            response.push(self.handle_item_operations_fetch(principal, fetch).await?);
         }
 
         if !response.children.is_empty() {
@@ -1137,7 +1206,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
 
     async fn handle_item_operations_fetch(
         &self,
-        account_id: Uuid,
+        principal: &AuthenticatedPrincipal,
         fetch: &WbxmlNode,
     ) -> Result<WbxmlNode> {
         let mut node = WbxmlNode::new(20, "Fetch");
@@ -1145,11 +1214,17 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .child("FileReference")
             .map(|value| value.text_value().trim())
         {
-            if let Some(attachment) = self
-                .store
-                .fetch_activesync_attachment_content(account_id, file_reference)
-                .await?
-            {
+            let mut attachment = None;
+            for access in self.mailbox_accesses(principal).await? {
+                attachment = self
+                    .store
+                    .fetch_activesync_attachment_content(access.account_id, file_reference)
+                    .await?;
+                if attachment.is_some() {
+                    break;
+                }
+            }
+            if let Some(attachment) = attachment {
                 node.push(WbxmlNode::with_text(20, "Status", "1"));
                 node.push(WbxmlNode::with_text(
                     17,
@@ -1178,13 +1253,41 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             return Ok(node);
         };
         let message_id = Uuid::parse_str(server_id)?;
-        let email = self
-            .store
-            .fetch_jmap_emails(account_id, &[message_id])
-            .await?
-            .into_iter()
-            .next();
-        if let Some(email) = email {
+        let mut resolved = None;
+        if let Some(collection_id) = fetch
+            .child("CollectionId")
+            .map(|node| node.text_value().trim().to_string())
+            .filter(|value| !value.is_empty())
+        {
+            let account_id = self
+                .resolve_collection(principal.account_id, &collection_id)
+                .await?
+                .map(|collection| collection.account_id)
+                .ok_or_else(|| anyhow!("collection not found"))?;
+            if let Some(email) = self
+                .store
+                .fetch_jmap_emails(account_id, &[message_id])
+                .await?
+                .into_iter()
+                .next()
+            {
+                resolved = Some((account_id, email));
+            }
+        } else {
+            for access in self.mailbox_accesses(principal).await? {
+                if let Some(email) = self
+                    .store
+                    .fetch_jmap_emails(access.account_id, &[message_id])
+                    .await?
+                    .into_iter()
+                    .next()
+                {
+                    resolved = Some((access.account_id, email));
+                    break;
+                }
+            }
+        }
+        if let Some((account_id, email)) = resolved {
             let attachments = self
                 .store
                 .fetch_activesync_message_attachments(account_id, email.id)
@@ -1366,15 +1469,24 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             bail!("invalid {command_name} payload");
         }
 
-        let source_message = self
-            .resolve_source_message(principal.account_id, request)
-            .await?;
+        let (source_mailbox_access, source_message) =
+            self.resolve_source_message(principal, request).await?;
         let mime_payload = request
             .child("Mime")
             .map(|node| node.text_value().as_bytes().to_vec())
             .ok_or_else(|| anyhow!("{command_name} is missing MIME content"))?;
         validate_mime_attachments(&mime_payload)?;
         let parsed = parse_mime_message(&mime_payload)?;
+        let mailbox_access = match self
+            .mailbox_access_for_from_address(
+                principal,
+                parsed.from.as_ref().map(|mailbox| mailbox.address.as_str()),
+            )
+            .await
+        {
+            Ok(access) => access,
+            Err(_) => source_mailbox_access.clone(),
+        };
 
         let (to, cc) =
             if parsed.to.is_empty() && parsed.cc.is_empty() && command_name == "SmartReply" {
@@ -1388,8 +1500,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         let mut attachments = parsed.attachments;
         if command_name == "SmartForward" {
             attachments.extend(
-                self.load_message_attachment_uploads(principal.account_id, source_message.id)
-                    .await?,
+                self.load_message_attachment_uploads(
+                    source_mailbox_access.account_id,
+                    source_message.id,
+                )
+                .await?,
             );
         }
 
@@ -1400,14 +1515,28 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         };
         let body_text =
             merge_smart_body(command_name, &parsed.body_text, &source_message.body_text);
+        let (sender_display, sender_address) = match parsed.sender {
+            Some(sender) => (sender.display_name, Some(sender.address)),
+            None => default_sender(&mailbox_access, principal, None, None),
+        };
         self.store
             .submit_message(
                 SubmitMessageInput {
                     draft_message_id: None,
-                    account_id: principal.account_id,
+                    account_id: mailbox_access.account_id,
+                    submitted_by_account_id: principal.account_id,
                     source: format!("activesync-{}", command_name.to_ascii_lowercase()),
-                    from_display: Some(principal.display_name.clone()),
-                    from_address: principal.email.clone(),
+                    from_display: parsed
+                        .from
+                        .as_ref()
+                        .and_then(|mailbox| mailbox.display_name.clone())
+                        .or_else(|| Some(mailbox_access.display_name.clone())),
+                    from_address: parsed
+                        .from
+                        .map(|mailbox| mailbox.address)
+                        .unwrap_or_else(|| mailbox_access.email.clone()),
+                    sender_display,
+                    sender_address,
                     to,
                     cc,
                     bcc: parsed.bcc,
@@ -1436,9 +1565,9 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
 
     async fn resolve_source_message(
         &self,
-        account_id: Uuid,
+        principal: &AuthenticatedPrincipal,
         request: &WbxmlNode,
-    ) -> Result<lpe_storage::JmapEmail> {
+    ) -> Result<(lpe_storage::MailboxAccountAccess, lpe_storage::JmapEmail)> {
         let source = request
             .child("Source")
             .ok_or_else(|| anyhow!("compose command is missing Source"))?;
@@ -1447,12 +1576,19 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .or_else(|| source.child("LongId"))
             .map(|node| node.text_value().trim().to_string())
             .ok_or_else(|| anyhow!("compose command is missing ItemId"))?;
-        self.store
-            .fetch_jmap_emails(account_id, &[Uuid::parse_str(&message_id)?])
-            .await?
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("source message not found"))
+        let message_id = Uuid::parse_str(&message_id)?;
+        for access in self.mailbox_accesses(principal).await? {
+            if let Some(email) = self
+                .store
+                .fetch_jmap_emails(access.account_id, &[message_id])
+                .await?
+                .into_iter()
+                .next()
+            {
+                return Ok((access, email));
+            }
+        }
+        bail!("source message not found")
     }
 
     async fn load_message_attachment_uploads(
@@ -1483,37 +1619,40 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
     }
 
     async fn folder_collections(&self, account_id: Uuid) -> Result<Vec<CollectionDefinition>> {
-        let mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
-        let mut collections = mailboxes
-            .into_iter()
-            .filter_map(|mailbox| match mailbox.role.as_str() {
-                "inbox" => Some(CollectionDefinition {
-                    id: mailbox.id.to_string(),
-                    class_name: MAIL_CLASS.to_string(),
-                    display_name: "Inbox".to_string(),
-                    folder_type: "2".to_string(),
-                    mailbox_id: Some(mailbox.id),
-                }),
-                "sent" => Some(CollectionDefinition {
-                    id: mailbox.id.to_string(),
-                    class_name: MAIL_CLASS.to_string(),
-                    display_name: "Sent".to_string(),
-                    folder_type: "5".to_string(),
-                    mailbox_id: Some(mailbox.id),
-                }),
-                "drafts" => Some(CollectionDefinition {
-                    id: mailbox.id.to_string(),
-                    class_name: MAIL_CLASS.to_string(),
-                    display_name: "Drafts".to_string(),
-                    folder_type: "3".to_string(),
-                    mailbox_id: Some(mailbox.id),
-                }),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
+        let mut collections = Vec::new();
+        for access in self
+            .store
+            .fetch_accessible_mailbox_accounts(account_id)
+            .await?
+        {
+            for mailbox in self.store.fetch_jmap_mailboxes(access.account_id).await? {
+                let display_name = if access.is_owned {
+                    mailbox.name.clone()
+                } else {
+                    format!("{} / {}", access.email, mailbox.name)
+                };
+                let folder = match mailbox.role.as_str() {
+                    "inbox" => Some(("2", display_name)),
+                    "sent" => Some(("5", display_name)),
+                    "drafts" => Some(("3", display_name)),
+                    _ => None,
+                };
+                if let Some((folder_type, display_name)) = folder {
+                    collections.push(CollectionDefinition {
+                        id: mailbox.id.to_string(),
+                        account_id: access.account_id,
+                        class_name: MAIL_CLASS.to_string(),
+                        display_name,
+                        folder_type: folder_type.to_string(),
+                        mailbox_id: Some(mailbox.id),
+                    });
+                }
+            }
+        }
 
         collections.push(CollectionDefinition {
             id: "contacts".to_string(),
+            account_id,
             class_name: CONTACTS_CLASS.to_string(),
             display_name: "Contacts".to_string(),
             folder_type: "9".to_string(),
@@ -1521,6 +1660,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         });
         collections.push(CollectionDefinition {
             id: "calendar".to_string(),
+            account_id,
             class_name: CALENDAR_CLASS.to_string(),
             display_name: "Calendar".to_string(),
             folder_type: "8".to_string(),

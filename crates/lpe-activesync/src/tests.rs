@@ -10,8 +10,9 @@ use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
     AccountLogin, ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncItemState,
     ActiveSyncSyncState, AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent,
-    JmapEmail, JmapEmailAddress, JmapEmailQuery, JmapMailbox, SavedDraftMessage,
-    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
+    JmapEmail, JmapEmailAddress, JmapEmailQuery, JmapMailbox, MailboxAccountAccess,
+    SavedDraftMessage, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
+    UpsertClientContactInput, UpsertClientEventInput,
 };
 use uuid::Uuid;
 
@@ -27,6 +28,7 @@ struct FakeStore {
     session: Option<AuthenticatedAccount>,
     login: Option<AccountLogin>,
     mailboxes: Vec<JmapMailbox>,
+    accessible_mailbox_accounts: Vec<MailboxAccountAccess>,
     emails: Arc<Mutex<Vec<JmapEmail>>>,
     contacts: Arc<Mutex<Vec<ClientContact>>>,
     events: Arc<Mutex<Vec<ClientEvent>>>,
@@ -111,6 +113,10 @@ impl FakeStore {
             sent_at: Some("2026-04-18T20:00:00Z".to_string()),
             from_address: "bob@example.test".to_string(),
             from_display: Some("Bob".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            submitted_by_account_id: Self::account().account_id,
             to: vec![JmapEmailAddress {
                 address: "alice@example.test".to_string(),
                 display_name: Some("Alice".to_string()),
@@ -126,7 +132,35 @@ impl FakeStore {
             has_attachments: false,
             size_octets: 32,
             internet_message_id: None,
+            mime_blob_ref: None,
             delivery_status: "received".to_string(),
+        }
+    }
+
+    fn mailbox_access() -> MailboxAccountAccess {
+        let account = Self::account();
+        MailboxAccountAccess {
+            account_id: account.account_id,
+            email: account.email,
+            display_name: account.display_name,
+            is_owned: true,
+            may_read: true,
+            may_write: true,
+            may_send_as: true,
+            may_send_on_behalf: true,
+        }
+    }
+
+    fn shared_mailbox_access(may_send_as: bool, may_send_on_behalf: bool) -> MailboxAccountAccess {
+        MailboxAccountAccess {
+            account_id: Uuid::parse_str("bbbbbbbb-1111-2222-3333-444444444444").unwrap(),
+            email: "shared@example.test".to_string(),
+            display_name: "Shared Mailbox".to_string(),
+            is_owned: false,
+            may_read: true,
+            may_write: true,
+            may_send_as,
+            may_send_on_behalf,
         }
     }
 }
@@ -148,9 +182,44 @@ impl AccountAuthStore for FakeStore {
         let login = self.login.clone();
         Box::pin(async move { Ok(login) })
     }
+
+    fn fetch_active_account_app_passwords<'a>(
+        &'a self,
+        _email: &'a str,
+    ) -> StoreFuture<'a, Vec<StoredAccountAppPassword>> {
+        Box::pin(async move { Ok(Vec::new()) })
+    }
+
+    fn touch_account_app_password<'a>(
+        &'a self,
+        _email: &'a str,
+        _app_password_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn append_audit_event<'a>(
+        &'a self,
+        _tenant_id: &'a str,
+        _entry: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move { Ok(()) })
+    }
 }
 
 impl ActiveSyncStore for FakeStore {
+    fn fetch_accessible_mailbox_accounts<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MailboxAccountAccess>> {
+        let accesses = if self.accessible_mailbox_accounts.is_empty() {
+            vec![Self::mailbox_access()]
+        } else {
+            self.accessible_mailbox_accounts.clone()
+        };
+        Box::pin(async move { Ok(accesses) })
+    }
+
     fn fetch_jmap_mailboxes<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
         let mailboxes = self.mailboxes.clone();
         Box::pin(async move { Ok(mailboxes) })
@@ -395,6 +464,7 @@ impl ActiveSyncStore for FakeStore {
                     Uuid::parse_str("10101010-1010-1010-1010-101010101010").unwrap()
                 }),
                 account_id: input.account_id,
+                submitted_by_account_id: input.submitted_by_account_id,
                 draft_mailbox_id: FakeStore::draft_mailbox().id,
                 delivery_status: "draft".to_string(),
             })
@@ -421,6 +491,7 @@ impl ActiveSyncStore for FakeStore {
                 message_id: Uuid::new_v4(),
                 thread_id: Uuid::new_v4(),
                 account_id: input.account_id,
+                submitted_by_account_id: input.submitted_by_account_id,
                 sent_mailbox_id: Uuid::new_v4(),
                 outbound_queue_id: Uuid::new_v4(),
                 delivery_status: "queued".to_string(),
@@ -1362,6 +1433,73 @@ async fn send_mail_uses_canonical_submission_model() {
     assert_eq!(submitted[0].source, "activesync-sendmail");
     assert_eq!(submitted[0].subject, "Hello");
     assert_eq!(submitted[0].to[0].address, "bob@example.test");
+}
+
+#[tokio::test]
+async fn send_mail_uses_on_behalf_sender_for_delegated_mailbox() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        accessible_mailbox_accounts: vec![
+            FakeStore::mailbox_access(),
+            FakeStore::shared_mailbox_access(false, true),
+        ],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+
+    service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("SendMail".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &mime_headers(),
+            b"From: Shared Mailbox <shared@example.test>\r\nTo: Bob <bob@example.test>\r\nSubject: Delegated\r\n\r\nBody",
+        )
+        .await
+        .unwrap();
+
+    let submitted = store.submitted_messages.lock().unwrap();
+    assert_eq!(
+        submitted[0].account_id,
+        FakeStore::shared_mailbox_access(false, true).account_id
+    );
+    assert_eq!(
+        submitted[0].submitted_by_account_id,
+        FakeStore::account().account_id
+    );
+    assert_eq!(submitted[0].from_address, "shared@example.test");
+    assert_eq!(
+        submitted[0].sender_address.as_deref(),
+        Some("alice@example.test")
+    );
+}
+
+#[tokio::test]
+async fn send_mail_rejects_inaccessible_shared_mailbox_address() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        accessible_mailbox_accounts: vec![FakeStore::mailbox_access()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let result = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("SendMail".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &mime_headers(),
+            b"From: Shared Mailbox <shared@example.test>\r\nTo: Bob <bob@example.test>\r\nSubject: Nope\r\n\r\nBody",
+        )
+        .await;
+
+    assert!(result.is_err());
 }
 
 #[tokio::test]

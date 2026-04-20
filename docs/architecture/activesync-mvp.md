@@ -64,6 +64,7 @@ The MVP implements a focused `WBXML` codec for the code pages needed by the curr
 - base-folder synchronization for `Inbox`, `Sent`, and `Drafts`
 - exposure of `Contacts` and `Calendar` collections
 - message synchronization for `Inbox`, `Sent`, and `Drafts`
+- same-tenant shared mailbox projection for delegated `Inbox`, `Sent`, and `Drafts`
 - draft creation, update, and deletion through `Sync` on `Drafts`
 - `Contacts` mutations through `Sync` on the `Contacts` collection
 - `Calendar` mutations through `Sync` on the `Calendar` collection
@@ -74,6 +75,7 @@ The MVP implements a focused `WBXML` codec for the code pages needed by the curr
 - `Ping` over synchronized folders by comparing current collection state against the device's latest persisted `SyncKey`
 - `SmartReply` and `SmartForward` wired to canonical submission, reusing the canonical source message and forwarding source attachments when needed
 - guarantee that a message sent from a native client becomes visible in the authoritative `Sent` view
+- delegated mailbox submission through the same canonical sender-authorization model used by `JMAP`
 - persistent `SyncKey` storage in `PostgreSQL` per account, device, and collection
 - complete `Sync` pagination with `WindowSize` and `MoreAvailable`, including continuation of a server batch across multiple `SyncKey` values
 - incremental `Sync` state tracking with compact per-item fingerprints instead of full serialized `ApplicationData` snapshots for large mailbox collections
@@ -94,6 +96,8 @@ Those mutations still write directly into the canonical `contacts` and `calendar
 - `Sent` remains authoritative; `ActiveSync` does not write a parallel sent copy
 - `SendMail` always finishes in canonical `LPE` submission
 - canonical submission remains transactional: message stored, `Sent` copy written, outbound queue persisted, then relay delegated to `LPE-CT`
+- delegated `SendMail`, `SmartReply`, and `SmartForward` resolve mailbox ownership and sender rights through canonical mailbox and sender grants
+- if a delegated mailbox has only `send_on_behalf`, the adapter persists the authenticated account as `Sender`; if `send_as` is granted, the adapter may submit without a separate sender identity
 - `Bcc` metadata is not reinjected into standard mailbox search
 - the adapter does not reuse any `Stalwart` code
 
@@ -108,6 +112,7 @@ Those mutations still write directly into the canonical `contacts` and `calendar
 - `SmartReply` and `SmartForward` are targeted at the highest-priority Outlook/mobile flows; they reuse canonical submission and source-message data, but they do not yet cover every ComposeMail variant
 - the `SendMail` `MIME` parser is still intentionally limited to MVP needs: it now covers common MIME attachments, but not the full MIME surface
 - fine-grained client-originated mutation handling is currently focused on `Drafts`
+- shared mailbox projection is currently limited to canonical mail folders; contacts and calendar continue to use their dedicated collaboration collections
 - `Drafts` synchronization is targeted for `ActiveSync 16.1`; clients limited to older protocol versions should not be treated as fully supported for that capability
 - the first `Sync` with `SyncKey = 0` uses a conservative priming round-trip before emitting the paged server changes; this is targeted for Outlook/mobile but has not yet been validated against the full diversity of `ActiveSync` clients
 - `Sync` continuation is stabilized around a compact collection fingerprint set rather than persisted full payload snapshots; if an item targeted by an unfinished paged batch mutates before that page is emitted, the server may invalidate that continuation `SyncKey` and require a fresh sync instead of replaying a stale payload

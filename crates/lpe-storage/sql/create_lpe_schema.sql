@@ -62,6 +62,11 @@ CREATE TABLE messages (
     sent_at TIMESTAMPTZ,
     from_display TEXT,
     from_address TEXT NOT NULL CHECK (from_address = lower(btrim(from_address))),
+    sender_display TEXT,
+    sender_address TEXT,
+    sender_authorization_kind TEXT NOT NULL DEFAULT 'self'
+        CHECK (sender_authorization_kind IN ('self', 'send-as', 'send-on-behalf')),
+    submitted_by_account_id UUID NOT NULL,
     subject_normalized TEXT NOT NULL,
     preview_text TEXT NOT NULL,
     submission_source TEXT NOT NULL DEFAULT 'unknown' CHECK (btrim(submission_source) <> ''),
@@ -77,6 +82,9 @@ CREATE TABLE messages (
     FOREIGN KEY (tenant_id, account_id)
         REFERENCES accounts (tenant_id, id)
         ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, submitted_by_account_id)
+        REFERENCES accounts (tenant_id, id)
+        ON DELETE RESTRICT,
     FOREIGN KEY (tenant_id, mailbox_id)
         REFERENCES mailboxes (tenant_id, id)
         ON DELETE CASCADE
@@ -87,6 +95,9 @@ CREATE INDEX messages_mailbox_received_idx
 
 CREATE INDEX messages_account_thread_idx
     ON messages (tenant_id, account_id, thread_id);
+
+CREATE INDEX messages_submitted_by_idx
+    ON messages (tenant_id, submitted_by_account_id, sent_at DESC);
 
 CREATE INDEX messages_unread_partial_idx
     ON messages (tenant_id, account_id, mailbox_id, received_at DESC)
@@ -804,6 +815,53 @@ CREATE INDEX collaboration_collection_grants_grantee_idx
 
 CREATE INDEX collaboration_collection_grants_owner_idx
     ON collaboration_collection_grants (tenant_id, collection_kind, owner_account_id, grantee_account_id);
+
+CREATE TABLE mailbox_delegation_grants (
+    id UUID PRIMARY KEY,
+    tenant_id TEXT NOT NULL CHECK (btrim(tenant_id) <> ''),
+    owner_account_id UUID NOT NULL,
+    grantee_account_id UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, owner_account_id, grantee_account_id),
+    CHECK (owner_account_id <> grantee_account_id),
+    FOREIGN KEY (tenant_id, owner_account_id)
+        REFERENCES accounts (tenant_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, grantee_account_id)
+        REFERENCES accounts (tenant_id, id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX mailbox_delegation_grants_grantee_idx
+    ON mailbox_delegation_grants (tenant_id, grantee_account_id, owner_account_id);
+
+CREATE INDEX mailbox_delegation_grants_owner_idx
+    ON mailbox_delegation_grants (tenant_id, owner_account_id, grantee_account_id);
+
+CREATE TABLE sender_delegation_grants (
+    id UUID PRIMARY KEY,
+    tenant_id TEXT NOT NULL CHECK (btrim(tenant_id) <> ''),
+    owner_account_id UUID NOT NULL,
+    grantee_account_id UUID NOT NULL,
+    sender_right TEXT NOT NULL CHECK (sender_right IN ('send_as', 'send_on_behalf')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, owner_account_id, grantee_account_id, sender_right),
+    CHECK (owner_account_id <> grantee_account_id),
+    FOREIGN KEY (tenant_id, owner_account_id)
+        REFERENCES accounts (tenant_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, grantee_account_id)
+        REFERENCES accounts (tenant_id, id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX sender_delegation_grants_grantee_idx
+    ON sender_delegation_grants (tenant_id, grantee_account_id, owner_account_id);
+
+CREATE INDEX sender_delegation_grants_owner_idx
+    ON sender_delegation_grants (tenant_id, owner_account_id, grantee_account_id, sender_right);
 
 CREATE OR REPLACE VIEW searchable_mail_documents AS
 SELECT

@@ -931,9 +931,12 @@ pub struct UpsertClientTaskInput {
 pub struct SubmitMessageInput {
     pub draft_message_id: Option<Uuid>,
     pub account_id: Uuid,
+    pub submitted_by_account_id: Uuid,
     pub source: String,
     pub from_display: Option<String>,
     pub from_address: String,
+    pub sender_display: Option<String>,
+    pub sender_address: Option<String>,
     pub to: Vec<SubmittedRecipientInput>,
     pub cc: Vec<SubmittedRecipientInput>,
     pub bcc: Vec<SubmittedRecipientInput>,
@@ -966,6 +969,7 @@ pub struct SubmittedMessage {
     pub message_id: Uuid,
     pub thread_id: Uuid,
     pub account_id: Uuid,
+    pub submitted_by_account_id: Uuid,
     pub sent_mailbox_id: Uuid,
     pub outbound_queue_id: Uuid,
     pub delivery_status: String,
@@ -991,8 +995,110 @@ pub struct SieveScriptDocument {
 pub struct SavedDraftMessage {
     pub message_id: Uuid,
     pub account_id: Uuid,
+    pub submitted_by_account_id: Uuid,
     pub draft_mailbox_id: Uuid,
     pub delivery_status: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SenderAuthorizationKind {
+    SelfSend,
+    SendAs,
+    SendOnBehalf,
+}
+
+impl SenderAuthorizationKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SelfSend => "self",
+            Self::SendAs => "send-as",
+            Self::SendOnBehalf => "send-on-behalf",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SenderDelegationRight {
+    SendAs,
+    SendOnBehalf,
+}
+
+impl SenderDelegationRight {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SendAs => "send_as",
+            Self::SendOnBehalf => "send_on_behalf",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailboxAccountAccess {
+    pub account_id: Uuid,
+    pub email: String,
+    pub display_name: String,
+    pub is_owned: bool,
+    pub may_read: bool,
+    pub may_write: bool,
+    pub may_send_as: bool,
+    pub may_send_on_behalf: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SenderIdentity {
+    pub id: String,
+    pub owner_account_id: Uuid,
+    pub email: String,
+    pub display_name: String,
+    pub authorization_kind: String,
+    pub sender_address: Option<String>,
+    pub sender_display: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MailboxDelegationGrantInput {
+    pub owner_account_id: Uuid,
+    pub grantee_email: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SenderDelegationGrantInput {
+    pub owner_account_id: Uuid,
+    pub grantee_email: String,
+    pub sender_right: SenderDelegationRight,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailboxDelegationGrant {
+    pub id: Uuid,
+    pub owner_account_id: Uuid,
+    pub owner_email: String,
+    pub owner_display_name: String,
+    pub grantee_account_id: Uuid,
+    pub grantee_email: String,
+    pub grantee_display_name: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SenderDelegationGrant {
+    pub id: Uuid,
+    pub owner_account_id: Uuid,
+    pub owner_email: String,
+    pub owner_display_name: String,
+    pub grantee_account_id: Uuid,
+    pub grantee_email: String,
+    pub grantee_display_name: String,
+    pub sender_right: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1033,6 +1139,10 @@ pub struct JmapEmail {
     pub sent_at: Option<String>,
     pub from_address: String,
     pub from_display: Option<String>,
+    pub sender_address: Option<String>,
+    pub sender_display: Option<String>,
+    pub sender_authorization_kind: String,
+    pub submitted_by_account_id: Uuid,
     pub to: Vec<JmapEmailAddress>,
     pub cc: Vec<JmapEmailAddress>,
     pub bcc: Vec<JmapEmailAddress>,
@@ -1093,6 +1203,7 @@ pub struct JmapEmailSubmission {
     pub id: Uuid,
     pub email_id: Uuid,
     pub thread_id: Uuid,
+    pub identity_id: String,
     pub identity_email: String,
     pub envelope_mail_from: String,
     pub envelope_rcpt_to: Vec<String>,
@@ -1136,10 +1247,13 @@ pub struct JmapMailboxUpdateInput {
 #[derive(Debug, Clone)]
 pub struct JmapImportedEmailInput {
     pub account_id: Uuid,
+    pub submitted_by_account_id: Uuid,
     pub mailbox_id: Uuid,
     pub source: String,
     pub from_display: Option<String>,
     pub from_address: String,
+    pub sender_display: Option<String>,
+    pub sender_address: Option<String>,
     pub to: Vec<SubmittedRecipientInput>,
     pub cc: Vec<SubmittedRecipientInput>,
     pub bcc: Vec<SubmittedRecipientInput>,
@@ -1237,6 +1351,10 @@ struct JmapEmailRow {
     sent_at: Option<String>,
     from_address: String,
     from_display: Option<String>,
+    sender_address: Option<String>,
+    sender_display: Option<String>,
+    sender_authorization_kind: String,
+    submitted_by_account_id: Uuid,
     subject: String,
     preview: String,
     body_text: String,
@@ -1265,9 +1383,47 @@ struct JmapEmailSubmissionRow {
     email_id: Uuid,
     thread_id: Uuid,
     from_address: String,
+    sender_address: Option<String>,
+    sender_authorization_kind: String,
     send_at: String,
     queue_status: String,
     delivery_status: String,
+}
+
+#[derive(Debug, FromRow)]
+struct MailboxAccountAccessRow {
+    account_id: Uuid,
+    email: String,
+    display_name: String,
+    may_send_as: bool,
+    may_send_on_behalf: bool,
+}
+
+#[derive(Debug, FromRow)]
+struct MailboxDelegationGrantRow {
+    id: Uuid,
+    owner_account_id: Uuid,
+    owner_email: String,
+    owner_display_name: String,
+    grantee_account_id: Uuid,
+    grantee_email: String,
+    grantee_display_name: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, FromRow)]
+struct SenderDelegationGrantRow {
+    id: Uuid,
+    owner_account_id: Uuid,
+    owner_email: String,
+    owner_display_name: String,
+    grantee_account_id: Uuid,
+    grantee_email: String,
+    grantee_display_name: String,
+    sender_right: String,
+    created_at: String,
+    updated_at: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -1278,6 +1434,9 @@ struct PendingOutboundQueueRow {
     attempts: i32,
     from_address: String,
     from_display: Option<String>,
+    sender_address: Option<String>,
+    sender_display: Option<String>,
+    sender_authorization_kind: String,
     subject: String,
     body_text: String,
     body_html_sanitized: Option<String>,
@@ -1539,11 +1698,21 @@ struct AccessibleEventRow {
     notes: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct AccountIdentity {
     id: Uuid,
     email: String,
     display_name: String,
+}
+
+#[derive(Debug)]
+struct ResolvedSubmissionAuthorization {
+    submitted_by: AccountIdentity,
+    from_address: String,
+    from_display: Option<String>,
+    sender_address: Option<String>,
+    sender_display: Option<String>,
+    authorization_kind: SenderAuthorizationKind,
 }
 
 #[derive(Debug, FromRow)]
@@ -4523,6 +4692,10 @@ impl Storage {
                 END AS sent_at,
                 m.from_address,
                 NULLIF(m.from_display, '') AS from_display,
+                NULLIF(m.sender_address, '') AS sender_address,
+                NULLIF(m.sender_display, '') AS sender_display,
+                m.sender_authorization_kind,
+                m.submitted_by_account_id,
                 m.subject_normalized AS subject,
                 m.preview_text AS preview,
                 COALESCE(b.body_text, '') AS body_text,
@@ -4618,6 +4791,10 @@ impl Storage {
                     sent_at: row.sent_at.clone(),
                     from_address: row.from_address.clone(),
                     from_display: row.from_display.clone(),
+                    sender_address: row.sender_address.clone(),
+                    sender_display: row.sender_display.clone(),
+                    sender_authorization_kind: row.sender_authorization_kind.clone(),
+                    submitted_by_account_id: row.submitted_by_account_id,
                     to,
                     cc,
                     bcc,
@@ -4661,6 +4838,10 @@ impl Storage {
                 END AS sent_at,
                 m.from_address,
                 NULLIF(m.from_display, '') AS from_display,
+                NULLIF(m.sender_address, '') AS sender_address,
+                NULLIF(m.sender_display, '') AS sender_display,
+                m.sender_authorization_kind,
+                m.submitted_by_account_id,
                 m.subject_normalized AS subject,
                 m.preview_text AS preview,
                 COALESCE(b.body_text, '') AS body_text,
@@ -4842,6 +5023,8 @@ impl Storage {
                 q.message_id AS email_id,
                 m.thread_id,
                 m.from_address,
+                NULLIF(m.sender_address, '') AS sender_address,
+                m.sender_authorization_kind,
                 to_char(q.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS send_at,
                 q.status AS queue_status,
                 m.delivery_status
@@ -4893,8 +5076,15 @@ impl Storage {
                 id: row.id,
                 email_id: row.email_id,
                 thread_id: row.thread_id,
+                identity_id: sender_identity_id(
+                    sender_authorization_kind_from_str(&row.sender_authorization_kind),
+                    account_id,
+                ),
                 identity_email: row.from_address.clone(),
-                envelope_mail_from: row.from_address,
+                envelope_mail_from: row
+                    .sender_address
+                    .clone()
+                    .unwrap_or_else(|| row.from_address.clone()),
                 envelope_rcpt_to: recipient_rows
                     .iter()
                     .filter(|recipient| recipient.message_id == row.email_id)
@@ -4948,6 +5138,9 @@ impl Storage {
                 q.attempts,
                 m.from_address,
                 m.from_display,
+                m.sender_address,
+                m.sender_display,
+                m.sender_authorization_kind,
                 m.subject_normalized AS subject,
                 b.body_text,
                 b.body_html_sanitized,
@@ -5030,6 +5223,9 @@ impl Storage {
                 account_id: row.account_id,
                 from_address: row.from_address,
                 from_display: row.from_display,
+                sender_address: row.sender_address,
+                sender_display: row.sender_display,
+                sender_authorization_kind: row.sender_authorization_kind,
                 to,
                 cc,
                 bcc,
@@ -5419,9 +5615,12 @@ impl Storage {
                 SubmitMessageInput {
                     draft_message_id: None,
                     account_id: followup.account_id,
+                    submitted_by_account_id: followup.account_id,
                     source: "sieve-redirect".to_string(),
                     from_display: Some(followup.account_display_name.clone()),
                     from_address: followup.account_email.clone(),
+                    sender_display: None,
+                    sender_address: None,
                     to: vec![SubmittedRecipientInput {
                         address: redirect.clone(),
                         display_name: None,
@@ -5467,9 +5666,12 @@ impl Storage {
                     SubmitMessageInput {
                         draft_message_id: None,
                         account_id: followup.account_id,
+                        submitted_by_account_id: followup.account_id,
                         source: "sieve-vacation".to_string(),
                         from_display: Some(followup.account_display_name.clone()),
                         from_address: followup.account_email.clone(),
+                        sender_display: None,
+                        sender_address: None,
                         to: vec![SubmittedRecipientInput {
                             address: followup.sender_address.clone(),
                             display_name: None,
@@ -5559,14 +5761,15 @@ impl Storage {
             r#"
             INSERT INTO messages (
                 id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                received_at, sent_at, from_display, from_address, subject_normalized,
+                received_at, sent_at, from_display, from_address, sender_display,
+                sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
                 preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
                 submission_source, delivery_status
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                NOW(), NULL, NULL, $7, $8,
-                $9, TRUE, FALSE, FALSE, $10, $11,
+                NOW(), NULL, NULL, $7, NULL,
+                NULL, 'self', $3, $8, $9, TRUE, FALSE, FALSE, $10, $11,
                 'lpe-ct', 'stored'
             )
             "#,
@@ -5758,6 +5961,11 @@ impl Storage {
         audit: AuditEntryInput,
     ) -> Result<SavedDraftMessage> {
         let from_address = normalize_email(&input.from_address);
+        let sender_address = input
+            .sender_address
+            .as_deref()
+            .map(normalize_email)
+            .filter(|value| !value.is_empty());
         let subject = normalize_subject(&input.subject);
         let body_text = input.body_text.trim().to_string();
         let visible_recipients = normalize_visible_recipients(&input);
@@ -5770,6 +5978,8 @@ impl Storage {
         let mut tx = self.pool.begin().await?;
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         self.ensure_account_exists(&mut tx, &tenant_id, input.account_id)
+            .await?;
+        self.ensure_same_tenant_account_in_tx(&mut tx, &tenant_id, input.submitted_by_account_id)
             .await?;
         let draft_mailbox_id = self
             .ensure_mailbox(
@@ -5805,14 +6015,18 @@ impl Storage {
                     sent_at = NULL,
                     from_display = $6,
                     from_address = $7,
-                    subject_normalized = $8,
-                    preview_text = $9,
-                    size_octets = $10,
-                    mime_blob_ref = $11,
-                    unread = $12,
-                    flagged = $13,
+                    sender_display = $8,
+                    sender_address = $9,
+                    sender_authorization_kind = $10,
+                    submitted_by_account_id = $11,
+                    subject_normalized = $12,
+                    preview_text = $13,
+                    size_octets = $14,
+                    mime_blob_ref = $15,
+                    unread = $16,
+                    flagged = $17,
                     has_attachments = FALSE,
-                    submission_source = $14,
+                    submission_source = $18,
                     delivery_status = 'draft'
                 FROM mailboxes mb
                 WHERE m.mailbox_id = mb.id
@@ -5830,6 +6044,10 @@ impl Storage {
             .bind(input.internet_message_id)
             .bind(input.from_display.map(|value| value.trim().to_string()))
             .bind(&from_address)
+            .bind(input.sender_display.map(|value| value.trim().to_string()))
+            .bind(sender_address.as_deref())
+            .bind(SenderAuthorizationKind::SelfSend.as_str())
+            .bind(input.submitted_by_account_id)
             .bind(&subject)
             .bind(&preview_text)
             .bind(input.size_octets.max(0))
@@ -5866,15 +6084,16 @@ impl Storage {
                 r#"
                 INSERT INTO messages (
                     id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                    received_at, sent_at, from_display, from_address, subject_normalized,
+                    received_at, sent_at, from_display, from_address, sender_display,
+                    sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
                     preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
                     submission_source, delivery_status
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6,
                     NOW(), NULL, $7, $8, $9,
-                    $10, $11, $12, FALSE, $13, $14,
-                    $15, 'draft'
+                    $10, $11, $12, $13, $14, $15, FALSE, $16, $17,
+                    $18, 'draft'
                 )
                 "#,
             )
@@ -5886,6 +6105,10 @@ impl Storage {
             .bind(input.internet_message_id)
             .bind(input.from_display.map(|value| value.trim().to_string()))
             .bind(&from_address)
+            .bind(input.sender_display.map(|value| value.trim().to_string()))
+            .bind(sender_address.as_deref())
+            .bind(SenderAuthorizationKind::SelfSend.as_str())
+            .bind(input.submitted_by_account_id)
             .bind(&subject)
             .bind(&preview_text)
             .bind(unread)
@@ -5975,6 +6198,7 @@ impl Storage {
         Ok(SavedDraftMessage {
             message_id,
             account_id: input.account_id,
+            submitted_by_account_id: input.submitted_by_account_id,
             draft_mailbox_id,
             delivery_status: "draft".to_string(),
         })
@@ -6389,6 +6613,390 @@ impl Storage {
         Ok(rows.into_iter().map(map_collaboration_grant).collect())
     }
 
+    pub async fn fetch_account_identity(&self, account_id: Uuid) -> Result<MailboxAccountAccess> {
+        let account = self.account_identity_for_id(account_id).await?;
+        Ok(MailboxAccountAccess {
+            account_id: account.id,
+            email: account.email,
+            display_name: account.display_name,
+            is_owned: true,
+            may_read: true,
+            may_write: true,
+            may_send_as: true,
+            may_send_on_behalf: false,
+        })
+    }
+
+    pub async fn upsert_mailbox_delegation_grant(
+        &self,
+        input: MailboxDelegationGrantInput,
+        audit: AuditEntryInput,
+    ) -> Result<MailboxDelegationGrant> {
+        let tenant_id = self
+            .tenant_id_for_account_id(input.owner_account_id)
+            .await?;
+        let grantee_email = normalize_email(&input.grantee_email);
+        if grantee_email.is_empty() {
+            bail!("grantee email is required");
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let owner = self
+            .load_account_identity_in_tx(&mut tx, &tenant_id, input.owner_account_id)
+            .await?;
+        let grantee = self
+            .load_account_identity_by_email_in_tx(&mut tx, &tenant_id, &grantee_email)
+            .await?;
+
+        if owner.id == grantee.id {
+            bail!("self-delegation is not supported");
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO mailbox_delegation_grants (
+                id, tenant_id, owner_account_id, grantee_account_id
+            )
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (tenant_id, owner_account_id, grantee_account_id)
+            DO UPDATE SET updated_at = NOW()
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&tenant_id)
+        .bind(owner.id)
+        .bind(grantee.id)
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        tx.commit().await?;
+
+        self.fetch_mailbox_delegation_grant(owner.id, grantee.id)
+            .await?
+            .ok_or_else(|| anyhow!("mailbox delegation grant not found after upsert"))
+    }
+
+    pub async fn delete_mailbox_delegation_grant(
+        &self,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let deleted = sqlx::query(
+            r#"
+            DELETE FROM mailbox_delegation_grants
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND grantee_account_id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(owner_account_id)
+        .bind(grantee_account_id)
+        .execute(&mut *tx)
+        .await?;
+
+        if deleted.rows_affected() == 0 {
+            bail!("mailbox delegation grant not found");
+        }
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn fetch_mailbox_delegation_grant(
+        &self,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+    ) -> Result<Option<MailboxDelegationGrant>> {
+        let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        let row = sqlx::query_as::<_, MailboxDelegationGrantRow>(
+            r#"
+            SELECT
+                g.id,
+                g.owner_account_id,
+                owner.primary_email AS owner_email,
+                owner.display_name AS owner_display_name,
+                g.grantee_account_id,
+                grantee.primary_email AS grantee_email,
+                grantee.display_name AS grantee_display_name,
+                to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM mailbox_delegation_grants g
+            JOIN accounts owner ON owner.id = g.owner_account_id
+            JOIN accounts grantee ON grantee.id = g.grantee_account_id
+            WHERE g.tenant_id = $1
+              AND g.owner_account_id = $2
+              AND g.grantee_account_id = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(owner_account_id)
+        .bind(grantee_account_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(map_mailbox_delegation_grant))
+    }
+
+    pub async fn upsert_sender_delegation_grant(
+        &self,
+        input: SenderDelegationGrantInput,
+        audit: AuditEntryInput,
+    ) -> Result<SenderDelegationGrant> {
+        let tenant_id = self
+            .tenant_id_for_account_id(input.owner_account_id)
+            .await?;
+        let grantee_email = normalize_email(&input.grantee_email);
+        if grantee_email.is_empty() {
+            bail!("grantee email is required");
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let owner = self
+            .load_account_identity_in_tx(&mut tx, &tenant_id, input.owner_account_id)
+            .await?;
+        let grantee = self
+            .load_account_identity_by_email_in_tx(&mut tx, &tenant_id, &grantee_email)
+            .await?;
+
+        if owner.id == grantee.id {
+            bail!("self-delegation is not supported");
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO sender_delegation_grants (
+                id, tenant_id, owner_account_id, grantee_account_id, sender_right
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (tenant_id, owner_account_id, grantee_account_id, sender_right)
+            DO UPDATE SET updated_at = NOW()
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&tenant_id)
+        .bind(owner.id)
+        .bind(grantee.id)
+        .bind(input.sender_right.as_str())
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        tx.commit().await?;
+
+        self.fetch_sender_delegation_grant(owner.id, grantee.id, input.sender_right)
+            .await?
+            .ok_or_else(|| anyhow!("sender delegation grant not found after upsert"))
+    }
+
+    pub async fn delete_sender_delegation_grant(
+        &self,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+        sender_right: SenderDelegationRight,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let deleted = sqlx::query(
+            r#"
+            DELETE FROM sender_delegation_grants
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND grantee_account_id = $3
+              AND sender_right = $4
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(owner_account_id)
+        .bind(grantee_account_id)
+        .bind(sender_right.as_str())
+        .execute(&mut *tx)
+        .await?;
+
+        if deleted.rows_affected() == 0 {
+            bail!("sender delegation grant not found");
+        }
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn fetch_sender_delegation_grant(
+        &self,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+        sender_right: SenderDelegationRight,
+    ) -> Result<Option<SenderDelegationGrant>> {
+        let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        let row = sqlx::query_as::<_, SenderDelegationGrantRow>(
+            r#"
+            SELECT
+                g.id,
+                g.owner_account_id,
+                owner.primary_email AS owner_email,
+                owner.display_name AS owner_display_name,
+                g.grantee_account_id,
+                grantee.primary_email AS grantee_email,
+                grantee.display_name AS grantee_display_name,
+                g.sender_right,
+                to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM sender_delegation_grants g
+            JOIN accounts owner ON owner.id = g.owner_account_id
+            JOIN accounts grantee ON grantee.id = g.grantee_account_id
+            WHERE g.tenant_id = $1
+              AND g.owner_account_id = $2
+              AND g.grantee_account_id = $3
+              AND g.sender_right = $4
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(owner_account_id)
+        .bind(grantee_account_id)
+        .bind(sender_right.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(map_sender_delegation_grant))
+    }
+
+    pub async fn fetch_accessible_mailbox_accounts(
+        &self,
+        principal_account_id: Uuid,
+    ) -> Result<Vec<MailboxAccountAccess>> {
+        let principal = self.account_identity_for_id(principal_account_id).await?;
+        let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
+        let mut accounts = vec![MailboxAccountAccess {
+            account_id: principal.id,
+            email: principal.email,
+            display_name: principal.display_name,
+            is_owned: true,
+            may_read: true,
+            may_write: true,
+            may_send_as: true,
+            may_send_on_behalf: false,
+        }];
+
+        let rows = sqlx::query_as::<_, MailboxAccountAccessRow>(
+            r#"
+            SELECT
+                owner.id AS account_id,
+                owner.primary_email AS email,
+                owner.display_name,
+                EXISTS(
+                    SELECT 1
+                    FROM sender_delegation_grants sg
+                    WHERE sg.tenant_id = g.tenant_id
+                      AND sg.owner_account_id = g.owner_account_id
+                      AND sg.grantee_account_id = g.grantee_account_id
+                      AND sg.sender_right = 'send_as'
+                ) AS may_send_as,
+                EXISTS(
+                    SELECT 1
+                    FROM sender_delegation_grants sg
+                    WHERE sg.tenant_id = g.tenant_id
+                      AND sg.owner_account_id = g.owner_account_id
+                      AND sg.grantee_account_id = g.grantee_account_id
+                      AND sg.sender_right = 'send_on_behalf'
+                ) AS may_send_on_behalf
+            FROM mailbox_delegation_grants g
+            JOIN accounts owner ON owner.id = g.owner_account_id
+            WHERE g.tenant_id = $1
+              AND g.grantee_account_id = $2
+            ORDER BY lower(owner.primary_email) ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(principal_account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        accounts.extend(rows.into_iter().map(|row| MailboxAccountAccess {
+            account_id: row.account_id,
+            email: row.email,
+            display_name: row.display_name,
+            is_owned: false,
+            may_read: true,
+            may_write: true,
+            may_send_as: row.may_send_as,
+            may_send_on_behalf: row.may_send_on_behalf,
+        }));
+        Ok(accounts)
+    }
+
+    pub async fn require_mailbox_account_access(
+        &self,
+        principal_account_id: Uuid,
+        target_account_id: Uuid,
+    ) -> Result<MailboxAccountAccess> {
+        self.fetch_accessible_mailbox_accounts(principal_account_id)
+            .await?
+            .into_iter()
+            .find(|account| account.account_id == target_account_id)
+            .ok_or_else(|| anyhow!("mailbox account is not accessible"))
+    }
+
+    pub async fn fetch_sender_identities(
+        &self,
+        principal_account_id: Uuid,
+        target_account_id: Uuid,
+    ) -> Result<Vec<SenderIdentity>> {
+        let access = self
+            .require_mailbox_account_access(principal_account_id, target_account_id)
+            .await?;
+        let principal = self.account_identity_for_id(principal_account_id).await?;
+
+        let mut identities = Vec::new();
+        if access.is_owned {
+            identities.push(SenderIdentity {
+                id: sender_identity_id(SenderAuthorizationKind::SelfSend, target_account_id),
+                owner_account_id: target_account_id,
+                email: access.email.clone(),
+                display_name: access.display_name.clone(),
+                authorization_kind: SenderAuthorizationKind::SelfSend.as_str().to_string(),
+                sender_address: None,
+                sender_display: None,
+            });
+        } else {
+            if access.may_send_as {
+                identities.push(SenderIdentity {
+                    id: sender_identity_id(SenderAuthorizationKind::SendAs, target_account_id),
+                    owner_account_id: target_account_id,
+                    email: access.email.clone(),
+                    display_name: access.display_name.clone(),
+                    authorization_kind: SenderAuthorizationKind::SendAs.as_str().to_string(),
+                    sender_address: None,
+                    sender_display: None,
+                });
+            }
+            if access.may_send_on_behalf {
+                identities.push(SenderIdentity {
+                    id: sender_identity_id(
+                        SenderAuthorizationKind::SendOnBehalf,
+                        target_account_id,
+                    ),
+                    owner_account_id: target_account_id,
+                    email: access.email,
+                    display_name: access.display_name,
+                    authorization_kind: SenderAuthorizationKind::SendOnBehalf.as_str().to_string(),
+                    sender_address: Some(principal.email),
+                    sender_display: Some(principal.display_name),
+                });
+            }
+        }
+
+        Ok(identities)
+    }
+
     pub async fn fetch_accessible_contact_collections(
         &self,
         principal_account_id: Uuid,
@@ -6787,15 +7395,11 @@ impl Storage {
         input: SubmitMessageInput,
         audit: AuditEntryInput,
     ) -> Result<SubmittedMessage> {
-        let from_address = normalize_email(&input.from_address);
         let subject = normalize_subject(&input.subject);
         let body_text = input.body_text.trim().to_string();
         let visible_recipients = normalize_visible_recipients(&input);
         let bcc_recipients = normalize_bcc_recipients(&input);
 
-        if from_address.is_empty() {
-            bail!("from_address is required");
-        }
         if visible_recipients.is_empty() && bcc_recipients.is_empty() {
             bail!("at least one recipient is required");
         }
@@ -6823,6 +7427,10 @@ impl Storage {
             bail!("account not found");
         }
 
+        let authorization = self
+            .resolve_submission_authorization_in_tx(&mut tx, &tenant_id, &input)
+            .await?;
+
         let sent_mailbox_id = self
             .ensure_mailbox(
                 &mut tx,
@@ -6839,7 +7447,8 @@ impl Storage {
         let thread_id = Uuid::new_v4();
         let outbound_queue_id = Uuid::new_v4();
         let preview_text = preview_text(&body_text);
-        let participants_normalized = participants_normalized(&from_address, &visible_recipients);
+        let participants_normalized =
+            participants_normalized(&authorization.from_address, &visible_recipients);
         let mime_blob_ref = input
             .mime_blob_ref
             .filter(|value| !value.trim().is_empty())
@@ -6850,15 +7459,16 @@ impl Storage {
             r#"
             INSERT INTO messages (
                 id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                received_at, sent_at, from_display, from_address, subject_normalized,
+                received_at, sent_at, from_display, from_address, sender_display,
+                sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
                 preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
                 submission_source, delivery_status
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
                 NOW(), NOW(), $7, $8, $9,
-                $10, FALSE, FALSE, FALSE, $11, $12,
-                $13, 'queued'
+                $10, $11, $12, $13, FALSE, FALSE, FALSE, $14, $15,
+                $16, 'queued'
             )
             "#,
         )
@@ -6868,8 +7478,12 @@ impl Storage {
         .bind(sent_mailbox_id)
         .bind(thread_id)
         .bind(input.internet_message_id)
-        .bind(input.from_display.map(|value| value.trim().to_string()))
-        .bind(&from_address)
+        .bind(authorization.from_display.as_deref())
+        .bind(&authorization.from_address)
+        .bind(authorization.sender_display.as_deref())
+        .bind(authorization.sender_address.as_deref())
+        .bind(authorization.authorization_kind.as_str())
+        .bind(authorization.submitted_by.id)
         .bind(&subject)
         .bind(&preview_text)
         .bind(input.size_octets.max(0))
@@ -6976,6 +7590,7 @@ impl Storage {
             message_id,
             thread_id,
             account_id: input.account_id,
+            submitted_by_account_id: authorization.submitted_by.id,
             sent_mailbox_id,
             outbound_queue_id,
             delivery_status: "queued".to_string(),
@@ -7055,9 +7670,12 @@ impl Storage {
             SubmitMessageInput {
                 draft_message_id: Some(draft_message_id),
                 account_id,
+                submitted_by_account_id: draft.submitted_by_account_id,
                 source: source.trim().to_lowercase(),
                 from_display: draft.from_display,
                 from_address: draft.from_address,
+                sender_display: draft.sender_display,
+                sender_address: draft.sender_address,
                 to,
                 cc,
                 bcc,
@@ -7118,7 +7736,8 @@ impl Storage {
             r#"
             INSERT INTO messages (
                 id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                received_at, sent_at, from_display, from_address, subject_normalized,
+                received_at, sent_at, from_display, from_address, sender_display,
+                sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
                 preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
                 submission_source, delivery_status
             )
@@ -7126,7 +7745,8 @@ impl Storage {
                 $4, tenant_id, account_id, $5, thread_id, internet_message_id,
                 NOW(),
                 CASE WHEN $6 = 'draft' THEN NULL ELSE sent_at END,
-                from_display, from_address, subject_normalized,
+                from_display, from_address, sender_display,
+                sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
                 preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
                 submission_source, $6
             FROM messages
@@ -7317,15 +7937,16 @@ impl Storage {
             r#"
             INSERT INTO messages (
                 id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                received_at, sent_at, from_display, from_address, subject_normalized,
+                received_at, sent_at, from_display, from_address, sender_display,
+                sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
                 preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
                 submission_source, delivery_status
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
                 NOW(), NULL, $7, $8, $9,
-                $10, FALSE, FALSE, FALSE, $11, $12,
-                $13, $14
+                $10, $11, $12, $13, $14, FALSE, FALSE, FALSE, $15, $16,
+                $17, $18
             )
             "#,
         )
@@ -7337,6 +7958,10 @@ impl Storage {
         .bind(input.internet_message_id)
         .bind(input.from_display)
         .bind(normalize_email(&input.from_address))
+        .bind(input.sender_display)
+        .bind(input.sender_address.map(|value| normalize_email(&value)))
+        .bind(SenderAuthorizationKind::SelfSend.as_str())
+        .bind(input.submitted_by_account_id)
         .bind(normalize_subject(&input.subject))
         .bind(preview)
         .bind(input.size_octets.max(0))
@@ -8974,14 +9599,15 @@ impl Storage {
             r#"
             INSERT INTO messages (
                 id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                received_at, sent_at, from_display, from_address, subject_normalized,
+                received_at, sent_at, from_display, from_address, sender_display,
+                sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
                 preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
                 submission_source, delivery_status
             )
             VALUES (
                 $1, $2, $3, $4, $5, NULLIF($6, ''),
-                NOW(), NULL, NULL, $7, $8,
-                $9, TRUE, FALSE, FALSE, $10, $11,
+                NOW(), NULL, NULL, $7, NULL,
+                NULL, 'self', $3, $8, $9, TRUE, FALSE, FALSE, $10, $11,
                 'pst-import', 'stored'
             )
             "#,
@@ -9541,6 +10167,147 @@ impl Storage {
         })
     }
 
+    async fn ensure_same_tenant_account_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Uuid,
+    ) -> Result<()> {
+        self.load_account_identity_in_tx(tx, tenant_id, account_id)
+            .await
+            .map(|_| ())
+    }
+
+    async fn has_sender_right_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+        sender_right: SenderDelegationRight,
+    ) -> Result<bool> {
+        sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM sender_delegation_grants
+                WHERE tenant_id = $1
+                  AND owner_account_id = $2
+                  AND grantee_account_id = $3
+                  AND sender_right = $4
+            )
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(owner_account_id)
+        .bind(grantee_account_id)
+        .bind(sender_right.as_str())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(Into::into)
+    }
+
+    async fn resolve_submission_authorization_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        input: &SubmitMessageInput,
+    ) -> Result<ResolvedSubmissionAuthorization> {
+        let owner = self
+            .load_account_identity_in_tx(tx, tenant_id, input.account_id)
+            .await?;
+        let submitted_by = self
+            .load_account_identity_in_tx(tx, tenant_id, input.submitted_by_account_id)
+            .await?;
+        let requested_from = normalize_email(&input.from_address);
+        let requested_sender = input
+            .sender_address
+            .as_deref()
+            .map(normalize_email)
+            .filter(|value| !value.is_empty());
+        let owner_display_name = owner.display_name.clone();
+        let submitted_by_display_name = submitted_by.display_name.clone();
+
+        if requested_from.is_empty() {
+            bail!("from_address is required");
+        }
+
+        if owner.id == submitted_by.id {
+            if requested_from != owner.email {
+                bail!("from email must match authenticated account");
+            }
+            if let Some(sender_address) = requested_sender {
+                if sender_address != submitted_by.email {
+                    bail!("sender email must match authenticated account");
+                }
+            }
+            return Ok(ResolvedSubmissionAuthorization {
+                submitted_by,
+                from_address: requested_from,
+                from_display: trim_optional_text(input.from_display.as_deref())
+                    .or_else(|| Some(owner_display_name.clone())),
+                sender_address: None,
+                sender_display: None,
+                authorization_kind: SenderAuthorizationKind::SelfSend,
+            });
+        }
+
+        if requested_from != owner.email {
+            bail!("from email must match delegated mailbox");
+        }
+
+        if let Some(sender_address) = requested_sender {
+            if sender_address != submitted_by.email {
+                bail!("sender email must match authenticated account");
+            }
+            if !self
+                .has_sender_right_in_tx(
+                    tx,
+                    tenant_id,
+                    owner.id,
+                    submitted_by.id,
+                    SenderDelegationRight::SendOnBehalf,
+                )
+                .await?
+            {
+                bail!("send on behalf is not granted for this mailbox");
+            }
+            return Ok(ResolvedSubmissionAuthorization {
+                submitted_by,
+                from_address: requested_from,
+                from_display: trim_optional_text(input.from_display.as_deref())
+                    .or_else(|| Some(owner_display_name.clone())),
+                sender_address: Some(sender_address),
+                sender_display: trim_optional_text(input.sender_display.as_deref())
+                    .or_else(|| Some(submitted_by_display_name)),
+                authorization_kind: SenderAuthorizationKind::SendOnBehalf,
+            });
+        }
+
+        if !self
+            .has_sender_right_in_tx(
+                tx,
+                tenant_id,
+                owner.id,
+                submitted_by.id,
+                SenderDelegationRight::SendAs,
+            )
+            .await?
+        {
+            bail!("send as is not granted for this mailbox");
+        }
+
+        Ok(ResolvedSubmissionAuthorization {
+            submitted_by,
+            from_address: requested_from,
+            from_display: trim_optional_text(input.from_display.as_deref())
+                .or_else(|| Some(owner_display_name)),
+            sender_address: None,
+            sender_display: None,
+            authorization_kind: SenderAuthorizationKind::SendAs,
+        })
+    }
+
     async fn tenant_id_for_account_id(&self, account_id: Uuid) -> Result<String> {
         sqlx::query_scalar::<_, String>(
             r#"
@@ -9943,6 +10710,35 @@ fn map_collaboration_grant(row: CollaborationGrantRow) -> CollaborationGrant {
     }
 }
 
+fn map_mailbox_delegation_grant(row: MailboxDelegationGrantRow) -> MailboxDelegationGrant {
+    MailboxDelegationGrant {
+        id: row.id,
+        owner_account_id: row.owner_account_id,
+        owner_email: row.owner_email,
+        owner_display_name: row.owner_display_name,
+        grantee_account_id: row.grantee_account_id,
+        grantee_email: row.grantee_email,
+        grantee_display_name: row.grantee_display_name,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    }
+}
+
+fn map_sender_delegation_grant(row: SenderDelegationGrantRow) -> SenderDelegationGrant {
+    SenderDelegationGrant {
+        id: row.id,
+        owner_account_id: row.owner_account_id,
+        owner_email: row.owner_email,
+        owner_display_name: row.owner_display_name,
+        grantee_account_id: row.grantee_account_id,
+        grantee_email: row.grantee_email,
+        grantee_display_name: row.grantee_display_name,
+        sender_right: row.sender_right,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    }
+}
+
 fn map_task(row: ClientTaskRow) -> ClientTask {
     ClientTask {
         id: row.id,
@@ -10042,6 +10838,25 @@ fn participants_normalized(
             .map(|(_, recipient)| recipient.address.clone()),
     );
     participants.join(" ")
+}
+
+fn trim_optional_text(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+fn sender_authorization_kind_from_str(value: &str) -> SenderAuthorizationKind {
+    match value.trim() {
+        "send-as" => SenderAuthorizationKind::SendAs,
+        "send-on-behalf" => SenderAuthorizationKind::SendOnBehalf,
+        _ => SenderAuthorizationKind::SelfSend,
+    }
+}
+
+fn sender_identity_id(kind: SenderAuthorizationKind, owner_account_id: Uuid) -> String {
+    format!("{}:{}", kind.as_str(), owner_account_id)
 }
 
 fn validate_collaboration_rights(
@@ -10188,9 +11003,12 @@ mod tests {
         SubmitMessageInput {
             draft_message_id: None,
             account_id: Uuid::nil(),
+            submitted_by_account_id: Uuid::nil(),
             source: "test".to_string(),
             from_display: None,
             from_address: "sender@example.test".to_string(),
+            sender_display: None,
+            sender_address: None,
             to: vec![SubmittedRecipientInput {
                 address: "to@example.test".to_string(),
                 display_name: None,

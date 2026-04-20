@@ -2,7 +2,7 @@
 
 ### Objective
 
-This document describes the first `LPE` MVP sharing, delegation, and fine ACL model for contacts and calendars.
+This document describes the first `LPE` MVP sharing, delegation, and fine ACL model for contacts, calendars, and mailbox delegation.
 
 The MVP stays strictly aligned with the existing canonical tables:
 
@@ -10,7 +10,7 @@ The MVP stays strictly aligned with the existing canonical tables:
 - `calendar_events`
 - `audit_events`
 
-It does not introduce any parallel business-object storage. Rights are added as a canonical collection layer over the objects already owned by an account.
+It does not introduce any parallel business-object storage. Rights are added as canonical layers over the objects already owned by an account.
 
 ### Principles
 
@@ -18,6 +18,7 @@ It does not introduce any parallel business-object storage. Rights are added as 
 - sharing and delegation stay limited to accounts inside the same tenant
 - the rights model is shared by `JMAP`, `DAV`, the web client, and account APIs
 - no protocol creates its own sharing model
+- mailbox delegation and sender authorization stay canonical and are enforced in the shared submission path
 - no `Stalwart` code is reused
 - rights changes reuse the canonical `audit_events` journal
 
@@ -71,17 +72,48 @@ The MVP supports:
 - organizer and attendee-status interoperability on shared calendar collections through the same canonical event rows
 - coherent exposure of the same rights through `JMAP` and `DAV`
 - minimal audit of grant changes
+- shared mailbox projection and delegated sender authorization through the canonical mailbox and submission models
 
 The MVP does not yet support:
 
 - per-item ACLs
 - cross-tenant sharing
 - sharing groups
-- complex secretary or proxy delegation roles
+- complex secretary or proxy delegation roles beyond full-mailbox projection plus `send-as` and `send-on-behalf`
 - partial subscriptions or subset filtering
 - fine-grained ACL sync history
 
 ### Protocol exposure
+
+#### Mailbox delegation
+
+Mailbox delegation is modeled separately from contacts/calendar collection grants.
+
+The MVP introduces two canonical grant tables:
+
+- `mailbox_delegation_grants` for shared mailbox access
+- `sender_delegation_grants` for sender authorization
+
+The mailbox projection grant exposes the delegated mailbox as another canonical mailbox account to the grantee. It does not copy mailbox state, messages, folders, or drafts.
+
+Sender grants are distinct durable rights:
+
+- `send_as`
+- `send_on_behalf`
+
+Submission always flows through the same canonical `submit_message` path. That path resolves:
+
+- the mailbox owner account
+- the authenticated submitting account
+- the durable sender behavior recorded on the message row
+
+The canonical message record therefore distinguishes:
+
+- self-send
+- `Send As`
+- `Send on Behalf`
+
+`Send on Behalf` persists both the delegated `From` mailbox and the authenticated `Sender`. `Send As` persists the delegated `From` mailbox without a separate sender identity.
 
 #### JMAP
 
@@ -94,6 +126,8 @@ The MVP does not yet support:
 
 `ContactCard/set` and `CalendarEvent/set` may create into a shared collection when `may_write=true`.
 
+Mail `JMAP` additionally exposes accessible shared mailbox accounts in the session account map and exposes delegated sender identities through `Identity/get`. Draft creation and submission for shared mailboxes keep using the canonical mailbox owner account plus the authenticated submitting account.
+
 #### DAV
 
 `CardDAV` and `CalDAV` expose:
@@ -105,6 +139,8 @@ DAV home `PROPFIND` depth `1` returns every accessible collection.
 
 DAV reads and writes apply the same canonical grants as `JMAP`, including organizer and attendee-status updates on accessible shared calendar collections.
 
+The mailbox delegation lot does not add mailbox access through `DAV`.
+
 ### MVP audit
 
 The MVP does not add a specialized journal. It reuses `audit_events`.
@@ -113,6 +149,10 @@ The minimally audited actions are:
 
 - share-grant creation or update
 - share-grant deletion
+- mailbox delegation grant creation or update
+- mailbox delegation grant deletion
+- sender delegation grant creation or update
+- sender delegation grant deletion
 
 The modified-object detail intentionally remains small in this lot.
 
@@ -120,7 +160,6 @@ The modified-object detail intentionally remains small in this lot.
 
 - collection-only granularity on the implicit default collections
 - no user-specific renaming of shared collections
-- no `send-on-behalf`, `send-as`, or shared-mailbox workflow delegation
 - no sophisticated multi-master conflict handling
 - no real-time rights-change notification
 

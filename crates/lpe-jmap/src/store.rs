@@ -3,8 +3,9 @@ use lpe_storage::{
     AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount, ClientTask,
     CollaborationCollection, JmapEmail, JmapEmailQuery, JmapEmailSubmission,
     JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
-    JmapThreadQuery, JmapUploadBlob, SavedDraftMessage, Storage, SubmitMessageInput,
-    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    JmapThreadQuery, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, SenderIdentity,
+    Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientTaskInput,
 };
 use uuid::Uuid;
 
@@ -12,6 +13,15 @@ use uuid::Uuid;
 pub trait JmapStore: Clone + Send + Sync + 'static {
     async fn fetch_account_session(&self, token: &str) -> Result<Option<AuthenticatedAccount>>;
     async fn fetch_jmap_mailboxes(&self, account_id: Uuid) -> Result<Vec<JmapMailbox>>;
+    async fn fetch_accessible_mailbox_accounts(
+        &self,
+        principal_account_id: Uuid,
+    ) -> Result<Vec<MailboxAccountAccess>>;
+    async fn fetch_sender_identities(
+        &self,
+        principal_account_id: Uuid,
+        target_account_id: Uuid,
+    ) -> Result<Vec<SenderIdentity>>;
     async fn fetch_jmap_mailbox_ids(&self, account_id: Uuid) -> Result<Vec<Uuid>>;
     async fn create_jmap_mailbox(
         &self,
@@ -173,6 +183,23 @@ impl JmapStore for Storage {
 
     async fn fetch_jmap_mailboxes(&self, account_id: Uuid) -> Result<Vec<JmapMailbox>> {
         self.fetch_jmap_mailboxes(account_id).await
+    }
+
+    async fn fetch_accessible_mailbox_accounts(
+        &self,
+        principal_account_id: Uuid,
+    ) -> Result<Vec<MailboxAccountAccess>> {
+        self.fetch_accessible_mailbox_accounts(principal_account_id)
+            .await
+    }
+
+    async fn fetch_sender_identities(
+        &self,
+        principal_account_id: Uuid,
+        target_account_id: Uuid,
+    ) -> Result<Vec<SenderIdentity>> {
+        self.fetch_sender_identities(principal_account_id, target_account_id)
+            .await
     }
 
     async fn fetch_jmap_mailbox_ids(&self, account_id: Uuid) -> Result<Vec<Uuid>> {

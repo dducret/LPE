@@ -2,8 +2,8 @@ use anyhow::Result;
 use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
     ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncItemState, ActiveSyncSyncState,
-    AuditEntryInput, ClientContact, ClientEvent, JmapEmail, JmapMailbox, SavedDraftMessage,
-    Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
+    AuditEntryInput, ClientContact, ClientEvent, JmapEmail, JmapMailbox, MailboxAccountAccess,
+    SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
     UpsertClientEventInput,
 };
 use std::{future::Future, pin::Pin};
@@ -12,6 +12,10 @@ use uuid::Uuid;
 pub(crate) type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
 pub trait ActiveSyncStore: AccountAuthStore {
+    fn fetch_accessible_mailbox_accounts<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MailboxAccountAccess>>;
     fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>>;
     fn query_jmap_email_ids<'a>(
         &'a self,
@@ -139,6 +143,16 @@ pub trait ActiveSyncStore: AccountAuthStore {
 }
 
 impl ActiveSyncStore for Storage {
+    fn fetch_accessible_mailbox_accounts<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MailboxAccountAccess>> {
+        Box::pin(async move {
+            self.fetch_accessible_mailbox_accounts(principal_account_id)
+                .await
+        })
+    }
+
     fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
         Box::pin(async move { self.fetch_jmap_mailboxes(account_id).await })
     }

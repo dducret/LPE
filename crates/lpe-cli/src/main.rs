@@ -325,6 +325,9 @@ mod tests {
             account_id: Uuid::new_v4(),
             from_address: "sender@example.test".to_string(),
             from_display: None,
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
             to: vec![TransportRecipient {
                 address: "dest@example.test".to_string(),
                 display_name: None,

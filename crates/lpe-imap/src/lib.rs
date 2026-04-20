@@ -847,9 +847,12 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                 SubmitMessageInput {
                     draft_message_id: None,
                     account_id: principal.account_id,
+                    submitted_by_account_id: principal.account_id,
                     source: "imap-append".to_string(),
                     from_display,
                     from_address,
+                    sender_display: None,
+                    sender_address: None,
                     to: parsed
                         .to
                         .into_iter()

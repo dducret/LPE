@@ -391,6 +391,7 @@ impl ImapStore for FakeStore {
             Ok(SavedDraftMessage {
                 message_id,
                 account_id,
+                submitted_by_account_id: account_id,
                 draft_mailbox_id: Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap(),
                 delivery_status: "draft".to_string(),
             })

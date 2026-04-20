@@ -450,6 +450,7 @@ pub struct MailboxUpdateInput {
 #[derive(Debug, Default, Clone)]
 pub struct DraftMutation {
     pub from: Option<Vec<EmailAddressInput>>,
+    pub sender: Option<Vec<EmailAddressInput>>,
     pub to: Option<Vec<EmailAddressInput>>,
     pub cc: Option<Vec<EmailAddressInput>>,
     pub bcc: Option<Vec<EmailAddressInput>>,
