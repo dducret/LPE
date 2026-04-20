@@ -90,6 +90,9 @@ Files:
 - `install-lpe.sh` is now interactive when run in a terminal for first-install values such as the public hostname, PostgreSQL settings, bootstrap administrator, integration secret, install directory, and service actions
 - `install-lpe.sh` also provisions the pinned `Magika` CLI binary with checksum verification into `/opt/lpe/bin/magika`
 - `install-lpe.sh` writes installer layout settings to `/etc/lpe/install.env`, writes runtime settings to `/etc/lpe/lpe.env`, and starts `lpe.service` only when the selected service action enables it
+- `install-lpe.sh` now defaults to running `init-schema.sh` on first install before starting services, so a fresh node comes up against an initialized `0.1.3` schema
+- `install-lpe.sh` now verifies that `LPE_DB_PASSWORD`, `DATABASE_URL`, `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD`, and `LPE_INTEGRATION_SHARED_SECRET` were actually persisted to `/etc/lpe/lpe.env` before it continues
+- `install-lpe.sh` writes `DATABASE_URL` to `/etc/lpe/lpe.env`; when an older env file still lacks it, maintenance scripts derive it from `LPE_DB_HOST`, `LPE_DB_PORT`, `LPE_DB_NAME`, `LPE_DB_USER`, and `LPE_DB_PASSWORD`
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
 - `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, recreates the database schema from scratch for `0.1.3`, rebuilds `lpe-cli`, and restarts the service
 - `update-lpe.sh` also re-provisions the same pinned `Magika` version so content validation stays deterministic
@@ -114,11 +117,9 @@ Recommended order:
 
 1. run `bootstrap-postgresql.sh`
 2. run `install-lpe.sh`
-3. adjust `/etc/lpe/lpe.env`
-4. run `init-schema.sh`
-5. verify the service with `systemctl status lpe.service`
-6. open `http://server-address/` to reach the administration console through `nginx`
-7. open `http://server-address/mail/` to reach the web client
+3. verify the service with `systemctl status lpe.service`
+4. open `http://server-address/` to reach the administration console through `nginx`
+5. open `http://server-address/mail/` to reach the web client
 
 The web client requires user authentication. First create an account and its password from the administration domain page, then sign in to `/mail/` with the full email address and that password.
 
@@ -149,8 +150,6 @@ Complete example:
 cd ~/LPE-bootstrap/installation/debian-trixie
 ./bootstrap-postgresql.sh
 ./install-lpe.sh
-nano /etc/lpe/lpe.env
-./init-schema.sh
 systemctl status lpe.service
 ./check-lpe.sh
 ```
@@ -187,7 +186,7 @@ The `LPE` installer prompts for:
 - bootstrap administrator display name, default `Bootstrap Administrator`
 - bootstrap administrator password, no default
 - whether to enable and start services now, default `yes`
-- whether to run `init-schema.sh` now, default `no`
+- whether to run `init-schema.sh` now, default `yes` on first install and `no` on later reruns
 
 The `LPE-CT` installer prompts for:
 
@@ -238,6 +237,18 @@ Typical unattended `LPE` environment variables:
 - `LPE_ENABLE_SERVICES`
 - `LPE_RUN_MIGRATIONS`
 
+The effective default PostgreSQL connection string shape is:
+
+```bash
+postgres://<LPE_DB_USER>:<LPE_DB_PASSWORD>@<LPE_DB_HOST>:<LPE_DB_PORT>/<LPE_DB_NAME>
+```
+
+With the shipped non-secret defaults, that becomes:
+
+```bash
+postgres://lpe:<password>@localhost:5432/lpe
+```
+
 Typical unattended `LPE-CT` environment variables:
 
 - `LPE_CT_PUBLIC_HOSTNAME`
@@ -271,7 +282,7 @@ LPE_INTEGRATION_SHARED_SECRET='replace-with-a-secret-of-at-least-32-characters' 
 LPE_BOOTSTRAP_ADMIN_EMAIL=admin@example.com \
 LPE_BOOTSTRAP_ADMIN_PASSWORD='replace-with-strong-password' \
 LPE_ENABLE_SERVICES=yes \
-LPE_RUN_MIGRATIONS=no \
+LPE_RUN_MIGRATIONS=yes \
 ./install-lpe.sh --non-interactive
 ```
 

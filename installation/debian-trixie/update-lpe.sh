@@ -88,8 +88,8 @@ set -a
 source "${ENV_FILE}"
 set +a
 
-if [[ -z "${DATABASE_URL:-}" ]]; then
-  echo "DATABASE_URL is not set in ${ENV_FILE}" >&2
+if ! ensure_database_url; then
+  echo "DATABASE_URL is not set in ${ENV_FILE} and could not be derived from LPE_DB_HOST/LPE_DB_PORT/LPE_DB_NAME/LPE_DB_USER/LPE_DB_PASSWORD" >&2
   exit 1
 fi
 

@@ -25,6 +25,10 @@ NGINX_ENABLED_DIR="${NGINX_ENABLED_DIR:-/etc/nginx/sites-enabled}"
 NGINX_SITE_NAME="${NGINX_SITE_NAME:-lpe.conf}"
 MAGIKA_VERSION="${MAGIKA_VERSION:-1.0.2}"
 MAGIKA_LINUX_X86_64_SHA256="${MAGIKA_LINUX_X86_64_SHA256:-4ce475c965cd20e724b5fc53e8a303a479b9d8649beef8721d05e9b3988fbab4}"
+FIRST_INSTALL=0
+if [[ ! -f "${INSTALL_ENV_FILE}" && ! -d "${SRC_DIR}/.git" ]]; then
+  FIRST_INSTALL=1
+fi
 load_env_file_if_present "${INSTALL_ENV_FILE}"
 load_env_file_if_present "${ENV_FILE}"
 
@@ -40,7 +44,13 @@ LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME_DEFAULT="${LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME:-Bo
 LPE_PST_IMPORT_DIR_DEFAULT="${LPE_PST_IMPORT_DIR:-${DATA_DIR}/imports}"
 LPE_PUBLIC_SCHEME_DEFAULT="${LPE_PUBLIC_SCHEME:-https}"
 LPE_ENABLE_SERVICES_DEFAULT="${LPE_ENABLE_SERVICES:-yes}"
-LPE_RUN_MIGRATIONS_DEFAULT="${LPE_RUN_MIGRATIONS:-no}"
+if [[ -n "${LPE_RUN_MIGRATIONS:-}" ]]; then
+  LPE_RUN_MIGRATIONS_DEFAULT="${LPE_RUN_MIGRATIONS}"
+elif [[ "${FIRST_INSTALL}" == "1" ]]; then
+  LPE_RUN_MIGRATIONS_DEFAULT="yes"
+else
+  LPE_RUN_MIGRATIONS_DEFAULT="no"
+fi
 
 usage() {
   cat <<'EOF'
@@ -156,6 +166,14 @@ collect_runtime_values() {
   LPE_AUTODISCOVER_ACTIVESYNC_URL="$(format_public_url "${LPE_PUBLIC_SCHEME}" "${LPE_PUBLIC_HOSTNAME}" "${LPE_NGINX_LISTEN_PORT}" "/Microsoft-Server-ActiveSync")"
 }
 
+validate_runtime_values() {
+  validate_nonempty "${LPE_DB_PASSWORD:-}" || fail_install "PostgreSQL password ended up empty during installation."
+  validate_nonempty "${LPE_BOOTSTRAP_ADMIN_EMAIL:-}" || fail_install "Bootstrap administrator email ended up empty during installation."
+  validate_nonempty "${LPE_BOOTSTRAP_ADMIN_PASSWORD:-}" || fail_install "Bootstrap administrator password ended up empty during installation."
+  validate_shared_secret "${LPE_INTEGRATION_SHARED_SECRET:-}" || fail_install "Integration shared secret is missing or too weak."
+  ensure_database_url || fail_install "DATABASE_URL could not be built from the PostgreSQL settings."
+}
+
 write_install_layout_file() {
   install -d -o root -g root "${ENV_DIR}"
   : > "${INSTALL_ENV_FILE}"
@@ -205,6 +223,31 @@ write_runtime_env_file() {
   write_env_value "${ENV_FILE}" "LPE_PUBLIC_SCHEME" "${LPE_PUBLIC_SCHEME}"
   write_env_value "${ENV_FILE}" "LPE_PUBLIC_HOSTNAME" "${LPE_PUBLIC_HOSTNAME}"
   write_env_value "${ENV_FILE}" "LPE_AUTODISCOVER_ACTIVESYNC_URL" "${LPE_AUTODISCOVER_ACTIVESYNC_URL}"
+}
+
+verify_runtime_env_file() {
+  local env_db_password=""
+  local env_database_url=""
+  local env_admin_email=""
+  local env_admin_password=""
+  local env_shared_secret=""
+
+  set -a
+  # shellcheck disable=SC1090
+  source "${ENV_FILE}"
+  set +a
+
+  env_db_password="${LPE_DB_PASSWORD:-}"
+  env_database_url="${DATABASE_URL:-}"
+  env_admin_email="${LPE_BOOTSTRAP_ADMIN_EMAIL:-}"
+  env_admin_password="${LPE_BOOTSTRAP_ADMIN_PASSWORD:-}"
+  env_shared_secret="${LPE_INTEGRATION_SHARED_SECRET:-}"
+
+  validate_nonempty "${env_db_password}" || fail_install "LPE_DB_PASSWORD was written empty to ${ENV_FILE}."
+  validate_nonempty "${env_database_url}" || fail_install "DATABASE_URL was written empty to ${ENV_FILE}."
+  validate_nonempty "${env_admin_email}" || fail_install "LPE_BOOTSTRAP_ADMIN_EMAIL was written empty to ${ENV_FILE}."
+  validate_nonempty "${env_admin_password}" || fail_install "LPE_BOOTSTRAP_ADMIN_PASSWORD was written empty to ${ENV_FILE}."
+  validate_shared_secret "${env_shared_secret}" || fail_install "LPE_INTEGRATION_SHARED_SECRET was written missing or too weak to ${ENV_FILE}."
 }
 
 install_prerequisites() {
@@ -335,6 +378,7 @@ main() {
   parse_args "$@"
   require_root
   collect_runtime_values
+  validate_runtime_values
   install_prerequisites
   ensure_service_user
   prepare_directories
@@ -343,10 +387,11 @@ main() {
   prepare_rust
   build_lpe
   write_runtime_env_file
+  verify_runtime_env_file
   build_web
   render_service_files
-  activate_services
   run_schema_init_if_requested
+  activate_services
 
   echo "LPE installed in ${INSTALL_ROOT}."
   echo "Runtime configuration written to ${ENV_FILE}."

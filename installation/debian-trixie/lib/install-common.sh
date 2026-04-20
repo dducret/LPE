@@ -467,6 +467,31 @@ build_postgres_url() {
     "${encoded_database}"
 }
 
+derive_database_url_from_env() {
+  local host="${LPE_DB_HOST:-}"
+  local port="${LPE_DB_PORT:-}"
+  local database="${LPE_DB_NAME:-}"
+  local username="${LPE_DB_USER:-}"
+  local password="${LPE_DB_PASSWORD:-}"
+
+  [[ -n "${host}" ]] || return 1
+  [[ -n "${port}" ]] || return 1
+  [[ -n "${database}" ]] || return 1
+  [[ -n "${username}" ]] || return 1
+  [[ -n "${password}" ]] || return 1
+
+  build_postgres_url "${host}" "${port}" "${database}" "${username}" "${password}"
+}
+
+ensure_database_url() {
+  if [[ -n "${DATABASE_URL:-}" ]]; then
+    return 0
+  fi
+
+  DATABASE_URL="$(derive_database_url_from_env)" || return 1
+  export DATABASE_URL
+}
+
 format_public_url() {
   local scheme="$1"
   local host="$2"

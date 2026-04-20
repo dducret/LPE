@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/install-common.sh"
+
 INSTALL_ROOT="${INSTALL_ROOT:-/opt/lpe}"
 SRC_DIR="${SRC_DIR:-$INSTALL_ROOT/src}"
 BIN_PATH="${BIN_PATH:-$INSTALL_ROOT/bin/lpe-cli}"
@@ -59,7 +62,7 @@ set -a
 source "$ENV_FILE"
 set +a
 
-[[ -n "${DATABASE_URL:-}" ]] || fail "DATABASE_URL is not set in $ENV_FILE"
+ensure_database_url || fail "DATABASE_URL is not set in $ENV_FILE and could not be derived from LPE_DB_HOST/LPE_DB_PORT/LPE_DB_NAME/LPE_DB_USER/LPE_DB_PASSWORD"
 pass "DATABASE_URL is configured"
 [[ -n "${LPE_BOOTSTRAP_ADMIN_EMAIL:-}" ]] || fail "LPE_BOOTSTRAP_ADMIN_EMAIL is not set in $ENV_FILE"
 pass "Bootstrap administrator email is configured"
