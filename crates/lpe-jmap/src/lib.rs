@@ -17,17 +17,16 @@ use lpe_storage::{
     normalize_calendar_participation_status, parse_calendar_participants_metadata,
     serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent, AuditEntryInput,
     AuthenticatedAccount, CalendarOrganizerMetadata, CalendarParticipantMetadata,
-    CalendarParticipantsMetadata, ClientTask, CollaborationCollection, JmapEmail, JmapEmailAddress,
-    JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage,
-    SenderIdentity, Storage, SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientTaskInput,
+    CalendarParticipantsMetadata, CanonicalChangeCategory, ClientTask, CollaborationCollection,
+    JmapEmail, JmapEmailAddress, JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob,
+    MailboxAccountAccess, SavedDraftMessage, SenderIdentity, Storage, SubmitMessageInput,
+    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientTaskInput,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
-use tokio::time::interval;
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -52,7 +51,7 @@ use crate::protocol::{
     ThreadQueryArguments, WebSocketPushDisable, WebSocketPushEnable, WebSocketRequestEnvelope,
     WebSocketRequestError, WebSocketResponse, WebSocketStateChange,
 };
-use crate::store::JmapStore;
+use crate::store::{JmapPushListener, JmapStore};
 
 const JMAP_CORE_CAPABILITY: &str = "urn:ietf:params:jmap:core";
 const JMAP_MAIL_CAPABILITY: &str = "urn:ietf:params:jmap:mail";
@@ -66,8 +65,6 @@ const QUERY_STATE_VERSION: &str = "mvp-2";
 const STATE_TOKEN_VERSION: &str = "mvp-1";
 const MAX_QUERY_LIMIT: u64 = 250;
 const DEFAULT_GET_LIMIT: u64 = 100;
-const WEBSOCKET_POLL_INTERVAL: Duration = Duration::from_secs(2);
-
 type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -101,7 +98,7 @@ struct StateEntry {
 #[derive(Debug, Default)]
 struct PushSubscription {
     enabled_types: HashSet<String>,
-    last_type_states: HashMap<String, String>,
+    last_type_states: HashMap<String, HashMap<String, String>>,
     last_push_state: Option<String>,
 }
 
@@ -413,10 +410,12 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
     async fn handle_websocket(&self, mut socket: WebSocket, account: AuthenticatedAccount) {
         let mut subscription = PushSubscription::default();
-        let mut ticker = interval(WEBSOCKET_POLL_INTERVAL);
-        ticker.tick().await;
+        let Ok(mut listener) = self.store.create_push_listener(account.account_id).await else {
+            return;
+        };
 
         loop {
+            let push_categories = self.push_categories(&subscription.enabled_types);
             tokio::select! {
                 incoming = socket.recv() => {
                     let Some(Ok(message)) = incoming else {
@@ -430,7 +429,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         break;
                     }
                 }
-                _ = ticker.tick(), if !subscription.enabled_types.is_empty() => {
+                changed = listener.wait_for_change(&push_categories), if !subscription.enabled_types.is_empty() => {
+                    if changed.is_err() {
+                        break;
+                    }
                     if self
                         .publish_state_changes(&mut socket, account.account_id, &mut subscription)
                         .await
@@ -549,7 +551,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         client_push_state: Option<String>,
     ) -> Result<()> {
         let type_states = self
-            .current_type_states(account_id, &subscription.enabled_types)
+            .current_push_states(account_id, &subscription.enabled_types)
             .await?;
         let current_push_state = encode_push_state(&type_states)?;
         let should_send = client_push_state
@@ -558,7 +560,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         subscription.last_type_states = type_states.clone();
         subscription.last_push_state = Some(current_push_state.clone());
         if should_send {
-            self.send_state_change(socket, account_id, type_states, current_push_state)
+            self.send_state_change(socket, type_states, current_push_state)
                 .await?;
         }
         Ok(())
@@ -571,12 +573,23 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         subscription: &mut PushSubscription,
     ) -> Result<()> {
         let current_type_states = self
-            .current_type_states(account_id, &subscription.enabled_types)
+            .current_push_states(account_id, &subscription.enabled_types)
             .await?;
         let mut changed = HashMap::new();
-        for (data_type, state) in &current_type_states {
-            if subscription.last_type_states.get(data_type) != Some(state) {
-                changed.insert(data_type.clone(), state.clone());
+        for (push_account_id, states) in &current_type_states {
+            let mut account_changed = HashMap::new();
+            for (data_type, state) in states {
+                if subscription
+                    .last_type_states
+                    .get(push_account_id)
+                    .and_then(|previous| previous.get(data_type))
+                    != Some(state)
+                {
+                    account_changed.insert(data_type.clone(), state.clone());
+                }
+            }
+            if !account_changed.is_empty() {
+                changed.insert(push_account_id.clone(), account_changed);
             }
         }
 
@@ -587,8 +600,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let push_state = encode_push_state(&current_type_states)?;
         subscription.last_type_states = current_type_states;
         subscription.last_push_state = Some(push_state.clone());
-        self.send_state_change(socket, account_id, changed, push_state)
-            .await
+        self.send_state_change(socket, changed, push_state).await
     }
 
     async fn send_request_error(
@@ -615,12 +627,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     async fn send_state_change(
         &self,
         socket: &mut WebSocket,
-        account_id: Uuid,
-        changed_types: HashMap<String, String>,
+        changed: HashMap<String, HashMap<String, String>>,
         push_state: String,
     ) -> Result<()> {
-        let mut changed = HashMap::new();
-        changed.insert(account_id.to_string(), changed_types);
         let payload = WebSocketStateChange {
             type_name: "StateChange",
             changed,
@@ -647,15 +656,74 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         )
     }
 
-    async fn current_type_states(
+    fn push_categories(&self, data_types: &HashSet<String>) -> Vec<CanonicalChangeCategory> {
+        let mut categories = Vec::new();
+        if data_types.iter().any(|value| self.is_mail_push_type(value)) {
+            categories.push(CanonicalChangeCategory::Mail);
+        }
+        if data_types
+            .iter()
+            .any(|value| matches!(value.as_str(), "AddressBook" | "ContactCard"))
+        {
+            categories.push(CanonicalChangeCategory::Contacts);
+        }
+        if data_types
+            .iter()
+            .any(|value| matches!(value.as_str(), "Calendar" | "CalendarEvent"))
+        {
+            categories.push(CanonicalChangeCategory::Calendar);
+        }
+        if data_types
+            .iter()
+            .any(|value| matches!(value.as_str(), "TaskList" | "Task"))
+        {
+            categories.push(CanonicalChangeCategory::Tasks);
+        }
+        categories
+    }
+
+    fn is_mail_push_type(&self, data_type: &str) -> bool {
+        matches!(data_type, "Mailbox" | "Email" | "Thread")
+    }
+
+    async fn current_push_states(
         &self,
-        account_id: Uuid,
+        principal_account_id: Uuid,
         data_types: &HashSet<String>,
-    ) -> Result<HashMap<String, String>> {
+    ) -> Result<HashMap<String, HashMap<String, String>>> {
         let mut states = HashMap::new();
+        if data_types.is_empty() {
+            return Ok(states);
+        }
+
+        let mailbox_accounts = self
+            .store
+            .fetch_accessible_mailbox_accounts(principal_account_id)
+            .await?;
+        for mailbox_account in mailbox_accounts {
+            let mut account_states = HashMap::new();
+            for data_type in data_types {
+                if self.is_mail_push_type(data_type) {
+                    let state = self
+                        .object_state(mailbox_account.account_id, data_type)
+                        .await?;
+                    account_states.insert(data_type.clone(), state);
+                }
+            }
+            if !account_states.is_empty() {
+                states.insert(mailbox_account.account_id.to_string(), account_states);
+            }
+        }
+
         for data_type in data_types {
-            let state = self.object_state(account_id, data_type).await?;
-            states.insert(data_type.clone(), state);
+            if self.is_mail_push_type(data_type) {
+                continue;
+            }
+            let state = self.object_state(principal_account_id, data_type).await?;
+            states
+                .entry(principal_account_id.to_string())
+                .or_insert_with(HashMap::new)
+                .insert(data_type.clone(), state);
         }
         Ok(states)
     }
@@ -3677,12 +3745,14 @@ fn decode_state(value: &str) -> Result<StateToken> {
     Ok(token)
 }
 
-fn encode_push_state(type_states: &HashMap<String, String>) -> Result<String> {
+fn encode_push_state(type_states: &HashMap<String, HashMap<String, String>>) -> Result<String> {
     let mut entries = type_states
         .iter()
-        .map(|(data_type, state)| StateEntry {
-            id: data_type.clone(),
-            fingerprint: state.clone(),
+        .flat_map(|(account_id, states)| {
+            states.iter().map(move |(data_type, state)| StateEntry {
+                id: format!("{account_id}:{data_type}"),
+                fingerprint: state.clone(),
+            })
         })
         .collect::<Vec<_>>();
     entries.sort_by(|left, right| left.id.cmp(&right.id));
@@ -5455,8 +5525,9 @@ mod tests {
     use super::*;
     use lpe_magika::{DetectionSource, Detector, MagikaDetection};
     use lpe_storage::{
-        AccessibleContact, AccessibleEvent, ClientContact, ClientEvent, CollaborationCollection,
-        CollaborationRights, JmapImportedEmailInput, MailboxAccountAccess, SenderIdentity,
+        AccessibleContact, AccessibleEvent, CanonicalChangeCategory, ClientContact, ClientEvent,
+        CollaborationCollection, CollaborationRights, JmapImportedEmailInput, MailboxAccountAccess,
+        SenderIdentity,
     };
     use std::sync::{Arc, Mutex};
 
@@ -5475,6 +5546,8 @@ mod tests {
         saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
         submitted_drafts: Arc<Mutex<Vec<Uuid>>>,
     }
+
+    struct FakePushListener;
 
     #[derive(Clone)]
     struct FakeDetector {
@@ -5557,6 +5630,12 @@ mod tests {
             },
             0.80,
         )
+    }
+
+    impl JmapPushListener for FakePushListener {
+        async fn wait_for_change(&mut self, _categories: &[CanonicalChangeCategory]) -> Result<()> {
+            Ok(())
+        }
     }
 
     impl FakeStore {
@@ -5855,12 +5934,21 @@ mod tests {
     }
 
     impl JmapStore for FakeStore {
+        type PushListener = FakePushListener;
+
         async fn fetch_account_session(&self, token: &str) -> Result<Option<AuthenticatedAccount>> {
             Ok(if token == "token" {
                 self.session.clone()
             } else {
                 None
             })
+        }
+
+        async fn create_push_listener(
+            &self,
+            _principal_account_id: Uuid,
+        ) -> Result<Self::PushListener> {
+            Ok(FakePushListener)
         }
 
         async fn fetch_jmap_mailboxes(&self, _account_id: Uuid) -> Result<Vec<JmapMailbox>> {
@@ -7433,6 +7521,47 @@ mod tests {
             session.primary_accounts[JMAP_TASKS_CAPABILITY],
             FakeStore::account().account_id.to_string()
         );
+    }
+
+    #[tokio::test]
+    async fn websocket_push_states_include_shared_mailbox_accounts() {
+        let shared = FakeStore::shared_account();
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::inbox_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                MailboxAccountAccess {
+                    account_id: shared.account_id,
+                    email: shared.email,
+                    display_name: shared.display_name,
+                    is_owned: false,
+                    may_read: true,
+                    may_write: true,
+                    may_send_as: false,
+                    may_send_on_behalf: false,
+                },
+            ],
+            ..Default::default()
+        });
+        let states = service
+            .current_push_states(
+                FakeStore::account().account_id,
+                &HashSet::from([
+                    "Mailbox".to_string(),
+                    "AddressBook".to_string(),
+                    "Task".to_string(),
+                ]),
+            )
+            .await
+            .unwrap();
+
+        assert!(states[&FakeStore::account().account_id.to_string()].contains_key("Mailbox"));
+        assert!(states[&FakeStore::account().account_id.to_string()].contains_key("AddressBook"));
+        assert!(states[&FakeStore::account().account_id.to_string()].contains_key("Task"));
+        assert!(states[&shared.account_id.to_string()].contains_key("Mailbox"));
+        assert!(!states[&shared.account_id.to_string()].contains_key("AddressBook"));
+        assert!(!states[&shared.account_id.to_string()].contains_key("Task"));
     }
 
     #[tokio::test]

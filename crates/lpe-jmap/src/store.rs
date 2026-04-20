@@ -1,17 +1,25 @@
 use anyhow::Result;
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount, ClientTask,
-    CollaborationCollection, JmapEmail, JmapEmailQuery, JmapEmailSubmission,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
-    JmapThreadQuery, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, SenderIdentity,
-    Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientTaskInput,
+    AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount,
+    CanonicalChangeCategory, CanonicalChangeListener, ClientTask, CollaborationCollection,
+    JmapEmail, JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapThreadQuery, JmapUploadBlob,
+    MailboxAccountAccess, SavedDraftMessage, SenderIdentity, Storage, SubmitMessageInput,
+    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use uuid::Uuid;
 
 #[allow(async_fn_in_trait)]
+pub trait JmapPushListener: Send {
+    async fn wait_for_change(&mut self, categories: &[CanonicalChangeCategory]) -> Result<()>;
+}
+
+#[allow(async_fn_in_trait)]
 pub trait JmapStore: Clone + Send + Sync + 'static {
+    type PushListener: JmapPushListener;
+
     async fn fetch_account_session(&self, token: &str) -> Result<Option<AuthenticatedAccount>>;
+    async fn create_push_listener(&self, principal_account_id: Uuid) -> Result<Self::PushListener>;
     async fn fetch_jmap_mailboxes(&self, account_id: Uuid) -> Result<Vec<JmapMailbox>>;
     async fn fetch_accessible_mailbox_accounts(
         &self,
@@ -176,9 +184,22 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
     async fn delete_jmap_task(&self, account_id: Uuid, task_id: Uuid) -> Result<()>;
 }
 
+impl JmapPushListener for CanonicalChangeListener {
+    async fn wait_for_change(&mut self, categories: &[CanonicalChangeCategory]) -> Result<()> {
+        CanonicalChangeListener::wait_for_change(self, categories).await
+    }
+}
+
 impl JmapStore for Storage {
+    type PushListener = CanonicalChangeListener;
+
     async fn fetch_account_session(&self, token: &str) -> Result<Option<AuthenticatedAccount>> {
         self.fetch_account_session(token).await
+    }
+
+    async fn create_push_listener(&self, principal_account_id: Uuid) -> Result<Self::PushListener> {
+        self.create_canonical_change_listener(principal_account_id)
+            .await
     }
 
     async fn fetch_jmap_mailboxes(&self, account_id: Uuid) -> Result<Vec<JmapMailbox>> {

@@ -16,8 +16,8 @@ use lpe_magika::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use sqlx::{FromRow, Pool, Postgres, Row};
-use std::collections::BTreeMap;
+use sqlx::{postgres::PgListener, Executor, FromRow, Pool, Postgres, Row};
+use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
@@ -34,10 +34,60 @@ const MAX_SIEVE_SCRIPTS_PER_ACCOUNT: i64 = 16;
 const MAX_SIEVE_REDIRECTS_PER_MESSAGE: usize = 4;
 const DEFAULT_SIEVE_MAILBOX_RETENTION_DAYS: i32 = 365;
 const DEFAULT_COLLECTION_ID: &str = "default";
+const CANONICAL_CHANGE_CHANNEL: &str = "lpe_canonical_changes";
 
 #[derive(Clone)]
 pub struct Storage {
     pool: Pool<Postgres>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CanonicalChangeCategory {
+    Mail,
+    Contacts,
+    Calendar,
+    Tasks,
+}
+
+impl CanonicalChangeCategory {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Mail => "mail",
+            Self::Contacts => "contacts",
+            Self::Calendar => "calendar",
+            Self::Tasks => "tasks",
+        }
+    }
+}
+
+pub struct CanonicalChangeListener {
+    tenant_id: String,
+    listener: PgListener,
+}
+
+impl CanonicalChangeListener {
+    pub async fn wait_for_change(&mut self, categories: &[CanonicalChangeCategory]) -> Result<()> {
+        let categories = categories
+            .iter()
+            .map(|category| category.as_str())
+            .collect::<HashSet<_>>();
+        if categories.is_empty() {
+            return Ok(());
+        }
+
+        loop {
+            let notification = self.listener.recv().await?;
+            let Ok(payload) =
+                serde_json::from_str::<CanonicalChangeNotification>(notification.payload())
+            else {
+                continue;
+            };
+            if payload.tenant_id == self.tenant_id && categories.contains(payload.category.as_str())
+            {
+                return Ok(());
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1795,6 +1845,12 @@ struct EmailTraceRow {
     received_at: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct CanonicalChangeNotification {
+    tenant_id: String,
+    category: String,
+}
+
 impl Storage {
     pub fn new(pool: Pool<Postgres>) -> Self {
         Self { pool }
@@ -1803,6 +1859,19 @@ impl Storage {
     pub async fn connect(database_url: &str) -> Result<Self> {
         let pool = Pool::<Postgres>::connect(database_url).await?;
         Ok(Self::new(pool))
+    }
+
+    pub async fn create_canonical_change_listener(
+        &self,
+        principal_account_id: Uuid,
+    ) -> Result<CanonicalChangeListener> {
+        let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
+        let mut listener = PgListener::connect_with(&self.pool).await?;
+        listener.listen(CANONICAL_CHANGE_CHANNEL).await?;
+        Ok(CanonicalChangeListener {
+            tenant_id,
+            listener,
+        })
     }
 
     pub fn pool(&self) -> &Pool<Postgres> {
@@ -2102,6 +2171,8 @@ impl Storage {
             .await?;
 
             self.insert_audit(&mut tx, &tenant_id, audit).await?;
+            Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail)
+                .await?;
         }
 
         tx.commit().await?;
@@ -4415,6 +4486,7 @@ impl Storage {
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
         tx.commit().await?;
 
         self.fetch_jmap_mailboxes(input.account_id)
@@ -4481,6 +4553,7 @@ impl Storage {
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -4999,6 +5072,8 @@ impl Storage {
         .bind(message_ids)
         .execute(&self.pool)
         .await?;
+
+        Self::emit_canonical_change(&self.pool, &tenant_id, CanonicalChangeCategory::Mail).await?;
 
         Ok(())
     }
@@ -6193,6 +6268,7 @@ impl Storage {
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
         tx.commit().await?;
 
         Ok(SavedDraftMessage {
@@ -6246,6 +6322,9 @@ impl Storage {
         .bind(input.notes.trim())
         .fetch_one(&self.pool)
         .await?;
+
+        Self::emit_canonical_change(&self.pool, &tenant_id, CanonicalChangeCategory::Contacts)
+            .await?;
 
         Ok(map_contact(row))
     }
@@ -6311,6 +6390,9 @@ impl Storage {
         .bind(input.notes.trim())
         .fetch_one(&self.pool)
         .await?;
+
+        Self::emit_canonical_change(&self.pool, &tenant_id, CanonicalChangeCategory::Calendar)
+            .await?;
 
         Ok(map_event(row))
     }
@@ -6382,6 +6464,8 @@ impl Storage {
         .fetch_one(&self.pool)
         .await?;
 
+        Self::emit_canonical_change(&self.pool, &tenant_id, CanonicalChangeCategory::Tasks).await?;
+
         Ok(map_task(row))
     }
 
@@ -6403,6 +6487,9 @@ impl Storage {
             bail!("contact not found");
         }
 
+        Self::emit_canonical_change(&self.pool, &tenant_id, CanonicalChangeCategory::Contacts)
+            .await?;
+
         Ok(())
     }
 
@@ -6423,6 +6510,9 @@ impl Storage {
         if deleted.rows_affected() == 0 {
             bail!("event not found");
         }
+
+        Self::emit_canonical_change(&self.pool, &tenant_id, CanonicalChangeCategory::Calendar)
+            .await?;
 
         Ok(())
     }
@@ -6524,6 +6614,10 @@ impl Storage {
         }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Contacts)
+            .await?;
+        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Calendar)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -6704,6 +6798,7 @@ impl Storage {
         }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -6788,6 +6883,7 @@ impl Storage {
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
         tx.commit().await?;
 
         self.fetch_sender_delegation_grant(owner.id, grantee.id, input.sender_right)
@@ -6825,6 +6921,7 @@ impl Storage {
         }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -7584,6 +7681,7 @@ impl Storage {
         }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
         tx.commit().await?;
 
         Ok(SubmittedMessage {
@@ -8053,6 +8151,7 @@ impl Storage {
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
         tx.commit().await?;
 
         self.fetch_jmap_emails(input.account_id, &[message_id])
@@ -8073,6 +8172,7 @@ impl Storage {
         self.delete_draft_message_in_tx(&mut tx, &tenant_id, account_id, message_id)
             .await?;
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -9781,6 +9881,26 @@ impl Storage {
         .execute(&mut **tx)
         .await?;
 
+        Ok(())
+    }
+
+    async fn emit_canonical_change<'e, E>(
+        executor: E,
+        tenant_id: &str,
+        category: CanonicalChangeCategory,
+    ) -> Result<()>
+    where
+        E: Executor<'e, Database = Postgres>,
+    {
+        let payload = serde_json::to_string(&CanonicalChangeNotification {
+            tenant_id: tenant_id.to_string(),
+            category: category.as_str().to_string(),
+        })?;
+        sqlx::query("SELECT pg_notify($1, $2)")
+            .bind(CANONICAL_CHANGE_CHANNEL)
+            .bind(payload)
+            .execute(executor)
+            .await?;
         Ok(())
     }
 

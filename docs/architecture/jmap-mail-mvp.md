@@ -82,14 +82,15 @@ Additional supported `JMAP` routes:
 - message `blobId` values now expose the canonical `mime_blob_ref` shape when one already exists, including `upload:{uuid}` for imported MIME uploads, and fall back to adapter-scoped opaque identifiers for messages that do not yet expose a persistent downloadable MIME blob
 - no `JMAP Blob/get`, blob copy, or persistent message download contract is advertised yet; the current blob model is intentionally limited to uploaded-imported MIME reuse and internal canonical references
 - the session keeps `eventSourceUrl` empty; this MVP uses `JMAP` over WebSocket rather than the older event-source transport
-- WebSocket push uses short-lived canonical snapshot comparison in the adapter instead of a durable server-side push-subscription history table or a second state database
-- supported push data types are limited to `Mailbox`, `Email`, `Thread`, `AddressBook`, `ContactCard`, `Calendar`, and `CalendarEvent`
+- WebSocket push uses `PostgreSQL` `LISTEN` / `NOTIFY` to wake the adapter on canonical storage commits, then recomputes canonical object states from `PostgreSQL` instead of introducing a durable push-history table or a second state database
+- mail push state spans every mailbox account visible through canonical mailbox delegation so one authenticated session can receive `StateChange` payloads for owned and delegated mailboxes without a protocol-local sharing cache
+- supported push data types are limited to `Mailbox`, `Email`, `Thread`, `AddressBook`, `ContactCard`, `Calendar`, `CalendarEvent`, `TaskList`, and `Task`
 
 ### Next methods to add
 
 - `Blob/copy`
 - `VacationResponse/get`
 - persistent message-blob retrieval beyond temporary uploaded blobs
-- durable server-side push cursors or database-native notification fan-out for very large mailbox counts
+- durable server-side push cursors beyond the current per-connection database wakeup model for very large mailbox counts
 
 
