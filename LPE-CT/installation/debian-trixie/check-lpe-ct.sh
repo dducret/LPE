@@ -48,10 +48,15 @@ set -a
 source "$ENV_FILE"
 set +a
 
+[[ -n "${LPE_CT_BOOTSTRAP_ADMIN_EMAIL:-}" ]] || fail "LPE_CT_BOOTSTRAP_ADMIN_EMAIL is not set in $ENV_FILE"
+pass "Bootstrap management email is configured"
+
 API_HEALTH_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/health"
 API_DASHBOARD_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/api/v1/dashboard"
 SMTP_HOST="${LPE_CT_SMTP_TEST_HOST:-127.0.0.1}"
 SMTP_PORT="${LPE_CT_SMTP_TEST_PORT:-${LPE_CT_SMTP_BIND_ADDRESS##*:}}"
+SMTP_TEST_SENDER="${LPE_CT_SMTP_TEST_SENDER:?Set LPE_CT_SMTP_TEST_SENDER in $ENV_FILE or the shell environment}"
+SMTP_TEST_RECIPIENT="${LPE_CT_SMTP_TEST_RECIPIENT:?Set LPE_CT_SMTP_TEST_RECIPIENT in $ENV_FILE or the shell environment}"
 
 systemctl is-enabled "$SERVICE_NAME" >/dev/null 2>&1 || fail "Service is not enabled: $SERVICE_NAME"
 pass "Service enabled: $SERVICE_NAME"
@@ -80,8 +85,8 @@ pass "Dashboard endpoint responded correctly"
 
 smtp_response="$({
   printf 'EHLO check-lpe-ct.local\r\n'
-  printf 'MAIL FROM:<check@lpe-ct.local>\r\n'
-  printf 'RCPT TO:<postmaster@example.test>\r\n'
+  printf 'MAIL FROM:<%s>\r\n' "$SMTP_TEST_SENDER"
+  printf 'RCPT TO:<%s>\r\n' "$SMTP_TEST_RECIPIENT"
   printf 'DATA\r\n'
   printf 'Subject: LPE-CT local installation check\r\n'
   printf '\r\n'

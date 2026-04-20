@@ -83,8 +83,8 @@ The MVP now implements:
 ### Security constraints
 
 - local admin password login remains supported for bootstrap and recovery
-- bootstrap may use `admin@example.test` with `ChangeMeNow$` for the first operational sign-in
-- that bootstrap secret must be changed immediately in real deployments
+- bootstrap requires an explicitly configured real administrator email and a strong password
+- the product must not ship or auto-seed a runtime administrator with a published default secret
 - the `OIDC` callback must match the real public origin
 - `OIDC` secrets remain server-side
 - the current `OIDC` flow still relies on `userinfo` for this MVP

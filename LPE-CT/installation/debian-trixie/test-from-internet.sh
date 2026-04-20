@@ -6,7 +6,7 @@ SMTP_PORT="${SMTP_PORT:-25}"
 EXPECT_MANAGEMENT_PUBLIC="${EXPECT_MANAGEMENT_PUBLIC:-false}"
 MANAGEMENT_URL="${MANAGEMENT_URL:-http://${CT_PUBLIC_HOST}/api/dashboard}"
 SENDER="${SENDER:-internet-check@example.net}"
-RECIPIENT="${RECIPIENT:-postmaster@example.test}"
+RECIPIENT="${RECIPIENT:?Set RECIPIENT to a real mailbox hosted behind LPE-CT}"
 
 fail() {
   echo "[FAIL] $*" >&2

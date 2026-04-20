@@ -61,9 +61,13 @@ set +a
 
 [[ -n "${DATABASE_URL:-}" ]] || fail "DATABASE_URL is not set in $ENV_FILE"
 pass "DATABASE_URL is configured"
+[[ -n "${LPE_BOOTSTRAP_ADMIN_EMAIL:-}" ]] || fail "LPE_BOOTSTRAP_ADMIN_EMAIL is not set in $ENV_FILE"
+pass "Bootstrap administrator email is configured"
 
 BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
 HTTP_BASE="http://${BIND_ADDRESS}"
+BOOTSTRAP_EMAIL="${LPE_BOOTSTRAP_ADMIN_EMAIL}"
+AUTODISCOVER_TEST_EMAIL="${LPE_AUTODISCOVER_TEST_EMAIL:-$BOOTSTRAP_EMAIL}"
 
 systemctl is-enabled "$SERVICE_NAME" >/dev/null 2>&1 || fail "Service is not enabled: $SERVICE_NAME"
 pass "Service enabled: $SERVICE_NAME"
@@ -88,12 +92,12 @@ pass "Found view public.searchable_mail_documents"
 check_http_json_field "$HTTP_BASE/health" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/live" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/ready" '"status":"ready"'
-check_http_json_field "$HTTP_BASE/bootstrap/admin" '"email":"admin@example.test"'
+check_http_json_field "$HTTP_BASE/bootstrap/admin" "\"email\":\"${BOOTSTRAP_EMAIL}\""
 check_http_json_field "$HTTP_BASE/health/local-ai" '"provider":"stub-local"'
 check_http_json_field "http://127.0.0.1/api/health" '"status":"ok"'
 check_http_json_field "http://127.0.0.1/api/health/live" '"status":"ok"'
 check_http_json_field "http://127.0.0.1/api/health/ready" '"status":"ready"'
-check_http_json_field "http://127.0.0.1/api/bootstrap/admin" '"email":"admin@example.test"'
+check_http_json_field "http://127.0.0.1/api/bootstrap/admin" "\"email\":\"${BOOTSTRAP_EMAIL}\""
 
 autoconfig_body="$(curl --silent --show-error --fail "http://127.0.0.1/autoconfig/mail/config-v1.1.xml")" \
   || fail "HTTP request failed: http://127.0.0.1/autoconfig/mail/config-v1.1.xml"
@@ -109,7 +113,7 @@ pass "Thunderbird well-known autoconfig endpoint is published by nginx"
 
 autodiscover_body="$(curl --silent --show-error --fail \
   --header 'Content-Type: application/xml' \
-  --data '<?xml version="1.0" encoding="utf-8"?><Autodiscover><Request><EMailAddress>alice@example.test</EMailAddress></Request></Autodiscover>' \
+  --data "<?xml version=\"1.0\" encoding=\"utf-8\"?><Autodiscover><Request><EMailAddress>${AUTODISCOVER_TEST_EMAIL}</EMailAddress></Request></Autodiscover>" \
   "http://127.0.0.1/autodiscover/autodiscover.xml")" \
   || fail "HTTP request failed: http://127.0.0.1/autodiscover/autodiscover.xml"
 [[ "$autodiscover_body" == *"<Type>MobileSync</Type>"* ]] \

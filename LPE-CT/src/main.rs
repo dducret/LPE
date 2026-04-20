@@ -751,17 +751,34 @@ fn parse_bool(value: &str) -> bool {
     )
 }
 
-fn ensure_management_bootstrap(state: &mut DashboardState) -> Result<()> {
-    let admin_email = env::var("LPE_CT_BOOTSTRAP_ADMIN_EMAIL")
-        .unwrap_or_else(|_| "admin@example.test".to_string())
-        .trim()
-        .to_lowercase();
-    let password = env::var("LPE_CT_BOOTSTRAP_ADMIN_PASSWORD")
-        .unwrap_or_else(|_| "ChangeMeNow$".to_string());
+fn env_value(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().trim_matches('_').to_string())
+        .filter(|value| !value.is_empty())
+}
 
+fn required_trimmed_env(name: &str) -> Result<String> {
+    env_value(name).ok_or_else(|| anyhow::anyhow!("{name} must be set"))
+}
+
+fn local_hostname() -> String {
+    env_value("HOSTNAME")
+        .or_else(|| env_value("COMPUTERNAME"))
+        .unwrap_or_else(|| "localhost".to_string())
+}
+
+fn ensure_management_bootstrap(state: &mut DashboardState) -> Result<()> {
     if state.management_auth.admin_email.trim().is_empty()
         || state.management_auth.password_hash.trim().is_empty()
     {
+        let admin_email = required_trimmed_env("LPE_CT_BOOTSTRAP_ADMIN_EMAIL")?.to_lowercase();
+        let password = required_trimmed_env("LPE_CT_BOOTSTRAP_ADMIN_PASSWORD")?;
+        if is_known_weak_secret(password.trim()) {
+            anyhow::bail!(
+                "LPE_CT_BOOTSTRAP_ADMIN_PASSWORD uses a forbidden weak placeholder value"
+            );
+        }
         state.management_auth = ManagementAuthState {
             admin_email: admin_email.clone(),
             password_hash: hash_password(password.trim())?,
@@ -791,20 +808,47 @@ fn parse_csv(value: &str) -> Vec<String> {
 }
 
 fn default_state() -> DashboardState {
+    let node_name = env_value("LPE_CT_NODE_NAME")
+        .or_else(|| env_value("LPE_CT_SERVER_NAME"))
+        .unwrap_or_else(local_hostname);
+    let management_fqdn = env_value("LPE_CT_MANAGEMENT_FQDN")
+        .or_else(|| env_value("LPE_CT_SERVER_NAME"))
+        .unwrap_or_else(|| node_name.clone());
+    let published_mx = env_value("LPE_CT_PUBLISHED_MX").unwrap_or_else(|| management_fqdn.clone());
+    let primary_upstream = env_value("LPE_CT_RELAY_PRIMARY").unwrap_or_default();
+    let secondary_upstream = env_value("LPE_CT_RELAY_SECONDARY").unwrap_or_default();
+    let outbound_smart_hosts = [primary_upstream.clone(), secondary_upstream.clone()]
+        .into_iter()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim_start_matches("smtp://").to_string())
+        .collect();
+    let routing_rules = if primary_upstream.trim().is_empty() {
+        Vec::new()
+    } else {
+        vec![RoutingRule {
+            id: "default-primary".to_string(),
+            description: "Default outbound route through the configured primary relay".to_string(),
+            sender_domain: None,
+            recipient_domain: None,
+            relay_target: primary_upstream.clone(),
+        }]
+    };
     DashboardState {
         site: SiteProfile {
-            node_name: "ct-edge-01".to_string(),
+            node_name,
             role: "dmz-sorting-center".to_string(),
-            region: "eu-central".to_string(),
-            dmz_zone: "mail-dmz-a".to_string(),
-            published_mx: "mx1.example.test".to_string(),
-            management_fqdn: "ct-mgmt.example.test".to_string(),
-            public_smtp_bind: "0.0.0.0:25".to_string(),
-            management_bind: "127.0.0.1:8380".to_string(),
+            region: env_value("LPE_CT_REGION").unwrap_or_default(),
+            dmz_zone: env_value("LPE_CT_DMZ_ZONE").unwrap_or_default(),
+            published_mx,
+            management_fqdn,
+            public_smtp_bind: env_value("LPE_CT_SMTP_BIND_ADDRESS")
+                .unwrap_or_else(|| "0.0.0.0:25".to_string()),
+            management_bind: env_value("LPE_CT_BIND_ADDRESS")
+                .unwrap_or_else(|| "127.0.0.1:8380".to_string()),
         },
         relay: RelaySettings {
-            primary_upstream: "smtp://10.20.0.12:2525".to_string(),
-            secondary_upstream: "smtp://10.20.0.13:2525".to_string(),
+            primary_upstream,
+            secondary_upstream,
             core_delivery_base_url: default_core_delivery_base_url(),
             mutual_tls_required: false,
             fallback_to_hold_queue: false,
@@ -813,13 +857,7 @@ fn default_state() -> DashboardState {
                 .to_string(),
         },
         routing: RoutingSettings {
-            rules: vec![RoutingRule {
-                id: "default-primary".to_string(),
-                description: "Default outbound route through the primary relay".to_string(),
-                sender_domain: None,
-                recipient_domain: None,
-                relay_target: "smtp://10.20.0.12:2525".to_string(),
-            }],
+            rules: routing_rules,
         },
         throttling: ThrottlingSettings {
             enabled: true,
@@ -834,12 +872,13 @@ fn default_state() -> DashboardState {
             }],
         },
         network: NetworkSettings {
-            allowed_management_cidrs: vec!["10.20.30.0/24".to_string()],
-            allowed_upstream_cidrs: vec!["10.20.0.0/16".to_string()],
-            outbound_smart_hosts: vec![
-                "10.20.0.12:2525".to_string(),
-                "10.20.0.13:2525".to_string(),
-            ],
+            allowed_management_cidrs: env_value("LPE_CT_ALLOWED_MANAGEMENT_CIDRS")
+                .map(|value| parse_csv(&value))
+                .unwrap_or_default(),
+            allowed_upstream_cidrs: env_value("LPE_CT_ALLOWED_UPSTREAM_CIDRS")
+                .map(|value| parse_csv(&value))
+                .unwrap_or_default(),
+            outbound_smart_hosts,
             public_listener_enabled: true,
             submission_listener_enabled: false,
             proxy_protocol_enabled: false,
@@ -868,7 +907,8 @@ fn default_state() -> DashboardState {
             auto_download: false,
             maintenance_window: "Sun 02:30".to_string(),
             last_applied_release: "bootstrap".to_string(),
-            update_source: "https://github.com/dducret/LPE".to_string(),
+            update_source: env_value("LPE_CT_UPDATE_SOURCE")
+                .unwrap_or_else(|| "git checkout".to_string()),
         },
         queues: QueueMetrics {
             inbound_messages: 0,
@@ -882,25 +922,13 @@ fn default_state() -> DashboardState {
             admin_email: String::new(),
             password_hash: String::new(),
         },
-        audit: vec![
-            AuditEvent {
-                timestamp: "bootstrap".to_string(),
-                actor: "system".to_string(),
-                action: "seed-profile".to_string(),
-                details: "Default DMZ sorting center profile created".to_string(),
-            },
-            AuditEvent {
-                timestamp: "bootstrap".to_string(),
-                actor: "system".to_string(),
-                action: "seed-relay".to_string(),
-                details: "Initial LAN relay targets prepared".to_string(),
-            },
-        ],
+        audit: Vec::new(),
     }
 }
 
 fn default_core_delivery_base_url() -> String {
-    "http://10.20.0.20:8080".to_string()
+    env_value("LPE_CT_CORE_DELIVERY_BASE_URL")
+        .unwrap_or_else(|| "http://127.0.0.1:8080".to_string())
 }
 
 fn default_dnsbl_enabled() -> bool {
@@ -955,8 +983,8 @@ fn read_ha_role() -> Result<Option<String>> {
         return Ok(None);
     };
 
-    let role = fs::read_to_string(&path)
-        .with_context(|| format!("unable to read {}", path.display()))?;
+    let role =
+        fs::read_to_string(&path).with_context(|| format!("unable to read {}", path.display()))?;
     let normalized = role.trim().to_ascii_lowercase();
     if normalized.is_empty() {
         anyhow::bail!("HA role file {} is empty", path.display());
@@ -982,11 +1010,9 @@ fn ha_activation_check() -> ReadinessCheck {
             true,
             "HA role gating disabled; node follows default single-node readiness",
         ),
-        Ok(Some(role)) if role == "active" => readiness_ok(
-            "ha-role",
-            true,
-            "node is marked active for HA traffic",
-        ),
+        Ok(Some(role)) if role == "active" => {
+            readiness_ok("ha-role", true, "node is marked active for HA traffic")
+        }
         Ok(Some(role)) => readiness_failed(
             "ha-role",
             true,

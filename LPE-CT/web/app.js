@@ -8,6 +8,12 @@ const drawerSummary = document.getElementById("drawer-summary");
 const drawerPanels = Array.from(document.querySelectorAll(".drawer-panel"));
 const panelTriggers = Array.from(document.querySelectorAll("[data-open-panel]"));
 const AUTH_TOKEN_KEY = "lpeCtAdminToken";
+const LAST_ADMIN_EMAIL_KEY = "lpeCtAdminLastEmail";
+
+const loginEmailField = document.querySelector("#login-form input[name='email']");
+if (loginEmailField) {
+  loginEmailField.value = window.localStorage.getItem(LAST_ADMIN_EMAIL_KEY) ?? "";
+}
 
 function authHeaders() {
   const token = window.localStorage.getItem(AUTH_TOKEN_KEY);
@@ -210,6 +216,9 @@ async function loginAdmin() {
   }
   const body = await response.json();
   window.localStorage.setItem(AUTH_TOKEN_KEY, body.token);
+  if (typeof payload.email === "string" && payload.email.trim()) {
+    window.localStorage.setItem(LAST_ADMIN_EMAIL_KEY, payload.email.trim());
+  }
   showLoginFeedback("Authenticated.", false);
   await load();
 }

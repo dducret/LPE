@@ -4,8 +4,8 @@ set -euo pipefail
 API_URL="${API_URL:-http://127.0.0.1/api}"
 SMTP_HOST="${SMTP_HOST:-127.0.0.1}"
 SMTP_PORT="${SMTP_PORT:-25}"
-SENDER="${SENDER:-local-check@lpe-ct.test}"
-RECIPIENT="${RECIPIENT:-postmaster@example.test}"
+SENDER="${SENDER:?Set SENDER to the real local sender address}"
+RECIPIENT="${RECIPIENT:?Set RECIPIENT to a real mailbox hosted behind LPE-CT}"
 
 fail() {
   echo "[FAIL] $*" >&2

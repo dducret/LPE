@@ -42,13 +42,12 @@ mod types;
 
 use crate::types::{
     AdminAuthFactorsResponse, ApiResult, AttachmentSupportResponse, BootstrapAdminRequest,
-    BootstrapAdminResponse, ClientLoginResponse, CreateAccountRequest, CreateAliasRequest,
-    CreateDomainRequest, CreateFilterRuleRequest, CreateMailboxRequest,
-    CreatePstTransferJobRequest, CreateServerAdministratorRequest,
-    CollaborationOverviewResponse, EmailTraceSearchRequest, EnrollTotpRequest,
-    EnrollTotpResponse, LocalAiHealthResponse, LoginRequest, LoginResponse,
-    OidcMetadataResponse, OidcStartResponse, ReadinessCheck, ReadinessResponse,
-    SubmitMessageRequest, SubmitRecipientRequest, UpdateAccountRequest,
+    BootstrapAdminResponse, ClientLoginResponse, CollaborationOverviewResponse,
+    CreateAccountRequest, CreateAliasRequest, CreateDomainRequest, CreateFilterRuleRequest,
+    CreateMailboxRequest, CreatePstTransferJobRequest, CreateServerAdministratorRequest,
+    EmailTraceSearchRequest, EnrollTotpRequest, EnrollTotpResponse, LocalAiHealthResponse,
+    LoginRequest, LoginResponse, OidcMetadataResponse, OidcStartResponse, ReadinessCheck,
+    ReadinessResponse, SubmitMessageRequest, SubmitRecipientRequest, UpdateAccountRequest,
     UpdateAntispamSettingsRequest, UpdateLocalAiSettingsRequest, UpdateSecuritySettingsRequest,
     UpdateServerSettingsRequest, UpsertClientContactRequest, UpsertClientEventRequest,
     UpsertClientTaskRequest, UpsertCollaborationGrantRequest, VerifyTotpRequest,
@@ -116,7 +115,10 @@ pub fn router(storage: Storage) -> Router {
         )
         .route("/mail/contacts", post(upsert_client_contact))
         .route("/mail/calendar/events", post(upsert_client_event))
-        .route("/mail/shares", get(list_collaboration_overview).put(upsert_collaboration_grant))
+        .route(
+            "/mail/shares",
+            get(list_collaboration_overview).put(upsert_collaboration_grant),
+        )
         .route(
             "/mail/shares/{kind}/{grantee_account_id}",
             delete(delete_collaboration_grant),
@@ -2046,18 +2048,12 @@ pub fn bootstrap_admin_request_from_env() -> anyhow::Result<BootstrapAdminReques
 }
 
 pub fn bootstrap_admin_request_from_env_or_defaults() -> anyhow::Result<BootstrapAdminRequest> {
-    let email = env::var("LPE_BOOTSTRAP_ADMIN_EMAIL")
-        .unwrap_or_else(|_| "admin@example.test".to_string())
-        .trim()
-        .to_string();
+    let email = required_env("LPE_BOOTSTRAP_ADMIN_EMAIL")?;
     let display_name = env::var("LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME")
         .unwrap_or_else(|_| "Bootstrap Administrator".to_string())
         .trim()
         .to_string();
-    let password = env::var("LPE_BOOTSTRAP_ADMIN_PASSWORD")
-        .unwrap_or_else(|_| "ChangeMeNow$".to_string())
-        .trim()
-        .to_string();
+    let password = required_env("LPE_BOOTSTRAP_ADMIN_PASSWORD")?;
 
     validate_bootstrap_admin_request(&email, &display_name, &password)?;
 
@@ -2346,15 +2342,25 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_defaults_allow_first_login_secret() {
+    fn bootstrap_auto_request_requires_explicit_bootstrap_credentials() {
         let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("LPE_BOOTSTRAP_ADMIN_EMAIL");
         std::env::remove_var("LPE_BOOTSTRAP_ADMIN_PASSWORD");
         std::env::remove_var("LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME");
 
+        assert!(bootstrap_admin_request_from_env_or_defaults().is_err());
+
+        std::env::set_var("LPE_BOOTSTRAP_ADMIN_EMAIL", "root@tenant.example");
+        std::env::set_var(
+            "LPE_BOOTSTRAP_ADMIN_PASSWORD",
+            "Very-Strong-Bootstrap-Password-2026",
+        );
         let request = bootstrap_admin_request_from_env_or_defaults().unwrap();
-        assert_eq!(request.email, "admin@example.test");
-        assert_eq!(request.password, "ChangeMeNow$");
+        assert_eq!(request.email, "root@tenant.example");
+        assert_eq!(request.password, "Very-Strong-Bootstrap-Password-2026");
+
+        std::env::remove_var("LPE_BOOTSTRAP_ADMIN_EMAIL");
+        std::env::remove_var("LPE_BOOTSTRAP_ADMIN_PASSWORD");
     }
 
     #[test]

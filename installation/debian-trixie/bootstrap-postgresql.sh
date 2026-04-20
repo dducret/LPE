@@ -3,7 +3,7 @@ set -euo pipefail
 
 DB_NAME="${DB_NAME:-lpe}"
 DB_USER="${DB_USER:-lpe}"
-DB_PASSWORD="${DB_PASSWORD:-change-me}"
+DB_PASSWORD="${DB_PASSWORD:?Set DB_PASSWORD to a strong PostgreSQL password before running bootstrap-postgresql.sh}"
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-5432}"
 POSTGRES_SERVICE="${POSTGRES_SERVICE:-postgresql}"

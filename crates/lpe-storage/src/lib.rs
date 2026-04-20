@@ -18,6 +18,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{FromRow, Pool, Postgres, Row};
 use std::collections::BTreeMap;
+use std::env;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -7285,11 +7286,13 @@ impl Storage {
                 tls_mode: row.try_get("tls_mode")?,
             },
             None => ServerSettings {
-                primary_hostname: "mail.example.test".to_string(),
-                admin_bind_address: "127.0.0.1:8080".to_string(),
-                smtp_bind_address: "0.0.0.0:25".to_string(),
-                imap_bind_address: "0.0.0.0:143".to_string(),
-                jmap_bind_address: "0.0.0.0:8081".to_string(),
+                primary_hostname: env_hostname("LPE_PUBLIC_HOSTNAME")
+                    .or_else(|| env_hostname("LPE_SERVER_NAME"))
+                    .unwrap_or_else(|| "localhost".to_string()),
+                admin_bind_address: env_bind_address("LPE_BIND_ADDRESS", "127.0.0.1:8080"),
+                smtp_bind_address: env_bind_address("LPE_SMTP_BIND_ADDRESS", "0.0.0.0:25"),
+                imap_bind_address: env_bind_address("LPE_IMAP_BIND_ADDRESS", "0.0.0.0:143"),
+                jmap_bind_address: env_bind_address("LPE_JMAP_BIND_ADDRESS", "0.0.0.0:8081"),
                 default_locale: "en".to_string(),
                 max_message_size_mb: 64,
                 tls_mode: "required".to_string(),
@@ -9173,6 +9176,21 @@ fn hash_sieve_vacation_key(vacation: &VacationAction) -> String {
     hasher.update(b"\n");
     hasher.update(vacation.days.to_string().as_bytes());
     format!("{:x}", hasher.finalize())
+}
+
+fn env_hostname(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().trim_matches('_').to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn env_bind_address(name: &str, fallback: &str) -> String {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| fallback.to_string())
 }
 
 #[cfg(test)]

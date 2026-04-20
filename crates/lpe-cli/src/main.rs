@@ -70,7 +70,11 @@ async fn auto_bootstrap_admin_if_missing(storage: &Storage) -> Result<()> {
         return Ok(());
     }
 
-    let request = bootstrap_admin_request_from_env_or_defaults()?;
+    let request = bootstrap_admin_request_from_env_or_defaults().map_err(|error| {
+        anyhow::anyhow!(
+            "missing real bootstrap administrator configuration: set LPE_BOOTSTRAP_ADMIN_EMAIL and LPE_BOOTSTRAP_ADMIN_PASSWORD before first startup ({error})"
+        )
+    })?;
     let result = bootstrap_admin(storage, request).await?;
     info!(
         "auto-bootstrap administrator created for {} ({})",

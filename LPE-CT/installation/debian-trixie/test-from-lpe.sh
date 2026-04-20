@@ -4,8 +4,8 @@ set -euo pipefail
 CT_HOST="${CT_HOST:?Set CT_HOST to the LPE-CT DMZ host or IP}"
 SMTP_PORT="${SMTP_PORT:-25}"
 API_URL="${API_URL:-}"
-SENDER="${SENDER:-lpe-core-check@example.test}"
-RECIPIENT="${RECIPIENT:-postmaster@example.test}"
+SENDER="${SENDER:?Set SENDER to the real LPE relay sender address}"
+RECIPIENT="${RECIPIENT:?Set RECIPIENT to a real mailbox hosted behind LPE-CT}"
 
 fail() {
   echo "[FAIL] $*" >&2

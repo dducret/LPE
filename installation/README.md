@@ -109,7 +109,7 @@ The administration console now stores its accounts, account passwords, mailboxes
 
 `PST` imports can be uploaded from the browser. The service validates each incoming file with Google `Magika` before storing it in `LPE_PST_IMPORT_DIR`, defaulting to `/var/lib/lpe/imports`, and then creates the `PST` import request with the resulting server path. The maximum accepted API upload size is configured through `LPE_PST_UPLOAD_MAX_BYTES`, defaulting to `21474836480` bytes. The `nginx` reverse proxy is aligned through `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, defaulting to `20g`. The binary path is configured through `LPE_MAGIKA_BIN`, defaulting to `/opt/lpe/bin/magika`, and the minimum confidence threshold through `LPE_MAGIKA_MIN_SCORE`.
 
-When no administrator exists yet, `LPE` now creates a bootstrap administrator automatically at startup from `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME`, and `LPE_BOOTSTRAP_ADMIN_PASSWORD`. The example configuration uses `admin@example.test` with `ChangeMeNow$` for the first operational sign-in. In production, that bootstrap secret must be changed immediately.
+When no administrator exists yet, `LPE` now creates a bootstrap administrator automatically at startup from `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME`, and `LPE_BOOTSTRAP_ADMIN_PASSWORD`. First startup now requires a real bootstrap email address and a strong password in `/etc/lpe/lpe.env`; there is no fallback runtime administrator or published default secret.
 
 The back office now also supports a first federated `OIDC` login for administrators. Configuration is done from the console `Security` page and requires:
 

@@ -12,7 +12,8 @@
 
 \if :{?db_password}
 \else
-\set db_password change-me
+\echo db_password must be provided with -v db_password=...
+\quit 1
 \endif
 
 DO $$

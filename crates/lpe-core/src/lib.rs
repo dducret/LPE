@@ -2,6 +2,7 @@ use anyhow::Result;
 use lpe_ai::{summarize_projection, LocalModelProvider};
 use lpe_attachments::AttachmentFormat;
 use lpe_domain::{AccessScope, Account, DocumentChunk, DocumentKind, DocumentProjection};
+use std::env;
 use uuid::Uuid;
 
 pub mod sieve;
@@ -11,19 +12,28 @@ pub struct CoreService;
 
 impl CoreService {
     pub fn bootstrap_admin_account(&self) -> Result<Account> {
-        Ok(Account::new("admin@example.test", "LPE Administrator"))
+        let hostname = env::var("LPE_PUBLIC_HOSTNAME")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "localhost".to_string());
+        Ok(Account::new(
+            format!("bootstrap-admin@{hostname}"),
+            "LPE Administrator",
+        ))
     }
 
     pub fn bootstrap_mail_projection(&self, owner_account_id: Uuid) -> DocumentProjection {
+        let principal_label = format!("account:{owner_account_id}");
         DocumentProjection {
             id: Uuid::new_v4(),
             source_object_id: Uuid::new_v4(),
             kind: DocumentKind::MailMessage,
-            title: "Welcome to LPE".to_string(),
+            title: "LPE local AI readiness".to_string(),
             preview: "LPE prepares normalized documents for search and local AI.".to_string(),
             body_text: "LPE stores normalized message projections to support PostgreSQL full-text search and future local LLM workflows.".to_string(),
             language: Some("en".to_string()),
-            participants: vec!["admin@example.test".to_string()],
+            participants: vec![principal_label],
             content_hash: "bootstrap-mail-projection".to_string(),
             scope: AccessScope {
                 tenant_id: "__platform__".to_string(),
