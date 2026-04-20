@@ -35,6 +35,7 @@ const MAX_SIEVE_REDIRECTS_PER_MESSAGE: usize = 4;
 const DEFAULT_SIEVE_MAILBOX_RETENTION_DAYS: i32 = 365;
 const DEFAULT_COLLECTION_ID: &str = "default";
 const CANONICAL_CHANGE_CHANNEL: &str = "lpe_canonical_changes";
+const EXPECTED_SCHEMA_VERSION: &str = "0.1.3";
 
 #[derive(Clone)]
 pub struct Storage {
@@ -1919,7 +1920,9 @@ impl Storage {
 
     pub async fn connect(database_url: &str) -> Result<Self> {
         let pool = Pool::<Postgres>::connect(database_url).await?;
-        Ok(Self::new(pool))
+        let storage = Self::new(pool);
+        storage.assert_schema_version().await?;
+        Ok(storage)
     }
 
     pub async fn create_canonical_change_listener(
@@ -1937,6 +1940,29 @@ impl Storage {
 
     pub fn pool(&self) -> &Pool<Postgres> {
         &self.pool
+    }
+
+    async fn assert_schema_version(&self) -> Result<()> {
+        let schema_version = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT schema_version
+            FROM schema_metadata
+            WHERE singleton = TRUE
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .context(
+            "database schema is not initialized for LPE 0.1.3; recreate the database and apply crates/lpe-storage/sql/schema.sql",
+        )?;
+
+        if schema_version != EXPECTED_SCHEMA_VERSION {
+            bail!(
+                "unsupported database schema version {schema_version}; expected {EXPECTED_SCHEMA_VERSION}. Release 0.1.3 requires a fresh database initialized from crates/lpe-storage/sql/schema.sql"
+            );
+        }
+
+        Ok(())
     }
 
     pub async fn fetch_admin_dashboard(&self) -> Result<AdminDashboard> {

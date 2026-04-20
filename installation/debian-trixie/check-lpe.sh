@@ -82,12 +82,17 @@ systemctl is-active "$NGINX_SERVICE_NAME" >/dev/null 2>&1 || fail "Service is no
 pass "Service active: $NGINX_SERVICE_NAME"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.accounts');" | grep -qx 'accounts' \
-  || fail "Table public.accounts is missing. Run /opt/lpe/src/installation/debian-trixie/run-migrations.sh"
+  || fail "Table public.accounts is missing. Run /opt/lpe/src/installation/debian-trixie/init-schema.sh"
 pass "Found table public.accounts"
 
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.searchable_mail_documents');" | grep -qx 'searchable_mail_documents' \
-  || fail "View public.searchable_mail_documents is missing. Run /opt/lpe/src/installation/debian-trixie/run-migrations.sh"
+  || fail "View public.searchable_mail_documents is missing. Run /opt/lpe/src/installation/debian-trixie/init-schema.sh"
 pass "Found view public.searchable_mail_documents"
+
+schema_version="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE;")" \
+  || fail "Schema metadata is missing. Run /opt/lpe/src/installation/debian-trixie/init-schema.sh"
+[[ "$schema_version" == "0.1.3" ]] || fail "Unexpected schema version: $schema_version"
+pass "Schema version is 0.1.3"
 
 check_http_json_field "$HTTP_BASE/health" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/live" '"status":"ok"'

@@ -149,4 +149,4 @@ systemctl restart nginx
 echo "LPE installed in ${INSTALL_ROOT}."
 echo "Service lpe.service has been started."
 echo "nginx now serves the admin console on / and the web client on /mail/."
-echo "Review ${ENV_DIR}/lpe.env and run the migrations script if the database schema is not initialized yet."
+echo "Review ${ENV_DIR}/lpe.env and run installation/debian-trixie/init-schema.sh to create a fresh 0.1.3 database."

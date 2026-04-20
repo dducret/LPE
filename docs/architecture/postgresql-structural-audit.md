@@ -117,7 +117,7 @@ The current Debian runner executes files lexicographically, so it works today, b
 Correction implemented:
 
 - a canonical full schema creation script for fresh databases:
-  [create_lpe_schema.sql](/C:/Development/LPE/crates/lpe-storage/sql/create_lpe_schema.sql)
+  [schema.sql](/C:/Development/LPE/crates/lpe-storage/sql/schema.sql)
 
 Rust impact:
 
@@ -125,7 +125,7 @@ Rust impact:
 
 ## Delivered artifacts
 
-- Canonical fresh schema: [create_lpe_schema.sql](/C:/Development/LPE/crates/lpe-storage/sql/create_lpe_schema.sql)
+- Canonical fresh schema: [schema.sql](/C:/Development/LPE/crates/lpe-storage/sql/schema.sql)
 - Rust multi-tenant credential/session fixes: [lib.rs](/C:/Development/LPE/crates/lpe-storage/src/lib.rs)
 
 ## Notes

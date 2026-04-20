@@ -1,8 +1,28 @@
+-- Copyright 2026 LPE Contributors
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+
 BEGIN;
 
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION pg_trgm;
 
-CREATE SEQUENCE IF NOT EXISTS message_imap_uid_seq;
+CREATE SEQUENCE message_imap_uid_seq;
+
+CREATE TABLE schema_metadata (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
+    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.3'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 CREATE TABLE accounts (
     id UUID PRIMARY KEY,
@@ -12,6 +32,9 @@ CREATE TABLE accounts (
     quota_mb INTEGER NOT NULL DEFAULT 4096 CHECK (quota_mb >= 0),
     used_mb INTEGER NOT NULL DEFAULT 0 CHECK (used_mb >= 0),
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'disabled')),
+    gal_visibility TEXT NOT NULL DEFAULT 'tenant' CHECK (gal_visibility IN ('tenant', 'hidden')),
+    directory_kind TEXT NOT NULL DEFAULT 'person'
+        CHECK (directory_kind IN ('person', 'room', 'equipment')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, primary_email)
@@ -25,6 +48,7 @@ CREATE TABLE domains (
     inbound_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     outbound_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     default_quota_mb INTEGER NOT NULL DEFAULT 4096 CHECK (default_quota_mb >= 0),
+    default_sieve_script TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, name)
@@ -408,6 +432,22 @@ CREATE TABLE admin_auth_factors (
 CREATE INDEX admin_auth_factors_admin_idx
     ON admin_auth_factors (tenant_id, admin_email, factor_type);
 
+CREATE TABLE account_credentials (
+    tenant_id TEXT NOT NULL CHECK (btrim(tenant_id) <> ''),
+    account_email TEXT NOT NULL CHECK (account_email = lower(btrim(account_email))),
+    password_hash TEXT NOT NULL CHECK (btrim(password_hash) <> ''),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_email),
+    FOREIGN KEY (tenant_id, account_email)
+        REFERENCES accounts (tenant_id, primary_email)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX account_credentials_tenant_status_idx
+    ON account_credentials (tenant_id, status);
+
 CREATE TABLE account_oidc_config (
     tenant_id TEXT PRIMARY KEY,
     issuer_url TEXT NOT NULL CHECK (btrim(issuer_url) <> ''),
@@ -438,22 +478,6 @@ CREATE TABLE account_oidc_identities (
 
 CREATE INDEX account_oidc_identities_account_idx
     ON account_oidc_identities (tenant_id, account_email);
-
-CREATE TABLE account_credentials (
-    tenant_id TEXT NOT NULL CHECK (btrim(tenant_id) <> ''),
-    account_email TEXT NOT NULL CHECK (account_email = lower(btrim(account_email))),
-    password_hash TEXT NOT NULL CHECK (btrim(password_hash) <> ''),
-    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (tenant_id, account_email),
-    FOREIGN KEY (tenant_id, account_email)
-        REFERENCES accounts (tenant_id, primary_email)
-        ON DELETE CASCADE
-);
-
-CREATE INDEX account_credentials_tenant_status_idx
-    ON account_credentials (tenant_id, status);
 
 CREATE TABLE account_auth_factors (
     id UUID PRIMARY KEY,
@@ -882,6 +906,9 @@ LEFT JOIN attachments a
    AND a.message_id = m.id
 GROUP BY m.id, m.account_id, m.mailbox_id, m.received_at, m.subject_normalized, mb.search_vector;
 
+INSERT INTO schema_metadata (singleton, schema_version)
+VALUES (TRUE, '0.1.3');
+
 INSERT INTO security_settings (
     tenant_id,
     password_login_enabled,
@@ -892,8 +919,7 @@ INSERT INTO security_settings (
     oidc_provider_label,
     oidc_auto_link_by_email
 )
-VALUES ('__platform__', TRUE, TRUE, 45, 365, FALSE, 'Corporate SSO', TRUE)
-ON CONFLICT (tenant_id) DO NOTHING;
+VALUES ('__platform__', TRUE, TRUE, 45, 365, FALSE, 'Corporate SSO', TRUE);
 
 INSERT INTO local_ai_settings (
     tenant_id,
@@ -903,8 +929,7 @@ INSERT INTO local_ai_settings (
     offline_only,
     indexing_enabled
 )
-VALUES ('__platform__', TRUE, 'stub-local', 'gemma3-local', TRUE, TRUE)
-ON CONFLICT (tenant_id) DO NOTHING;
+VALUES ('__platform__', TRUE, 'stub-local', 'gemma3-local', TRUE, TRUE);
 
 INSERT INTO antispam_settings (
     tenant_id,
@@ -913,7 +938,6 @@ INSERT INTO antispam_settings (
     quarantine_enabled,
     quarantine_retention_days
 )
-VALUES ('__platform__', TRUE, 'rspamd-ready', TRUE, 30)
-ON CONFLICT (tenant_id) DO NOTHING;
+VALUES ('__platform__', TRUE, 'rspamd-ready', TRUE, 30);
 
 COMMIT;

@@ -2,9 +2,11 @@
 
 `LPE` is a modern mail and collaboration platform written primarily in Rust.
 
-The repository is aligned for release `0.1.20`.
+The repository is aligned for release `0.1.3`.
 
-See `docs/releases/0.1.20.md` for the short release note.
+Release `0.1.3` is a breaking change. Legacy updates are not supported. A fresh install and database recreation are required.
+
+See `docs/releases/0.1.3.md` for the short release note.
 
 ## Initial Principles
 
@@ -50,4 +52,4 @@ The current workspace compiles with:
 cargo check
 ```
 
-For installation and update workflows on `Debian Trixie`, see [installation/README.md](/C:/Development/LPE/installation/README.md).
+For installation and reset workflows on `Debian Trixie`, see [installation/README.md](/C:/Development/LPE/installation/README.md).
