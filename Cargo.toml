@@ -20,7 +20,7 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "Apache-2.0"
-version = "0.1.0"
+version = "0.1.20"
 authors = ["LPE Contributors"]
 repository = "https://example.com/lpe"
 
@@ -43,3 +43,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 uuid = { version = "1.18", features = ["serde", "v4"] }
 zip = { version = "4.6", default-features = false, features = ["deflate"] }
+

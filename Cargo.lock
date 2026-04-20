@@ -1354,7 +1354,7 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "lpe-activesync"
-version = "0.1.0"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1371,7 +1371,7 @@ dependencies = [
 
 [[package]]
 name = "lpe-admin-api"
-version = "0.1.0"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1398,7 +1398,7 @@ dependencies = [
 
 [[package]]
 name = "lpe-ai"
-version = "0.1.0"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "lpe-domain",
@@ -1408,7 +1408,7 @@ dependencies = [
 
 [[package]]
 name = "lpe-attachments"
-version = "0.1.0"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "docx-lite",
@@ -1420,7 +1420,7 @@ dependencies = [
 
 [[package]]
 name = "lpe-cli"
-version = "0.1.0"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "axum",
@@ -1438,7 +1438,7 @@ dependencies = [
 
 [[package]]
 name = "lpe-core"
-version = "0.1.0"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "lpe-ai",
@@ -1449,7 +1449,7 @@ dependencies = [
 
 [[package]]
 name = "lpe-dav"
-version = "0.1.0"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "axum",
@@ -1463,7 +1463,7 @@ dependencies = [
 
 [[package]]
 name = "lpe-domain"
-version = "0.1.0"
+version = "0.1.20"
 dependencies = [
  "base64",
  "serde",
@@ -1473,7 +1473,7 @@ dependencies = [
 
 [[package]]
 name = "lpe-imap"
-version = "0.1.0"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1487,7 +1487,7 @@ dependencies = [
 
 [[package]]
 name = "lpe-jmap"
-version = "0.1.0"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "axum",
@@ -1501,7 +1501,7 @@ dependencies = [
 
 [[package]]
 name = "lpe-magika"
-version = "0.1.0"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "base64",
@@ -1511,7 +1511,7 @@ dependencies = [
 
 [[package]]
 name = "lpe-mail-auth"
-version = "0.1.0"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1524,7 +1524,7 @@ dependencies = [
 
 [[package]]
 name = "lpe-managesieve"
-version = "0.1.0"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1538,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "lpe-storage"
-version = "0.1.0"
+version = "0.1.20"
 dependencies = [
  "anyhow",
  "base64",

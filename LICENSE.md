@@ -1,3 +1,38 @@
+# LPE License
+
+## Project License
+
+All source code produced in `LPE` is distributed under `Apache-2.0`.
+
+## Dependency Policy
+
+- `MIT` dependencies are allowed only when no reasonable `Apache-2.0` alternative exists.
+- `GPL`, `LGPL`, `AGPL`, `SSPL`, and non-standard licenses are forbidden.
+- Every new dependency must have its declared license reviewed before adoption.
+- Any retained `MIT` dependency must have a documented justification.
+
+## Accepted MIT Exceptions
+
+These exceptions are currently accepted because they are common in the Rust ecosystem or required by the current implementation, and no reasonable `Apache-2.0` replacement has been selected yet:
+
+- `tokio`
+- `axum`
+- `multer` (transitive dependency enabled by `axum` multipart upload support)
+- `tracing`
+- `tracing-subscriber`
+- `tracing-serde` (transitive dependency enabled by structured JSON `tracing` output)
+- `docx-lite`
+- `tonic` for internal `LPE-CT <-> LPE` `gRPC` contracts only
+
+`argon2` is used for password hashing. The RustCrypto crate is available under `Apache-2.0 OR MIT`, which is compatible with the `Apache-2.0` preference.
+
+Google `Magika` is an acceptable candidate for file-type validation because its official project is published under `Apache-2.0`. As with every dependency, the selected integration path and its transitive dependencies must still be reviewed before adoption.
+
+## External Reference Constraint
+
+Stalwart may be studied only as a product or architecture benchmark. Its code must not be reused in `LPE`.
+
+## Apache License 2.0
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -199,3 +234,4 @@
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+

@@ -1,72 +1,4 @@
-# Edge and Protocol Exposure | Exposition perimetrique et protocoles
-
-## Francais
-
-### Objectif
-
-Ce document decrit la frontiere entre `LPE` et `LPE-CT` pour l'exposition reseau, la publication des protocoles et le transport interne.
-
-### Regle centrale
-
-`LPE-CT` est l'unique point d'exposition externe.
-
-Le coeur `LPE` ne doit pas etre accessible directement depuis Internet et n'en a pas besoin pour fonctionner dans l'architecture cible.
-
-### Exposition externe de base
-
-`LPE-CT` publie:
-
-- `SMTP` entrant sur le port `25`
-- le client web `LPE` en `HTTPS` sur `443` sous `/mail`
-- `ActiveSync` en `HTTPS` sous `/activesync`
-- les endpoints `JMAP` en `TLS` vers `LPE`
-- `IMAPS`
-- `ManageSieve` en `TLS` sur `4190` lorsqu'il est active
-- `SMTPS`
-
-Pour la soumission cliente securisee, la base cible prefere le port `465` en TLS implicite, conformement a `RFC 8314`.
-
-Les WebSockets `JMAP` securisees sont une extension future et ne font pas partie de la base actuelle.
-
-### Separation entre publication et logique protocolaire
-
-- `LPE` porte la logique protocolaire mailbox et collaboration
-- `LPE` porte aussi l'execution des regles mailbox `Sieve` et le service `ManageSieve` associe
-- `LPE-CT` porte l'exposition externe, le reverse proxy, le proxy TCP/TLS et la posture perimetrique
-
-Les politiques de bord `LPE-CT` restent distinctes des regles `Sieve` utilisateur. `Sieve` ne doit pas devenir un vehicule pour exprimer du filtrage perimeterique, des decisions antispam, des quarantaines, ni des politiques de relay ou de throttling qui restent du ressort du centre de tri.
-
-### ActiveSync
-
-`ActiveSync` est bavard et utilise frequemment du long polling.
-
-Le frontal `LPE-CT` doit donc supporter:
-
-- des timeouts longs
-- une gestion de connexion adaptee
-- l'absence de coupure prematuree pour Outlook et iOS pendant les attentes longues
-
-### LPE-CT aussi stateless que possible
-
-`LPE-CT` doit rester aussi stateless que possible afin de faciliter:
-
-- le load-balancing `DNS`
-- `VRRP`
-- le remplacement horizontal de noeuds
-
-L'etat edge necessaire, comme le spool ou la quarantaine, doit rester borne, explicite et operationnellement remplacable.
-
-### Transport interne `LPE-CT <-> LPE`
-
-Le protocole cible pour les echanges internes entre `LPE-CT` et `LPE` est `gRPC`.
-
-Ce choix est strictement limite au backbone interne et ne change pas les protocoles exposes aux clients.
-
-L'implementation Rust privilegiee pour cette couche est `tonic`.
-
-Le contrat fonctionnel v1 actuellement en place reste documente separement dans `docs/architecture/lpe-ct-integration.md`.
-
-## English
+# Edge and Protocol Exposure
 
 ### Goal
 
@@ -131,3 +63,5 @@ This choice is strictly limited to the internal backbone and does not change the
 The preferred Rust implementation for that internal layer is `tonic`.
 
 The current functional v1 contract remains documented separately in `docs/architecture/lpe-ct-integration.md`.
+
+

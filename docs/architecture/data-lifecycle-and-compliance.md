@@ -1,58 +1,4 @@
-# Data Lifecycle and Compliance | Cycle de vie des donnees et compliance
-
-## Francais
-
-### Objectif
-
-Ce document couvre le stockage mailbox, l'archivage, la retention, la deduplication, la confidentialite et les traitements asynchrones.
-
-### Tiers de taille mailbox
-
-- moins de `10 GB`: base partagee
-- plus de `10 GB`: base dediee
-- plus de `50 GB`: partition technique invisible a l'utilisateur
-- plus de `100 GB`: archive en ligne a performances degradees
-
-### Import et export `PST`
-
-`LPE` supporte l'import et l'export `PST` complets ou partiels.
-
-### Deduplication
-
-Les blobs identiques sont dedupliques a l'echelle du domaine.
-
-Les exports doivent reconstruire correctement les pieces jointes.
-
-### Retention et legal hold
-
-La retention peut etre definie au niveau:
-
-- tenant
-- domaine
-- mailbox
-- dossier
-
-Le legal hold est pilote au niveau tenant.
-
-### `Bcc`
-
-`Bcc` est une metadonnee protegee.
-
-Elle:
-
-- n'est pas indexee dans la recherche standard
-- n'entre pas dans les pipelines IA utilisateur
-- reste disponible pour audit/compliance via workflows privilegies
-
-### Suppression et audit
-
-Les messages supprimes doivent etre reconstruits puis deplaces dans un `Audit Store` separe afin de ne pas polluer les index de production.
-
-### Extraction de texte asynchrone
-
-L'extraction de texte des pieces jointes ne doit pas se faire dans le flux synchrone de reception `SMTP`.
-
-## English
+# Data Lifecycle and Compliance
 
 ### Goal
 
@@ -103,3 +49,5 @@ Deleted messages must be reconstructed and moved into a separated `Audit Store` 
 ### Asynchronous text extraction
 
 Attachment text extraction must not happen in the synchronous `SMTP` receive path.
+
+
