@@ -39,7 +39,7 @@ For the administration plane, `LPE` now supports a first federated-login MVP bas
 The initial scope stays intentionally limited:
 
 - federated login currently applies to the administration back office
-- mailbox-account login remains password-based in v1
+- mailbox accounts now support a first dedicated modern-authentication MVP with local password login, optional mailbox `OIDC`, optional user `TOTP` for interactive login, and app passwords for legacy client protocols
 - `ManageSieve` reuses the same mailbox-account login and does not introduce a separate identity surface
 - no passwordless-only mode is required in v1
 - administrator factors now support a first `TOTP` flow for password login

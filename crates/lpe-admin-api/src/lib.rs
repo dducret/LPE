@@ -36,13 +36,16 @@ use uuid::Uuid;
 
 mod client_config;
 mod observability;
+mod account_oidc;
 mod oidc;
 mod totp;
 mod types;
 
 use crate::types::{
-    AdminAuthFactorsResponse, ApiResult, AttachmentSupportResponse, BootstrapAdminRequest,
-    BootstrapAdminResponse, ClientLoginResponse, CollaborationOverviewResponse,
+    AccountAppPasswordsResponse, AccountAuthFactorsResponse, AdminAuthFactorsResponse, ApiResult,
+    AttachmentSupportResponse, BootstrapAdminRequest, BootstrapAdminResponse,
+    ClientLoginResponse, ClientOidcMetadataResponse, ClientOidcStartResponse,
+    CollaborationOverviewResponse, CreateAccountAppPasswordRequest, CreateAccountAppPasswordResponse,
     CreateAccountRequest, CreateAliasRequest, CreateDomainRequest, CreateFilterRuleRequest,
     CreateMailboxRequest, CreatePstTransferJobRequest, CreateServerAdministratorRequest,
     EmailTraceSearchRequest, EnrollTotpRequest, EnrollTotpResponse, LocalAiHealthResponse,
@@ -75,6 +78,15 @@ pub fn router(storage: Storage) -> Router {
         .route("/mail/auth/login", post(client_login))
         .route("/mail/auth/logout", post(client_logout))
         .route("/mail/auth/me", get(client_me))
+        .route("/mail/auth/factors", get(account_auth_factors))
+        .route("/mail/auth/factors/totp/enroll", post(enroll_account_totp))
+        .route("/mail/auth/factors/totp/verify", post(verify_account_totp_factor))
+        .route("/mail/auth/factors/{factor_id}", delete(revoke_account_factor))
+        .route("/mail/auth/app-passwords", get(list_account_app_passwords).post(create_account_app_password))
+        .route("/mail/auth/app-passwords/{app_password_id}", delete(revoke_account_app_password))
+        .route("/mail/auth/oidc/metadata", get(client_oidc_metadata))
+        .route("/mail/auth/oidc/start", get(client_oidc_start))
+        .route("/mail/auth/oidc/callback", get(client_oidc_callback))
         .route("/mail/workspace", get(client_workspace))
         .route(
             "/mail/tasks",
@@ -579,6 +591,18 @@ async fn client_login(
     State(storage): State<Storage>,
     Json(request): Json<LoginRequest>,
 ) -> ApiResult<ClientLoginResponse> {
+    let security = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?
+        .security_settings;
+    if !security.mailbox_password_login_enabled {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "password login is disabled for mailbox accounts".to_string(),
+        ));
+    }
+
     let email = request.email.trim().to_lowercase();
     let candidate = storage
         .fetch_account_login(&email)
@@ -586,10 +610,46 @@ async fn client_login(
         .map_err(internal_error)?
         .ok_or((StatusCode::UNAUTHORIZED, "invalid credentials".to_string()))?;
 
-    if candidate.status != "active" || !verify_password(&candidate.password_hash, &request.password)
-    {
+    if candidate.status != "active" || !verify_password(&candidate.password_hash, &request.password) {
+        let _ = storage
+            .append_audit_event(
+                &candidate.tenant_id,
+                AuditEntryInput {
+                    actor: email.clone(),
+                    action: "mail-auth.password-login-failed".to_string(),
+                    subject: "invalid-credentials".to_string(),
+                },
+            )
+            .await;
         return Err((StatusCode::UNAUTHORIZED, "invalid credentials".to_string()));
     }
+
+    let auth_method = if let Some((_, secret)) = storage
+        .fetch_account_totp_secret(&email)
+        .await
+        .map_err(internal_error)?
+    {
+        let code = request
+            .totp_code
+            .as_deref()
+            .ok_or((StatusCode::UNAUTHORIZED, "missing TOTP code".to_string()))?;
+        if !totp::verify_code(&secret, code, totp::unix_time()) {
+            let _ = storage
+                .append_audit_event(
+                    &candidate.tenant_id,
+                    AuditEntryInput {
+                        actor: email.clone(),
+                        action: "mail-auth.totp-failed".to_string(),
+                        subject: "password".to_string(),
+                    },
+                )
+                .await;
+            return Err((StatusCode::UNAUTHORIZED, "invalid TOTP code".to_string()));
+        }
+        "password+totp"
+    } else {
+        "password"
+    };
 
     let token = Uuid::new_v4().to_string();
     storage
@@ -601,6 +661,16 @@ async fn client_login(
         )
         .await
         .map_err(internal_error)?;
+    let _ = storage
+        .append_audit_event(
+            &candidate.tenant_id,
+            AuditEntryInput {
+                actor: email.clone(),
+                action: "mail-auth.login-succeeded".to_string(),
+                subject: auth_method.to_string(),
+            },
+        )
+        .await;
     let account = storage
         .fetch_account_session(&token)
         .await
@@ -634,6 +704,325 @@ async fn client_me(
     headers: HeaderMap,
 ) -> ApiResult<AuthenticatedAccount> {
     Ok(Json(require_account(&storage, &headers).await?))
+}
+
+async fn account_auth_factors(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<AccountAuthFactorsResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let factors = storage
+        .fetch_account_auth_factors(&account.email)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(AccountAuthFactorsResponse { factors }))
+}
+
+async fn enroll_account_totp(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<EnrollTotpRequest>,
+) -> ApiResult<EnrollTotpResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let dashboard = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?;
+    let label = request
+        .label
+        .unwrap_or_else(|| account.display_name.clone())
+        .trim()
+        .to_string();
+    let secret = totp::generate_secret();
+    let factor_id = storage
+        .create_account_auth_factor(lpe_storage::NewAccountAuthFactor {
+            account_email: account.email.clone(),
+            factor_type: "totp".to_string(),
+            secret_ciphertext: secret.clone(),
+        })
+        .await
+        .map_err(internal_error)?;
+    let _ = storage
+        .append_audit_event(
+            &account.tenant_id,
+            AuditEntryInput {
+                actor: account.email.clone(),
+                action: "mail-auth.totp-enrollment-started".to_string(),
+                subject: factor_id.to_string(),
+            },
+        )
+        .await;
+    Ok(Json(EnrollTotpResponse {
+        factor_id,
+        secret: secret.clone(),
+        otpauth_url: totp::otpauth_url(
+            &dashboard.server_settings.primary_hostname,
+            &account.email,
+            &label,
+            &secret,
+        ),
+    }))
+}
+
+async fn verify_account_totp_factor(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<VerifyTotpRequest>,
+) -> ApiResult<AccountAuthFactorsResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let secret = storage
+        .fetch_pending_account_factor_secret(&account.email, request.factor_id)
+        .await
+        .map_err(internal_error)?
+        .ok_or((StatusCode::NOT_FOUND, "pending factor not found".to_string()))?;
+    if !totp::verify_code(&secret, &request.code, totp::unix_time()) {
+        return Err((StatusCode::UNAUTHORIZED, "invalid TOTP code".to_string()));
+    }
+    storage
+        .activate_account_auth_factor(&account.email, request.factor_id)
+        .await
+        .map_err(internal_error)?;
+    let _ = storage
+        .append_audit_event(
+            &account.tenant_id,
+            AuditEntryInput {
+                actor: account.email.clone(),
+                action: "mail-auth.totp-enrollment-verified".to_string(),
+                subject: request.factor_id.to_string(),
+            },
+        )
+        .await;
+    let factors = storage
+        .fetch_account_auth_factors(&account.email)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(AccountAuthFactorsResponse { factors }))
+}
+
+async fn revoke_account_factor(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(factor_id): AxumPath<Uuid>,
+) -> ApiResult<AccountAuthFactorsResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let revoked = storage
+        .revoke_account_auth_factor(&account.email, factor_id)
+        .await
+        .map_err(internal_error)?;
+    if !revoked {
+        return Err((StatusCode::NOT_FOUND, "factor not found".to_string()));
+    }
+    let _ = storage
+        .append_audit_event(
+            &account.tenant_id,
+            AuditEntryInput {
+                actor: account.email.clone(),
+                action: "mail-auth.factor-revoked".to_string(),
+                subject: factor_id.to_string(),
+            },
+        )
+        .await;
+    let factors = storage
+        .fetch_account_auth_factors(&account.email)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(AccountAuthFactorsResponse { factors }))
+}
+
+async fn list_account_app_passwords(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<AccountAppPasswordsResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let app_passwords = storage
+        .list_account_app_passwords(&account.email)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(AccountAppPasswordsResponse { app_passwords }))
+}
+
+async fn create_account_app_password(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<CreateAccountAppPasswordRequest>,
+) -> ApiResult<CreateAccountAppPasswordResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let label = request.label.trim();
+    if label.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "label is required".to_string()));
+    }
+    let secret = generate_app_password_secret();
+    let id = storage
+        .create_account_app_password(
+            &account.email,
+            label,
+            &hash_password(&secret).map_err(internal_error)?,
+        )
+        .await
+        .map_err(internal_error)?;
+    let _ = storage
+        .append_audit_event(
+            &account.tenant_id,
+            AuditEntryInput {
+                actor: account.email.clone(),
+                action: "mail-auth.app-password-created".to_string(),
+                subject: label.to_string(),
+            },
+        )
+        .await;
+    Ok(Json(CreateAccountAppPasswordResponse {
+        id,
+        label: label.to_string(),
+        secret,
+    }))
+}
+
+async fn revoke_account_app_password(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(app_password_id): AxumPath<Uuid>,
+) -> ApiResult<AccountAppPasswordsResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let revoked = storage
+        .revoke_account_app_password(&account.email, app_password_id)
+        .await
+        .map_err(internal_error)?;
+    if !revoked {
+        return Err((StatusCode::NOT_FOUND, "app password not found".to_string()));
+    }
+    let _ = storage
+        .append_audit_event(
+            &account.tenant_id,
+            AuditEntryInput {
+                actor: account.email.clone(),
+                action: "mail-auth.app-password-revoked".to_string(),
+                subject: app_password_id.to_string(),
+            },
+        )
+        .await;
+    let app_passwords = storage
+        .list_account_app_passwords(&account.email)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(AccountAppPasswordsResponse { app_passwords }))
+}
+
+async fn client_oidc_metadata(
+    State(storage): State<Storage>,
+) -> ApiResult<ClientOidcMetadataResponse> {
+    let settings = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?
+        .security_settings;
+    Ok(Json(ClientOidcMetadataResponse {
+        enabled: settings.mailbox_oidc_login_enabled,
+        provider_label: settings.mailbox_oidc_provider_label,
+    }))
+}
+
+async fn client_oidc_start(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<ClientOidcStartResponse> {
+    let settings = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?
+        .security_settings;
+    let public_origin = public_origin(&headers);
+    let authorization_url = account_oidc::authorization_url(&settings, &public_origin)
+        .await
+        .map_err(bad_request_error)?;
+    Ok(Json(ClientOidcStartResponse { authorization_url }))
+}
+
+async fn client_oidc_callback(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Redirect, (StatusCode, String)> {
+    let code = params
+        .get("code")
+        .cloned()
+        .ok_or((StatusCode::BAD_REQUEST, "missing OIDC code".to_string()))?;
+    let state = params
+        .get("state")
+        .cloned()
+        .ok_or((StatusCode::BAD_REQUEST, "missing OIDC state".to_string()))?;
+
+    let settings = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?
+        .security_settings;
+    let public_origin = public_origin(&headers);
+    let claims = account_oidc::exchange_code_for_claims(&settings, &public_origin, &code, &state)
+        .await
+        .map_err(bad_request_error)?;
+
+    let account_email = match storage
+        .find_account_oidc_identity(&claims.issuer_url, &claims.subject)
+        .await
+        .map_err(internal_error)?
+    {
+        Some(email) => email,
+        None if settings.mailbox_oidc_auto_link_by_email => storage
+            .fetch_account_login(&claims.email)
+            .await
+            .map_err(internal_error)?
+            .map(|candidate| candidate.email)
+            .ok_or((
+                StatusCode::FORBIDDEN,
+                "OIDC identity is not linked to a mailbox account".to_string(),
+            ))?,
+        None => {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "OIDC identity is not linked to a mailbox account".to_string(),
+            ));
+        }
+    };
+
+    storage
+        .upsert_account_oidc_identity(&lpe_storage::AccountOidcClaims {
+            issuer_url: claims.issuer_url,
+            subject: claims.subject,
+            email: account_email.clone(),
+            display_name: claims.display_name,
+        })
+        .await
+        .map_err(internal_error)?;
+
+    let account = storage
+        .fetch_account_login(&account_email)
+        .await
+        .map_err(internal_error)?
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            "mailbox account not found".to_string(),
+        ))?;
+    let token = Uuid::new_v4().to_string();
+    storage
+        .create_account_session(
+            &token,
+            &account.tenant_id,
+            &account.email,
+            client_session_minutes(),
+        )
+        .await
+        .map_err(internal_error)?;
+    let _ = storage
+        .append_audit_event(
+            &account.tenant_id,
+            AuditEntryInput {
+                actor: account.email.clone(),
+                action: "mail-auth.login-succeeded".to_string(),
+                subject: "oidc".to_string(),
+            },
+        )
+        .await;
+    Ok(Redirect::to(&format!("/mail/#client_token={token}")))
 }
 
 async fn client_workspace(
@@ -1065,6 +1454,73 @@ async fn update_security_settings(
                     oidc_claim_email: request.oidc_claim_email.trim().to_string(),
                     oidc_claim_display_name: request.oidc_claim_display_name.trim().to_string(),
                     oidc_claim_subject: request.oidc_claim_subject.trim().to_string(),
+                    mailbox_password_login_enabled: request
+                        .mailbox_password_login_enabled
+                        .unwrap_or(existing.security_settings.mailbox_password_login_enabled),
+                    mailbox_oidc_login_enabled: request
+                        .mailbox_oidc_login_enabled
+                        .unwrap_or(existing.security_settings.mailbox_oidc_login_enabled),
+                    mailbox_oidc_provider_label: request
+                        .mailbox_oidc_provider_label
+                        .unwrap_or(existing.security_settings.mailbox_oidc_provider_label)
+                        .trim()
+                        .to_string(),
+                    mailbox_oidc_auto_link_by_email: request
+                        .mailbox_oidc_auto_link_by_email
+                        .unwrap_or(existing.security_settings.mailbox_oidc_auto_link_by_email),
+                    mailbox_oidc_issuer_url: request
+                        .mailbox_oidc_issuer_url
+                        .unwrap_or(existing.security_settings.mailbox_oidc_issuer_url)
+                        .trim()
+                        .to_string(),
+                    mailbox_oidc_authorization_endpoint: request
+                        .mailbox_oidc_authorization_endpoint
+                        .unwrap_or(existing.security_settings.mailbox_oidc_authorization_endpoint)
+                        .trim()
+                        .to_string(),
+                    mailbox_oidc_token_endpoint: request
+                        .mailbox_oidc_token_endpoint
+                        .unwrap_or(existing.security_settings.mailbox_oidc_token_endpoint)
+                        .trim()
+                        .to_string(),
+                    mailbox_oidc_userinfo_endpoint: request
+                        .mailbox_oidc_userinfo_endpoint
+                        .unwrap_or(existing.security_settings.mailbox_oidc_userinfo_endpoint)
+                        .trim()
+                        .to_string(),
+                    mailbox_oidc_client_id: request
+                        .mailbox_oidc_client_id
+                        .unwrap_or(existing.security_settings.mailbox_oidc_client_id)
+                        .trim()
+                        .to_string(),
+                    mailbox_oidc_client_secret: request
+                        .mailbox_oidc_client_secret
+                        .unwrap_or(existing.security_settings.mailbox_oidc_client_secret)
+                        .trim()
+                        .to_string(),
+                    mailbox_oidc_scopes: request
+                        .mailbox_oidc_scopes
+                        .unwrap_or(existing.security_settings.mailbox_oidc_scopes)
+                        .trim()
+                        .to_string(),
+                    mailbox_oidc_claim_email: request
+                        .mailbox_oidc_claim_email
+                        .unwrap_or(existing.security_settings.mailbox_oidc_claim_email)
+                        .trim()
+                        .to_string(),
+                    mailbox_oidc_claim_display_name: request
+                        .mailbox_oidc_claim_display_name
+                        .unwrap_or(existing.security_settings.mailbox_oidc_claim_display_name)
+                        .trim()
+                        .to_string(),
+                    mailbox_oidc_claim_subject: request
+                        .mailbox_oidc_claim_subject
+                        .unwrap_or(existing.security_settings.mailbox_oidc_claim_subject)
+                        .trim()
+                        .to_string(),
+                    mailbox_app_passwords_enabled: request
+                        .mailbox_app_passwords_enabled
+                        .unwrap_or(existing.security_settings.mailbox_app_passwords_enabled),
                 },
                 local_ai_settings: existing.local_ai_settings,
                 antispam_settings: existing.antispam_settings,
@@ -2198,6 +2654,14 @@ fn is_known_weak_secret(value: &str) -> bool {
             | "default"
             | "test"
             | "example"
+    )
+}
+
+fn generate_app_password_secret() -> String {
+    format!(
+        "lpeapp-{}-{}",
+        Uuid::new_v4().simple(),
+        Uuid::new_v4().simple()
     )
 }
 

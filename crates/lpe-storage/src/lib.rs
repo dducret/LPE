@@ -203,6 +203,21 @@ pub struct SecuritySettings {
     pub oidc_claim_email: String,
     pub oidc_claim_display_name: String,
     pub oidc_claim_subject: String,
+    pub mailbox_password_login_enabled: bool,
+    pub mailbox_oidc_login_enabled: bool,
+    pub mailbox_oidc_provider_label: String,
+    pub mailbox_oidc_auto_link_by_email: bool,
+    pub mailbox_oidc_issuer_url: String,
+    pub mailbox_oidc_authorization_endpoint: String,
+    pub mailbox_oidc_token_endpoint: String,
+    pub mailbox_oidc_userinfo_endpoint: String,
+    pub mailbox_oidc_client_id: String,
+    pub mailbox_oidc_client_secret: String,
+    pub mailbox_oidc_scopes: String,
+    pub mailbox_oidc_claim_email: String,
+    pub mailbox_oidc_claim_display_name: String,
+    pub mailbox_oidc_claim_subject: String,
+    pub mailbox_app_passwords_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -365,11 +380,50 @@ pub struct AdminOidcClaims {
     pub display_name: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountOidcClaims {
+    pub issuer_url: String,
+    pub subject: String,
+    pub email: String,
+    pub display_name: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewAdminAuthFactor {
     pub admin_email: String,
     pub factor_type: String,
     pub secret_ciphertext: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AccountAuthFactor {
+    pub id: Uuid,
+    pub factor_type: String,
+    pub status: String,
+    pub created_at: String,
+    pub verified_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewAccountAuthFactor {
+    pub account_email: String,
+    pub factor_type: String,
+    pub secret_ciphertext: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AccountAppPassword {
+    pub id: Uuid,
+    pub label: String,
+    pub status: String,
+    pub created_at: String,
+    pub last_used_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredAccountAppPassword {
+    pub id: Uuid,
+    pub password_hash: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1120,6 +1174,26 @@ struct AdminAuthFactorRow {
     created_at: String,
     verified_at: Option<String>,
     secret_ciphertext: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct AccountAuthFactorRow {
+    id: Uuid,
+    factor_type: String,
+    status: String,
+    created_at: String,
+    verified_at: Option<String>,
+    secret_ciphertext: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct AccountAppPasswordRow {
+    id: Uuid,
+    label: String,
+    status: String,
+    created_at: String,
+    last_used_at: Option<String>,
+    password_hash: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -2265,6 +2339,402 @@ impl Storage {
         Ok(updated.rows_affected() > 0)
     }
 
+    pub async fn find_account_oidc_identity(
+        &self,
+        issuer_url: &str,
+        subject: &str,
+    ) -> Result<Option<String>> {
+        let tenant_id = sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT tenant_id
+            FROM account_oidc_identities
+            WHERE issuer_url = $1 AND subject = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(issuer_url.trim())
+        .bind(subject.trim())
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(tenant_id) = tenant_id else {
+            return Ok(None);
+        };
+
+        sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT account_email
+            FROM account_oidc_identities
+            WHERE tenant_id = $1 AND issuer_url = $2 AND subject = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(issuer_url.trim())
+        .bind(subject.trim())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    pub async fn upsert_account_oidc_identity(&self, claims: &AccountOidcClaims) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_email(&claims.email).await?;
+        sqlx::query(
+            r#"
+            INSERT INTO account_oidc_identities (
+                tenant_id, issuer_url, subject, account_email, created_at, last_login_at
+            )
+            VALUES ($1, $2, $3, $4, NOW(), NOW())
+            ON CONFLICT (tenant_id, issuer_url, subject) DO UPDATE SET
+                account_email = EXCLUDED.account_email,
+                last_login_at = NOW()
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(claims.issuer_url.trim())
+        .bind(claims.subject.trim())
+        .bind(normalize_email(&claims.email))
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn create_account_auth_factor(&self, input: NewAccountAuthFactor) -> Result<Uuid> {
+        let account_email = normalize_email(&input.account_email);
+        let tenant_id = self.tenant_id_for_account_email(&account_email).await?;
+        let factor_id = Uuid::new_v4();
+
+        sqlx::query(
+            r#"
+            INSERT INTO account_auth_factors (
+                id, tenant_id, account_email, factor_type, status, secret_ciphertext
+            )
+            VALUES ($1, $2, $3, $4, 'pending', $5)
+            "#,
+        )
+        .bind(factor_id)
+        .bind(&tenant_id)
+        .bind(account_email)
+        .bind(input.factor_type.trim().to_lowercase())
+        .bind(input.secret_ciphertext)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(factor_id)
+    }
+
+    pub async fn fetch_account_auth_factors(
+        &self,
+        account_email: &str,
+    ) -> Result<Vec<AccountAuthFactor>> {
+        let account_email = normalize_email(account_email);
+        let tenant_id = self.tenant_id_for_account_email(&account_email).await?;
+        let rows = sqlx::query_as::<_, AccountAuthFactorRow>(
+            r#"
+            SELECT
+                id,
+                factor_type,
+                status,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                CASE
+                    WHEN verified_at IS NULL THEN NULL
+                    ELSE to_char(verified_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS verified_at,
+                secret_ciphertext
+            FROM account_auth_factors
+            WHERE tenant_id = $1 AND lower(account_email) = lower($2)
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_email)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| AccountAuthFactor {
+                id: row.id,
+                factor_type: row.factor_type,
+                status: row.status,
+                created_at: row.created_at,
+                verified_at: row.verified_at,
+            })
+            .collect())
+    }
+
+    pub async fn fetch_account_totp_secret(
+        &self,
+        account_email: &str,
+    ) -> Result<Option<(Uuid, String)>> {
+        let account_email = normalize_email(account_email);
+        let tenant_id = self.tenant_id_for_account_email(&account_email).await?;
+        let row = sqlx::query_as::<_, AccountAuthFactorRow>(
+            r#"
+            SELECT
+                id,
+                factor_type,
+                status,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                CASE
+                    WHEN verified_at IS NULL THEN NULL
+                    ELSE to_char(verified_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS verified_at,
+                secret_ciphertext
+            FROM account_auth_factors
+            WHERE tenant_id = $1
+              AND lower(account_email) = lower($2)
+              AND factor_type = 'totp'
+              AND status = 'active'
+            ORDER BY verified_at DESC NULLS LAST, created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_email)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.and_then(|row| row.secret_ciphertext.map(|secret| (row.id, secret))))
+    }
+
+    pub async fn fetch_pending_account_factor_secret(
+        &self,
+        account_email: &str,
+        factor_id: Uuid,
+    ) -> Result<Option<String>> {
+        let account_email = normalize_email(account_email);
+        let tenant_id = self.tenant_id_for_account_email(&account_email).await?;
+        sqlx::query_scalar(
+            r#"
+            SELECT secret_ciphertext
+            FROM account_auth_factors
+            WHERE tenant_id = $1
+              AND lower(account_email) = lower($2)
+              AND id = $3
+              AND status = 'pending'
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_email)
+        .bind(factor_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    pub async fn activate_account_auth_factor(
+        &self,
+        account_email: &str,
+        factor_id: Uuid,
+    ) -> Result<bool> {
+        let account_email = normalize_email(account_email);
+        let tenant_id = self.tenant_id_for_account_email(&account_email).await?;
+        let updated = sqlx::query(
+            r#"
+            UPDATE account_auth_factors
+            SET status = 'active', verified_at = NOW()
+            WHERE tenant_id = $1
+              AND lower(account_email) = lower($2)
+              AND id = $3
+              AND status = 'pending'
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_email)
+        .bind(factor_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(updated.rows_affected() > 0)
+    }
+
+    pub async fn revoke_account_auth_factor(
+        &self,
+        account_email: &str,
+        factor_id: Uuid,
+    ) -> Result<bool> {
+        let account_email = normalize_email(account_email);
+        let tenant_id = self.tenant_id_for_account_email(&account_email).await?;
+        let updated = sqlx::query(
+            r#"
+            UPDATE account_auth_factors
+            SET status = 'revoked'
+            WHERE tenant_id = $1
+              AND lower(account_email) = lower($2)
+              AND id = $3
+              AND status IN ('pending', 'active')
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_email)
+        .bind(factor_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(updated.rows_affected() > 0)
+    }
+
+    pub async fn create_account_app_password(
+        &self,
+        account_email: &str,
+        label: &str,
+        password_hash: &str,
+    ) -> Result<Uuid> {
+        let account_email = normalize_email(account_email);
+        let tenant_id = self.tenant_id_for_account_email(&account_email).await?;
+        let id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO account_app_passwords (
+                id, tenant_id, account_email, label, password_hash, status
+            )
+            VALUES ($1, $2, $3, $4, $5, 'active')
+            "#,
+        )
+        .bind(id)
+        .bind(&tenant_id)
+        .bind(account_email)
+        .bind(label.trim())
+        .bind(password_hash.trim())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(id)
+    }
+
+    pub async fn list_account_app_passwords(
+        &self,
+        account_email: &str,
+    ) -> Result<Vec<AccountAppPassword>> {
+        let account_email = normalize_email(account_email);
+        let tenant_id = self.tenant_id_for_account_email(&account_email).await?;
+        let rows = sqlx::query_as::<_, AccountAppPasswordRow>(
+            r#"
+            SELECT
+                id,
+                label,
+                status,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                CASE
+                    WHEN last_used_at IS NULL THEN NULL
+                    ELSE to_char(last_used_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS last_used_at,
+                NULL AS password_hash
+            FROM account_app_passwords
+            WHERE tenant_id = $1 AND lower(account_email) = lower($2)
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_email)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| AccountAppPassword {
+                id: row.id,
+                label: row.label,
+                status: row.status,
+                created_at: row.created_at,
+                last_used_at: row.last_used_at,
+            })
+            .collect())
+    }
+
+    pub async fn fetch_active_account_app_passwords(
+        &self,
+        account_email: &str,
+    ) -> Result<Vec<StoredAccountAppPassword>> {
+        let account_email = normalize_email(account_email);
+        let tenant_id = self.tenant_id_for_account_email(&account_email).await?;
+        let rows = sqlx::query_as::<_, AccountAppPasswordRow>(
+            r#"
+            SELECT
+                id,
+                label,
+                status,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                CASE
+                    WHEN last_used_at IS NULL THEN NULL
+                    ELSE to_char(last_used_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS last_used_at,
+                password_hash
+            FROM account_app_passwords
+            WHERE tenant_id = $1
+              AND lower(account_email) = lower($2)
+              AND status = 'active'
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_email)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|row| {
+                row.password_hash.map(|password_hash| StoredAccountAppPassword {
+                    id: row.id,
+                    password_hash,
+                })
+            })
+            .collect())
+    }
+
+    pub async fn touch_account_app_password(
+        &self,
+        account_email: &str,
+        app_password_id: Uuid,
+    ) -> Result<()> {
+        let account_email = normalize_email(account_email);
+        let tenant_id = self.tenant_id_for_account_email(&account_email).await?;
+        sqlx::query(
+            r#"
+            UPDATE account_app_passwords
+            SET last_used_at = NOW()
+            WHERE tenant_id = $1
+              AND lower(account_email) = lower($2)
+              AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_email)
+        .bind(app_password_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn revoke_account_app_password(
+        &self,
+        account_email: &str,
+        app_password_id: Uuid,
+    ) -> Result<bool> {
+        let account_email = normalize_email(account_email);
+        let tenant_id = self.tenant_id_for_account_email(&account_email).await?;
+        let updated = sqlx::query(
+            r#"
+            UPDATE account_app_passwords
+            SET status = 'disabled'
+            WHERE tenant_id = $1
+              AND lower(account_email) = lower($2)
+              AND id = $3
+              AND status = 'active'
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_email)
+        .bind(app_password_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(updated.rows_affected() > 0)
+    }
+
     pub async fn append_audit_event(&self, tenant_id: &str, audit: AuditEntryInput) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         self.insert_audit(&mut tx, tenant_id, audit).await?;
@@ -3073,9 +3543,12 @@ impl Storage {
             INSERT INTO security_settings (
                 tenant_id, password_login_enabled, mfa_required_for_admins,
                 session_timeout_minutes, audit_retention_days, oidc_login_enabled,
-                oidc_provider_label, oidc_auto_link_by_email
+                oidc_provider_label, oidc_auto_link_by_email,
+                mailbox_password_login_enabled, mailbox_oidc_login_enabled,
+                mailbox_oidc_provider_label, mailbox_oidc_auto_link_by_email,
+                mailbox_app_passwords_enabled
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             ON CONFLICT (tenant_id) DO UPDATE SET
                 password_login_enabled = EXCLUDED.password_login_enabled,
                 mfa_required_for_admins = EXCLUDED.mfa_required_for_admins,
@@ -3084,6 +3557,11 @@ impl Storage {
                 oidc_login_enabled = EXCLUDED.oidc_login_enabled,
                 oidc_provider_label = EXCLUDED.oidc_provider_label,
                 oidc_auto_link_by_email = EXCLUDED.oidc_auto_link_by_email,
+                mailbox_password_login_enabled = EXCLUDED.mailbox_password_login_enabled,
+                mailbox_oidc_login_enabled = EXCLUDED.mailbox_oidc_login_enabled,
+                mailbox_oidc_provider_label = EXCLUDED.mailbox_oidc_provider_label,
+                mailbox_oidc_auto_link_by_email = EXCLUDED.mailbox_oidc_auto_link_by_email,
+                mailbox_app_passwords_enabled = EXCLUDED.mailbox_app_passwords_enabled,
                 updated_at = NOW()
             "#,
         )
@@ -3095,6 +3573,11 @@ impl Storage {
         .bind(update.security_settings.oidc_login_enabled)
         .bind(update.security_settings.oidc_provider_label)
         .bind(update.security_settings.oidc_auto_link_by_email)
+        .bind(update.security_settings.mailbox_password_login_enabled)
+        .bind(update.security_settings.mailbox_oidc_login_enabled)
+        .bind(update.security_settings.mailbox_oidc_provider_label)
+        .bind(update.security_settings.mailbox_oidc_auto_link_by_email)
+        .bind(update.security_settings.mailbox_app_passwords_enabled)
         .execute(&mut *tx)
         .await?;
 
@@ -3139,6 +3622,50 @@ impl Storage {
         .bind(update.security_settings.oidc_claim_email)
         .bind(update.security_settings.oidc_claim_display_name)
         .bind(update.security_settings.oidc_claim_subject)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO account_oidc_config (
+                tenant_id,
+                issuer_url,
+                authorization_endpoint,
+                token_endpoint,
+                userinfo_endpoint,
+                client_id,
+                client_secret,
+                scopes,
+                claim_email,
+                claim_display_name,
+                claim_subject
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (tenant_id) DO UPDATE SET
+                issuer_url = EXCLUDED.issuer_url,
+                authorization_endpoint = EXCLUDED.authorization_endpoint,
+                token_endpoint = EXCLUDED.token_endpoint,
+                userinfo_endpoint = EXCLUDED.userinfo_endpoint,
+                client_id = EXCLUDED.client_id,
+                client_secret = EXCLUDED.client_secret,
+                scopes = EXCLUDED.scopes,
+                claim_email = EXCLUDED.claim_email,
+                claim_display_name = EXCLUDED.claim_display_name,
+                claim_subject = EXCLUDED.claim_subject,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(PLATFORM_TENANT_ID)
+        .bind(update.security_settings.mailbox_oidc_issuer_url)
+        .bind(update.security_settings.mailbox_oidc_authorization_endpoint)
+        .bind(update.security_settings.mailbox_oidc_token_endpoint)
+        .bind(update.security_settings.mailbox_oidc_userinfo_endpoint)
+        .bind(update.security_settings.mailbox_oidc_client_id)
+        .bind(update.security_settings.mailbox_oidc_client_secret)
+        .bind(update.security_settings.mailbox_oidc_scopes)
+        .bind(update.security_settings.mailbox_oidc_claim_email)
+        .bind(update.security_settings.mailbox_oidc_claim_display_name)
+        .bind(update.security_settings.mailbox_oidc_claim_subject)
         .execute(&mut *tx)
         .await?;
 
@@ -7311,6 +7838,11 @@ impl Storage {
                 s.oidc_login_enabled,
                 s.oidc_provider_label,
                 s.oidc_auto_link_by_email,
+                s.mailbox_password_login_enabled,
+                s.mailbox_oidc_login_enabled,
+                s.mailbox_oidc_provider_label,
+                s.mailbox_oidc_auto_link_by_email,
+                s.mailbox_app_passwords_enabled,
                 c.issuer_url,
                 c.authorization_endpoint,
                 c.token_endpoint,
@@ -7320,9 +7852,20 @@ impl Storage {
                 c.scopes,
                 c.claim_email,
                 c.claim_display_name,
-                c.claim_subject
+                c.claim_subject,
+                mc.issuer_url AS mailbox_issuer_url,
+                mc.authorization_endpoint AS mailbox_authorization_endpoint,
+                mc.token_endpoint AS mailbox_token_endpoint,
+                mc.userinfo_endpoint AS mailbox_userinfo_endpoint,
+                mc.client_id AS mailbox_client_id,
+                mc.client_secret AS mailbox_client_secret,
+                mc.scopes AS mailbox_scopes,
+                mc.claim_email AS mailbox_claim_email,
+                mc.claim_display_name AS mailbox_claim_display_name,
+                mc.claim_subject AS mailbox_claim_subject
             FROM security_settings s
             LEFT JOIN admin_oidc_config c ON c.tenant_id = s.tenant_id
+            LEFT JOIN account_oidc_config mc ON mc.tenant_id = s.tenant_id
             WHERE s.tenant_id = $1
             "#,
         )
@@ -7369,6 +7912,44 @@ impl Storage {
                 oidc_claim_subject: row
                     .try_get::<Option<String>, _>("claim_subject")?
                     .unwrap_or_else(|| "sub".to_string()),
+                mailbox_password_login_enabled: row
+                    .try_get("mailbox_password_login_enabled")?,
+                mailbox_oidc_login_enabled: row.try_get("mailbox_oidc_login_enabled")?,
+                mailbox_oidc_provider_label: row.try_get("mailbox_oidc_provider_label")?,
+                mailbox_oidc_auto_link_by_email: row
+                    .try_get("mailbox_oidc_auto_link_by_email")?,
+                mailbox_oidc_issuer_url: row
+                    .try_get::<Option<String>, _>("mailbox_issuer_url")?
+                    .unwrap_or_default(),
+                mailbox_oidc_authorization_endpoint: row
+                    .try_get::<Option<String>, _>("mailbox_authorization_endpoint")?
+                    .unwrap_or_default(),
+                mailbox_oidc_token_endpoint: row
+                    .try_get::<Option<String>, _>("mailbox_token_endpoint")?
+                    .unwrap_or_default(),
+                mailbox_oidc_userinfo_endpoint: row
+                    .try_get::<Option<String>, _>("mailbox_userinfo_endpoint")?
+                    .unwrap_or_default(),
+                mailbox_oidc_client_id: row
+                    .try_get::<Option<String>, _>("mailbox_client_id")?
+                    .unwrap_or_default(),
+                mailbox_oidc_client_secret: row
+                    .try_get::<Option<String>, _>("mailbox_client_secret")?
+                    .unwrap_or_default(),
+                mailbox_oidc_scopes: row
+                    .try_get::<Option<String>, _>("mailbox_scopes")?
+                    .unwrap_or_else(|| "openid profile email".to_string()),
+                mailbox_oidc_claim_email: row
+                    .try_get::<Option<String>, _>("mailbox_claim_email")?
+                    .unwrap_or_else(|| "email".to_string()),
+                mailbox_oidc_claim_display_name: row
+                    .try_get::<Option<String>, _>("mailbox_claim_display_name")?
+                    .unwrap_or_else(|| "name".to_string()),
+                mailbox_oidc_claim_subject: row
+                    .try_get::<Option<String>, _>("mailbox_claim_subject")?
+                    .unwrap_or_else(|| "sub".to_string()),
+                mailbox_app_passwords_enabled: row
+                    .try_get("mailbox_app_passwords_enabled")?,
             },
             None => SecuritySettings {
                 password_login_enabled: true,
@@ -7388,6 +7969,21 @@ impl Storage {
                 oidc_claim_email: "email".to_string(),
                 oidc_claim_display_name: "name".to_string(),
                 oidc_claim_subject: "sub".to_string(),
+                mailbox_password_login_enabled: true,
+                mailbox_oidc_login_enabled: false,
+                mailbox_oidc_provider_label: "Mailbox SSO".to_string(),
+                mailbox_oidc_auto_link_by_email: true,
+                mailbox_oidc_issuer_url: String::new(),
+                mailbox_oidc_authorization_endpoint: String::new(),
+                mailbox_oidc_token_endpoint: String::new(),
+                mailbox_oidc_userinfo_endpoint: String::new(),
+                mailbox_oidc_client_id: String::new(),
+                mailbox_oidc_client_secret: String::new(),
+                mailbox_oidc_scopes: "openid profile email".to_string(),
+                mailbox_oidc_claim_email: "email".to_string(),
+                mailbox_oidc_claim_display_name: "name".to_string(),
+                mailbox_oidc_claim_subject: "sub".to_string(),
+                mailbox_app_passwords_enabled: true,
             },
         })
     }

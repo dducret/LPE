@@ -14,6 +14,11 @@ type ClientLoginResponse = {
   account: ClientIdentity;
 };
 
+type ClientOidcMetadataResponse = {
+  enabled: boolean;
+  provider_label: string;
+};
+
 async function apiJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api/${path}`, {
     ...options,
@@ -32,9 +37,10 @@ export function App() {
   const [authToken, setAuthToken] = React.useState<string | null>(() => window.localStorage.getItem("lpe.client.token"));
   const [identity, setIdentity] = React.useState<ClientIdentity | null>(null);
   const workspace = useClientWorkspace(copy, authToken, identity);
-  const [loginForm, setLoginForm] = React.useState({ email: "", password: "" });
+  const [loginForm, setLoginForm] = React.useState({ email: "", password: "", totp_code: "" });
   const [loginError, setLoginError] = React.useState("");
   const [loginBusy, setLoginBusy] = React.useState(false);
+  const [oidcMetadata, setOidcMetadata] = React.useState<ClientOidcMetadataResponse | null>(null);
   const [accountMenuOpen, setAccountMenuOpen] = React.useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
   const [sidebarMobileOpen, setSidebarMobileOpen] = React.useState(false);
@@ -48,6 +54,14 @@ export function App() {
   React.useEffect(() => {
     authToken ? window.localStorage.setItem("lpe.client.token", authToken) : window.localStorage.removeItem("lpe.client.token");
   }, [authToken]);
+
+  React.useEffect(() => {
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const clientToken = hash.get("client_token");
+    if (!clientToken) return;
+    setAuthToken(clientToken);
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  }, []);
 
   React.useEffect(() => {
     if (!authToken) {
@@ -87,6 +101,12 @@ export function App() {
     setSidebarMobileOpen(false);
   }, [workspace.section, workspace.folder]);
 
+  React.useEffect(() => {
+    apiJson<ClientOidcMetadataResponse>("mail/auth/oidc/metadata")
+      .then(setOidcMetadata)
+      .catch(() => setOidcMetadata({ enabled: false, provider_label: "" }));
+  }, []);
+
   async function loginClient(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoginBusy(true);
@@ -98,13 +118,25 @@ export function App() {
       });
       setAuthToken(response.token);
       setIdentity(response.account);
-      setLoginForm((current) => ({ ...current, password: "" }));
+      setLoginForm((current) => ({ ...current, password: "", totp_code: "" }));
     } catch {
       setAuthToken(null);
       setIdentity(null);
       setLoginError(copy.loginError);
     } finally {
       setLoginBusy(false);
+    }
+  }
+
+  async function loginWithOidc() {
+    setLoginBusy(true);
+    setLoginError("");
+    try {
+      const response = await apiJson<{ authorization_url: string }>("mail/auth/oidc/start");
+      window.location.assign(response.authorization_url);
+    } catch {
+      setLoginBusy(false);
+      setLoginError(copy.loginError);
     }
   }
 
@@ -142,8 +174,20 @@ export function App() {
               <span>{copy.loginPassword}</span>
               <input type="password" value={loginForm.password} autoComplete="current-password" required onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))} />
             </label>
+            <label className="field">
+              <span>{copy.loginTotp}</span>
+              <input type="text" value={loginForm.totp_code} inputMode="numeric" autoComplete="one-time-code" onChange={(event) => setLoginForm((current) => ({ ...current, totp_code: event.target.value }))} />
+            </label>
             {loginError ? <p className="login-error">{loginError}</p> : null}
             <button className="primary-button" type="submit" disabled={loginBusy}>{copy.loginSubmit}</button>
+            {oidcMetadata?.enabled ? (
+              <>
+                <p className="feedback muted">{copy.loginOrDivider}</p>
+                <button className="ghost-button" type="button" disabled={loginBusy} onClick={() => void loginWithOidc()}>
+                  {copy.loginOidc}{oidcMetadata.provider_label ? ` · ${oidcMetadata.provider_label}` : ""}
+                </button>
+              </>
+            ) : null}
           </form>
           <label className="locale-picker">
             <span>{copy.languageLabel}</span>

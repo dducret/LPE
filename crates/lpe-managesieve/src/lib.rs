@@ -1,8 +1,8 @@
 use anyhow::{anyhow, bail, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use lpe_mail_auth::{normalize_login_name, verify_password};
+use lpe_mail_auth::{authenticate_plain_credentials, AccountAuthStore};
 use lpe_storage::{
-    AccountLogin, AuditEntryInput, SieveScriptDocument, SieveScriptSummary, Storage,
+    AuditEntryInput, SieveScriptDocument, SieveScriptSummary, Storage,
 };
 use std::{future::Future, pin::Pin};
 use tokio::{
@@ -13,8 +13,7 @@ use uuid::Uuid;
 
 pub type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
-pub trait ManageSieveStore: Clone + Send + Sync + 'static {
-    fn fetch_account_login<'a>(&'a self, email: &'a str) -> StoreFuture<'a, Option<AccountLogin>>;
+pub trait ManageSieveStore: AccountAuthStore {
     fn list_sieve_scripts<'a>(
         &'a self,
         account_id: Uuid,
@@ -54,10 +53,6 @@ pub trait ManageSieveStore: Clone + Send + Sync + 'static {
 }
 
 impl ManageSieveStore for Storage {
-    fn fetch_account_login<'a>(&'a self, email: &'a str) -> StoreFuture<'a, Option<AccountLogin>> {
-        Box::pin(async move { self.fetch_account_login(email).await })
-    }
-
     fn list_sieve_scripts<'a>(
         &'a self,
         account_id: Uuid,
@@ -326,16 +321,11 @@ async fn authenticate<S: ManageSieveStore>(
     let _authzid = parts.next();
     let username = String::from_utf8(parts.next().unwrap_or_default().to_vec())?;
     let password = String::from_utf8(parts.next().unwrap_or_default().to_vec())?;
-    let login = store
-        .fetch_account_login(&normalize_login_name(&username, None))
-        .await?
-        .ok_or_else(|| anyhow!("invalid credentials"))?;
-    if login.status != "active" || !verify_password(&login.password_hash, &password) {
-        bail!("invalid credentials");
-    }
+    let principal =
+        authenticate_plain_credentials(store, None, &username, &password, "managesieve").await?;
     Ok(AuthenticatedAccount {
-        account_id: login.account_id,
-        email: login.email,
+        account_id: principal.account_id,
+        email: principal.email,
     })
 }
 

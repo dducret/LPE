@@ -1,7 +1,7 @@
 use axum::{http::StatusCode, Json};
 use lpe_storage::{
-    AdminAuthFactor, AuthenticatedAccount, AuthenticatedAdmin, CollaborationCollection,
-    CollaborationGrant,
+    AccountAppPassword, AccountAuthFactor, AdminAuthFactor, AuthenticatedAccount,
+    AuthenticatedAdmin, CollaborationCollection, CollaborationGrant,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -74,6 +74,17 @@ pub struct ClientLoginResponse {
     pub account: AuthenticatedAccount,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ClientOidcMetadataResponse {
+    pub enabled: bool,
+    pub provider_label: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ClientOidcStartResponse {
+    pub authorization_url: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
     pub email: String,
@@ -106,6 +117,32 @@ pub struct EnrollTotpResponse {
 pub struct VerifyTotpRequest {
     pub factor_id: Uuid,
     pub code: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountAuthFactorsResponse {
+    pub factors: Vec<AccountAuthFactor>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountAppPasswordsResponse {
+    pub app_passwords: Vec<AccountAppPassword>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAccountAppPasswordRequest {
+    pub label: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateAccountAppPasswordResponse {
+    pub id: Uuid,
+    pub label: String,
+    pub secret: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -186,6 +223,36 @@ pub struct UpdateSecuritySettingsRequest {
     pub oidc_claim_email: String,
     pub oidc_claim_display_name: String,
     pub oidc_claim_subject: String,
+    #[serde(default)]
+    pub mailbox_password_login_enabled: Option<bool>,
+    #[serde(default)]
+    pub mailbox_oidc_login_enabled: Option<bool>,
+    #[serde(default)]
+    pub mailbox_oidc_provider_label: Option<String>,
+    #[serde(default)]
+    pub mailbox_oidc_auto_link_by_email: Option<bool>,
+    #[serde(default)]
+    pub mailbox_oidc_issuer_url: Option<String>,
+    #[serde(default)]
+    pub mailbox_oidc_authorization_endpoint: Option<String>,
+    #[serde(default)]
+    pub mailbox_oidc_token_endpoint: Option<String>,
+    #[serde(default)]
+    pub mailbox_oidc_userinfo_endpoint: Option<String>,
+    #[serde(default)]
+    pub mailbox_oidc_client_id: Option<String>,
+    #[serde(default)]
+    pub mailbox_oidc_client_secret: Option<String>,
+    #[serde(default)]
+    pub mailbox_oidc_scopes: Option<String>,
+    #[serde(default)]
+    pub mailbox_oidc_claim_email: Option<String>,
+    #[serde(default)]
+    pub mailbox_oidc_claim_display_name: Option<String>,
+    #[serde(default)]
+    pub mailbox_oidc_claim_subject: Option<String>,
+    #[serde(default)]
+    pub mailbox_app_passwords_enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

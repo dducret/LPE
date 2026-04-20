@@ -272,6 +272,21 @@ mod tests {
             oidc_claim_email: "email".to_string(),
             oidc_claim_display_name: "name".to_string(),
             oidc_claim_subject: "sub".to_string(),
+            mailbox_password_login_enabled: true,
+            mailbox_oidc_login_enabled: false,
+            mailbox_oidc_provider_label: "Mailbox SSO".to_string(),
+            mailbox_oidc_auto_link_by_email: true,
+            mailbox_oidc_issuer_url: String::new(),
+            mailbox_oidc_authorization_endpoint: String::new(),
+            mailbox_oidc_token_endpoint: String::new(),
+            mailbox_oidc_userinfo_endpoint: String::new(),
+            mailbox_oidc_client_id: String::new(),
+            mailbox_oidc_client_secret: String::new(),
+            mailbox_oidc_scopes: "openid profile email".to_string(),
+            mailbox_oidc_claim_email: "email".to_string(),
+            mailbox_oidc_claim_display_name: "name".to_string(),
+            mailbox_oidc_claim_subject: "sub".to_string(),
+            mailbox_app_passwords_enabled: true,
         }
     }
 

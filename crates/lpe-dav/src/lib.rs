@@ -285,7 +285,7 @@ impl<S: DavStore> DavService<S> {
             return Ok(options_response());
         }
 
-        let principal = authenticate_account(&self.store, None, headers).await?;
+        let principal = authenticate_account(&self.store, None, headers, "dav").await?;
         match method.as_str() {
             "PROPFIND" => self.handle_propfind(&principal, &path, headers).await,
             "REPORT" => self.handle_report(&principal, &path, body).await,

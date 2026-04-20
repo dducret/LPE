@@ -131,7 +131,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         hinted_user: Option<&str>,
         headers: &HeaderMap,
     ) -> Result<AccountPrincipal> {
-        authenticate_account(&self.store, hinted_user, headers).await
+        authenticate_account(&self.store, hinted_user, headers, "activesync").await
     }
 
     async fn handle_provision(

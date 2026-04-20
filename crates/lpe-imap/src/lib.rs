@@ -3,7 +3,7 @@ use lpe_magika::{
     collect_mime_attachment_parts, Detector, ExpectedKind, IngressContext, PolicyDecision,
     ValidationRequest, Validator,
 };
-use lpe_mail_auth::{normalize_login_name, verify_password, AccountPrincipal};
+use lpe_mail_auth::{authenticate_plain_credentials, AccountPrincipal};
 use lpe_storage::{
     mail::parse_rfc822_message, AuditEntryInput, ImapEmail, JmapEmailAddress, SubmitMessageInput,
 };
@@ -268,21 +268,10 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         }
         let username = tokens[0].clone();
         let password = tokens[1].clone();
-        let login = self
-            .store
-            .fetch_account_login(&normalize_login_name(&username, None))
-            .await?
-            .ok_or_else(|| anyhow!("invalid credentials"))?;
-        if login.status != "active" || !verify_password(&login.password_hash, &password) {
-            bail!("invalid credentials");
-        }
-
-        self.principal = Some(AccountPrincipal {
-            tenant_id: login.tenant_id,
-            account_id: login.account_id,
-            email: login.email,
-            display_name: login.display_name,
-        });
+        self.principal = Some(
+            authenticate_plain_credentials(&self.store, None, &username, &password, "imap")
+                .await?,
+        );
         self.selected = None;
 
         writer

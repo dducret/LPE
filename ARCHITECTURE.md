@@ -42,6 +42,7 @@ The important non-negotiable rules are:
 - `docs/architecture/initial-architecture.md`
 - `docs/architecture/tenancy-identity-and-administration.md`
 - `docs/architecture/admin-federated-auth-mvp.md`
+- `docs/architecture/mailbox-modern-auth-mvp.md`
 - `docs/architecture/web-design.md`
 - `docs/architecture/local-llm.md`
 
