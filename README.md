@@ -52,4 +52,4 @@ The current workspace compiles with:
 cargo check
 ```
 
-For installation and reset workflows on `Debian Trixie`, see [installation/README.md](/C:/Development/LPE/installation/README.md).
+For installation and reset workflows on `Debian Trixie`, see [installation/README.md](installation/README.md).
