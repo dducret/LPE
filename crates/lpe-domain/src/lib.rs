@@ -227,12 +227,48 @@ pub struct InboundDeliveryResponse {
     pub detail: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SmtpSubmissionAuthRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SmtpSubmissionAuthResponse {
+    pub tenant_id: String,
+    pub account_id: Uuid,
+    pub email: String,
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SmtpSubmissionRequest {
+    pub trace_id: String,
+    pub helo: String,
+    pub peer: String,
+    pub account_id: Uuid,
+    pub account_email: String,
+    pub account_display_name: String,
+    pub mail_from: String,
+    pub rcpt_to: Vec<String>,
+    #[serde(with = "base64_bytes")]
+    pub raw_message: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SmtpSubmissionResponse {
+    pub trace_id: String,
+    pub message_id: Uuid,
+    pub outbound_queue_id: Uuid,
+    pub delivery_status: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        OutboundMessageHandoffRequest, OutboundMessageHandoffResponse, TransportDeliveryStatus,
-        TransportDsnReport, TransportRecipient, TransportRetryAdvice, TransportRouteDecision,
-        TransportTechnicalStatus, TransportThrottleStatus,
+        OutboundMessageHandoffRequest, OutboundMessageHandoffResponse, SmtpSubmissionRequest,
+        TransportDeliveryStatus, TransportDsnReport, TransportRecipient, TransportRetryAdvice,
+        TransportRouteDecision, TransportTechnicalStatus, TransportThrottleStatus,
     };
     use uuid::Uuid;
 
@@ -326,5 +362,23 @@ mod tests {
         assert_eq!(json["dsn"]["status"], "4.7.1");
         assert_eq!(json["route"]["queue"], "deferred");
         assert_eq!(json["throttle"]["scope"], "recipient-domain");
+    }
+
+    #[test]
+    fn smtp_submission_request_serializes_raw_message_as_base64() {
+        let request = SmtpSubmissionRequest {
+            trace_id: "trace-1".to_string(),
+            helo: "client.example.test".to_string(),
+            peer: "203.0.113.10:53544".to_string(),
+            account_id: Uuid::nil(),
+            account_email: "alice@example.test".to_string(),
+            account_display_name: "Alice".to_string(),
+            mail_from: "alice@example.test".to_string(),
+            rcpt_to: vec!["bob@example.test".to_string()],
+            raw_message: b"Subject: hi\r\n\r\nbody".to_vec(),
+        };
+
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["raw_message"], "U3ViamVjdDogaGkNCg0KYm9keQ==");
     }
 }

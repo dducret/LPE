@@ -26,6 +26,8 @@ These exceptions are currently accepted because they are common in the Rust ecos
 
 `argon2` is used for password hashing. The RustCrypto crate is available under `Apache-2.0 OR MIT`, which is compatible with the `Apache-2.0` preference.
 
+`rustls`, `tokio-rustls`, and `rustls-pemfile` are acceptable for implicit-TLS `SMTP` submission because they are published under `Apache-2.0`-compatible dual licenses and keep TLS termination inside the Rust service boundary.
+
 Google `Magika` is an acceptable candidate for file-type validation because its official project is published under `Apache-2.0`. As with every dependency, the selected integration path and its transitive dependencies must still be reviewed before adoption.
 
 ## External Reference Constraint

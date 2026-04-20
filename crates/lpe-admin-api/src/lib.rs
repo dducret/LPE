@@ -12,14 +12,17 @@ use axum::{
 };
 use lpe_ai::{LocalModelProvider, StubLocalModelProvider};
 use lpe_core::CoreService;
-use lpe_domain::{InboundDeliveryRequest, InboundDeliveryResponse};
+use lpe_domain::{
+    InboundDeliveryRequest, InboundDeliveryResponse, SmtpSubmissionAuthRequest,
+    SmtpSubmissionAuthResponse, SmtpSubmissionRequest, SmtpSubmissionResponse,
+};
 use lpe_magika::{
-    write_validation_record, Detector, ExpectedKind, IngressContext, PolicyDecision,
-    ValidationRequest, Validator,
+    collect_mime_attachment_parts, write_validation_record, Detector, ExpectedKind, IngressContext,
+    PolicyDecision, ValidationRequest, Validator,
 };
 use lpe_mail_auth::{
-    issue_oauth_access_token, normalize_scope, DEFAULT_OAUTH_ACCESS_SCOPE,
-    DEFAULT_OAUTH_ACCESS_TOKEN_SECONDS,
+    authenticate_plain_credentials, issue_oauth_access_token, normalize_scope, AccountPrincipal,
+    DEFAULT_OAUTH_ACCESS_SCOPE, DEFAULT_OAUTH_ACCESS_TOKEN_SECONDS,
 };
 use lpe_storage::{
     AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput,
@@ -142,6 +145,11 @@ pub fn router(storage: Storage) -> Router {
             "/internal/lpe-ct/inbound-deliveries",
             post(deliver_inbound_message),
         )
+        .route(
+            "/internal/lpe-ct/submission-auth",
+            post(authenticate_smtp_submission),
+        )
+        .route("/internal/lpe-ct/submissions", post(accept_smtp_submission))
         .route(
             "/mail/messages/{message_id}/draft",
             delete(delete_draft_message),
@@ -2163,6 +2171,223 @@ async fn deliver_inbound_message(
     Ok(Json(response))
 }
 
+async fn authenticate_smtp_submission(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<SmtpSubmissionAuthRequest>,
+) -> ApiResult<SmtpSubmissionAuthResponse> {
+    require_integration(&headers)?;
+    let principal = authenticate_plain_credentials(
+        &storage,
+        None,
+        &request.username,
+        &request.password,
+        "smtp",
+    )
+    .await
+    .map_err(|error| (StatusCode::UNAUTHORIZED, error.to_string()))?;
+    Ok(Json(SmtpSubmissionAuthResponse {
+        tenant_id: principal.tenant_id,
+        account_id: principal.account_id,
+        email: principal.email,
+        display_name: principal.display_name,
+    }))
+}
+
+async fn accept_smtp_submission(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<SmtpSubmissionRequest>,
+) -> ApiResult<SmtpSubmissionResponse> {
+    require_integration(&headers)?;
+    if !ha_allows_active_work().map_err(internal_error)? {
+        let role = ha_current_role()
+            .map_err(internal_error)?
+            .unwrap_or_else(|| "standby".to_string());
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("node role {role} does not accept LPE-CT smtp submissions"),
+        ));
+    }
+
+    let principal = AccountPrincipal {
+        tenant_id: String::new(),
+        account_id: request.account_id,
+        email: request.account_email.trim().to_lowercase(),
+        display_name: request.account_display_name.clone(),
+    };
+    let submit_input =
+        build_smtp_submission_input(&principal, &request).map_err(bad_request_error)?;
+    let submitted = storage
+        .submit_message(
+            submit_input,
+            AuditEntryInput {
+                actor: principal.email.clone(),
+                action: "smtp-submission".to_string(),
+                subject: "client smtp submission".to_string(),
+            },
+        )
+        .await
+        .map_err(bad_request_error)?;
+    observability::record_mail_submission("smtp");
+    info!(
+        trace_id = %request.trace_id,
+        account_id = %principal.account_id,
+        message_id = %submitted.message_id,
+        outbound_queue_id = %submitted.outbound_queue_id,
+        peer = %request.peer,
+        helo = %request.helo,
+        recipient_count = request.rcpt_to.len(),
+        "smtp submission accepted from lpe-ct"
+    );
+
+    Ok(Json(SmtpSubmissionResponse {
+        trace_id: request.trace_id,
+        message_id: submitted.message_id,
+        outbound_queue_id: submitted.outbound_queue_id,
+        delivery_status: submitted.delivery_status,
+    }))
+}
+
+fn build_smtp_submission_input(
+    principal: &AccountPrincipal,
+    request: &SmtpSubmissionRequest,
+) -> anyhow::Result<SubmitMessageInput> {
+    let envelope_from = request
+        .mail_from
+        .trim()
+        .trim_matches(['<', '>'])
+        .to_lowercase();
+    if envelope_from.is_empty() {
+        anyhow::bail!("smtp submission requires MAIL FROM");
+    }
+    if envelope_from != principal.email {
+        anyhow::bail!("authenticated account cannot submit a different envelope sender");
+    }
+    if request.rcpt_to.is_empty() {
+        anyhow::bail!("smtp submission requires at least one RCPT TO recipient");
+    }
+
+    let parsed = lpe_storage::mail::parse_rfc822_message(&request.raw_message)?;
+    validate_smtp_submission_attachments(&request.raw_message)?;
+    let from = parsed
+        .from
+        .as_ref()
+        .map(|address| address.email.trim().to_lowercase())
+        .unwrap_or_else(|| principal.email.clone());
+    if from != principal.email {
+        anyhow::bail!("authenticated account cannot submit a different From address");
+    }
+
+    let visible_to = parsed
+        .to
+        .into_iter()
+        .map(|recipient| SubmittedRecipientInput {
+            address: recipient.email,
+            display_name: recipient.display_name,
+        })
+        .collect::<Vec<_>>();
+    let visible_cc = parsed
+        .cc
+        .into_iter()
+        .map(|recipient| SubmittedRecipientInput {
+            address: recipient.email,
+            display_name: recipient.display_name,
+        })
+        .collect::<Vec<_>>();
+    let bcc = merge_smtp_bcc_recipients(
+        &request.raw_message,
+        &request.rcpt_to,
+        &visible_to,
+        &visible_cc,
+    );
+    let from_display = parsed
+        .from
+        .and_then(|address| address.display_name)
+        .or_else(|| Some(principal.display_name.clone()));
+
+    Ok(SubmitMessageInput {
+        draft_message_id: None,
+        account_id: principal.account_id,
+        source: "smtp-submission".to_string(),
+        from_display,
+        from_address: principal.email.clone(),
+        to: visible_to,
+        cc: visible_cc,
+        bcc,
+        subject: parsed.subject,
+        body_text: parsed.body_text,
+        body_html_sanitized: parsed.body_html_sanitized,
+        internet_message_id: parsed.message_id,
+        mime_blob_ref: Some(format!("smtp-submission-mime:{}", Uuid::new_v4())),
+        size_octets: request.raw_message.len() as i64,
+        unread: Some(false),
+        flagged: Some(false),
+        attachments: parsed.attachments,
+    })
+}
+
+fn merge_smtp_bcc_recipients(
+    raw_message: &[u8],
+    envelope_recipients: &[String],
+    to: &[SubmittedRecipientInput],
+    cc: &[SubmittedRecipientInput],
+) -> Vec<SubmittedRecipientInput> {
+    let mut visible = to
+        .iter()
+        .chain(cc.iter())
+        .map(|recipient| recipient.address.trim().to_lowercase())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut merged = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+
+    for recipient in lpe_storage::mail::parse_header_recipients(raw_message, "bcc") {
+        let normalized = recipient.address.trim().to_lowercase();
+        if !normalized.is_empty() && seen.insert(normalized.clone()) {
+            visible.insert(normalized);
+            merged.push(recipient);
+        }
+    }
+
+    for recipient in envelope_recipients {
+        let normalized = recipient.trim().trim_matches(['<', '>']).to_lowercase();
+        if !normalized.is_empty()
+            && !visible.contains(&normalized)
+            && seen.insert(normalized.clone())
+        {
+            merged.push(SubmittedRecipientInput {
+                address: normalized,
+                display_name: None,
+            });
+        }
+    }
+
+    merged
+}
+
+fn validate_smtp_submission_attachments(raw_message: &[u8]) -> anyhow::Result<()> {
+    let validator = Validator::from_env();
+    for attachment in collect_mime_attachment_parts(raw_message)? {
+        let outcome = validator.validate_bytes(
+            ValidationRequest {
+                ingress_context: IngressContext::SmtpClientSubmission,
+                declared_mime: attachment.declared_mime.clone(),
+                filename: attachment.filename.clone(),
+                expected_kind: ExpectedKind::Any,
+            },
+            &attachment.bytes,
+        )?;
+        if outcome.policy_decision != PolicyDecision::Accept {
+            anyhow::bail!(
+                "smtp submission blocked by Magika validation for {:?}: {}",
+                attachment.filename,
+                outcome.reason
+            );
+        }
+    }
+    Ok(())
+}
+
 fn ensure_client_message_owner(
     account: &AuthenticatedAccount,
     request: &SubmitMessageRequest,
@@ -2764,16 +2989,20 @@ fn generate_app_password_secret() -> String {
 mod tests {
     use super::{
         bootstrap_admin_request_from_env, bootstrap_admin_request_from_env_or_defaults,
-        ha_activation_check, ha_allows_active_work, integration_shared_secret,
+        build_smtp_submission_input, ha_activation_check, ha_allows_active_work,
+        integration_shared_secret, merge_smtp_bcc_recipients,
         validate_uploaded_pst_file_with_validator,
     };
+    use lpe_domain::SmtpSubmissionRequest;
     use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
+    use lpe_mail_auth::AccountPrincipal;
     use std::{
         fs,
         path::PathBuf,
         sync::Mutex,
         time::{SystemTime, UNIX_EPOCH},
     };
+    use uuid::Uuid;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -2963,6 +3192,77 @@ mod tests {
         assert!(!ha_allows_active_work().unwrap());
 
         std::env::remove_var("LPE_HA_ROLE_FILE");
+    }
+
+    #[test]
+    fn smtp_submission_derives_envelope_only_recipients_as_bcc() {
+        let raw = concat!(
+            "From: Alice <alice@example.test>\r\n",
+            "To: Bob <bob@example.test>\r\n",
+            "Bcc: Hidden <hidden@example.test>\r\n",
+            "Subject: Hi\r\n",
+            "\r\n",
+            "Body\r\n"
+        );
+
+        let bcc = merge_smtp_bcc_recipients(
+            raw.as_bytes(),
+            &[
+                "bob@example.test".to_string(),
+                "hidden@example.test".to_string(),
+                "blind2@example.test".to_string(),
+            ],
+            &[lpe_storage::SubmittedRecipientInput {
+                address: "bob@example.test".to_string(),
+                display_name: Some("Bob".to_string()),
+            }],
+            &[],
+        );
+
+        assert_eq!(bcc.len(), 2);
+        assert_eq!(bcc[0].address, "hidden@example.test");
+        assert_eq!(bcc[1].address, "blind2@example.test");
+    }
+
+    #[test]
+    fn smtp_submission_builds_canonical_submit_input() {
+        let principal = AccountPrincipal {
+            tenant_id: "tenant-a".to_string(),
+            account_id: Uuid::nil(),
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+        };
+        let request = SmtpSubmissionRequest {
+            trace_id: "trace-1".to_string(),
+            helo: "laptop.example.test".to_string(),
+            peer: "203.0.113.55:41234".to_string(),
+            account_id: Uuid::nil(),
+            account_email: "alice@example.test".to_string(),
+            account_display_name: "Alice".to_string(),
+            mail_from: "alice@example.test".to_string(),
+            rcpt_to: vec![
+                "bob@example.test".to_string(),
+                "blind@example.test".to_string(),
+            ],
+            raw_message: concat!(
+                "From: Alice <alice@example.test>\r\n",
+                "To: Bob <bob@example.test>\r\n",
+                "Subject: Hello\r\n",
+                "\r\n",
+                "Body\r\n"
+            )
+            .as_bytes()
+            .to_vec(),
+        };
+
+        let input = build_smtp_submission_input(&principal, &request).unwrap();
+
+        assert_eq!(input.source, "smtp-submission");
+        assert_eq!(input.from_address, "alice@example.test");
+        assert_eq!(input.to.len(), 1);
+        assert_eq!(input.to[0].address, "bob@example.test");
+        assert_eq!(input.bcc.len(), 1);
+        assert_eq!(input.bcc[0].address, "blind@example.test");
     }
 }
 

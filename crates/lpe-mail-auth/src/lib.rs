@@ -10,7 +10,7 @@ use base64::{
 };
 use hmac::{Hmac, Mac};
 use lpe_storage::{
-    AccountLogin, AuditEntryInput, AuthenticatedAccount, StoredAccountAppPassword, Storage,
+    AccountLogin, AuditEntryInput, AuthenticatedAccount, Storage, StoredAccountAppPassword,
 };
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -26,7 +26,7 @@ type HmacSha256 = Hmac<Sha256>;
 
 const MAIL_OAUTH_SIGNING_SECRET_ENV: &str = "LPE_MAIL_OAUTH_SIGNING_SECRET";
 const MIN_OAUTH_SIGNING_SECRET_LEN: usize = 32;
-pub const DEFAULT_OAUTH_ACCESS_SCOPE: &str = "mail imap dav activesync managesieve";
+pub const DEFAULT_OAUTH_ACCESS_SCOPE: &str = "mail imap dav activesync managesieve smtp";
 pub const DEFAULT_OAUTH_ACCESS_TOKEN_SECONDS: u32 = 3600;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,7 +94,10 @@ impl AccountAuthStore for Storage {
         email: &'a str,
         app_password_id: uuid::Uuid,
     ) -> StoreFuture<'a, ()> {
-        Box::pin(async move { self.touch_account_app_password(email, app_password_id).await })
+        Box::pin(async move {
+            self.touch_account_app_password(email, app_password_id)
+                .await
+        })
     }
 
     fn append_audit_event<'a>(
@@ -203,7 +206,9 @@ pub async fn authenticate_plain_credentials<S: AccountAuthStore>(
     let auth_method = if verify_password(&login.password_hash, password) {
         "password".to_string()
     } else {
-        let app_passwords = store.fetch_active_account_app_passwords(&normalized).await?;
+        let app_passwords = store
+            .fetch_active_account_app_passwords(&normalized)
+            .await?;
         let Some(app_password) = app_passwords
             .into_iter()
             .find(|entry| verify_password(&entry.password_hash, password))
@@ -325,7 +330,7 @@ pub fn normalize_scope(scope: &str) -> Result<String> {
     for value in &values {
         if !matches!(
             value.as_str(),
-            "mail" | "imap" | "dav" | "activesync" | "managesieve"
+            "mail" | "imap" | "dav" | "activesync" | "managesieve" | "smtp"
         ) {
             bail!("unsupported oauth access token scope {value}");
         }
@@ -511,7 +516,9 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer token"));
 
-        let principal = authenticate_account(&store, None, &headers, "dav").await.unwrap();
+        let principal = authenticate_account(&store, None, &headers, "dav")
+            .await
+            .unwrap();
 
         assert_eq!(principal.tenant_id, "tenant-a");
     }
@@ -537,7 +544,9 @@ mod tests {
             HeaderValue::from_str(&format!("Basic {encoded}")).unwrap(),
         );
 
-        let principal = authenticate_account(&store, None, &headers, "dav").await.unwrap();
+        let principal = authenticate_account(&store, None, &headers, "dav")
+            .await
+            .unwrap();
 
         assert_eq!(principal.tenant_id, "tenant-b");
     }
@@ -595,7 +604,9 @@ mod tests {
             HeaderValue::from_str(&format!("Basic {encoded}")).unwrap(),
         );
 
-        let principal = authenticate_account(&store, None, &headers, "imap").await.unwrap();
+        let principal = authenticate_account(&store, None, &headers, "imap")
+            .await
+            .unwrap();
 
         assert_eq!(principal.tenant_id, "tenant-d");
     }
@@ -677,5 +688,11 @@ mod tests {
             .to_string()
             .contains("oauth access token is not valid for this surface"));
         env::remove_var(MAIL_OAUTH_SIGNING_SECRET_ENV);
+    }
+
+    #[test]
+    fn normalize_scope_accepts_smtp_surface() {
+        let scope = normalize_scope("smtp mail").unwrap();
+        assert_eq!(scope, "mail smtp");
     }
 }

@@ -52,11 +52,29 @@ The outbound handoff result is now structured. In addition to the status and `tr
 
 The raw `SMTP` body is carried into `LPE` to keep delivery context, but mailbox persistence remains controlled by the internal `LPE` model.
 
+### Authenticated client submission flow `Client -> LPE-CT -> LPE`
+
+1. the client connects to the external `LPE-CT` submission listener, preferably implicit `TLS` on `465`
+2. `LPE-CT` authenticates the client mailbox credentials by calling `POST /internal/lpe-ct/submission-auth` on `LPE`
+3. after `AUTH`, `LPE-CT` accepts `MAIL FROM`, `RCPT TO`, and `DATA`
+4. `LPE-CT` forwards the authenticated principal, envelope, and raw RFC 822 body to `POST /internal/lpe-ct/submissions`
+5. `LPE` validates attachments with `Magika`, derives visible and `Bcc` recipients, enforces sender ownership, and invokes the canonical submission workflow
+6. `LPE` creates the authoritative `Sent` copy before inserting the outbound queue row
+7. only after that canonical submission succeeds does `LPE-CT` return a successful SMTP final reply to the client
+8. outbound relay still happens later through the existing `LPE -> LPE-CT` outbound handoff path
+
+This keeps Internet-facing `SMTP` in `LPE-CT` while ensuring every client submission converges on the single `LPE` business workflow.
+
 ### Internal authentication
 
 Both HTTP calls use the header:
 
 - `x-lpe-integration-key`
+
+The authenticated client-submission bridge uses the same header for:
+
+- `POST /internal/lpe-ct/submission-auth`
+- `POST /internal/lpe-ct/submissions`
 
 The shared secret is provided through:
 
@@ -80,6 +98,10 @@ On the `LPE-CT` side:
 - `LPE_CT_CORE_DELIVERY_BASE_URL`
 - `LPE_CT_RELAY_PRIMARY`
 - `LPE_CT_RELAY_SECONDARY`
+- `LPE_CT_SUBMISSION_BIND_ADDRESS`
+- `LPE_CT_SUBMISSION_TLS_CERT_PATH`
+- `LPE_CT_SUBMISSION_TLS_KEY_PATH`
+- `LPE_CT_SUBMISSION_MAX_MESSAGE_SIZE_MB`
 - `LPE_CT_LOG_FORMAT`
 - `LPE_CT_METRICS_ENABLED`
 - `LPE_INTEGRATION_SHARED_SECRET`
@@ -114,6 +136,7 @@ The detailed metric families and logging behavior are documented in `docs/archit
 
 - the `LPE` worker performs synchronous handoff and updates state afterward
 - the `LPE` worker now also sends `attempt_count` and `last_attempt_error`, allowing `LPE-CT` to apply informed retry and throttling policies
+- authenticated client submission now terminates on `LPE-CT`, but the internal submission contract creates the canonical `Sent` copy in `LPE` before any relay
 - `LPE-CT` keeps raw SMTP bytes intact on ingress and carries them through persistence and internal final delivery
 - `LPE-CT` extracts inbound visible text from decoded MIME (`multipart/alternative`, `quoted-printable`, `base64`, HTML) instead of indexing the raw RFC 822 body blindly
 - `LPE-CT` now persists a structured authentication summary (`SPF`, `DKIM`, `DMARC`, alignment, tempfail) and explicit `defer` / `quarantine` / `reject` reasons

@@ -15,6 +15,7 @@ The core `LPE` server must not be directly reachable from the public Internet an
 `LPE-CT` publishes:
 
 - inbound `SMTP` on port `25`
+- authenticated client `SMTP` submission on implicit `TLS` port `465` when configured
 - the `LPE` web client over `HTTPS` on `443` under `/mail`
 - `ActiveSync` over `HTTPS` under `/activesync`
 - exposed `JMAP` endpoints over `TLS` toward `LPE`
@@ -24,6 +25,8 @@ The core `LPE` server must not be directly reachable from the public Internet an
 - `SMTPS`
 
 For secure client submission, the baseline target prefers implicit TLS on port `465`, aligned with `RFC 8314`.
+
+When client submission is enabled, `LPE-CT` terminates the external `TLS` session, performs `AUTH`, and forwards the raw RFC 822 message plus envelope to the internal canonical `LPE` submission workflow. `LPE-CT` does not create the authoritative `Sent` copy itself, and the internal `LPE -> LPE-CT` outbound relay remains a backend-only transport.
 
 When published, the `JMAP` WebSocket endpoint remains a reverse-proxied `LPE` protocol adapter behind `LPE-CT`; it does not change the rule that `LPE-CT` is the only external exposure point.
 

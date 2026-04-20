@@ -31,9 +31,9 @@ Thunderbird autoconfig publishes:
 
 By default, no client `SMTP` submission endpoint is advertised.
 
-That omission is intentional: the repository currently publishes the internal `LPE -> LPE-CT` relay and a minimal perimeter `SMTP` listener on the `LPE-CT` side, but it does not yet expose an authenticated client-submission endpoint such as `465` or `587`.
-
 An `SMTP` block is included in the XML only when a real client-submission endpoint is explicitly configured through the environment.
+
+For the current implementation, that means an authenticated `LPE-CT` submission listener is actually enabled, preferably on implicit `TLS` port `465`, with certificate and key material configured on `LPE-CT`.
 
 ### Outlook
 
@@ -74,6 +74,7 @@ For a domain `example.test`:
 - publish `autodiscover.example.test` or reuse `mail.example.test` toward the same front end
 - re-expose the `/autoconfig/...`, `/.well-known/autoconfig/...`, `/autodiscover/...`, `/Autodiscover/...`, and `/Microsoft-Server-ActiveSync` routes over HTTPS
 - publish `IMAPS` on the same hostname when native `IMAP` access is exposed
+- publish the authenticated `SMTPS` submission listener only when `LPE-CT` really exposes it
 - do not reuse the internal `LPE -> LPE-CT` relay as a client-submission endpoint
 
 

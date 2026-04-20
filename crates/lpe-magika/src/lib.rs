@@ -36,6 +36,7 @@ pub enum IngressContext {
     PstProcessing,
     AttachmentParsing,
     ActiveSyncMimeSubmission,
+    SmtpClientSubmission,
     LpeCtInboundSmtp,
 }
 
@@ -626,7 +627,8 @@ fn decide_policy(
         IngressContext::JmapUpload
         | IngressContext::JmapEmailImport
         | IngressContext::ImapAppend
-        | IngressContext::ActiveSyncMimeSubmission => {
+        | IngressContext::ActiveSyncMimeSubmission
+        | IngressContext::SmtpClientSubmission => {
             if mismatch {
                 (
                     PolicyDecision::Reject,
@@ -1025,6 +1027,35 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.policy_decision, PolicyDecision::Reject);
         assert!(outcome.mismatch);
+    }
+
+    #[test]
+    fn smtp_client_submission_unknown_file_is_restricted() {
+        let validator = Validator::new(
+            FakeDetector {
+                detection: MagikaDetection {
+                    label: "unknown_binary".to_string(),
+                    mime_type: "application/octet-stream".to_string(),
+                    description: "unknown".to_string(),
+                    group: "unknown".to_string(),
+                    extensions: Vec::new(),
+                    score: Some(0.99),
+                },
+            },
+            0.80,
+        );
+        let outcome = validator
+            .validate_bytes(
+                ValidationRequest {
+                    ingress_context: IngressContext::SmtpClientSubmission,
+                    declared_mime: None,
+                    filename: None,
+                    expected_kind: ExpectedKind::Any,
+                },
+                b"blob",
+            )
+            .unwrap();
+        assert_eq!(outcome.policy_decision, PolicyDecision::Restrict);
     }
 
     #[test]

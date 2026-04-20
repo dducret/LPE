@@ -24,6 +24,7 @@ use uuid::Uuid;
 
 mod observability;
 mod smtp;
+mod submission;
 
 const MIN_INTEGRATION_SECRET_LEN: usize = 32;
 pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -289,6 +290,7 @@ async fn main() -> Result<()> {
         env::var("LPE_CT_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8380".to_string());
     let smtp_bind_address =
         env::var("LPE_CT_SMTP_BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:25".to_string());
+    let submission_bind_address = env::var("LPE_CT_SUBMISSION_BIND_ADDRESS").ok();
     let state_file = PathBuf::from(
         env::var("LPE_CT_STATE_FILE").unwrap_or_else(|_| "/var/lib/lpe-ct/state.json".to_string()),
     );
@@ -305,6 +307,8 @@ async fn main() -> Result<()> {
     normalize_local_data_stores(&mut dashboard.local_data_stores);
     dashboard.site.management_bind = bind_address.clone();
     dashboard.site.public_smtp_bind = smtp_bind_address.clone();
+    dashboard.network.submission_listener_enabled =
+        submission_listener_is_configured(&submission_bind_address);
     persist_state(&state_file, &dashboard)?;
 
     let state = AppState {
@@ -317,6 +321,10 @@ async fn main() -> Result<()> {
     let api_state = state.clone();
     let smtp_state_file = state.state_file.as_ref().clone();
     let smtp_spool_dir = state.spool_dir.as_ref().clone();
+    let submission_core_base_url = {
+        let snapshot = state.store.lock().unwrap().clone();
+        snapshot.relay.core_delivery_base_url
+    };
     let api_task = tokio::spawn(async move {
         let listener = TcpListener::bind(&bind_address).await?;
         info!("lpe-ct management api listening on http://{bind_address}");
@@ -326,10 +334,19 @@ async fn main() -> Result<()> {
     let smtp_task = tokio::spawn(async move {
         smtp::run_smtp_listener(smtp_bind_address, smtp_state_file, smtp_spool_dir).await
     });
+    let submission_task = tokio::spawn(async move {
+        if let Some(bind_address) = submission_bind_address {
+            submission::run_submission_listener(bind_address, submission_core_base_url).await?;
+        } else {
+            let _ = std::future::pending::<Result<()>>().await;
+        }
+        Result::<()>::Ok(())
+    });
 
     tokio::select! {
         result = api_task => result??,
         result = smtp_task => result??,
+        result = submission_task => result??,
     }
 
     Ok(())
@@ -1121,6 +1138,22 @@ fn default_core_delivery_base_url() -> String {
         .unwrap_or_else(|| "http://127.0.0.1:8080".to_string())
 }
 
+fn submission_listener_is_configured(bind_address: &Option<String>) -> bool {
+    bind_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some()
+        && env::var("LPE_CT_SUBMISSION_TLS_CERT_PATH")
+            .ok()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+        && env::var("LPE_CT_SUBMISSION_TLS_KEY_PATH")
+            .ok()
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+}
+
 fn default_true() -> bool {
     true
 }
@@ -1658,7 +1691,7 @@ mod tests {
     use super::{
         address_binds_publicly, apply_env_overrides, default_state, ha_activation_check,
         ha_non_active_role_for_traffic, integration_shared_secret, normalize_local_data_stores,
-        ENV_LOCK,
+        submission_listener_is_configured, ENV_LOCK,
     };
     use std::{
         fs,
@@ -1793,5 +1826,28 @@ mod tests {
         std::env::remove_var("LPE_CT_LOCAL_DB_LISTEN_ADDRESS");
         std::env::remove_var("LPE_CT_LOCAL_DB_NETWORK_SCOPE");
         std::env::remove_var("LPE_CT_LOCAL_DB_PURPOSES");
+    }
+
+    #[test]
+    fn submission_listener_requires_bind_and_tls_material() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("LPE_CT_SUBMISSION_TLS_CERT_PATH");
+        std::env::remove_var("LPE_CT_SUBMISSION_TLS_KEY_PATH");
+        assert!(!submission_listener_is_configured(&Some(
+            "0.0.0.0:465".to_string()
+        )));
+
+        std::env::set_var(
+            "LPE_CT_SUBMISSION_TLS_CERT_PATH",
+            "/etc/lpe-ct/fullchain.pem",
+        );
+        std::env::set_var("LPE_CT_SUBMISSION_TLS_KEY_PATH", "/etc/lpe-ct/privkey.pem");
+        assert!(submission_listener_is_configured(&Some(
+            "0.0.0.0:465".to_string()
+        )));
+        assert!(!submission_listener_is_configured(&None));
+
+        std::env::remove_var("LPE_CT_SUBMISSION_TLS_CERT_PATH");
+        std::env::remove_var("LPE_CT_SUBMISSION_TLS_KEY_PATH");
     }
 }
