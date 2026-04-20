@@ -16,13 +16,70 @@ is_interactive_install() {
     return 1
   fi
 
-  [[ -t 0 && -t 1 ]]
+  if [[ -e /dev/tty && -r /dev/tty && -w /dev/tty ]]; then
+    return 0
+  fi
+
+  [[ -t 0 || -t 2 ]]
+}
+
+prompt_output_target() {
+  if [[ -e /dev/tty && -w /dev/tty ]]; then
+    printf '/dev/tty'
+    return 0
+  fi
+
+  printf '/dev/stderr'
+}
+
+prompt_input_target() {
+  if [[ -e /dev/tty && -r /dev/tty ]]; then
+    printf '/dev/tty'
+    return 0
+  fi
+
+  printf '/dev/stdin'
+}
+
+prompt_print() {
+  local target
+  target="$(prompt_output_target)"
+  printf '%s' "$*" > "${target}"
+}
+
+prompt_println() {
+  local target
+  target="$(prompt_output_target)"
+  printf '%s\n' "$*" > "${target}"
+}
+
+prompt_read_line() {
+  local __resultvar="$1"
+  local input_target
+  local value
+
+  input_target="$(prompt_input_target)"
+  IFS= read -r value < "${input_target}" || true
+  printf -v "${__resultvar}" '%s' "${value}"
+}
+
+prompt_read_secret() {
+  local __resultvar="$1"
+  local input_target
+  local output_target
+  local value
+
+  input_target="$(prompt_input_target)"
+  output_target="$(prompt_output_target)"
+  IFS= read -r -s value < "${input_target}" || true
+  printf '\n' > "${output_target}"
+  printf -v "${__resultvar}" '%s' "${value}"
 }
 
 print_section() {
   local title="$1"
   if is_interactive_install; then
-    printf '\n%s\n' "${title}"
+    prompt_print "\n${title}\n"
   fi
 }
 
@@ -134,15 +191,15 @@ ask_with_default() {
   fi
 
   while true; do
-    printf '%s (%s): ' "${label}" "${default_value}"
-    IFS= read -r value || true
+    prompt_print "${label} (${default_value}): "
+    prompt_read_line value
     value="$(trim "${value}")"
     if [[ -z "${value}" ]]; then
       value="$(trim "${default_value}")"
     fi
 
     if [[ -n "${validator}" ]] && ! "${validator}" "${value}"; then
-      echo "${error_message}" >&2
+      prompt_println "${error_message}"
       continue
     fi
 
@@ -168,17 +225,17 @@ ask_required() {
   fi
 
   while true; do
-    printf '%s (required): ' "${label}"
-    IFS= read -r value || true
+    prompt_print "${label} (required): "
+    prompt_read_line value
     value="$(trim "${value}")"
 
     if [[ -z "${value}" ]]; then
-      echo "${error_message}" >&2
+      prompt_println "${error_message}"
       continue
     fi
 
     if [[ -n "${validator}" ]] && ! "${validator}" "${value}"; then
-      echo "${error_message}" >&2
+      prompt_println "${error_message}"
       continue
     fi
 
@@ -216,9 +273,8 @@ ask_secret_with_default_behavior_when_possible() {
   fi
 
   while true; do
-    printf '%s (%s): ' "${label}" "${prompt_suffix}"
-    IFS= read -r -s value || true
-    printf '\n'
+    prompt_print "${label} (${prompt_suffix}): "
+    prompt_read_secret value
     value="$(trim "${value}")"
 
     if [[ -z "${value}" ]]; then
@@ -226,12 +282,12 @@ ask_secret_with_default_behavior_when_possible() {
     fi
 
     if [[ -z "${value}" ]]; then
-      echo "${error_message}" >&2
+      prompt_println "${error_message}"
       continue
     fi
 
     if [[ -n "${validator}" ]] && ! "${validator}" "${value}"; then
-      echo "${error_message}" >&2
+      prompt_println "${error_message}"
       continue
     fi
 
@@ -265,8 +321,8 @@ ask_yes_no() {
   fi
 
   while true; do
-    printf '%s (%s): ' "${label}" "${normalized_default}"
-    IFS= read -r value || true
+    prompt_print "${label} (${normalized_default}): "
+    prompt_read_line value
     value="$(trim "${value}")"
 
     if [[ -z "${value}" ]]; then
@@ -283,7 +339,7 @@ ask_yes_no() {
       return 0
     fi
 
-    echo "Enter yes or no." >&2
+    prompt_println "Enter yes or no."
   done
 }
 
