@@ -335,6 +335,65 @@ pub struct CalendarQueryArguments {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskListGetArguments {
+    pub account_id: Option<String>,
+    pub ids: Option<Vec<String>>,
+    pub properties: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskListSetArguments {
+    pub account_id: Option<String>,
+    pub create: Option<HashMap<String, Value>>,
+    pub update: Option<HashMap<String, Value>>,
+    pub destroy: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskGetArguments {
+    pub account_id: Option<String>,
+    pub ids: Option<Vec<String>>,
+    pub properties: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQueryArguments {
+    pub account_id: Option<String>,
+    pub position: Option<u64>,
+    pub limit: Option<u64>,
+    pub filter: Option<TaskQueryFilter>,
+    pub sort: Option<Vec<TaskQuerySort>>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQueryFilter {
+    pub in_task_list: Option<String>,
+    pub text: Option<String>,
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskQuerySort {
+    pub property: String,
+    pub is_ascending: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSetArguments {
+    pub account_id: Option<String>,
+    pub create: Option<HashMap<String, Value>>,
+    pub update: Option<HashMap<String, Value>>,
+    pub destroy: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CalendarEventGetArguments {
     pub account_id: Option<String>,
     pub ids: Option<Vec<String>>,

@@ -14,10 +14,11 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
 use lpe_storage::{
     mail::parse_rfc822_message, AccessibleContact, AccessibleEvent, AuditEntryInput,
-    AuthenticatedAccount, CollaborationCollection, JmapEmail, JmapEmailAddress,
+    AuthenticatedAccount, ClientTask, CollaborationCollection, JmapEmail, JmapEmailAddress,
     JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob, SavedDraftMessage, Storage,
     SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientTaskInput,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -43,9 +44,10 @@ use crate::protocol::{
     IdentityGetArguments, JmapApiRequest, JmapApiResponse, JmapMethodCall, JmapMethodResponse,
     MailboxCreateInput, MailboxGetArguments, MailboxQueryArguments, MailboxSetArguments,
     MailboxUpdateInput, QueryChangesArguments, QuotaGetArguments, SearchSnippetGetArguments,
-    SessionAccount, SessionDocument, ThreadGetArguments, ThreadQueryArguments,
-    WebSocketPushDisable, WebSocketPushEnable, WebSocketRequestEnvelope, WebSocketRequestError,
-    WebSocketResponse, WebSocketStateChange,
+    SessionAccount, SessionDocument, TaskGetArguments, TaskListGetArguments, TaskListSetArguments,
+    TaskQueryArguments, TaskQueryFilter, TaskQuerySort, TaskSetArguments, ThreadGetArguments,
+    ThreadQueryArguments, WebSocketPushDisable, WebSocketPushEnable, WebSocketRequestEnvelope,
+    WebSocketRequestError, WebSocketResponse, WebSocketStateChange,
 };
 use crate::store::JmapStore;
 
@@ -54,6 +56,7 @@ const JMAP_MAIL_CAPABILITY: &str = "urn:ietf:params:jmap:mail";
 const JMAP_SUBMISSION_CAPABILITY: &str = "urn:ietf:params:jmap:submission";
 const JMAP_CONTACTS_CAPABILITY: &str = "urn:ietf:params:jmap:contacts";
 const JMAP_CALENDARS_CAPABILITY: &str = "urn:ietf:params:jmap:calendars";
+const JMAP_TASKS_CAPABILITY: &str = "urn:ietf:params:jmap:tasks";
 const JMAP_WEBSOCKET_CAPABILITY: &str = "urn:ietf:params:jmap:websocket";
 const SESSION_STATE: &str = "mvp-3";
 const QUERY_STATE_VERSION: &str = "mvp-2";
@@ -253,6 +256,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         primary_accounts.insert(JMAP_SUBMISSION_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_CONTACTS_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_CALENDARS_CAPABILITY.to_string(), account_id.clone());
+        primary_accounts.insert(JMAP_TASKS_CAPABILITY.to_string(), account_id.clone());
 
         Ok(SessionDocument {
             capabilities,
@@ -345,6 +349,17 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 }
                 "CalendarEvent/set" => {
                     self.handle_calendar_event_set(&account, arguments, &mut created_ids)
+                        .await
+                }
+                "TaskList/get" => self.handle_task_list_get(&account, arguments).await,
+                "TaskList/changes" => self.handle_task_list_changes(&account, arguments).await,
+                "TaskList/set" => self.handle_task_list_set(&account, arguments).await,
+                "Task/get" => self.handle_task_get(&account, arguments).await,
+                "Task/query" => self.handle_task_query(&account, arguments).await,
+                "Task/queryChanges" => self.handle_task_query_changes(&account, arguments).await,
+                "Task/changes" => self.handle_task_changes(&account, arguments).await,
+                "Task/set" => {
+                    self.handle_task_set(&account, arguments, &mut created_ids)
                         .await
                 }
                 "Identity/get" => self.handle_identity_get(&account, arguments).await,
@@ -601,6 +616,8 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 | "ContactCard"
                 | "Calendar"
                 | "CalendarEvent"
+                | "TaskList"
+                | "Task"
         )
     }
 
@@ -723,6 +740,20 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     .map(|event| StateEntry {
                         id: event.id.to_string(),
                         fingerprint: event_state_fingerprint(&event),
+                    })
+                    .collect())
+            }
+            "TaskList" => Ok(vec![StateEntry {
+                id: default_task_list_id().to_string(),
+                fingerprint: default_task_list_state_fingerprint(),
+            }]),
+            "Task" => {
+                let tasks = self.store.fetch_jmap_tasks(account_id).await?;
+                Ok(tasks
+                    .into_iter()
+                    .map(|task| StateEntry {
+                        id: task.id.to_string(),
+                        fingerprint: task_state_fingerprint(&task),
                     })
                     .collect())
             }
@@ -1546,6 +1577,336 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         }
 
         let new_state = self.object_state(account_id, "CalendarEvent").await?;
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "oldState": old_state,
+            "newState": new_state,
+            "created": Value::Object(created),
+            "notCreated": Value::Object(not_created),
+            "updated": Value::Object(updated),
+            "notUpdated": Value::Object(not_updated),
+            "destroyed": destroyed,
+            "notDestroyed": Value::Object(not_destroyed),
+        }))
+    }
+
+    async fn handle_task_list_get(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: TaskListGetArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let properties = task_list_properties(arguments.properties);
+        let requested_ids = arguments.ids.unwrap_or_default();
+        let list = if requested_ids.is_empty()
+            || requested_ids.iter().any(|id| id == default_task_list_id())
+        {
+            vec![task_list_to_value(&properties)]
+        } else {
+            Vec::new()
+        };
+        let not_found = requested_ids
+            .into_iter()
+            .filter(|id| id != default_task_list_id())
+            .map(Value::String)
+            .collect::<Vec<_>>();
+        let state = self.object_state(account_id, "TaskList").await?;
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "state": state,
+            "list": list,
+            "notFound": not_found,
+        }))
+    }
+
+    async fn handle_task_list_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: ChangesArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let entries = self.object_state_entries(account_id, "TaskList").await?;
+        Ok(changes_response(
+            account_id,
+            "TaskList",
+            &arguments.since_state,
+            arguments.max_changes,
+            entries,
+        ))
+    }
+
+    async fn handle_task_list_set(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: TaskListSetArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let old_state = self.object_state(account_id, "TaskList").await?;
+        let mut not_created = Map::new();
+        let mut not_updated = Map::new();
+        let mut not_destroyed = Map::new();
+
+        if let Some(create) = arguments.create {
+            for (creation_id, _) in create {
+                not_created.insert(
+                    creation_id,
+                    method_error("forbidden", "TaskList/set is not supported in the MVP"),
+                );
+            }
+        }
+        if let Some(update) = arguments.update {
+            for (id, _) in update {
+                not_updated.insert(
+                    id,
+                    method_error("forbidden", "TaskList/set is not supported in the MVP"),
+                );
+            }
+        }
+        if let Some(ids) = arguments.destroy {
+            for id in ids {
+                not_destroyed.insert(
+                    id,
+                    method_error("forbidden", "TaskList/set is not supported in the MVP"),
+                );
+            }
+        }
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "oldState": old_state.clone(),
+            "newState": old_state,
+            "created": Value::Object(Map::new()),
+            "notCreated": Value::Object(not_created),
+            "updated": Value::Object(Map::new()),
+            "notUpdated": Value::Object(not_updated),
+            "destroyed": Vec::<String>::new(),
+            "notDestroyed": Value::Object(not_destroyed),
+        }))
+    }
+
+    async fn handle_task_get(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: TaskGetArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let properties = task_properties(arguments.properties);
+        let requested_ids = parse_uuid_list(arguments.ids)?;
+        let tasks = if let Some(ids) = requested_ids.as_ref() {
+            self.store.fetch_jmap_tasks_by_ids(account_id, ids).await?
+        } else {
+            self.store.fetch_jmap_tasks(account_id).await?
+        };
+        let requested_set = requested_ids
+            .as_ref()
+            .map(|ids| ids.iter().copied().collect::<HashSet<Uuid>>())
+            .unwrap_or_default();
+        let list = tasks
+            .iter()
+            .filter(|task| requested_ids.is_none() || requested_set.contains(&task.id))
+            .map(|task| task_to_value(task, &properties))
+            .collect::<Vec<_>>();
+        let not_found = requested_ids
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|id| !tasks.iter().any(|task| task.id == *id))
+            .map(|id| Value::String(id.to_string()))
+            .collect::<Vec<_>>();
+        let state = self.object_state(account_id, "Task").await?;
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "state": state,
+            "list": list,
+            "notFound": not_found,
+        }))
+    }
+
+    async fn handle_task_query(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: TaskQueryArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        validate_task_sort(arguments.sort.as_deref())?;
+        validate_task_filter(arguments.filter.as_ref())?;
+
+        let mut tasks = self.store.fetch_jmap_tasks(account_id).await?;
+        if let Some(filter) = arguments.filter.as_ref() {
+            tasks.retain(|task| task_matches_filter(task, filter));
+        }
+        tasks.sort_by_key(task_sort_key);
+
+        let position = arguments.position.unwrap_or(0) as usize;
+        let limit = arguments
+            .limit
+            .unwrap_or(DEFAULT_GET_LIMIT)
+            .min(MAX_QUERY_LIMIT) as usize;
+        let ids = tasks
+            .iter()
+            .skip(position)
+            .take(limit)
+            .map(|task| task.id.to_string())
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "queryState": encode_query_state(
+                "Task",
+                arguments.filter.map(|filter| serde_json::to_value(filter)).transpose()?,
+                arguments
+                    .sort
+                    .map(|sort| {
+                        sort.into_iter()
+                            .map(serde_json::to_value)
+                            .collect::<std::result::Result<Vec<_>, _>>()
+                    })
+                    .transpose()?,
+                tasks.iter().map(|task| task.id.to_string()).collect(),
+            )?,
+            "canCalculateChanges": true,
+            "position": position,
+            "ids": ids,
+            "total": tasks.len(),
+        }))
+    }
+
+    async fn handle_task_query_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: QueryChangesArguments<TaskQueryFilter, TaskQuerySort> =
+            serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        validate_task_sort(arguments.sort.as_deref())?;
+        validate_task_filter(arguments.filter.as_ref())?;
+
+        let mut tasks = self.store.fetch_jmap_tasks(account_id).await?;
+        if let Some(filter) = arguments.filter.as_ref() {
+            tasks.retain(|task| task_matches_filter(task, filter));
+        }
+        tasks.sort_by_key(task_sort_key);
+
+        query_changes_response(
+            account_id,
+            "Task",
+            arguments.since_query_state,
+            arguments.filter.map(serde_json::to_value).transpose()?,
+            arguments
+                .sort
+                .map(|sort| {
+                    sort.into_iter()
+                        .map(serde_json::to_value)
+                        .collect::<std::result::Result<Vec<_>, _>>()
+                })
+                .transpose()?,
+            tasks.iter().map(|task| task.id.to_string()).collect(),
+            tasks.len() as u64,
+            arguments.max_changes,
+        )
+    }
+
+    async fn handle_task_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: ChangesArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let entries = self.object_state_entries(account_id, "Task").await?;
+        Ok(changes_response(
+            account_id,
+            "Task",
+            &arguments.since_state,
+            arguments.max_changes,
+            entries,
+        ))
+    }
+
+    async fn handle_task_set(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        created_ids: &mut HashMap<String, String>,
+    ) -> Result<Value> {
+        let arguments: TaskSetArguments = serde_json::from_value(arguments)?;
+        let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let old_state = self.object_state(account_id, "Task").await?;
+        let mut created = Map::new();
+        let mut not_created = Map::new();
+        let mut updated = Map::new();
+        let mut not_updated = Map::new();
+        let mut destroyed = Vec::new();
+        let mut not_destroyed = Map::new();
+
+        if let Some(create) = arguments.create {
+            for (creation_id, value) in create {
+                match parse_task_input(None, account_id, value) {
+                    Ok(input) => match self.store.upsert_jmap_task(input).await {
+                        Ok(task) => {
+                            created_ids.insert(creation_id.clone(), task.id.to_string());
+                            created.insert(
+                                creation_id,
+                                json!({
+                                    "id": task.id.to_string(),
+                                }),
+                            );
+                        }
+                        Err(error) => {
+                            not_created.insert(creation_id, set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_created.insert(creation_id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        if let Some(update) = arguments.update {
+            for (id, value) in update {
+                match parse_uuid(&id)
+                    .and_then(|task_id| parse_task_input(Some(task_id), account_id, value))
+                {
+                    Ok(input) => match self.store.upsert_jmap_task(input).await {
+                        Ok(_) => {
+                            updated.insert(id, Value::Object(Map::new()));
+                        }
+                        Err(error) => {
+                            not_updated.insert(id, set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_updated.insert(id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        if let Some(ids) = arguments.destroy {
+            for id in ids {
+                match parse_uuid(&id) {
+                    Ok(task_id) => match self.store.delete_jmap_task(account_id, task_id).await {
+                        Ok(()) => destroyed.push(Value::String(id)),
+                        Err(error) => {
+                            not_destroyed.insert(id, set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_destroyed.insert(id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        let new_state = self.object_state(account_id, "Task").await?;
         Ok(json!({
             "accountId": account_id.to_string(),
             "oldState": old_state,
@@ -2638,6 +2999,14 @@ fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {
             }),
         ),
         (
+            JMAP_TASKS_CAPABILITY.to_string(),
+            json!({
+                "minDateTime": "1970-01-01T00:00:00",
+                "maxDateTime": "9999-12-31T23:59:59",
+                "mayCreateTaskList": false,
+            }),
+        ),
+        (
             JMAP_WEBSOCKET_CAPABILITY.to_string(),
             json!({
                 "url": websocket_url,
@@ -2726,11 +3095,47 @@ fn validate_calendar_event_filter(filter: Option<&CalendarEventQueryFilter>) -> 
     Ok(())
 }
 
+fn validate_task_sort(sort: Option<&[TaskQuerySort]>) -> Result<()> {
+    if let Some(sort) = sort {
+        for item in sort {
+            if item.property != "sortOrder" || item.is_ascending.unwrap_or(true) != true {
+                bail!("only sortOrder ascending sort is supported");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_task_filter(filter: Option<&TaskQueryFilter>) -> Result<()> {
+    if let Some(filter) = filter {
+        if let Some(task_list_id) = filter.in_task_list.as_deref() {
+            if task_list_id != default_task_list_id() {
+                bail!("only taskListId=default is supported");
+            }
+        }
+        if let Some(status) = filter.status.as_deref() {
+            validate_task_status_value(status)?;
+        }
+    }
+    Ok(())
+}
+
 fn require_collection_id(value: &str, kind: &str) -> Result<()> {
     if value.trim().is_empty() {
         bail!("{kind} id is required");
     }
     Ok(())
+}
+
+fn default_task_list_id() -> &'static str {
+    "default"
+}
+
+fn validate_task_status_value(status: &str) -> Result<()> {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "" | "needs-action" | "in-progress" | "completed" | "cancelled" => Ok(()),
+        other => bail!("unsupported task status: {other}"),
+    }
 }
 
 fn mailbox_properties(properties: Option<Vec<String>>) -> HashSet<String> {
@@ -2813,6 +3218,23 @@ fn calendar_properties(properties: Option<Vec<String>>) -> HashSet<String> {
         .collect()
 }
 
+fn task_list_properties(properties: Option<Vec<String>>) -> HashSet<String> {
+    properties
+        .unwrap_or_else(|| {
+            vec![
+                "id".to_string(),
+                "name".to_string(),
+                "role".to_string(),
+                "sortOrder".to_string(),
+                "isSubscribed".to_string(),
+                "isVisible".to_string(),
+                "myRights".to_string(),
+            ]
+        })
+        .into_iter()
+        .collect()
+}
+
 fn calendar_to_value(collection: &CollaborationCollection, properties: &HashSet<String>) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", collection.id.clone());
@@ -2836,6 +3258,31 @@ fn calendar_to_value(collection: &CollaborationCollection, properties: &HashSet<
                 "mayRename": false,
                 "mayDelete": false,
                 "mayAdmin": collection.rights.may_share,
+            }),
+        );
+    }
+    Value::Object(object)
+}
+
+fn task_list_to_value(properties: &HashSet<String>) -> Value {
+    let mut object = Map::new();
+    insert_if(properties, &mut object, "id", default_task_list_id());
+    insert_if(properties, &mut object, "name", "Tasks");
+    insert_if(properties, &mut object, "role", "inbox");
+    insert_if(properties, &mut object, "sortOrder", 0);
+    insert_if(properties, &mut object, "isSubscribed", true);
+    insert_if(properties, &mut object, "isVisible", true);
+    if properties.contains("myRights") {
+        object.insert(
+            "myRights".to_string(),
+            json!({
+                "mayRead": true,
+                "mayAddItems": true,
+                "mayModifyItems": true,
+                "mayRemoveItems": true,
+                "mayRename": false,
+                "mayDelete": false,
+                "mayAdmin": false,
             }),
         );
     }
@@ -2928,6 +3375,23 @@ fn event_state_fingerprint(event: &AccessibleEvent) -> String {
         event.notes,
         event.rights.may_write
     )
+}
+
+fn task_state_fingerprint(task: &ClientTask) -> String {
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}",
+        task.title,
+        task.description,
+        task.status,
+        task.due_at.as_deref().unwrap_or_default(),
+        task.completed_at.as_deref().unwrap_or_default(),
+        task.sort_order,
+        task.updated_at
+    )
+}
+
+fn default_task_list_state_fingerprint() -> String {
+    "default|Tasks|inbox|0|rw".to_string()
 }
 
 fn email_state_fingerprint(email: &JmapEmail) -> String {
@@ -3154,7 +3618,11 @@ fn query_changes_response(
     }
 
     let next_query_state = encode_query_state(kind, filter, sort, current_ids.clone())?;
-    let diff = compute_query_diff(&previous.ids, &current_ids, max_changes);
+    let diff = if kind == "Task" {
+        compute_query_diff_with_reorders(&previous.ids, &current_ids, max_changes)
+    } else {
+        compute_query_diff(&previous.ids, &current_ids, max_changes)
+    };
     let change_count = diff.removed.len() + diff.added.len();
     let change_limit = max_changes.unwrap_or(u64::MAX) as usize;
 
@@ -3189,6 +3657,55 @@ fn compute_query_diff(
 
     for (index, id) in current_ids.iter().enumerate() {
         if !previous_ids.contains(id) {
+            added.push(json!({
+                "id": id,
+                "index": index,
+            }));
+            if removed.len() + added.len() >= max_changes {
+                break;
+            }
+        }
+    }
+
+    QueryDiff { removed, added }
+}
+
+fn compute_query_diff_with_reorders(
+    previous_ids: &[String],
+    current_ids: &[String],
+    max_changes: Option<u64>,
+) -> QueryDiff {
+    let mut removed = Vec::new();
+    let mut added = Vec::new();
+    let max_changes = max_changes.unwrap_or(u64::MAX) as usize;
+    let previous_positions = previous_ids
+        .iter()
+        .enumerate()
+        .map(|(index, id)| (id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    let current_positions = current_ids
+        .iter()
+        .enumerate()
+        .map(|(index, id)| (id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+
+    for (index, id) in previous_ids.iter().enumerate() {
+        let moved = current_positions
+            .get(id.as_str())
+            .is_some_and(|current_index| *current_index != index);
+        if !current_positions.contains_key(id.as_str()) || moved {
+            removed.push(id.clone());
+            if removed.len() + added.len() >= max_changes {
+                return QueryDiff { removed, added };
+            }
+        }
+    }
+
+    for (index, id) in current_ids.iter().enumerate() {
+        let moved = previous_positions
+            .get(id.as_str())
+            .is_some_and(|previous_index| *previous_index != index);
+        if !previous_positions.contains_key(id.as_str()) || moved {
             added.push(json!({
                 "id": id,
                 "index": index,
@@ -3341,6 +3858,27 @@ fn calendar_event_properties(properties: Option<Vec<String>>) -> HashSet<String>
                 "participants".to_string(),
                 "description".to_string(),
                 "calendarIds".to_string(),
+            ]
+        })
+        .into_iter()
+        .collect()
+}
+
+fn task_properties(properties: Option<Vec<String>>) -> HashSet<String> {
+    properties
+        .unwrap_or_else(|| {
+            vec![
+                "id".to_string(),
+                "uid".to_string(),
+                "@type".to_string(),
+                "taskListId".to_string(),
+                "title".to_string(),
+                "description".to_string(),
+                "status".to_string(),
+                "due".to_string(),
+                "completed".to_string(),
+                "sortOrder".to_string(),
+                "updated".to_string(),
             ]
         })
         .into_iter()
@@ -3817,6 +4355,37 @@ fn calendar_event_to_value(event: &AccessibleEvent, properties: &HashSet<String>
     Value::Object(object)
 }
 
+fn task_to_value(task: &ClientTask, properties: &HashSet<String>) -> Value {
+    let mut object = Map::new();
+    insert_if(properties, &mut object, "id", task.id.to_string());
+    insert_if(properties, &mut object, "uid", task.id.to_string());
+    insert_if(properties, &mut object, "@type", "Task");
+    insert_if(
+        properties,
+        &mut object,
+        "taskListId",
+        default_task_list_id(),
+    );
+    insert_if(properties, &mut object, "title", task.title.clone());
+    insert_if(
+        properties,
+        &mut object,
+        "description",
+        task.description.clone(),
+    );
+    insert_if(properties, &mut object, "status", task.status.clone());
+    insert_if(properties, &mut object, "due", task.due_at.clone());
+    insert_if(
+        properties,
+        &mut object,
+        "completed",
+        task.completed_at.clone(),
+    );
+    insert_if(properties, &mut object, "sortOrder", task.sort_order);
+    insert_if(properties, &mut object, "updated", task.updated_at.clone());
+    Value::Object(object)
+}
+
 fn participants_from_event(event: &AccessibleEvent) -> Value {
     if let Ok(value) = serde_json::from_str::<Value>(&event.attendees_json) {
         if value.is_object() {
@@ -3956,8 +4525,39 @@ fn event_matches_filter(event: &AccessibleEvent, filter: &CalendarEventQueryFilt
     true
 }
 
+fn task_matches_filter(task: &ClientTask, filter: &TaskQueryFilter) -> bool {
+    if let Some(task_list_id) = filter.in_task_list.as_deref() {
+        if task_list_id != default_task_list_id() {
+            return false;
+        }
+    }
+    if let Some(status) = filter.status.as_deref() {
+        if task.status != status.trim().to_ascii_lowercase() {
+            return false;
+        }
+    }
+    if let Some(text) = filter.text.as_deref() {
+        let text = text.trim().to_ascii_lowercase();
+        if !text.is_empty()
+            && !task.title.to_ascii_lowercase().contains(&text)
+            && !task.description.to_ascii_lowercase().contains(&text)
+        {
+            return false;
+        }
+    }
+    true
+}
+
 fn calendar_event_sort_key(event: &AccessibleEvent) -> String {
     calendar_event_start(event)
+}
+
+fn task_sort_key(task: &ClientTask) -> (i32, String, String) {
+    (
+        task.sort_order,
+        task.updated_at.clone(),
+        task.id.to_string(),
+    )
 }
 
 fn calendar_event_start(event: &AccessibleEvent) -> String {
@@ -4197,6 +4797,43 @@ fn parse_calendar_event_input(
     ))
 }
 
+fn parse_task_input(
+    id: Option<Uuid>,
+    account_id: Uuid,
+    value: Value,
+) -> Result<UpsertClientTaskInput> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("task arguments must be an object"))?;
+    reject_unknown_task_properties(object)?;
+    validate_task_list_id(object.get("taskListId"))?;
+
+    let task_type = object
+        .get("@type")
+        .and_then(Value::as_str)
+        .unwrap_or("Task");
+    if task_type != "Task" {
+        bail!("only @type=Task is supported");
+    }
+    if let Some(uid) = object.get("uid").and_then(Value::as_str) {
+        if uid.trim().is_empty() {
+            bail!("uid must not be empty");
+        }
+    }
+
+    Ok(UpsertClientTaskInput {
+        id,
+        account_id,
+        title: parse_required_string(object.get("title"), "title")?,
+        description: parse_optional_string(object.get("description"))?.unwrap_or_default(),
+        status: parse_optional_string(object.get("status"))?
+            .unwrap_or_else(|| "needs-action".to_string()),
+        due_at: parse_optional_string(object.get("due"))?,
+        completed_at: parse_optional_string(object.get("completed"))?,
+        sort_order: object.get("sortOrder").and_then(Value::as_i64).unwrap_or(0) as i32,
+    })
+}
+
 fn parse_email_copy(value: Value, created_ids: &HashMap<String, String>) -> Result<(Uuid, Uuid)> {
     let object = value
         .as_object()
@@ -4241,6 +4878,17 @@ fn reject_unknown_calendar_event_properties(object: &Map<String, Value>) -> Resu
     Ok(())
 }
 
+fn reject_unknown_task_properties(object: &Map<String, Value>) -> Result<()> {
+    for key in object.keys() {
+        match key.as_str() {
+            "@type" | "uid" | "title" | "description" | "status" | "due" | "completed"
+            | "sortOrder" | "taskListId" => {}
+            _ => bail!("unsupported task property: {key}"),
+        }
+    }
+    Ok(())
+}
+
 fn validate_address_book_ids(value: Option<&Value>) -> Result<Option<String>> {
     if let Some(value) = value {
         let object = value
@@ -4273,6 +4921,18 @@ fn validate_calendar_ids(value: Option<&Value>) -> Result<Option<String>> {
         return Ok(Some(collection_id.clone()));
     }
     Ok(None)
+}
+
+fn validate_task_list_id(value: Option<&Value>) -> Result<()> {
+    if let Some(value) = value {
+        let task_list_id = value
+            .as_str()
+            .ok_or_else(|| anyhow!("taskListId must be a string"))?;
+        if task_list_id != default_task_list_id() {
+            bail!("only taskListId=default is supported");
+        }
+    }
+    Ok(())
 }
 
 fn reject_unknown_email_properties(object: &Map<String, Value>) -> Result<()> {
@@ -4562,6 +5222,7 @@ mod tests {
         emails: Vec<JmapEmail>,
         contacts: Arc<Mutex<Vec<ClientContact>>>,
         events: Arc<Mutex<Vec<ClientEvent>>>,
+        tasks: Arc<Mutex<Vec<ClientTask>>>,
         uploads: Arc<Mutex<Vec<JmapUploadBlob>>>,
         imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
         saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
@@ -4853,6 +5514,19 @@ mod tests {
                 attendees: "alice@example.test, bob@example.test".to_string(),
                 attendees_json: "[]".to_string(),
                 notes: "Daily sync".to_string(),
+            }
+        }
+
+        fn task() -> ClientTask {
+            ClientTask {
+                id: Uuid::parse_str("56565656-5656-5656-5656-565656565656").unwrap(),
+                title: "Prepare release".to_string(),
+                description: "Confirm the release checklist".to_string(),
+                status: "needs-action".to_string(),
+                due_at: Some("2026-04-21T09:00:00Z".to_string()),
+                completed_at: None,
+                sort_order: 10,
+                updated_at: "2026-04-20T15:00:00Z".to_string(),
             }
         }
     }
@@ -5327,6 +6001,62 @@ mod tests {
             events.retain(|entry| entry.id != event_id);
             if events.len() == original_len {
                 bail!("event not found");
+            }
+            Ok(())
+        }
+
+        async fn fetch_jmap_tasks(&self, _account_id: Uuid) -> Result<Vec<ClientTask>> {
+            Ok(self.tasks.lock().unwrap().clone())
+        }
+
+        async fn fetch_jmap_tasks_by_ids(
+            &self,
+            _account_id: Uuid,
+            ids: &[Uuid],
+        ) -> Result<Vec<ClientTask>> {
+            Ok(self
+                .tasks
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|task| ids.contains(&task.id))
+                .cloned()
+                .collect())
+        }
+
+        async fn upsert_jmap_task(&self, input: UpsertClientTaskInput) -> Result<ClientTask> {
+            let task = ClientTask {
+                id: input.id.unwrap_or_else(Uuid::new_v4),
+                title: input.title.trim().to_string(),
+                description: input.description.trim().to_string(),
+                status: input.status.trim().to_ascii_lowercase(),
+                due_at: input.due_at,
+                completed_at: if input.status.trim().eq_ignore_ascii_case("completed") {
+                    input
+                        .completed_at
+                        .or_else(|| Some("2026-04-20T16:00:00Z".to_string()))
+                } else {
+                    None
+                },
+                sort_order: input.sort_order,
+                updated_at: if input.id.is_some() {
+                    "2026-04-20T16:00:00Z".to_string()
+                } else {
+                    "2026-04-20T15:30:00Z".to_string()
+                },
+            };
+            let mut tasks = self.tasks.lock().unwrap();
+            tasks.retain(|entry| entry.id != task.id);
+            tasks.push(task.clone());
+            Ok(task)
+        }
+
+        async fn delete_jmap_task(&self, _account_id: Uuid, task_id: Uuid) -> Result<()> {
+            let mut tasks = self.tasks.lock().unwrap();
+            let original_len = tasks.len();
+            tasks.retain(|entry| entry.id != task_id);
+            if tasks.len() == original_len {
+                bail!("task not found");
             }
             Ok(())
         }
@@ -6164,6 +6894,7 @@ mod tests {
 
         assert!(session.capabilities.contains_key(JMAP_CONTACTS_CAPABILITY));
         assert!(session.capabilities.contains_key(JMAP_CALENDARS_CAPABILITY));
+        assert!(session.capabilities.contains_key(JMAP_TASKS_CAPABILITY));
         assert!(session.capabilities.contains_key(JMAP_WEBSOCKET_CAPABILITY));
         assert_eq!(
             session.primary_accounts[JMAP_CONTACTS_CAPABILITY],
@@ -6171,6 +6902,10 @@ mod tests {
         );
         assert_eq!(
             session.primary_accounts[JMAP_CALENDARS_CAPABILITY],
+            FakeStore::account().account_id.to_string()
+        );
+        assert_eq!(
+            session.primary_accounts[JMAP_TASKS_CAPABILITY],
             FakeStore::account().account_id.to_string()
         );
     }
@@ -6297,6 +7032,178 @@ mod tests {
         let events = store.events.lock().unwrap();
         assert_eq!(events.len(), 2);
         assert!(events.iter().any(|event| event.title == "Planning"));
+    }
+
+    #[tokio::test]
+    async fn task_methods_use_canonical_task_store() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            tasks: Arc::new(Mutex::new(vec![FakeStore::task()])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_TASKS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall("TaskList/get".to_string(), json!({}), "c1".to_string()),
+                        JmapMethodCall(
+                            "Task/get".to_string(),
+                            json!({"ids": [FakeStore::task().id.to_string()]}),
+                            "c2".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Task/set".to_string(),
+                            json!({
+                                "create": {
+                                    "t1": {
+                                        "@type": "Task",
+                                        "title": "Follow up",
+                                        "description": "Send customer recap",
+                                        "status": "in-progress",
+                                        "due": "2026-04-22T08:30:00Z",
+                                        "sortOrder": 20,
+                                        "taskListId": "default"
+                                    }
+                                }
+                            }),
+                            "c3".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["list"][0]["id"],
+            Value::String("default".to_string())
+        );
+        assert_eq!(
+            response.method_responses[1].1["list"][0]["status"],
+            Value::String("needs-action".to_string())
+        );
+        assert!(response.created_ids.contains_key("t1"));
+        let tasks = store.tasks.lock().unwrap();
+        assert_eq!(tasks.len(), 2);
+        assert!(tasks.iter().any(|task| task.title == "Follow up"));
+    }
+
+    #[tokio::test]
+    async fn task_query_changes_tracks_sort_order_and_updates() {
+        let mut second_task = FakeStore::task();
+        second_task.id = Uuid::parse_str("67676767-6767-6767-6767-676767676767").unwrap();
+        second_task.title = "Review notes".to_string();
+        second_task.sort_order = 20;
+        second_task.updated_at = "2026-04-20T15:10:00Z".to_string();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            tasks: Arc::new(Mutex::new(vec![FakeStore::task(), second_task.clone()])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let initial = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_TASKS_CAPABILITY.to_string()],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Task/query".to_string(),
+                            json!({"sort": [{"property": "sortOrder", "isAscending": true}]}),
+                            "c1".to_string(),
+                        ),
+                        JmapMethodCall("Task/get".to_string(), json!({}), "c2".to_string()),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        let query_state = initial.method_responses[0].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let task_state = initial.method_responses[1].1["state"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_TASKS_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Task/set".to_string(),
+                        json!({
+                            "update": {
+                                second_task.id.to_string(): {
+                                    "title": "Review notes",
+                                    "description": "Review architecture notes",
+                                    "status": "completed",
+                                    "completed": "2026-04-20T16:00:00Z",
+                                    "sortOrder": 5,
+                                    "taskListId": "default"
+                                }
+                            }
+                        }),
+                        "c2".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let changes = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_TASKS_CAPABILITY.to_string()],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Task/queryChanges".to_string(),
+                            json!({
+                                "sinceQueryState": query_state,
+                                "sort": [{"property": "sortOrder", "isAscending": true}]
+                            }),
+                            "c3".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Task/changes".to_string(),
+                            json!({
+                                "sinceState": task_state
+                            }),
+                            "c4".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(changes.method_responses[0].1["removed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == &Value::String(second_task.id.to_string())));
+        assert!(changes.method_responses[0].1["added"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value["id"] == Value::String(second_task.id.to_string())));
+        assert!(changes.method_responses[1].1["updated"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == &Value::String(second_task.id.to_string())));
     }
 
     #[tokio::test]

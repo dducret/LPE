@@ -1,10 +1,10 @@
 use anyhow::Result;
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount,
+    AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount, ClientTask,
     CollaborationCollection, JmapEmail, JmapEmailQuery, JmapEmailSubmission,
     JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
     JmapThreadQuery, JmapUploadBlob, SavedDraftMessage, Storage, SubmitMessageInput,
-    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
+    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use uuid::Uuid;
 
@@ -156,6 +156,14 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         principal_account_id: Uuid,
         event_id: Uuid,
     ) -> Result<()>;
+    async fn fetch_jmap_tasks(&self, account_id: Uuid) -> Result<Vec<ClientTask>>;
+    async fn fetch_jmap_tasks_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientTask>>;
+    async fn upsert_jmap_task(&self, input: UpsertClientTaskInput) -> Result<ClientTask>;
+    async fn delete_jmap_task(&self, account_id: Uuid, task_id: Uuid) -> Result<()>;
 }
 
 impl JmapStore for Storage {
@@ -419,5 +427,25 @@ impl JmapStore for Storage {
     ) -> Result<()> {
         self.delete_accessible_event(principal_account_id, event_id)
             .await
+    }
+
+    async fn fetch_jmap_tasks(&self, account_id: Uuid) -> Result<Vec<ClientTask>> {
+        self.fetch_client_tasks(account_id).await
+    }
+
+    async fn fetch_jmap_tasks_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientTask>> {
+        self.fetch_client_tasks_by_ids(account_id, ids).await
+    }
+
+    async fn upsert_jmap_task(&self, input: UpsertClientTaskInput) -> Result<ClientTask> {
+        self.upsert_client_task(input).await
+    }
+
+    async fn delete_jmap_task(&self, account_id: Uuid, task_id: Uuid) -> Result<()> {
+        self.delete_client_task(account_id, task_id).await
     }
 }

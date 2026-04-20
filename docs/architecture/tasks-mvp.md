@@ -65,6 +65,80 @@ The MVP explicitly prepares:
 - future mobile and `ActiveSync` reuse without reshaping the storage model
 - future incremental synchronization through `updated_at` and `sort_order`
 
+### JMAP Tasks adapter MVP
+
+The first `JMAP Tasks` adapter now ships in `lpe-jmap`.
+
+It remains a thin adapter above the canonical `tasks` table:
+
+- the canonical `tasks` row remains the single source of truth
+- no `JMAP`-specific task store, sync table, or rights model is introduced
+- all reads and writes remain scoped to the authenticated account
+- the exposed shape stays intentionally close to future `DAV` `VTODO` and `ActiveSync Tasks` reuse
+
+#### Task list model
+
+The MVP exposes one virtual `TaskList` per authenticated account:
+
+- `TaskList.id`: `default`
+- `TaskList.role`: `inbox`
+- `TaskList.name`: `Tasks`
+- `TaskList` rights: read, create, update, and delete task items for the authenticated account only
+
+`TaskList/set` is rejected in the MVP because the canonical model currently has one personal task collection per account and does not yet model multiple task lists.
+
+#### Canonical mapping
+
+The first `Task` mapping is:
+
+- `Task.id` and `Task.uid` -> canonical `tasks.id`
+- `Task.taskListId` -> virtual `default` task list
+- `Task.title` -> `tasks.title`
+- `Task.description` -> `tasks.description`
+- `Task.status` -> `tasks.status`
+- `Task.due` -> `tasks.due_at` as a UTC timestamp string
+- `Task.completed` -> `tasks.completed_at` as a UTC timestamp string
+- `Task.sortOrder` -> `tasks.sort_order`
+- `Task.updated` -> `tasks.updated_at` as a UTC timestamp string
+
+The MVP keeps the canonical task status set unchanged:
+
+- `needs-action`
+- `in-progress`
+- `completed`
+- `cancelled`
+
+This preserves a direct bridge to future `VTODO` `STATUS` mapping and to later mobile compatibility layers.
+
+#### Implemented JMAP methods
+
+The first adapter implements:
+
+- `TaskList/get`
+- `TaskList/changes`
+- `TaskList/set` with forbidden mutation semantics
+- `Task/get`
+- `Task/query`
+- `Task/queryChanges`
+- `Task/changes`
+- `Task/set`
+
+The MVP intentionally does not yet implement:
+
+- shared task lists
+- `Task/copy`
+- task notifications
+- recurrence, alerts, subtasks, assignees, or attachments
+
+#### Sync behavior
+
+The MVP sync contract is:
+
+- `Task/changes` fingerprints include canonical task content together with `sort_order` and `updated_at`
+- `Task/query` is ordered by `sort_order`, then `updated_at`, then `id`
+- `Task/queryChanges` treats `sort_order` moves as ordered-result changes so clients can reconcile task reordering
+- `TaskList/changes` uses the virtual single-list state only; there is no parallel list sync store
+
 ### Out of scope for the MVP
 
 - shared task lists

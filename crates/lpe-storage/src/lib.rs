@@ -701,6 +701,7 @@ pub struct ClientTask {
     pub due_at: Option<String>,
     pub completed_at: Option<String>,
     pub sort_order: i32,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1359,6 +1360,7 @@ struct ClientTaskRow {
     due_at: Option<String>,
     completed_at: Option<String>,
     sort_order: i32,
+    updated_at: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -2678,10 +2680,11 @@ impl Storage {
         Ok(rows
             .into_iter()
             .filter_map(|row| {
-                row.password_hash.map(|password_hash| StoredAccountAppPassword {
-                    id: row.id,
-                    password_hash,
-                })
+                row.password_hash
+                    .map(|password_hash| StoredAccountAppPassword {
+                        id: row.id,
+                        password_hash,
+                    })
             })
             .collect())
     }
@@ -5937,7 +5940,8 @@ impl Storage {
                     WHEN completed_at IS NULL THEN NULL
                     ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS completed_at,
-                sort_order
+                sort_order,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             "#,
         )
         .bind(task_id)
@@ -7927,12 +7931,10 @@ impl Storage {
                 oidc_claim_subject: row
                     .try_get::<Option<String>, _>("claim_subject")?
                     .unwrap_or_else(|| "sub".to_string()),
-                mailbox_password_login_enabled: row
-                    .try_get("mailbox_password_login_enabled")?,
+                mailbox_password_login_enabled: row.try_get("mailbox_password_login_enabled")?,
                 mailbox_oidc_login_enabled: row.try_get("mailbox_oidc_login_enabled")?,
                 mailbox_oidc_provider_label: row.try_get("mailbox_oidc_provider_label")?,
-                mailbox_oidc_auto_link_by_email: row
-                    .try_get("mailbox_oidc_auto_link_by_email")?,
+                mailbox_oidc_auto_link_by_email: row.try_get("mailbox_oidc_auto_link_by_email")?,
                 mailbox_oidc_issuer_url: row
                     .try_get::<Option<String>, _>("mailbox_issuer_url")?
                     .unwrap_or_default(),
@@ -7963,8 +7965,7 @@ impl Storage {
                 mailbox_oidc_claim_subject: row
                     .try_get::<Option<String>, _>("mailbox_claim_subject")?
                     .unwrap_or_else(|| "sub".to_string()),
-                mailbox_app_passwords_enabled: row
-                    .try_get("mailbox_app_passwords_enabled")?,
+                mailbox_app_passwords_enabled: row.try_get("mailbox_app_passwords_enabled")?,
             },
             None => SecuritySettings {
                 password_login_enabled: true,
@@ -8299,7 +8300,8 @@ impl Storage {
                     WHEN completed_at IS NULL THEN NULL
                     ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS completed_at,
-                sort_order
+                sort_order,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             FROM tasks
             WHERE tenant_id = $1 AND account_id = $2
             ORDER BY
@@ -8346,7 +8348,8 @@ impl Storage {
                     WHEN completed_at IS NULL THEN NULL
                     ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS completed_at,
-                sort_order
+                sort_order,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             FROM tasks
             WHERE tenant_id = $1
               AND account_id = $2
@@ -9639,6 +9642,7 @@ fn map_task(row: ClientTaskRow) -> ClientTask {
         due_at: row.due_at,
         completed_at: row.completed_at,
         sort_order: row.sort_order,
+        updated_at: row.updated_at,
     }
 }
 
@@ -9845,8 +9849,7 @@ mod tests {
         attachment_kind, default_permissions_for_role, domain_from_email,
         normalize_admin_permissions, normalize_bcc_recipients, normalize_task_status,
         normalize_visible_recipients, participants_normalized, validate_pst_import_path,
-        SubmitMessageInput,
-        SubmittedRecipientInput,
+        SubmitMessageInput, SubmittedRecipientInput,
     };
     use lpe_magika::{
         write_validation_record, ExpectedKind, IngressContext, PolicyDecision, ValidationOutcome,
@@ -9997,7 +10000,10 @@ mod tests {
 
     #[test]
     fn attachment_kind_falls_back_to_real_extension_label() {
-        assert_eq!(attachment_kind("application/octet-stream", "archive.zip"), "ZIP");
+        assert_eq!(
+            attachment_kind("application/octet-stream", "archive.zip"),
+            "ZIP"
+        );
         assert_eq!(attachment_kind("application/octet-stream", "blob"), "FILE");
     }
 
