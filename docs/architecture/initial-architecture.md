@@ -57,7 +57,7 @@ All client layers must use this canonical submission and synchronization model. 
 
 Every file entering through an external connection or through a client must be validated with Google `Magika` before normal processing. This applies to `LPE-CT` for external ingress paths and to `LPE` for client-side uploads and imports.
 
-The currently implemented `JMAP Mail` MVP in `lpe-jmap` follows that rule. `EmailSubmission/set` does not speak `SMTP`; it reuses the existing canonical submission workflow after loading a persisted draft. `Mailbox/get`, `Email/query`, and `Email/get` read the canonical mailbox projection without reinjecting `Bcc` into standard search paths. The supported scope is detailed in `docs/architecture/jmap-mail-mvp.md`.
+The currently implemented `JMAP Mail` MVP in `lpe-jmap` follows that rule. `EmailSubmission/set` does not speak `SMTP`; it reuses the existing canonical submission workflow after loading a persisted draft. `Mailbox/get`, `Email/query`, and `Email/get` read the canonical mailbox projection without reinjecting `Bcc` into standard search paths. `JMAP` over WebSocket now reuses those same canonical projections and state tokens for real-time refresh without introducing a second mailbox-state engine. The supported scope is detailed in `docs/architecture/jmap-mail-mvp.md`.
 
 The currently implemented `IMAP` MVP in `lpe-imap` follows the same rule. `LOGIN`, `LIST`, `SELECT`, `FETCH`, `STORE`, `SEARCH`, and `UID` read and update canonical mailbox state, while `APPEND` is limited to `Drafts` and reuses canonical draft persistence without introducing parallel `Sent`, `Drafts`, or `Outbox` logic. The supported scope is detailed in `docs/architecture/imap-mvp.md`.
 

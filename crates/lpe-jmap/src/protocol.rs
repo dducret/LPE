@@ -26,6 +26,64 @@ pub struct JmapApiResponse {
 #[derive(Debug, Serialize)]
 pub struct JmapMethodResponse(pub String, pub Value, pub String);
 
+#[derive(Debug, Deserialize)]
+pub struct WebSocketRequestEnvelope {
+    #[serde(rename = "@type")]
+    pub _type_name: Option<String>,
+    pub id: Option<String>,
+    #[serde(rename = "using", default)]
+    pub using_capabilities: Vec<String>,
+    #[serde(rename = "methodCalls", default)]
+    pub method_calls: Vec<JmapMethodCall>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WebSocketPushEnable {
+    #[serde(rename = "@type")]
+    pub _type_name: String,
+    #[serde(rename = "dataTypes", default)]
+    pub data_types: Vec<String>,
+    #[serde(rename = "pushState")]
+    pub push_state: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WebSocketPushDisable {
+    #[serde(rename = "@type")]
+    pub _type_name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WebSocketResponse {
+    #[serde(rename = "@type")]
+    pub type_name: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(flatten)]
+    pub response: JmapApiResponse,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WebSocketRequestError {
+    #[serde(rename = "@type")]
+    pub type_name: &'static str,
+    #[serde(rename = "requestId", skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(rename = "type")]
+    pub error_type: String,
+    pub status: u16,
+    pub detail: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WebSocketStateChange {
+    #[serde(rename = "@type")]
+    pub type_name: &'static str,
+    pub changed: HashMap<String, HashMap<String, String>>,
+    #[serde(rename = "pushState", skip_serializing_if = "Option::is_none")]
+    pub push_state: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct SessionDocument {
     pub capabilities: HashMap<String, Value>,

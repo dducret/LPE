@@ -10,16 +10,18 @@ This document describes the `JMAP Mail` scope currently supported by `LPE` for t
 
 - the `JMAP` client reuses the existing mailbox-account authentication
 - login remains `/api/mail/auth/login`
-- the existing account bearer token must then be sent to `/api/jmap/session` and `/api/jmap/api`
-- without the Debian reverse proxy, the same routes are exposed directly as `/jmap/session` and `/jmap/api`
+- the existing account bearer token must then be sent to `/api/jmap/session`, `/api/jmap/api`, and `/api/jmap/ws`
+- without the Debian reverse proxy, the same routes are exposed directly as `/jmap/session`, `/jmap/api`, and `/jmap/ws`
 
 ### Supported session capabilities
 
 - `urn:ietf:params:jmap:core`
 - `urn:ietf:params:jmap:mail`
 - `urn:ietf:params:jmap:submission`
+- `urn:ietf:params:jmap:websocket`
 
 The `JMAP` session is real: it is built from the authenticated mailbox account and exposes that current `LPE` account as the active `accountId`.
+The WebSocket capability is advertised only when the `/jmap/ws` endpoint is actually present in the running adapter.
 
 ### Supported methods
 
@@ -48,6 +50,7 @@ Additional supported `JMAP` routes:
 
 - `POST /api/jmap/upload/{accountId}` for temporary `JMAP` blob upload
 - `GET /api/jmap/download/{accountId}/{blobId}/{name}` for temporary blob download
+- `GET /api/jmap/ws` for `JMAP` over WebSocket with the `jmap` subprotocol
 
 ### Important MVP rules
 
@@ -56,6 +59,8 @@ Additional supported `JMAP` routes:
 - `EmailSubmission/set` does not submit raw MIME or direct `SMTP`
 - `EmailSubmission/set` takes an existing draft `emailId` and calls the canonical `LPE` submission workflow
 - canonical submission creates the authoritative copy in `Sent`, marks the message as `queued`, inserts an `outbound_message_queue` row, then removes the source draft
+- `JMAP` object `state` values and WebSocket `StateChange` payloads are derived from the same canonical mailbox, message, contact, and calendar projections already stored in `PostgreSQL`
+- the WebSocket transport is notification and request transport only; it does not introduce a second mailbox cache, event journal, or submission model
 - `Bcc` remains stored separately in `message_bcc_recipients`
 - `Bcc` is not reinjected into search, `participants_normalized`, or `Email/query`
 - `Email/get` may return `bcc` only when the `bcc` property is explicitly requested for the authenticated account's own sender-side draft or sent message
@@ -76,13 +81,15 @@ Additional supported `JMAP` routes:
 - `Blob/upload` currently stores temporary upload blobs in `PostgreSQL`
 - message `blobId` values now expose the canonical `mime_blob_ref` shape when one already exists, including `upload:{uuid}` for imported MIME uploads, and fall back to adapter-scoped opaque identifiers for messages that do not yet expose a persistent downloadable MIME blob
 - no `JMAP Blob/get`, blob copy, or persistent message download contract is advertised yet; the current blob model is intentionally limited to uploaded-imported MIME reuse and internal canonical references
-- the session keeps `eventSourceUrl` empty and does not advertise any WebSocket capability; the adapter code now keeps query-state handling and blob references separated so a future `JMAP WebSocket` transport can reuse the same canonical query and state logic without changing the storage model
+- the session keeps `eventSourceUrl` empty; this MVP uses `JMAP` over WebSocket rather than the older event-source transport
+- WebSocket push uses short-lived canonical snapshot comparison in the adapter instead of a durable server-side push-subscription history table or a second state database
+- supported push data types are limited to `Mailbox`, `Email`, `Thread`, `AddressBook`, `ContactCard`, `Calendar`, and `CalendarEvent`
 
 ### Next methods to add
 
 - `Blob/copy`
 - `VacationResponse/get`
 - persistent message-blob retrieval beyond temporary uploaded blobs
-- real-time state transport for `JMAP WebSocket` once an actual server endpoint exists
+- durable server-side push cursors or database-native notification fan-out for very large mailbox counts
 
 

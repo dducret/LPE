@@ -18,13 +18,14 @@ The core `LPE` server must not be directly reachable from the public Internet an
 - the `LPE` web client over `HTTPS` on `443` under `/mail`
 - `ActiveSync` over `HTTPS` under `/activesync`
 - exposed `JMAP` endpoints over `TLS` toward `LPE`
+- secure `JMAP` WebSockets over `TLS` under the same published `JMAP` origin when the `JMAP` WebSocket endpoint is enabled
 - `IMAPS`
 - `ManageSieve` over `TLS` on `4190` when enabled
 - `SMTPS`
 
 For secure client submission, the baseline target prefers implicit TLS on port `465`, aligned with `RFC 8314`.
 
-Secure `JMAP` WebSockets are a future extension and are not part of the current baseline.
+When published, the `JMAP` WebSocket endpoint remains a reverse-proxied `LPE` protocol adapter behind `LPE-CT`; it does not change the rule that `LPE-CT` is the only external exposure point.
 
 ### Separation between publication and protocol logic
 
@@ -43,6 +44,12 @@ The `LPE-CT` front layer must therefore support:
 - long timeouts
 - protocol-aware connection handling
 - no premature disconnects for Outlook and iOS during long-held sync waits
+
+`JMAP` WebSockets require similar edge treatment:
+
+- support for `HTTP` upgrade handling and persistent `TLS` sessions
+- no premature idle timeout while a mailbox session is waiting for state changes
+- publication only on the externally documented `LPE-CT` hostname, never by exposing the core `LPE` bind address directly
 
 ### LPE-CT as stateless as possible
 

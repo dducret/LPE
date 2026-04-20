@@ -26,7 +26,7 @@ repository = "https://example.com/lpe"
 
 [workspace.dependencies]
 anyhow = "1.0"
-axum = { version = "0.8", features = ["multipart"] }
+axum = { version = "0.8", features = ["multipart", "ws"] }
 docx_lite = { package = "docx-lite", version = "0.2" }
 pdf_oxide = "0.3"
 quick-xml = "0.39"

@@ -1,7 +1,10 @@
 use anyhow::{anyhow, bail, Result};
 use axum::{
     body::Bytes,
-    extract::State,
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
+    },
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
@@ -19,6 +22,8 @@ use lpe_storage::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
+use tokio::time::interval;
 use uuid::Uuid;
 
 #[cfg(test)]
@@ -39,6 +44,8 @@ use crate::protocol::{
     MailboxCreateInput, MailboxGetArguments, MailboxQueryArguments, MailboxSetArguments,
     MailboxUpdateInput, QueryChangesArguments, QuotaGetArguments, SearchSnippetGetArguments,
     SessionAccount, SessionDocument, ThreadGetArguments, ThreadQueryArguments,
+    WebSocketPushDisable, WebSocketPushEnable, WebSocketRequestEnvelope, WebSocketRequestError,
+    WebSocketResponse, WebSocketStateChange,
 };
 use crate::store::JmapStore;
 
@@ -47,10 +54,13 @@ const JMAP_MAIL_CAPABILITY: &str = "urn:ietf:params:jmap:mail";
 const JMAP_SUBMISSION_CAPABILITY: &str = "urn:ietf:params:jmap:submission";
 const JMAP_CONTACTS_CAPABILITY: &str = "urn:ietf:params:jmap:contacts";
 const JMAP_CALENDARS_CAPABILITY: &str = "urn:ietf:params:jmap:calendars";
-const SESSION_STATE: &str = "mvp-2";
+const JMAP_WEBSOCKET_CAPABILITY: &str = "urn:ietf:params:jmap:websocket";
+const SESSION_STATE: &str = "mvp-3";
 const QUERY_STATE_VERSION: &str = "mvp-2";
+const STATE_TOKEN_VERSION: &str = "mvp-1";
 const MAX_QUERY_LIMIT: u64 = 250;
 const DEFAULT_GET_LIMIT: u64 = 100;
+const WEBSOCKET_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 
@@ -69,6 +79,26 @@ struct QueryDiff {
     added: Vec<Value>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct StateToken {
+    version: String,
+    kind: String,
+    entries: Vec<StateEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct StateEntry {
+    id: String,
+    fingerprint: String,
+}
+
+#[derive(Debug, Default)]
+struct PushSubscription {
+    enabled_types: HashSet<String>,
+    last_type_states: HashMap<String, String>,
+    last_push_state: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum JmapBlobId {
     Upload(Uuid),
@@ -79,6 +109,7 @@ pub fn router() -> Router<Storage> {
     Router::new()
         .route("/session", get(session_handler))
         .route("/api", post(api_handler))
+        .route("/ws", get(websocket_handler))
         .route("/upload/{account_id}", post(upload_handler))
         .route(
             "/download/{account_id}/{blob_id}/{name}",
@@ -113,9 +144,10 @@ async fn session_handler(
 ) -> HttpResult<SessionDocument> {
     let service = JmapService::new(storage);
     let authorization = authorization_header(&headers);
+    let websocket_url = websocket_url(&headers);
     Ok(Json(
         service
-            .session_document(authorization.as_deref())
+            .session_document(authorization.as_deref(), websocket_url.as_deref())
             .await
             .map_err(http_error)?,
     ))
@@ -179,11 +211,31 @@ async fn download_handler(
     Ok(([("content-type", blob.media_type.clone())], blob.blob_bytes))
 }
 
+async fn websocket_handler(
+    ws: WebSocketUpgrade,
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> std::result::Result<impl IntoResponse, (StatusCode, String)> {
+    let service = JmapService::new(storage);
+    let authorization = authorization_header(&headers);
+    let account = service
+        .authenticate(authorization.as_deref())
+        .await
+        .map_err(http_error)?;
+    Ok(ws.protocols(["jmap"]).on_upgrade(move |socket| async move {
+        service.handle_websocket(socket, account).await;
+    }))
+}
+
 impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
-    pub async fn session_document(&self, authorization: Option<&str>) -> Result<SessionDocument> {
+    pub async fn session_document(
+        &self,
+        authorization: Option<&str>,
+        websocket_url: Option<&str>,
+    ) -> Result<SessionDocument> {
         let account = self.authenticate(authorization).await?;
         let account_id = account.account_id.to_string();
-        let capabilities = session_capabilities();
+        let capabilities = session_capabilities(websocket_url.unwrap_or("ws://localhost/jmap/ws"));
         let mut accounts = HashMap::new();
         accounts.insert(
             account_id.clone(),
@@ -220,8 +272,16 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         authorization: Option<&str>,
         request: JmapApiRequest,
     ) -> Result<JmapApiResponse> {
-        let _declared_capabilities = request.using_capabilities;
         let account = self.authenticate(authorization).await?;
+        self.handle_api_request_for_account(&account, request).await
+    }
+
+    async fn handle_api_request_for_account(
+        &self,
+        account: &AuthenticatedAccount,
+        request: JmapApiRequest,
+    ) -> Result<JmapApiResponse> {
+        let _declared_capabilities = request.using_capabilities;
         let mut method_responses = Vec::with_capacity(request.method_calls.len());
         let mut created_ids = HashMap::new();
 
@@ -310,6 +370,366 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         })
     }
 
+    async fn handle_websocket(&self, mut socket: WebSocket, account: AuthenticatedAccount) {
+        let mut subscription = PushSubscription::default();
+        let mut ticker = interval(WEBSOCKET_POLL_INTERVAL);
+        ticker.tick().await;
+
+        loop {
+            tokio::select! {
+                incoming = socket.recv() => {
+                    let Some(Ok(message)) = incoming else {
+                        break;
+                    };
+                    if self
+                        .handle_websocket_message(&mut socket, &account, &mut subscription, message)
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                _ = ticker.tick(), if !subscription.enabled_types.is_empty() => {
+                    if self
+                        .publish_state_changes(&mut socket, account.account_id, &mut subscription)
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    async fn handle_websocket_message(
+        &self,
+        socket: &mut WebSocket,
+        account: &AuthenticatedAccount,
+        subscription: &mut PushSubscription,
+        message: Message,
+    ) -> Result<()> {
+        match message {
+            Message::Text(payload) => {
+                let value = match serde_json::from_str::<Value>(&payload) {
+                    Ok(value) => value,
+                    Err(_) => {
+                        self.send_request_error(
+                            socket,
+                            None,
+                            "urn:ietf:params:jmap:error:notJSON",
+                            StatusCode::BAD_REQUEST,
+                            "The request did not parse as JSON.",
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                };
+
+                let message_type = value
+                    .get("@type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Request");
+                match message_type {
+                    "Request" => {
+                        let envelope: WebSocketRequestEnvelope = serde_json::from_value(value)?;
+                        let response = self
+                            .handle_api_request_for_account(
+                                account,
+                                JmapApiRequest {
+                                    using_capabilities: envelope.using_capabilities,
+                                    method_calls: envelope.method_calls,
+                                },
+                            )
+                            .await?;
+                        let response = WebSocketResponse {
+                            type_name: "Response",
+                            id: envelope.id,
+                            response,
+                        };
+                        socket
+                            .send(Message::Text(serde_json::to_string(&response)?.into()))
+                            .await?;
+                    }
+                    "WebSocketPushEnable" => {
+                        let request: WebSocketPushEnable = serde_json::from_value(value)?;
+                        subscription.enabled_types = request
+                            .data_types
+                            .into_iter()
+                            .filter(|value| self.supports_push_data_type(value))
+                            .collect();
+                        subscription.last_type_states.clear();
+                        subscription.last_push_state = None;
+                        self.enable_push(
+                            socket,
+                            account.account_id,
+                            subscription,
+                            request.push_state,
+                        )
+                        .await?;
+                    }
+                    "WebSocketPushDisable" => {
+                        let _: WebSocketPushDisable = serde_json::from_value(value)?;
+                        subscription.enabled_types.clear();
+                        subscription.last_type_states.clear();
+                        subscription.last_push_state = None;
+                    }
+                    _ => {
+                        self.send_request_error(
+                            socket,
+                            None,
+                            "urn:ietf:params:jmap:error:unknownMethod",
+                            StatusCode::BAD_REQUEST,
+                            "Unsupported WebSocket JMAP message type.",
+                        )
+                        .await?;
+                    }
+                }
+            }
+            Message::Binary(_) => {
+                socket.send(Message::Close(None)).await?;
+            }
+            Message::Ping(payload) => {
+                socket.send(Message::Pong(payload)).await?;
+            }
+            Message::Close(_) => {
+                socket.send(Message::Close(None)).await?;
+            }
+            Message::Pong(_) => {}
+        }
+        Ok(())
+    }
+
+    async fn enable_push(
+        &self,
+        socket: &mut WebSocket,
+        account_id: Uuid,
+        subscription: &mut PushSubscription,
+        client_push_state: Option<String>,
+    ) -> Result<()> {
+        let type_states = self
+            .current_type_states(account_id, &subscription.enabled_types)
+            .await?;
+        let current_push_state = encode_push_state(&type_states)?;
+        let should_send = client_push_state
+            .as_deref()
+            .is_some_and(|push_state| push_state != current_push_state);
+        subscription.last_type_states = type_states.clone();
+        subscription.last_push_state = Some(current_push_state.clone());
+        if should_send {
+            self.send_state_change(socket, account_id, type_states, current_push_state)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn publish_state_changes(
+        &self,
+        socket: &mut WebSocket,
+        account_id: Uuid,
+        subscription: &mut PushSubscription,
+    ) -> Result<()> {
+        let current_type_states = self
+            .current_type_states(account_id, &subscription.enabled_types)
+            .await?;
+        let mut changed = HashMap::new();
+        for (data_type, state) in &current_type_states {
+            if subscription.last_type_states.get(data_type) != Some(state) {
+                changed.insert(data_type.clone(), state.clone());
+            }
+        }
+
+        if changed.is_empty() {
+            return Ok(());
+        }
+
+        let push_state = encode_push_state(&current_type_states)?;
+        subscription.last_type_states = current_type_states;
+        subscription.last_push_state = Some(push_state.clone());
+        self.send_state_change(socket, account_id, changed, push_state)
+            .await
+    }
+
+    async fn send_request_error(
+        &self,
+        socket: &mut WebSocket,
+        request_id: Option<String>,
+        error_type: &str,
+        status: StatusCode,
+        detail: &str,
+    ) -> Result<()> {
+        let error = WebSocketRequestError {
+            type_name: "RequestError",
+            request_id,
+            error_type: error_type.to_string(),
+            status: status.as_u16(),
+            detail: detail.to_string(),
+        };
+        socket
+            .send(Message::Text(serde_json::to_string(&error)?.into()))
+            .await?;
+        Ok(())
+    }
+
+    async fn send_state_change(
+        &self,
+        socket: &mut WebSocket,
+        account_id: Uuid,
+        changed_types: HashMap<String, String>,
+        push_state: String,
+    ) -> Result<()> {
+        let mut changed = HashMap::new();
+        changed.insert(account_id.to_string(), changed_types);
+        let payload = WebSocketStateChange {
+            type_name: "StateChange",
+            changed,
+            push_state: Some(push_state),
+        };
+        socket
+            .send(Message::Text(serde_json::to_string(&payload)?.into()))
+            .await?;
+        Ok(())
+    }
+
+    fn supports_push_data_type(&self, data_type: &str) -> bool {
+        matches!(
+            data_type,
+            "Mailbox"
+                | "Email"
+                | "Thread"
+                | "AddressBook"
+                | "ContactCard"
+                | "Calendar"
+                | "CalendarEvent"
+        )
+    }
+
+    async fn current_type_states(
+        &self,
+        account_id: Uuid,
+        data_types: &HashSet<String>,
+    ) -> Result<HashMap<String, String>> {
+        let mut states = HashMap::new();
+        for data_type in data_types {
+            let state = self.object_state(account_id, data_type).await?;
+            states.insert(data_type.clone(), state);
+        }
+        Ok(states)
+    }
+
+    async fn object_state(&self, account_id: Uuid, data_type: &str) -> Result<String> {
+        let entries = self.object_state_entries(account_id, data_type).await?;
+        encode_state(data_type, entries)
+    }
+
+    async fn object_state_entries(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+    ) -> Result<Vec<StateEntry>> {
+        match data_type {
+            "Mailbox" => {
+                let mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
+                Ok(mailboxes
+                    .into_iter()
+                    .map(|mailbox| StateEntry {
+                        id: mailbox.id.to_string(),
+                        fingerprint: format!(
+                            "{}|{}|{}|{}|{}",
+                            mailbox.role,
+                            mailbox.name,
+                            mailbox.sort_order,
+                            mailbox.total_emails,
+                            mailbox.unread_emails
+                        ),
+                    })
+                    .collect())
+            }
+            "Email" => {
+                let ids = self.store.fetch_all_jmap_email_ids(account_id).await?;
+                let emails = self.store.fetch_jmap_emails(account_id, &ids).await?;
+                Ok(emails
+                    .into_iter()
+                    .map(|email| StateEntry {
+                        id: email.id.to_string(),
+                        fingerprint: email_state_fingerprint(&email),
+                    })
+                    .collect())
+            }
+            "Thread" => {
+                let ids = self.store.fetch_all_jmap_email_ids(account_id).await?;
+                let emails = self.store.fetch_jmap_emails(account_id, &ids).await?;
+                let mut threads: HashMap<Uuid, Vec<String>> = HashMap::new();
+                for email in emails {
+                    threads.entry(email.thread_id).or_default().push(format!(
+                        "{}:{}",
+                        email.id,
+                        email_state_fingerprint(&email)
+                    ));
+                }
+                let mut entries = threads
+                    .into_iter()
+                    .map(|(thread_id, mut fingerprints)| {
+                        fingerprints.sort();
+                        StateEntry {
+                            id: thread_id.to_string(),
+                            fingerprint: fingerprints.join("|"),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                entries.sort_by(|left, right| left.id.cmp(&right.id));
+                Ok(entries)
+            }
+            "AddressBook" => {
+                let collections = self
+                    .store
+                    .fetch_accessible_contact_collections(account_id)
+                    .await?;
+                Ok(collections
+                    .into_iter()
+                    .map(|collection| StateEntry {
+                        id: collection.id.clone(),
+                        fingerprint: collection_state_fingerprint(&collection),
+                    })
+                    .collect())
+            }
+            "ContactCard" => {
+                let contacts = self.store.fetch_accessible_contacts(account_id).await?;
+                Ok(contacts
+                    .into_iter()
+                    .map(|contact| StateEntry {
+                        id: contact.id.to_string(),
+                        fingerprint: contact_state_fingerprint(&contact),
+                    })
+                    .collect())
+            }
+            "Calendar" => {
+                let collections = self
+                    .store
+                    .fetch_accessible_calendar_collections(account_id)
+                    .await?;
+                Ok(collections
+                    .into_iter()
+                    .map(|collection| StateEntry {
+                        id: collection.id.clone(),
+                        fingerprint: collection_state_fingerprint(&collection),
+                    })
+                    .collect())
+            }
+            "CalendarEvent" => {
+                let events = self.store.fetch_accessible_events(account_id).await?;
+                Ok(events
+                    .into_iter()
+                    .map(|event| StateEntry {
+                        id: event.id.to_string(),
+                        fingerprint: event_state_fingerprint(&event),
+                    })
+                    .collect())
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
     async fn handle_mailbox_get(
         &self,
         account: &AuthenticatedAccount,
@@ -338,10 +758,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .filter(|id| !mailboxes.iter().any(|mailbox| mailbox.id == *id))
             .map(|id| Value::String(id.to_string()))
             .collect::<Vec<_>>();
+        let state = self.object_state(account_id, "Mailbox").await?;
 
         Ok(json!({
             "accountId": account_id.to_string(),
-            "state": SESSION_STATE,
+            "state": state,
             "list": list,
             "notFound": not_found,
         }))
@@ -416,12 +837,13 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
-        let ids = self.store.fetch_jmap_mailbox_ids(account_id).await?;
+        let entries = self.object_state_entries(account_id, "Mailbox").await?;
         Ok(changes_response(
             account_id,
+            "Mailbox",
             &arguments.since_state,
             arguments.max_changes,
-            ids.into_iter().map(|id| id.to_string()).collect(),
+            entries,
         ))
     }
 
@@ -433,6 +855,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: MailboxSetArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let old_state = self.object_state(account_id, "Mailbox").await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
         let mut updated = Map::new();
@@ -543,10 +966,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             }
         }
 
+        let new_state = self.object_state(account_id, "Mailbox").await?;
         Ok(json!({
             "accountId": account_id.to_string(),
-            "oldState": SESSION_STATE,
-            "newState": SESSION_STATE,
+            "oldState": old_state,
+            "newState": new_state,
             "created": Value::Object(created),
             "notCreated": Value::Object(not_created),
             "updated": Value::Object(updated),
@@ -579,10 +1003,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .filter(|id| !collections.iter().any(|collection| collection.id == *id))
             .map(Value::String)
             .collect::<Vec<_>>();
+        let state = self.object_state(account_id, "AddressBook").await?;
 
         Ok(json!({
             "accountId": account_id.to_string(),
-            "state": SESSION_STATE,
+            "state": state,
             "list": list,
             "notFound": not_found,
         }))
@@ -632,14 +1057,19 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .store
             .fetch_accessible_contact_collections(account_id)
             .await?;
+        let entries = collections
+            .into_iter()
+            .map(|collection| StateEntry {
+                id: collection.id.clone(),
+                fingerprint: collection_state_fingerprint(&collection),
+            })
+            .collect::<Vec<_>>();
         Ok(changes_response(
             account_id,
+            "AddressBook",
             &arguments.since_state,
             arguments.max_changes,
-            collections
-                .into_iter()
-                .map(|collection| collection.id)
-                .collect(),
+            entries,
         ))
     }
 
@@ -675,10 +1105,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .filter(|id| !contacts.iter().any(|contact| contact.id == *id))
             .map(|id| Value::String(id.to_string()))
             .collect::<Vec<_>>();
+        let state = self.object_state(account_id, "ContactCard").await?;
 
         Ok(json!({
             "accountId": account_id.to_string(),
-            "state": SESSION_STATE,
+            "state": state,
             "list": list,
             "notFound": not_found,
         }))
@@ -729,18 +1160,13 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
-        let ids = self
-            .store
-            .fetch_accessible_contacts(account_id)
-            .await?
-            .into_iter()
-            .map(|contact| contact.id.to_string())
-            .collect::<Vec<_>>();
+        let entries = self.object_state_entries(account_id, "ContactCard").await?;
         Ok(changes_response(
             account_id,
+            "ContactCard",
             &arguments.since_state,
             arguments.max_changes,
-            ids,
+            entries,
         ))
     }
 
@@ -752,6 +1178,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: ContactCardSetArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let old_state = self.object_state(account_id, "ContactCard").await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
         let mut updated = Map::new();
@@ -827,10 +1254,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             }
         }
 
+        let new_state = self.object_state(account_id, "ContactCard").await?;
         Ok(json!({
             "accountId": account_id.to_string(),
-            "oldState": SESSION_STATE,
-            "newState": SESSION_STATE,
+            "oldState": old_state,
+            "newState": new_state,
             "created": Value::Object(created),
             "notCreated": Value::Object(not_created),
             "updated": Value::Object(updated),
@@ -863,10 +1291,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .filter(|id| !collections.iter().any(|collection| collection.id == *id))
             .map(Value::String)
             .collect::<Vec<_>>();
+        let state = self.object_state(account_id, "Calendar").await?;
 
         Ok(json!({
             "accountId": account_id.to_string(),
-            "state": SESSION_STATE,
+            "state": state,
             "list": list,
             "notFound": not_found,
         }))
@@ -916,14 +1345,19 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .store
             .fetch_accessible_calendar_collections(account_id)
             .await?;
+        let entries = collections
+            .into_iter()
+            .map(|collection| StateEntry {
+                id: collection.id.clone(),
+                fingerprint: collection_state_fingerprint(&collection),
+            })
+            .collect::<Vec<_>>();
         Ok(changes_response(
             account_id,
+            "Calendar",
             &arguments.since_state,
             arguments.max_changes,
-            collections
-                .into_iter()
-                .map(|collection| collection.id)
-                .collect(),
+            entries,
         ))
     }
 
@@ -958,10 +1392,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .filter(|id| !events.iter().any(|event| event.id == *id))
             .map(|id| Value::String(id.to_string()))
             .collect::<Vec<_>>();
+        let state = self.object_state(account_id, "CalendarEvent").await?;
 
         Ok(json!({
             "accountId": account_id.to_string(),
-            "state": SESSION_STATE,
+            "state": state,
             "list": list,
             "notFound": not_found,
         }))
@@ -1012,18 +1447,15 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
-        let ids = self
-            .store
-            .fetch_accessible_events(account_id)
-            .await?
-            .into_iter()
-            .map(|event| event.id.to_string())
-            .collect::<Vec<_>>();
+        let entries = self
+            .object_state_entries(account_id, "CalendarEvent")
+            .await?;
         Ok(changes_response(
             account_id,
+            "CalendarEvent",
             &arguments.since_state,
             arguments.max_changes,
-            ids,
+            entries,
         ))
     }
 
@@ -1035,6 +1467,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: CalendarEventSetArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let old_state = self.object_state(account_id, "CalendarEvent").await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
         let mut updated = Map::new();
@@ -1112,10 +1545,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             }
         }
 
+        let new_state = self.object_state(account_id, "CalendarEvent").await?;
         Ok(json!({
             "accountId": account_id.to_string(),
-            "oldState": SESSION_STATE,
-            "newState": SESSION_STATE,
+            "oldState": old_state,
+            "newState": new_state,
             "created": Value::Object(created),
             "notCreated": Value::Object(not_created),
             "updated": Value::Object(updated),
@@ -1258,10 +1692,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .filter(|id| !emails.iter().any(|email| email.id == **id))
             .map(|id| Value::String(id.to_string()))
             .collect::<Vec<_>>();
+        let state = self.object_state(account_id, "Email").await?;
 
         Ok(json!({
             "accountId": account_id.to_string(),
-            "state": SESSION_STATE,
+            "state": state,
             "list": emails.iter().map(|email| email_to_value(email, &properties)).collect::<Vec<_>>(),
             "notFound": not_found,
         }))
@@ -1274,12 +1709,13 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
-        let ids = self.store.fetch_all_jmap_email_ids(account_id).await?;
+        let entries = self.object_state_entries(account_id, "Email").await?;
         Ok(changes_response(
             account_id,
+            "Email",
             &arguments.since_state,
             arguments.max_changes,
-            ids.into_iter().map(|id| id.to_string()).collect(),
+            entries,
         ))
     }
 
@@ -1296,6 +1732,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             bail!("cross-account Email/copy is not supported");
         }
 
+        let old_state = self.object_state(account_id, "Email").await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
         for (creation_id, value) in arguments.create {
@@ -1333,11 +1770,12 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             }
         }
 
+        let new_state = self.object_state(account_id, "Email").await?;
         Ok(json!({
             "fromAccountId": from_account_id.to_string(),
             "accountId": account_id.to_string(),
-            "oldState": SESSION_STATE,
-            "newState": SESSION_STATE,
+            "oldState": old_state,
+            "newState": new_state,
             "created": Value::Object(created),
             "notCreated": Value::Object(not_created),
         }))
@@ -1351,6 +1789,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: EmailImportArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let old_state = self.object_state(account_id, "Email").await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
 
@@ -1388,10 +1827,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             }
         }
 
+        let new_state = self.object_state(account_id, "Email").await?;
         Ok(json!({
             "accountId": account_id.to_string(),
-            "oldState": SESSION_STATE,
-            "newState": SESSION_STATE,
+            "oldState": old_state,
+            "newState": new_state,
             "created": Value::Object(created),
             "notCreated": Value::Object(not_created),
         }))
@@ -1405,6 +1845,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: EmailSetArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let old_state = self.object_state(account_id, "Email").await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
         let mut updated = Map::new();
@@ -1475,10 +1916,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             }
         }
 
+        let new_state = self.object_state(account_id, "Email").await?;
         Ok(json!({
             "accountId": account_id.to_string(),
-            "oldState": SESSION_STATE,
-            "newState": SESSION_STATE,
+            "oldState": old_state,
+            "newState": new_state,
             "created": Value::Object(created),
             "notCreated": Value::Object(not_created),
             "updated": Value::Object(updated),
@@ -1496,6 +1938,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: EmailSubmissionSetArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let old_state = self.object_state(account_id, "Email").await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
 
@@ -1544,10 +1987,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             }
         }
 
+        let new_state = self.object_state(account_id, "Email").await?;
         Ok(json!({
             "accountId": account_id.to_string(),
-            "oldState": SESSION_STATE,
-            "newState": SESSION_STATE,
+            "oldState": old_state,
+            "newState": new_state,
             "created": Value::Object(created),
             "notCreated": Value::Object(not_created),
         }))
@@ -1573,10 +2017,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .filter(|id| !submissions.iter().any(|submission| submission.id == *id))
             .map(|id| Value::String(id.to_string()))
             .collect::<Vec<_>>();
+        let state = self.object_state(account_id, "Email").await?;
 
         Ok(json!({
             "accountId": account_id.to_string(),
-            "state": SESSION_STATE,
+            "state": state,
             "list": submissions.iter().map(|submission| email_submission_to_value(submission, &properties)).collect::<Vec<_>>(),
             "notFound": not_found,
         }))
@@ -1708,10 +2153,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 list.push(thread_to_value(thread_id, thread_emails, &properties));
             }
         }
+        let state = self.object_state(account_id, "Thread").await?;
 
         Ok(json!({
             "accountId": account_id.to_string(),
-            "state": SESSION_STATE,
+            "state": state,
             "list": list,
             "notFound": not_found,
         }))
@@ -1724,12 +2170,13 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
-        let ids = self.store.fetch_all_jmap_thread_ids(account_id).await?;
+        let entries = self.object_state_entries(account_id, "Thread").await?;
         Ok(changes_response(
             account_id,
+            "Thread",
             &arguments.since_state,
             arguments.max_changes,
-            ids.into_iter().map(|id| id.to_string()).collect(),
+            entries,
         ))
     }
 
@@ -2110,6 +2557,24 @@ fn authorization_header(headers: &HeaderMap) -> Option<String> {
         .map(ToString::to_string)
 }
 
+fn websocket_url(headers: &HeaderMap) -> Option<String> {
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))
+        .and_then(|value| value.to_str().ok())?;
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| match value {
+            "https" => "wss",
+            "http" => "ws",
+            other if other.starts_with("ws") => other,
+            _ => "ws",
+        })
+        .unwrap_or("ws");
+    Some(format!("{scheme}://{host}/jmap/ws"))
+}
+
 fn bearer_token(authorization: Option<&str>) -> Option<&str> {
     authorization
         .and_then(|value| value.strip_prefix("Bearer "))
@@ -2133,7 +2598,7 @@ fn http_error(error: anyhow::Error) -> (StatusCode, String) {
     (status, message)
 }
 
-fn session_capabilities() -> HashMap<String, Value> {
+fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {
     HashMap::from([
         (
             JMAP_CORE_CAPABILITY.to_string(),
@@ -2170,6 +2635,13 @@ fn session_capabilities() -> HashMap<String, Value> {
             JMAP_CALENDARS_CAPABILITY.to_string(),
             json!({
                 "maxCalendarsPerEvent": 1,
+            }),
+        ),
+        (
+            JMAP_WEBSOCKET_CAPABILITY.to_string(),
+            json!({
+                "url": websocket_url,
+                "supportsPush": true,
             }),
         ),
     ])
@@ -2403,35 +2875,236 @@ fn mailbox_to_value(mailbox: &JmapMailbox, properties: &HashSet<String>) -> Valu
     Value::Object(object)
 }
 
+fn collection_state_fingerprint(collection: &CollaborationCollection) -> String {
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        collection.kind,
+        collection.owner_account_id,
+        collection.owner_email,
+        collection.owner_display_name,
+        collection.display_name,
+        collection.is_owned,
+        collection.rights.may_read,
+        collection.rights.may_write,
+        collection.rights.may_delete,
+        collection.rights.may_share
+    )
+}
+
+fn contact_state_fingerprint(contact: &AccessibleContact) -> String {
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        contact.collection_id,
+        contact.owner_account_id,
+        contact.owner_email,
+        contact.owner_display_name,
+        contact.name,
+        contact.role,
+        contact.email,
+        contact.phone,
+        contact.team,
+        contact.notes,
+        contact.rights.may_write,
+        contact.rights.may_delete
+    )
+}
+
+fn event_state_fingerprint(event: &AccessibleEvent) -> String {
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        event.collection_id,
+        event.owner_account_id,
+        event.owner_email,
+        event.owner_display_name,
+        event.date,
+        event.time,
+        event.time_zone,
+        event.duration_minutes,
+        event.recurrence_rule,
+        event.title,
+        event.location,
+        event.attendees,
+        event.attendees_json,
+        event.notes,
+        event.rights.may_write
+    )
+}
+
+fn email_state_fingerprint(email: &JmapEmail) -> String {
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        email.thread_id,
+        email.mailbox_id,
+        email.mailbox_role,
+        email.mailbox_name,
+        email.received_at,
+        email.sent_at.as_deref().unwrap_or_default(),
+        email.from_display.as_deref().unwrap_or_default(),
+        email.from_address,
+        format_addresses(&email.to),
+        format_addresses(&email.cc),
+        format_addresses(&email.bcc),
+        email.subject,
+        email.preview,
+        email.unread,
+        email.flagged,
+        email.delivery_status,
+    ) + &format!(
+        "|{}|{}|{}|{}|{}",
+        email.body_text,
+        email.body_html_sanitized.as_deref().unwrap_or_default(),
+        email.has_attachments,
+        email.size_octets,
+        email.internet_message_id.as_deref().unwrap_or_default(),
+    )
+}
+
+fn format_addresses(addresses: &[JmapEmailAddress]) -> String {
+    addresses
+        .iter()
+        .map(|address| {
+            format!(
+                "{}:{}",
+                address.address,
+                address.display_name.clone().unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn changes_response(
     account_id: Uuid,
+    kind: &str,
     since_state: &str,
     max_changes: Option<u64>,
-    ids: Vec<String>,
+    current_entries: Vec<StateEntry>,
 ) -> Value {
     let max_changes = max_changes.unwrap_or(u64::MAX) as usize;
-    if since_state == SESSION_STATE {
-        json!({
-            "accountId": account_id.to_string(),
-            "oldState": SESSION_STATE,
-            "newState": SESSION_STATE,
-            "hasMoreChanges": false,
-            "created": Vec::<String>::new(),
-            "updated": Vec::<String>::new(),
-            "destroyed": Vec::<String>::new(),
-        })
-    } else {
-        let created = ids.into_iter().take(max_changes).collect::<Vec<_>>();
-        json!({
+    let new_state =
+        encode_state(kind, current_entries.clone()).unwrap_or_else(|_| SESSION_STATE.to_string());
+    let Ok(previous) = decode_state(since_state) else {
+        let created = current_entries
+            .into_iter()
+            .take(max_changes)
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>();
+        return json!({
             "accountId": account_id.to_string(),
             "oldState": since_state,
-            "newState": SESSION_STATE,
+            "newState": new_state,
             "hasMoreChanges": false,
             "created": created,
             "updated": Vec::<String>::new(),
             "destroyed": Vec::<String>::new(),
-        })
+        });
+    };
+
+    if previous.kind != kind {
+        let created = current_entries
+            .into_iter()
+            .take(max_changes)
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>();
+        return json!({
+            "accountId": account_id.to_string(),
+            "oldState": since_state,
+            "newState": new_state,
+            "hasMoreChanges": false,
+            "created": created,
+            "updated": Vec::<String>::new(),
+            "destroyed": Vec::<String>::new(),
+        });
     }
+
+    let previous_map = previous
+        .entries
+        .into_iter()
+        .map(|entry| (entry.id, entry.fingerprint))
+        .collect::<HashMap<_, _>>();
+    let current_map = current_entries
+        .into_iter()
+        .map(|entry| (entry.id, entry.fingerprint))
+        .collect::<HashMap<_, _>>();
+
+    let mut created = current_map
+        .keys()
+        .filter(|id| !previous_map.contains_key(*id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut updated = current_map
+        .iter()
+        .filter_map(|(id, fingerprint)| {
+            previous_map
+                .get(id)
+                .filter(|previous| *previous != fingerprint)
+                .map(|_| id.clone())
+        })
+        .collect::<Vec<_>>();
+    let mut destroyed = previous_map
+        .keys()
+        .filter(|id| !current_map.contains_key(*id))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    created.sort();
+    updated.sort();
+    destroyed.sort();
+
+    let total_changes = created.len() + updated.len() + destroyed.len();
+    let has_more_changes = total_changes > max_changes;
+    if total_changes > max_changes {
+        let mut remaining = max_changes;
+        created.truncate(remaining.min(created.len()));
+        remaining = remaining.saturating_sub(created.len());
+        updated.truncate(remaining.min(updated.len()));
+        remaining = remaining.saturating_sub(updated.len());
+        destroyed.truncate(remaining.min(destroyed.len()));
+    }
+
+    json!({
+        "accountId": account_id.to_string(),
+        "oldState": since_state,
+        "newState": new_state,
+        "hasMoreChanges": has_more_changes,
+        "created": created,
+        "updated": updated,
+        "destroyed": destroyed,
+    })
+}
+
+fn encode_state(kind: &str, entries: Vec<StateEntry>) -> Result<String> {
+    let mut entries = entries;
+    entries.sort_by(|left, right| left.id.cmp(&right.id));
+    let token = StateToken {
+        version: STATE_TOKEN_VERSION.to_string(),
+        kind: kind.to_string(),
+        entries,
+    };
+    Ok(URL_SAFE_NO_PAD.encode(serde_json::to_vec(&token)?))
+}
+
+fn decode_state(value: &str) -> Result<StateToken> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| anyhow!("invalid state"))?;
+    let token: StateToken = serde_json::from_slice(&bytes).map_err(|_| anyhow!("invalid state"))?;
+    if token.version != STATE_TOKEN_VERSION {
+        bail!("unsupported state version");
+    }
+    Ok(token)
+}
+
+fn encode_push_state(type_states: &HashMap<String, String>) -> Result<String> {
+    let mut entries = type_states
+        .iter()
+        .map(|(data_type, state)| StateEntry {
+            id: data_type.clone(),
+            fingerprint: state.clone(),
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.id.cmp(&right.id));
+    encode_state("Push", entries)
 }
 
 fn encode_query_state(
@@ -4667,13 +5340,20 @@ mod tests {
         });
 
         let session = service
-            .session_document(Some("Bearer token"))
+            .session_document(
+                Some("Bearer token"),
+                Some("wss://mail.example.test/jmap/ws"),
+            )
             .await
             .unwrap();
 
         assert_eq!(session.username, "alice@example.test");
         assert_eq!(session.api_url, "/jmap/api");
         assert!(session.capabilities.contains_key(JMAP_MAIL_CAPABILITY));
+        assert_eq!(
+            session.capabilities[JMAP_WEBSOCKET_CAPABILITY]["url"],
+            "wss://mail.example.test/jmap/ws"
+        );
     }
 
     #[tokio::test]
@@ -4933,6 +5613,61 @@ mod tests {
         assert_eq!(
             response.method_responses[1].1["added"][0]["id"],
             Value::String(FakeStore::inbox_email().id.to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn email_changes_report_updates_for_existing_messages() {
+        let initial = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            emails: vec![FakeStore::draft_email()],
+            ..Default::default()
+        });
+        let initial_response = initial
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/get".to_string(),
+                        json!({}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        let prior_state = initial_response.method_responses[0].1["state"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let mut updated_email = FakeStore::draft_email();
+        updated_email.flagged = true;
+        updated_email.preview = "Updated preview".to_string();
+        let updated = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            emails: vec![updated_email],
+            ..Default::default()
+        });
+        let response = updated
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/changes".to_string(),
+                        json!({"sinceState": prior_state}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["updated"][0],
+            Value::String(FakeStore::draft_email().id.to_string())
         );
     }
 
@@ -5420,12 +6155,16 @@ mod tests {
         });
 
         let session = service
-            .session_document(Some("Bearer token"))
+            .session_document(
+                Some("Bearer token"),
+                Some("wss://mail.example.test/jmap/ws"),
+            )
             .await
             .unwrap();
 
         assert!(session.capabilities.contains_key(JMAP_CONTACTS_CAPABILITY));
         assert!(session.capabilities.contains_key(JMAP_CALENDARS_CAPABILITY));
+        assert!(session.capabilities.contains_key(JMAP_WEBSOCKET_CAPABILITY));
         assert_eq!(
             session.primary_accounts[JMAP_CONTACTS_CAPABILITY],
             FakeStore::account().account_id.to_string()
