@@ -28,11 +28,13 @@ use lpe_storage::{
     AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput,
     AuthenticatedAccount, AuthenticatedAdmin, ClientContact, ClientEvent, ClientTask,
     ClientWorkspace, CollaborationGrantInput, CollaborationResourceKind, DashboardUpdate,
-    EmailTraceResult, EmailTraceSearchInput, HealthResponse, LocalAiSettings, NewAccount,
-    NewAdminAuthFactor, NewAlias, NewDomain, NewFilterRule, NewMailbox, NewPstTransferJob,
-    NewServerAdministrator, PstJobExecutionSummary, SavedDraftMessage, SecuritySettings,
-    ServerSettings, Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
-    UpdateAccount, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    EmailTraceResult, EmailTraceSearchInput, HealthResponse, LocalAiSettings,
+    MailboxDelegationGrantInput, NewAccount, NewAdminAuthFactor, NewAlias, NewDomain,
+    NewFilterRule, NewMailbox, NewPstTransferJob, NewServerAdministrator,
+    PstJobExecutionSummary, SavedDraftMessage, SecuritySettings, SenderDelegationGrant,
+    SenderDelegationGrantInput, SenderDelegationRight, ServerSettings, SieveScriptDocument,
+    Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdateAccount,
+    UpdateDomain, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::env;
 use std::path::{Path, PathBuf};
@@ -57,11 +59,15 @@ use crate::types::{
     CreateClientOauthAccessTokenRequest, CreateDomainRequest, CreateFilterRuleRequest,
     CreateMailboxRequest, CreatePstTransferJobRequest, CreateServerAdministratorRequest,
     EmailTraceSearchRequest, EnrollTotpRequest, EnrollTotpResponse, LocalAiHealthResponse,
-    LoginRequest, LoginResponse, OidcMetadataResponse, OidcStartResponse, ReadinessCheck,
-    ReadinessResponse, SubmitMessageRequest, SubmitRecipientRequest, UpdateAccountRequest,
-    UpdateAntispamSettingsRequest, UpdateLocalAiSettingsRequest, UpdateSecuritySettingsRequest,
-    UpdateServerSettingsRequest, UpsertClientContactRequest, UpsertClientEventRequest,
-    UpsertClientTaskRequest, UpsertCollaborationGrantRequest, VerifyTotpRequest,
+    LoginRequest, LoginResponse, MailFlowResponse, MailboxDelegationResponse,
+    OidcMetadataResponse, OidcStartResponse, ReadinessCheck, ReadinessResponse,
+    RenameSieveScriptRequest, SetActiveSieveScriptRequest, SieveOverviewResponse,
+    SubmitMessageRequest, SubmitRecipientRequest, UpdateAccountRequest,
+    UpdateAntispamSettingsRequest, UpdateDomainRequest, UpdateLocalAiSettingsRequest,
+    UpdateSecuritySettingsRequest, UpdateServerSettingsRequest, UpsertClientContactRequest,
+    UpsertClientEventRequest, UpsertClientTaskRequest, UpsertCollaborationGrantRequest,
+    UpsertMailboxDelegationGrantRequest, UpsertSenderDelegationGrantRequest,
+    UpsertSieveScriptRequest, VerifyTotpRequest,
 };
 
 const MIN_ADMIN_PASSWORD_LEN: usize = 12;
@@ -132,9 +138,11 @@ pub fn router(storage: Storage) -> Router {
             post(upload_pst_import),
         )
         .route("/console/domains", post(create_domain))
+        .route("/console/domains/{domain_id}", put(update_domain))
         .route("/console/aliases", post(create_alias))
         .route("/console/admins", post(create_server_administrator))
         .route("/console/antispam/rules", post(create_filter_rule))
+        .route("/console/mail-flow", get(mail_flow))
         .route(
             "/console/mailboxes/pst-jobs/run-pending",
             post(run_pst_jobs),
@@ -164,6 +172,21 @@ pub fn router(storage: Storage) -> Router {
             "/mail/shares/{kind}/{grantee_account_id}",
             delete(delete_collaboration_grant),
         )
+        .route("/mail/delegation", get(get_mailbox_delegation))
+        .route("/mail/delegation/mailboxes", put(upsert_mailbox_delegation_grant))
+        .route(
+            "/mail/delegation/mailboxes/{grantee_account_id}",
+            delete(delete_mailbox_delegation_grant),
+        )
+        .route("/mail/delegation/sender", put(upsert_sender_delegation_grant))
+        .route(
+            "/mail/delegation/sender/{sender_right}/{grantee_account_id}",
+            delete(delete_sender_delegation_grant),
+        )
+        .route("/mail/sieve", get(get_sieve_overview).post(put_sieve_script))
+        .route("/mail/sieve/rename", post(rename_sieve_script))
+        .route("/mail/sieve/active", put(set_active_sieve_script))
+        .route("/mail/sieve/{name}", get(get_sieve_script).delete(delete_sieve_script))
         .route(
             "/console/audit/email-trace-search",
             post(search_email_trace),
@@ -1178,6 +1201,8 @@ async fn create_account(
                 email: request.email.clone(),
                 display_name: request.display_name,
                 quota_mb: request.quota_mb.max(256),
+                gal_visibility: request.gal_visibility.unwrap_or_else(|| "tenant".to_string()),
+                directory_kind: request.directory_kind.unwrap_or_else(|| "person".to_string()),
             },
             AuditEntryInput {
                 actor: admin.email.clone(),
@@ -1242,6 +1267,8 @@ async fn update_account(
                 display_name: request.display_name,
                 quota_mb: request.quota_mb.max(256),
                 status: request.status,
+                gal_visibility: request.gal_visibility.unwrap_or_else(|| "tenant".to_string()),
+                directory_kind: request.directory_kind.unwrap_or_else(|| "person".to_string()),
                 password_hash,
             },
             AuditEntryInput {
@@ -1418,11 +1445,40 @@ async fn create_domain(
                 default_quota_mb: request.default_quota_mb.max(256),
                 inbound_enabled: request.inbound_enabled,
                 outbound_enabled: request.outbound_enabled,
+                default_sieve_script: request.default_sieve_script.unwrap_or_default(),
             },
             AuditEntryInput {
                 actor: admin.email,
                 action: "create-domain".to_string(),
                 subject: request.name,
+            },
+        )
+        .await
+        .map_err(internal_error)?;
+
+    dashboard(State(storage), headers).await
+}
+
+async fn update_domain(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(domain_id): AxumPath<Uuid>,
+    Json(request): Json<UpdateDomainRequest>,
+) -> ApiResult<AdminDashboard> {
+    let admin = require_admin(&storage, &headers, "domains").await?;
+    storage
+        .update_domain(
+            UpdateDomain {
+                domain_id,
+                default_quota_mb: request.default_quota_mb.max(256),
+                inbound_enabled: request.inbound_enabled,
+                outbound_enabled: request.outbound_enabled,
+                default_sieve_script: request.default_sieve_script.unwrap_or_default(),
+            },
+            AuditEntryInput {
+                actor: admin.email,
+                action: "update-domain".to_string(),
+                subject: domain_id.to_string(),
             },
         )
         .await
@@ -2066,6 +2122,272 @@ async fn delete_collaboration_grant(
     }))
 }
 
+async fn get_mailbox_delegation(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<MailboxDelegationResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let incoming_mailboxes = storage
+        .fetch_accessible_mailbox_accounts(account.account_id)
+        .await
+        .map_err(internal_error)?
+        .into_iter()
+        .filter(|entry| !entry.is_owned)
+        .collect();
+    let overview = lpe_storage::MailboxDelegationOverview {
+        outgoing_mailboxes: storage
+            .fetch_outgoing_mailbox_delegation_grants(account.account_id)
+            .await
+            .map_err(internal_error)?,
+        incoming_mailboxes,
+        outgoing_sender_rights: storage
+            .fetch_outgoing_sender_delegation_grants(account.account_id)
+            .await
+            .map_err(internal_error)?,
+    };
+    Ok(Json(MailboxDelegationResponse { overview }))
+}
+
+async fn upsert_mailbox_delegation_grant(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<UpsertMailboxDelegationGrantRequest>,
+) -> ApiResult<lpe_storage::MailboxDelegationGrant> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .upsert_mailbox_delegation_grant(
+                MailboxDelegationGrantInput {
+                    owner_account_id: account.account_id,
+                    grantee_email: request.grantee_email.clone(),
+                },
+                AuditEntryInput {
+                    actor: account.email.clone(),
+                    action: "mailbox-delegation-upsert".to_string(),
+                    subject: request.grantee_email,
+                },
+            )
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+async fn delete_mailbox_delegation_grant(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(grantee_account_id): AxumPath<Uuid>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    storage
+        .delete_mailbox_delegation_grant(
+            account.account_id,
+            grantee_account_id,
+            AuditEntryInput {
+                actor: account.email,
+                action: "mailbox-delegation-delete".to_string(),
+                subject: grantee_account_id.to_string(),
+            },
+        )
+        .await
+        .map_err(bad_request_error)?;
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+async fn upsert_sender_delegation_grant(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<UpsertSenderDelegationGrantRequest>,
+) -> ApiResult<SenderDelegationGrant> {
+    let account = require_account(&storage, &headers).await?;
+    let sender_right = parse_sender_delegation_right(&request.sender_right).map_err(bad_request_error)?;
+    Ok(Json(
+        storage
+            .upsert_sender_delegation_grant(
+                SenderDelegationGrantInput {
+                    owner_account_id: account.account_id,
+                    grantee_email: request.grantee_email.clone(),
+                    sender_right,
+                },
+                AuditEntryInput {
+                    actor: account.email.clone(),
+                    action: format!("sender-delegation-upsert:{}", sender_right.as_str()),
+                    subject: request.grantee_email,
+                },
+            )
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+async fn delete_sender_delegation_grant(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath((sender_right, grantee_account_id)): AxumPath<(String, Uuid)>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let sender_right = parse_sender_delegation_right(&sender_right).map_err(bad_request_error)?;
+    storage
+        .delete_sender_delegation_grant(
+            account.account_id,
+            grantee_account_id,
+            sender_right,
+            AuditEntryInput {
+                actor: account.email,
+                action: format!("sender-delegation-delete:{}", sender_right.as_str()),
+                subject: grantee_account_id.to_string(),
+            },
+        )
+        .await
+        .map_err(bad_request_error)?;
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+async fn get_sieve_overview(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<SieveOverviewResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let scripts = storage
+        .list_sieve_scripts(account.account_id)
+        .await
+        .map_err(internal_error)?;
+    let active_script = storage
+        .fetch_active_sieve_script(account.account_id)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(SieveOverviewResponse {
+        scripts,
+        active_script,
+    }))
+}
+
+async fn get_sieve_script(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(name): AxumPath<String>,
+) -> ApiResult<SieveScriptDocument> {
+    let account = require_account(&storage, &headers).await?;
+    let script = storage
+        .get_sieve_script(account.account_id, &name)
+        .await
+        .map_err(bad_request_error)?
+        .ok_or((StatusCode::NOT_FOUND, "sieve script not found".to_string()))?;
+    Ok(Json(script))
+}
+
+async fn put_sieve_script(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<UpsertSieveScriptRequest>,
+) -> ApiResult<SieveScriptDocument> {
+    let account = require_account(&storage, &headers).await?;
+    let subject = request.name.clone();
+    Ok(Json(
+        storage
+            .put_sieve_script(
+                account.account_id,
+                &request.name,
+                &request.content,
+                request.activate,
+                AuditEntryInput {
+                    actor: account.email,
+                    action: "sieve-script-upsert".to_string(),
+                    subject,
+                },
+            )
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+async fn rename_sieve_script(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<RenameSieveScriptRequest>,
+) -> ApiResult<lpe_storage::SieveScriptSummary> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .rename_sieve_script(
+                account.account_id,
+                &request.old_name,
+                &request.new_name,
+                AuditEntryInput {
+                    actor: account.email,
+                    action: "sieve-script-rename".to_string(),
+                    subject: format!("{} -> {}", request.old_name, request.new_name),
+                },
+            )
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+async fn set_active_sieve_script(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<SetActiveSieveScriptRequest>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let subject = request.name.clone().unwrap_or_else(|| "none".to_string());
+    storage
+        .set_active_sieve_script(
+            account.account_id,
+            request.name.as_deref(),
+            AuditEntryInput {
+                actor: account.email,
+                action: "sieve-script-activate".to_string(),
+                subject,
+            },
+        )
+        .await
+        .map_err(bad_request_error)?;
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+async fn delete_sieve_script(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(name): AxumPath<String>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let subject = name.clone();
+    storage
+        .delete_sieve_script(
+            account.account_id,
+            &name,
+            AuditEntryInput {
+                actor: account.email,
+                action: "sieve-script-delete".to_string(),
+                subject,
+            },
+        )
+        .await
+        .map_err(bad_request_error)?;
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+async fn mail_flow(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<MailFlowResponse> {
+    require_admin(&storage, &headers, "operations").await?;
+    let items = storage.fetch_mail_flow_entries().await.map_err(internal_error)?;
+    Ok(Json(MailFlowResponse { items }))
+}
+
 async fn list_client_tasks(
     State(storage): State<Storage>,
     headers: HeaderMap,
@@ -2455,6 +2777,14 @@ fn parse_collaboration_kind(value: &str) -> Result<CollaborationResourceKind, St
         "contacts" | "contact" => Ok(CollaborationResourceKind::Contacts),
         "calendar" | "calendars" => Ok(CollaborationResourceKind::Calendar),
         _ => Err("unsupported collaboration kind".to_string()),
+    }
+}
+
+fn parse_sender_delegation_right(value: &str) -> Result<SenderDelegationRight, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "send_as" | "send-as" => Ok(SenderDelegationRight::SendAs),
+        "send_on_behalf" | "send-on-behalf" => Ok(SenderDelegationRight::SendOnBehalf),
+        _ => Err("unsupported sender delegation right".to_string()),
     }
 }
 

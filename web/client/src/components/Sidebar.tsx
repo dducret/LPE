@@ -29,7 +29,8 @@ export function Sidebar(props: {
   const sectionLinks: Array<{ id: Section; label: string }> = [
     { id: "mail", label: props.copy.sections.mail },
     { id: "calendar", label: props.copy.sections.calendar },
-    { id: "contacts", label: props.copy.sections.contacts }
+    { id: "contacts", label: props.copy.sections.contacts },
+    { id: "settings", label: props.copy.sections.settings }
   ];
 
   return (

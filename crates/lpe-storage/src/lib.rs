@@ -165,6 +165,8 @@ pub struct AccountRecord {
     pub quota_mb: u32,
     pub used_mb: u32,
     pub status: String,
+    pub gal_visibility: String,
+    pub directory_kind: String,
     pub mailboxes: Vec<MailboxRecord>,
 }
 
@@ -176,6 +178,7 @@ pub struct DomainRecord {
     pub inbound_enabled: bool,
     pub outbound_enabled: bool,
     pub default_quota_mb: u32,
+    pub default_sieve_script: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -329,6 +332,8 @@ pub struct NewAccount {
     pub email: String,
     pub display_name: String,
     pub quota_mb: u32,
+    pub gal_visibility: String,
+    pub directory_kind: String,
 }
 
 #[derive(Debug, Clone)]
@@ -337,6 +342,8 @@ pub struct UpdateAccount {
     pub display_name: String,
     pub quota_mb: u32,
     pub status: String,
+    pub gal_visibility: String,
+    pub directory_kind: String,
     pub password_hash: Option<String>,
 }
 
@@ -362,6 +369,16 @@ pub struct NewDomain {
     pub default_quota_mb: u32,
     pub inbound_enabled: bool,
     pub outbound_enabled: bool,
+    pub default_sieve_script: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateDomain {
+    pub domain_id: Uuid,
+    pub default_quota_mb: u32,
+    pub inbound_enabled: bool,
+    pub outbound_enabled: bool,
+    pub default_sieve_script: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1152,6 +1169,31 @@ pub struct SenderDelegationGrant {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailboxDelegationOverview {
+    pub outgoing_mailboxes: Vec<MailboxDelegationGrant>,
+    pub incoming_mailboxes: Vec<MailboxAccountAccess>,
+    pub outgoing_sender_rights: Vec<SenderDelegationGrant>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailFlowEntry {
+    pub queue_id: Uuid,
+    pub message_id: Uuid,
+    pub account_email: String,
+    pub subject: String,
+    pub status: String,
+    pub delivery_status: String,
+    pub submitted_at: String,
+    pub last_attempt_at: Option<String>,
+    pub next_attempt_at: Option<String>,
+    pub trace_id: Option<String>,
+    pub remote_message_ref: Option<String>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct OutboundQueueStatusUpdate {
     pub queue_id: Uuid,
     pub message_id: Uuid,
@@ -1325,6 +1367,8 @@ struct AccountRow {
     quota_mb: i32,
     used_mb: i32,
     status: String,
+    gal_visibility: String,
+    directory_kind: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -1359,6 +1403,7 @@ struct DomainRow {
     inbound_enabled: bool,
     outbound_enabled: bool,
     default_quota_mb: i32,
+    default_sieve_script: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -1845,6 +1890,22 @@ struct EmailTraceRow {
     received_at: String,
 }
 
+#[derive(Debug, FromRow)]
+struct MailFlowRow {
+    queue_id: Uuid,
+    message_id: Uuid,
+    account_email: String,
+    subject: String,
+    status: String,
+    delivery_status: String,
+    submitted_at: String,
+    last_attempt_at: Option<String>,
+    next_attempt_at: Option<String>,
+    trace_id: Option<String>,
+    remote_message_ref: Option<String>,
+    last_error: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct CanonicalChangeNotification {
     tenant_id: String,
@@ -1882,7 +1943,15 @@ impl Storage {
         let tenant_id = PLATFORM_TENANT_ID;
         let account_rows = sqlx::query_as::<_, AccountRow>(
             r#"
-            SELECT id, primary_email, display_name, quota_mb, used_mb, status
+            SELECT
+                id,
+                primary_email,
+                display_name,
+                quota_mb,
+                used_mb,
+                status,
+                gal_visibility,
+                directory_kind
             FROM accounts
             WHERE tenant_id = $1
             ORDER BY created_at ASC
@@ -1973,13 +2042,22 @@ impl Storage {
                 quota_mb: row.quota_mb as u32,
                 used_mb: row.used_mb as u32,
                 status: row.status,
+                gal_visibility: row.gal_visibility,
+                directory_kind: row.directory_kind,
                 mailboxes,
             });
         }
 
         let domains = sqlx::query_as::<_, DomainRow>(
             r#"
-            SELECT id, name, status, inbound_enabled, outbound_enabled, default_quota_mb
+            SELECT
+                id,
+                name,
+                status,
+                inbound_enabled,
+                outbound_enabled,
+                default_quota_mb,
+                default_sieve_script
             FROM domains
             WHERE tenant_id = $1
             ORDER BY created_at ASC
@@ -1996,6 +2074,7 @@ impl Storage {
             inbound_enabled: row.inbound_enabled,
             outbound_enabled: row.outbound_enabled,
             default_quota_mb: row.default_quota_mb as u32,
+            default_sieve_script: row.default_sieve_script,
         })
         .collect::<Vec<_>>();
 
@@ -2056,16 +2135,18 @@ impl Storage {
         .collect::<Vec<_>>();
 
         let total_mailboxes = accounts.iter().map(|account| account.mailboxes.len()).sum();
-        let pending_queue_items = accounts
-            .iter()
-            .map(|account| {
-                account
-                    .mailboxes
-                    .iter()
-                    .map(|mailbox| mailbox.message_count)
-                    .sum::<u32>()
-            })
-            .sum();
+        let pending_queue_items = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM outbound_message_queue
+            WHERE tenant_id = $1
+              AND status IN ('queued', 'deferred')
+            "#,
+        )
+        .bind(tenant_id)
+        .fetch_one(&self.pool)
+        .await?
+        .max(0) as u32;
 
         let protocols = vec![
             ProtocolStatus {
@@ -2160,6 +2241,20 @@ impl Storage {
         if insert_result.rows_affected() > 0 {
             sqlx::query(
                 r#"
+                UPDATE accounts
+                SET gal_visibility = $1, directory_kind = $2
+                WHERE tenant_id = $3 AND id = $4
+                "#,
+            )
+            .bind(normalize_gal_visibility(&input.gal_visibility)?)
+            .bind(normalize_directory_kind(&input.directory_kind)?)
+            .bind(&tenant_id)
+            .bind(account_id)
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query(
+                r#"
                 INSERT INTO mailboxes (id, tenant_id, account_id, role, display_name, sort_order, retention_days)
                 VALUES ($1, $2, $3, 'inbox', 'Inbox', 0, 365)
                 "#,
@@ -2196,14 +2291,20 @@ impl Storage {
         let account_email = sqlx::query_scalar::<_, String>(
             r#"
             UPDATE accounts
-            SET display_name = $1, quota_mb = $2, status = $3
-            WHERE tenant_id = $4 AND id = $5
+            SET display_name = $1,
+                quota_mb = $2,
+                status = $3,
+                gal_visibility = $4,
+                directory_kind = $5
+            WHERE tenant_id = $6 AND id = $7
             RETURNING primary_email
             "#,
         )
         .bind(display_name)
         .bind(input.quota_mb.max(256) as i32)
         .bind(&status)
+        .bind(normalize_gal_visibility(&input.gal_visibility)?)
+        .bind(normalize_directory_kind(&input.directory_kind)?)
         .bind(&tenant_id)
         .bind(input.account_id)
         .fetch_optional(&mut *tx)
@@ -2362,8 +2463,11 @@ impl Storage {
         let tenant_id = self.tenant_id_for_domain_name(&input.name).await?;
         let result = sqlx::query(
             r#"
-            INSERT INTO domains (id, tenant_id, name, status, inbound_enabled, outbound_enabled, default_quota_mb)
-            VALUES ($1, $2, $3, 'active', $4, $5, $6)
+            INSERT INTO domains (
+                id, tenant_id, name, status, inbound_enabled, outbound_enabled, default_quota_mb,
+                default_sieve_script
+            )
+            VALUES ($1, $2, $3, 'active', $4, $5, $6, $7)
             ON CONFLICT (tenant_id, name) DO NOTHING
             "#,
         )
@@ -2373,6 +2477,7 @@ impl Storage {
         .bind(input.inbound_enabled)
         .bind(input.outbound_enabled)
         .bind(input.default_quota_mb as i32)
+        .bind(input.default_sieve_script.trim())
         .execute(&mut *tx)
         .await?;
 
@@ -2380,6 +2485,37 @@ impl Storage {
             self.insert_audit(&mut tx, &tenant_id, audit).await?;
         }
 
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn update_domain(&self, input: UpdateDomain, audit: AuditEntryInput) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let tenant_id = PLATFORM_TENANT_ID;
+        let updated = sqlx::query(
+            r#"
+            UPDATE domains
+            SET default_quota_mb = $1,
+                inbound_enabled = $2,
+                outbound_enabled = $3,
+                default_sieve_script = $4
+            WHERE tenant_id = $5 AND id = $6
+            "#,
+        )
+        .bind(input.default_quota_mb.max(256) as i32)
+        .bind(input.inbound_enabled)
+        .bind(input.outbound_enabled)
+        .bind(input.default_sieve_script.trim())
+        .bind(tenant_id)
+        .bind(input.domain_id)
+        .execute(&mut *tx)
+        .await?;
+
+        if updated.rows_affected() == 0 {
+            bail!("domain not found");
+        }
+
+        self.insert_audit(&mut tx, tenant_id, audit).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -6966,6 +7102,73 @@ impl Storage {
         Ok(row.map(map_sender_delegation_grant))
     }
 
+    pub async fn fetch_outgoing_mailbox_delegation_grants(
+        &self,
+        owner_account_id: Uuid,
+    ) -> Result<Vec<MailboxDelegationGrant>> {
+        let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        let rows = sqlx::query_as::<_, MailboxDelegationGrantRow>(
+            r#"
+            SELECT
+                g.id,
+                g.owner_account_id,
+                owner.primary_email AS owner_email,
+                owner.display_name AS owner_display_name,
+                g.grantee_account_id,
+                grantee.primary_email AS grantee_email,
+                grantee.display_name AS grantee_display_name,
+                to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM mailbox_delegation_grants g
+            JOIN accounts owner ON owner.id = g.owner_account_id
+            JOIN accounts grantee ON grantee.id = g.grantee_account_id
+            WHERE g.tenant_id = $1
+              AND g.owner_account_id = $2
+            ORDER BY lower(grantee.primary_email) ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(owner_account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_mailbox_delegation_grant).collect())
+    }
+
+    pub async fn fetch_outgoing_sender_delegation_grants(
+        &self,
+        owner_account_id: Uuid,
+    ) -> Result<Vec<SenderDelegationGrant>> {
+        let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        let rows = sqlx::query_as::<_, SenderDelegationGrantRow>(
+            r#"
+            SELECT
+                g.id,
+                g.owner_account_id,
+                owner.primary_email AS owner_email,
+                owner.display_name AS owner_display_name,
+                g.grantee_account_id,
+                grantee.primary_email AS grantee_email,
+                grantee.display_name AS grantee_display_name,
+                g.sender_right,
+                to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM sender_delegation_grants g
+            JOIN accounts owner ON owner.id = g.owner_account_id
+            JOIN accounts grantee ON grantee.id = g.grantee_account_id
+            WHERE g.tenant_id = $1
+              AND g.owner_account_id = $2
+            ORDER BY lower(grantee.primary_email) ASC, g.sender_right ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(owner_account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_sender_delegation_grant).collect())
+    }
+
     pub async fn fetch_accessible_mailbox_accounts(
         &self,
         principal_account_id: Uuid,
@@ -7028,6 +7231,59 @@ impl Storage {
             may_send_on_behalf: row.may_send_on_behalf,
         }));
         Ok(accounts)
+    }
+
+    pub async fn fetch_mail_flow_entries(&self) -> Result<Vec<MailFlowEntry>> {
+        let rows = sqlx::query_as::<_, MailFlowRow>(
+            r#"
+            SELECT
+                q.id AS queue_id,
+                q.message_id,
+                a.primary_email AS account_email,
+                m.subject_normalized AS subject,
+                q.status,
+                m.delivery_status,
+                to_char(q.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS submitted_at,
+                CASE
+                    WHEN q.last_attempt_at IS NULL THEN NULL
+                    ELSE to_char(q.last_attempt_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS last_attempt_at,
+                CASE
+                    WHEN q.next_attempt_at IS NULL THEN NULL
+                    ELSE to_char(q.next_attempt_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS next_attempt_at,
+                q.trace_id,
+                q.remote_message_ref,
+                q.last_error
+            FROM outbound_message_queue q
+            JOIN messages m ON m.id = q.message_id
+            JOIN accounts a ON a.id = m.account_id
+            WHERE q.tenant_id = $1
+            ORDER BY q.created_at DESC
+            LIMIT 100
+            "#,
+        )
+        .bind(PLATFORM_TENANT_ID)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| MailFlowEntry {
+                queue_id: row.queue_id,
+                message_id: row.message_id,
+                account_email: row.account_email,
+                subject: row.subject,
+                status: row.status,
+                delivery_status: row.delivery_status,
+                submitted_at: row.submitted_at,
+                last_attempt_at: row.last_attempt_at,
+                next_attempt_at: row.next_attempt_at,
+                trace_id: row.trace_id,
+                remote_message_ref: row.remote_message_ref,
+                last_error: row.last_error,
+            })
+            .collect())
     }
 
     pub async fn require_mailbox_account_access(
@@ -10965,6 +11221,23 @@ fn trim_optional_text(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
+}
+
+fn normalize_gal_visibility(value: &str) -> Result<String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "tenant" | "" => Ok("tenant".to_string()),
+        "hidden" => Ok("hidden".to_string()),
+        other => bail!("unsupported GAL visibility: {other}"),
+    }
+}
+
+fn normalize_directory_kind(value: &str) -> Result<String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "person" | "" => Ok("person".to_string()),
+        "room" => Ok("room".to_string()),
+        "equipment" => Ok("equipment".to_string()),
+        other => bail!("unsupported directory kind: {other}"),
+    }
 }
 
 fn sender_authorization_kind_from_str(value: &str) -> SenderAuthorizationKind {

@@ -1690,3 +1690,43 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+.detail-pane-wide {
+  grid-column: 1 / -1;
+}
+
+.settings-shell {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.settings-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 1rem;
+}
+
+.settings-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.settings-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line-soft, rgba(15, 23, 42, 0.12));
+  border-radius: 1rem;
+  background: var(--surface-elevated, rgba(255, 255, 255, 0.86));
+}
+
+.settings-item p {
+  margin: 0.2rem 0 0;
+  color: var(--text-muted, rgba(15, 23, 42, 0.68));
+}

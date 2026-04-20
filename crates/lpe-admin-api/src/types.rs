@@ -1,7 +1,8 @@
 use axum::{http::StatusCode, Json};
 use lpe_storage::{
     AccountAppPassword, AccountAuthFactor, AdminAuthFactor, AuthenticatedAccount,
-    AuthenticatedAdmin, CollaborationCollection, CollaborationGrant,
+    AuthenticatedAdmin, CollaborationCollection, CollaborationGrant, MailFlowEntry,
+    MailboxDelegationOverview, SieveScriptDocument, SieveScriptSummary,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -166,6 +167,10 @@ pub struct CreateAccountRequest {
     pub display_name: String,
     pub quota_mb: u32,
     pub password: String,
+    #[serde(default)]
+    pub gal_visibility: Option<String>,
+    #[serde(default)]
+    pub directory_kind: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -174,6 +179,10 @@ pub struct UpdateAccountRequest {
     pub quota_mb: u32,
     pub status: String,
     pub password: Option<String>,
+    #[serde(default)]
+    pub gal_visibility: Option<String>,
+    #[serde(default)]
+    pub directory_kind: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -198,6 +207,17 @@ pub struct CreateDomainRequest {
     pub default_quota_mb: u32,
     pub inbound_enabled: bool,
     pub outbound_enabled: bool,
+    #[serde(default)]
+    pub default_sieve_script: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateDomainRequest {
+    pub default_quota_mb: u32,
+    pub inbound_enabled: bool,
+    pub outbound_enabled: bool,
+    #[serde(default)]
+    pub default_sieve_script: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -388,6 +408,60 @@ pub struct CollaborationOverviewResponse {
     pub outgoing_calendars: Vec<CollaborationGrant>,
     pub incoming_contact_collections: Vec<CollaborationCollection>,
     pub incoming_calendar_collections: Vec<CollaborationCollection>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertMailboxDelegationGrantRequest {
+    pub grantee_email: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertSenderDelegationGrantRequest {
+    pub grantee_email: String,
+    pub sender_right: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailFlowResponse {
+    pub items: Vec<MailFlowEntry>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SieveOverviewResponse {
+    pub scripts: Vec<SieveScriptSummary>,
+    pub active_script: Option<SieveScriptDocument>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertSieveScriptRequest {
+    pub name: String,
+    pub content: String,
+    #[serde(default)]
+    pub activate: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameSieveScriptRequest {
+    pub old_name: String,
+    pub new_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetActiveSieveScriptRequest {
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailboxDelegationResponse {
+    pub overview: MailboxDelegationOverview,
 }
 
 #[derive(Debug, Deserialize)]

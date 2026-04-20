@@ -3,9 +3,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lpe_mail_auth::{
     authenticate_bearer_access_token, authenticate_plain_credentials, AccountAuthStore,
 };
-use lpe_storage::{
-    AuditEntryInput, SieveScriptDocument, SieveScriptSummary, Storage,
-};
+use lpe_storage::{AuditEntryInput, SieveScriptDocument, SieveScriptSummary, Storage};
 use std::{future::Future, pin::Pin};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
@@ -322,18 +320,12 @@ async fn authenticate<S: ManageSieveStore>(
             let _authzid = parts.next();
             let username = String::from_utf8(parts.next().unwrap_or_default().to_vec())?;
             let password = String::from_utf8(parts.next().unwrap_or_default().to_vec())?;
-            authenticate_plain_credentials(store, None, &username, &password, "managesieve")
-                .await?
+            authenticate_plain_credentials(store, None, &username, &password, "managesieve").await?
         }
         "XOAUTH2" => {
             let (username, bearer_token) = parse_xoauth2_initial_response(&encoded)?;
-            authenticate_bearer_access_token(
-                store,
-                Some(&username),
-                &bearer_token,
-                "managesieve",
-            )
-            .await?
+            authenticate_bearer_access_token(store, Some(&username), &bearer_token, "managesieve")
+                .await?
         }
         _ => bail!("only AUTHENTICATE PLAIN and XOAUTH2 are supported"),
     };
@@ -568,9 +560,9 @@ mod tests {
         password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
         Argon2,
     };
+    use lpe_mail_auth::issue_oauth_access_token;
     use lpe_storage::AccountLogin;
     use std::sync::{Arc, Mutex};
-    use lpe_mail_auth::issue_oauth_access_token;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -653,7 +645,6 @@ mod tests {
     }
 
     impl ManageSieveStore for FakeStore {
-
         fn list_sieve_scripts<'a>(
             &'a self,
             _account_id: Uuid,

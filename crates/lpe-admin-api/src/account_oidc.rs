@@ -110,10 +110,13 @@ pub async fn exchange_code_for_claims(
         .context("mailbox OIDC userinfo payload is invalid")?;
 
     let issuer_url = settings.mailbox_oidc_issuer_url.trim().to_string();
-    let subject = claim_string(&userinfo, &settings.mailbox_oidc_claim_subject)
-        .ok_or_else(|| anyhow!("mailbox OIDC userinfo does not contain the configured subject claim"))?;
-    let email = claim_string(&userinfo, &settings.mailbox_oidc_claim_email)
-        .ok_or_else(|| anyhow!("mailbox OIDC userinfo does not contain the configured email claim"))?;
+    let subject =
+        claim_string(&userinfo, &settings.mailbox_oidc_claim_subject).ok_or_else(|| {
+            anyhow!("mailbox OIDC userinfo does not contain the configured subject claim")
+        })?;
+    let email = claim_string(&userinfo, &settings.mailbox_oidc_claim_email).ok_or_else(|| {
+        anyhow!("mailbox OIDC userinfo does not contain the configured email claim")
+    })?;
     let display_name = claim_string(&userinfo, &settings.mailbox_oidc_claim_display_name)
         .unwrap_or_else(|| email.clone());
 
@@ -161,18 +164,27 @@ fn normalized_scopes(settings: &SecuritySettings) -> &str {
 }
 
 async fn resolved_endpoints(settings: &SecuritySettings) -> Result<OidcResolvedEndpoints> {
-    if !settings.mailbox_oidc_authorization_endpoint.trim().is_empty()
+    if !settings
+        .mailbox_oidc_authorization_endpoint
+        .trim()
+        .is_empty()
         && !settings.mailbox_oidc_token_endpoint.trim().is_empty()
         && !settings.mailbox_oidc_userinfo_endpoint.trim().is_empty()
     {
         return Ok(OidcResolvedEndpoints {
-            authorization_endpoint: settings.mailbox_oidc_authorization_endpoint.trim().to_string(),
+            authorization_endpoint: settings
+                .mailbox_oidc_authorization_endpoint
+                .trim()
+                .to_string(),
             token_endpoint: settings.mailbox_oidc_token_endpoint.trim().to_string(),
             userinfo_endpoint: settings.mailbox_oidc_userinfo_endpoint.trim().to_string(),
         });
     }
 
-    let issuer = settings.mailbox_oidc_issuer_url.trim().trim_end_matches('/');
+    let issuer = settings
+        .mailbox_oidc_issuer_url
+        .trim()
+        .trim_end_matches('/');
     let discovery_url = format!("{issuer}/.well-known/openid-configuration");
     let document = Client::new()
         .get(&discovery_url)
@@ -210,8 +222,8 @@ fn verify_state(state: &str, secret: &str, expected_redirect_uri: &str) -> Resul
     let payload = URL_SAFE_NO_PAD
         .decode(payload_encoded)
         .context("mailbox OIDC state payload is invalid")?;
-    let payload: OidcStatePayload = serde_json::from_slice(&payload)
-        .context("mailbox OIDC state payload is malformed")?;
+    let payload: OidcStatePayload =
+        serde_json::from_slice(&payload).context("mailbox OIDC state payload is malformed")?;
     if payload.redirect_uri != expected_redirect_uri {
         bail!("mailbox OIDC state redirect target is invalid");
     }

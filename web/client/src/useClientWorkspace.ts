@@ -3,13 +3,16 @@ import { blankContact, blankDraft, blankEvent, countFolders, filterMessages, quo
 import type { ClientCopy } from "./i18n";
 import type {
   ClientIdentity,
+  CollaborationOverview,
   ClientWorkspacePayload,
   ContactItem,
   EventItem,
   Folder,
+  MailboxDelegationOverview,
   Message,
   MessageDraft,
   Mode,
+  SieveOverview,
   Section
 } from "./client-types";
 
@@ -20,10 +23,22 @@ async function apiJson<T>(path: string, token: string, options: RequestInit = {}
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
       ...(options.headers ?? {})
-    }
+    },
+    credentials: "same-origin"
   });
-  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  if (!response.ok) {
+    const detail = (await response.text()).trim();
+    throw new Error(detail || `Request failed: ${response.status}`);
+  }
   return (await response.json()) as T;
+}
+
+function mapClientError(error: unknown, fallback: string) {
+  const detail = error instanceof Error ? error.message.toLowerCase() : "";
+  if (detail.includes("quota")) return "Quota exceeded. Free space or ask an administrator for a larger quota.";
+  if (detail.includes("not found")) return "The requested item no longer exists.";
+  if (detail.includes("forbidden")) return "This action is not allowed for the current account.";
+  return fallback;
 }
 
 function splitRecipients(value: string) {
@@ -80,6 +95,26 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   const [draftMessageId, setDraftMessageId] = React.useState<string | null>(null);
   const [eventForm, setEventForm] = React.useState(blankEvent());
   const [contactForm, setContactForm] = React.useState(blankContact());
+  const [collaboration, setCollaboration] = React.useState<CollaborationOverview | null>(null);
+  const [mailboxDelegation, setMailboxDelegation] = React.useState<MailboxDelegationOverview | null>(null);
+  const [sieve, setSieve] = React.useState<SieveOverview | null>(null);
+  const [shareForm, setShareForm] = React.useState({
+    kind: "contacts" as "contacts" | "calendar",
+    granteeEmail: "",
+    mayRead: true,
+    mayWrite: false,
+    mayDelete: false,
+    mayShare: false
+  });
+  const [mailboxForm, setMailboxForm] = React.useState({
+    granteeEmail: "",
+    senderRight: "send_as" as "send_as" | "send_on_behalf"
+  });
+  const [sieveForm, setSieveForm] = React.useState({
+    name: "vacation",
+    content: "require [\"vacation\"];\n\nvacation :days 7 :subject \"Out of office\" \"I am currently away.\";",
+    activate: true
+  });
 
   const loadWorkspace = React.useCallback(async () => {
     if (!authToken || !identity) {
@@ -103,9 +138,70 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     }
   }, [authToken, copy.loadError, identity]);
 
+  const loadSettings = React.useCallback(async () => {
+    if (!authToken || !identity) {
+      setCollaboration(null);
+      setMailboxDelegation(null);
+      setSieve(null);
+      return;
+    }
+
+    try {
+      const [nextCollaboration, nextMailboxDelegation, nextSieve] = await Promise.all([
+        apiJson<CollaborationOverview>("mail/shares", authToken),
+        apiJson<{ overview: MailboxDelegationOverview }>("mail/delegation", authToken),
+        apiJson<SieveOverview>("mail/sieve", authToken)
+      ]);
+      setCollaboration(nextCollaboration);
+      setMailboxDelegation(nextMailboxDelegation.overview);
+      setSieve(nextSieve);
+      if (nextSieve.activeScript) {
+        setSieveForm({
+          name: nextSieve.activeScript.name,
+          content: nextSieve.activeScript.content,
+          activate: true
+        });
+      }
+    } catch {
+      // Keep the main workspace available even when settings endpoints fail.
+    }
+  }, [authToken, identity]);
+
   React.useEffect(() => {
     void loadWorkspace();
   }, [loadWorkspace]);
+
+  React.useEffect(() => {
+    void loadSettings();
+  }, [loadSettings]);
+
+  React.useEffect(() => {
+    if (!authToken) return;
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${protocol}://${window.location.host}/api/jmap/ws`, "jmap");
+
+    socket.addEventListener("open", () => {
+      socket.send(JSON.stringify({
+        "@type": "WebSocketPushEnable",
+        dataTypes: ["Mailbox", "Email", "CalendarEvent", "ContactCard"]
+      }));
+    });
+    socket.addEventListener("message", (event) => {
+      try {
+        const payload = JSON.parse(event.data as string) as { "@type"?: string };
+        if (payload["@type"] === "StateChange") {
+          void loadWorkspace();
+          void loadSettings();
+          pushNotice("Workspace updated from the canonical server state.");
+        }
+      } catch {
+        // Ignore malformed push payloads.
+      }
+    });
+    socket.addEventListener("error", () => undefined);
+
+    return () => socket.close();
+  }, [authToken, loadSettings, loadWorkspace]);
 
   const counts = React.useMemo(() => countFolders(mail), [mail]);
   const filtered = React.useMemo(() => filterMessages(mail, folder, query), [folder, mail, query]);
@@ -141,6 +237,11 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     setNotice(value);
     window.setTimeout(() => setNotice(""), 2200);
   }, []);
+
+  const resources = React.useMemo(
+    () => contacts.filter((item) => /room|equipment|resource/i.test(`${item.role} ${item.team}`)),
+    [contacts]
+  );
 
   const openComposer = React.useCallback((next: Mode, item?: Message) => {
     setSection("mail");
@@ -267,6 +368,138 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     setEventForm(blankEvent());
   }, []);
 
+  const saveShare = React.useCallback(async () => {
+    if (!authToken || !shareForm.granteeEmail.trim()) return pushNotice(copy.validationContact);
+    try {
+      await apiJson("mail/shares", authToken, {
+        method: "PUT",
+        body: JSON.stringify({
+          kind: shareForm.kind,
+          granteeEmail: shareForm.granteeEmail,
+          mayRead: shareForm.mayRead,
+          mayWrite: shareForm.mayWrite,
+          mayDelete: shareForm.mayDelete,
+          mayShare: shareForm.mayShare
+        })
+      });
+      await loadSettings();
+      setShareForm((value) => ({ ...value, granteeEmail: "" }));
+      pushNotice("Share updated.");
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    }
+  }, [authToken, copy.saveError, copy.validationContact, loadSettings, pushNotice, shareForm]);
+
+  const deleteShare = React.useCallback(async (kind: string, granteeAccountId: string) => {
+    if (!authToken) return;
+    try {
+      await apiJson(`mail/shares/${kind}/${granteeAccountId}`, authToken, { method: "DELETE" });
+      await loadSettings();
+      pushNotice("Share removed.");
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    }
+  }, [authToken, copy.saveError, loadSettings, pushNotice]);
+
+  const saveMailboxDelegation = React.useCallback(async () => {
+    if (!authToken || !mailboxForm.granteeEmail.trim()) return pushNotice(copy.validationContact);
+    try {
+      await apiJson("mail/delegation/mailboxes", authToken, {
+        method: "PUT",
+        body: JSON.stringify({ granteeEmail: mailboxForm.granteeEmail })
+      });
+      await loadSettings();
+      pushNotice("Mailbox delegation updated.");
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    }
+  }, [authToken, copy.saveError, copy.validationContact, loadSettings, mailboxForm.granteeEmail, pushNotice]);
+
+  const deleteMailboxDelegation = React.useCallback(async (granteeAccountId: string) => {
+    if (!authToken) return;
+    try {
+      await apiJson(`mail/delegation/mailboxes/${granteeAccountId}`, authToken, { method: "DELETE" });
+      await loadSettings();
+      pushNotice("Mailbox delegation removed.");
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    }
+  }, [authToken, copy.saveError, loadSettings, pushNotice]);
+
+  const saveSenderDelegation = React.useCallback(async () => {
+    if (!authToken || !mailboxForm.granteeEmail.trim()) return pushNotice(copy.validationContact);
+    try {
+      await apiJson("mail/delegation/sender", authToken, {
+        method: "PUT",
+        body: JSON.stringify({ granteeEmail: mailboxForm.granteeEmail, senderRight: mailboxForm.senderRight })
+      });
+      await loadSettings();
+      pushNotice("Sender delegation updated.");
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    }
+  }, [authToken, copy.saveError, copy.validationContact, loadSettings, mailboxForm, pushNotice]);
+
+  const deleteSenderDelegation = React.useCallback(async (senderRight: string, granteeAccountId: string) => {
+    if (!authToken) return;
+    try {
+      await apiJson(`mail/delegation/sender/${senderRight}/${granteeAccountId}`, authToken, { method: "DELETE" });
+      await loadSettings();
+      pushNotice("Sender delegation removed.");
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    }
+  }, [authToken, copy.saveError, loadSettings, pushNotice]);
+
+  const saveSieve = React.useCallback(async () => {
+    if (!authToken || !sieveForm.name.trim() || !sieveForm.content.trim()) return pushNotice(copy.validationMessage);
+    try {
+      await apiJson("mail/sieve", authToken, {
+        method: "POST",
+        body: JSON.stringify(sieveForm)
+      });
+      await loadSettings();
+      pushNotice("Sieve script saved.");
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    }
+  }, [authToken, copy.saveError, copy.validationMessage, loadSettings, pushNotice, sieveForm]);
+
+  const loadSieveScript = React.useCallback(async (name: string) => {
+    if (!authToken) return;
+    try {
+      const script = await apiJson<{ name: string; content: string; isActive: boolean }>(`mail/sieve/${encodeURIComponent(name)}`, authToken);
+      setSieveForm({ name: script.name, content: script.content, activate: script.isActive });
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    }
+  }, [authToken, copy.saveError, pushNotice]);
+
+  const deleteSieve = React.useCallback(async (name: string) => {
+    if (!authToken) return;
+    try {
+      await apiJson(`mail/sieve/${encodeURIComponent(name)}`, authToken, { method: "DELETE" });
+      await loadSettings();
+      pushNotice("Sieve script deleted.");
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    }
+  }, [authToken, copy.saveError, loadSettings, pushNotice]);
+
+  const activateSieve = React.useCallback(async (name: string | null) => {
+    if (!authToken) return;
+    try {
+      await apiJson("mail/sieve/active", authToken, {
+        method: "PUT",
+        body: JSON.stringify({ name })
+      });
+      await loadSettings();
+      pushNotice(name ? "Sieve script activated." : "Sieve script disabled.");
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    }
+  }, [authToken, copy.saveError, loadSettings, pushNotice]);
+
   return {
     section,
     setSection,
@@ -305,6 +538,26 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     refreshWorkspace,
     saveContact,
     saveEvent,
+    resources,
+    collaboration,
+    mailboxDelegation,
+    sieve,
+    shareForm,
+    setShareForm,
+    mailboxForm,
+    setMailboxForm,
+    sieveForm,
+    setSieveForm,
+    saveShare,
+    deleteShare,
+    saveMailboxDelegation,
+    deleteMailboxDelegation,
+    saveSenderDelegation,
+    deleteSenderDelegation,
+    saveSieve,
+    loadSieveScript,
+    deleteSieve,
+    activateSieve,
     resetContactForm,
     resetEventForm
   };

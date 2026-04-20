@@ -5,6 +5,7 @@ import { MasterPane } from "./components/MasterPane";
 import { MailDetail } from "./components/MailDetail";
 import { EventEditor } from "./components/EventEditor";
 import { ContactEditor } from "./components/ContactEditor";
+import { SettingsWorkspace } from "./components/SettingsWorkspace";
 import { useClientWorkspace } from "./useClientWorkspace";
 import type { ClientIdentity } from "./client-types";
 import "./styles.css";
@@ -25,7 +26,8 @@ async function apiJson<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers: {
       "Content-Type": "application/json",
       ...(options.headers ?? {})
-    }
+    },
+    credentials: "same-origin"
   });
   if (!response.ok) throw new Error(`Request failed: ${response.status}`);
   return (await response.json()) as T;
@@ -206,7 +208,12 @@ export function App() {
     ? workspace.filtered.length
     : workspace.section === "calendar"
       ? workspace.filteredEvents.length
-      : workspace.filteredContacts.length;
+      : workspace.section === "contacts"
+        ? workspace.filteredContacts.length
+        : (workspace.collaboration?.outgoingContacts.length ?? 0)
+          + (workspace.collaboration?.outgoingCalendars.length ?? 0)
+          + (workspace.mailboxDelegation?.outgoingMailboxes.length ?? 0)
+          + (workspace.sieve?.scripts.length ?? 0);
   const attachmentCount = workspace.section === "mail"
     ? workspace.filtered.reduce((total, item) => total + item.attachments.length, 0)
     : 0;
@@ -220,7 +227,9 @@ export function App() {
     ? copy.heroBody
     : workspace.section === "calendar"
       ? copy.calendarBody
-      : copy.contactsBody;
+      : workspace.section === "contacts"
+        ? copy.contactsBody
+        : "Delegation, booking, and filtering stay synchronized with the canonical server state.";
 
   return (
     <main className="app-shell">
@@ -307,21 +316,23 @@ export function App() {
           {workspace.notice ? <div className="notice-banner">{workspace.notice}</div> : null}
 
           <div className={showMailPane || workspace.section !== "mail" ? "content-grid has-detail" : "content-grid"}>
-            <MasterPane
-              copy={copy}
-              section={workspace.section}
-              folder={workspace.folder}
-              mode={workspace.mode}
-              filteredMessages={workspace.filtered}
-              events={workspace.filteredEvents}
-              contacts={workspace.filteredContacts}
-              messageId={workspace.messageId}
-              eventId={workspace.eventId}
-              contactId={workspace.contactId}
-              onSelectMessage={workspace.setMessageId}
-              onSelectEvent={workspace.setEventId}
-              onSelectContact={workspace.setContactId}
-            />
+            {workspace.section !== "settings" ? (
+              <MasterPane
+                copy={copy}
+                section={workspace.section}
+                folder={workspace.folder}
+                mode={workspace.mode}
+                filteredMessages={workspace.filtered}
+                events={workspace.filteredEvents}
+                contacts={workspace.filteredContacts}
+                messageId={workspace.messageId}
+                eventId={workspace.eventId}
+                contactId={workspace.contactId}
+                onSelectMessage={workspace.setMessageId}
+                onSelectEvent={workspace.setEventId}
+                onSelectContact={workspace.setContactId}
+              />
+            ) : null}
 
             {showMailPane ? (
               <section className="detail-pane">
@@ -348,6 +359,7 @@ export function App() {
                 currentEvent={workspace.currentEvent}
                 eventForm={workspace.eventForm}
                 setEventForm={workspace.setEventForm}
+                resources={workspace.resources}
                 onNew={workspace.resetEventForm}
                 onSave={() => void workspace.saveEvent()}
               />
@@ -363,6 +375,33 @@ export function App() {
                 setContactForm={workspace.setContactForm}
                 onNew={workspace.resetContactForm}
                 onSave={() => void workspace.saveContact()}
+              />
+            </section>
+            ) : null}
+
+            {workspace.section === "settings" ? (
+            <section className="detail-pane detail-pane-wide">
+              <SettingsWorkspace
+                copy={copy}
+                collaboration={workspace.collaboration}
+                mailboxDelegation={workspace.mailboxDelegation}
+                sieve={workspace.sieve}
+                shareForm={workspace.shareForm}
+                setShareForm={workspace.setShareForm}
+                mailboxForm={workspace.mailboxForm}
+                setMailboxForm={workspace.setMailboxForm}
+                sieveForm={workspace.sieveForm}
+                setSieveForm={workspace.setSieveForm}
+                onSaveShare={() => void workspace.saveShare()}
+                onDeleteShare={(kind, granteeAccountId) => void workspace.deleteShare(kind, granteeAccountId)}
+                onSaveMailboxDelegation={() => void workspace.saveMailboxDelegation()}
+                onDeleteMailboxDelegation={(granteeAccountId) => void workspace.deleteMailboxDelegation(granteeAccountId)}
+                onSaveSenderDelegation={() => void workspace.saveSenderDelegation()}
+                onDeleteSenderDelegation={(senderRight, granteeAccountId) => void workspace.deleteSenderDelegation(senderRight, granteeAccountId)}
+                onSaveSieve={() => void workspace.saveSieve()}
+                onLoadSieve={(name) => void workspace.loadSieveScript(name)}
+                onDeleteSieve={(name) => void workspace.deleteSieve(name)}
+                onSetActiveSieve={(name) => void workspace.activateSieve(name)}
               />
             </section>
             ) : null}
