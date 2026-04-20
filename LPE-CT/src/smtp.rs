@@ -20,10 +20,11 @@ use lpe_magika::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sqlx::{postgres::PgPoolOptions, types::Json};
 use std::{
-    collections::{hash_map::DefaultHasher, HashMap},
+    collections::{hash_map::DefaultHasher, HashMap, HashSet},
     convert::TryFrom,
-    fs,
+    env, fs,
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
@@ -47,6 +48,11 @@ pub(crate) struct RuntimeConfig {
     drain_mode: bool,
     quarantine_enabled: bool,
     greylisting_enabled: bool,
+    bayespam_enabled: bool,
+    bayespam_auto_learn: bool,
+    bayespam_score_weight: f32,
+    bayespam_min_token_length: u32,
+    bayespam_max_tokens: u32,
     require_spf: bool,
     require_dkim_alignment: bool,
     require_dmarc_enforcement: bool,
@@ -62,6 +68,8 @@ pub(crate) struct RuntimeConfig {
     routing_rules: Vec<OutboundRoutingRule>,
     throttle_enabled: bool,
     throttle_rules: Vec<OutboundThrottleRule>,
+    local_db_enabled: bool,
+    local_db_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -95,6 +103,30 @@ struct DecisionTraceEntry {
     stage: String,
     outcome: String,
     detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct QuarantineMetadata {
+    trace_id: String,
+    direction: String,
+    status: String,
+    received_at: String,
+    peer: String,
+    helo: String,
+    mail_from: String,
+    rcpt_to: Vec<String>,
+    subject: String,
+    internet_message_id: Option<String>,
+    spool_path: String,
+    reason: Option<String>,
+    spam_score: f32,
+    security_score: f32,
+    reputation_score: i32,
+    dnsbl_hits: Vec<String>,
+    auth_summary: AuthSummary,
+    decision_trace: Vec<DecisionTraceEntry>,
+    magika_summary: Option<String>,
+    magika_decision: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -251,6 +283,27 @@ struct ReputationEntry {
     deferred: u32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct BayesCorpus {
+    ham_messages: u32,
+    spam_messages: u32,
+    ham_tokens: HashMap<String, u32>,
+    spam_tokens: HashMap<String, u32>,
+}
+
+#[derive(Debug, Clone)]
+struct BayesOutcome {
+    probability: f32,
+    matched_tokens: usize,
+    contribution: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BayesLabel {
+    Ham,
+    Spam,
+}
+
 const GREYLIST_DELAY_SECONDS: u64 = 90;
 
 pub(crate) const SPOOL_QUEUES: [&str; 9] = [
@@ -265,8 +318,9 @@ pub(crate) const SPOOL_QUEUES: [&str; 9] = [
     "greylist",
 ];
 
-pub(crate) const POLICY_ARTIFACTS: [&str; 3] = [
+pub(crate) const POLICY_ARTIFACTS: [&str; 4] = [
     "policy/reputation.json",
+    "policy/bayespam.json",
     "policy/<throttle>.json",
     "greylist/<triplet>.json",
 ];
@@ -327,6 +381,11 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
         drain_mode: dashboard.policies.drain_mode,
         quarantine_enabled: dashboard.policies.quarantine_enabled,
         greylisting_enabled: dashboard.policies.greylisting_enabled,
+        bayespam_enabled: dashboard.policies.bayespam_enabled,
+        bayespam_auto_learn: dashboard.policies.bayespam_auto_learn,
+        bayespam_score_weight: dashboard.policies.bayespam_score_weight,
+        bayespam_min_token_length: dashboard.policies.bayespam_min_token_length,
+        bayespam_max_tokens: dashboard.policies.bayespam_max_tokens,
         require_spf: dashboard.policies.require_spf,
         require_dkim_alignment: dashboard.policies.require_dkim_alignment,
         require_dmarc_enforcement: dashboard.policies.require_dmarc_enforcement,
@@ -365,6 +424,11 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
                 retry_after_seconds: rule.retry_after_seconds,
             })
             .collect(),
+        local_db_enabled: dashboard.local_data_stores.dedicated_postgres.enabled,
+        local_db_url: env::var("LPE_CT_LOCAL_DB_URL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
     }
 }
 
@@ -405,6 +469,87 @@ pub(crate) async fn process_outbound_handoff(
         throttle: None,
         data: compose_rfc822_message(&payload),
     };
+    message.decision_trace.push(DecisionTraceEntry {
+        stage: "protocol".to_string(),
+        outcome: "queued".to_string(),
+        detail: format!(
+            "outbound handoff contains {} envelope recipient(s) and attempt_count={}",
+            message.rcpt_to.len(),
+            payload.attempt_count
+        ),
+    });
+    if let Some(last_attempt_error) = payload
+        .last_attempt_error
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        message.decision_trace.push(DecisionTraceEntry {
+            stage: "retry-context".to_string(),
+            outcome: "previous-failure".to_string(),
+            detail: last_attempt_error.to_string(),
+        });
+    }
+    message.decision_trace.push(DecisionTraceEntry {
+        stage: "routing".to_string(),
+        outcome: "selected".to_string(),
+        detail: format!(
+            "relay_target={} rule_id={}",
+            route.relay_target.as_deref().unwrap_or(""),
+            route.rule_id.as_deref().unwrap_or("default")
+        ),
+    });
+    match score_bayespam(
+        spool_dir,
+        config,
+        &payload.subject,
+        &payload.body_text,
+        &payload.from_address,
+        "lpe-core",
+    )? {
+        Some(outcome) => {
+            message.spam_score += outcome.contribution;
+            message.decision_trace.push(DecisionTraceEntry {
+                stage: "bayespam".to_string(),
+                outcome: if outcome.probability >= 0.90 {
+                    "spam"
+                } else if outcome.probability >= 0.70 {
+                    "suspect"
+                } else {
+                    "ham"
+                }
+                .to_string(),
+                detail: format!(
+                    "bayespam probability {:.3} using {} learned tokens (contribution={:.2})",
+                    outcome.probability, outcome.matched_tokens, outcome.contribution
+                ),
+            });
+        }
+        None if config.bayespam_enabled => {
+            message.decision_trace.push(DecisionTraceEntry {
+                stage: "bayespam".to_string(),
+                outcome: "skipped".to_string(),
+                detail: "bayespam corpus is not trained enough for scoring yet".to_string(),
+            });
+        }
+        None => {
+            message.decision_trace.push(DecisionTraceEntry {
+                stage: "bayespam".to_string(),
+                outcome: "disabled".to_string(),
+                detail: "bayespam disabled by local policy".to_string(),
+            });
+        }
+    }
+    message.decision_trace.push(DecisionTraceEntry {
+        stage: "virus-scan".to_string(),
+        outcome: "pending".to_string(),
+        detail: "Virus scanning hook reserved for a later implementation".to_string(),
+    });
+    message.decision_trace.push(DecisionTraceEntry {
+        stage: "final-score".to_string(),
+        outcome: "calculated".to_string(),
+        detail: format!("outbound spam_score={:.2}", message.spam_score),
+    });
 
     persist_message(spool_dir, "outbound", &message).await?;
 
@@ -417,6 +562,7 @@ pub(crate) async fn process_outbound_handoff(
             detail: "message matched local quarantine policy".to_string(),
         });
         move_message(spool_dir, &message, "outbound", "quarantine").await?;
+        persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
         observability::record_security_event("outbound_quarantine");
         info!(
             trace_id = %message.id,
@@ -430,6 +576,34 @@ pub(crate) async fn process_outbound_handoff(
             status: TransportDeliveryStatus::Quarantined,
             trace_id: message.id,
             detail: Some("message matched quarantine policy".to_string()),
+            remote_message_ref: None,
+            retry: None,
+            dsn: None,
+            technical: None,
+            route: Some(route),
+            throttle: None,
+        });
+    }
+
+    if config.quarantine_enabled && message.spam_score >= config.spam_quarantine_threshold {
+        message.status = "quarantined".to_string();
+        message.relay_error = Some(format!(
+            "bayespam score {:.2} reached quarantine threshold {:.2}",
+            message.spam_score, config.spam_quarantine_threshold
+        ));
+        message.decision_trace.push(DecisionTraceEntry {
+            stage: "outbound-policy".to_string(),
+            outcome: "quarantine".to_string(),
+            detail: message.relay_error.clone().unwrap_or_default(),
+        });
+        move_message(spool_dir, &message, "outbound", "quarantine").await?;
+        persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
+        observability::record_security_event("outbound_quarantine");
+        return Ok(OutboundMessageHandoffResponse {
+            queue_id: payload.queue_id,
+            status: TransportDeliveryStatus::Quarantined,
+            trace_id: message.id,
+            detail: message.relay_error,
             remote_message_ref: None,
             retry: None,
             dsn: None,
@@ -491,7 +665,14 @@ pub(crate) async fn process_outbound_handoff(
         });
     }
 
-    let execution = relay_message(config, &message, &route).await;
+    let execution = relay_message(
+        config,
+        &message,
+        &route,
+        payload.attempt_count,
+        payload.last_attempt_error.as_deref(),
+    )
+    .await;
     message.status = execution
         .route
         .as_ref()
@@ -517,6 +698,9 @@ pub(crate) async fn process_outbound_handoff(
         move_message(spool_dir, &message, "outbound", "held").await?;
     } else {
         move_message(spool_dir, &message, "outbound", destination).await?;
+    }
+    if destination == "quarantine" {
+        persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
     }
     if matches!(
         execution.status,
@@ -760,8 +944,12 @@ async fn handle_smtp_session(
                 .await?;
             } else if message.status == "quarantined" {
                 write_smtp(&mut writer, &format!("250 quarantined as {}", message.id)).await?;
+                return Ok(());
             } else {
                 write_smtp(&mut writer, &format!("250 queued as {}", message.id)).await?;
+            }
+            if message.status == "rejected" {
+                return Ok(());
             }
             mail_from.clear();
             rcpt_to.clear();
@@ -830,7 +1018,7 @@ async fn receive_message_with_validator<D: Detector>(
         dnsbl_hits: Vec::new(),
         auth_summary: AuthSummary::default(),
         decision_trace: vec![DecisionTraceEntry {
-            stage: "smtp-ingress".to_string(),
+            stage: "ingress".to_string(),
             outcome: "accepted".to_string(),
             detail: "message accepted by SMTP edge and persisted to the incoming spool".to_string(),
         }],
@@ -843,6 +1031,17 @@ async fn receive_message_with_validator<D: Detector>(
     };
 
     persist_message(spool_dir, "incoming", &message).await?;
+    message.decision_trace.push(DecisionTraceEntry {
+        stage: "protocol".to_string(),
+        outcome: "smtp-envelope".to_string(),
+        detail: format!(
+            "peer={} helo={} mail_from={} rcpt_count={}",
+            message.peer,
+            message.helo,
+            message.mail_from,
+            message.rcpt_to.len()
+        ),
+    });
 
     if config.drain_mode {
         message.status = "held".to_string();
@@ -869,6 +1068,7 @@ async fn receive_message_with_validator<D: Detector>(
                 detail: message.magika_summary.clone().unwrap_or_default(),
             });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
+            persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
             info!(
                 trace_id = %message.id,
                 status = %message.status,
@@ -888,6 +1088,7 @@ async fn receive_message_with_validator<D: Detector>(
                 detail: message.magika_summary.clone().unwrap_or_default(),
             });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
+            persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
             info!(
                 trace_id = %message.id,
                 status = %message.status,
@@ -907,6 +1108,7 @@ async fn receive_message_with_validator<D: Detector>(
                 detail: message.magika_summary.clone().unwrap_or_default(),
             });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
+            persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
             info!(
                 trace_id = %message.id,
                 status = %message.status,
@@ -939,6 +1141,7 @@ async fn receive_message_with_validator<D: Detector>(
                 });
                 move_message(spool_dir, &message, "incoming", "sent").await?;
                 update_reputation(spool_dir, &message, FilterAction::Accept)?;
+                train_bayespam(spool_dir, config, &message, BayesLabel::Ham)?;
                 observability::record_smtp_session("delivered");
             }
             Err(error) => {
@@ -968,14 +1171,18 @@ async fn receive_message_with_validator<D: Detector>(
             observability::record_security_event("inbound_quarantine");
             message.status = "quarantined".to_string();
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
+            persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
             update_reputation(spool_dir, &message, FilterAction::Quarantine)?;
+            train_bayespam(spool_dir, config, &message, BayesLabel::Spam)?;
             observability::record_smtp_session("quarantined");
         }
         FilterAction::Reject => {
             observability::record_security_event("inbound_reject");
             message.status = "rejected".to_string();
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
+            persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
             update_reputation(spool_dir, &message, FilterAction::Reject)?;
+            train_bayespam(spool_dir, config, &message, BayesLabel::Spam)?;
             observability::record_smtp_session("rejected");
         }
         FilterAction::Defer => {
@@ -1047,6 +1254,9 @@ async fn evaluate_inbound_policy(
     let mut dnsbl = DnsblOutcome::default();
     let mut auth_summary = AuthSummary::default();
     let mut auth_assessment = None;
+    let mut defer_reasons = Vec::new();
+    let mut reject_reasons = Vec::new();
+    let mut quarantine_reasons = Vec::new();
     let reputation_score = if config.reputation_enabled {
         load_reputation_score(spool_dir, peer_ip, mail_from)?
     } else {
@@ -1054,6 +1264,7 @@ async fn evaluate_inbound_policy(
     };
 
     if config.quarantine_enabled && should_quarantine(message_bytes) {
+        let reasons = vec!["message matched local quarantine policy".to_string()];
         decision_trace.push(DecisionTraceEntry {
             stage: "manual-quarantine".to_string(),
             outcome: "quarantine".to_string(),
@@ -1061,7 +1272,7 @@ async fn evaluate_inbound_policy(
         });
         return Ok(FilterVerdict {
             action: FilterAction::Quarantine,
-            reason: Some("message matched local quarantine policy".to_string()),
+            reason: Some(reasons.join("; ")),
             spam_score: config.spam_quarantine_threshold.max(1.0),
             security_score: 1.0,
             reputation_score,
@@ -1070,6 +1281,12 @@ async fn evaluate_inbound_policy(
             decision_trace,
         });
     }
+
+    decision_trace.push(DecisionTraceEntry {
+        stage: "pipeline".to_string(),
+        outcome: "start".to_string(),
+        detail: "running inbound edge pipeline: rbl/dns, bayespam, virus scan placeholder, final scoring".to_string(),
+    });
 
     if let Some(ip) = peer_ip {
         if config.greylisting_enabled {
@@ -1108,13 +1325,13 @@ async fn evaluate_inbound_policy(
                 spam_score += 4.0 + dnsbl.hits.len() as f32;
                 security_score += 2.0;
                 decision_trace.push(DecisionTraceEntry {
-                    stage: "dnsbl".to_string(),
+                    stage: "rbl-dns-check".to_string(),
                     outcome: "listed".to_string(),
                     detail: format!("source IP listed on {}", dnsbl.hits.join(", ")),
                 });
             } else {
                 decision_trace.push(DecisionTraceEntry {
-                    stage: "dnsbl".to_string(),
+                    stage: "rbl-dns-check".to_string(),
                     outcome: "clear".to_string(),
                     detail: "source IP not listed on configured DNSBL zones".to_string(),
                 });
@@ -1122,7 +1339,7 @@ async fn evaluate_inbound_policy(
             if !dnsbl.tempfail_zones.is_empty() {
                 security_score += 0.5;
                 decision_trace.push(DecisionTraceEntry {
-                    stage: "dnsbl".to_string(),
+                    stage: "rbl-dns-check".to_string(),
                     outcome: "temperror".to_string(),
                     detail: format!(
                         "temporary DNS failure while querying {}",
@@ -1164,6 +1381,48 @@ async fn evaluate_inbound_policy(
         });
     }
 
+    let subject = parse_rfc822_header_value(message_bytes, "subject").unwrap_or_default();
+    let visible_text = extract_visible_text(message_bytes)?;
+    match score_bayespam(spool_dir, config, &subject, &visible_text, mail_from, helo)? {
+        Some(outcome) => {
+            spam_score += outcome.contribution;
+            decision_trace.push(DecisionTraceEntry {
+                stage: "bayespam".to_string(),
+                outcome: if outcome.probability >= 0.90 {
+                    "spam"
+                } else if outcome.probability >= 0.70 {
+                    "suspect"
+                } else {
+                    "ham"
+                }
+                .to_string(),
+                detail: format!(
+                    "bayespam probability {:.3} using {} learned tokens (contribution={:.2})",
+                    outcome.probability, outcome.matched_tokens, outcome.contribution
+                ),
+            });
+        }
+        None if config.bayespam_enabled => {
+            decision_trace.push(DecisionTraceEntry {
+                stage: "bayespam".to_string(),
+                outcome: "skipped".to_string(),
+                detail: "bayespam corpus is not trained enough for scoring yet".to_string(),
+            });
+        }
+        None => {
+            decision_trace.push(DecisionTraceEntry {
+                stage: "bayespam".to_string(),
+                outcome: "disabled".to_string(),
+                detail: "bayespam disabled by local policy".to_string(),
+            });
+        }
+    }
+    decision_trace.push(DecisionTraceEntry {
+        stage: "virus-scan".to_string(),
+        outcome: "pending".to_string(),
+        detail: "Virus scanning hook reserved for a later implementation".to_string(),
+    });
+
     if reputation_score < 0 {
         spam_score += (-reputation_score) as f32 * 0.35;
         security_score += (-reputation_score) as f32 * 0.10;
@@ -1181,6 +1440,10 @@ async fn evaluate_inbound_policy(
     }
 
     if config.reputation_enabled && reputation_score <= config.reputation_reject_threshold {
+        reject_reasons.push(format!(
+            "reputation score {} reached reject threshold {}",
+            reputation_score, config.reputation_reject_threshold
+        ));
         decision_trace.push(DecisionTraceEntry {
             stage: "reputation".to_string(),
             outcome: "reject".to_string(),
@@ -1192,6 +1455,10 @@ async fn evaluate_inbound_policy(
     } else if config.reputation_enabled
         && reputation_score <= config.reputation_quarantine_threshold
     {
+        quarantine_reasons.push(format!(
+            "reputation score {} reached quarantine threshold {}",
+            reputation_score, config.reputation_quarantine_threshold
+        ));
         decision_trace.push(DecisionTraceEntry {
             stage: "reputation".to_string(),
             outcome: "quarantine".to_string(),
@@ -1202,104 +1469,97 @@ async fn evaluate_inbound_policy(
         });
     }
 
-    let reason = if config.defer_on_auth_tempfail
+    if config.defer_on_auth_tempfail
         && auth_assessment
             .as_ref()
             .is_some_and(AuthenticationAssessment::has_temporary_failure)
     {
-        Some("authentication dependency temporarily failed".to_string())
-    } else if config.require_dmarc_enforcement
+        defer_reasons.push("authentication dependency temporarily failed".to_string());
+    }
+    if config.require_dmarc_enforcement
         && auth_assessment
             .as_ref()
             .is_some_and(|assessment| assessment.dmarc == DmarcDisposition::Reject)
     {
-        Some("DMARC policy requested reject".to_string())
-    } else if config.require_dmarc_enforcement
+        reject_reasons.push("DMARC policy requested reject".to_string());
+    }
+    if config.require_dmarc_enforcement
         && auth_assessment
             .as_ref()
             .is_some_and(|assessment| assessment.dmarc == DmarcDisposition::Quarantine)
     {
-        Some("DMARC policy requested quarantine".to_string())
-    } else if config.require_spf
+        quarantine_reasons.push("DMARC policy requested quarantine".to_string());
+    }
+    if config.require_spf
         && auth_assessment.as_ref().is_some_and(|assessment| {
             assessment.spf == SpfDisposition::Fail && !assessment.dkim_aligned
         })
     {
-        Some("SPF failed and no aligned DKIM signature passed".to_string())
-    } else if config.require_dkim_alignment
+        reject_reasons.push("SPF failed and no aligned DKIM signature passed".to_string());
+    }
+    if config.require_dkim_alignment
         && auth_assessment
             .as_ref()
             .is_some_and(|assessment| !assessment.dkim_aligned)
     {
-        Some("aligned DKIM verification did not pass".to_string())
-    } else if config.reputation_enabled && reputation_score <= config.reputation_reject_threshold {
-        Some(format!(
-            "reputation score {} reached reject threshold {}",
-            reputation_score, config.reputation_reject_threshold
-        ))
-    } else if config.reputation_enabled
-        && reputation_score <= config.reputation_quarantine_threshold
-    {
-        Some(format!(
-            "reputation score {} reached quarantine threshold {}",
-            reputation_score, config.reputation_quarantine_threshold
-        ))
-    } else if spam_score >= config.spam_reject_threshold {
-        Some(format!(
+        quarantine_reasons.push("aligned DKIM verification did not pass".to_string());
+    }
+    if spam_score >= config.spam_reject_threshold {
+        reject_reasons.push(format!(
             "spam score {:.1} reached reject threshold {:.1}",
             spam_score, config.spam_reject_threshold
-        ))
+        ));
     } else if spam_score >= config.spam_quarantine_threshold {
-        Some(format!(
+        quarantine_reasons.push(format!(
             "spam score {:.1} reached quarantine threshold {:.1}",
             spam_score, config.spam_quarantine_threshold
-        ))
+        ));
+    }
+
+    decision_trace.push(DecisionTraceEntry {
+        stage: "final-score".to_string(),
+        outcome: "calculated".to_string(),
+        detail: format!(
+            "spam_score={spam_score:.1} security_score={security_score:.1} reputation_score={reputation_score}"
+        ),
+    });
+
+    for reason in &defer_reasons {
+        decision_trace.push(DecisionTraceEntry {
+            stage: "policy-trigger".to_string(),
+            outcome: "defer".to_string(),
+            detail: reason.clone(),
+        });
+    }
+    for reason in &reject_reasons {
+        decision_trace.push(DecisionTraceEntry {
+            stage: "policy-trigger".to_string(),
+            outcome: "reject".to_string(),
+            detail: reason.clone(),
+        });
+    }
+    for reason in &quarantine_reasons {
+        decision_trace.push(DecisionTraceEntry {
+            stage: "policy-trigger".to_string(),
+            outcome: "quarantine".to_string(),
+            detail: reason.clone(),
+        });
+    }
+
+    let (action, reasons) = if !defer_reasons.is_empty() {
+        (FilterAction::Defer, defer_reasons)
+    } else if !reject_reasons.is_empty() {
+        (FilterAction::Reject, reject_reasons)
+    } else if !quarantine_reasons.is_empty() {
+        (FilterAction::Quarantine, quarantine_reasons)
     } else {
-        None
+        (FilterAction::Accept, Vec::new())
     };
 
-    let action = if config.defer_on_auth_tempfail
-        && auth_assessment
-            .as_ref()
-            .is_some_and(AuthenticationAssessment::has_temporary_failure)
-    {
-        FilterAction::Defer
-    } else if config.require_dmarc_enforcement
-        && auth_assessment
-            .as_ref()
-            .is_some_and(|assessment| assessment.dmarc == DmarcDisposition::Reject)
-    {
-        FilterAction::Reject
-    } else if config.require_dmarc_enforcement
-        && auth_assessment
-            .as_ref()
-            .is_some_and(|assessment| assessment.dmarc == DmarcDisposition::Quarantine)
-    {
-        FilterAction::Quarantine
-    } else if config.require_spf
-        && auth_assessment.as_ref().is_some_and(|assessment| {
-            assessment.spf == SpfDisposition::Fail && !assessment.dkim_aligned
-        })
-    {
-        FilterAction::Reject
-    } else if config.require_dkim_alignment
-        && auth_assessment
-            .as_ref()
-            .is_some_and(|assessment| !assessment.dkim_aligned)
-    {
-        FilterAction::Quarantine
-    } else if config.reputation_enabled && reputation_score <= config.reputation_reject_threshold {
-        FilterAction::Reject
-    } else if config.reputation_enabled
-        && reputation_score <= config.reputation_quarantine_threshold
-    {
-        FilterAction::Quarantine
-    } else if spam_score >= config.spam_reject_threshold {
-        FilterAction::Reject
-    } else if spam_score >= config.spam_quarantine_threshold {
-        FilterAction::Quarantine
+    let reason = if reasons.is_empty() {
+        None
     } else {
-        FilterAction::Accept
+        Some(reasons.join("; "))
     };
 
     decision_trace.push(DecisionTraceEntry {
@@ -1733,6 +1993,168 @@ fn save_reputation_store(spool_dir: &Path, store: &ReputationStore) -> Result<()
     Ok(())
 }
 
+fn load_bayespam_corpus(spool_dir: &Path) -> Result<BayesCorpus> {
+    let path = spool_dir.join("policy").join("bayespam.json");
+    if !path.exists() {
+        return Ok(BayesCorpus::default());
+    }
+    Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
+}
+
+fn save_bayespam_corpus(spool_dir: &Path, corpus: &BayesCorpus) -> Result<()> {
+    let path = spool_dir.join("policy").join("bayespam.json");
+    fs::write(path, serde_json::to_string_pretty(corpus)?)?;
+    Ok(())
+}
+
+fn tokenize_for_bayespam(
+    subject: &str,
+    visible_text: &str,
+    mail_from: &str,
+    helo: &str,
+    min_token_length: usize,
+    max_tokens: usize,
+) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut tokens = Vec::new();
+    for token in [subject, visible_text, mail_from, helo]
+        .into_iter()
+        .flat_map(|value| {
+            value
+                .split(|ch: char| !ch.is_ascii_alphanumeric())
+                .map(str::trim)
+                .filter(|token| token.len() >= min_token_length)
+                .map(|token| token.to_ascii_lowercase())
+                .collect::<Vec<_>>()
+        })
+    {
+        if seen.insert(token.clone()) {
+            tokens.push(token);
+            if tokens.len() >= max_tokens {
+                break;
+            }
+        }
+    }
+    tokens
+}
+
+fn bayespam_token_probability(corpus: &BayesCorpus, token: &str) -> Option<f64> {
+    if corpus.ham_messages == 0 || corpus.spam_messages == 0 {
+        return None;
+    }
+    let spam = (*corpus.spam_tokens.get(token).unwrap_or(&0) as f64 + 1.0)
+        / (corpus.spam_messages as f64 + 2.0);
+    let ham = (*corpus.ham_tokens.get(token).unwrap_or(&0) as f64 + 1.0)
+        / (corpus.ham_messages as f64 + 2.0);
+    let probability = spam / (spam + ham);
+    Some(probability.clamp(0.01, 0.99))
+}
+
+fn score_bayespam_tokens(
+    corpus: &BayesCorpus,
+    tokens: &[String],
+    score_weight: f32,
+) -> Option<BayesOutcome> {
+    if corpus.ham_messages == 0 || corpus.spam_messages == 0 {
+        return None;
+    }
+
+    let mut log_spam = 0.0f64;
+    let mut log_ham = 0.0f64;
+    let mut matched = 0usize;
+    for token in tokens {
+        let Some(probability) = bayespam_token_probability(corpus, token) else {
+            continue;
+        };
+        log_spam += probability.ln();
+        log_ham += (1.0 - probability).ln();
+        matched += 1;
+    }
+
+    if matched == 0 {
+        return None;
+    }
+
+    let probability = 1.0 / (1.0 + (log_ham - log_spam).exp());
+    let contribution = ((probability as f32 - 0.5).max(0.0) * 2.0) * score_weight.max(0.0);
+    Some(BayesOutcome {
+        probability: probability as f32,
+        matched_tokens: matched,
+        contribution,
+    })
+}
+
+fn score_bayespam(
+    spool_dir: &Path,
+    config: &RuntimeConfig,
+    subject: &str,
+    visible_text: &str,
+    mail_from: &str,
+    helo: &str,
+) -> Result<Option<BayesOutcome>> {
+    if !config.bayespam_enabled {
+        return Ok(None);
+    }
+    let corpus = load_bayespam_corpus(spool_dir)?;
+    let tokens = tokenize_for_bayespam(
+        subject,
+        visible_text,
+        mail_from,
+        helo,
+        config.bayespam_min_token_length.max(2) as usize,
+        config.bayespam_max_tokens.max(16) as usize,
+    );
+    Ok(score_bayespam_tokens(
+        &corpus,
+        &tokens,
+        config.bayespam_score_weight,
+    ))
+}
+
+fn train_bayespam(
+    spool_dir: &Path,
+    config: &RuntimeConfig,
+    message: &QueuedMessage,
+    label: BayesLabel,
+) -> Result<()> {
+    if !config.bayespam_enabled || !config.bayespam_auto_learn {
+        return Ok(());
+    }
+
+    let subject = parse_rfc822_header_value(&message.data, "subject").unwrap_or_default();
+    let visible_text = extract_visible_text(&message.data)?;
+    let tokens = tokenize_for_bayespam(
+        &subject,
+        &visible_text,
+        &message.mail_from,
+        &message.helo,
+        config.bayespam_min_token_length.max(2) as usize,
+        config.bayespam_max_tokens.max(16) as usize,
+    );
+    if tokens.is_empty() {
+        return Ok(());
+    }
+
+    let mut corpus = load_bayespam_corpus(spool_dir)?;
+    match label {
+        BayesLabel::Ham => {
+            corpus.ham_messages = corpus.ham_messages.saturating_add(1);
+            for token in tokens {
+                let entry = corpus.ham_tokens.entry(token).or_insert(0);
+                *entry = entry.saturating_add(1);
+            }
+        }
+        BayesLabel::Spam => {
+            corpus.spam_messages = corpus.spam_messages.saturating_add(1);
+            for token in tokens {
+                let entry = corpus.spam_tokens.entry(token).or_insert(0);
+                *entry = entry.saturating_add(1);
+            }
+        }
+    }
+    save_bayespam_corpus(spool_dir, &corpus)
+}
+
 fn stable_key_id<T: Hash>(value: &T) -> String {
     let mut hasher = DefaultHasher::new();
     value.hash(&mut hasher);
@@ -1888,6 +2310,8 @@ async fn relay_message(
     config: &RuntimeConfig,
     message: &QueuedMessage,
     route: &TransportRouteDecision,
+    attempt_count: u32,
+    _last_attempt_error: Option<&str>,
 ) -> OutboundExecution {
     if config.mutual_tls_required {
         return OutboundExecution {
@@ -1929,7 +2353,7 @@ async fn relay_message(
 
     let mut last_error = None;
     for target in targets {
-        match relay_message_to_target(&target, message, route).await {
+        match relay_message_to_target(&target, message, route, attempt_count).await {
             Ok(execution) => return execution,
             Err(error) => last_error = Some((target, error)),
         }
@@ -1944,8 +2368,9 @@ async fn relay_message(
         TransportDeliveryStatus::Deferred
     };
     let retry = if status == TransportDeliveryStatus::Deferred {
+        let retry_after = retry_after_seconds(300, attempt_count);
         Some(TransportRetryAdvice {
-            retry_after_seconds: 300,
+            retry_after_seconds: retry_after,
             policy: "connect-backoff".to_string(),
             reason: Some(detail.clone()),
         })
@@ -2000,6 +2425,7 @@ async fn relay_message_to_target(
     target: &str,
     message: &QueuedMessage,
     route: &TransportRouteDecision,
+    attempt_count: u32,
 ) -> Result<OutboundExecution> {
     let address = normalize_smtp_target(target);
     let stream = TcpStream::connect(&address)
@@ -2036,8 +2462,9 @@ async fn relay_message_to_target(
                 detail: Some(reply.message.clone()),
                 remote_message_ref: None,
                 retry: if status == TransportDeliveryStatus::Deferred {
+                    let retry_after = retry_after_seconds(300, attempt_count);
                     Some(TransportRetryAdvice {
-                        retry_after_seconds: 300,
+                        retry_after_seconds: retry_after,
                         policy: "remote-smtp".to_string(),
                         reason: Some(reply.message.clone()),
                     })
@@ -2083,11 +2510,14 @@ async fn relay_message_to_target(
             status: TransportDeliveryStatus::Deferred,
             detail: Some(data_reply.message.clone()),
             remote_message_ref: None,
-            retry: Some(TransportRetryAdvice {
-                retry_after_seconds: 300,
-                policy: "remote-smtp".to_string(),
-                reason: Some(data_reply.message.clone()),
-            }),
+            retry: {
+                let retry_after = retry_after_seconds(300, attempt_count);
+                Some(TransportRetryAdvice {
+                    retry_after_seconds: retry_after,
+                    policy: "remote-smtp".to_string(),
+                    reason: Some(data_reply.message.clone()),
+                })
+            },
             dsn: Some(TransportDsnReport {
                 action: "delayed".to_string(),
                 status: enhanced.clone().unwrap_or_else(|| "4.3.0".to_string()),
@@ -2128,8 +2558,9 @@ async fn relay_message_to_target(
             detail: Some(final_reply.message.clone()),
             remote_message_ref: None,
             retry: if status == TransportDeliveryStatus::Deferred {
+                let retry_after = retry_after_seconds(300, attempt_count);
                 Some(TransportRetryAdvice {
-                    retry_after_seconds: 300,
+                    retry_after_seconds: retry_after,
                     policy: "remote-smtp".to_string(),
                     reason: Some(final_reply.message.clone()),
                 })
@@ -2321,6 +2752,11 @@ fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
         drain_mode: bool_at(&value, &["policies", "drain_mode"], false),
         quarantine_enabled: bool_at(&value, &["policies", "quarantine_enabled"], true),
         greylisting_enabled: bool_at(&value, &["policies", "greylisting_enabled"], true),
+        bayespam_enabled: bool_at(&value, &["policies", "bayespam_enabled"], true),
+        bayespam_auto_learn: bool_at(&value, &["policies", "bayespam_auto_learn"], true),
+        bayespam_score_weight: f32_at(&value, &["policies", "bayespam_score_weight"], 6.0),
+        bayespam_min_token_length: u32_at(&value, &["policies", "bayespam_min_token_length"], 3),
+        bayespam_max_tokens: u32_at(&value, &["policies", "bayespam_max_tokens"], 256),
         require_spf: bool_at(&value, &["policies", "require_spf"], true),
         require_dkim_alignment: bool_at(&value, &["policies", "require_dkim_alignment"], false),
         require_dmarc_enforcement: bool_at(
@@ -2352,7 +2788,175 @@ fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
         routing_rules: routing_rules_at(&value),
         throttle_enabled: bool_at(&value, &["throttling", "enabled"], true),
         throttle_rules: throttle_rules_at(&value),
+        local_db_enabled: bool_at(
+            &value,
+            &["local_data_stores", "dedicated_postgres", "enabled"],
+            false,
+        ),
+        local_db_url: env::var("LPE_CT_LOCAL_DB_URL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
     })
+}
+
+fn quarantine_metadata(spool_dir: &Path, message: &QueuedMessage) -> QuarantineMetadata {
+    QuarantineMetadata {
+        trace_id: message.id.clone(),
+        direction: message.direction.clone(),
+        status: message.status.clone(),
+        received_at: message.received_at.clone(),
+        peer: message.peer.clone(),
+        helo: message.helo.clone(),
+        mail_from: message.mail_from.clone(),
+        rcpt_to: message.rcpt_to.clone(),
+        subject: parse_rfc822_header_value(&message.data, "subject").unwrap_or_default(),
+        internet_message_id: parse_rfc822_header_value(&message.data, "message-id"),
+        spool_path: spool_path(spool_dir, "quarantine", &message.id)
+            .display()
+            .to_string(),
+        reason: message.relay_error.clone(),
+        spam_score: message.spam_score,
+        security_score: message.security_score,
+        reputation_score: message.reputation_score,
+        dnsbl_hits: message.dnsbl_hits.clone(),
+        auth_summary: message.auth_summary.clone(),
+        decision_trace: message.decision_trace.clone(),
+        magika_summary: message.magika_summary.clone(),
+        magika_decision: message.magika_decision.clone(),
+    }
+}
+
+fn retry_after_seconds(base: u32, attempt_count: u32) -> u32 {
+    let multiplier = 2u32.saturating_pow(attempt_count.min(4));
+    base.max(1).saturating_mul(multiplier).min(3600)
+}
+
+async fn persist_quarantine_metadata(
+    spool_dir: &Path,
+    config: &RuntimeConfig,
+    message: &QueuedMessage,
+) -> Result<()> {
+    if !config.local_db_enabled {
+        return Ok(());
+    }
+
+    let Some(database_url) = config.local_db_url.as_deref() else {
+        warn!(
+            trace_id = %message.id,
+            "quarantine metadata store enabled but LPE_CT_LOCAL_DB_URL is not configured"
+        );
+        return Ok(());
+    };
+
+    let pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect_lazy(database_url)?;
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS quarantine_messages (
+            trace_id TEXT PRIMARY KEY,
+            direction TEXT NOT NULL,
+            status TEXT NOT NULL,
+            received_at TEXT NOT NULL,
+            peer TEXT NOT NULL,
+            helo TEXT NOT NULL,
+            mail_from TEXT NOT NULL,
+            rcpt_to JSONB NOT NULL,
+            subject TEXT NOT NULL,
+            internet_message_id TEXT,
+            spool_path TEXT NOT NULL,
+            reason TEXT,
+            spam_score REAL NOT NULL,
+            security_score REAL NOT NULL,
+            reputation_score INTEGER NOT NULL,
+            dnsbl_hits JSONB NOT NULL,
+            auth_summary JSONB NOT NULL,
+            decision_trace JSONB NOT NULL,
+            magika_summary TEXT,
+            magika_decision TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    let metadata = quarantine_metadata(spool_dir, message);
+    sqlx::query(
+        r#"
+        INSERT INTO quarantine_messages (
+            trace_id, direction, status, received_at, peer, helo, mail_from, rcpt_to,
+            subject, internet_message_id, spool_path, reason, spam_score, security_score,
+            reputation_score, dnsbl_hits, auth_summary, decision_trace, magika_summary,
+            magika_decision
+        )
+        VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8,
+            $9, $10, $11, $12, $13, $14,
+            $15, $16, $17, $18, $19, $20
+        )
+        ON CONFLICT (trace_id) DO UPDATE SET
+            status = EXCLUDED.status,
+            received_at = EXCLUDED.received_at,
+            peer = EXCLUDED.peer,
+            helo = EXCLUDED.helo,
+            mail_from = EXCLUDED.mail_from,
+            rcpt_to = EXCLUDED.rcpt_to,
+            subject = EXCLUDED.subject,
+            internet_message_id = EXCLUDED.internet_message_id,
+            spool_path = EXCLUDED.spool_path,
+            reason = EXCLUDED.reason,
+            spam_score = EXCLUDED.spam_score,
+            security_score = EXCLUDED.security_score,
+            reputation_score = EXCLUDED.reputation_score,
+            dnsbl_hits = EXCLUDED.dnsbl_hits,
+            auth_summary = EXCLUDED.auth_summary,
+            decision_trace = EXCLUDED.decision_trace,
+            magika_summary = EXCLUDED.magika_summary,
+            magika_decision = EXCLUDED.magika_decision,
+            updated_at = NOW()
+        "#,
+    )
+    .bind(&metadata.trace_id)
+    .bind(&metadata.direction)
+    .bind(&metadata.status)
+    .bind(&metadata.received_at)
+    .bind(&metadata.peer)
+    .bind(&metadata.helo)
+    .bind(&metadata.mail_from)
+    .bind(Json(metadata.rcpt_to))
+    .bind(&metadata.subject)
+    .bind(&metadata.internet_message_id)
+    .bind(&metadata.spool_path)
+    .bind(&metadata.reason)
+    .bind(metadata.spam_score)
+    .bind(metadata.security_score)
+    .bind(metadata.reputation_score)
+    .bind(Json(metadata.dnsbl_hits))
+    .bind(Json(metadata.auth_summary))
+    .bind(Json(metadata.decision_trace))
+    .bind(&metadata.magika_summary)
+    .bind(&metadata.magika_decision)
+    .execute(&pool)
+    .await?;
+
+    Ok(())
+}
+
+async fn persist_quarantine_metadata_or_warn(
+    spool_dir: &Path,
+    config: &RuntimeConfig,
+    message: &QueuedMessage,
+) {
+    if let Err(error) = persist_quarantine_metadata(spool_dir, config, message).await {
+        warn!(
+            trace_id = %message.id,
+            error = %error,
+            "unable to persist quarantine metadata in local PostgreSQL"
+        );
+    }
 }
 
 fn routing_rules_at(value: &Value) -> Vec<OutboundRoutingRule> {
@@ -2639,10 +3243,11 @@ mod tests {
     use super::{
         apply_authentication_scores, classify_inbound_message, compose_rfc822_message,
         dkim_disposition, dnsbl_query_name, encode_quoted_printable, evaluate_greylisting,
-        initialize_spool, load_reputation_score, parse_peer_ip, process_outbound_handoff,
-        receive_message, receive_message_with_validator, spf_disposition, stable_key_id,
-        summarize_dkim, summarize_dmarc, summarize_spf, unix_now, update_reputation, AuthSummary,
-        AuthenticationAssessment, DkimDisposition, FilterAction, GreylistEntry,
+        initialize_spool, load_bayespam_corpus, load_reputation_score, parse_peer_ip,
+        process_outbound_handoff, receive_message, receive_message_with_validator,
+        retry_after_seconds, score_bayespam, spf_disposition, stable_key_id, summarize_dkim,
+        summarize_dmarc, summarize_spf, train_bayespam, unix_now, update_reputation, AuthSummary,
+        AuthenticationAssessment, BayesLabel, DkimDisposition, FilterAction, GreylistEntry,
         OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig, SpfDisposition,
     };
     use crate::ENV_LOCK;
@@ -2686,6 +3291,11 @@ mod tests {
             drain_mode: false,
             quarantine_enabled: true,
             greylisting_enabled: false,
+            bayespam_enabled: true,
+            bayespam_auto_learn: true,
+            bayespam_score_weight: 6.0,
+            bayespam_min_token_length: 3,
+            bayespam_max_tokens: 256,
             require_spf: true,
             require_dkim_alignment: false,
             require_dmarc_enforcement: true,
@@ -2701,6 +3311,36 @@ mod tests {
             routing_rules: Vec::new(),
             throttle_enabled: false,
             throttle_rules: Vec::new(),
+            local_db_enabled: false,
+            local_db_url: None,
+        }
+    }
+
+    fn training_message(subject: &str, body: &str) -> QueuedMessage {
+        QueuedMessage {
+            id: format!("trace-{}", stable_key_id(&(subject, body))),
+            direction: "inbound".to_string(),
+            received_at: "unix:1".to_string(),
+            peer: "192.0.2.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "sender@example.test".to_string(),
+            rcpt_to: vec!["dest@example.test".to_string()],
+            status: "incoming".to_string(),
+            relay_error: None,
+            magika_summary: None,
+            magika_decision: None,
+            spam_score: 0.0,
+            security_score: 0.0,
+            reputation_score: 0,
+            dnsbl_hits: Vec::new(),
+            auth_summary: AuthSummary::default(),
+            decision_trace: Vec::new(),
+            remote_message_ref: None,
+            technical_status: None,
+            dsn: None,
+            route: None,
+            throttle: None,
+            data: format!("Subject: {subject}\r\n\r\n{body}").into_bytes(),
         }
     }
 
@@ -3191,6 +3831,84 @@ mod tests {
     }
 
     #[test]
+    fn bayespam_learns_tokens_and_scores_spammy_message() {
+        let spool = temp_dir("bayespam-train");
+        initialize_spool(&spool).unwrap();
+        let config = runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+
+        train_bayespam(
+            &spool,
+            &config,
+            &training_message("Weekly report", "meeting agenda project status"),
+            BayesLabel::Ham,
+        )
+        .unwrap();
+        train_bayespam(
+            &spool,
+            &config,
+            &training_message("Cheap pills", "cheap pills winner casino bonus pills"),
+            BayesLabel::Spam,
+        )
+        .unwrap();
+
+        let corpus = load_bayespam_corpus(&spool).unwrap();
+        assert_eq!(corpus.ham_messages, 1);
+        assert_eq!(corpus.spam_messages, 1);
+        assert!(corpus.spam_tokens.contains_key("cheap"));
+
+        let score = score_bayespam(
+            &spool,
+            &config,
+            "Cheap pills offer",
+            "casino bonus cheap pills now",
+            "sender@example.test",
+            "mx.example.test",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(score.probability > 0.80);
+        assert!(score.contribution > 3.0);
+    }
+
+    #[tokio::test]
+    async fn outbound_handoff_quarantines_on_bayespam_score() {
+        let spool = temp_dir("outbound-bayespam");
+        initialize_spool(&spool).unwrap();
+        let mut config =
+            runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+        config.spam_quarantine_threshold = 4.0;
+
+        train_bayespam(
+            &spool,
+            &config,
+            &training_message("Project update", "meeting notes roadmap delivery"),
+            BayesLabel::Ham,
+        )
+        .unwrap();
+        train_bayespam(
+            &spool,
+            &config,
+            &training_message("Cheap pills", "cheap pills winner casino bonus pills"),
+            BayesLabel::Spam,
+        )
+        .unwrap();
+
+        let mut request = outbound_request("Cheap pills now");
+        request.body_text = "cheap pills winner casino bonus".to_string();
+        let response = process_outbound_handoff(&spool, &config, request)
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, TransportDeliveryStatus::Quarantined);
+        assert!(response
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("bayespam score"));
+    }
+
+    #[test]
     fn auth_summary_uses_structured_outcomes() {
         assert_eq!(summarize_spf(&SpfResult::Pass), "pass");
         assert_eq!(
@@ -3258,6 +3976,14 @@ mod tests {
         assert!(security_score >= 5.0);
         assert!(trace.iter().any(|entry| entry.stage == "spf-alignment"));
         assert!(trace.iter().any(|entry| entry.stage == "dkim-alignment"));
+    }
+
+    #[test]
+    fn retry_backoff_grows_with_attempt_count_and_caps() {
+        assert_eq!(retry_after_seconds(300, 0), 300);
+        assert_eq!(retry_after_seconds(300, 1), 600);
+        assert_eq!(retry_after_seconds(300, 3), 2400);
+        assert_eq!(retry_after_seconds(300, 9), 3600);
     }
 
     #[test]

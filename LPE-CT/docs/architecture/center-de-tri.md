@@ -20,8 +20,12 @@ The perimeter pipeline now also executes:
 - greylisting
 - `DNSBL/RBL` lookups
 - `SPF`, `DKIM`, and `DMARC` verification
+- local `bayespam` scoring with spool-first corpus learning
+- explicit virus-scan placeholder stage recorded in the decision trace
 - anti-spam scoring and simple local reputation
 - detailed decision tracing persisted in the spool
+
+When dedicated local PostgreSQL is enabled, `LPE-CT` now also persists technical quarantine metadata into a private `quarantine_messages` table. Payload custody remains in the spool and quarantine directories.
 
 `LPE-CT` may also use dedicated local technical data stores for perimeter-owned state such as Bayesian filtering, reputation, greylisting, quarantine indexes, or cluster coordination. Those stores must remain local to the sorting center and must not become canonical mailbox or collaboration storage.
 
@@ -36,6 +40,7 @@ For outbound `LPE -> LPE-CT` handoff, the sorting center now also covers:
 
 - local outbound routing rules
 - local outbound throttling
+- retry backoff informed by the upstream attempt count supplied by `LPE`
 - classification of `SMTP` replies into `relayed`, `deferred`, `bounced`, or `failed`
 - structured technical and `DSN` detail for the latest attempt
 

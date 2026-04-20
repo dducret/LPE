@@ -133,6 +133,16 @@ struct PolicySettings {
     drain_mode: bool,
     quarantine_enabled: bool,
     greylisting_enabled: bool,
+    #[serde(default = "default_bayespam_enabled")]
+    bayespam_enabled: bool,
+    #[serde(default = "default_bayespam_auto_learn")]
+    bayespam_auto_learn: bool,
+    #[serde(default = "default_bayespam_score_weight")]
+    bayespam_score_weight: f32,
+    #[serde(default = "default_bayespam_min_token_length")]
+    bayespam_min_token_length: u32,
+    #[serde(default = "default_bayespam_max_tokens")]
+    bayespam_max_tokens: u32,
     require_spf: bool,
     require_dkim_alignment: bool,
     require_dmarc_enforcement: bool,
@@ -722,6 +732,27 @@ fn apply_env_overrides(state: &mut DashboardState) {
     if let Ok(value) = env::var("LPE_CT_GREYLISTING_ENABLED") {
         state.policies.greylisting_enabled = parse_bool(&value);
     }
+    if let Ok(value) = env::var("LPE_CT_BAYESPAM_ENABLED") {
+        state.policies.bayespam_enabled = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_BAYESPAM_AUTO_LEARN") {
+        state.policies.bayespam_auto_learn = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_BAYESPAM_SCORE_WEIGHT") {
+        if let Ok(parsed) = value.parse::<f32>() {
+            state.policies.bayespam_score_weight = parsed.max(0.0);
+        }
+    }
+    if let Ok(value) = env::var("LPE_CT_BAYESPAM_MIN_TOKEN_LENGTH") {
+        if let Ok(parsed) = value.parse::<u32>() {
+            state.policies.bayespam_min_token_length = parsed.max(2);
+        }
+    }
+    if let Ok(value) = env::var("LPE_CT_BAYESPAM_MAX_TOKENS") {
+        if let Ok(parsed) = value.parse::<u32>() {
+            state.policies.bayespam_max_tokens = parsed.max(16);
+        }
+    }
     if let Ok(value) = env::var("LPE_CT_REQUIRE_SPF") {
         state.policies.require_spf = parse_bool(&value);
     }
@@ -803,6 +834,15 @@ fn apply_env_overrides(state: &mut DashboardState) {
 }
 
 fn normalize_policy_settings(policies: &mut PolicySettings) {
+    if policies.bayespam_min_token_length < 2 {
+        policies.bayespam_min_token_length = 2;
+    }
+    if policies.bayespam_max_tokens < 16 {
+        policies.bayespam_max_tokens = 16;
+    }
+    if policies.bayespam_score_weight < 0.0 {
+        policies.bayespam_score_weight = 0.0;
+    }
     if policies.reputation_reject_threshold > policies.reputation_quarantine_threshold {
         policies.reputation_reject_threshold = policies.reputation_quarantine_threshold;
     }
@@ -813,8 +853,7 @@ fn normalize_policy_settings(policies: &mut PolicySettings) {
 
 fn normalize_local_data_stores(local_data_stores: &mut LocalDataStoresSettings) {
     if local_data_stores.state_file_path.trim().is_empty() {
-        local_data_stores.state_file_path =
-            "/var/lib/lpe-ct/state.json".to_string();
+        local_data_stores.state_file_path = "/var/lib/lpe-ct/state.json".to_string();
     }
     if local_data_stores.spool_root.trim().is_empty() {
         local_data_stores.spool_root = "/var/spool/lpe-ct".to_string();
@@ -828,9 +867,8 @@ fn normalize_local_data_stores(local_data_stores: &mut LocalDataStoresSettings) 
     if local_data_stores.forbidden_canonical_data.is_empty() {
         local_data_stores.forbidden_canonical_data = default_forbidden_canonical_data();
     }
-    local_data_stores.dedicated_postgres.network_scope = normalize_local_db_network_scope(
-        &local_data_stores.dedicated_postgres.network_scope,
-    );
+    local_data_stores.dedicated_postgres.network_scope =
+        normalize_local_db_network_scope(&local_data_stores.dedicated_postgres.network_scope);
     if local_data_stores.dedicated_postgres.purposes.is_empty() {
         local_data_stores.dedicated_postgres.purposes = default_local_db_purposes();
     }
@@ -999,6 +1037,11 @@ fn default_state() -> DashboardState {
             drain_mode: false,
             quarantine_enabled: true,
             greylisting_enabled: true,
+            bayespam_enabled: default_bayespam_enabled(),
+            bayespam_auto_learn: default_bayespam_auto_learn(),
+            bayespam_score_weight: default_bayespam_score_weight(),
+            bayespam_min_token_length: default_bayespam_min_token_length(),
+            bayespam_max_tokens: default_bayespam_max_tokens(),
             require_spf: true,
             require_dkim_alignment: false,
             require_dmarc_enforcement: true,
@@ -1047,7 +1090,10 @@ fn default_true() -> bool {
 }
 
 fn default_spool_queues() -> Vec<String> {
-    smtp::SPOOL_QUEUES.iter().map(|value| (*value).to_string()).collect()
+    smtp::SPOOL_QUEUES
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect()
 }
 
 fn default_policy_artifacts() -> Vec<String> {
@@ -1101,15 +1147,33 @@ fn default_local_db_notes() -> String {
 
 fn normalize_local_db_network_scope(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
-        "host-local" | "private-backend" | "lpe-ct-cluster" => {
-            value.trim().to_ascii_lowercase()
-        }
+        "host-local" | "private-backend" | "lpe-ct-cluster" => value.trim().to_ascii_lowercase(),
         _ => default_local_db_network_scope(),
     }
 }
 
 fn default_dnsbl_enabled() -> bool {
     true
+}
+
+fn default_bayespam_enabled() -> bool {
+    true
+}
+
+fn default_bayespam_auto_learn() -> bool {
+    true
+}
+
+fn default_bayespam_score_weight() -> f32 {
+    6.0
+}
+
+fn default_bayespam_min_token_length() -> u32 {
+    3
+}
+
+fn default_bayespam_max_tokens() -> u32 {
+    256
 }
 
 fn default_defer_on_auth_tempfail() -> bool {
@@ -1334,7 +1398,10 @@ fn check_local_data_store_policy(local_data_stores: &LocalDataStoresSettings) ->
 
 fn address_binds_publicly(address: &str) -> bool {
     let normalized = address.trim();
-    if matches!(normalized, "0.0.0.0" | "0.0.0.0:5432" | "::" | "[::]" | "[::]:5432") {
+    if matches!(
+        normalized,
+        "0.0.0.0" | "0.0.0.0:5432" | "::" | "[::]" | "[::]:5432"
+    ) {
         return true;
     }
 
@@ -1625,7 +1692,11 @@ mod tests {
 
         assert!(state.local_data_stores.dedicated_postgres.enabled);
         assert_eq!(
-            state.local_data_stores.dedicated_postgres.listen_address.as_deref(),
+            state
+                .local_data_stores
+                .dedicated_postgres
+                .listen_address
+                .as_deref(),
             Some("127.0.0.1:5432")
         );
         assert_eq!(

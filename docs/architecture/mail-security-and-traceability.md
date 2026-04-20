@@ -12,6 +12,15 @@ This document describes mail flow, edge security, traceability, and quarantine b
 
 The current `LPE-CT` implementation already executes real `SPF`, `DKIM`, and `DMARC` validation, greylisting, `DNSBL/RBL` lookups, simple local reputation, and a detailed decision trace persisted in the spool.
 
+The inbound perimeter pipeline is now explicitly staged as:
+
+1. ingress trace creation
+2. SMTP protocol/envelope capture
+3. `RBL` / DNS checks plus `SPF` / `DKIM` / `DMARC`
+4. local Bayesian scoring plus a placeholder hook for the future virus engine
+5. final score calculation
+6. accept, defer, reject, or quarantine
+
 Edge decisions now rely on structured outcomes:
 
 - `DMARC reject` can force SMTP reject
@@ -81,6 +90,8 @@ When delivery can proceed normally, the internal `LPE-CT -> LPE` exchange should
 ### Quarantine
 
 Quarantine is stored in `LPE-CT`.
+
+When `LPE-CT` enables its dedicated local `PostgreSQL` store, quarantined messages are also indexed in a technical `quarantine_messages` table for operational search and release workflows. Spool custody of the message payload remains with `LPE-CT`.
 
 `LPE` may request the release of a message through a privileged action, but quarantine ownership remains in the sorting center.
 

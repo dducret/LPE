@@ -69,6 +69,9 @@ The target storage model is therefore:
 
 The preferred first dedicated store is an `LPE-CT`-owned local `PostgreSQL` service used only for technical state.
 
+The current implementation may now upsert quarantined-message metadata into a private `quarantine_messages` table when `LPE_CT_LOCAL_DB_ENABLED=true` and `LPE_CT_LOCAL_DB_URL` is configured. That table is technical only; payload custody remains in the spool and quarantine directories.
+The first `bayespam` implementation remains spool-first through `policy/bayespam.json`, which keeps the classifier operational even when the optional local PostgreSQL service is disabled.
+
 Typical target domains for that local database are:
 
 - Bayesian classifier tokens, corpus metadata, and training history

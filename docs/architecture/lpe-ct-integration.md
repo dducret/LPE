@@ -117,9 +117,11 @@ The detailed metric families and logging behavior are documented in `docs/archit
 - `LPE-CT` keeps raw SMTP bytes intact on ingress and carries them through persistence and internal final delivery
 - `LPE-CT` extracts inbound visible text from decoded MIME (`multipart/alternative`, `quoted-printable`, `base64`, HTML) instead of indexing the raw RFC 822 body blindly
 - `LPE-CT` now persists a structured authentication summary (`SPF`, `DKIM`, `DMARC`, alignment, tempfail) and explicit `defer` / `quarantine` / `reject` reasons
+- `LPE-CT` now records the full inbound edge pipeline in the decision trace, including protocol capture, `RBL` / DNS checks, active `bayespam`, placeholder virus-scan stage, and final score calculation
+- when the dedicated local PostgreSQL store is enabled, `LPE-CT` upserts quarantined-message metadata into a private `quarantine_messages` table while keeping payload custody in the spool
 - `LPE-CT` composes outbound relay as RFC 822 with either plain `text/plain` or `multipart/alternative` `text/plain` + `text/html` when `body_html_sanitized` is available, without reinjecting `Bcc` into visible headers
 - `LPE-CT` applies outbound routing rules and throttling before the actual SMTP relay
-- `LPE-CT` classifies outbound failures into `deferred`, `bounced`, or `failed` from SMTP replies and produces structured technical and `DSN` feedback
+- `LPE-CT` classifies outbound failures into `deferred`, `bounced`, or `failed` from SMTP replies and produces structured technical and `DSN` feedback with retry backoff derived from the upstream attempt count
 - inbound final delivery creates per-mailbox `Inbox` copies in `LPE`
 - standard search and visible projections do not reinject `Bcc`
 
