@@ -20,12 +20,12 @@ use lpe_magika::{
 use lpe_storage::{
     AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput,
     AuthenticatedAccount, AuthenticatedAdmin, ClientContact, ClientEvent, ClientTask,
-    ClientWorkspace, DashboardUpdate, EmailTraceResult, EmailTraceSearchInput, HealthResponse,
-    LocalAiSettings, NewAccount, NewAdminAuthFactor, NewAlias, NewDomain, NewFilterRule,
-    NewMailbox, NewPstTransferJob, NewServerAdministrator, PstJobExecutionSummary,
-    SavedDraftMessage, SecuritySettings, ServerSettings, Storage, SubmitMessageInput,
-    SubmittedMessage, SubmittedRecipientInput, UpdateAccount, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientTaskInput,
+    ClientWorkspace, CollaborationGrantInput, CollaborationResourceKind, DashboardUpdate,
+    EmailTraceResult, EmailTraceSearchInput, HealthResponse, LocalAiSettings, NewAccount,
+    NewAdminAuthFactor, NewAlias, NewDomain, NewFilterRule, NewMailbox, NewPstTransferJob,
+    NewServerAdministrator, PstJobExecutionSummary, SavedDraftMessage, SecuritySettings,
+    ServerSettings, Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    UpdateAccount, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::env;
 use std::path::{Path, PathBuf};
@@ -44,13 +44,14 @@ use crate::types::{
     AdminAuthFactorsResponse, ApiResult, AttachmentSupportResponse, BootstrapAdminRequest,
     BootstrapAdminResponse, ClientLoginResponse, CreateAccountRequest, CreateAliasRequest,
     CreateDomainRequest, CreateFilterRuleRequest, CreateMailboxRequest,
-    CreatePstTransferJobRequest, CreateServerAdministratorRequest, EmailTraceSearchRequest,
-    EnrollTotpRequest, EnrollTotpResponse, LocalAiHealthResponse, LoginRequest, LoginResponse,
+    CreatePstTransferJobRequest, CreateServerAdministratorRequest,
+    CollaborationOverviewResponse, EmailTraceSearchRequest, EnrollTotpRequest,
+    EnrollTotpResponse, LocalAiHealthResponse, LoginRequest, LoginResponse,
     OidcMetadataResponse, OidcStartResponse, ReadinessCheck, ReadinessResponse,
     SubmitMessageRequest, SubmitRecipientRequest, UpdateAccountRequest,
     UpdateAntispamSettingsRequest, UpdateLocalAiSettingsRequest, UpdateSecuritySettingsRequest,
     UpdateServerSettingsRequest, UpsertClientContactRequest, UpsertClientEventRequest,
-    UpsertClientTaskRequest, VerifyTotpRequest,
+    UpsertClientTaskRequest, UpsertCollaborationGrantRequest, VerifyTotpRequest,
 };
 
 const MIN_ADMIN_PASSWORD_LEN: usize = 12;
@@ -115,6 +116,11 @@ pub fn router(storage: Storage) -> Router {
         )
         .route("/mail/contacts", post(upsert_client_contact))
         .route("/mail/calendar/events", post(upsert_client_event))
+        .route("/mail/shares", get(list_collaboration_overview).put(upsert_collaboration_grant))
+        .route(
+            "/mail/shares/{kind}/{grantee_account_id}",
+            delete(delete_collaboration_grant),
+        )
         .route(
             "/console/audit/email-trace-search",
             post(search_email_trace),
@@ -1346,21 +1352,36 @@ async fn upsert_client_contact(
     Json(request): Json<UpsertClientContactRequest>,
 ) -> ApiResult<ClientContact> {
     let account = require_account(&storage, &headers).await?;
-    Ok(Json(
+    let input = UpsertClientContactInput {
+        id: request.id,
+        account_id: account.account_id,
+        name: request.name,
+        role: request.role,
+        email: request.email,
+        phone: request.phone,
+        team: request.team,
+        notes: request.notes,
+    };
+    let contact = if let Some(contact_id) = request.id {
         storage
-            .upsert_client_contact(UpsertClientContactInput {
-                id: request.id,
-                account_id: account.account_id,
-                name: request.name,
-                role: request.role,
-                email: request.email,
-                phone: request.phone,
-                team: request.team,
-                notes: request.notes,
-            })
+            .update_accessible_contact(account.account_id, contact_id, input)
             .await
-            .map_err(bad_request_error)?,
-    ))
+            .map_err(bad_request_error)?
+    } else {
+        storage
+            .create_accessible_contact(account.account_id, request.collection_id.as_deref(), input)
+            .await
+            .map_err(bad_request_error)?
+    };
+    Ok(Json(ClientContact {
+        id: contact.id,
+        name: contact.name,
+        role: contact.role,
+        email: contact.email,
+        phone: contact.phone,
+        team: contact.team,
+        notes: contact.notes,
+    }))
 }
 
 async fn upsert_client_event(
@@ -1369,25 +1390,141 @@ async fn upsert_client_event(
     Json(request): Json<UpsertClientEventRequest>,
 ) -> ApiResult<ClientEvent> {
     let account = require_account(&storage, &headers).await?;
+    let input = UpsertClientEventInput {
+        id: request.id,
+        account_id: account.account_id,
+        date: request.date,
+        time: request.time,
+        time_zone: request.time_zone,
+        duration_minutes: request.duration_minutes,
+        recurrence_rule: request.recurrence_rule,
+        title: request.title,
+        location: request.location,
+        attendees: request.attendees,
+        attendees_json: request.attendees_json,
+        notes: request.notes,
+    };
+    let event = if let Some(event_id) = request.id {
+        storage
+            .update_accessible_event(account.account_id, event_id, input)
+            .await
+            .map_err(bad_request_error)?
+    } else {
+        storage
+            .create_accessible_event(account.account_id, request.collection_id.as_deref(), input)
+            .await
+            .map_err(bad_request_error)?
+    };
+    Ok(Json(ClientEvent {
+        id: event.id,
+        date: event.date,
+        time: event.time,
+        time_zone: event.time_zone,
+        duration_minutes: event.duration_minutes,
+        recurrence_rule: event.recurrence_rule,
+        title: event.title,
+        location: event.location,
+        attendees: event.attendees,
+        attendees_json: event.attendees_json,
+        notes: event.notes,
+    }))
+}
+
+async fn list_collaboration_overview(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<CollaborationOverviewResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let incoming_contact_collections = storage
+        .fetch_accessible_contact_collections(account.account_id)
+        .await
+        .map_err(internal_error)?
+        .into_iter()
+        .filter(|collection| !collection.is_owned)
+        .collect();
+    let incoming_calendar_collections = storage
+        .fetch_accessible_calendar_collections(account.account_id)
+        .await
+        .map_err(internal_error)?
+        .into_iter()
+        .filter(|collection| !collection.is_owned)
+        .collect();
+
+    Ok(Json(CollaborationOverviewResponse {
+        outgoing_contacts: storage
+            .fetch_outgoing_collaboration_grants(
+                account.account_id,
+                CollaborationResourceKind::Contacts,
+            )
+            .await
+            .map_err(internal_error)?,
+        outgoing_calendars: storage
+            .fetch_outgoing_collaboration_grants(
+                account.account_id,
+                CollaborationResourceKind::Calendar,
+            )
+            .await
+            .map_err(internal_error)?,
+        incoming_contact_collections,
+        incoming_calendar_collections,
+    }))
+}
+
+async fn upsert_collaboration_grant(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<UpsertCollaborationGrantRequest>,
+) -> ApiResult<lpe_storage::CollaborationGrant> {
+    let account = require_account(&storage, &headers).await?;
+    let kind = parse_collaboration_kind(&request.kind).map_err(bad_request_error)?;
     Ok(Json(
         storage
-            .upsert_client_event(UpsertClientEventInput {
-                id: request.id,
-                account_id: account.account_id,
-                date: request.date,
-                time: request.time,
-                time_zone: request.time_zone,
-                duration_minutes: request.duration_minutes,
-                recurrence_rule: request.recurrence_rule,
-                title: request.title,
-                location: request.location,
-                attendees: request.attendees,
-                attendees_json: request.attendees_json,
-                notes: request.notes,
-            })
+            .upsert_collaboration_grant(
+                CollaborationGrantInput {
+                    kind,
+                    owner_account_id: account.account_id,
+                    grantee_email: request.grantee_email.clone(),
+                    may_read: request.may_read,
+                    may_write: request.may_write,
+                    may_delete: request.may_delete,
+                    may_share: request.may_share,
+                },
+                AuditEntryInput {
+                    actor: account.email.clone(),
+                    action: format!("collaboration-share-upsert:{}", kind.as_str()),
+                    subject: request.grantee_email,
+                },
+            )
             .await
             .map_err(bad_request_error)?,
     ))
+}
+
+async fn delete_collaboration_grant(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath((kind, grantee_account_id)): AxumPath<(String, Uuid)>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let kind = parse_collaboration_kind(&kind).map_err(bad_request_error)?;
+    storage
+        .delete_collaboration_grant(
+            account.account_id,
+            kind,
+            grantee_account_id,
+            AuditEntryInput {
+                actor: account.email,
+                action: format!("collaboration-share-delete:{}", kind.as_str()),
+                subject: grantee_account_id.to_string(),
+            },
+        )
+        .await
+        .map_err(bad_request_error)?;
+
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
 }
 
 async fn list_client_tasks(
@@ -1538,6 +1675,14 @@ fn internal_error(error: impl ToString) -> (StatusCode, String) {
 
 fn bad_request_error(error: impl ToString) -> (StatusCode, String) {
     (StatusCode::BAD_REQUEST, error.to_string())
+}
+
+fn parse_collaboration_kind(value: &str) -> Result<CollaborationResourceKind, String> {
+    match value.trim().to_lowercase().as_str() {
+        "contacts" | "contact" => Ok(CollaborationResourceKind::Contacts),
+        "calendar" | "calendars" => Ok(CollaborationResourceKind::Calendar),
+        _ => Err("unsupported collaboration kind".to_string()),
+    }
 }
 
 fn require_integration(headers: &HeaderMap) -> std::result::Result<(), (StatusCode, String)> {

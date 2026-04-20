@@ -67,6 +67,7 @@ The important non-negotiable rules are:
 ### Data, lifecycle, and compliance
 
 - `docs/architecture/attachments-v1.md`
+- `docs/architecture/collaboration-acl-delegation-mvp.md`
 - `docs/architecture/data-lifecycle-and-compliance.md`
 
 ## Deferred Topics

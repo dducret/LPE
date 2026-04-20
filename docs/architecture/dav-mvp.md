@@ -15,7 +15,7 @@ The `crates/lpe-dav` crate exposes a deliberately small but more interoperable D
 - `calendar_events` remains the source of truth for calendar data, including the minimal interoperability metadata now needed for DAV clients
 - future task compatibility must reuse the canonical `tasks` model rather than introducing DAV-only task storage
 - the adapter must not introduce a separate storage, tenant, or rights model
-- each DAV request is scoped to the authenticated account only
+- each DAV request is scoped to the authenticated principal and the canonical same-tenant grants resolved by `LPE`
 
 ## Endpoints
 
@@ -23,8 +23,8 @@ The `crates/lpe-dav` crate exposes a deliberately small but more interoperable D
 - `/.well-known/caldav`
 - `/dav/`
 - `/dav/principals/me/`
-- `/dav/addressbooks/me/default/`
-- `/dav/calendars/me/default/`
+- `/dav/addressbooks/me/{collection-id}/`
+- `/dav/calendars/me/{collection-id}/`
 
 Without the Debian reverse proxy, these routes are exposed directly by the Rust service.
 
@@ -49,11 +49,11 @@ The MVP supports:
 
 The implementation keeps discovery and synchronization intentionally minimal:
 
-- `PROPFIND` exposes the root, current principal, the default address-book collection, the default calendar collection, and collection members
+- `PROPFIND` exposes the root, current principal, every accessible address-book collection, every accessible calendar collection, and collection members
 - `REPORT` supports collection reads, multiget-style `href` targeting, simple text-match filtering, and minimal calendar `time-range` filtering on event start
 - `GET` returns one `vCard` or one `iCalendar` object and honors `If-None-Match`
 - `PUT` performs full-resource replacement for one `vCard` or one `iCalendar` object and honors `If-Match` and `If-None-Match`
-- `DELETE` removes one contact or one event owned by the authenticated account and honors `If-Match` and `If-None-Match`
+- `DELETE` removes one contact or one event only when the canonical grant allows delete and honors `If-Match` and `If-None-Match`
 - `ETag` values are returned on DAV resources and write responses
 
 ## Minimal mapping
@@ -90,8 +90,9 @@ The canonical calendar model still belongs to `LPE`. The DAV adapter does not ma
 ## Supported MVP scope
 
 - account authentication reuse
-- default `CardDAV` address-book collection
-- default `CalDAV` calendar collection
+- owned default `CardDAV` address-book collection
+- owned default `CalDAV` calendar collection
+- same-tenant shared address-book and calendar collections when canonical grants exist
 - collection discovery through minimal DAV properties
 - read access to contacts and events through collection and resource endpoints
 - full-resource create and update for contacts and events through `PUT`
@@ -111,17 +112,20 @@ The canonical calendar model still belongs to `LPE`. The DAV adapter does not ma
 ## Important rules
 
 - the adapter does not duplicate business logic already implemented in storage
-- tenant and account scoping continue to be enforced by the canonical `LPE` account model
+- tenant, owner, and grantee scoping continue to be enforced by the canonical `LPE` account model
 - DAV compatibility does not create a separate collaboration authority outside `LPE`
 - the adapter does not reuse any `Stalwart` code
 - the adapter stores interoperability metadata only in canonical `LPE` event fields; there is still no DAV-only storage layer
+- rights come from the canonical collection-grant model shared with `JMAP`
 
 ## Known limitations
 
-- the MVP exposes one default address-book collection and one default calendar collection per account
+- the MVP always exposes the owner's default collections and may expose additional same-tenant shared collections
 - the MVP supports only a minimal subset of DAV discovery and query semantics
 - contact updates replace the whole `vCard`; partial patch semantics are not implemented
 - calendar updates still replace the whole `VEVENT`
+- ACLs remain collection-scoped; there is no per-item DAV ACL yet
+- cross-tenant sharing is not supported
 - calendar recurrence support is limited to preserving one raw `RRULE`; recurrence expansion, exceptions, and detached instances are not implemented
 - time-zone support is limited to preserving `TZID` on `DTSTART`; `VTIMEZONE` definitions are not stored or expanded
 - `REPORT` filtering remains intentionally small and does not implement the full CardDAV or CalDAV filter grammar

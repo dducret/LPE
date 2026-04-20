@@ -9,7 +9,8 @@ use axum::{
 };
 use lpe_mail_auth::{authenticate_account, AccountAuthStore, AccountPrincipal};
 use lpe_storage::{
-    ClientContact, ClientEvent, Storage, UpsertClientContactInput, UpsertClientEventInput,
+    AccessibleContact, AccessibleEvent, CollaborationCollection, Storage,
+    UpsertClientContactInput, UpsertClientEventInput,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -21,8 +22,11 @@ use uuid::Uuid;
 const ROOT_PATH: &str = "/dav/";
 const PRINCIPAL_PATH: &str = "/dav/principals/me/";
 const ADDRESSBOOK_HOME_PATH: &str = "/dav/addressbooks/me/";
+const DEFAULT_COLLECTION_ID: &str = "default";
+const ADDRESSBOOK_COLLECTION_PREFIX: &str = "/dav/addressbooks/me/";
 const ADDRESSBOOK_COLLECTION_PATH: &str = "/dav/addressbooks/me/default/";
 const CALENDAR_HOME_PATH: &str = "/dav/calendars/me/";
+const CALENDAR_COLLECTION_PREFIX: &str = "/dav/calendars/me/";
 const CALENDAR_COLLECTION_PATH: &str = "/dav/calendars/me/default/";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -51,77 +55,187 @@ pub fn router() -> Router<Storage> {
 }
 
 pub trait DavStore: AccountAuthStore {
-    fn fetch_client_contacts<'a>(
+    fn fetch_accessible_contact_collections<'a>(
         &'a self,
-        account_id: Uuid,
-    ) -> lpe_mail_auth::StoreFuture<'a, Vec<ClientContact>>;
-    fn fetch_client_events<'a>(
+        principal_account_id: Uuid,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>>;
+    fn fetch_accessible_calendar_collections<'a>(
         &'a self,
-        account_id: Uuid,
-    ) -> lpe_mail_auth::StoreFuture<'a, Vec<ClientEvent>>;
-    fn upsert_client_contact<'a>(
+        principal_account_id: Uuid,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>>;
+    fn fetch_accessible_contacts<'a>(
         &'a self,
+        principal_account_id: Uuid,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleContact>>;
+    fn fetch_accessible_contacts_in_collection<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleContact>>;
+    fn fetch_accessible_events<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleEvent>>;
+    fn fetch_accessible_events_in_collection<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleEvent>>;
+    fn create_accessible_contact<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: Option<&'a str>,
         input: UpsertClientContactInput,
-    ) -> lpe_mail_auth::StoreFuture<'a, ClientContact>;
-    fn upsert_client_event<'a>(
+    ) -> lpe_mail_auth::StoreFuture<'a, AccessibleContact>;
+    fn create_accessible_event<'a>(
         &'a self,
+        principal_account_id: Uuid,
+        collection_id: Option<&'a str>,
         input: UpsertClientEventInput,
-    ) -> lpe_mail_auth::StoreFuture<'a, ClientEvent>;
-    fn delete_client_contact<'a>(
+    ) -> lpe_mail_auth::StoreFuture<'a, AccessibleEvent>;
+    fn update_accessible_contact<'a>(
         &'a self,
-        account_id: Uuid,
+        principal_account_id: Uuid,
+        contact_id: Uuid,
+        input: UpsertClientContactInput,
+    ) -> lpe_mail_auth::StoreFuture<'a, AccessibleContact>;
+    fn update_accessible_event<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+        input: UpsertClientEventInput,
+    ) -> lpe_mail_auth::StoreFuture<'a, AccessibleEvent>;
+    fn delete_accessible_contact<'a>(
+        &'a self,
+        principal_account_id: Uuid,
         contact_id: Uuid,
     ) -> lpe_mail_auth::StoreFuture<'a, ()>;
-    fn delete_client_event<'a>(
+    fn delete_accessible_event<'a>(
         &'a self,
-        account_id: Uuid,
+        principal_account_id: Uuid,
         event_id: Uuid,
     ) -> lpe_mail_auth::StoreFuture<'a, ()>;
 }
 
 impl DavStore for Storage {
-    fn fetch_client_contacts<'a>(
+    fn fetch_accessible_contact_collections<'a>(
         &'a self,
-        account_id: Uuid,
-    ) -> lpe_mail_auth::StoreFuture<'a, Vec<ClientContact>> {
-        Box::pin(async move { self.fetch_client_contacts(account_id).await })
+        principal_account_id: Uuid,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>> {
+        Box::pin(async move { self.fetch_accessible_contact_collections(principal_account_id).await })
     }
 
-    fn fetch_client_events<'a>(
+    fn fetch_accessible_calendar_collections<'a>(
         &'a self,
-        account_id: Uuid,
-    ) -> lpe_mail_auth::StoreFuture<'a, Vec<ClientEvent>> {
-        Box::pin(async move { self.fetch_client_events(account_id).await })
+        principal_account_id: Uuid,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>> {
+        Box::pin(async move { self.fetch_accessible_calendar_collections(principal_account_id).await })
     }
 
-    fn upsert_client_contact<'a>(
+    fn fetch_accessible_contacts<'a>(
         &'a self,
+        principal_account_id: Uuid,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleContact>> {
+        Box::pin(async move { self.fetch_accessible_contacts(principal_account_id).await })
+    }
+
+    fn fetch_accessible_contacts_in_collection<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleContact>> {
+        Box::pin(async move {
+            self.fetch_accessible_contacts_in_collection(principal_account_id, collection_id)
+                .await
+        })
+    }
+
+    fn fetch_accessible_events<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleEvent>> {
+        Box::pin(async move { self.fetch_accessible_events(principal_account_id).await })
+    }
+
+    fn fetch_accessible_events_in_collection<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleEvent>> {
+        Box::pin(async move {
+            self.fetch_accessible_events_in_collection(principal_account_id, collection_id)
+                .await
+        })
+    }
+
+    fn create_accessible_contact<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: Option<&'a str>,
         input: UpsertClientContactInput,
-    ) -> lpe_mail_auth::StoreFuture<'a, ClientContact> {
-        Box::pin(async move { self.upsert_client_contact(input).await })
+    ) -> lpe_mail_auth::StoreFuture<'a, AccessibleContact> {
+        Box::pin(async move {
+            self.create_accessible_contact(principal_account_id, collection_id, input)
+                .await
+        })
     }
 
-    fn upsert_client_event<'a>(
+    fn create_accessible_event<'a>(
         &'a self,
+        principal_account_id: Uuid,
+        collection_id: Option<&'a str>,
         input: UpsertClientEventInput,
-    ) -> lpe_mail_auth::StoreFuture<'a, ClientEvent> {
-        Box::pin(async move { self.upsert_client_event(input).await })
+    ) -> lpe_mail_auth::StoreFuture<'a, AccessibleEvent> {
+        Box::pin(async move {
+            self.create_accessible_event(principal_account_id, collection_id, input)
+                .await
+        })
     }
 
-    fn delete_client_contact<'a>(
+    fn update_accessible_contact<'a>(
         &'a self,
-        account_id: Uuid,
+        principal_account_id: Uuid,
+        contact_id: Uuid,
+        input: UpsertClientContactInput,
+    ) -> lpe_mail_auth::StoreFuture<'a, AccessibleContact> {
+        Box::pin(async move {
+            self.update_accessible_contact(principal_account_id, contact_id, input)
+                .await
+        })
+    }
+
+    fn update_accessible_event<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+        input: UpsertClientEventInput,
+    ) -> lpe_mail_auth::StoreFuture<'a, AccessibleEvent> {
+        Box::pin(async move {
+            self.update_accessible_event(principal_account_id, event_id, input)
+                .await
+        })
+    }
+
+    fn delete_accessible_contact<'a>(
+        &'a self,
+        principal_account_id: Uuid,
         contact_id: Uuid,
     ) -> lpe_mail_auth::StoreFuture<'a, ()> {
-        Box::pin(async move { self.delete_client_contact(account_id, contact_id).await })
+        Box::pin(async move {
+            self.delete_accessible_contact(principal_account_id, contact_id)
+                .await
+        })
     }
 
-    fn delete_client_event<'a>(
+    fn delete_accessible_event<'a>(
         &'a self,
-        account_id: Uuid,
+        principal_account_id: Uuid,
         event_id: Uuid,
     ) -> lpe_mail_auth::StoreFuture<'a, ()> {
-        Box::pin(async move { self.delete_client_event(account_id, event_id).await })
+        Box::pin(async move {
+            self.delete_accessible_event(principal_account_id, event_id)
+                .await
+        })
     }
 }
 
@@ -195,38 +309,36 @@ impl<S: DavStore> DavService<S> {
         let entries = match path {
             ROOT_PATH => vec![root_propfind_entry()],
             PRINCIPAL_PATH => vec![principal_propfind_entry()],
-            ADDRESSBOOK_HOME_PATH => vec![collection_home_entry(
-                ADDRESSBOOK_HOME_PATH,
-                "Address Books",
-                collection_resourcetype("collection"),
-            )],
-            CALENDAR_HOME_PATH => vec![collection_home_entry(
-                CALENDAR_HOME_PATH,
-                "Calendars",
-                collection_resourcetype("collection"),
-            )],
-            ADDRESSBOOK_COLLECTION_PATH => {
-                let mut entries = vec![addressbook_collection_entry()];
+            ADDRESSBOOK_HOME_PATH => {
+                let mut entries = vec![collection_home_entry(
+                    ADDRESSBOOK_HOME_PATH,
+                    "Address Books",
+                    collection_resourcetype("collection"),
+                )];
                 if depth == "1" {
                     entries.extend(
                         self.store
-                            .fetch_client_contacts(principal.account_id)
+                            .fetch_accessible_contact_collections(principal.account_id)
                             .await?
                             .into_iter()
-                            .map(contact_resource_entry),
+                            .map(addressbook_collection_entry),
                     );
                 }
                 entries
             }
-            CALENDAR_COLLECTION_PATH => {
-                let mut entries = vec![calendar_collection_entry()];
+            CALENDAR_HOME_PATH => {
+                let mut entries = vec![collection_home_entry(
+                    CALENDAR_HOME_PATH,
+                    "Calendars",
+                    collection_resourcetype("collection"),
+                )];
                 if depth == "1" {
                     entries.extend(
                         self.store
-                            .fetch_client_events(principal.account_id)
+                            .fetch_accessible_calendar_collections(principal.account_id)
                             .await?
                             .into_iter()
-                            .map(event_resource_entry),
+                            .map(calendar_collection_entry),
                     );
                 }
                 entries
@@ -236,6 +348,52 @@ impl<S: DavStore> DavService<S> {
                     vec![contact_resource_entry(contact)]
                 } else if let Some(event) = self.event_for_path(principal.account_id, path).await? {
                     vec![event_resource_entry(event)]
+                } else if let Some(collection_id) = collection_id_from_contact_path(path) {
+                    let collections = self
+                        .store
+                        .fetch_accessible_contact_collections(principal.account_id)
+                        .await?;
+                    let collection = collections
+                        .into_iter()
+                        .find(|entry| entry.id == collection_id)
+                        .ok_or_else(|| anyhow!("not found"))?;
+                    let mut entries = vec![addressbook_collection_entry(collection.clone())];
+                    if depth == "1" {
+                        entries.extend(
+                            self.store
+                                .fetch_accessible_contacts_in_collection(
+                                    principal.account_id,
+                                    &collection.id,
+                                )
+                                .await?
+                                .into_iter()
+                                .map(contact_resource_entry),
+                        );
+                    }
+                    entries
+                } else if let Some(collection_id) = collection_id_from_event_path(path) {
+                    let collections = self
+                        .store
+                        .fetch_accessible_calendar_collections(principal.account_id)
+                        .await?;
+                    let collection = collections
+                        .into_iter()
+                        .find(|entry| entry.id == collection_id)
+                        .ok_or_else(|| anyhow!("not found"))?;
+                    let mut entries = vec![calendar_collection_entry(collection.clone())];
+                    if depth == "1" {
+                        entries.extend(
+                            self.store
+                                .fetch_accessible_events_in_collection(
+                                    principal.account_id,
+                                    &collection.id,
+                                )
+                                .await?
+                                .into_iter()
+                                .map(event_resource_entry),
+                        );
+                    }
+                    entries
                 } else {
                     bail!("not found");
                 }
@@ -251,24 +409,24 @@ impl<S: DavStore> DavService<S> {
         body: &[u8],
     ) -> Result<Response> {
         let filter = parse_report_filter(body)?;
-        let entries = match path {
-            ADDRESSBOOK_COLLECTION_PATH => self
-                .store
-                .fetch_client_contacts(principal.account_id)
+        let entries = if let Some(collection_id) = collection_id_from_contact_path(path) {
+            self.store
+                .fetch_accessible_contacts_in_collection(principal.account_id, &collection_id)
                 .await?
                 .into_iter()
                 .filter(|contact| contact_matches_report(contact, &filter))
                 .map(contact_report_entry)
-                .collect(),
-            CALENDAR_COLLECTION_PATH => self
-                .store
-                .fetch_client_events(principal.account_id)
+                .collect()
+        } else if let Some(collection_id) = collection_id_from_event_path(path) {
+            self.store
+                .fetch_accessible_events_in_collection(principal.account_id, &collection_id)
                 .await?
                 .into_iter()
                 .filter(|event| event_matches_report(event, &filter))
                 .map(event_report_entry)
-                .collect(),
-            _ => bail!("not found"),
+                .collect()
+        } else {
+            bail!("not found")
         };
         Ok(multistatus_response(entries))
     }
@@ -311,21 +469,37 @@ impl<S: DavStore> DavService<S> {
         headers: &HeaderMap,
         body: &[u8],
     ) -> Result<Response> {
-        if let Some(resource_id) = resource_id_for_contact_path(path) {
+        if let Some((collection_id, resource_id)) = resource_id_for_contact_path(path) {
             let existing = self.contact_for_path(principal.account_id, path).await?;
             check_write_preconditions(headers, existing.as_ref().map(etag_for_contact))?;
             let parsed = parse_vcard(resource_id, principal.account_id, body)?;
-            let contact = self.store.upsert_client_contact(parsed).await?;
+            let contact = if existing.is_some() {
+                self.store
+                    .update_accessible_contact(principal.account_id, resource_id, parsed)
+                    .await?
+            } else {
+                self.store
+                    .create_accessible_contact(principal.account_id, Some(&collection_id), parsed)
+                    .await?
+            };
             return Ok(status_with_etag(
                 if existing.is_some() { 204 } else { 201 },
                 etag_for_contact(&contact),
             ));
         }
-        if let Some(resource_id) = resource_id_for_event_path(path) {
+        if let Some((collection_id, resource_id)) = resource_id_for_event_path(path) {
             let existing = self.event_for_path(principal.account_id, path).await?;
             check_write_preconditions(headers, existing.as_ref().map(etag_for_event))?;
             let parsed = parse_ical(resource_id, principal.account_id, body)?;
-            let event = self.store.upsert_client_event(parsed).await?;
+            let event = if existing.is_some() {
+                self.store
+                    .update_accessible_event(principal.account_id, resource_id, parsed)
+                    .await?
+            } else {
+                self.store
+                    .create_accessible_event(principal.account_id, Some(&collection_id), parsed)
+                    .await?
+            };
             return Ok(status_with_etag(
                 if existing.is_some() { 204 } else { 201 },
                 etag_for_event(&event),
@@ -340,19 +514,19 @@ impl<S: DavStore> DavService<S> {
         path: &str,
         headers: &HeaderMap,
     ) -> Result<Response> {
-        if let Some(resource_id) = resource_id_for_contact_path(path) {
+        if let Some((_, resource_id)) = resource_id_for_contact_path(path) {
             let existing = self.contact_for_path(principal.account_id, path).await?;
             check_delete_preconditions(headers, existing.as_ref().map(etag_for_contact))?;
             self.store
-                .delete_client_contact(principal.account_id, resource_id)
+                .delete_accessible_contact(principal.account_id, resource_id)
                 .await?;
             return Ok(status_only(204));
         }
-        if let Some(resource_id) = resource_id_for_event_path(path) {
+        if let Some((_, resource_id)) = resource_id_for_event_path(path) {
             let existing = self.event_for_path(principal.account_id, path).await?;
             check_delete_preconditions(headers, existing.as_ref().map(etag_for_event))?;
             self.store
-                .delete_client_event(principal.account_id, resource_id)
+                .delete_accessible_event(principal.account_id, resource_id)
                 .await?;
             return Ok(status_only(204));
         }
@@ -363,25 +537,25 @@ impl<S: DavStore> DavService<S> {
         &self,
         account_id: Uuid,
         path: &str,
-    ) -> Result<Option<ClientContact>> {
-        let Some(resource_id) = resource_id_for_contact_path(path) else {
+    ) -> Result<Option<AccessibleContact>> {
+        let Some((collection_id, resource_id)) = resource_id_for_contact_path(path) else {
             return Ok(None);
         };
         Ok(self
             .store
-            .fetch_client_contacts(account_id)
+            .fetch_accessible_contacts_in_collection(account_id, &collection_id)
             .await?
             .into_iter()
             .find(|contact| contact.id == resource_id))
     }
 
-    async fn event_for_path(&self, account_id: Uuid, path: &str) -> Result<Option<ClientEvent>> {
-        let Some(resource_id) = resource_id_for_event_path(path) else {
+    async fn event_for_path(&self, account_id: Uuid, path: &str) -> Result<Option<AccessibleEvent>> {
+        let Some((collection_id, resource_id)) = resource_id_for_event_path(path) else {
             return Ok(None);
         };
         Ok(self
             .store
-            .fetch_client_events(account_id)
+            .fetch_accessible_events_in_collection(account_id, &collection_id)
             .await?
             .into_iter()
             .find(|event| event.id == resource_id))
@@ -426,11 +600,11 @@ fn principal_propfind_entry() -> String {
     )
 }
 
-fn addressbook_collection_entry() -> String {
+fn addressbook_collection_entry(collection: CollaborationCollection) -> String {
     response_entry(
-        ADDRESSBOOK_COLLECTION_PATH,
+        &contact_collection_href(&collection.id),
         collection_props(
-            "Contacts",
+            &collection.display_name,
             "<d:collection/><card:addressbook/>",
             None,
             None,
@@ -441,11 +615,11 @@ fn addressbook_collection_entry() -> String {
     )
 }
 
-fn calendar_collection_entry() -> String {
+fn calendar_collection_entry(collection: CollaborationCollection) -> String {
     response_entry(
-        CALENDAR_COLLECTION_PATH,
+        &event_collection_href(&collection.id),
         collection_props(
-            "Calendar",
+            &collection.display_name,
             "<d:collection/><cal:calendar/>",
             None,
             None,
@@ -463,10 +637,10 @@ fn collection_home_entry(path: &str, display_name: &str, resource_type: String) 
     )
 }
 
-fn contact_resource_entry(contact: ClientContact) -> String {
+fn contact_resource_entry(contact: AccessibleContact) -> String {
     let body = serialize_vcard(&contact);
     response_entry(
-        &contact_href(contact.id),
+        &contact_href(&contact.collection_id, contact.id),
         collection_props(
             &contact.name,
             "",
@@ -477,10 +651,10 @@ fn contact_resource_entry(contact: ClientContact) -> String {
     )
 }
 
-fn event_resource_entry(event: ClientEvent) -> String {
+fn event_resource_entry(event: AccessibleEvent) -> String {
     let body = serialize_ical(&event);
     response_entry(
-        &event_href(event.id),
+        &event_href(&event.collection_id, event.id),
         collection_props(
             &event.title,
             "",
@@ -491,10 +665,10 @@ fn event_resource_entry(event: ClientEvent) -> String {
     )
 }
 
-fn contact_report_entry(contact: ClientContact) -> String {
+fn contact_report_entry(contact: AccessibleContact) -> String {
     let body = serialize_vcard(&contact);
     response_entry(
-        &contact_href(contact.id),
+        &contact_href(&contact.collection_id, contact.id),
         format!(
             "<d:propstat><d:prop><d:getetag>{}</d:getetag><card:address-data>{}</card:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>",
             xml_escape(&etag(&body)),
@@ -503,10 +677,10 @@ fn contact_report_entry(contact: ClientContact) -> String {
     )
 }
 
-fn event_report_entry(event: ClientEvent) -> String {
+fn event_report_entry(event: AccessibleEvent) -> String {
     let body = serialize_ical(&event);
     response_entry(
-        &event_href(event.id),
+        &event_href(&event.collection_id, event.id),
         format!(
             "<d:propstat><d:prop><d:getetag>{}</d:getetag><cal:calendar-data>{}</cal:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>",
             xml_escape(&etag(&body)),
@@ -663,24 +837,57 @@ fn error_response(error: anyhow::Error) -> Response {
         .unwrap()
 }
 
-fn contact_href(id: Uuid) -> String {
-    format!("{ADDRESSBOOK_COLLECTION_PATH}{id}.vcf")
+fn contact_collection_href(collection_id: &str) -> String {
+    format!("{ADDRESSBOOK_COLLECTION_PREFIX}{collection_id}/")
 }
 
-fn event_href(id: Uuid) -> String {
-    format!("{CALENDAR_COLLECTION_PATH}{id}.ics")
+fn event_collection_href(collection_id: &str) -> String {
+    format!("{CALENDAR_COLLECTION_PREFIX}{collection_id}/")
 }
 
-fn resource_id_for_contact_path(path: &str) -> Option<Uuid> {
-    path.strip_prefix(ADDRESSBOOK_COLLECTION_PATH)
-        .and_then(|value| value.strip_suffix(".vcf"))
-        .and_then(parse_uuid_path_segment)
+fn contact_href(collection_id: &str, id: Uuid) -> String {
+    format!("{}{id}.vcf", contact_collection_href(collection_id))
 }
 
-fn resource_id_for_event_path(path: &str) -> Option<Uuid> {
-    path.strip_prefix(CALENDAR_COLLECTION_PATH)
-        .and_then(|value| value.strip_suffix(".ics"))
-        .and_then(parse_uuid_path_segment)
+fn event_href(collection_id: &str, id: Uuid) -> String {
+    format!("{}{id}.ics", event_collection_href(collection_id))
+}
+
+fn collection_id_from_contact_path(path: &str) -> Option<String> {
+    collection_id_from_path(path, ADDRESSBOOK_COLLECTION_PREFIX)
+}
+
+fn collection_id_from_event_path(path: &str) -> Option<String> {
+    collection_id_from_path(path, CALENDAR_COLLECTION_PREFIX)
+}
+
+fn collection_id_from_path(path: &str, prefix: &str) -> Option<String> {
+    let rest = path.strip_prefix(prefix)?;
+    let collection_id = rest.split('/').next()?.trim();
+    if collection_id.is_empty() {
+        return None;
+    }
+    Some(collection_id.to_string())
+}
+
+fn resource_id_for_contact_path(path: &str) -> Option<(String, Uuid)> {
+    resource_id_for_path(path, ADDRESSBOOK_COLLECTION_PREFIX, ".vcf")
+}
+
+fn resource_id_for_event_path(path: &str) -> Option<(String, Uuid)> {
+    resource_id_for_path(path, CALENDAR_COLLECTION_PREFIX, ".ics")
+}
+
+fn resource_id_for_path(path: &str, prefix: &str, suffix: &str) -> Option<(String, Uuid)> {
+    let rest = path.strip_prefix(prefix)?;
+    let (collection_id, file_name) = rest.split_once('/')?;
+    if collection_id.is_empty() {
+        return None;
+    }
+    let resource_id = file_name
+        .strip_suffix(suffix)
+        .and_then(parse_uuid_path_segment)?;
+    Some((collection_id.to_string(), resource_id))
 }
 
 fn parse_uuid_path_segment(value: &str) -> Option<Uuid> {
@@ -696,15 +903,15 @@ fn etag(value: &str) -> String {
     format!("\"{:x}\"", hasher.finish())
 }
 
-fn etag_for_contact(contact: &ClientContact) -> String {
+fn etag_for_contact(contact: &AccessibleContact) -> String {
     etag(&serialize_vcard(contact))
 }
 
-fn etag_for_event(event: &ClientEvent) -> String {
+fn etag_for_event(event: &AccessibleEvent) -> String {
     etag(&serialize_ical(event))
 }
 
-fn serialize_vcard(contact: &ClientContact) -> String {
+fn serialize_vcard(contact: &AccessibleContact) -> String {
     let mut lines = vec![
         "BEGIN:VCARD".to_string(),
         "VERSION:3.0".to_string(),
@@ -720,7 +927,7 @@ fn serialize_vcard(contact: &ClientContact) -> String {
     lines.join("\r\n")
 }
 
-fn serialize_ical(event: &ClientEvent) -> String {
+fn serialize_ical(event: &AccessibleEvent) -> String {
     let dtstart = format_ical_datetime(&event.date, &event.time);
     let attendees = attendees_for_event(event);
     let mut lines = vec![
@@ -947,7 +1154,7 @@ fn property_parameter(left: &str, name: &str) -> Option<String> {
     })
 }
 
-fn attendees_for_event(event: &ClientEvent) -> Vec<DavAttendee> {
+fn attendees_for_event(event: &AccessibleEvent) -> Vec<DavAttendee> {
     let parsed =
         serde_json::from_str::<Vec<DavAttendee>>(&event.attendees_json).unwrap_or_default();
     if !parsed.is_empty() {
@@ -957,8 +1164,8 @@ fn attendees_for_event(event: &ClientEvent) -> Vec<DavAttendee> {
         .attendees
         .split(',')
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| DavAttendee {
+        .filter(|value: &&str| !value.is_empty())
+        .map(|value: &str| DavAttendee {
             email: value.to_string(),
             common_name: String::new(),
             role: "REQ-PARTICIPANT".to_string(),
@@ -1099,12 +1306,12 @@ fn xml_attribute_value(xml: &str, element: &str, attribute: &str) -> Option<Stri
     Some(value[..value_end].to_string())
 }
 
-fn contact_matches_report(contact: &ClientContact, filter: &ReportFilter) -> bool {
+fn contact_matches_report(contact: &AccessibleContact, filter: &ReportFilter) -> bool {
     if !filter.hrefs.is_empty()
         && !filter
             .hrefs
             .iter()
-            .any(|href| href == &contact_href(contact.id))
+            .any(|href| href == &contact_href(DEFAULT_COLLECTION_ID, contact.id))
     {
         return false;
     }
@@ -1122,12 +1329,12 @@ fn contact_matches_report(contact: &ClientContact, filter: &ReportFilter) -> boo
         .all(|term| haystack.contains(&term.trim().to_lowercase()))
 }
 
-fn event_matches_report(event: &ClientEvent, filter: &ReportFilter) -> bool {
+fn event_matches_report(event: &AccessibleEvent, filter: &ReportFilter) -> bool {
     if !filter.hrefs.is_empty()
         && !filter
             .hrefs
             .iter()
-            .any(|href| href == &event_href(event.id))
+            .any(|href| href == &event_href(DEFAULT_COLLECTION_ID, event.id))
     {
         return false;
     }
@@ -1267,7 +1474,10 @@ mod tests {
     use axum::body::to_bytes;
     use axum::http::HeaderValue;
     use lpe_mail_auth::AccountAuthStore;
-    use lpe_storage::{AccountLogin, AuthenticatedAccount};
+    use lpe_storage::{
+        AccessibleContact, AccessibleEvent, AccountLogin, AuthenticatedAccount, ClientContact,
+        ClientEvent, CollaborationCollection, CollaborationRights,
+    };
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
@@ -1279,6 +1489,83 @@ mod tests {
     }
 
     impl FakeStore {
+        fn full_rights() -> CollaborationRights {
+            CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: true,
+            }
+        }
+
+        fn contact_collection() -> CollaborationCollection {
+            let account = Self::account();
+            CollaborationCollection {
+                id: DEFAULT_COLLECTION_ID.to_string(),
+                kind: "contacts".to_string(),
+                owner_account_id: account.account_id,
+                owner_email: account.email.clone(),
+                owner_display_name: account.display_name.clone(),
+                display_name: "Contacts".to_string(),
+                is_owned: true,
+                rights: Self::full_rights(),
+            }
+        }
+
+        fn calendar_collection() -> CollaborationCollection {
+            let account = Self::account();
+            CollaborationCollection {
+                id: DEFAULT_COLLECTION_ID.to_string(),
+                kind: "calendar".to_string(),
+                owner_account_id: account.account_id,
+                owner_email: account.email.clone(),
+                owner_display_name: account.display_name.clone(),
+                display_name: "Calendar".to_string(),
+                is_owned: true,
+                rights: Self::full_rights(),
+            }
+        }
+
+        fn accessible_contact(contact: ClientContact) -> AccessibleContact {
+            let account = Self::account();
+            AccessibleContact {
+                id: contact.id,
+                collection_id: DEFAULT_COLLECTION_ID.to_string(),
+                owner_account_id: account.account_id,
+                owner_email: account.email.clone(),
+                owner_display_name: account.display_name.clone(),
+                rights: Self::full_rights(),
+                name: contact.name,
+                role: contact.role,
+                email: contact.email,
+                phone: contact.phone,
+                team: contact.team,
+                notes: contact.notes,
+            }
+        }
+
+        fn accessible_event(event: ClientEvent) -> AccessibleEvent {
+            let account = Self::account();
+            AccessibleEvent {
+                id: event.id,
+                collection_id: DEFAULT_COLLECTION_ID.to_string(),
+                owner_account_id: account.account_id,
+                owner_email: account.email.clone(),
+                owner_display_name: account.display_name.clone(),
+                rights: Self::full_rights(),
+                date: event.date,
+                time: event.time,
+                time_zone: event.time_zone,
+                duration_minutes: event.duration_minutes,
+                recurrence_rule: event.recurrence_rule,
+                title: event.title,
+                location: event.location,
+                attendees: event.attendees,
+                attendees_json: event.attendees_json,
+                notes: event.notes,
+            }
+        }
+
         fn account() -> AuthenticatedAccount {
             AuthenticatedAccount {
                 tenant_id: "tenant-a".to_string(),
@@ -1313,26 +1600,72 @@ mod tests {
     }
 
     impl DavStore for FakeStore {
-        fn fetch_client_contacts<'a>(
+        fn fetch_accessible_contact_collections<'a>(
             &'a self,
-            _account_id: Uuid,
-        ) -> lpe_mail_auth::StoreFuture<'a, Vec<ClientContact>> {
-            let contacts = self.contacts.lock().unwrap().clone();
+            _principal_account_id: Uuid,
+        ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>> {
+            Box::pin(async move { Ok(vec![Self::contact_collection()]) })
+        }
+
+        fn fetch_accessible_calendar_collections<'a>(
+            &'a self,
+            _principal_account_id: Uuid,
+        ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>> {
+            Box::pin(async move { Ok(vec![Self::calendar_collection()]) })
+        }
+
+        fn fetch_accessible_contacts<'a>(
+            &'a self,
+            _principal_account_id: Uuid,
+        ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleContact>> {
+            let contacts = self
+                .contacts
+                .lock()
+                .unwrap()
+                .clone()
+                .into_iter()
+                .map(Self::accessible_contact)
+                .collect();
             Box::pin(async move { Ok(contacts) })
         }
 
-        fn fetch_client_events<'a>(
+        fn fetch_accessible_contacts_in_collection<'a>(
             &'a self,
-            _account_id: Uuid,
-        ) -> lpe_mail_auth::StoreFuture<'a, Vec<ClientEvent>> {
-            let events = self.events.lock().unwrap().clone();
+            principal_account_id: Uuid,
+            _collection_id: &'a str,
+        ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleContact>> {
+            self.fetch_accessible_contacts(principal_account_id)
+        }
+
+        fn fetch_accessible_events<'a>(
+            &'a self,
+            _principal_account_id: Uuid,
+        ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleEvent>> {
+            let events = self
+                .events
+                .lock()
+                .unwrap()
+                .clone()
+                .into_iter()
+                .map(Self::accessible_event)
+                .collect();
             Box::pin(async move { Ok(events) })
         }
 
-        fn upsert_client_contact<'a>(
+        fn fetch_accessible_events_in_collection<'a>(
             &'a self,
+            principal_account_id: Uuid,
+            _collection_id: &'a str,
+        ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleEvent>> {
+            self.fetch_accessible_events(principal_account_id)
+        }
+
+        fn create_accessible_contact<'a>(
+            &'a self,
+            _principal_account_id: Uuid,
+            _collection_id: Option<&'a str>,
             input: UpsertClientContactInput,
-        ) -> lpe_mail_auth::StoreFuture<'a, ClientContact> {
+        ) -> lpe_mail_auth::StoreFuture<'a, AccessibleContact> {
             let mut contacts = self.contacts.lock().unwrap();
             let contact = ClientContact {
                 id: input.id.unwrap(),
@@ -1345,13 +1678,15 @@ mod tests {
             };
             contacts.retain(|entry| entry.id != contact.id);
             contacts.push(contact.clone());
-            Box::pin(async move { Ok(contact) })
+            Box::pin(async move { Ok(Self::accessible_contact(contact)) })
         }
 
-        fn upsert_client_event<'a>(
+        fn create_accessible_event<'a>(
             &'a self,
+            _principal_account_id: Uuid,
+            _collection_id: Option<&'a str>,
             input: UpsertClientEventInput,
-        ) -> lpe_mail_auth::StoreFuture<'a, ClientEvent> {
+        ) -> lpe_mail_auth::StoreFuture<'a, AccessibleEvent> {
             let mut events = self.events.lock().unwrap();
             let event = ClientEvent {
                 id: input.id.unwrap(),
@@ -1368,12 +1703,32 @@ mod tests {
             };
             events.retain(|entry| entry.id != event.id);
             events.push(event.clone());
-            Box::pin(async move { Ok(event) })
+            Box::pin(async move { Ok(Self::accessible_event(event)) })
         }
 
-        fn delete_client_contact<'a>(
+        fn update_accessible_contact<'a>(
             &'a self,
-            _account_id: Uuid,
+            principal_account_id: Uuid,
+            contact_id: Uuid,
+            mut input: UpsertClientContactInput,
+        ) -> lpe_mail_auth::StoreFuture<'a, AccessibleContact> {
+            input.id = Some(contact_id);
+            self.create_accessible_contact(principal_account_id, Some(DEFAULT_COLLECTION_ID), input)
+        }
+
+        fn update_accessible_event<'a>(
+            &'a self,
+            principal_account_id: Uuid,
+            event_id: Uuid,
+            mut input: UpsertClientEventInput,
+        ) -> lpe_mail_auth::StoreFuture<'a, AccessibleEvent> {
+            input.id = Some(event_id);
+            self.create_accessible_event(principal_account_id, Some(DEFAULT_COLLECTION_ID), input)
+        }
+
+        fn delete_accessible_contact<'a>(
+            &'a self,
+            _principal_account_id: Uuid,
             contact_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, ()> {
             self.contacts
@@ -1383,9 +1738,9 @@ mod tests {
             Box::pin(async move { Ok(()) })
         }
 
-        fn delete_client_event<'a>(
+        fn delete_accessible_event<'a>(
             &'a self,
-            _account_id: Uuid,
+            _principal_account_id: Uuid,
             event_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, ()> {
             self.events
@@ -1442,7 +1797,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::from_u16(207).unwrap());
         let body = response_text(response).await;
-        assert!(body.contains(&contact_href(contact_id)));
+        assert!(body.contains(&contact_href(DEFAULT_COLLECTION_ID, contact_id)));
         assert!(body.contains("text/vcard"));
     }
 
@@ -1581,7 +1936,8 @@ mod tests {
         let mut headers = bearer_headers();
         headers.insert(
             "if-none-match",
-            HeaderValue::from_str(&etag_for_event(&event)).unwrap(),
+            HeaderValue::from_str(&etag_for_event(&FakeStore::accessible_event(event.clone())))
+                .unwrap(),
         );
 
         let response = service
@@ -1635,7 +1991,7 @@ mod tests {
 <card:filter><card:prop-filter name=\"FN\"><card:text-match>bob</card:text-match></card:prop-filter></card:filter>\
 <d:href>{}</d:href>\
 </card:addressbook-query>",
-            contact_href(first_id)
+            contact_href(DEFAULT_COLLECTION_ID, first_id)
         );
 
         let response = service
@@ -1649,8 +2005,8 @@ mod tests {
             .unwrap();
 
         let payload = response_text(response).await;
-        assert!(payload.contains(&contact_href(first_id)));
-        assert!(!payload.contains(&contact_href(second_id)));
+        assert!(payload.contains(&contact_href(DEFAULT_COLLECTION_ID, first_id)));
+        assert!(!payload.contains(&contact_href(DEFAULT_COLLECTION_ID, second_id)));
     }
 
     #[tokio::test]

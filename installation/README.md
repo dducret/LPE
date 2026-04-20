@@ -163,6 +163,8 @@ Pour les mises a jour ulterieures:
 
 `update-lpe.sh` execute `run-migrations.sh` automatiquement. Cela couvre notamment les changements de schema utilises par `/api/mail/workspace`, comme les tables `contacts` et `calendar_events`.
 
+Pour des environnements de developpement, de reset fonctionnel ou de reconstruction MVP, `update-lpe.sh` supporte aussi `LPE_RESET_DATABASE_ON_UPDATE=true`. Dans ce mode, le script supprime puis recree completement le schema `public` PostgreSQL avant d'appliquer les migrations. Ce mode est destructif et ne doit pas etre active sur une instance contenant des donnees a conserver.
+
 Si tu veux d'abord recuperer les derniers scripts avant une mise a jour:
 
 ```bash
@@ -360,6 +362,8 @@ For later updates:
 2. run `update-lpe.sh`
 
 `update-lpe.sh` runs `run-migrations.sh` automatically. This covers schema changes used by `/api/mail/workspace`, such as the `contacts` and `calendar_events` tables.
+
+For development, functional reset, or MVP rebuild environments, `update-lpe.sh` also supports `LPE_RESET_DATABASE_ON_UPDATE=true`. In that mode, the script drops and recreates the PostgreSQL `public` schema before running migrations. This mode is destructive and must not be enabled on an instance that contains data you need to keep.
 
 If you want to fetch the latest scripts first before an update:
 

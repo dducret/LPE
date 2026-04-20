@@ -78,11 +78,21 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
   exit 1
 fi
 
+LPE_RESET_DATABASE_ON_UPDATE="${LPE_RESET_DATABASE_ON_UPDATE:-false}"
+
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
 LPE_SERVER_NAME="${LPE_SERVER_NAME:-_}"
 LPE_NGINX_CLIENT_MAX_BODY_SIZE="${LPE_NGINX_CLIENT_MAX_BODY_SIZE:-20g}"
 LPE_PST_IMPORT_DIR="${LPE_PST_IMPORT_DIR:-/var/lib/lpe/imports}"
 install -d -o lpe -g lpe "${LPE_PST_IMPORT_DIR}"
+
+if [[ "${LPE_RESET_DATABASE_ON_UPDATE}" == "true" ]]; then
+  systemctl stop "${SERVICE_NAME}" || true
+  psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 <<'SQL'
+DROP SCHEMA IF EXISTS public CASCADE;
+CREATE SCHEMA public;
+SQL
+fi
 
 cd "${SRC_DIR}"
 "${SRC_DIR}/installation/debian-trixie/run-migrations.sh"

@@ -74,8 +74,20 @@ set -a
 source "${ENV_FILE}"
 set +a
 
+LPE_CT_RESET_STATE_ON_UPDATE="${LPE_CT_RESET_STATE_ON_UPDATE:-false}"
 LPE_CT_BIND_ADDRESS="${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}"
 LPE_CT_SERVER_NAME="${LPE_CT_SERVER_NAME:-_}"
+
+if [[ "${LPE_CT_RESET_STATE_ON_UPDATE}" == "true" ]]; then
+  systemctl stop "${SERVICE_NAME}" || true
+  rm -f "${LPE_CT_STATE_FILE:-/var/lib/lpe-ct/state.json}"
+  rm -rf \
+    "${SPOOL_DIR}/incoming" \
+    "${SPOOL_DIR}/deferred" \
+    "${SPOOL_DIR}/quarantine" \
+    "${SPOOL_DIR}/held" \
+    "${SPOOL_DIR}/sent"
+fi
 
 cd "${SRC_DIR}"
 "${CARGO_BIN}" build --release --manifest-path "${SRC_DIR}/LPE-CT/Cargo.toml"

@@ -14,7 +14,7 @@ Le crate `crates/lpe-jmap` agit comme un adaptateur `JMAP` au-dessus des modeles
 - `contacts` reste la source de verite pour les fiches contact
 - `calendar_events` reste la source de verite pour les evenements calendrier
 - `CardDAV`, `CalDAV`, `ActiveSync` et `JMAP` convergent vers les memes objets canoniques
-- les droits restent scopes au compte authentifie; il n'existe pas de modele de partage ou de delegation propre a `JMAP`
+- les droits sont derives du modele canonique de grants intra-tenant; il n'existe pas de modele de partage ou de delegation propre a `JMAP`
 - aucun code `Stalwart` n'est reutilise
 
 ### Authentification
@@ -30,7 +30,7 @@ Le crate `crates/lpe-jmap` agit comme un adaptateur `JMAP` au-dessus des modeles
 - `urn:ietf:params:jmap:contacts`
 - `urn:ietf:params:jmap:calendars`
 
-La session `JMAP` expose le meme `accountId` que les autres couches protocolaires. Les carnets d'adresses et calendriers sont virtuels au niveau `JMAP`, mais restent branches sur les donnees canoniques du compte courant.
+La session `JMAP` expose le meme `accountId` que les autres couches protocolaires. Les carnets d'adresses et calendriers sont virtuels au niveau `JMAP`, mais restent branches sur les donnees canoniques du compte courant et sur les collections partagees accessibles dans le meme tenant.
 
 ### Methodes supportees
 
@@ -58,8 +58,9 @@ Calendrier:
 
 #### Address book
 
-- un seul carnet virtuel `default` est expose par compte
-- `myRights` indique lecture, ecriture et suppression sur les fiches du compte
+- le proprietaire voit son carnet virtuel `default`
+- des carnets partages supplementaires peuvent etre exposes pour les grants intra-tenant
+- `myRights` indique lecture, ecriture, suppression et partage selon le grant canonique resolu
 - `mayCreateTopLevel` reste `false`
 
 #### ContactCard
@@ -73,12 +74,13 @@ Le mapping `JMAP` vers `contacts` est le suivant:
 - `phones.*.number` -> `contacts.phone`
 - `organizations.*.name` -> `contacts.team`
 - `notes.*.note` -> `contacts.notes`
-- `addressBookIds.default` -> collection virtuelle unique du compte
+- `addressBookIds.{collectionId}` -> collection virtuelle possedee ou partagee resolue par le modele canonique ACL
 
 #### Calendar
 
-- un seul calendrier virtuel `default` est expose par compte
-- `myRights` indique lecture, ecriture et suppression sur les evenements du compte
+- le proprietaire voit son calendrier virtuel `default`
+- des calendriers partages supplementaires peuvent etre exposes pour les grants intra-tenant
+- `myRights` indique lecture, ecriture, suppression et partage selon le grant canonique resolu
 - `mayCreateTopLevel` reste `false`
 
 #### CalendarEvent
@@ -91,21 +93,25 @@ Le mapping `JMAP` vers `calendar_events` est le suivant:
 - `locations.*.name` -> `calendar_events.location`
 - `participants` -> `calendar_events.attendees` sous forme texte normalisee
 - `description` -> `calendar_events.notes`
-- `calendarIds.default` -> collection virtuelle unique du compte
+- `calendarIds.{collectionId}` -> collection virtuelle possedee ou partagee resolue par le modele canonique ACL
 
 ### Regles MVP importantes
 
 - `ContactCard/set` cree, remplace ou supprime directement les lignes canoniques de `contacts`
 - `CalendarEvent/set` cree, remplace ou supprime directement les lignes canoniques de `calendar_events`
-- les lectures `JMAP` utilisent les memes objets comptes que `CardDAV`, `CalDAV` et `ActiveSync`
-- le perimetre des droits reste celui du compte authentifie; aucun acces cross-account n'est supporte
+- les lectures `JMAP` utilisent les memes objets canoniques que `CardDAV`, `CalDAV` et `ActiveSync`
+- le proprietaire garde tous les droits sur sa collection `default`
+- un compte du meme tenant peut lire ou modifier une collection partagee seulement via un grant canonique
+- aucun acces inter-tenant n'est supporte
+- les changements de droits sont journalises minimalement dans `audit_events`
 - `changes` reexpose l'etat courant du compte et ne maintient pas encore d'historique fin de synchronisation
 
 ### Limitations assumees du MVP
 
-- un seul `AddressBook` et un seul `Calendar` virtuels par compte
-- pas de partage, delegation, abonnement, ni droits fins par collection
-- `ContactCard/query` supporte seulement le tri `name` ascendant et le filtre texte simple, avec `inAddressBook` limite au carnet `default`
+- un compte proprietaire a toujours une collection `default`; des collections partagees supplementaires peuvent etre exposees
+- les ACL restent au niveau collection implicite; il n'existe pas encore d'ACL par fiche ou par evenement
+- le partage et la delegation restent limites au meme tenant
+- `ContactCard/query` supporte seulement le tri `name` ascendant et le filtre texte simple, avec `inAddressBook` limite a une seule collection cible
 - `CalendarEvent/query` supporte seulement le tri `start` ascendant et les filtres `inCalendar`, `text`, `after`, `before`
 - `ContactCard/set` supporte seulement `kind=individual`
 - `CalendarEvent/set` supporte seulement `@type=Event`
@@ -115,6 +121,8 @@ Le mapping `JMAP` vers `calendar_events` est le suivant:
 - les participants calendrier sont encore stockes comme texte canonique et reexposes en objets `Participant` minimaux
 - pas de recurrence, alarmes, disponibilite, statut participant, organisateur, pieces jointes calendrier, ni semantique `VCARD` ou `VCALENDAR` etendue
 - les objets `AddressBook` et `Calendar` sont virtuels et non modifiables via `set`
+- pas de renommage utilisateur des collections partagees
+- pas d'historique fin des ACL ni de notifications temps reel de changement de droits
 
 ### Coherence avec les autres adaptateurs
 
@@ -136,7 +144,7 @@ The `crates/lpe-jmap` crate acts as a `JMAP` adapter on top of the canonical mod
 - `contacts` remains the source of truth for contact cards
 - `calendar_events` remains the source of truth for calendar events
 - `CardDAV`, `CalDAV`, `ActiveSync`, and `JMAP` converge on the same canonical objects
-- rights remain scoped to the authenticated account; there is no `JMAP`-specific sharing or delegation model
+- rights are derived from the canonical same-tenant grant model; there is no `JMAP`-specific sharing or delegation model
 - no `Stalwart` code is reused
 
 ### Authentication
@@ -152,7 +160,7 @@ The `crates/lpe-jmap` crate acts as a `JMAP` adapter on top of the canonical mod
 - `urn:ietf:params:jmap:contacts`
 - `urn:ietf:params:jmap:calendars`
 
-The `JMAP` session exposes the same `accountId` as the other protocol adapters. Address books and calendars are virtual at the `JMAP` layer, but remain wired to the authenticated account's canonical data.
+The `JMAP` session exposes the same `accountId` as the other protocol adapters. Address books and calendars are virtual at the `JMAP` layer, but remain wired to the authenticated account's canonical data and to accessible shared collections inside the same tenant.
 
 ### Supported methods
 
@@ -180,8 +188,9 @@ Calendars:
 
 #### Address book
 
-- one virtual `default` address book is exposed per account
-- `myRights` advertises read, write, and delete access for the authenticated account's cards
+- the owner sees its virtual `default` address book
+- extra shared address books may be exposed for same-tenant grants
+- `myRights` advertises read, write, delete, and share access according to the resolved canonical grant
 - `mayCreateTopLevel` remains `false`
 
 #### ContactCard
@@ -195,12 +204,13 @@ The `JMAP` to `contacts` mapping is:
 - `phones.*.number` -> `contacts.phone`
 - `organizations.*.name` -> `contacts.team`
 - `notes.*.note` -> `contacts.notes`
-- `addressBookIds.default` -> the account's single virtual collection
+- `addressBookIds.{collectionId}` -> an owned or shared virtual collection resolved through the canonical ACL model
 
 #### Calendar
 
-- one virtual `default` calendar is exposed per account
-- `myRights` advertises read, write, and delete access for the authenticated account's events
+- the owner sees its virtual `default` calendar
+- extra shared calendars may be exposed for same-tenant grants
+- `myRights` advertises read, write, delete, and share access according to the resolved canonical grant
 - `mayCreateTopLevel` remains `false`
 
 #### CalendarEvent
@@ -213,21 +223,25 @@ The `JMAP` to `calendar_events` mapping is:
 - `locations.*.name` -> `calendar_events.location`
 - `participants` -> `calendar_events.attendees` as normalized text
 - `description` -> `calendar_events.notes`
-- `calendarIds.default` -> the account's single virtual collection
+- `calendarIds.{collectionId}` -> an owned or shared virtual collection resolved through the canonical ACL model
 
 ### Important MVP rules
 
 - `ContactCard/set` directly creates, replaces, or deletes canonical `contacts` rows
 - `CalendarEvent/set` directly creates, replaces, or deletes canonical `calendar_events` rows
-- `JMAP` reads use the same account-scoped objects as `CardDAV`, `CalDAV`, and `ActiveSync`
-- rights remain bounded by the authenticated account; cross-account access is not supported
+- `JMAP` reads use the same canonical objects as `CardDAV`, `CalDAV`, and `ActiveSync`
+- the owner keeps full rights on its `default` collection
+- an account in the same tenant may read or mutate a shared collection only through a canonical grant
+- cross-tenant access is not supported
+- rights changes are minimally audited through `audit_events`
 - `changes` re-exposes the current account state and does not yet maintain a fine-grained sync history
 
 ### Accepted MVP limitations
 
-- one virtual `AddressBook` and one virtual `Calendar` per account
-- no sharing, delegation, subscriptions, or fine-grained collection ACLs
-- `ContactCard/query` supports only ascending `name` sort and simple text filtering, with `inAddressBook` limited to the `default` book
+- an owning account always has a `default` collection; extra shared collections may also be exposed
+- ACLs remain at the implicit collection level; there is no per-contact or per-event ACL yet
+- sharing and delegation remain limited to the same tenant
+- `ContactCard/query` supports only ascending `name` sort and simple text filtering, with `inAddressBook` limited to one target collection
 - `CalendarEvent/query` supports only ascending `start` sort and the `inCalendar`, `text`, `after`, and `before` filters
 - `ContactCard/set` supports only `kind=individual`
 - `CalendarEvent/set` supports only `@type=Event`
@@ -237,6 +251,8 @@ The `JMAP` to `calendar_events` mapping is:
 - calendar participants are still stored in the canonical model as text and re-exposed as minimal `Participant` objects
 - no recurrence, alarms, free/busy, participant status, organizer model, calendar attachments, or extended `VCARD` or `VCALENDAR` semantics
 - `AddressBook` and `Calendar` objects are virtual and cannot be modified through `set`
+- no user-specific renaming of shared collections
+- no fine-grained ACL history or real-time rights-change notifications
 
 ### Consistency with other adapters
 

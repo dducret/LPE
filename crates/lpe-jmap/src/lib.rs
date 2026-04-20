@@ -9,10 +9,11 @@ use axum::{
 };
 use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
 use lpe_storage::{
-    mail::parse_rfc822_message, AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent,
-    JmapEmail, JmapEmailAddress, JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob, SavedDraftMessage,
-    Storage, SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput,
+    mail::parse_rfc822_message, AccessibleContact, AccessibleEvent, AuditEntryInput,
+    AuthenticatedAccount, CollaborationCollection, JmapEmail, JmapEmailAddress,
+    JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob, SavedDraftMessage, Storage,
+    SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput,
     UpsertClientEventInput,
 };
 use serde::Serialize;
@@ -48,8 +49,6 @@ const JMAP_CALENDARS_CAPABILITY: &str = "urn:ietf:params:jmap:calendars";
 const SESSION_STATE: &str = "mvp-1";
 const MAX_QUERY_LIMIT: u64 = 250;
 const DEFAULT_GET_LIMIT: u64 = 100;
-const DEFAULT_ADDRESS_BOOK_ID: &str = "default";
-const DEFAULT_CALENDAR_ID: &str = "default";
 
 type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 
@@ -507,16 +506,15 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
         let properties = address_book_properties(arguments.properties);
         let requested_ids = arguments.ids.unwrap_or_default();
-        let include_default = requested_ids.is_empty()
-            || requested_ids.iter().any(|id| id == DEFAULT_ADDRESS_BOOK_ID);
-        let list = if include_default {
-            vec![address_book_to_value(&properties)]
-        } else {
-            Vec::new()
-        };
+        let collections = self.store.fetch_accessible_contact_collections(account_id).await?;
+        let list = collections
+            .iter()
+            .filter(|collection| requested_ids.is_empty() || requested_ids.contains(&collection.id))
+            .map(|collection| address_book_to_value(collection, &properties))
+            .collect::<Vec<_>>();
         let not_found = requested_ids
             .into_iter()
-            .filter(|id| id != DEFAULT_ADDRESS_BOOK_ID)
+            .filter(|id| !collections.iter().any(|collection| collection.id == *id))
             .map(Value::String)
             .collect::<Vec<_>>();
 
@@ -535,13 +533,15 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: AddressBookQueryArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
-        let position = arguments.position.unwrap_or(0).min(1) as usize;
+        let collections = self.store.fetch_accessible_contact_collections(account_id).await?;
+        let position = arguments.position.unwrap_or(0) as usize;
         let limit = arguments
             .limit
             .unwrap_or(DEFAULT_GET_LIMIT)
             .min(MAX_QUERY_LIMIT) as usize;
-        let ids = [DEFAULT_ADDRESS_BOOK_ID.to_string()]
-            .into_iter()
+        let ids = collections
+            .iter()
+            .map(|collection| collection.id.clone())
             .skip(position)
             .take(limit)
             .collect::<Vec<_>>();
@@ -552,7 +552,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             "canCalculateChanges": true,
             "position": position,
             "ids": ids,
-            "total": 1,
+            "total": collections.len(),
         }))
     }
 
@@ -563,11 +563,12 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let collections = self.store.fetch_accessible_contact_collections(account_id).await?;
         Ok(changes_response(
             account_id,
             &arguments.since_state,
             arguments.max_changes,
-            vec![DEFAULT_ADDRESS_BOOK_ID.to_string()],
+            collections.into_iter().map(|collection| collection.id).collect(),
         ))
     }
 
@@ -582,10 +583,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let requested_ids = parse_uuid_list(arguments.ids)?;
         let contacts = if let Some(ids) = requested_ids.as_ref() {
             self.store
-                .fetch_client_contacts_by_ids(account_id, &ids)
+                .fetch_accessible_contacts_by_ids(account_id, &ids)
                 .await?
         } else {
-            self.store.fetch_client_contacts(account_id).await?
+            self.store.fetch_accessible_contacts(account_id).await?
         };
         let requested_set = requested_ids
             .as_ref()
@@ -622,7 +623,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         validate_entity_sort(arguments.sort.as_deref(), "name", true)?;
         validate_contact_filter(arguments.filter.as_ref())?;
 
-        let mut contacts = self.store.fetch_client_contacts(account_id).await?;
+        let mut contacts = self.store.fetch_accessible_contacts(account_id).await?;
         if let Some(filter) = arguments.filter.as_ref() {
             contacts.retain(|contact| contact_matches_filter(contact, filter));
         }
@@ -659,7 +660,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
         let ids = self
             .store
-            .fetch_client_contacts(account_id)
+            .fetch_accessible_contacts(account_id)
             .await?
             .into_iter()
             .map(|contact| contact.id.to_string())
@@ -690,7 +691,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         if let Some(create) = arguments.create {
             for (creation_id, value) in create {
                 match parse_contact_input(None, account_id, value) {
-                    Ok(input) => match self.store.upsert_client_contact(input).await {
+                    Ok((collection_id, input)) => match self
+                        .store
+                        .create_accessible_contact(account_id, collection_id.as_deref(), input)
+                        .await
+                    {
                         Ok(contact) => {
                             created_ids.insert(creation_id.clone(), contact.id.to_string());
                             created.insert(creation_id, json!({ "id": contact.id.to_string() }));
@@ -709,9 +714,13 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         if let Some(update) = arguments.update {
             for (id, value) in update {
                 match parse_uuid(&id)
-                    .and_then(|contact_id| parse_contact_input(Some(contact_id), account_id, value))
+                    .and_then(|contact_id| parse_contact_input(Some(contact_id), account_id, value).map(|(_, input)| (contact_id, input)))
                 {
-                    Ok(input) => match self.store.upsert_client_contact(input).await {
+                    Ok((contact_id, input)) => match self
+                        .store
+                        .update_accessible_contact(account_id, contact_id, input)
+                        .await
+                    {
                         Ok(_) => {
                             updated.insert(id, Value::Object(Map::new()));
                         }
@@ -731,7 +740,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 match parse_uuid(&id) {
                     Ok(contact_id) => match self
                         .store
-                        .delete_client_contact(account_id, contact_id)
+                        .delete_accessible_contact(account_id, contact_id)
                         .await
                     {
                         Ok(()) => destroyed.push(Value::String(id)),
@@ -768,16 +777,15 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
         let properties = calendar_properties(arguments.properties);
         let requested_ids = arguments.ids.unwrap_or_default();
-        let include_default =
-            requested_ids.is_empty() || requested_ids.iter().any(|id| id == DEFAULT_CALENDAR_ID);
-        let list = if include_default {
-            vec![calendar_to_value(&properties)]
-        } else {
-            Vec::new()
-        };
+        let collections = self.store.fetch_accessible_calendar_collections(account_id).await?;
+        let list = collections
+            .iter()
+            .filter(|collection| requested_ids.is_empty() || requested_ids.contains(&collection.id))
+            .map(|collection| calendar_to_value(collection, &properties))
+            .collect::<Vec<_>>();
         let not_found = requested_ids
             .into_iter()
-            .filter(|id| id != DEFAULT_CALENDAR_ID)
+            .filter(|id| !collections.iter().any(|collection| collection.id == *id))
             .map(Value::String)
             .collect::<Vec<_>>();
 
@@ -796,13 +804,15 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: CalendarQueryArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
-        let position = arguments.position.unwrap_or(0).min(1) as usize;
+        let collections = self.store.fetch_accessible_calendar_collections(account_id).await?;
+        let position = arguments.position.unwrap_or(0) as usize;
         let limit = arguments
             .limit
             .unwrap_or(DEFAULT_GET_LIMIT)
             .min(MAX_QUERY_LIMIT) as usize;
-        let ids = [DEFAULT_CALENDAR_ID.to_string()]
-            .into_iter()
+        let ids = collections
+            .iter()
+            .map(|collection| collection.id.clone())
             .skip(position)
             .take(limit)
             .collect::<Vec<_>>();
@@ -813,7 +823,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             "canCalculateChanges": true,
             "position": position,
             "ids": ids,
-            "total": 1,
+            "total": collections.len(),
         }))
     }
 
@@ -824,11 +834,12 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
+        let collections = self.store.fetch_accessible_calendar_collections(account_id).await?;
         Ok(changes_response(
             account_id,
             &arguments.since_state,
             arguments.max_changes,
-            vec![DEFAULT_CALENDAR_ID.to_string()],
+            collections.into_iter().map(|collection| collection.id).collect(),
         ))
     }
 
@@ -843,10 +854,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let requested_ids = parse_uuid_list(arguments.ids)?;
         let events = if let Some(ids) = requested_ids.as_ref() {
             self.store
-                .fetch_client_events_by_ids(account_id, ids)
+                .fetch_accessible_events_by_ids(account_id, ids)
                 .await?
         } else {
-            self.store.fetch_client_events(account_id).await?
+            self.store.fetch_accessible_events(account_id).await?
         };
         let requested_set = requested_ids
             .as_ref()
@@ -882,7 +893,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         validate_entity_sort(arguments.sort.as_deref(), "start", true)?;
         validate_calendar_event_filter(arguments.filter.as_ref())?;
 
-        let mut events = self.store.fetch_client_events(account_id).await?;
+        let mut events = self.store.fetch_accessible_events(account_id).await?;
         if let Some(filter) = arguments.filter.as_ref() {
             events.retain(|event| event_matches_filter(event, filter));
         }
@@ -919,7 +930,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
         let ids = self
             .store
-            .fetch_client_events(account_id)
+            .fetch_accessible_events(account_id)
             .await?
             .into_iter()
             .map(|event| event.id.to_string())
@@ -950,7 +961,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         if let Some(create) = arguments.create {
             for (creation_id, value) in create {
                 match parse_calendar_event_input(None, account_id, value) {
-                    Ok(input) => match self.store.upsert_client_event(input).await {
+                    Ok((collection_id, input)) => match self
+                        .store
+                        .create_accessible_event(account_id, collection_id.as_deref(), input)
+                        .await
+                    {
                         Ok(event) => {
                             created_ids.insert(creation_id.clone(), event.id.to_string());
                             created.insert(creation_id, json!({ "id": event.id.to_string() }));
@@ -970,8 +985,13 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             for (id, value) in update {
                 match parse_uuid(&id).and_then(|event_id| {
                     parse_calendar_event_input(Some(event_id), account_id, value)
+                        .map(|(_, input)| (event_id, input))
                 }) {
-                    Ok(input) => match self.store.upsert_client_event(input).await {
+                    Ok((event_id, input)) => match self
+                        .store
+                        .update_accessible_event(account_id, event_id, input)
+                        .await
+                    {
                         Ok(_) => {
                             updated.insert(id, Value::Object(Map::new()));
                         }
@@ -990,7 +1010,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             for id in ids {
                 match parse_uuid(&id) {
                     Ok(event_id) => {
-                        match self.store.delete_client_event(account_id, event_id).await {
+                        match self.store.delete_accessible_event(account_id, event_id).await {
                             Ok(()) => destroyed.push(Value::String(id)),
                             Err(error) => {
                                 not_destroyed.insert(id, set_error(&error.to_string()));
@@ -1911,7 +1931,7 @@ fn validate_entity_sort(
 fn validate_contact_filter(filter: Option<&ContactCardQueryFilter>) -> Result<()> {
     if let Some(filter) = filter {
         if let Some(address_book_id) = filter.in_address_book.as_deref() {
-            require_default_collection_id(address_book_id, "addressBook")?;
+            require_collection_id(address_book_id, "addressBook")?;
         }
     }
     Ok(())
@@ -1920,7 +1940,7 @@ fn validate_contact_filter(filter: Option<&ContactCardQueryFilter>) -> Result<()
 fn validate_calendar_event_filter(filter: Option<&CalendarEventQueryFilter>) -> Result<()> {
     if let Some(filter) = filter {
         if let Some(calendar_id) = filter.in_calendar.as_deref() {
-            require_default_collection_id(calendar_id, "calendar")?;
+            require_collection_id(calendar_id, "calendar")?;
         }
         if let Some(after) = filter.after.as_deref() {
             parse_local_datetime(after)?;
@@ -1932,9 +1952,9 @@ fn validate_calendar_event_filter(filter: Option<&CalendarEventQueryFilter>) -> 
     Ok(())
 }
 
-fn require_default_collection_id(value: &str, kind: &str) -> Result<()> {
-    if value != DEFAULT_ADDRESS_BOOK_ID && value != DEFAULT_CALENDAR_ID {
-        bail!("unsupported {kind} id");
+fn require_collection_id(value: &str, kind: &str) -> Result<()> {
+    if value.trim().is_empty() {
+        bail!("{kind} id is required");
     }
     Ok(())
 }
@@ -1972,23 +1992,26 @@ fn address_book_properties(properties: Option<Vec<String>>) -> HashSet<String> {
         .collect()
 }
 
-fn address_book_to_value(properties: &HashSet<String>) -> Value {
+fn address_book_to_value(
+    collection: &CollaborationCollection,
+    properties: &HashSet<String>,
+) -> Value {
     let mut object = Map::new();
-    insert_if(properties, &mut object, "id", DEFAULT_ADDRESS_BOOK_ID);
-    insert_if(properties, &mut object, "name", "Contacts");
+    insert_if(properties, &mut object, "id", collection.id.clone());
+    insert_if(properties, &mut object, "name", collection.display_name.clone());
     insert_if(properties, &mut object, "sortOrder", 0);
     insert_if(properties, &mut object, "isSubscribed", true);
     if properties.contains("myRights") {
         object.insert(
             "myRights".to_string(),
             json!({
-                "mayRead": true,
-                "mayAddItems": true,
-                "mayModifyItems": true,
-                "mayRemoveItems": true,
+                "mayRead": collection.rights.may_read,
+                "mayAddItems": collection.rights.may_write,
+                "mayModifyItems": collection.rights.may_write,
+                "mayRemoveItems": collection.rights.may_delete,
                 "mayRename": false,
                 "mayDelete": false,
-                "mayAdmin": false,
+                "mayAdmin": collection.rights.may_share,
             }),
         );
     }
@@ -2011,10 +2034,10 @@ fn calendar_properties(properties: Option<Vec<String>>) -> HashSet<String> {
         .collect()
 }
 
-fn calendar_to_value(properties: &HashSet<String>) -> Value {
+fn calendar_to_value(collection: &CollaborationCollection, properties: &HashSet<String>) -> Value {
     let mut object = Map::new();
-    insert_if(properties, &mut object, "id", DEFAULT_CALENDAR_ID);
-    insert_if(properties, &mut object, "name", "Calendar");
+    insert_if(properties, &mut object, "id", collection.id.clone());
+    insert_if(properties, &mut object, "name", collection.display_name.clone());
     insert_if(properties, &mut object, "sortOrder", 0);
     insert_if(properties, &mut object, "isSubscribed", true);
     insert_if(properties, &mut object, "isVisible", true);
@@ -2022,13 +2045,13 @@ fn calendar_to_value(properties: &HashSet<String>) -> Value {
         object.insert(
             "myRights".to_string(),
             json!({
-                "mayRead": true,
-                "mayAddItems": true,
-                "mayModifyItems": true,
-                "mayRemoveItems": true,
+                "mayRead": collection.rights.may_read,
+                "mayAddItems": collection.rights.may_write,
+                "mayModifyItems": collection.rights.may_write,
+                "mayRemoveItems": collection.rights.may_delete,
                 "mayRename": false,
                 "mayDelete": false,
-                "mayAdmin": false,
+                "mayAdmin": collection.rights.may_share,
             }),
         );
     }
@@ -2499,7 +2522,7 @@ fn email_keywords(email: &JmapEmail) -> Value {
     Value::Object(keywords)
 }
 
-fn contact_to_value(contact: &ClientContact, properties: &HashSet<String>) -> Value {
+fn contact_to_value(contact: &AccessibleContact, properties: &HashSet<String>) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", contact.id.to_string());
     insert_if(properties, &mut object, "uid", contact.id.to_string());
@@ -2576,13 +2599,13 @@ fn contact_to_value(contact: &ClientContact, properties: &HashSet<String>) -> Va
     if properties.contains("addressBookIds") {
         object.insert(
             "addressBookIds".to_string(),
-            json!({DEFAULT_ADDRESS_BOOK_ID: true}),
+            json!({contact.collection_id.clone(): true}),
         );
     }
     Value::Object(object)
 }
 
-fn calendar_event_to_value(event: &ClientEvent, properties: &HashSet<String>) -> Value {
+fn calendar_event_to_value(event: &AccessibleEvent, properties: &HashSet<String>) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", event.id.to_string());
     insert_if(properties, &mut object, "uid", event.id.to_string());
@@ -2632,13 +2655,13 @@ fn calendar_event_to_value(event: &ClientEvent, properties: &HashSet<String>) ->
     if properties.contains("calendarIds") {
         object.insert(
             "calendarIds".to_string(),
-            json!({DEFAULT_CALENDAR_ID: true}),
+            json!({event.collection_id.clone(): true}),
         );
     }
     Value::Object(object)
 }
 
-fn participants_from_event(event: &ClientEvent) -> Value {
+fn participants_from_event(event: &AccessibleEvent) -> Value {
     if let Ok(value) = serde_json::from_str::<Value>(&event.attendees_json) {
         if value.is_object() {
             return value;
@@ -2708,9 +2731,11 @@ fn participants_from_attendees(attendees: &str) -> Value {
     Value::Object(participants)
 }
 
-fn contact_matches_filter(contact: &ClientContact, filter: &ContactCardQueryFilter) -> bool {
-    if filter.in_address_book.is_some() {
-        // Only one virtual address book is exposed in the MVP.
+fn contact_matches_filter(contact: &AccessibleContact, filter: &ContactCardQueryFilter) -> bool {
+    if let Some(address_book_id) = filter.in_address_book.as_deref() {
+        if address_book_id != contact.collection_id {
+            return false;
+        }
     }
     if let Some(text) = filter.text.as_deref() {
         let needle = text.trim().to_lowercase();
@@ -2733,9 +2758,11 @@ fn contact_matches_filter(contact: &ClientContact, filter: &ContactCardQueryFilt
     true
 }
 
-fn event_matches_filter(event: &ClientEvent, filter: &CalendarEventQueryFilter) -> bool {
-    if filter.in_calendar.is_some() {
-        // Only one virtual calendar is exposed in the MVP.
+fn event_matches_filter(event: &AccessibleEvent, filter: &CalendarEventQueryFilter) -> bool {
+    if let Some(calendar_id) = filter.in_calendar.as_deref() {
+        if calendar_id != event.collection_id {
+            return false;
+        }
     }
     if let Some(after) = filter.after.as_deref() {
         let start = calendar_event_start(event);
@@ -2773,11 +2800,11 @@ fn event_matches_filter(event: &ClientEvent, filter: &CalendarEventQueryFilter) 
     true
 }
 
-fn calendar_event_sort_key(event: &ClientEvent) -> String {
+fn calendar_event_sort_key(event: &AccessibleEvent) -> String {
     calendar_event_start(event)
 }
 
-fn calendar_event_start(event: &ClientEvent) -> String {
+fn calendar_event_start(event: &AccessibleEvent) -> String {
     format!("{}T{}:00", event.date, event.time)
 }
 
@@ -2907,12 +2934,12 @@ fn parse_contact_input(
     id: Option<Uuid>,
     account_id: Uuid,
     value: Value,
-) -> Result<UpsertClientContactInput> {
+) -> Result<(Option<String>, UpsertClientContactInput)> {
     let object = value
         .as_object()
         .ok_or_else(|| anyhow!("contact card arguments must be an object"))?;
     reject_unknown_contact_properties(object)?;
-    validate_address_book_ids(object.get("addressBookIds"))?;
+    let collection_id = validate_address_book_ids(object.get("addressBookIds"))?;
 
     let kind = object
         .get("kind")
@@ -2922,28 +2949,31 @@ fn parse_contact_input(
         bail!("only kind=individual is supported");
     }
 
-    Ok(UpsertClientContactInput {
-        id,
-        account_id,
-        name: parse_contact_name(object.get("name"))?,
-        role: parse_contact_title(object.get("titles"))?,
-        email: parse_contact_email(object.get("emails"))?,
-        phone: parse_contact_phone(object.get("phones"))?,
-        team: parse_contact_organization(object.get("organizations"))?,
-        notes: parse_contact_note(object.get("notes"))?,
-    })
+    Ok((
+        collection_id,
+        UpsertClientContactInput {
+            id,
+            account_id,
+            name: parse_contact_name(object.get("name"))?,
+            role: parse_contact_title(object.get("titles"))?,
+            email: parse_contact_email(object.get("emails"))?,
+            phone: parse_contact_phone(object.get("phones"))?,
+            team: parse_contact_organization(object.get("organizations"))?,
+            notes: parse_contact_note(object.get("notes"))?,
+        },
+    ))
 }
 
 fn parse_calendar_event_input(
     id: Option<Uuid>,
     account_id: Uuid,
     value: Value,
-) -> Result<UpsertClientEventInput> {
+) -> Result<(Option<String>, UpsertClientEventInput)> {
     let object = value
         .as_object()
         .ok_or_else(|| anyhow!("calendar event arguments must be an object"))?;
     reject_unknown_calendar_event_properties(object)?;
-    validate_calendar_ids(object.get("calendarIds"))?;
+    let collection_id = validate_calendar_ids(object.get("calendarIds"))?;
 
     let event_type = object
         .get("@type")
@@ -2965,20 +2995,23 @@ fn parse_calendar_event_input(
             .ok_or_else(|| anyhow!("start is required"))?,
     )?;
 
-    Ok(UpsertClientEventInput {
-        id,
-        account_id,
-        date,
-        time,
-        time_zone: parse_optional_string(object.get("timeZone"))?.unwrap_or_default(),
-        duration_minutes: parse_calendar_duration(object.get("duration"))?,
-        recurrence_rule: String::new(),
-        title: parse_required_string(object.get("title"), "title")?,
-        location: parse_calendar_location(object.get("locations"))?,
-        attendees: parse_calendar_participants(object.get("participants"))?,
-        attendees_json: parse_calendar_participants_json(object.get("participants"))?,
-        notes: parse_optional_string(object.get("description"))?.unwrap_or_default(),
-    })
+    Ok((
+        collection_id,
+        UpsertClientEventInput {
+            id,
+            account_id,
+            date,
+            time,
+            time_zone: parse_optional_string(object.get("timeZone"))?.unwrap_or_default(),
+            duration_minutes: parse_calendar_duration(object.get("duration"))?,
+            recurrence_rule: String::new(),
+            title: parse_required_string(object.get("title"), "title")?,
+            location: parse_calendar_location(object.get("locations"))?,
+            attendees: parse_calendar_participants(object.get("participants"))?,
+            attendees_json: parse_calendar_participants_json(object.get("participants"))?,
+            notes: parse_optional_string(object.get("description"))?.unwrap_or_default(),
+        },
+    ))
 }
 
 fn parse_email_copy(value: Value, created_ids: &HashMap<String, String>) -> Result<(Uuid, Uuid)> {
@@ -3025,32 +3058,38 @@ fn reject_unknown_calendar_event_properties(object: &Map<String, Value>) -> Resu
     Ok(())
 }
 
-fn validate_address_book_ids(value: Option<&Value>) -> Result<()> {
+fn validate_address_book_ids(value: Option<&Value>) -> Result<Option<String>> {
     if let Some(value) = value {
         let object = value
             .as_object()
             .ok_or_else(|| anyhow!("addressBookIds must be an object"))?;
-        if object.len() != 1
-            || object.get(DEFAULT_ADDRESS_BOOK_ID).and_then(Value::as_bool) != Some(true)
-        {
-            bail!("only the default addressBookId is supported");
+        if object.len() != 1 {
+            bail!("exactly one addressBookId must be provided");
         }
+        let (collection_id, enabled) = object.iter().next().unwrap();
+        if enabled.as_bool() != Some(true) {
+            bail!("addressBookIds entries must be true");
+        }
+        return Ok(Some(collection_id.clone()));
     }
-    Ok(())
+    Ok(None)
 }
 
-fn validate_calendar_ids(value: Option<&Value>) -> Result<()> {
+fn validate_calendar_ids(value: Option<&Value>) -> Result<Option<String>> {
     if let Some(value) = value {
         let object = value
             .as_object()
             .ok_or_else(|| anyhow!("calendarIds must be an object"))?;
-        if object.len() != 1
-            || object.get(DEFAULT_CALENDAR_ID).and_then(Value::as_bool) != Some(true)
-        {
-            bail!("only the default calendarId is supported");
+        if object.len() != 1 {
+            bail!("exactly one calendarId must be provided");
         }
+        let (collection_id, enabled) = object.iter().next().unwrap();
+        if enabled.as_bool() != Some(true) {
+            bail!("calendarIds entries must be true");
+        }
+        return Ok(Some(collection_id.clone()));
     }
-    Ok(())
+    Ok(None)
 }
 
 fn reject_unknown_email_properties(object: &Map<String, Value>) -> Result<()> {
@@ -3327,6 +3366,10 @@ fn map_parsed_recipients(
 mod tests {
     use super::*;
     use lpe_magika::{DetectionSource, Detector, MagikaDetection};
+    use lpe_storage::{
+        AccessibleContact, AccessibleEvent, ClientContact, ClientEvent, CollaborationCollection,
+        CollaborationRights,
+    };
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
@@ -3415,6 +3458,83 @@ mod tests {
     }
 
     impl FakeStore {
+        fn full_rights() -> CollaborationRights {
+            CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: true,
+            }
+        }
+
+        fn contact_collection() -> CollaborationCollection {
+            let account = Self::account();
+            CollaborationCollection {
+                id: "default".to_string(),
+                kind: "contacts".to_string(),
+                owner_account_id: account.account_id,
+                owner_email: account.email.clone(),
+                owner_display_name: account.display_name.clone(),
+                display_name: "Contacts".to_string(),
+                is_owned: true,
+                rights: Self::full_rights(),
+            }
+        }
+
+        fn calendar_collection() -> CollaborationCollection {
+            let account = Self::account();
+            CollaborationCollection {
+                id: "default".to_string(),
+                kind: "calendar".to_string(),
+                owner_account_id: account.account_id,
+                owner_email: account.email.clone(),
+                owner_display_name: account.display_name.clone(),
+                display_name: "Calendar".to_string(),
+                is_owned: true,
+                rights: Self::full_rights(),
+            }
+        }
+
+        fn accessible_contact(contact: ClientContact) -> AccessibleContact {
+            let account = Self::account();
+            AccessibleContact {
+                id: contact.id,
+                collection_id: "default".to_string(),
+                owner_account_id: account.account_id,
+                owner_email: account.email.clone(),
+                owner_display_name: account.display_name.clone(),
+                rights: Self::full_rights(),
+                name: contact.name,
+                role: contact.role,
+                email: contact.email,
+                phone: contact.phone,
+                team: contact.team,
+                notes: contact.notes,
+            }
+        }
+
+        fn accessible_event(event: ClientEvent) -> AccessibleEvent {
+            let account = Self::account();
+            AccessibleEvent {
+                id: event.id,
+                collection_id: "default".to_string(),
+                owner_account_id: account.account_id,
+                owner_email: account.email.clone(),
+                owner_display_name: account.display_name.clone(),
+                rights: Self::full_rights(),
+                date: event.date,
+                time: event.time,
+                time_zone: event.time_zone,
+                duration_minutes: event.duration_minutes,
+                recurrence_rule: event.recurrence_rule,
+                title: event.title,
+                location: event.location,
+                attendees: event.attendees,
+                attendees_json: event.attendees_json,
+                notes: event.notes,
+            }
+        }
+
         fn account() -> AuthenticatedAccount {
             AuthenticatedAccount {
                 tenant_id: "tenant-a".to_string(),
@@ -3773,15 +3893,32 @@ mod tests {
             })
         }
 
-        async fn fetch_client_contacts(&self, _account_id: Uuid) -> Result<Vec<ClientContact>> {
-            Ok(self.contacts.lock().unwrap().clone())
+        async fn fetch_accessible_contact_collections(
+            &self,
+            _principal_account_id: Uuid,
+        ) -> Result<Vec<CollaborationCollection>> {
+            Ok(vec![Self::contact_collection()])
         }
 
-        async fn fetch_client_contacts_by_ids(
+        async fn fetch_accessible_contacts(
             &self,
-            _account_id: Uuid,
+            _principal_account_id: Uuid,
+        ) -> Result<Vec<AccessibleContact>> {
+            Ok(self
+                .contacts
+                .lock()
+                .unwrap()
+                .iter()
+                .cloned()
+                .map(Self::accessible_contact)
+                .collect())
+        }
+
+        async fn fetch_accessible_contacts_by_ids(
+            &self,
+            _principal_account_id: Uuid,
             ids: &[Uuid],
-        ) -> Result<Vec<ClientContact>> {
+        ) -> Result<Vec<AccessibleContact>> {
             Ok(self
                 .contacts
                 .lock()
@@ -3789,13 +3926,16 @@ mod tests {
                 .iter()
                 .filter(|contact| ids.contains(&contact.id))
                 .cloned()
+                .map(Self::accessible_contact)
                 .collect())
         }
 
-        async fn upsert_client_contact(
+        async fn create_accessible_contact(
             &self,
+            _principal_account_id: Uuid,
+            _collection_id: Option<&str>,
             input: UpsertClientContactInput,
-        ) -> Result<ClientContact> {
+        ) -> Result<AccessibleContact> {
             let contact = ClientContact {
                 id: input.id.unwrap_or_else(Uuid::new_v4),
                 name: input.name,
@@ -3808,10 +3948,25 @@ mod tests {
             let mut contacts = self.contacts.lock().unwrap();
             contacts.retain(|entry| entry.id != contact.id);
             contacts.push(contact.clone());
-            Ok(contact)
+            Ok(Self::accessible_contact(contact))
         }
 
-        async fn delete_client_contact(&self, _account_id: Uuid, contact_id: Uuid) -> Result<()> {
+        async fn update_accessible_contact(
+            &self,
+            principal_account_id: Uuid,
+            contact_id: Uuid,
+            mut input: UpsertClientContactInput,
+        ) -> Result<AccessibleContact> {
+            input.id = Some(contact_id);
+            self.create_accessible_contact(principal_account_id, Some("default"), input)
+                .await
+        }
+
+        async fn delete_accessible_contact(
+            &self,
+            _principal_account_id: Uuid,
+            contact_id: Uuid,
+        ) -> Result<()> {
             let mut contacts = self.contacts.lock().unwrap();
             let original_len = contacts.len();
             contacts.retain(|entry| entry.id != contact_id);
@@ -3821,15 +3976,32 @@ mod tests {
             Ok(())
         }
 
-        async fn fetch_client_events(&self, _account_id: Uuid) -> Result<Vec<ClientEvent>> {
-            Ok(self.events.lock().unwrap().clone())
+        async fn fetch_accessible_calendar_collections(
+            &self,
+            _principal_account_id: Uuid,
+        ) -> Result<Vec<CollaborationCollection>> {
+            Ok(vec![Self::calendar_collection()])
         }
 
-        async fn fetch_client_events_by_ids(
+        async fn fetch_accessible_events(
             &self,
-            _account_id: Uuid,
+            _principal_account_id: Uuid,
+        ) -> Result<Vec<AccessibleEvent>> {
+            Ok(self
+                .events
+                .lock()
+                .unwrap()
+                .iter()
+                .cloned()
+                .map(Self::accessible_event)
+                .collect())
+        }
+
+        async fn fetch_accessible_events_by_ids(
+            &self,
+            _principal_account_id: Uuid,
             ids: &[Uuid],
-        ) -> Result<Vec<ClientEvent>> {
+        ) -> Result<Vec<AccessibleEvent>> {
             Ok(self
                 .events
                 .lock()
@@ -3837,10 +4009,16 @@ mod tests {
                 .iter()
                 .filter(|event| ids.contains(&event.id))
                 .cloned()
+                .map(Self::accessible_event)
                 .collect())
         }
 
-        async fn upsert_client_event(&self, input: UpsertClientEventInput) -> Result<ClientEvent> {
+        async fn create_accessible_event(
+            &self,
+            _principal_account_id: Uuid,
+            _collection_id: Option<&str>,
+            input: UpsertClientEventInput,
+        ) -> Result<AccessibleEvent> {
             let event = ClientEvent {
                 id: input.id.unwrap_or_else(Uuid::new_v4),
                 date: input.date,
@@ -3857,10 +4035,25 @@ mod tests {
             let mut events = self.events.lock().unwrap();
             events.retain(|entry| entry.id != event.id);
             events.push(event.clone());
-            Ok(event)
+            Ok(Self::accessible_event(event))
         }
 
-        async fn delete_client_event(&self, _account_id: Uuid, event_id: Uuid) -> Result<()> {
+        async fn update_accessible_event(
+            &self,
+            principal_account_id: Uuid,
+            event_id: Uuid,
+            mut input: UpsertClientEventInput,
+        ) -> Result<AccessibleEvent> {
+            input.id = Some(event_id);
+            self.create_accessible_event(principal_account_id, Some("default"), input)
+                .await
+        }
+
+        async fn delete_accessible_event(
+            &self,
+            _principal_account_id: Uuid,
+            event_id: Uuid,
+        ) -> Result<()> {
             let mut events = self.events.lock().unwrap();
             let original_len = events.len();
             events.retain(|entry| entry.id != event_id);

@@ -27,6 +27,7 @@ La multi-tenance runtime suit les invariants suivants:
 - les credentials de compte et d'administration sont uniques par `(tenant_id, email)`, pas globalement par email seul
 - les sessions de compte et d'administration sont rattachees au meme tenant que le credential qui les a creees
 - toute requete de stockage qui lit ou modifie des donnees runtime d'un tenant doit filtrer a la fois par `tenant_id` resolu et par le proprietaire ou l'identifiant de l'objet
+- toute resolution de partage, delegation ou ACL sur contacts et calendriers doit verifier simultanement `tenant_id`, `owner_account_id` et `grantee_account_id`; aucun grant cross-tenant n'est autorise
 - la remise entrante doit resoudre le tenant independamment pour chaque destinataire accepte afin qu'une transaction `SMTP` unique ne fusionne pas plusieurs tenants dans un meme scope runtime
 - la deduplication des pieces jointes reste scopee par domaine et donc par tenant dans le modele runtime actuel un domaine par tenant
 - les scripts `Sieve`, leur statut actif et la memoire minimale `vacation` sont scopes par `(tenant_id, account_id)` et ne doivent jamais etre resolves hors du compte authentifie ou du destinataire de remise
@@ -128,6 +129,7 @@ Runtime multi-tenancy follows these invariants:
 - account and administrator credentials are unique per `(tenant_id, email)`, not globally by email alone
 - account and administrator sessions are bound to the same tenant as the credential that created them
 - every storage query that reads or mutates tenant-owned runtime data must filter by both the resolved `tenant_id` and the object owner or identifier
+- every sharing, delegation, or ACL resolution on contacts and calendars must verify `tenant_id`, `owner_account_id`, and `grantee_account_id` together; no cross-tenant grant is allowed
 - inbound delivery must resolve the tenant independently for each accepted recipient so one SMTP transaction cannot collapse multiple tenants into one runtime scope
 - attachment deduplication remains domain-scoped and therefore tenant-scoped in the current one-domain-per-tenant runtime model
 - `Sieve` scripts, their active state, and the minimal `vacation` memory are scoped by `(tenant_id, account_id)` and must never be resolved outside the authenticated account or inbound-delivery recipient

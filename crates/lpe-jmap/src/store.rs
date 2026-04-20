@@ -1,9 +1,10 @@
 use anyhow::Result;
 use lpe_storage::{
-    AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, JmapEmail, JmapEmailQuery,
-    JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob, SavedDraftMessage, Storage,
-    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
+    AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount,
+    CollaborationCollection, JmapEmail, JmapEmailQuery, JmapEmailSubmission,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput,
+    JmapQuota, JmapUploadBlob, SavedDraftMessage, Storage, SubmitMessageInput,
+    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
 };
 use uuid::Uuid;
 
@@ -87,23 +88,66 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         input: JmapImportedEmailInput,
         audit: AuditEntryInput,
     ) -> Result<JmapEmail>;
-    async fn fetch_client_contacts(&self, account_id: Uuid) -> Result<Vec<ClientContact>>;
-    async fn fetch_client_contacts_by_ids(
+    async fn fetch_accessible_contact_collections(
         &self,
-        account_id: Uuid,
-        ids: &[Uuid],
-    ) -> Result<Vec<ClientContact>>;
-    async fn upsert_client_contact(&self, input: UpsertClientContactInput)
-        -> Result<ClientContact>;
-    async fn delete_client_contact(&self, account_id: Uuid, contact_id: Uuid) -> Result<()>;
-    async fn fetch_client_events(&self, account_id: Uuid) -> Result<Vec<ClientEvent>>;
-    async fn fetch_client_events_by_ids(
+        principal_account_id: Uuid,
+    ) -> Result<Vec<CollaborationCollection>>;
+    async fn fetch_accessible_contacts(
         &self,
-        account_id: Uuid,
+        principal_account_id: Uuid,
+    ) -> Result<Vec<AccessibleContact>>;
+    async fn fetch_accessible_contacts_by_ids(
+        &self,
+        principal_account_id: Uuid,
         ids: &[Uuid],
-    ) -> Result<Vec<ClientEvent>>;
-    async fn upsert_client_event(&self, input: UpsertClientEventInput) -> Result<ClientEvent>;
-    async fn delete_client_event(&self, account_id: Uuid, event_id: Uuid) -> Result<()>;
+    ) -> Result<Vec<AccessibleContact>>;
+    async fn create_accessible_contact(
+        &self,
+        principal_account_id: Uuid,
+        collection_id: Option<&str>,
+        input: UpsertClientContactInput,
+    ) -> Result<AccessibleContact>;
+    async fn update_accessible_contact(
+        &self,
+        principal_account_id: Uuid,
+        contact_id: Uuid,
+        input: UpsertClientContactInput,
+    ) -> Result<AccessibleContact>;
+    async fn delete_accessible_contact(
+        &self,
+        principal_account_id: Uuid,
+        contact_id: Uuid,
+    ) -> Result<()>;
+    async fn fetch_accessible_calendar_collections(
+        &self,
+        principal_account_id: Uuid,
+    ) -> Result<Vec<CollaborationCollection>>;
+    async fn fetch_accessible_events(
+        &self,
+        principal_account_id: Uuid,
+    ) -> Result<Vec<AccessibleEvent>>;
+    async fn fetch_accessible_events_by_ids(
+        &self,
+        principal_account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<AccessibleEvent>>;
+    async fn create_accessible_event(
+        &self,
+        principal_account_id: Uuid,
+        collection_id: Option<&str>,
+        input: UpsertClientEventInput,
+    ) -> Result<AccessibleEvent>;
+    async fn update_accessible_event(
+        &self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+        input: UpsertClientEventInput,
+    ) -> Result<AccessibleEvent>;
+    async fn delete_accessible_event(
+        &self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+    ) -> Result<()>;
 }
 
 impl JmapStore for Storage {
@@ -251,46 +295,109 @@ impl JmapStore for Storage {
         self.import_jmap_email(input, audit).await
     }
 
-    async fn fetch_client_contacts(&self, account_id: Uuid) -> Result<Vec<ClientContact>> {
-        self.fetch_client_contacts(account_id).await
+    async fn fetch_accessible_contact_collections(
+        &self,
+        principal_account_id: Uuid,
+    ) -> Result<Vec<CollaborationCollection>> {
+        self.fetch_accessible_contact_collections(principal_account_id)
+            .await
     }
 
-    async fn fetch_client_contacts_by_ids(
+    async fn fetch_accessible_contacts(
         &self,
-        account_id: Uuid,
+        principal_account_id: Uuid,
+    ) -> Result<Vec<AccessibleContact>> {
+        self.fetch_accessible_contacts(principal_account_id).await
+    }
+
+    async fn fetch_accessible_contacts_by_ids(
+        &self,
+        principal_account_id: Uuid,
         ids: &[Uuid],
-    ) -> Result<Vec<ClientContact>> {
-        self.fetch_client_contacts_by_ids(account_id, ids).await
+    ) -> Result<Vec<AccessibleContact>> {
+        self.fetch_accessible_contacts_by_ids(principal_account_id, ids)
+            .await
     }
 
-    async fn upsert_client_contact(
+    async fn create_accessible_contact(
         &self,
+        principal_account_id: Uuid,
+        collection_id: Option<&str>,
         input: UpsertClientContactInput,
-    ) -> Result<ClientContact> {
-        self.upsert_client_contact(input).await
+    ) -> Result<AccessibleContact> {
+        self.create_accessible_contact(principal_account_id, collection_id, input)
+            .await
     }
 
-    async fn delete_client_contact(&self, account_id: Uuid, contact_id: Uuid) -> Result<()> {
-        self.delete_client_contact(account_id, contact_id).await
-    }
-
-    async fn fetch_client_events(&self, account_id: Uuid) -> Result<Vec<ClientEvent>> {
-        self.fetch_client_events(account_id).await
-    }
-
-    async fn fetch_client_events_by_ids(
+    async fn update_accessible_contact(
         &self,
-        account_id: Uuid,
+        principal_account_id: Uuid,
+        contact_id: Uuid,
+        input: UpsertClientContactInput,
+    ) -> Result<AccessibleContact> {
+        self.update_accessible_contact(principal_account_id, contact_id, input)
+            .await
+    }
+
+    async fn delete_accessible_contact(
+        &self,
+        principal_account_id: Uuid,
+        contact_id: Uuid,
+    ) -> Result<()> {
+        self.delete_accessible_contact(principal_account_id, contact_id)
+            .await
+    }
+
+    async fn fetch_accessible_calendar_collections(
+        &self,
+        principal_account_id: Uuid,
+    ) -> Result<Vec<CollaborationCollection>> {
+        self.fetch_accessible_calendar_collections(principal_account_id)
+            .await
+    }
+
+    async fn fetch_accessible_events(
+        &self,
+        principal_account_id: Uuid,
+    ) -> Result<Vec<AccessibleEvent>> {
+        self.fetch_accessible_events(principal_account_id).await
+    }
+
+    async fn fetch_accessible_events_by_ids(
+        &self,
+        principal_account_id: Uuid,
         ids: &[Uuid],
-    ) -> Result<Vec<ClientEvent>> {
-        self.fetch_client_events_by_ids(account_id, ids).await
+    ) -> Result<Vec<AccessibleEvent>> {
+        self.fetch_accessible_events_by_ids(principal_account_id, ids)
+            .await
     }
 
-    async fn upsert_client_event(&self, input: UpsertClientEventInput) -> Result<ClientEvent> {
-        self.upsert_client_event(input).await
+    async fn create_accessible_event(
+        &self,
+        principal_account_id: Uuid,
+        collection_id: Option<&str>,
+        input: UpsertClientEventInput,
+    ) -> Result<AccessibleEvent> {
+        self.create_accessible_event(principal_account_id, collection_id, input)
+            .await
     }
 
-    async fn delete_client_event(&self, account_id: Uuid, event_id: Uuid) -> Result<()> {
-        self.delete_client_event(account_id, event_id).await
+    async fn update_accessible_event(
+        &self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+        input: UpsertClientEventInput,
+    ) -> Result<AccessibleEvent> {
+        self.update_accessible_event(principal_account_id, event_id, input)
+            .await
+    }
+
+    async fn delete_accessible_event(
+        &self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+    ) -> Result<()> {
+        self.delete_accessible_event(principal_account_id, event_id)
+            .await
     }
 }

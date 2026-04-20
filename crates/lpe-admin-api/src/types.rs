@@ -1,5 +1,8 @@
 use axum::{http::StatusCode, Json};
-use lpe_storage::{AdminAuthFactor, AuthenticatedAccount, AuthenticatedAdmin};
+use lpe_storage::{
+    AdminAuthFactor, AuthenticatedAccount, AuthenticatedAdmin, CollaborationCollection,
+    CollaborationGrant,
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -254,6 +257,8 @@ pub struct SubmitRecipientRequest {
 #[derive(Debug, Deserialize)]
 pub struct UpsertClientContactRequest {
     pub id: Option<Uuid>,
+    #[serde(rename = "collectionId")]
+    pub collection_id: Option<String>,
     pub name: String,
     pub role: String,
     pub email: String,
@@ -265,6 +270,8 @@ pub struct UpsertClientContactRequest {
 #[derive(Debug, Deserialize)]
 pub struct UpsertClientEventRequest {
     pub id: Option<Uuid>,
+    #[serde(rename = "collectionId")]
+    pub collection_id: Option<String>,
     pub date: String,
     pub time: String,
     #[serde(default)]
@@ -279,6 +286,26 @@ pub struct UpsertClientEventRequest {
     #[serde(default)]
     pub attendees_json: String,
     pub notes: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertCollaborationGrantRequest {
+    pub kind: String,
+    pub grantee_email: String,
+    pub may_read: bool,
+    pub may_write: bool,
+    pub may_delete: bool,
+    pub may_share: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollaborationOverviewResponse {
+    pub outgoing_contacts: Vec<CollaborationGrant>,
+    pub outgoing_calendars: Vec<CollaborationGrant>,
+    pub incoming_contact_collections: Vec<CollaborationCollection>,
+    pub incoming_calendar_collections: Vec<CollaborationCollection>,
 }
 
 #[derive(Debug, Deserialize)]

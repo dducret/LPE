@@ -86,6 +86,8 @@ Configurer au minimum:
 
 Voir aussi `docs/operations/mail-filtering.md` pour le detail des scores, traces et politiques operatoires.
 
+Pour les environnements de developpement ou de reconstruction complete du centre de tri, `update-lpe-ct.sh` supporte `LPE_CT_RESET_STATE_ON_UPDATE=true`. Ce mode supprime l'etat local persiste et vide les repertoires de spool `incoming`, `deferred`, `quarantine`, `held` et `sent` avant redeploiement. Pour `LPE-CT`, ce reset d'etat/spool est l'equivalent operationnel d'un reset complet, car le composant ne maintient pas de base PostgreSQL metier parallele.
+
 Fonctions encore hors scope dans ce lot:
 
 - signature `DKIM` sortante
@@ -193,6 +195,8 @@ Configure at least:
 - `LPE_CT_SPAM_QUARANTINE_THRESHOLD`, `LPE_CT_SPAM_REJECT_THRESHOLD`
 
 See `docs/operations/mail-filtering.md` for the detailed score, trace, and policy workflow.
+
+For development or full sorting-center rebuild environments, `update-lpe-ct.sh` supports `LPE_CT_RESET_STATE_ON_UPDATE=true`. This mode removes the persisted local state and wipes the `incoming`, `deferred`, `quarantine`, `held`, and `sent` spool directories before redeployment. For `LPE-CT`, that state/spool wipe is the operational equivalent of a full reset, because the component does not maintain a parallel PostgreSQL business database.
 
 Still out of scope in this lot:
 
