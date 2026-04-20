@@ -3909,12 +3909,7 @@ impl Storage {
             .await?;
         tx.commit().await?;
 
-        Ok(self
-            .fetch_jmap_mailboxes(account_id)
-            .await?
-            .into_iter()
-            .filter(|mailbox| matches!(mailbox.role.as_str(), "inbox" | "sent" | "drafts"))
-            .collect())
+        self.fetch_jmap_mailboxes(account_id).await
     }
 
     pub async fn fetch_jmap_mailbox_ids(&self, account_id: Uuid) -> Result<Vec<Uuid>> {

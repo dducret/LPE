@@ -1,8 +1,8 @@
 use anyhow::Result;
 use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
-    AuditEntryInput, ImapEmail, JmapEmailQuery, JmapMailbox, SavedDraftMessage, Storage,
-    SubmitMessageInput,
+    AuditEntryInput, ImapEmail, JmapEmailQuery, JmapMailbox, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, SavedDraftMessage, Storage, SubmitMessageInput,
 };
 use std::{future::Future, pin::Pin};
 use uuid::Uuid;
@@ -32,6 +32,32 @@ pub trait ImapStore: AccountAuthStore {
         position: u64,
         limit: u64,
     ) -> StoreFuture<'a, JmapEmailQuery>;
+    fn create_imap_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        name: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox>;
+    fn rename_imap_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        name: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox>;
+    fn delete_imap_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
+    fn copy_imap_email<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ImapEmail>;
     fn save_draft_message<'a>(
         &'a self,
         input: SubmitMessageInput,
@@ -77,6 +103,77 @@ impl ImapStore for Storage {
         Box::pin(async move {
             self.query_jmap_email_ids(account_id, mailbox_id, search_text, position, limit)
                 .await
+        })
+    }
+
+    fn create_imap_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        name: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox> {
+        Box::pin(async move {
+            self.create_jmap_mailbox(
+                JmapMailboxCreateInput {
+                    account_id,
+                    name: name.to_string(),
+                    sort_order: None,
+                },
+                audit,
+            )
+            .await
+        })
+    }
+
+    fn rename_imap_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        name: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox> {
+        Box::pin(async move {
+            self.update_jmap_mailbox(
+                JmapMailboxUpdateInput {
+                    account_id,
+                    mailbox_id,
+                    name: Some(name.to_string()),
+                    sort_order: None,
+                },
+                audit,
+            )
+            .await
+        })
+    }
+
+    fn delete_imap_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.destroy_jmap_mailbox(account_id, mailbox_id, audit)
+                .await
+        })
+    }
+
+    fn copy_imap_email<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ImapEmail> {
+        Box::pin(async move {
+            let copied = self
+                .copy_jmap_email(account_id, message_id, target_mailbox_id, audit)
+                .await?;
+            self.fetch_imap_emails(account_id, target_mailbox_id)
+                .await?
+                .into_iter()
+                .find(|email| email.id == copied.id)
+                .ok_or_else(|| anyhow::anyhow!("copied IMAP message not found"))
         })
     }
 

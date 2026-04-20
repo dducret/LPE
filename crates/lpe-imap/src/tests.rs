@@ -42,7 +42,7 @@ impl Detector for FakeDetector {
 struct FakeStore {
     session: Option<AuthenticatedAccount>,
     login: AccountLogin,
-    mailboxes: Vec<JmapMailbox>,
+    mailboxes: Arc<Mutex<Vec<JmapMailbox>>>,
     emails: Arc<Mutex<Vec<ImapEmail>>>,
 }
 
@@ -59,7 +59,7 @@ impl FakeStore {
                 password_hash: password_hash(),
                 status: "active".to_string(),
             },
-            mailboxes: vec![
+            mailboxes: Arc::new(Mutex::new(vec![
                 mailbox("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "inbox", "Inbox", 0),
                 mailbox("cccccccc-cccc-cccc-cccc-cccccccccccc", "sent", "Sent", 20),
                 mailbox(
@@ -68,7 +68,7 @@ impl FakeStore {
                     "Drafts",
                     10,
                 ),
-            ],
+            ])),
             emails: Arc::new(Mutex::new(vec![
                 email(
                     "11111111-1111-1111-1111-111111111111",
@@ -143,7 +143,7 @@ impl AccountAuthStore for FakeStore {
 
 impl ImapStore for FakeStore {
     fn ensure_imap_mailboxes<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
-        let mailboxes = self.mailboxes.clone();
+        let mailboxes = self.mailboxes.lock().unwrap().clone();
         Box::pin(async move { Ok(mailboxes) })
     }
 
@@ -212,17 +212,131 @@ impl ImapStore for FakeStore {
         Box::pin(async move { Ok(JmapEmailQuery { ids, total }) })
     }
 
+    fn create_imap_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        name: &'a str,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox> {
+        let mut mailboxes = self.mailboxes.lock().unwrap();
+        let mailbox = mailbox(
+            &Uuid::new_v4().to_string(),
+            "",
+            name,
+            mailboxes
+                .iter()
+                .map(|item| item.sort_order)
+                .max()
+                .unwrap_or(0)
+                + 1,
+        );
+        let created = mailbox.clone();
+        let _ = account_id;
+        mailboxes.push(mailbox);
+        Box::pin(async move { Ok(created) })
+    }
+
+    fn rename_imap_mailbox<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_id: Uuid,
+        name: &'a str,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox> {
+        let mut mailboxes = self.mailboxes.lock().unwrap();
+        let mailbox = mailboxes
+            .iter_mut()
+            .find(|mailbox| mailbox.id == mailbox_id)
+            .unwrap();
+        mailbox.name = name.to_string();
+        let renamed = mailbox.clone();
+        Box::pin(async move { Ok(renamed) })
+    }
+
+    fn delete_imap_mailbox<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_id: Uuid,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        let mut mailboxes = self.mailboxes.lock().unwrap();
+        let emails = self.emails.lock().unwrap();
+        if emails.iter().any(|email| email.mailbox_id == mailbox_id) {
+            return Box::pin(async move { anyhow::bail!("mailbox is not empty") });
+        }
+        mailboxes.retain(|mailbox| mailbox.id != mailbox_id);
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn copy_imap_email<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ImapEmail> {
+        let mailboxes = self.mailboxes.lock().unwrap();
+        let target_mailbox = mailboxes
+            .iter()
+            .find(|mailbox| mailbox.id == target_mailbox_id)
+            .unwrap()
+            .clone();
+        drop(mailboxes);
+
+        let mut emails = self.emails.lock().unwrap();
+        let source = emails
+            .iter()
+            .find(|email| email.id == message_id)
+            .unwrap()
+            .clone();
+        let next_uid = emails
+            .iter()
+            .filter(|email| email.mailbox_id == target_mailbox_id)
+            .map(|email| email.uid)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let copied = ImapEmail {
+            id: Uuid::new_v4(),
+            uid: next_uid,
+            thread_id: source.thread_id,
+            mailbox_id: target_mailbox.id,
+            mailbox_role: target_mailbox.role,
+            mailbox_name: target_mailbox.name,
+            received_at: source.received_at,
+            sent_at: source.sent_at,
+            from_address: source.from_address,
+            from_display: source.from_display,
+            to: source.to,
+            cc: source.cc,
+            bcc: source.bcc,
+            subject: source.subject,
+            preview: source.preview,
+            body_text: source.body_text,
+            body_html_sanitized: source.body_html_sanitized,
+            unread: source.unread,
+            flagged: source.flagged,
+            has_attachments: source.has_attachments,
+            size_octets: source.size_octets,
+            internet_message_id: source.internet_message_id,
+            delivery_status: "stored".to_string(),
+        };
+        emails.push(copied.clone());
+        Box::pin(async move { Ok(copied) })
+    }
+
     fn save_draft_message<'a>(
         &'a self,
         input: SubmitMessageInput,
         _audit: AuditEntryInput,
     ) -> StoreFuture<'a, SavedDraftMessage> {
-        let mailbox = self
-            .mailboxes
+        let mailboxes = self.mailboxes.lock().unwrap();
+        let mailbox = mailboxes
             .iter()
             .find(|mailbox| mailbox.role == "drafts")
             .unwrap()
             .clone();
+        drop(mailboxes);
         let mut emails = self.emails.lock().unwrap();
         let next_uid = emails.iter().map(|email| email.uid).max().unwrap_or(0) + 1;
         let message_id = Uuid::new_v4();
@@ -300,9 +414,9 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     assert!(login.contains("A1 OK LOGIN completed"));
 
     let list = send_command(&mut stream, "A2 LIST \"\" \"*\"\r\n", "A2").await;
-    assert!(list.contains("* LIST () \"/\" \"Inbox\""));
-    assert!(list.contains("* LIST () \"/\" \"Sent\""));
-    assert!(list.contains("* LIST () \"/\" \"Drafts\""));
+    assert!(list.contains("* LIST (\\Inbox) \"/\" \"Inbox\""));
+    assert!(list.contains("* LIST (\\Sent) \"/\" \"Sent\""));
+    assert!(list.contains("* LIST (\\Drafts) \"/\" \"Drafts\""));
 
     let select = send_command(&mut stream, "A3 SELECT Inbox\r\n", "A3").await;
     assert!(select.contains("* 1 EXISTS"));
@@ -329,10 +443,46 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     let search = send_command(&mut stream, "A6 SEARCH SEEN TEXT Welcome\r\n", "A6").await;
     assert!(search.contains("* SEARCH 1"));
 
-    let select_drafts = send_command(&mut stream, "A7 SELECT Drafts\r\n", "A7").await;
+    let create_projects = send_command(&mut stream, "A7 CREATE Projects\r\n", "A7").await;
+    assert!(create_projects.contains("A7 OK CREATE completed"));
+
+    let list_custom = send_command(&mut stream, "A8 LIST \"\" \"*\"\r\n", "A8").await;
+    assert!(list_custom.contains("\"Projects\""));
+
+    let create_temp = send_command(&mut stream, "A8B CREATE Temp\r\n", "A8B").await;
+    assert!(create_temp.contains("A8B OK CREATE completed"));
+    let delete_temp = send_command(&mut stream, "A8C DELETE Temp\r\n", "A8C").await;
+    assert!(delete_temp.contains("A8C OK DELETE completed"));
+
+    let status = send_command(
+        &mut stream,
+        "A9 STATUS Projects (MESSAGES UIDNEXT UIDVALIDITY UNSEEN)\r\n",
+        "A9",
+    )
+    .await;
+    assert!(status.contains("* STATUS \"Projects\" (MESSAGES 0 UIDNEXT 1 UIDVALIDITY 1 UNSEEN 0)"));
+
+    let rename_projects = send_command(&mut stream, "A10 RENAME Projects Archive\r\n", "A10").await;
+    assert!(rename_projects.contains("A10 OK RENAME completed"));
+
+    let copy = send_command(&mut stream, "A11 COPY 1 Archive\r\n", "A11").await;
+    assert!(copy.contains("A11 OK [COPYUID 1 1 1] COPY completed"));
+
+    let select_archive = send_command(&mut stream, "A12 SELECT Archive\r\n", "A12").await;
+    assert!(select_archive.contains("* 1 EXISTS"));
+
+    let richer_search = send_command(
+        &mut stream,
+        "A13 SEARCH HEADER SUBJECT Welcome SINCE 19-Apr-2026 SMALLER 100\r\n",
+        "A13",
+    )
+    .await;
+    assert!(richer_search.contains("* SEARCH 1"));
+
+    let select_drafts = send_command(&mut stream, "A14 SELECT Drafts\r\n", "A14").await;
     assert!(select_drafts.contains("* 0 EXISTS"));
 
-    let append_prelude = send_partial_command(&mut stream, "A8 APPEND Drafts {80}\r\n").await;
+    let append_prelude = send_partial_command(&mut stream, "A15 APPEND Drafts {80}\r\n").await;
     assert!(append_prelude.contains("+ Ready for literal data"));
     let append = send_command(
         &mut stream,
@@ -344,13 +494,18 @@ async fn login_list_select_fetch_store_search_and_append_work() {
             "Draft body\r\n",
             "\r\n"
         ),
-        "A8",
+        "A15",
     )
     .await;
-    assert!(append.contains("A8 OK APPEND completed"));
+    assert!(append.contains("A15 OK APPEND completed"));
 
-    let drafts = send_command(&mut stream, "A9 UID SEARCH TEXT Draft\r\n", "A9").await;
+    let drafts = send_command(&mut stream, "A16 UID SEARCH TEXT Draft\r\n", "A16").await;
     assert!(drafts.contains("* SEARCH 3"));
+
+    let select_archive_again = send_command(&mut stream, "A17 SELECT Archive\r\n", "A17").await;
+    assert!(select_archive_again.contains("* 1 EXISTS"));
+    let delete_archive = send_command(&mut stream, "A18 DELETE Archive\r\n", "A18").await;
+    assert!(delete_archive.contains("A18 NO mailbox is not empty"));
 
     task.abort();
 }

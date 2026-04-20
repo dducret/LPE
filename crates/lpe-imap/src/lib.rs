@@ -8,7 +8,8 @@ use lpe_mail_auth::{
     authenticate_bearer_access_token, authenticate_plain_credentials, AccountPrincipal,
 };
 use lpe_storage::{
-    mail::parse_rfc822_message, AuditEntryInput, ImapEmail, JmapEmailAddress, SubmitMessageInput,
+    mail::parse_rfc822_message, AuditEntryInput, ImapEmail, JmapEmailAddress, JmapMailbox,
+    SubmitMessageInput,
 };
 use std::{collections::HashSet, sync::Arc};
 use tokio::{
@@ -21,7 +22,7 @@ mod store;
 
 use crate::store::ImapStore;
 
-const CAPABILITIES: &str = "IMAP4rev1 UIDPLUS AUTH=XOAUTH2 SASL-IR";
+const CAPABILITIES: &str = "IMAP4rev1 AUTH=XOAUTH2 SASL-IR";
 const UID_VALIDITY: u32 = 1;
 
 #[derive(Clone)]
@@ -100,6 +101,7 @@ struct Session<S, D> {
 struct SelectedMailbox {
     mailbox_id: Uuid,
     mailbox_name: String,
+    mailbox_role: String,
     emails: Vec<ImapEmail>,
 }
 
@@ -152,6 +154,22 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                     .await
             }
             "LIST" => self.handle_list(&request.tag, writer).await,
+            "STATUS" => {
+                self.handle_status(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "CREATE" => {
+                self.handle_create(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "DELETE" => {
+                self.handle_delete(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "RENAME" => {
+                self.handle_rename(&request.tag, &request.arguments, writer)
+                    .await
+            }
             "SELECT" => {
                 self.handle_select(&request.tag, &request.arguments, writer)
                     .await
@@ -176,6 +194,15 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             }
             "SEARCH" => {
                 self.handle_search(
+                    &request.tag,
+                    &request.arguments,
+                    writer,
+                    MessageRefKind::Sequence,
+                )
+                .await
+            }
+            "COPY" => {
+                self.handle_copy(
                     &request.tag,
                     &request.arguments,
                     writer,
@@ -276,8 +303,7 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         let username = tokens[0].clone();
         let password = tokens[1].clone();
         self.principal = Some(
-            authenticate_plain_credentials(&self.store, None, &username, &password, "imap")
-                .await?,
+            authenticate_plain_credentials(&self.store, None, &username, &password, "imap").await?,
         );
         self.selected = None;
 
@@ -310,13 +336,8 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         }
         let (username, bearer_token) = parse_xoauth2_initial_response(&tokens[1])?;
         self.principal = Some(
-            authenticate_bearer_access_token(
-                &self.store,
-                Some(&username),
-                &bearer_token,
-                "imap",
-            )
-            .await?,
+            authenticate_bearer_access_token(&self.store, Some(&username), &bearer_token, "imap")
+                .await?,
         );
         self.selected = None;
 
@@ -340,7 +361,8 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             writer
                 .write_all(
                     format!(
-                        "* LIST () \"/\" \"{}\"\r\n",
+                        "* LIST {} \"/\" \"{}\"\r\n",
+                        render_list_flags(&mailbox.role),
                         sanitize_imap_quoted(&mailbox.name)
                     )
                     .as_bytes(),
@@ -349,6 +371,117 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         }
         writer
             .write_all(format!("{tag} OK LIST completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    async fn handle_status<W>(&mut self, tag: &str, arguments: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        let mailbox = self.resolve_mailbox_by_name(arguments).await?;
+        let principal = self.require_auth()?;
+        let emails = self
+            .store
+            .fetch_imap_emails(principal.account_id, mailbox.id)
+            .await?;
+        let requested = parse_status_items(arguments)?;
+        let response = render_status_response(&mailbox, &emails, &requested);
+
+        writer.write_all(response.as_bytes()).await?;
+        writer
+            .write_all(format!("{tag} OK STATUS completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    async fn handle_create<W>(&mut self, tag: &str, arguments: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        let mailbox_name = first_token(arguments, "CREATE expects a mailbox name")?;
+        validate_flat_mailbox_name(&mailbox_name)?;
+        let principal = self.require_auth()?;
+        self.store
+            .create_imap_mailbox(
+                principal.account_id,
+                &mailbox_name,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "imap-create-mailbox".to_string(),
+                    subject: format!("create mailbox {}", mailbox_name),
+                },
+            )
+            .await?;
+
+        writer
+            .write_all(format!("{tag} OK CREATE completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    async fn handle_delete<W>(&mut self, tag: &str, arguments: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        let mailbox = self.resolve_mailbox_by_name(arguments).await?;
+        let principal = self.require_auth()?;
+        self.store
+            .delete_imap_mailbox(
+                principal.account_id,
+                mailbox.id,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "imap-delete-mailbox".to_string(),
+                    subject: format!("delete mailbox {}", mailbox.name),
+                },
+            )
+            .await?;
+        if matches!(self.selected.as_ref(), Some(selected) if selected.mailbox_id == mailbox.id) {
+            self.selected = None;
+        }
+
+        writer
+            .write_all(format!("{tag} OK DELETE completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    async fn handle_rename<W>(&mut self, tag: &str, arguments: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        let tokens = tokenize(arguments)?;
+        if tokens.len() != 2 {
+            bail!("RENAME expects source and target mailbox names");
+        }
+        let mailbox = self.resolve_mailbox_by_name(&tokens[0]).await?;
+        validate_flat_mailbox_name(&tokens[1])?;
+        let principal = self.require_auth()?;
+        self.store
+            .rename_imap_mailbox(
+                principal.account_id,
+                mailbox.id,
+                &tokens[1],
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "imap-rename-mailbox".to_string(),
+                    subject: format!("rename mailbox {} to {}", mailbox.name, tokens[1]),
+                },
+            )
+            .await?;
+        if let Some(selected) = self.selected.as_mut() {
+            if selected.mailbox_id == mailbox.id {
+                selected.mailbox_name = tokens[1].clone();
+            }
+        }
+
+        writer
+            .write_all(format!("{tag} OK RENAME completed\r\n").as_bytes())
             .await?;
         writer.flush().await?;
         Ok(true)
@@ -376,7 +509,6 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             .fetch_imap_emails(principal.account_id, mailbox.id)
             .await?;
         let exists = emails.len();
-        let unseen = emails.iter().filter(|email| email.unread).count();
         let uid_next = emails
             .last()
             .map(|email| email.uid.saturating_add(1))
@@ -384,6 +516,7 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         self.selected = Some(SelectedMailbox {
             mailbox_id: mailbox.id,
             mailbox_name: mailbox.name.clone(),
+            mailbox_role: mailbox.role.clone(),
             emails,
         });
 
@@ -398,7 +531,7 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             .write_all(
                 format!(
                     "* OK [UNSEEN {}] first unseen\r\n",
-                    if unseen == 0 { 0 } else { 1 }
+                    first_unseen_sequence(self.require_selected()?)
                 )
                 .as_bytes(),
             )
@@ -550,30 +683,11 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
     {
         let tokens = tokenize(arguments)?;
         let selected = self.require_selected()?;
-        let criteria = SearchCriteria::from_tokens(&tokens)?;
-        let text_ids = if let Some(text) = criteria.text.as_deref() {
-            let principal = self.require_auth()?;
-            Some(
-                self.store
-                    .query_jmap_email_ids(
-                        principal.account_id,
-                        Some(selected.mailbox_id),
-                        Some(text),
-                        0,
-                        selected.emails.len() as u64 + 1,
-                    )
-                    .await?
-                    .ids
-                    .into_iter()
-                    .collect::<HashSet<_>>(),
-            )
-        } else {
-            None
-        };
+        let criteria = SearchExpression::from_tokens(&tokens)?;
 
         let mut matches = Vec::new();
         for (index, email) in selected.emails.iter().enumerate() {
-            if !criteria.matches(email, text_ids.as_ref()) {
+            if !criteria.matches(email, index, &selected.emails, ref_kind)? {
                 continue;
             }
             matches.push(match ref_kind {
@@ -588,6 +702,67 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         writer
             .write_all(format!("{tag} OK SEARCH completed\r\n").as_bytes())
             .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    async fn handle_copy<W>(
+        &mut self,
+        tag: &str,
+        arguments: &str,
+        writer: &mut W,
+        ref_kind: MessageRefKind,
+    ) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        let (set_token, mailbox_token) = split_two(arguments)?;
+        let target_mailbox = self.resolve_mailbox_by_name(mailbox_token).await?;
+        let selected = self.require_selected()?;
+        ensure_copy_allowed(&selected.mailbox_role, &target_mailbox.role)?;
+        let indices = resolve_message_indexes(&selected.emails, set_token, ref_kind)?;
+        let principal = self.require_auth()?;
+        let mut source_uids = Vec::new();
+        let mut target_uids = Vec::new();
+
+        for index in indices {
+            let email = &selected.emails[index];
+            let copied = self
+                .store
+                .copy_imap_email(
+                    principal.account_id,
+                    email.id,
+                    target_mailbox.id,
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "imap-copy".to_string(),
+                        subject: format!(
+                            "copy message {} to mailbox {}",
+                            email.id, target_mailbox.name
+                        ),
+                    },
+                )
+                .await?;
+            source_uids.push(email.uid.to_string());
+            target_uids.push(copied.uid.to_string());
+        }
+
+        if matches!(self.selected.as_ref(), Some(selected) if selected.mailbox_id == target_mailbox.id)
+        {
+            self.refresh_selected().await?;
+        }
+
+        let response = if source_uids.is_empty() {
+            format!("{tag} OK COPY completed\r\n")
+        } else {
+            format!(
+                "{tag} OK [COPYUID {} {} {}] COPY completed\r\n",
+                UID_VALIDITY,
+                source_uids.join(","),
+                target_uids.join(",")
+            )
+        };
+        writer.write_all(response.as_bytes()).await?;
         writer.flush().await?;
         Ok(true)
     }
@@ -615,6 +790,10 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             }
             "SEARCH" => {
                 self.handle_search(tag, rest, writer, MessageRefKind::Uid)
+                    .await
+            }
+            "COPY" => {
+                self.handle_copy(tag, rest, writer, MessageRefKind::Uid)
                     .await
             }
             other => bail!("UID {} is not supported", other),
@@ -738,12 +917,26 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         self.selected = Some(SelectedMailbox {
             mailbox_id: selected.mailbox_id,
             mailbox_name: selected.mailbox_name.clone(),
+            mailbox_role: selected.mailbox_role.clone(),
             emails: self
                 .store
                 .fetch_imap_emails(principal.account_id, selected.mailbox_id)
                 .await?,
         });
         Ok(())
+    }
+
+    async fn resolve_mailbox_by_name(&self, arguments: &str) -> Result<JmapMailbox> {
+        let mailbox_name = first_token(arguments, "mailbox name is required")?;
+        let principal = self.require_auth()?;
+        let mailboxes = self
+            .store
+            .ensure_imap_mailboxes(principal.account_id)
+            .await?;
+        mailboxes
+            .into_iter()
+            .find(|candidate| mailbox_name_matches(&candidate.name, &candidate.role, &mailbox_name))
+            .ok_or_else(|| anyhow!("mailbox not found"))
     }
 }
 
@@ -754,64 +947,98 @@ struct RequestLine {
     arguments: String,
 }
 
-#[derive(Default)]
-struct SearchCriteria {
-    all: bool,
-    seen: Option<bool>,
-    flagged: Option<bool>,
-    text: Option<String>,
+enum SearchExpression {
+    All,
+    Seen(bool),
+    Flagged(bool),
+    Text(String),
+    Subject(String),
+    From(String),
+    To(String),
+    Cc(String),
+    Body(String),
+    Header(String, String),
+    Before(i32),
+    On(i32),
+    Since(i32),
+    Larger(i64),
+    Smaller(i64),
+    MessageSet(String, MessageRefKind),
+    Not(Box<SearchExpression>),
+    Or(Box<SearchExpression>, Box<SearchExpression>),
+    And(Vec<SearchExpression>),
 }
 
-impl SearchCriteria {
+impl SearchExpression {
     fn from_tokens(tokens: &[String]) -> Result<Self> {
         if tokens.is_empty() {
-            return Ok(Self {
-                all: true,
-                ..Self::default()
-            });
+            return Ok(Self::All);
         }
 
-        let mut criteria = Self::default();
         let mut cursor = 0usize;
+        let mut expressions = Vec::new();
         while cursor < tokens.len() {
-            match tokens[cursor].to_ascii_uppercase().as_str() {
-                "ALL" => criteria.all = true,
-                "SEEN" => criteria.seen = Some(true),
-                "UNSEEN" => criteria.seen = Some(false),
-                "FLAGGED" => criteria.flagged = Some(true),
-                "UNFLAGGED" => criteria.flagged = Some(false),
-                "TEXT" | "SUBJECT" | "FROM" | "TO" => {
-                    let value = tokens
-                        .get(cursor + 1)
-                        .ok_or_else(|| anyhow!("SEARCH {} requires an argument", tokens[cursor]))?;
-                    criteria.text = Some(value.clone());
-                    cursor += 1;
-                }
-                other => bail!("unsupported SEARCH criterion {}", other),
-            }
-            cursor += 1;
+            expressions.push(parse_search_key(tokens, &mut cursor)?);
         }
 
-        Ok(criteria)
+        if expressions.len() == 1 {
+            Ok(expressions.pop().unwrap())
+        } else {
+            Ok(Self::And(expressions))
+        }
     }
 
-    fn matches(&self, email: &ImapEmail, text_ids: Option<&HashSet<Uuid>>) -> bool {
-        if let Some(seen) = self.seen {
-            if seen == email.unread {
-                return false;
+    fn matches(
+        &self,
+        email: &ImapEmail,
+        index: usize,
+        emails: &[ImapEmail],
+        ref_kind: MessageRefKind,
+    ) -> Result<bool> {
+        Ok(match self {
+            Self::All => true,
+            Self::Seen(seen) => (*seen) != email.unread,
+            Self::Flagged(flagged) => *flagged == email.flagged,
+            Self::Text(value) => search_email_text(email).contains(&normalize_search_text(value)),
+            Self::Subject(value) => {
+                normalize_search_text(&email.subject).contains(&normalize_search_text(value))
             }
-        }
-        if let Some(flagged) = self.flagged {
-            if flagged != email.flagged {
-                return false;
+            Self::From(value) => searchable_sender(email).contains(&normalize_search_text(value)),
+            Self::To(value) => {
+                searchable_recipients(&email.to).contains(&normalize_search_text(value))
             }
-        }
-        if let Some(ids) = text_ids {
-            if !ids.contains(&email.id) {
-                return false;
+            Self::Cc(value) => {
+                searchable_recipients(&email.cc).contains(&normalize_search_text(value))
             }
-        }
-        true
+            Self::Body(value) => {
+                normalize_search_text(&email.body_text).contains(&normalize_search_text(value))
+            }
+            Self::Header(name, value) => {
+                searchable_header_value(email, name).contains(&normalize_search_text(value))
+            }
+            Self::Before(value) => message_search_date(email)? < *value,
+            Self::On(value) => message_search_date(email)? == *value,
+            Self::Since(value) => message_search_date(email)? >= *value,
+            Self::Larger(value) => email.size_octets > *value,
+            Self::Smaller(value) => email.size_octets < *value,
+            Self::MessageSet(set, criterion_kind) => {
+                let evaluation_kind = match criterion_kind {
+                    MessageRefKind::Uid => MessageRefKind::Uid,
+                    MessageRefKind::Sequence => ref_kind,
+                };
+                message_matches_set(email, index, emails, set, evaluation_kind)?
+            }
+            Self::Not(expression) => !expression.matches(email, index, emails, ref_kind)?,
+            Self::Or(left, right) => {
+                left.matches(email, index, emails, ref_kind)?
+                    || right.matches(email, index, emails, ref_kind)?
+            }
+            Self::And(expressions) => expressions.iter().all(|expression| {
+                expression
+                    .matches(email, index, emails, ref_kind)
+                    .unwrap_or(false)
+            }),
+        })
     }
 }
 
@@ -917,6 +1144,15 @@ fn mailbox_name_matches(display_name: &str, role: &str, requested: &str) -> bool
         || (role == "inbox" && requested.eq_ignore_ascii_case("INBOX"))
 }
 
+fn render_list_flags(role: &str) -> &'static str {
+    match role {
+        "inbox" => "(\\Inbox)",
+        "sent" => "(\\Sent)",
+        "drafts" => "(\\Drafts)",
+        _ => "()",
+    }
+}
+
 fn parse_fetch_attributes(input: &str) -> Result<FetchAttributes> {
     let upper = input.trim().to_ascii_uppercase();
     let expanded = match upper.as_str() {
@@ -1019,6 +1255,35 @@ fn render_flags(email: &ImapEmail, mailbox_name: &str) -> String {
     flags.join(" ")
 }
 
+fn render_status_response(
+    mailbox: &JmapMailbox,
+    emails: &[ImapEmail],
+    requested: &[String],
+) -> String {
+    let uid_next = emails
+        .last()
+        .map(|email| email.uid.saturating_add(1))
+        .unwrap_or(1);
+    let unseen = emails.iter().filter(|email| email.unread).count();
+    let items = requested
+        .iter()
+        .map(|item| match item.as_str() {
+            "MESSAGES" => format!("MESSAGES {}", emails.len()),
+            "RECENT" => "RECENT 0".to_string(),
+            "UIDNEXT" => format!("UIDNEXT {}", uid_next),
+            "UIDVALIDITY" => format!("UIDVALIDITY {}", UID_VALIDITY),
+            "UNSEEN" => format!("UNSEEN {}", unseen),
+            _ => format!("{} 0", item),
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "* STATUS \"{}\" ({})\r\n",
+        sanitize_imap_quoted(&mailbox.name),
+        items
+    )
+}
+
 fn render_header(email: &ImapEmail) -> String {
     let mut lines = Vec::new();
     lines.push(format!(
@@ -1047,6 +1312,29 @@ fn render_header(email: &ImapEmail) -> String {
 
 fn render_full_message(email: &ImapEmail) -> String {
     format!("{}{}", render_header(email), email.body_text)
+}
+
+fn render_visible_header(email: &ImapEmail) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "Date: {}",
+        email.sent_at.as_deref().unwrap_or(&email.received_at)
+    ));
+    lines.push(format!(
+        "From: {}",
+        render_address_header(email.from_display.as_deref(), &email.from_address)
+    ));
+    if !email.to.is_empty() {
+        lines.push(format!("To: {}", render_recipient_header(&email.to)));
+    }
+    if !email.cc.is_empty() {
+        lines.push(format!("Cc: {}", render_recipient_header(&email.cc)));
+    }
+    lines.push(format!("Subject: {}", email.subject));
+    if let Some(message_id) = email.internet_message_id.as_deref() {
+        lines.push(format!("Message-Id: {}", message_id));
+    }
+    lines.join("\r\n")
 }
 
 fn render_recipient_header(recipients: &[JmapEmailAddress]) -> String {
@@ -1159,6 +1447,46 @@ fn find_message_index(emails: &[ImapEmail], value: u32, ref_kind: MessageRefKind
     }
 }
 
+fn message_matches_set(
+    email: &ImapEmail,
+    index: usize,
+    emails: &[ImapEmail],
+    set_token: &str,
+    ref_kind: MessageRefKind,
+) -> Result<bool> {
+    let max_value = match ref_kind {
+        MessageRefKind::Sequence => emails.len() as u32,
+        MessageRefKind::Uid => emails.last().map(|candidate| candidate.uid).unwrap_or(0),
+    };
+    let value = match ref_kind {
+        MessageRefKind::Sequence => (index + 1) as u32,
+        MessageRefKind::Uid => email.uid,
+    };
+
+    for segment in set_token.split(',') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            continue;
+        }
+        if let Some((start, end)) = segment.split_once(':') {
+            let start = resolve_set_value(start, emails, max_value, ref_kind)?;
+            let end = resolve_set_value(end, emails, max_value, ref_kind)?;
+            let (from, to) = if start <= end {
+                (start, end)
+            } else {
+                (end, start)
+            };
+            if value >= from && value <= to {
+                return Ok(true);
+            }
+        } else if value == resolve_set_value(segment, emails, max_value, ref_kind)? {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
 fn parse_store_mode(token: &str) -> Result<StoreMode> {
     Ok(match token.to_ascii_uppercase().as_str() {
         "FLAGS" => StoreMode {
@@ -1189,6 +1517,33 @@ fn parse_store_mode(token: &str) -> Result<StoreMode> {
     })
 }
 
+fn parse_status_items(arguments: &str) -> Result<Vec<String>> {
+    let tokens = tokenize(arguments)?;
+    if tokens.len() < 2 {
+        bail!("STATUS expects a mailbox name and item list");
+    }
+    let source = tokens[1..].join(" ");
+    let requested = source
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(')')
+        .split_whitespace()
+        .map(|item| item.to_ascii_uppercase())
+        .collect::<Vec<_>>();
+    if requested.is_empty() {
+        bail!("STATUS expects at least one data item");
+    }
+    for item in &requested {
+        if !matches!(
+            item.as_str(),
+            "MESSAGES" | "RECENT" | "UIDNEXT" | "UIDVALIDITY" | "UNSEEN"
+        ) {
+            bail!("unsupported STATUS item {}", item);
+        }
+    }
+    Ok(requested)
+}
+
 fn parse_flag_list(token: &str) -> Result<HashSet<String>> {
     let source = token
         .trim()
@@ -1205,6 +1560,189 @@ fn parse_flag_list(token: &str) -> Result<HashSet<String>> {
 fn parse_literal_size(token: &str) -> Result<usize> {
     let value = token.trim().trim_start_matches('{').trim_end_matches('}');
     value.parse::<usize>().map_err(Into::into)
+}
+
+fn parse_search_key(tokens: &[String], cursor: &mut usize) -> Result<SearchExpression> {
+    let token = tokens
+        .get(*cursor)
+        .ok_or_else(|| anyhow!("unexpected end of SEARCH criteria"))?
+        .clone();
+    *cursor += 1;
+
+    if token.starts_with('(') && token.ends_with(')') && token.len() >= 2 {
+        return SearchExpression::from_tokens(&tokenize(&token[1..token.len() - 1])?);
+    }
+
+    Ok(match token.to_ascii_uppercase().as_str() {
+        "ALL" => SearchExpression::All,
+        "SEEN" => SearchExpression::Seen(true),
+        "UNSEEN" => SearchExpression::Seen(false),
+        "FLAGGED" => SearchExpression::Flagged(true),
+        "UNFLAGGED" => SearchExpression::Flagged(false),
+        "TEXT" => SearchExpression::Text(next_search_argument(tokens, cursor, "TEXT")?),
+        "SUBJECT" => SearchExpression::Subject(next_search_argument(tokens, cursor, "SUBJECT")?),
+        "FROM" => SearchExpression::From(next_search_argument(tokens, cursor, "FROM")?),
+        "TO" => SearchExpression::To(next_search_argument(tokens, cursor, "TO")?),
+        "CC" => SearchExpression::Cc(next_search_argument(tokens, cursor, "CC")?),
+        "BODY" => SearchExpression::Body(next_search_argument(tokens, cursor, "BODY")?),
+        "HEADER" => SearchExpression::Header(
+            next_search_argument(tokens, cursor, "HEADER")?,
+            next_search_argument(tokens, cursor, "HEADER")?,
+        ),
+        "BEFORE" => SearchExpression::Before(parse_search_date(&next_search_argument(
+            tokens, cursor, "BEFORE",
+        )?)?),
+        "ON" => SearchExpression::On(parse_search_date(&next_search_argument(
+            tokens, cursor, "ON",
+        )?)?),
+        "SINCE" => SearchExpression::Since(parse_search_date(&next_search_argument(
+            tokens, cursor, "SINCE",
+        )?)?),
+        "LARGER" => SearchExpression::Larger(
+            next_search_argument(tokens, cursor, "LARGER")?.parse::<i64>()?,
+        ),
+        "SMALLER" => SearchExpression::Smaller(
+            next_search_argument(tokens, cursor, "SMALLER")?.parse::<i64>()?,
+        ),
+        "UID" => SearchExpression::MessageSet(
+            next_search_argument(tokens, cursor, "UID")?,
+            MessageRefKind::Uid,
+        ),
+        "NOT" => SearchExpression::Not(Box::new(parse_search_key(tokens, cursor)?)),
+        "OR" => SearchExpression::Or(
+            Box::new(parse_search_key(tokens, cursor)?),
+            Box::new(parse_search_key(tokens, cursor)?),
+        ),
+        other if looks_like_message_set(other) => {
+            SearchExpression::MessageSet(token, MessageRefKind::Sequence)
+        }
+        other => bail!("unsupported SEARCH criterion {}", other),
+    })
+}
+
+fn next_search_argument(tokens: &[String], cursor: &mut usize, criterion: &str) -> Result<String> {
+    let value = tokens
+        .get(*cursor)
+        .cloned()
+        .ok_or_else(|| anyhow!("SEARCH {} requires an argument", criterion))?;
+    *cursor += 1;
+    Ok(value)
+}
+
+fn looks_like_message_set(token: &str) -> bool {
+    !token.is_empty()
+        && token
+            .chars()
+            .all(|character| character.is_ascii_digit() || matches!(character, '*' | ':' | ','))
+}
+
+fn normalize_search_text(value: &str) -> String {
+    value.to_ascii_lowercase()
+}
+
+fn searchable_sender(email: &ImapEmail) -> String {
+    normalize_search_text(&render_address_header(
+        email.from_display.as_deref(),
+        &email.from_address,
+    ))
+}
+
+fn searchable_recipients(recipients: &[JmapEmailAddress]) -> String {
+    normalize_search_text(&render_recipient_header(recipients))
+}
+
+fn search_email_text(email: &ImapEmail) -> String {
+    normalize_search_text(&format!(
+        "{}\n{}\n{}",
+        render_visible_header(email),
+        email.body_text,
+        email.preview
+    ))
+}
+
+fn searchable_header_value(email: &ImapEmail, name: &str) -> String {
+    match name.trim().to_ascii_uppercase().as_str() {
+        "FROM" => searchable_sender(email),
+        "TO" => searchable_recipients(&email.to),
+        "CC" => searchable_recipients(&email.cc),
+        "BCC" => String::new(),
+        "SUBJECT" => normalize_search_text(&email.subject),
+        "DATE" => normalize_search_text(email.sent_at.as_deref().unwrap_or(&email.received_at)),
+        "MESSAGE-ID" => {
+            normalize_search_text(email.internet_message_id.as_deref().unwrap_or_default())
+        }
+        _ => search_email_text(email),
+    }
+}
+
+fn parse_search_date(value: &str) -> Result<i32> {
+    let parts = value.split('-').collect::<Vec<_>>();
+    if parts.len() != 3 {
+        bail!("invalid SEARCH date {}", value);
+    }
+    let day = parts[0].trim().parse::<i32>()?;
+    let month = match parts[1].trim().to_ascii_lowercase().as_str() {
+        "jan" => 1,
+        "feb" => 2,
+        "mar" => 3,
+        "apr" => 4,
+        "may" => 5,
+        "jun" => 6,
+        "jul" => 7,
+        "aug" => 8,
+        "sep" => 9,
+        "oct" => 10,
+        "nov" => 11,
+        "dec" => 12,
+        _ => bail!("invalid SEARCH month {}", value),
+    };
+    let year = parts[2].trim().parse::<i32>()?;
+    Ok((year * 10_000) + (month * 100) + day)
+}
+
+fn message_search_date(email: &ImapEmail) -> Result<i32> {
+    let source = email.sent_at.as_deref().unwrap_or(&email.received_at);
+    if source.len() < 10 {
+        bail!("invalid message date");
+    }
+    let year = source[0..4].parse::<i32>()?;
+    let month = source[5..7].parse::<i32>()?;
+    let day = source[8..10].parse::<i32>()?;
+    Ok((year * 10_000) + (month * 100) + day)
+}
+
+fn first_token(arguments: &str, error: &str) -> Result<String> {
+    tokenize(arguments)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!(error.to_string()))
+}
+
+fn validate_flat_mailbox_name(value: &str) -> Result<()> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        bail!("mailbox name is required");
+    }
+    if trimmed.contains('/') {
+        bail!("hierarchical mailbox names are not supported yet");
+    }
+    Ok(())
+}
+
+fn ensure_copy_allowed(source_role: &str, target_role: &str) -> Result<()> {
+    if matches!(source_role, "drafts" | "sent") || matches!(target_role, "drafts" | "sent") {
+        bail!("COPY does not support Sent or Drafts because those states stay canonical");
+    }
+    Ok(())
+}
+
+fn first_unseen_sequence(selected: &SelectedMailbox) -> usize {
+    selected
+        .emails
+        .iter()
+        .position(|email| email.unread)
+        .map(|index| index + 1)
+        .unwrap_or(0)
 }
 
 fn parse_xoauth2_initial_response(encoded: &str) -> Result<(String, String)> {
