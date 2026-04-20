@@ -339,6 +339,8 @@ pub struct DraftMutation {
     pub subject: Option<String>,
     pub text_body: Option<String>,
     pub html_body: Option<Option<String>>,
+    pub unread: Option<bool>,
+    pub flagged: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

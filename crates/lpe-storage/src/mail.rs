@@ -26,13 +26,14 @@ pub fn parse_message_attachments(bytes: &[u8]) -> Result<Vec<AttachmentUploadInp
     collect_mime_attachment_parts(bytes)?
         .into_iter()
         .enumerate()
-        .map(|(index, attachment)| {
+        .map(|(index, mut attachment)| {
             let file_name = attachment
                 .filename
                 .unwrap_or_else(|| format!("attachment-{}.bin", index + 1));
             let media_type = attachment
                 .declared_mime
                 .unwrap_or_else(|| "application/octet-stream".to_string());
+            trim_single_structural_crlf(&mut attachment.bytes);
             Ok(AttachmentUploadInput {
                 file_name,
                 media_type,
@@ -94,13 +95,7 @@ pub fn parse_rfc822_message(bytes: &[u8]) -> Result<ParsedRfc822Message> {
         message_id: headers.get("message-id").cloned(),
         body_text: visible.text_body,
         body_html_sanitized: visible.html_body,
-        attachments: parse_message_attachments(bytes)?
-            .into_iter()
-            .map(|mut attachment| {
-                trim_trailing_crlf(&mut attachment.blob_bytes);
-                attachment
-            })
-            .collect(),
+        attachments: parse_message_attachments(bytes)?,
     })
 }
 
@@ -206,9 +201,11 @@ fn parse_single_address(value: &str) -> Option<ParsedMailAddress> {
     }
 }
 
-fn trim_trailing_crlf(bytes: &mut Vec<u8>) {
-    while matches!(bytes.last(), Some(b'\r' | b'\n')) {
-        bytes.pop();
+fn trim_single_structural_crlf(bytes: &mut Vec<u8>) {
+    if bytes.ends_with(b"\r\n") {
+        bytes.truncate(bytes.len() - 2);
+    } else if bytes.ends_with(b"\n") || bytes.ends_with(b"\r") {
+        bytes.truncate(bytes.len() - 1);
     }
 }
 
@@ -238,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_message_attachments_keeps_filename_mime_and_bytes() {
+    fn parse_message_attachments_trims_structural_boundary_crlf() {
         let message = concat!(
             "Content-Type: multipart/mixed; boundary=\"abc\"\r\n",
             "\r\n",
@@ -259,7 +256,7 @@ mod tests {
         assert_eq!(attachments.len(), 1);
         assert_eq!(attachments[0].file_name, "invoice.pdf");
         assert_eq!(attachments[0].media_type, "application/pdf");
-        assert_eq!(attachments[0].blob_bytes, b"PDFDATA\r\n".to_vec());
+        assert_eq!(attachments[0].blob_bytes, b"PDFDATA".to_vec());
     }
 
     #[test]

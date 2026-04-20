@@ -393,6 +393,8 @@ pub(crate) fn merged_draft_input(
         internet_message_id: existing.internet_message_id.clone(),
         mime_blob_ref: Some(format!("draft-message:{draft_id}")),
         size_octets: existing.size_octets,
+        unread: Some(existing.unread),
+        flagged: Some(existing.flagged),
         attachments: Vec::new(),
     }
 }
@@ -433,6 +435,8 @@ pub(crate) fn draft_input_from_application_data(
         internet_message_id: None,
         mime_blob_ref: None,
         size_octets: 0,
+        unread: Some(false),
+        flagged: Some(false),
         attachments: Vec::new(),
     }
 }

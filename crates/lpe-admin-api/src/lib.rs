@@ -2113,6 +2113,8 @@ fn map_submit_message_request(request: SubmitMessageRequest) -> SubmitMessageInp
         internet_message_id: request.internet_message_id,
         mime_blob_ref: request.mime_blob_ref,
         size_octets: request.size_octets.unwrap_or(0),
+        unread: None,
+        flagged: None,
         attachments: Vec::new(),
     }
 }

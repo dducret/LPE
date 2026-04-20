@@ -52,6 +52,7 @@ Additional supported `JMAP` routes:
 ### Important MVP rules
 
 - `Email/set` persists only in the `Drafts` mailbox
+- `Email/set` accepts draft `keywords` for `$draft`, `$seen`, and `$flagged`; `$seen` and `$flagged` are mapped onto the canonical draft unread-flagged state without creating any parallel priority model
 - `EmailSubmission/set` does not submit raw MIME or direct `SMTP`
 - `EmailSubmission/set` takes an existing draft `emailId` and calls the canonical `LPE` submission workflow
 - canonical submission creates the authoritative copy in `Sent`, marks the message as `queued`, inserts an `outbound_message_queue` row, then removes the source draft
@@ -71,7 +72,7 @@ Additional supported `JMAP` routes:
 - `EmailSubmission/set` expects an existing draft through `emailId` or a resolved creation reference in the same request
 - `Mailbox/set` cannot modify or delete system mailboxes (`Inbox`, `Sent`, `Drafts`, etc.)
 - `Email/copy` currently supports only same-account copy
-- `Email/import` consumes a validated `message/rfc822` blob, extracts visible multipart text with plaintext preference, preserves a first HTML body when available, validates each imported attachment with `Magika`, and imports multipart attachments into the canonical attachment pipeline
+- `Email/import` consumes a validated `message/rfc822` blob, extracts visible multipart text with plaintext preference, preserves a first HTML body when available, validates each imported attachment with `Magika`, trims structural multipart boundary line endings from imported attachment bytes, and imports multipart attachments into the canonical attachment pipeline
 - `Blob/upload` currently stores temporary upload blobs in `PostgreSQL`
 - message `blobId` values now expose the canonical `mime_blob_ref` shape when one already exists, including `upload:{uuid}` for imported MIME uploads, and fall back to adapter-scoped opaque identifiers for messages that do not yet expose a persistent downloadable MIME blob
 - no `JMAP Blob/get`, blob copy, or persistent message download contract is advertised yet; the current blob model is intentionally limited to uploaded-imported MIME reuse and internal canonical references

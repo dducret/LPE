@@ -1,12 +1,11 @@
 export type Section = "mail" | "calendar" | "contacts";
 export type Folder = "focused" | "inbox" | "drafts" | "sent" | "archive";
-export type Category = "priority" | "customer" | "internal";
 export type Mode = "closed" | "new" | "draft" | "reply" | "forward";
 
 export type Attachment = {
   id: string;
   name: string;
-  kind: "PDF" | "DOCX" | "ODT";
+  kind: string;
   size: string;
 };
 
@@ -23,7 +22,6 @@ export type Message = {
   timeLabel: string;
   unread: boolean;
   flagged: boolean;
-  category: Category;
   tags: string[];
   attachments: Attachment[];
   body: string[];

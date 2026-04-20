@@ -14,7 +14,6 @@ export function MailDetail(props: {
   onSaveDraft: () => void;
   onSend: () => void;
   onDeleteDraft: () => void;
-  onArchive: () => void;
 }) {
   if (props.mode !== "closed") {
     return (
@@ -75,7 +74,6 @@ export function MailDetail(props: {
         <div className="detail-actions">
           <button className="ghost-button" type="button" onClick={() => props.onReply(current)}>{props.copy.messageActions.reply}</button>
           <button className="ghost-button" type="button" onClick={() => props.onForward(current)}>{props.copy.messageActions.forward}</button>
-          <button className="ghost-button" type="button" onClick={props.onArchive}>{props.copy.messageActions.archive}</button>
         </div>
       </div>
 

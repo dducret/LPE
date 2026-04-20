@@ -1915,6 +1915,8 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     internet_message_id: None,
                     mime_blob_ref: None,
                     size_octets: 0,
+                    unread: Some(mutation.unread.unwrap_or(false)),
+                    flagged: Some(mutation.flagged.unwrap_or(false)),
                     attachments: Vec::new(),
                 },
                 audit,
@@ -1978,6 +1980,8 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     internet_message_id: existing.internet_message_id,
                     mime_blob_ref: None,
                     size_octets: existing.size_octets,
+                    unread: Some(mutation.unread.unwrap_or(existing.unread)),
+                    flagged: Some(mutation.flagged.unwrap_or(existing.flagged)),
                     attachments: Vec::new(),
                 },
                 audit,
@@ -3357,13 +3361,7 @@ fn parse_draft_mutation(value: Value) -> Result<DraftMutation> {
             bail!("only one mailboxId is supported");
         }
     }
-    if let Some(keywords) = object.get("keywords").and_then(Value::as_object) {
-        for keyword in keywords.keys() {
-            if keyword != "$draft" && keyword != "$seen" && keyword != "$flagged" {
-                bail!("unsupported keyword: {keyword}");
-            }
-        }
-    }
+    let keywords = parse_draft_keywords(object.get("keywords"))?;
 
     Ok(DraftMutation {
         from: parse_address_list(object.get("from"))?,
@@ -3373,7 +3371,40 @@ fn parse_draft_mutation(value: Value) -> Result<DraftMutation> {
         subject: parse_optional_string(object.get("subject"))?,
         text_body: parse_optional_string(object.get("textBody"))?,
         html_body: parse_optional_nullable_string(object.get("htmlBody"))?,
+        unread: keywords.unread,
+        flagged: keywords.flagged,
     })
+}
+
+#[derive(Default)]
+struct ParsedDraftKeywords {
+    unread: Option<bool>,
+    flagged: Option<bool>,
+}
+
+fn parse_draft_keywords(value: Option<&Value>) -> Result<ParsedDraftKeywords> {
+    let Some(keywords) = value.and_then(Value::as_object) else {
+        return Ok(ParsedDraftKeywords::default());
+    };
+
+    let mut parsed = ParsedDraftKeywords::default();
+    for (keyword, enabled) in keywords {
+        let enabled = enabled
+            .as_bool()
+            .ok_or_else(|| anyhow!("keyword {keyword} must be a boolean"))?;
+        match keyword.as_str() {
+            "$draft" => {
+                if !enabled {
+                    bail!("Email/set is limited to draft messages");
+                }
+            }
+            "$seen" => parsed.unread = Some(!enabled),
+            "$flagged" => parsed.flagged = Some(enabled),
+            _ => bail!("unsupported keyword: {keyword}"),
+        }
+    }
+
+    Ok(parsed)
 }
 
 fn parse_mailbox_create(value: Value) -> Result<MailboxCreateInput> {
@@ -4687,6 +4718,53 @@ mod tests {
         assert_eq!(saved[0].from_address, "alice@example.test");
         assert_eq!(saved[0].bcc.len(), 1);
         assert!(response.created_ids.contains_key("k1"));
+    }
+
+    #[tokio::test]
+    async fn email_set_maps_seen_and_flagged_keywords_to_draft_state() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/set".to_string(),
+                        json!({
+                            "create": {
+                                "k1": {
+                                    "from": [{"email": "alice@example.test"}],
+                                    "to": [{"email": "bob@example.test"}],
+                                    "subject": "Hello",
+                                    "textBody": "Draft body",
+                                    "keywords": {
+                                        "$draft": true,
+                                        "$seen": true,
+                                        "$flagged": true
+                                    }
+                                }
+                            }
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let saved = store.saved_drafts.lock().unwrap();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].unread, Some(false));
+        assert_eq!(saved[0].flagged, Some(true));
     }
 
     #[tokio::test]

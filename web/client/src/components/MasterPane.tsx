@@ -16,7 +16,6 @@ export function MasterPane(props: {
   onSelectMessage: (id: string) => void;
   onSelectEvent: (id: string) => void;
   onSelectContact: (id: string) => void;
-  onToolbarAction: () => void;
 }) {
   return (
     <section className="list-pane">
@@ -36,9 +35,6 @@ export function MasterPane(props: {
 
       {props.section === "mail" ? (
         <>
-          <div className="list-toolbar">
-            {props.copy.ribbonActions.slice(0, 3).map((label) => <button key={label} className="toolbar-chip" type="button" onClick={props.onToolbarAction}>{label}</button>)}
-          </div>
           <div className="message-list">
             {props.filteredMessages.map((item) => (
               <button
@@ -60,7 +56,6 @@ export function MasterPane(props: {
                   <span className="message-preview">{item.preview}</span>
                 </div>
                 <div className="message-inline-meta">
-                  <span className={`category-pill is-${item.category}`}>{props.copy.categories[item.category]}</span>
                   {item.flagged ? <span className="flag-pill">{props.copy.flaggedShort}</span> : null}
                   {item.attachments.length > 0 ? <span className="message-meta-pill">{props.copy.attachmentCount.replace("{count}", String(item.attachments.length))}</span> : null}
                 </div>

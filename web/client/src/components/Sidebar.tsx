@@ -15,7 +15,6 @@ export function Sidebar(props: {
   mailboxOwner: string;
   onCompose: () => void;
   onCloseComposer: () => void;
-  onAuxAction: () => void;
   collapsed: boolean;
   mobileOpen: boolean;
   onToggleCollapse: () => void;

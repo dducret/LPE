@@ -648,6 +648,8 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                     internet_message_id: parsed.message_id,
                     mime_blob_ref: Some(format!("imap-append:{}", Uuid::new_v4())),
                     size_octets: literal.len() as i64,
+                    unread: Some(false),
+                    flagged: Some(false),
                     attachments: parsed.attachments,
                 },
                 AuditEntryInput {

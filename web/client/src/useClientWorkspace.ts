@@ -210,10 +210,6 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     pushNotice(copy.noticeSyncDone);
   }, [copy.noticeSyncDone, loadWorkspace, pushNotice]);
 
-  const notifyFeaturePending = React.useCallback(() => {
-    pushNotice(copy.noticeFeaturePending);
-  }, [copy.noticeFeaturePending, pushNotice]);
-
   const deleteDraft = React.useCallback(async () => {
     if (!authToken || !draftMessageId) return;
     try {
@@ -307,7 +303,6 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     saveMessage,
     deleteDraft,
     refreshWorkspace,
-    notifyFeaturePending,
     saveContact,
     saveEvent,
     resetContactForm,

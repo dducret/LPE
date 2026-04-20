@@ -1088,6 +1088,8 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     internet_message_id: parsed.internet_message_id,
                     mime_blob_ref: Some(format!("activesync-mime:{}", Uuid::new_v4())),
                     size_octets: mime_payload.len() as i64,
+                    unread: Some(false),
+                    flagged: Some(false),
                     attachments: parsed.attachments,
                 },
                 AuditEntryInput {
@@ -1415,6 +1417,8 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     internet_message_id: parsed.internet_message_id,
                     mime_blob_ref: Some(format!("activesync-mime:{}", Uuid::new_v4())),
                     size_octets: mime_payload.len() as i64,
+                    unread: Some(false),
+                    flagged: Some(false),
                     attachments,
                 },
                 AuditEntryInput {

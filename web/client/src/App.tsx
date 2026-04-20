@@ -219,8 +219,8 @@ export function App() {
   const workspaceBody = workspace.section === "mail"
     ? copy.heroBody
     : workspace.section === "calendar"
-      ? "Shared calendar data stays aligned with the canonical account workspace."
-      : "People data remains available in the same softer three-pane shell.";
+      ? copy.calendarBody
+      : copy.contactsBody;
 
   return (
     <main className="app-shell">
@@ -250,9 +250,6 @@ export function App() {
               </div>
             ) : null}
           </div>
-          <button className="header-action" type="button" onClick={workspace.notifyFeaturePending} aria-label={copy.topActions.rules}>◫</button>
-          <button className="header-action" type="button" onClick={workspace.notifyFeaturePending} aria-label={copy.topActions.schedule}>✉</button>
-          <button className="header-action" type="button" onClick={workspace.notifyFeaturePending} aria-label={copy.accountMenuLabel}>⚙</button>
         </div>
       </header>
 
@@ -271,7 +268,6 @@ export function App() {
           mailboxOwner={identity.email}
           onCompose={() => workspace.openComposer("new")}
           onCloseComposer={workspace.closeComposer}
-          onAuxAction={workspace.notifyFeaturePending}
           collapsed={sidebarCollapsed}
           mobileOpen={sidebarMobileOpen}
           onToggleCollapse={() => setSidebarCollapsed((value) => !value)}
@@ -282,7 +278,6 @@ export function App() {
           <div className="workspace-toolbar">
             <div className="workspace-toolbar-actions">
               <button className="primary-button workspace-compose-button" type="button" onClick={() => workspace.openComposer("new")}>{copy.compose}</button>
-              {copy.toolbarChips.map((label) => <button key={label} className="workspace-tool-button" type="button" onClick={workspace.notifyFeaturePending}>{label}</button>)}
             </div>
             <div className="workspace-toolbar-summary">
               {isMailWorkspace ? <span className="workspace-chip">{`Unread ${unreadCount}`}</span> : null}
@@ -326,7 +321,6 @@ export function App() {
               onSelectMessage={workspace.setMessageId}
               onSelectEvent={workspace.setEventId}
               onSelectContact={workspace.setContactId}
-              onToolbarAction={workspace.notifyFeaturePending}
             />
 
             {showMailPane ? (
@@ -343,7 +337,6 @@ export function App() {
                   onSaveDraft={() => void workspace.saveMessage(true)}
                   onSend={() => void workspace.saveMessage(false)}
                   onDeleteDraft={() => void workspace.deleteDraft()}
-                  onArchive={workspace.notifyFeaturePending}
                 />
               </section>
             ) : null}

@@ -512,7 +512,6 @@ pub struct ClientMessage {
     pub time_label: String,
     pub unread: bool,
     pub flagged: bool,
-    pub category: String,
     pub tags: Vec<String>,
     pub attachments: Vec<ClientAttachment>,
     pub body: Vec<String>,
@@ -748,6 +747,8 @@ pub struct SubmitMessageInput {
     pub internet_message_id: Option<String>,
     pub mime_blob_ref: Option<String>,
     pub size_octets: i64,
+    pub unread: Option<bool>,
+    pub flagged: Option<bool>,
     pub attachments: Vec<AttachmentUploadInput>,
 }
 
@@ -3812,7 +3813,6 @@ impl Storage {
                     time_label: row.time_label,
                     unread: row.unread,
                     flagged: row.flagged,
-                    category: "internal".to_string(),
                     tags: client_message_tags(&row.mailbox_role, &row.delivery_status),
                     attachments,
                     body: body_paragraphs(&row.body_text),
@@ -5233,6 +5233,8 @@ impl Storage {
                         &followup.body_text,
                         &followup.attachments,
                     ),
+                    unread: Some(false),
+                    flagged: Some(false),
                     attachments: followup.attachments.clone(),
                 },
                 AuditEntryInput {
@@ -5278,6 +5280,8 @@ impl Storage {
                         internet_message_id: None,
                         mime_blob_ref: None,
                         size_octets: vacation.reason.len() as i64,
+                        unread: Some(false),
+                        flagged: Some(false),
                         attachments: Vec::new(),
                     },
                     AuditEntryInput {
@@ -5583,6 +5587,8 @@ impl Storage {
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| format!("draft-message:{message_id}"));
         let content_hash = format!("draft:{message_id}");
+        let unread = input.unread.unwrap_or(false);
+        let flagged = input.flagged.unwrap_or(false);
 
         if input.draft_message_id.is_some() {
             let updated = sqlx::query(
@@ -5598,7 +5604,10 @@ impl Storage {
                     preview_text = $9,
                     size_octets = $10,
                     mime_blob_ref = $11,
-                    submission_source = $12,
+                    unread = $12,
+                    flagged = $13,
+                    has_attachments = FALSE,
+                    submission_source = $14,
                     delivery_status = 'draft'
                 FROM mailboxes mb
                 WHERE m.mailbox_id = mb.id
@@ -5620,6 +5629,8 @@ impl Storage {
             .bind(&preview_text)
             .bind(input.size_octets.max(0))
             .bind(&mime_blob_ref)
+            .bind(unread)
+            .bind(flagged)
             .bind(input.source.trim().to_lowercase())
             .execute(&mut *tx)
             .await?;
@@ -5657,8 +5668,8 @@ impl Storage {
                 VALUES (
                     $1, $2, $3, $4, $5, $6,
                     NOW(), NULL, $7, $8, $9,
-                    $10, FALSE, FALSE, FALSE, $11, $12,
-                    $13, 'draft'
+                    $10, $11, $12, FALSE, $13, $14,
+                    $15, 'draft'
                 )
                 "#,
             )
@@ -5672,6 +5683,8 @@ impl Storage {
             .bind(&from_address)
             .bind(&subject)
             .bind(&preview_text)
+            .bind(unread)
+            .bind(flagged)
             .bind(input.size_octets.max(0))
             .bind(&mime_blob_ref)
             .bind(input.source.trim().to_lowercase())
@@ -6740,6 +6753,8 @@ impl Storage {
                 internet_message_id: draft.internet_message_id,
                 mime_blob_ref: None,
                 size_octets: draft.size_octets,
+                unread: Some(draft.unread),
+                flagged: Some(draft.flagged),
                 attachments: Vec::new(),
             },
             audit,
@@ -9503,8 +9518,43 @@ fn attachment_kind(media_type: &str, name: &str) -> String {
     } else if lower_media.contains("opendocument") || lower_name.ends_with(".odt") {
         "ODT".to_string()
     } else {
-        "PDF".to_string()
+        attachment_extension_label(name)
+            .or_else(|| media_type_label(&lower_media))
+            .unwrap_or_else(|| "FILE".to_string())
     }
+}
+
+fn attachment_extension_label(name: &str) -> Option<String> {
+    let extension = name
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.trim())
+        .filter(|extension| !extension.is_empty())?;
+    let normalized = extension
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_uppercase();
+    if normalized.is_empty() || normalized.len() > 8 {
+        return None;
+    }
+    Some(normalized)
+}
+
+fn media_type_label(media_type: &str) -> Option<String> {
+    let subtype = media_type
+        .split('/')
+        .nth(1)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    let normalized = subtype
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_uppercase();
+    if normalized.is_empty() || normalized.len() > 8 {
+        return None;
+    }
+    Some(normalized)
 }
 
 fn format_size(size_octets: i64) -> String {
@@ -9792,9 +9842,10 @@ fn env_bind_address(name: &str, fallback: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        default_permissions_for_role, domain_from_email, normalize_admin_permissions,
-        normalize_bcc_recipients, normalize_task_status, normalize_visible_recipients,
-        participants_normalized, validate_pst_import_path, SubmitMessageInput,
+        attachment_kind, default_permissions_for_role, domain_from_email,
+        normalize_admin_permissions, normalize_bcc_recipients, normalize_task_status,
+        normalize_visible_recipients, participants_normalized, validate_pst_import_path,
+        SubmitMessageInput,
         SubmittedRecipientInput,
     };
     use lpe_magika::{
@@ -9832,6 +9883,8 @@ mod tests {
             internet_message_id: None,
             mime_blob_ref: None,
             size_octets: 0,
+            unread: None,
+            flagged: None,
             attachments: Vec::new(),
         }
     }
@@ -9940,6 +9993,12 @@ mod tests {
     #[test]
     fn task_status_rejects_unknown_values() {
         assert!(normalize_task_status("done").is_err());
+    }
+
+    #[test]
+    fn attachment_kind_falls_back_to_real_extension_label() {
+        assert_eq!(attachment_kind("application/octet-stream", "archive.zip"), "ZIP");
+        assert_eq!(attachment_kind("application/octet-stream", "blob"), "FILE");
     }
 
     #[test]
