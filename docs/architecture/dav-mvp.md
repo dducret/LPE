@@ -33,6 +33,7 @@ With the documented `/api/` reverse proxy, they are reachable through `/api/.wel
 ## Authentication
 
 - mailbox-account `Bearer` sessions created by `/api/mail/auth/login` are accepted
+- mailbox `OAuth2` bearer access tokens created by `/api/mail/auth/oauth/access-token` are also accepted when the token scope includes `dav`
 - mailbox-account `Basic` authentication is also accepted for DAV-compatible clients
 - there is no separate DAV account model outside the normal `LPE` mailbox account
 

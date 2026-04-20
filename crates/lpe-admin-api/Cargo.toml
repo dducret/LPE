@@ -15,6 +15,7 @@ lpe-dav = { path = "../lpe-dav" }
 lpe-domain = { path = "../lpe-domain" }
 lpe-jmap = { path = "../lpe-jmap" }
 lpe-magika = { path = "../lpe-magika" }
+lpe-mail-auth = { path = "../lpe-mail-auth" }
 lpe-storage = { path = "../lpe-storage" }
 serde.workspace = true
 serde_json.workspace = true

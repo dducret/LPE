@@ -13,6 +13,7 @@ The MVP now covers:
 - local mailbox password login for webmail and session-based APIs
 - optional mailbox `OIDC` login through confidential authorization-code flow
 - optional user `TOTP` enrollment for interactive password login
+- mailbox `OAuth2` bearer access-token minting from an authenticated mailbox session
 - mailbox app passwords for legacy protocol clients that still use basic credentials
 - audit logging of mailbox authentication outcomes and methods
 
@@ -20,8 +21,8 @@ The MVP now covers:
 
 The MVP intentionally does not implement:
 
-- generic `OAuth2` bearer-token issuance by `LPE`
-- `SASL XOAUTH2` for `IMAP`, `DAV`, `ActiveSync`, or `ManageSieve`
+- public mailbox `OAuth2` authorization-code flow served directly by `LPE`
+- refresh tokens
 - passwordless-only mailbox mode
 - recovery codes
 - step-up policies
@@ -35,6 +36,7 @@ The MVP intentionally does not implement:
 - mailbox authorization remains internal to `LPE`; the external `IdP` authenticates identity only
 - every protocol adapter must continue to converge on the canonical mailbox and submission model
 - enabling modern auth must not move internet-facing `SMTP` back into the core `LPE` service
+- mailbox `OAuth2` access tokens are short-lived signed bearer tokens, not long-lived password substitutes
 
 ### Mailbox `OIDC` MVP
 
@@ -67,6 +69,18 @@ The mailbox `TOTP` MVP is intentionally limited to interactive password login:
 
 For this MVP, `TOTP` is not layered on top of the mailbox `OIDC` flow.
 
+### Mailbox `OAuth2` bearer tokens
+
+The mailbox `OAuth2` MVP is intentionally bounded:
+
+- `LPE` does not yet expose a full public OAuth authorization server for mailbox clients
+- an already authenticated mailbox session may mint a short-lived bearer access token through `/api/mail/auth/oauth/access-token`
+- the token is signed server-side, scope-limited, and validated by mailbox protocol adapters without introducing a second account store
+- the default scope covers `mail`, `imap`, `dav`, `activesync`, and `managesieve`
+- the default lifetime is one hour and is controlled through `LPE_MAIL_OAUTH_ACCESS_TOKEN_SECONDS`
+
+This is sufficient to reduce the modern-auth gap for native and compatibility clients while keeping the v1 design small and internally consistent.
+
 ### App passwords
 
 Mailbox app passwords exist to keep legacy protocols usable while mailbox MFA is introduced.
@@ -90,6 +104,7 @@ The initial method labels are:
 - `password`
 - `password+totp`
 - `oidc`
+- `oauth-bearer`
 - `app-password`
 
 Audit entries must also record failed interactive password and factor verification attempts.
@@ -99,7 +114,10 @@ Audit entries must also record failed interactive password and factor verificati
 This MVP keeps the existing protocol matrix stable:
 
 - webmail and other bearer-session mailbox APIs can use password or mailbox `OIDC`
+- mailbox APIs can also use short-lived mailbox `OAuth2` bearer access tokens when the token scope includes `mail`
 - `JMAP` session and API endpoints continue to use the internal mailbox bearer session
+- `IMAP` and `ManageSieve` now support `XOAUTH2` with the mailbox bearer access token
+- `DAV` and `ActiveSync` accept the same mailbox bearer access token through `Authorization: Bearer`
 - `IMAP`, `DAV`, `ActiveSync`, and `ManageSieve` remain compatible with existing password login
 - the same legacy protocols may also use mailbox app passwords
 

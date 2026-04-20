@@ -85,6 +85,15 @@ pub struct ClientOidcStartResponse {
     pub authorization_url: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientOauthAccessTokenResponse {
+    pub access_token: String,
+    pub token_type: String,
+    pub expires_in: u32,
+    pub scope: String,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
     pub email: String,
@@ -135,6 +144,12 @@ pub struct AccountAppPasswordsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct CreateAccountAppPasswordRequest {
     pub label: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateClientOauthAccessTokenRequest {
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

@@ -4,8 +4,9 @@ use argon2::{
     password_hash::{rand_core::OsRng, SaltString},
     Argon2, PasswordHasher,
 };
+use base64::Engine as _;
 use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
-use lpe_mail_auth::{AccountAuthStore, StoreFuture};
+use lpe_mail_auth::{issue_oauth_access_token, AccountAuthStore, StoreFuture};
 use lpe_storage::{
     AccountLogin, AuditEntryInput, AuthenticatedAccount, ImapEmail, JmapEmailAddress,
     JmapEmailQuery, JmapMailbox, SavedDraftMessage, SubmitMessageInput,
@@ -18,6 +19,8 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::{store::ImapStore, ImapServer};
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone)]
 struct FakeDetector;
@@ -37,6 +40,7 @@ impl Detector for FakeDetector {
 
 #[derive(Clone)]
 struct FakeStore {
+    session: Option<AuthenticatedAccount>,
     login: AccountLogin,
     mailboxes: Vec<JmapMailbox>,
     emails: Arc<Mutex<Vec<ImapEmail>>>,
@@ -46,6 +50,7 @@ impl FakeStore {
     fn new() -> Self {
         let account_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
         Self {
+            session: None,
             login: AccountLogin {
                 tenant_id: "tenant-a".to_string(),
                 account_id,
@@ -93,9 +98,14 @@ impl FakeStore {
 impl AccountAuthStore for FakeStore {
     fn fetch_account_session<'a>(
         &'a self,
-        _token: &'a str,
+        token: &'a str,
     ) -> StoreFuture<'a, Option<AuthenticatedAccount>> {
-        Box::pin(async move { Ok(None) })
+        let session = if token == "session-token" {
+            self.session.clone()
+        } else {
+            None
+        };
+        Box::pin(async move { Ok(session) })
     }
 
     fn fetch_account_login<'a>(&'a self, email: &'a str) -> StoreFuture<'a, Option<AccountLogin>> {
@@ -105,6 +115,29 @@ impl AccountAuthStore for FakeStore {
             None
         };
         Box::pin(async move { Ok(login) })
+    }
+
+    fn fetch_active_account_app_passwords<'a>(
+        &'a self,
+        _email: &'a str,
+    ) -> StoreFuture<'a, Vec<lpe_storage::StoredAccountAppPassword>> {
+        Box::pin(async move { Ok(Vec::new()) })
+    }
+
+    fn touch_account_app_password<'a>(
+        &'a self,
+        _email: &'a str,
+        _app_password_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn append_audit_event<'a>(
+        &'a self,
+        _tenant_id: &'a str,
+        _entry: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move { Ok(()) })
     }
 }
 
@@ -319,6 +352,56 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     let drafts = send_command(&mut stream, "A9 UID SEARCH TEXT Draft\r\n", "A9").await;
     assert!(drafts.contains("* SEARCH 3"));
 
+    task.abort();
+}
+
+#[tokio::test]
+async fn xoauth2_authenticate_is_accepted() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    std::env::set_var(
+        "LPE_MAIL_OAUTH_SIGNING_SECRET",
+        "0123456789abcdef0123456789abcdef",
+    );
+    let mut store = FakeStore::new();
+    store.session = Some(AuthenticatedAccount {
+        tenant_id: store.login.tenant_id.clone(),
+        account_id: store.login.account_id,
+        email: store.login.email.clone(),
+        display_name: store.login.display_name.clone(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    });
+    let token = issue_oauth_access_token(
+        &lpe_mail_auth::AccountPrincipal {
+            tenant_id: store.login.tenant_id.clone(),
+            account_id: store.login.account_id,
+            email: store.login.email.clone(),
+            display_name: store.login.display_name.clone(),
+        },
+        "imap",
+        600,
+    )
+    .unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let auth_payload = base64::engine::general_purpose::STANDARD.encode(format!(
+        "user={}\u{1}auth=Bearer {}\u{1}\u{1}",
+        store.login.email, token
+    ));
+
+    let response = send_command(
+        &mut stream,
+        &format!("A1 AUTHENTICATE XOAUTH2 {auth_payload}\r\n"),
+        "A1",
+    )
+    .await;
+
+    assert!(response.contains("A1 OK AUTHENTICATE completed"));
+    std::env::remove_var("LPE_MAIL_OAUTH_SIGNING_SECRET");
     task.abort();
 }
 

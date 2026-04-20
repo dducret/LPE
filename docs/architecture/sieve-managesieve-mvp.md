@@ -47,7 +47,7 @@ The MVP supports:
 - at most `16` scripts per account
 - at most `4` redirects per message
 - `vacation` applies minimal memory keyed by sender and response content
-- the `ManageSieve` MVP supports only `AUTHENTICATE PLAIN`
+- the `ManageSieve` MVP supports `AUTHENTICATE PLAIN` and `AUTHENTICATE XOAUTH2`
 - the `ManageSieve` MVP supports only non-synchronizing literals `{N+}`
 
 ### Explicit limitations

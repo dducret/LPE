@@ -1,9 +1,12 @@
 use anyhow::{anyhow, bail, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lpe_magika::{
     collect_mime_attachment_parts, Detector, ExpectedKind, IngressContext, PolicyDecision,
     ValidationRequest, Validator,
 };
-use lpe_mail_auth::{authenticate_plain_credentials, AccountPrincipal};
+use lpe_mail_auth::{
+    authenticate_bearer_access_token, authenticate_plain_credentials, AccountPrincipal,
+};
 use lpe_storage::{
     mail::parse_rfc822_message, AuditEntryInput, ImapEmail, JmapEmailAddress, SubmitMessageInput,
 };
@@ -18,7 +21,7 @@ mod store;
 
 use crate::store::ImapStore;
 
-const CAPABILITIES: &str = "IMAP4rev1 UIDPLUS";
+const CAPABILITIES: &str = "IMAP4rev1 UIDPLUS AUTH=XOAUTH2 SASL-IR";
 const UID_VALIDITY: u32 = 1;
 
 #[derive(Clone)]
@@ -142,6 +145,10 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                 .map(|_| false),
             "LOGIN" => {
                 self.handle_login(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "AUTHENTICATE" => {
+                self.handle_authenticate(&request.tag, &request.arguments, writer)
                     .await
             }
             "LIST" => self.handle_list(&request.tag, writer).await,
@@ -276,6 +283,45 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
 
         writer
             .write_all(format!("{tag} OK LOGIN completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    async fn handle_authenticate<W>(
+        &mut self,
+        tag: &str,
+        arguments: &str,
+        writer: &mut W,
+    ) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        if self.principal.is_some() {
+            bail!("already authenticated");
+        }
+
+        let tokens = tokenize(arguments)?;
+        if tokens.len() != 2 {
+            bail!("AUTHENTICATE expects mechanism and an initial response");
+        }
+        if !tokens[0].eq_ignore_ascii_case("XOAUTH2") {
+            bail!("only AUTHENTICATE XOAUTH2 is supported");
+        }
+        let (username, bearer_token) = parse_xoauth2_initial_response(&tokens[1])?;
+        self.principal = Some(
+            authenticate_bearer_access_token(
+                &self.store,
+                Some(&username),
+                &bearer_token,
+                "imap",
+            )
+            .await?,
+        );
+        self.selected = None;
+
+        writer
+            .write_all(format!("{tag} OK AUTHENTICATE completed\r\n").as_bytes())
             .await?;
         writer.flush().await?;
         Ok(true)
@@ -1159,6 +1205,32 @@ fn parse_flag_list(token: &str) -> Result<HashSet<String>> {
 fn parse_literal_size(token: &str) -> Result<usize> {
     let value = token.trim().trim_start_matches('{').trim_end_matches('}');
     value.parse::<usize>().map_err(Into::into)
+}
+
+fn parse_xoauth2_initial_response(encoded: &str) -> Result<(String, String)> {
+    let decoded = BASE64
+        .decode(encoded.trim())
+        .map_err(|_| anyhow!("invalid XOAUTH2 initial response"))?;
+    let decoded = String::from_utf8(decoded).map_err(|_| anyhow!("invalid XOAUTH2 payload"))?;
+    let mut username = None;
+    let mut bearer_token = None;
+    for segment in decoded.split('\u{1}') {
+        if let Some(value) = segment.strip_prefix("user=") {
+            let value = value.trim();
+            if !value.is_empty() {
+                username = Some(value.to_string());
+            }
+        } else if let Some(value) = segment.strip_prefix("auth=Bearer ") {
+            let value = value.trim();
+            if !value.is_empty() {
+                bearer_token = Some(value.to_string());
+            }
+        }
+    }
+    Ok((
+        username.ok_or_else(|| anyhow!("XOAUTH2 payload is missing the user field"))?,
+        bearer_token.ok_or_else(|| anyhow!("XOAUTH2 payload is missing the bearer token"))?,
+    ))
 }
 
 fn sanitize_imap_text(value: &str) -> String {

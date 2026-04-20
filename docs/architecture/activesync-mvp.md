@@ -30,6 +30,7 @@ With the documented Debian reverse proxy, they are published on `/Microsoft-Serv
 ### Authentication
 
 - the MVP accepts mailbox-account `Basic` authentication
+- mailbox `OAuth2` bearer access tokens are accepted through `Authorization: Bearer` when the token scope includes `activesync`
 - existing mailbox bearer-session authentication is still supported for tests and internal integration
 - there is no separate `ActiveSync` account model outside the normal `LPE` mailbox account
 

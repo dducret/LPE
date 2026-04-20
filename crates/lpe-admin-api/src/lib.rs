@@ -17,6 +17,10 @@ use lpe_magika::{
     write_validation_record, Detector, ExpectedKind, IngressContext, PolicyDecision,
     ValidationRequest, Validator,
 };
+use lpe_mail_auth::{
+    issue_oauth_access_token, normalize_scope, DEFAULT_OAUTH_ACCESS_SCOPE,
+    DEFAULT_OAUTH_ACCESS_TOKEN_SECONDS,
+};
 use lpe_storage::{
     AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput,
     AuthenticatedAccount, AuthenticatedAdmin, ClientContact, ClientEvent, ClientTask,
@@ -45,7 +49,9 @@ use crate::types::{
     AccountAppPasswordsResponse, AccountAuthFactorsResponse, AdminAuthFactorsResponse, ApiResult,
     AttachmentSupportResponse, BootstrapAdminRequest, BootstrapAdminResponse,
     ClientLoginResponse, ClientOidcMetadataResponse, ClientOidcStartResponse,
+    ClientOauthAccessTokenResponse,
     CollaborationOverviewResponse, CreateAccountAppPasswordRequest, CreateAccountAppPasswordResponse,
+    CreateClientOauthAccessTokenRequest,
     CreateAccountRequest, CreateAliasRequest, CreateDomainRequest, CreateFilterRuleRequest,
     CreateMailboxRequest, CreatePstTransferJobRequest, CreateServerAdministratorRequest,
     EmailTraceSearchRequest, EnrollTotpRequest, EnrollTotpResponse, LocalAiHealthResponse,
@@ -84,6 +90,7 @@ pub fn router(storage: Storage) -> Router {
         .route("/mail/auth/factors/{factor_id}", delete(revoke_account_factor))
         .route("/mail/auth/app-passwords", get(list_account_app_passwords).post(create_account_app_password))
         .route("/mail/auth/app-passwords/{app_password_id}", delete(revoke_account_app_password))
+        .route("/mail/auth/oauth/access-token", post(create_client_oauth_access_token))
         .route("/mail/auth/oidc/metadata", get(client_oidc_metadata))
         .route("/mail/auth/oidc/start", get(client_oidc_start))
         .route("/mail/auth/oidc/callback", get(client_oidc_callback))
@@ -905,6 +912,50 @@ async fn revoke_account_app_password(
         .await
         .map_err(internal_error)?;
     Ok(Json(AccountAppPasswordsResponse { app_passwords }))
+}
+
+async fn create_client_oauth_access_token(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<CreateClientOauthAccessTokenRequest>,
+) -> ApiResult<ClientOauthAccessTokenResponse> {
+    let account = require_account(&storage, &headers).await?;
+    let scope = normalize_scope(
+        request
+            .scope
+            .as_deref()
+            .unwrap_or(DEFAULT_OAUTH_ACCESS_SCOPE),
+    )
+    .map_err(bad_request_error)?;
+    let expires_in = client_oauth_access_token_seconds();
+    let access_token = issue_oauth_access_token(
+        &lpe_mail_auth::AccountPrincipal {
+            tenant_id: account.tenant_id.clone(),
+            account_id: account.account_id,
+            email: account.email.clone(),
+            display_name: account.display_name.clone(),
+        },
+        &scope,
+        expires_in,
+    )
+    .map_err(internal_error)?;
+    let _ = storage
+        .append_audit_event(
+            &account.tenant_id,
+            AuditEntryInput {
+                actor: account.email.clone(),
+                action: "mail-auth.oauth-access-token-created".to_string(),
+                subject: scope.clone(),
+            },
+        )
+        .await;
+
+    Ok(Json(ClientOauthAccessTokenResponse {
+        access_token,
+        token_type: "Bearer".to_string(),
+        expires_in,
+        scope,
+    }))
 }
 
 async fn client_oidc_metadata(
@@ -2866,6 +2917,14 @@ fn client_session_minutes() -> u32 {
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(720)
+}
+
+fn client_oauth_access_token_seconds() -> u32 {
+    env::var("LPE_MAIL_OAUTH_ACCESS_TOKEN_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| *value >= 60)
+        .unwrap_or(DEFAULT_OAUTH_ACCESS_TOKEN_SECONDS)
 }
 
 fn hash_password(password: &str) -> anyhow::Result<String> {

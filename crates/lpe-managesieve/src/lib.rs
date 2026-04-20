@@ -1,6 +1,8 @@
 use anyhow::{anyhow, bail, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use lpe_mail_auth::{authenticate_plain_credentials, AccountAuthStore};
+use lpe_mail_auth::{
+    authenticate_bearer_access_token, authenticate_plain_credentials, AccountAuthStore,
+};
 use lpe_storage::{
     AuditEntryInput, SieveScriptDocument, SieveScriptSummary, Storage,
 };
@@ -308,21 +310,33 @@ async fn authenticate<S: ManageSieveStore>(
         bail!("AUTHENTICATE expects mechanism");
     }
     let mechanism = as_string(&arguments[0])?;
-    if mechanism.to_ascii_uppercase() != "PLAIN" {
-        bail!("only AUTHENTICATE PLAIN is supported");
+    let mechanism = mechanism.to_ascii_uppercase();
+    if arguments.len() <= 1 {
+        bail!("AUTHENTICATE requires an initial response");
     }
-    let encoded = if arguments.len() > 1 {
-        as_string(&arguments[1])?
-    } else {
-        bail!("AUTHENTICATE PLAIN requires an initial response");
+    let encoded = as_string(&arguments[1])?;
+    let principal = match mechanism.as_str() {
+        "PLAIN" => {
+            let decoded = BASE64.decode(encoded.trim())?;
+            let mut parts = decoded.split(|value| *value == 0);
+            let _authzid = parts.next();
+            let username = String::from_utf8(parts.next().unwrap_or_default().to_vec())?;
+            let password = String::from_utf8(parts.next().unwrap_or_default().to_vec())?;
+            authenticate_plain_credentials(store, None, &username, &password, "managesieve")
+                .await?
+        }
+        "XOAUTH2" => {
+            let (username, bearer_token) = parse_xoauth2_initial_response(&encoded)?;
+            authenticate_bearer_access_token(
+                store,
+                Some(&username),
+                &bearer_token,
+                "managesieve",
+            )
+            .await?
+        }
+        _ => bail!("only AUTHENTICATE PLAIN and XOAUTH2 are supported"),
     };
-    let decoded = BASE64.decode(encoded.trim())?;
-    let mut parts = decoded.split(|value| *value == 0);
-    let _authzid = parts.next();
-    let username = String::from_utf8(parts.next().unwrap_or_default().to_vec())?;
-    let password = String::from_utf8(parts.next().unwrap_or_default().to_vec())?;
-    let principal =
-        authenticate_plain_credentials(store, None, &username, &password, "managesieve").await?;
     Ok(AuthenticatedAccount {
         account_id: principal.account_id,
         email: principal.email,
@@ -334,7 +348,7 @@ async fn write_capability<W: AsyncWriteExt + Unpin>(writer: &mut W) -> Result<()
         .write_all(
             concat!(
                 "\"IMPLEMENTATION\" \"LPE ManageSieve\"\r\n",
-                "\"SASL\" \"PLAIN\"\r\n",
+                "\"SASL\" \"PLAIN XOAUTH2\"\r\n",
                 "\"SIEVE\" \"fileinto discard redirect vacation\"\r\n",
                 "\"VERSION\" \"1.0\"\r\n",
                 "OK\r\n"
@@ -368,6 +382,32 @@ fn require_auth(account: &Option<AuthenticatedAccount>) -> Result<&Authenticated
     account
         .as_ref()
         .ok_or_else(|| anyhow!("authentication required"))
+}
+
+fn parse_xoauth2_initial_response(encoded: &str) -> Result<(String, String)> {
+    let decoded = BASE64
+        .decode(encoded.trim())
+        .map_err(|_| anyhow!("invalid XOAUTH2 initial response"))?;
+    let decoded = String::from_utf8(decoded).map_err(|_| anyhow!("invalid XOAUTH2 payload"))?;
+    let mut username = None;
+    let mut bearer_token = None;
+    for segment in decoded.split('\u{1}') {
+        if let Some(value) = segment.strip_prefix("user=") {
+            let value = value.trim();
+            if !value.is_empty() {
+                username = Some(value.to_string());
+            }
+        } else if let Some(value) = segment.strip_prefix("auth=Bearer ") {
+            let value = value.trim();
+            if !value.is_empty() {
+                bearer_token = Some(value.to_string());
+            }
+        }
+    }
+    Ok((
+        username.ok_or_else(|| anyhow!("XOAUTH2 payload is missing the user field"))?,
+        bearer_token.ok_or_else(|| anyhow!("XOAUTH2 payload is missing the bearer token"))?,
+    ))
 }
 
 fn single_string_arg(arguments: &[Argument]) -> Result<String> {
@@ -528,10 +568,15 @@ mod tests {
         password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
         Argon2,
     };
+    use lpe_storage::AccountLogin;
     use std::sync::{Arc, Mutex};
+    use lpe_mail_auth::issue_oauth_access_token;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[derive(Clone)]
     struct FakeStore {
+        session: Option<lpe_storage::AuthenticatedAccount>,
         login: AccountLogin,
         scripts: Arc<Mutex<Vec<SieveScriptDocument>>>,
         active: Arc<Mutex<Option<String>>>,
@@ -540,6 +585,7 @@ mod tests {
     impl FakeStore {
         fn new() -> Self {
             Self {
+                session: None,
                 login: AccountLogin {
                     tenant_id: "tenant-a".to_string(),
                     account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
@@ -557,7 +603,19 @@ mod tests {
         }
     }
 
-    impl ManageSieveStore for FakeStore {
+    impl AccountAuthStore for FakeStore {
+        fn fetch_account_session<'a>(
+            &'a self,
+            token: &'a str,
+        ) -> StoreFuture<'a, Option<lpe_storage::AuthenticatedAccount>> {
+            let session = if token == "session-token" {
+                self.session.clone()
+            } else {
+                None
+            };
+            Box::pin(async move { Ok(session) })
+        }
+
         fn fetch_account_login<'a>(
             &'a self,
             email: &'a str,
@@ -569,6 +627,32 @@ mod tests {
             };
             Box::pin(async move { Ok(login) })
         }
+
+        fn fetch_active_account_app_passwords<'a>(
+            &'a self,
+            _email: &'a str,
+        ) -> StoreFuture<'a, Vec<lpe_storage::StoredAccountAppPassword>> {
+            Box::pin(async move { Ok(Vec::new()) })
+        }
+
+        fn touch_account_app_password<'a>(
+            &'a self,
+            _email: &'a str,
+            _app_password_id: Uuid,
+        ) -> StoreFuture<'a, ()> {
+            Box::pin(async move { Ok(()) })
+        }
+
+        fn append_audit_event<'a>(
+            &'a self,
+            _tenant_id: &'a str,
+            _entry: AuditEntryInput,
+        ) -> StoreFuture<'a, ()> {
+            Box::pin(async move { Ok(()) })
+        }
+    }
+
+    impl ManageSieveStore for FakeStore {
 
         fn list_sieve_scripts<'a>(
             &'a self,
@@ -737,5 +821,57 @@ mod tests {
         stream.write_all(b"SETACTIVE \"main\"\r\n").await.unwrap();
         let read = stream.read(&mut response).await.unwrap();
         assert!(String::from_utf8_lossy(&response[..read]).contains("OK"));
+    }
+
+    #[tokio::test]
+    async fn managesieve_accepts_xoauth2() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var(
+            "LPE_MAIL_OAUTH_SIGNING_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
+        let mut store = FakeStore::new();
+        store.session = Some(lpe_storage::AuthenticatedAccount {
+            tenant_id: store.login.tenant_id.clone(),
+            account_id: store.login.account_id,
+            email: store.login.email.clone(),
+            display_name: store.login.display_name.clone(),
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
+        });
+        let token = issue_oauth_access_token(
+            &lpe_mail_auth::AccountPrincipal {
+                tenant_id: store.login.tenant_id.clone(),
+                account_id: store.login.account_id,
+                email: store.login.email.clone(),
+                display_name: store.login.display_name.clone(),
+            },
+            "managesieve",
+            600,
+        )
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = ManageSieveServer::new(store.clone());
+        tokio::spawn(async move {
+            server.serve(listener).await.unwrap();
+        });
+
+        let mut stream = TcpStream::connect(address).await.unwrap();
+        let mut greeting = [0_u8; 128];
+        let _ = stream.read(&mut greeting).await.unwrap();
+
+        let auth_payload = BASE64.encode(format!(
+            "user={}\u{1}auth=Bearer {}\u{1}\u{1}",
+            store.login.email, token
+        ));
+        stream
+            .write_all(format!("AUTHENTICATE \"XOAUTH2\" \"{auth_payload}\"\r\n").as_bytes())
+            .await
+            .unwrap();
+        let mut response = [0_u8; 128];
+        let read = stream.read(&mut response).await.unwrap();
+        assert!(String::from_utf8_lossy(&response[..read]).contains("OK"));
+
+        std::env::remove_var("LPE_MAIL_OAUTH_SIGNING_SECRET");
     }
 }

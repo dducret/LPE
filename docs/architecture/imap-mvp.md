@@ -9,6 +9,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 ## Implemented scope
 
 - account authentication through `LOGIN` with the existing mailbox account credentials
+- `AUTHENTICATE XOAUTH2` with the mailbox `OAuth2` bearer access token
 - `CAPABILITY`, `NOOP`, `LOGOUT`
 - `LIST` for the canonical system mailboxes `Inbox`, `Sent`, and `Drafts`
 - `SELECT` on `Inbox`, `Sent`, and `Drafts`
@@ -34,7 +35,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 ## Current limitations
 
 - no message submission or `APPEND` to `Sent`; outbound submission remains canonical through `JMAP`, `ActiveSync`, and the web/API submission workflow
-- no mailbox creation, rename, delete, subscribe, hierarchy management, `COPY`, `MOVE`, `EXPUNGE`, `IDLE`, `STATUS`, `NAMESPACE`, or `AUTHENTICATE`
+- no mailbox creation, rename, delete, subscribe, hierarchy management, `COPY`, `MOVE`, `EXPUNGE`, `IDLE`, `STATUS`, `NAMESPACE`, or SASL mechanisms other than `XOAUTH2`
 - only the `Inbox`, `Sent`, and `Drafts` system mailboxes are exposed by the MVP
 - the supported `FETCH` body sections are limited to header, text body, and reconstructed full message body without attachment MIME reserialization
 - `SEARCH` supports only a minimal subset: `ALL`, `SEEN`, `UNSEEN`, `FLAGGED`, `UNFLAGGED`, `TEXT`, `SUBJECT`, `FROM`, and `TO`
