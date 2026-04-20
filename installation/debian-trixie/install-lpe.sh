@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=installation/debian-trixie/lib/install-common.sh
+source "${SCRIPT_DIR}/lib/install-common.sh"
+
 REPO_URL="${REPO_URL:-https://github.com/dducret/LPE}"
 BRANCH="${BRANCH:-main}"
 INSTALL_ROOT="${INSTALL_ROOT:-/opt/lpe}"
@@ -10,6 +14,8 @@ WEB_ROOT="${WEB_ROOT:-$INSTALL_ROOT/www}"
 ADMIN_WEB_ROOT="${ADMIN_WEB_ROOT:-$WEB_ROOT/admin}"
 CLIENT_WEB_ROOT="${CLIENT_WEB_ROOT:-$WEB_ROOT/client}"
 ENV_DIR="${ENV_DIR:-/etc/lpe}"
+ENV_FILE="${ENV_FILE:-$ENV_DIR/lpe.env}"
+INSTALL_ENV_FILE="${INSTALL_ENV_FILE:-$ENV_DIR/install.env}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 DATA_DIR="${DATA_DIR:-/var/lib/lpe}"
 SERVICE_USER="${SERVICE_USER:-lpe}"
@@ -19,13 +25,50 @@ NGINX_ENABLED_DIR="${NGINX_ENABLED_DIR:-/etc/nginx/sites-enabled}"
 NGINX_SITE_NAME="${NGINX_SITE_NAME:-lpe.conf}"
 MAGIKA_VERSION="${MAGIKA_VERSION:-1.0.2}"
 MAGIKA_LINUX_X86_64_SHA256="${MAGIKA_LINUX_X86_64_SHA256:-4ce475c965cd20e724b5fc53e8a303a479b9d8649beef8721d05e9b3988fbab4}"
+load_env_file_if_present "${INSTALL_ENV_FILE}"
+load_env_file_if_present "${ENV_FILE}"
 
-if [[ "${EUID}" -ne 0 ]]; then
-  echo "This script must be run as root." >&2
-  exit 1
-fi
+LPE_BIND_ADDRESS_CURRENT="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
+LPE_LOCAL_BIND_HOST_DEFAULT="${LPE_LOCAL_BIND_HOST:-${LPE_BIND_ADDRESS_CURRENT%:*}}"
+LPE_LOCAL_BIND_PORT_DEFAULT="${LPE_LOCAL_BIND_PORT:-${LPE_BIND_ADDRESS_CURRENT##*:}}"
+LPE_NGINX_LISTEN_PORT_DEFAULT="${LPE_NGINX_LISTEN_PORT:-80}"
+LPE_DB_HOST_DEFAULT="${LPE_DB_HOST:-localhost}"
+LPE_DB_PORT_DEFAULT="${LPE_DB_PORT:-5432}"
+LPE_DB_NAME_DEFAULT="${LPE_DB_NAME:-lpe}"
+LPE_DB_USER_DEFAULT="${LPE_DB_USER:-lpe}"
+LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME_DEFAULT="${LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME:-Bootstrap Administrator}"
+LPE_PST_IMPORT_DIR_DEFAULT="${LPE_PST_IMPORT_DIR:-${DATA_DIR}/imports}"
+LPE_PUBLIC_SCHEME_DEFAULT="${LPE_PUBLIC_SCHEME:-https}"
+LPE_ENABLE_SERVICES_DEFAULT="${LPE_ENABLE_SERVICES:-yes}"
+LPE_RUN_MIGRATIONS_DEFAULT="${LPE_RUN_MIGRATIONS:-no}"
 
-export DEBIAN_FRONTEND=noninteractive
+usage() {
+  cat <<'EOF'
+Usage: install-lpe.sh [--non-interactive] [--interactive]
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --non-interactive)
+        INSTALL_NONINTERACTIVE=1
+        shift
+        ;;
+      --interactive)
+        INSTALL_FORCE_INTERACTIVE=1
+        shift
+        ;;
+      -h|--help)
+        usage
+        exit 0
+        ;;
+      *)
+        fail_install "Unknown argument: $1"
+        ;;
+    esac
+  done
+}
 
 install_magika() {
   local version="$1"
@@ -42,111 +85,264 @@ install_magika() {
   install -m 0755 "${temp_dir}/magika" "${BIN_DIR}/magika"
 }
 
-apt-get update
-apt-get install -y --no-install-recommends \
-  build-essential \
-  ca-certificates \
-  clang \
-  curl \
-  git \
-  libpq-dev \
-  nginx \
-  nodejs \
-  npm \
-  pkg-config \
-  postgresql-client \
-  rustup \
-  xz-utils
+require_root() {
+  if [[ "${EUID}" -ne 0 ]]; then
+    fail_install "This script must be run as root."
+  fi
+}
 
-if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
-  useradd --system --home-dir "${INSTALL_ROOT}" --create-home --shell /usr/sbin/nologin "${SERVICE_USER}"
-fi
+recompute_layout() {
+  SRC_DIR="${INSTALL_ROOT}/src"
+  BIN_DIR="${INSTALL_ROOT}/bin"
+  WEB_ROOT="${INSTALL_ROOT}/www"
+  ADMIN_WEB_ROOT="${WEB_ROOT}/admin"
+  CLIENT_WEB_ROOT="${WEB_ROOT}/client"
+}
 
-install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${INSTALL_ROOT}" "${SRC_DIR}" "${BIN_DIR}"
-install -d -o root -g root "${ADMIN_WEB_ROOT}" "${CLIENT_WEB_ROOT}"
-install -d -o root -g root "${ENV_DIR}"
-install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${DATA_DIR}"
+collect_runtime_values() {
+  local public_hostname_default="${LPE_PUBLIC_HOSTNAME:-}"
+  local lpe_ct_api_base_url_default="${LPE_CT_API_BASE_URL:-}"
+  local bootstrap_admin_email_default="${LPE_BOOTSTRAP_ADMIN_EMAIL:-}"
+  local bootstrap_admin_password_default="${LPE_BOOTSTRAP_ADMIN_PASSWORD:-}"
+  local db_password_default="${LPE_DB_PASSWORD:-}"
+  local shared_secret_default="${LPE_INTEGRATION_SHARED_SECRET:-}"
+  local service_choice_default="${LPE_ENABLE_SERVICES_DEFAULT}"
+  local migrations_choice_default="${LPE_RUN_MIGRATIONS_DEFAULT}"
 
-git config --global --add safe.directory "${SRC_DIR}" || true
+  print_section "Installation"
+  INSTALL_ROOT="$(ask_with_default "Installation directory" "${INSTALL_ROOT}" validate_directory_path "Enter an absolute directory path.")"
+  recompute_layout
 
-RUSTUP_BIN="$(command -v rustup || true)"
-if [[ -z "${RUSTUP_BIN}" ]]; then
-  echo "rustup executable not found after package installation." >&2
-  exit 1
-fi
+  print_section "Network"
+  LPE_PUBLIC_HOSTNAME="$(ask_required "Public hostname" "${public_hostname_default}" validate_hostname "Enter a valid hostname.")"
+  LPE_SERVER_NAME="$(ask_with_default "Server name" "${LPE_SERVER_NAME:-$LPE_PUBLIC_HOSTNAME}" validate_hostname "Enter a valid hostname.")"
+  LPE_LOCAL_BIND_HOST="$(ask_with_default "Local service host" "${LPE_LOCAL_BIND_HOST_DEFAULT}" validate_host_token "Enter a valid host token.")"
+  LPE_LOCAL_BIND_PORT="$(ask_with_default "Local service port" "${LPE_LOCAL_BIND_PORT_DEFAULT}" validate_port "Enter a valid TCP port.")"
+  LPE_BIND_ADDRESS="${LPE_LOCAL_BIND_HOST}:${LPE_LOCAL_BIND_PORT}"
+  LPE_NGINX_LISTEN_PORT="$(ask_with_default "HTTPS port" "${LPE_NGINX_LISTEN_PORT_DEFAULT}" validate_port "Enter a valid TCP port.")"
 
-if [[ ! -d "${SRC_DIR}/.git" ]]; then
-  git clone --branch "${BRANCH}" "${REPO_URL}" "${SRC_DIR}"
-else
+  print_section "Database"
+  LPE_DB_HOST="$(ask_with_default "PostgreSQL host" "${LPE_DB_HOST_DEFAULT}" validate_host_token "Enter a valid PostgreSQL host.")"
+  LPE_DB_PORT="$(ask_with_default "PostgreSQL port" "${LPE_DB_PORT_DEFAULT}" validate_port "Enter a valid PostgreSQL port.")"
+  LPE_DB_NAME="$(ask_with_default "PostgreSQL database name" "${LPE_DB_NAME_DEFAULT}" validate_nonempty "Enter a PostgreSQL database name.")"
+  LPE_DB_USER="$(ask_with_default "PostgreSQL username" "${LPE_DB_USER_DEFAULT}" validate_nonempty "Enter a PostgreSQL username.")"
+  LPE_DB_PASSWORD="$(ask_secret_with_default_behavior_when_possible "PostgreSQL password" "${db_password_default}" validate_password_nonempty "Enter a PostgreSQL password.")"
+  DATABASE_URL="$(build_postgres_url "${LPE_DB_HOST}" "${LPE_DB_PORT}" "${LPE_DB_NAME}" "${LPE_DB_USER}" "${LPE_DB_PASSWORD}")"
+
+  print_section "Integration"
+  LPE_CT_API_BASE_URL="$(ask_required "LPE-CT API base URL" "${lpe_ct_api_base_url_default}" validate_http_url "Enter a valid http:// or https:// URL.")"
+  LPE_INTEGRATION_SHARED_SECRET="$(ask_secret_with_default_behavior_when_possible "Integration shared secret" "${shared_secret_default}" validate_shared_secret "Enter a strong secret with at least 32 characters.")"
+
+  print_section "Administrator"
+  LPE_BOOTSTRAP_ADMIN_EMAIL="$(ask_required "Admin email" "${bootstrap_admin_email_default}" validate_email "Enter a valid email address.")"
+  LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME="$(ask_with_default "Admin display name" "${LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME_DEFAULT}" validate_nonempty "Enter an administrator display name.")"
+  LPE_BOOTSTRAP_ADMIN_PASSWORD="$(ask_secret_with_default_behavior_when_possible "Admin password" "${bootstrap_admin_password_default}" validate_password_nonempty "Enter an administrator password.")"
+
+  print_section "Services"
+  LPE_ENABLE_SERVICES="$(ask_yes_no "Enable and start systemd services now" "${service_choice_default}")"
+  LPE_RUN_MIGRATIONS="$(ask_yes_no "Run migrations now" "${migrations_choice_default}")"
+
+  LPE_PUBLIC_SCHEME="${LPE_PUBLIC_SCHEME_DEFAULT}"
+  LPE_PST_IMPORT_DIR="${LPE_PST_IMPORT_DIR_DEFAULT}"
+  LPE_NGINX_CLIENT_MAX_BODY_SIZE="${LPE_NGINX_CLIENT_MAX_BODY_SIZE:-20g}"
+  LPE_AUTODISCOVER_ACTIVESYNC_URL="$(format_public_url "${LPE_PUBLIC_SCHEME}" "${LPE_PUBLIC_HOSTNAME}" "${LPE_NGINX_LISTEN_PORT}" "/Microsoft-Server-ActiveSync")"
+}
+
+write_install_layout_file() {
+  install -d -o root -g root "${ENV_DIR}"
+  : > "${INSTALL_ENV_FILE}"
+  write_env_value "${INSTALL_ENV_FILE}" "INSTALL_ROOT" "${INSTALL_ROOT}"
+  write_env_value "${INSTALL_ENV_FILE}" "SRC_DIR" "${SRC_DIR}"
+  write_env_value "${INSTALL_ENV_FILE}" "BIN_DIR" "${BIN_DIR}"
+  write_env_value "${INSTALL_ENV_FILE}" "WEB_ROOT" "${WEB_ROOT}"
+  write_env_value "${INSTALL_ENV_FILE}" "ADMIN_WEB_ROOT" "${ADMIN_WEB_ROOT}"
+  write_env_value "${INSTALL_ENV_FILE}" "CLIENT_WEB_ROOT" "${CLIENT_WEB_ROOT}"
+  write_env_value "${INSTALL_ENV_FILE}" "ENV_DIR" "${ENV_DIR}"
+  write_env_value "${INSTALL_ENV_FILE}" "ENV_FILE" "${ENV_FILE}"
+  write_env_value "${INSTALL_ENV_FILE}" "SYSTEMD_DIR" "${SYSTEMD_DIR}"
+  write_env_value "${INSTALL_ENV_FILE}" "DATA_DIR" "${DATA_DIR}"
+  write_env_value "${INSTALL_ENV_FILE}" "SERVICE_USER" "${SERVICE_USER}"
+  write_env_value "${INSTALL_ENV_FILE}" "SERVICE_GROUP" "${SERVICE_GROUP}"
+  write_env_value "${INSTALL_ENV_FILE}" "NGINX_AVAILABLE_DIR" "${NGINX_AVAILABLE_DIR}"
+  write_env_value "${INSTALL_ENV_FILE}" "NGINX_ENABLED_DIR" "${NGINX_ENABLED_DIR}"
+  write_env_value "${INSTALL_ENV_FILE}" "NGINX_SITE_NAME" "${NGINX_SITE_NAME}"
+}
+
+write_runtime_env_file() {
+  if [[ ! -f "${ENV_FILE}" ]]; then
+    install -m 0640 "${SCRIPT_DIR}/lpe.env.example" "${ENV_FILE}"
+  fi
+
+  write_env_value "${ENV_FILE}" "RUST_LOG" "${RUST_LOG:-info}"
+  write_env_value "${ENV_FILE}" "LPE_BIND_ADDRESS" "${LPE_BIND_ADDRESS}"
+  write_env_value "${ENV_FILE}" "LPE_LOCAL_BIND_HOST" "${LPE_LOCAL_BIND_HOST}"
+  write_env_value "${ENV_FILE}" "LPE_LOCAL_BIND_PORT" "${LPE_LOCAL_BIND_PORT}"
+  write_env_value "${ENV_FILE}" "LPE_SERVER_NAME" "${LPE_SERVER_NAME}"
+  write_env_value "${ENV_FILE}" "LPE_NGINX_LISTEN_PORT" "${LPE_NGINX_LISTEN_PORT}"
+  write_env_value "${ENV_FILE}" "LPE_DB_HOST" "${LPE_DB_HOST}"
+  write_env_value "${ENV_FILE}" "LPE_DB_PORT" "${LPE_DB_PORT}"
+  write_env_value "${ENV_FILE}" "LPE_DB_NAME" "${LPE_DB_NAME}"
+  write_env_value "${ENV_FILE}" "LPE_DB_USER" "${LPE_DB_USER}"
+  write_env_value "${ENV_FILE}" "LPE_DB_PASSWORD" "${LPE_DB_PASSWORD}"
+  write_env_value "${ENV_FILE}" "DATABASE_URL" "${DATABASE_URL}"
+  write_env_value "${ENV_FILE}" "LPE_CT_API_BASE_URL" "${LPE_CT_API_BASE_URL}"
+  write_env_value "${ENV_FILE}" "LPE_INTEGRATION_SHARED_SECRET" "${LPE_INTEGRATION_SHARED_SECRET}"
+  write_env_value "${ENV_FILE}" "LPE_BOOTSTRAP_ADMIN_EMAIL" "${LPE_BOOTSTRAP_ADMIN_EMAIL}"
+  write_env_value "${ENV_FILE}" "LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME" "${LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME}"
+  write_env_value "${ENV_FILE}" "LPE_BOOTSTRAP_ADMIN_PASSWORD" "${LPE_BOOTSTRAP_ADMIN_PASSWORD}"
+  write_env_value "${ENV_FILE}" "LPE_PST_IMPORT_DIR" "${LPE_PST_IMPORT_DIR}"
+  write_env_value "${ENV_FILE}" "LPE_NGINX_CLIENT_MAX_BODY_SIZE" "${LPE_NGINX_CLIENT_MAX_BODY_SIZE}"
+  write_env_value "${ENV_FILE}" "LPE_MAGIKA_BIN" "${BIN_DIR}/magika"
+  write_env_value "${ENV_FILE}" "LPE_MAGIKA_MIN_SCORE" "${LPE_MAGIKA_MIN_SCORE:-0.80}"
+  write_env_value "${ENV_FILE}" "LPE_PUBLIC_SCHEME" "${LPE_PUBLIC_SCHEME}"
+  write_env_value "${ENV_FILE}" "LPE_PUBLIC_HOSTNAME" "${LPE_PUBLIC_HOSTNAME}"
+  write_env_value "${ENV_FILE}" "LPE_AUTODISCOVER_ACTIVESYNC_URL" "${LPE_AUTODISCOVER_ACTIVESYNC_URL}"
+}
+
+install_prerequisites() {
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    clang \
+    curl \
+    git \
+    libpq-dev \
+    nginx \
+    nodejs \
+    npm \
+    pkg-config \
+    postgresql-client \
+    rustup \
+    xz-utils
+}
+
+ensure_service_user() {
+  if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
+    useradd --system --home-dir "${INSTALL_ROOT}" --create-home --shell /usr/sbin/nologin "${SERVICE_USER}"
+  fi
+}
+
+prepare_directories() {
+  install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${INSTALL_ROOT}" "${SRC_DIR}" "${BIN_DIR}"
+  install -d -o root -g root "${ADMIN_WEB_ROOT}" "${CLIENT_WEB_ROOT}" "${ENV_DIR}"
+  install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${DATA_DIR}" "${LPE_PST_IMPORT_DIR}"
+}
+
+checkout_source() {
+  git config --global --add safe.directory "${SRC_DIR}" || true
+
+  if [[ ! -d "${SRC_DIR}/.git" ]]; then
+    git clone --branch "${BRANCH}" "${REPO_URL}" "${SRC_DIR}"
+    return 0
+  fi
+
   git -C "${SRC_DIR}" fetch --all --tags
   git -C "${SRC_DIR}" checkout "${BRANCH}"
-  git -C "${SRC_DIR}" pull --ff-only
-fi
+  git -C "${SRC_DIR}" pull --ff-only origin "${BRANCH}"
+}
 
-"${RUSTUP_BIN}" default stable
-export PATH="/root/.cargo/bin:${PATH}"
+prepare_rust() {
+  local rustup_bin
+  rustup_bin="$(command -v rustup || true)"
+  [[ -n "${rustup_bin}" ]] || fail_install "rustup executable not found after package installation."
+  "${rustup_bin}" default stable
+  export PATH="/root/.cargo/bin:${PATH}"
+}
 
-CARGO_BIN="$(command -v cargo || true)"
-if [[ -z "${CARGO_BIN}" ]]; then
-  echo "cargo executable not found after rustup toolchain initialization." >&2
-  exit 1
-fi
+build_lpe() {
+  local cargo_bin
+  cargo_bin="$(command -v cargo || true)"
+  [[ -n "${cargo_bin}" ]] || fail_install "cargo executable not found after rustup toolchain initialization."
 
-cd "${SRC_DIR}"
-"${CARGO_BIN}" build --release -p lpe-cli
+  cd "${SRC_DIR}"
+  "${cargo_bin}" build --release -p lpe-cli
+  [[ -x "target/release/lpe-cli" ]] || fail_install "lpe-cli binary not found after build."
 
-if [[ ! -x "target/release/lpe-cli" ]]; then
-  echo "lpe-cli binary not found after build." >&2
-  exit 1
-fi
+  install -m 0755 "target/release/lpe-cli" "${BIN_DIR}/lpe-cli"
+  install_magika "${MAGIKA_VERSION}" "${MAGIKA_LINUX_X86_64_SHA256}"
+}
 
-install -m 0755 "target/release/lpe-cli" "${BIN_DIR}/lpe-cli"
-install_magika "${MAGIKA_VERSION}" "${MAGIKA_LINUX_X86_64_SHA256}"
-install -m 0644 "${SRC_DIR}/installation/debian-trixie/lpe.service" "${SYSTEMD_DIR}/lpe.service"
+build_web() {
+  cd "${SRC_DIR}/web/admin"
+  npm ci
+  npm run build
 
-if [[ ! -f "${ENV_DIR}/lpe.env" ]]; then
-  install -m 0640 "${SRC_DIR}/installation/debian-trixie/lpe.env.example" "${ENV_DIR}/lpe.env"
-fi
+  cd "${SRC_DIR}/web/client"
+  npm ci
+  npm run build
 
-set -a
-source "${ENV_DIR}/lpe.env"
-set +a
+  cp -a "${SRC_DIR}/web/admin/dist/." "${ADMIN_WEB_ROOT}/"
+  cp -a "${SRC_DIR}/web/client/dist/." "${CLIENT_WEB_ROOT}/"
+}
 
-LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
-LPE_SERVER_NAME="${LPE_SERVER_NAME:-_}"
-LPE_NGINX_CLIENT_MAX_BODY_SIZE="${LPE_NGINX_CLIENT_MAX_BODY_SIZE:-20g}"
-LPE_PST_IMPORT_DIR="${LPE_PST_IMPORT_DIR:-${DATA_DIR}/imports}"
-install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${LPE_PST_IMPORT_DIR}"
+render_service_files() {
+  render_template \
+    "${SCRIPT_DIR}/lpe.service" \
+    "${SYSTEMD_DIR}/lpe.service" \
+    "LPE_SERVICE_USER=${SERVICE_USER}" \
+    "LPE_SERVICE_GROUP=${SERVICE_GROUP}" \
+    "LPE_SRC_DIR=${SRC_DIR}" \
+    "LPE_ENV_FILE=${ENV_FILE}" \
+    "LPE_BIN_DIR=${BIN_DIR}" \
+    "LPE_INSTALL_ROOT=${INSTALL_ROOT}" \
+    "LPE_DATA_DIR=${DATA_DIR}"
 
-cd "${SRC_DIR}/web/admin"
-npm ci
-npm run build
+  render_template \
+    "${SCRIPT_DIR}/lpe.nginx.conf" \
+    "${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}" \
+    "LPE_NGINX_LISTEN_PORT=${LPE_NGINX_LISTEN_PORT}" \
+    "LPE_SERVER_NAME=${LPE_SERVER_NAME}" \
+    "LPE_BIND_ADDRESS=${LPE_BIND_ADDRESS}" \
+    "LPE_NGINX_CLIENT_MAX_BODY_SIZE=${LPE_NGINX_CLIENT_MAX_BODY_SIZE}" \
+    "LPE_ADMIN_WEB_ROOT=${ADMIN_WEB_ROOT}"
+}
 
-cd "${SRC_DIR}/web/client"
-npm ci
-npm run build
+activate_services() {
+  ln -sfn "${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}" "${NGINX_ENABLED_DIR}/${NGINX_SITE_NAME}"
+  rm -f "${NGINX_ENABLED_DIR}/default"
+  nginx -t
 
-cp -a "${SRC_DIR}/web/admin/dist/." "${ADMIN_WEB_ROOT}/"
-cp -a "${SRC_DIR}/web/client/dist/." "${CLIENT_WEB_ROOT}/"
+  systemctl daemon-reload
 
-sed \
-  -e "s/__LPE_BIND_ADDRESS__/${LPE_BIND_ADDRESS//\//\\/}/g" \
-  -e "s/__LPE_SERVER_NAME__/${LPE_SERVER_NAME//\//\\/}/g" \
-  -e "s/__LPE_NGINX_CLIENT_MAX_BODY_SIZE__/${LPE_NGINX_CLIENT_MAX_BODY_SIZE//\//\\/}/g" \
-  "${SRC_DIR}/installation/debian-trixie/lpe.nginx.conf" \
-  > "${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}"
+  if [[ "${LPE_ENABLE_SERVICES}" == "yes" ]]; then
+    systemctl enable lpe.service
+    systemctl enable nginx
+    systemctl restart lpe.service
+    systemctl restart nginx
+    return 0
+  fi
 
-ln -sfn "${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}" "${NGINX_ENABLED_DIR}/${NGINX_SITE_NAME}"
-rm -f "${NGINX_ENABLED_DIR}/default"
-nginx -t
+  echo "Services were installed but not started."
+}
 
-systemctl daemon-reload
-systemctl enable lpe.service
-systemctl enable nginx
-systemctl restart lpe.service
-systemctl restart nginx
+run_schema_init_if_requested() {
+  if [[ "${LPE_RUN_MIGRATIONS}" == "yes" ]]; then
+    "${SCRIPT_DIR}/init-schema.sh"
+  fi
+}
 
-echo "LPE installed in ${INSTALL_ROOT}."
-echo "Service lpe.service has been started."
-echo "nginx now serves the admin console on / and the web client on /mail/."
-echo "Review ${ENV_DIR}/lpe.env and run installation/debian-trixie/init-schema.sh to create a fresh 0.1.3 database."
+main() {
+  parse_args "$@"
+  require_root
+  collect_runtime_values
+  install_prerequisites
+  ensure_service_user
+  prepare_directories
+  write_install_layout_file
+  checkout_source
+  prepare_rust
+  build_lpe
+  write_runtime_env_file
+  build_web
+  render_service_files
+  activate_services
+  run_schema_init_if_requested
+
+  echo "LPE installed in ${INSTALL_ROOT}."
+  echo "Runtime configuration written to ${ENV_FILE}."
+  echo "Install layout written to ${INSTALL_ENV_FILE}."
+}
+
+main "$@"

@@ -1,0 +1,403 @@
+#!/usr/bin/env bash
+
+trim() {
+  local value="${1-}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "${value}"
+}
+
+is_interactive_install() {
+  if [[ "${INSTALL_FORCE_INTERACTIVE:-}" == "1" ]]; then
+    return 0
+  fi
+
+  if [[ "${INSTALL_NONINTERACTIVE:-}" == "1" ]]; then
+    return 1
+  fi
+
+  [[ -t 0 && -t 1 ]]
+}
+
+print_section() {
+  local title="$1"
+  if is_interactive_install; then
+    printf '\n%s\n' "${title}"
+  fi
+}
+
+fail_install() {
+  echo "${1}" >&2
+  exit 1
+}
+
+load_env_file_if_present() {
+  local file="$1"
+  if [[ -f "${file}" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "${file}"
+    set +a
+  fi
+}
+
+shell_quote() {
+  printf '%q' "${1}"
+}
+
+write_env_value() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  local line
+  local temp_file
+
+  printf -v line '%s=%q' "${key}" "${value}"
+  mkdir -p "$(dirname "${file}")"
+  touch "${file}"
+  temp_file="$(mktemp)"
+
+  awk -v key="${key}" -v line="${line}" '
+    BEGIN { written = 0 }
+    index($0, key "=") == 1 {
+      if (!written) {
+        print line
+        written = 1
+      }
+      next
+    }
+    { print }
+    END {
+      if (!written) {
+        print line
+      }
+    }
+  ' "${file}" > "${temp_file}"
+
+  mv "${temp_file}" "${file}"
+}
+
+render_template() {
+  local template_file="$1"
+  local output_file="$2"
+  shift 2
+  local perl_script='
+    my %vars = map { split(/=/, $_, 2) } @ARGV;
+    local $/ = undef;
+    my $content = <STDIN>;
+    $content =~ s/__([A-Z0-9_]+)__/exists $vars{$1} ? $vars{$1} : "__${1}__"/ge;
+    print $content;
+  '
+
+  mkdir -p "$(dirname "${output_file}")"
+  perl -e "${perl_script}" "$@" < "${template_file}" > "${output_file}"
+}
+
+normalize_yes_no() {
+  local value
+  value="$(trim "${1-}")"
+  value="${value,,}"
+  case "${value}" in
+    y|yes|true|1|on)
+      printf 'yes'
+      return 0
+      ;;
+    n|no|false|0|off)
+      printf 'no'
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ask_with_default() {
+  local label="$1"
+  local default_value="${2-}"
+  local validator="${3-}"
+  local error_message="${4:-Invalid value.}"
+  local value
+
+  if ! is_interactive_install; then
+    if [[ -z "${default_value}" ]]; then
+      fail_install "${label} is required in non-interactive mode."
+    fi
+
+    value="$(trim "${default_value}")"
+    if [[ -n "${validator}" ]] && ! "${validator}" "${value}"; then
+      fail_install "${error_message}"
+    fi
+
+    printf '%s' "${value}"
+    return 0
+  fi
+
+  while true; do
+    printf '%s (%s): ' "${label}" "${default_value}"
+    IFS= read -r value || true
+    value="$(trim "${value}")"
+    if [[ -z "${value}" ]]; then
+      value="$(trim "${default_value}")"
+    fi
+
+    if [[ -n "${validator}" ]] && ! "${validator}" "${value}"; then
+      echo "${error_message}" >&2
+      continue
+    fi
+
+    printf '%s' "${value}"
+    return 0
+  done
+}
+
+ask_required() {
+  local label="$1"
+  local default_value="${2-}"
+  local validator="${3-}"
+  local error_message="${4:-This value is required.}"
+  local value
+
+  if [[ -n "${default_value}" ]]; then
+    ask_with_default "${label}" "${default_value}" "${validator}" "${error_message}"
+    return 0
+  fi
+
+  if ! is_interactive_install; then
+    fail_install "${label} is required in non-interactive mode."
+  fi
+
+  while true; do
+    printf '%s (required): ' "${label}"
+    IFS= read -r value || true
+    value="$(trim "${value}")"
+
+    if [[ -z "${value}" ]]; then
+      echo "${error_message}" >&2
+      continue
+    fi
+
+    if [[ -n "${validator}" ]] && ! "${validator}" "${value}"; then
+      echo "${error_message}" >&2
+      continue
+    fi
+
+    printf '%s' "${value}"
+    return 0
+  done
+}
+
+ask_secret_with_default_behavior_when_possible() {
+  local label="$1"
+  local default_value="${2-}"
+  local validator="${3-}"
+  local error_message="${4:-Invalid value.}"
+  local prompt_suffix
+  local value
+
+  if ! is_interactive_install; then
+    if [[ -z "${default_value}" ]]; then
+      fail_install "${label} is required in non-interactive mode."
+    fi
+
+    value="$(trim "${default_value}")"
+    if [[ -n "${validator}" ]] && ! "${validator}" "${value}"; then
+      fail_install "${error_message}"
+    fi
+
+    printf '%s' "${value}"
+    return 0
+  fi
+
+  if [[ -n "${default_value}" ]]; then
+    prompt_suffix="current value retained on Enter"
+  else
+    prompt_suffix="required"
+  fi
+
+  while true; do
+    printf '%s (%s): ' "${label}" "${prompt_suffix}"
+    IFS= read -r -s value || true
+    printf '\n'
+    value="$(trim "${value}")"
+
+    if [[ -z "${value}" ]]; then
+      value="${default_value}"
+    fi
+
+    if [[ -z "${value}" ]]; then
+      echo "${error_message}" >&2
+      continue
+    fi
+
+    if [[ -n "${validator}" ]] && ! "${validator}" "${value}"; then
+      echo "${error_message}" >&2
+      continue
+    fi
+
+    printf '%s' "${value}"
+    return 0
+  done
+}
+
+ask_yes_no() {
+  local label="$1"
+  local default_value="${2:-yes}"
+  local candidate="${3-}"
+  local normalized_default
+  local normalized_candidate
+  local value
+
+  normalized_default="$(normalize_yes_no "${default_value}")" || fail_install "Invalid yes/no default for ${label}."
+
+  if [[ -n "${candidate}" ]]; then
+    normalized_candidate="$(normalize_yes_no "${candidate}")" || fail_install "Invalid yes/no value for ${label}."
+    candidate="${normalized_candidate}"
+  fi
+
+  if ! is_interactive_install; then
+    if [[ -n "${candidate}" ]]; then
+      printf '%s' "${candidate}"
+    else
+      printf '%s' "${normalized_default}"
+    fi
+    return 0
+  fi
+
+  while true; do
+    printf '%s (%s): ' "${label}" "${normalized_default}"
+    IFS= read -r value || true
+    value="$(trim "${value}")"
+
+    if [[ -z "${value}" ]]; then
+      if [[ -n "${candidate}" ]]; then
+        printf '%s' "${candidate}"
+      else
+        printf '%s' "${normalized_default}"
+      fi
+      return 0
+    fi
+
+    if normalize_yes_no "${value}" >/dev/null; then
+      normalize_yes_no "${value}"
+      return 0
+    fi
+
+    echo "Enter yes or no." >&2
+  done
+}
+
+validate_nonempty() {
+  [[ -n "$(trim "${1-}")" ]]
+}
+
+validate_port() {
+  local value="$1"
+  [[ "${value}" =~ ^[0-9]+$ ]] || return 1
+  (( value >= 1 && value <= 65535 ))
+}
+
+validate_hostname() {
+  local value="$1"
+  [[ "${value}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$ ]]
+}
+
+validate_host_token() {
+  local value="$1"
+  [[ "${value}" =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
+validate_email() {
+  local value="$1"
+  [[ "${value}" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
+}
+
+validate_directory_path() {
+  local value="$1"
+  [[ "${value}" == /* ]]
+}
+
+validate_http_url() {
+  local value="$1"
+  [[ "${value}" =~ ^https?://[^[:space:]]+$ ]]
+}
+
+validate_smtp_url() {
+  local value="$1"
+  [[ "${value}" =~ ^smtp://[^[:space:]]+$ ]]
+}
+
+validate_password_nonempty() {
+  [[ -n "$(trim "${1-}")" ]]
+}
+
+validate_shared_secret() {
+  local value="$1"
+  local lowered
+  lowered="${value,,}"
+  [[ ${#value} -ge 32 ]] || return 1
+  case "${lowered}" in
+    change-me|changeme|shared-secret|integration-test|password|default|test|example)
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+urlencode() {
+  local raw="${1}"
+  local length="${#raw}"
+  local encoded=""
+  local index
+  local char
+
+  for (( index = 0; index < length; index++ )); do
+    char="${raw:index:1}"
+    case "${char}" in
+      [a-zA-Z0-9.~_-])
+        encoded+="${char}"
+        ;;
+      *)
+        printf -v char '%%%02X' "'${char}"
+        encoded+="${char}"
+        ;;
+    esac
+  done
+
+  printf '%s' "${encoded}"
+}
+
+build_postgres_url() {
+  local host="$1"
+  local port="$2"
+  local database="$3"
+  local username="$4"
+  local password="$5"
+  local encoded_username
+  local encoded_password
+  local encoded_database
+
+  encoded_username="$(urlencode "${username}")"
+  encoded_password="$(urlencode "${password}")"
+  encoded_database="$(urlencode "${database}")"
+  printf 'postgres://%s:%s@%s:%s/%s' \
+    "${encoded_username}" \
+    "${encoded_password}" \
+    "${host}" \
+    "${port}" \
+    "${encoded_database}"
+}
+
+format_public_url() {
+  local scheme="$1"
+  local host="$2"
+  local port="$3"
+  local path="${4:-}"
+
+  if [[ "${port}" == "80" && "${scheme}" == "http" ]] || [[ "${port}" == "443" && "${scheme}" == "https" ]]; then
+    printf '%s://%s%s' "${scheme}" "${host}" "${path}"
+    return 0
+  fi
+
+  printf '%s://%s:%s%s' "${scheme}" "${host}" "${port}" "${path}"
+}

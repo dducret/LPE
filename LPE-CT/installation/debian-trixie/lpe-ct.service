@@ -5,11 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=lpe-ct
-Group=lpe-ct
-WorkingDirectory=/opt/lpe-ct/src/LPE-CT
-EnvironmentFile=/etc/lpe-ct/lpe-ct.env
-ExecStart=/opt/lpe-ct/bin/lpe-ct
+User=__LPE_CT_SERVICE_USER__
+Group=__LPE_CT_SERVICE_GROUP__
+WorkingDirectory=__LPE_CT_SRC_DIR__/LPE-CT
+EnvironmentFile=__LPE_CT_ENV_FILE__
+ExecStart=__LPE_CT_BIN_DIR__/lpe-ct
 Restart=on-failure
 RestartSec=5
 StartLimitIntervalSec=30
@@ -28,7 +28,7 @@ LockPersonality=true
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-ReadWritePaths=/opt/lpe-ct /var/lib/lpe-ct /var/spool/lpe-ct
+ReadWritePaths=__LPE_CT_INSTALL_ROOT__ __LPE_CT_STATE_DIR__ __LPE_CT_SPOOL_DIR__
 
 [Install]
 WantedBy=multi-user.target

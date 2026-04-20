@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=installation/debian-trixie/lib/install-common.sh
+source "${SCRIPT_DIR}/../../../installation/debian-trixie/lib/install-common.sh"
+
 REPO_URL="${REPO_URL:-https://github.com/dducret/LPE}"
 BRANCH="${BRANCH:-main}"
 INSTALL_ROOT="${INSTALL_ROOT:-/opt/lpe-ct}"
@@ -9,10 +13,12 @@ BIN_DIR="${BIN_DIR:-$INSTALL_ROOT/bin}"
 WEB_ROOT="${WEB_ROOT:-$INSTALL_ROOT/www/management}"
 VENDOR_DIR="${VENDOR_DIR:-$INSTALL_ROOT/vendor}"
 ENV_FILE="${ENV_FILE:-/etc/lpe-ct/lpe-ct.env}"
+INSTALL_ENV_FILE="${INSTALL_ENV_FILE:-/etc/lpe-ct/install.env}"
 SPOOL_DIR="${SPOOL_DIR:-/var/spool/lpe-ct}"
 SERVICE_NAME="${SERVICE_NAME:-lpe-ct.service}"
 SERVICE_USER="${SERVICE_USER:-lpe-ct}"
 SERVICE_GROUP="${SERVICE_GROUP:-lpe-ct}"
+STATE_DIR="${STATE_DIR:-/var/lib/lpe-ct}"
 NGINX_AVAILABLE_DIR="${NGINX_AVAILABLE_DIR:-/etc/nginx/sites-available}"
 NGINX_ENABLED_DIR="${NGINX_ENABLED_DIR:-/etc/nginx/sites-enabled}"
 NGINX_SITE_NAME="${NGINX_SITE_NAME:-lpe-ct.conf}"
@@ -22,6 +28,8 @@ TAKERI_REPO_URL="${TAKERI_REPO_URL:-https://github.com/AnimeForLife191/Shuhari-C
 TAKERI_BRANCH="${TAKERI_BRANCH:-main}"
 TAKERI_SYNC_DIR="${TAKERI_SYNC_DIR:-$VENDOR_DIR/takeri-src}"
 TAKERI_BIN_PATH="${TAKERI_BIN_PATH:-$BIN_DIR/Shuhari-CyberForge-CLI}"
+
+load_env_file_if_present "${INSTALL_ENV_FILE}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "This script must be run as root." >&2
@@ -87,6 +95,7 @@ TAKERI_BIN_PATH="${LPE_CT_ANTIVIRUS_TAKERI_BIN:-$TAKERI_BIN_PATH}"
 LPE_CT_RESET_STATE_ON_UPDATE="${LPE_CT_RESET_STATE_ON_UPDATE:-false}"
 LPE_CT_BIND_ADDRESS="${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}"
 LPE_CT_SERVER_NAME="${LPE_CT_SERVER_NAME:-_}"
+LPE_CT_NGINX_LISTEN_PORT="${LPE_CT_NGINX_LISTEN_PORT:-80}"
 
 if [[ "${LPE_CT_RESET_STATE_ON_UPDATE}" == "true" ]]; then
   systemctl stop "${SERVICE_NAME}" || true
@@ -110,16 +119,27 @@ TAKERI_BIN_PATH="${TAKERI_BIN_PATH}" \
 CARGO_BIN="${CARGO_BIN}" \
 bash "${SRC_DIR}/LPE-CT/installation/debian-trixie/sync-takeri.sh"
 install_magika "${MAGIKA_VERSION}" "${MAGIKA_LINUX_X86_64_SHA256}"
-install -m 0644 "${SRC_DIR}/LPE-CT/installation/debian-trixie/lpe-ct.service" "/etc/systemd/system/lpe-ct.service"
 install -d -o root -g root "${WEB_ROOT}"
 install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${VENDOR_DIR}" "${SPOOL_DIR}" "${SPOOL_DIR}/incoming" "${SPOOL_DIR}/deferred" "${SPOOL_DIR}/quarantine" "${SPOOL_DIR}/held" "${SPOOL_DIR}/sent"
 cp -a "${SRC_DIR}/LPE-CT/web/." "${WEB_ROOT}/"
-
-sed \
-  -e "s/__LPE_CT_BIND_ADDRESS__/${LPE_CT_BIND_ADDRESS//\//\\/}/g" \
-  -e "s/__LPE_CT_SERVER_NAME__/${LPE_CT_SERVER_NAME//\//\\/}/g" \
+render_template \
+  "${SRC_DIR}/LPE-CT/installation/debian-trixie/lpe-ct.service" \
+  "/etc/systemd/system/lpe-ct.service" \
+  "LPE_CT_SERVICE_USER=${SERVICE_USER}" \
+  "LPE_CT_SERVICE_GROUP=${SERVICE_GROUP}" \
+  "LPE_CT_SRC_DIR=${SRC_DIR}" \
+  "LPE_CT_ENV_FILE=${ENV_FILE}" \
+  "LPE_CT_BIN_DIR=${BIN_DIR}" \
+  "LPE_CT_INSTALL_ROOT=${INSTALL_ROOT}" \
+  "LPE_CT_STATE_DIR=${STATE_DIR}" \
+  "LPE_CT_SPOOL_DIR=${SPOOL_DIR}"
+render_template \
   "${SRC_DIR}/LPE-CT/installation/debian-trixie/lpe-ct.nginx.conf" \
-  > "${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}"
+  "${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}" \
+  "LPE_CT_NGINX_LISTEN_PORT=${LPE_CT_NGINX_LISTEN_PORT}" \
+  "LPE_CT_BIND_ADDRESS=${LPE_CT_BIND_ADDRESS}" \
+  "LPE_CT_SERVER_NAME=${LPE_CT_SERVER_NAME}" \
+  "LPE_CT_WEB_ROOT=${WEB_ROOT}"
 
 ln -sfn "${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}" "${NGINX_ENABLED_DIR}/${NGINX_SITE_NAME}"
 rm -f "${NGINX_ENABLED_DIR}/default"

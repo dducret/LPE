@@ -5,11 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=lpe
-Group=lpe
-WorkingDirectory=/opt/lpe/src
-EnvironmentFile=/etc/lpe/lpe.env
-ExecStart=/opt/lpe/bin/lpe-cli
+User=__LPE_SERVICE_USER__
+Group=__LPE_SERVICE_GROUP__
+WorkingDirectory=__LPE_SRC_DIR__
+EnvironmentFile=__LPE_ENV_FILE__
+ExecStart=__LPE_BIN_DIR__/lpe-cli
 Restart=on-failure
 RestartSec=5
 StartLimitIntervalSec=30
@@ -26,7 +26,7 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-ReadWritePaths=/opt/lpe /var/lib/lpe
+ReadWritePaths=__LPE_INSTALL_ROOT__ __LPE_DATA_DIR__
 
 [Install]
 WantedBy=multi-user.target

@@ -75,10 +75,11 @@ The install and update scripts automatically register `/opt/lpe/src` as a Git `s
 Files:
 
 - `install-lpe.sh` installs prerequisites, clones the repository, builds `lpe-cli`, and installs the systemd service
+- `install-lpe.sh` is now interactive when run in a terminal for first-install values such as the public hostname, PostgreSQL settings, bootstrap administrator, integration secret, install directory, and service actions
 - `install-lpe.sh` also provisions the pinned `Magika` CLI binary with checksum verification into `/opt/lpe/bin/magika`
-- `install-lpe.sh` also starts `lpe.service` at the end of the installation
+- `install-lpe.sh` writes installer layout settings to `/etc/lpe/install.env`, writes runtime settings to `/etc/lpe/lpe.env`, and starts `lpe.service` only when the selected service action enables it
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
-- `update-lpe.sh` updates the repository, recreates the database schema from scratch for `0.1.3`, rebuilds `lpe-cli`, and restarts the service
+- `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, recreates the database schema from scratch for `0.1.3`, rebuilds `lpe-cli`, and restarts the service
 - `update-lpe.sh` also re-provisions the same pinned `Magika` version so content validation stays deterministic
 - `update-lpe.sh` also rebuilds `web/admin` and `web/client`, redeploys static assets, and reloads `nginx`
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
@@ -140,6 +141,147 @@ nano /etc/lpe/lpe.env
 ./init-schema.sh
 systemctl status lpe.service
 ./check-lpe.sh
+```
+
+### Interactive first install
+
+`install-lpe.sh` and `LPE-CT/installation/debian-trixie/install-lpe-ct.sh` now prompt section by section when they detect an interactive terminal.
+
+Prompt behavior:
+
+- prompts show defaults in the form `Question label (default value):`
+- pressing `Enter` accepts the displayed default
+- required values without a safe default are shown as required and are re-prompted until valid
+- leading and trailing whitespace is trimmed
+- yes/no prompts accept `y`, `yes`, `n`, `no`, and `Enter` for the default
+- secrets are not echoed; when a secret already exists, pressing `Enter` keeps the current value
+
+The `LPE` installer prompts for:
+
+- installation directory, default `/opt/lpe`
+- public hostname, no default
+- server name, defaulting to the selected public hostname
+- local service host, default `127.0.0.1`
+- local service port, default `8080`
+- HTTPS port, default `80`
+- PostgreSQL host, default `localhost`
+- PostgreSQL port, default `5432`
+- PostgreSQL database name, default `lpe`
+- PostgreSQL username, default `lpe`
+- PostgreSQL password, no default
+- `LPE-CT` API base URL, no default
+- integration shared secret, no default and at least `32` characters
+- bootstrap administrator email, no default
+- bootstrap administrator display name, default `Bootstrap Administrator`
+- bootstrap administrator password, no default
+- whether to enable and start services now, default `yes`
+- whether to run `init-schema.sh` now, default `no`
+
+The `LPE-CT` installer prompts for:
+
+- installation directory, default `/opt/lpe-ct`
+- public hostname, no default
+- server name, defaulting to the selected public hostname
+- local management host, default `127.0.0.1`
+- local management port, default `8380`
+- SMTP ingress host, default `0.0.0.0`
+- SMTP ingress port, default `25`
+- HTTPS port, default `80`
+- internal `LPE` delivery URL, no default
+- integration shared secret, no default and at least `32` characters
+- primary relay endpoint, default `smtp://10.20.0.12:2525`
+- secondary relay endpoint, default `smtp://10.20.0.13:2525`
+- quarantine root path, default `/var/spool/lpe-ct`
+- bootstrap administrator email, no default
+- bootstrap administrator password, no default
+- whether to enable and start services now, default `yes`
+
+Selected runtime values are written back to `/etc/lpe/lpe.env` or `/etc/lpe-ct/lpe-ct.env`. Selected install-layout values such as `INSTALL_ROOT`, `SRC_DIR`, `BIN_DIR`, `WEB_ROOT`, and service directories are written to `/etc/lpe/install.env` or `/etc/lpe-ct/install.env` so later `update` runs stay non-interactive and reuse the installed paths.
+
+### Unattended installs
+
+Both first-install scripts remain unattended-friendly. In non-interactive mode, by `--non-interactive` or when no interactive `TTY` is available, they:
+
+- use explicit environment variables first
+- fall back to documented defaults only for safe values
+- fail clearly for required values that do not have a safe default
+
+Typical unattended `LPE` environment variables:
+
+- `INSTALL_ROOT`
+- `LPE_PUBLIC_HOSTNAME`
+- `LPE_SERVER_NAME`
+- `LPE_LOCAL_BIND_HOST`
+- `LPE_LOCAL_BIND_PORT`
+- `LPE_NGINX_LISTEN_PORT`
+- `LPE_DB_HOST`
+- `LPE_DB_PORT`
+- `LPE_DB_NAME`
+- `LPE_DB_USER`
+- `LPE_DB_PASSWORD`
+- `LPE_CT_API_BASE_URL`
+- `LPE_INTEGRATION_SHARED_SECRET`
+- `LPE_BOOTSTRAP_ADMIN_EMAIL`
+- `LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME`
+- `LPE_BOOTSTRAP_ADMIN_PASSWORD`
+- `LPE_ENABLE_SERVICES`
+- `LPE_RUN_MIGRATIONS`
+
+Typical unattended `LPE-CT` environment variables:
+
+- `INSTALL_ROOT`
+- `LPE_CT_PUBLIC_HOSTNAME`
+- `LPE_CT_SERVER_NAME`
+- `LPE_CT_BIND_HOST`
+- `LPE_CT_BIND_PORT`
+- `LPE_CT_SMTP_HOST`
+- `LPE_CT_SMTP_PORT`
+- `LPE_CT_NGINX_LISTEN_PORT`
+- `LPE_CT_CORE_DELIVERY_BASE_URL`
+- `LPE_INTEGRATION_SHARED_SECRET`
+- `LPE_CT_RELAY_PRIMARY`
+- `LPE_CT_RELAY_SECONDARY`
+- `SPOOL_DIR`
+- `LPE_CT_BOOTSTRAP_ADMIN_EMAIL`
+- `LPE_CT_BOOTSTRAP_ADMIN_PASSWORD`
+- `LPE_CT_ENABLE_SERVICES`
+
+Example unattended `LPE` first install:
+
+```bash
+INSTALL_ROOT=/opt/lpe \
+LPE_PUBLIC_HOSTNAME=mail.example.com \
+LPE_SERVER_NAME=mail.example.com \
+LPE_DB_HOST=127.0.0.1 \
+LPE_DB_PORT=5432 \
+LPE_DB_NAME=lpe \
+LPE_DB_USER=lpe \
+LPE_DB_PASSWORD='replace-with-strong-password' \
+LPE_CT_API_BASE_URL=http://10.20.10.40:8380 \
+LPE_INTEGRATION_SHARED_SECRET='replace-with-a-secret-of-at-least-32-characters' \
+LPE_BOOTSTRAP_ADMIN_EMAIL=admin@example.com \
+LPE_BOOTSTRAP_ADMIN_PASSWORD='replace-with-strong-password' \
+LPE_ENABLE_SERVICES=yes \
+LPE_RUN_MIGRATIONS=no \
+./install-lpe.sh --non-interactive
+```
+
+Example unattended `LPE-CT` first install:
+
+```bash
+INSTALL_ROOT=/opt/lpe-ct \
+LPE_CT_PUBLIC_HOSTNAME=mx.example.com \
+LPE_CT_SERVER_NAME=mx.example.com \
+LPE_CT_SMTP_HOST=0.0.0.0 \
+LPE_CT_SMTP_PORT=25 \
+LPE_CT_CORE_DELIVERY_BASE_URL=http://10.20.0.40:8080 \
+LPE_INTEGRATION_SHARED_SECRET='replace-with-a-secret-of-at-least-32-characters' \
+LPE_CT_RELAY_PRIMARY=smtp://10.20.0.12:2525 \
+LPE_CT_RELAY_SECONDARY=smtp://10.20.0.13:2525 \
+LPE_CT_BOOTSTRAP_ADMIN_EMAIL=admin@example.com \
+LPE_CT_BOOTSTRAP_ADMIN_PASSWORD='replace-with-strong-password' \
+LPE_CT_ENABLE_SERVICES=yes \
+./install-lpe-ct.sh --non-interactive
 ```
 
 By default:
