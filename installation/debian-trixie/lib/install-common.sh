@@ -178,6 +178,13 @@ ask_with_default() {
   local validator="${3-}"
   local error_message="${4:-Invalid value.}"
   local value
+  local -a validator_args=()
+
+  if [[ -n "${validator}" ]]; then
+    # Split validator function and its fixed arguments, for cases like
+    # "validate_exact_path /opt/lpe".
+    read -r -a validator_args <<< "${validator}"
+  fi
 
   if ! is_interactive_install; then
     if [[ -z "${default_value}" ]]; then
@@ -185,7 +192,7 @@ ask_with_default() {
     fi
 
     value="$(trim "${default_value}")"
-    if [[ -n "${validator}" ]] && ! "${validator}" "${value}"; then
+    if [[ ${#validator_args[@]} -gt 0 ]] && ! "${validator_args[@]}" "${value}"; then
       fail_install "${error_message}"
     fi
 
@@ -201,7 +208,7 @@ ask_with_default() {
       value="$(trim "${default_value}")"
     fi
 
-    if [[ -n "${validator}" ]] && ! "${validator}" "${value}"; then
+    if [[ ${#validator_args[@]} -gt 0 ]] && ! "${validator_args[@]}" "${value}"; then
       prompt_println "${error_message}"
       continue
     fi
