@@ -110,12 +110,12 @@ write_env_value() {
   local key="$2"
   local value="$3"
   local line
-  local temp_file
+  local temp_file="/tmp/lpe-install-common.$$"
 
   printf -v line '%s=%q' "${key}" "${value}"
   mkdir -p "$(dirname "${file}")"
   touch "${file}"
-  temp_file="$(mktemp)"
+  rm -f "${temp_file}"
 
   awk -v key="${key}" -v line="${line}" '
     BEGIN { written = 0 }
@@ -218,23 +218,37 @@ ask_required() {
   local error_message="${4:-This value is required.}"
   local value
 
-  if [[ -n "${default_value}" ]]; then
-    ask_with_default "${label}" "${default_value}" "${validator}" "${error_message}"
-    return 0
-  fi
-
   if ! is_interactive_install; then
+    if [[ -n "${default_value}" ]]; then
+      value="$(trim "${default_value}")"
+      if [[ -n "${validator}" ]] && ! "${validator}" "${value}"; then
+        fail_install "${error_message}"
+      fi
+
+      printf '%s' "${value}"
+      return 0
+    fi
+
     fail_install "${label} is required in non-interactive mode."
   fi
 
   while true; do
-    prompt_print "${label} (required): "
+    if [[ -n "${default_value}" ]]; then
+      prompt_print "${label} (${default_value}) (required): "
+    else
+      prompt_print "${label} (required): "
+    fi
+
     prompt_read_line value
     value="$(trim "${value}")"
 
     if [[ -z "${value}" ]]; then
-      prompt_println "${error_message}"
-      continue
+      if [[ -n "${default_value}" ]]; then
+        value="$(trim "${default_value}")"
+      else
+        prompt_println "${error_message}"
+        continue
+      fi
     fi
 
     if [[ -n "${validator}" ]] && ! "${validator}" "${value}"; then
@@ -374,6 +388,12 @@ validate_email() {
 validate_directory_path() {
   local value="$1"
   [[ "${value}" == /* ]]
+}
+
+validate_exact_path() {
+  local expected="$1"
+  local actual="$2"
+  [[ "${actual}" == "${expected}" ]]
 }
 
 validate_http_url() {

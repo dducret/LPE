@@ -47,14 +47,19 @@ install_magika() {
   local expected_sha="$2"
   local archive="magika-x86_64-unknown-linux-gnu.tar.xz"
   local url="https://github.com/google/magika/releases/download/cli/v${version}/${archive}"
-  local temp_dir
-  temp_dir="$(mktemp -d)"
+  local temp_dir="/tmp/magika"
+  local extracted_bin
+
+  rm -rf "${temp_dir}"
+  mkdir -p "${temp_dir}"
   trap 'rm -rf "${temp_dir}"' RETURN
 
   curl --proto '=https' --tlsv1.2 -LsSf "${url}" -o "${temp_dir}/${archive}"
   echo "${expected_sha}  ${temp_dir}/${archive}" | sha256sum -c -
   tar -xJf "${temp_dir}/${archive}" -C "${temp_dir}"
-  install -m 0755 "${temp_dir}/magika" "${BIN_DIR}/magika"
+  extracted_bin="$(find "${temp_dir}" -type f -name magika | head -n 1)"
+  [[ -n "${extracted_bin}" ]] || { echo "magika binary not found after archive extraction." >&2; exit 1; }
+  install -m 0755 "${extracted_bin}" "${BIN_DIR}/magika"
 }
 
 git config --global --add safe.directory "${SRC_DIR}" || true

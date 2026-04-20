@@ -33,6 +33,18 @@ Operating assumptions:
 - root shell or an account with `sudo`
 - no local dependency assumed at the start except network access
 
+Path conventions:
+
+- installed product files for `LPE` live under `/opt/lpe`
+- installed product files for `LPE-CT` live under `/opt/lpe-ct`
+- bundled executables such as `magika` and the default `takeri` CLI live under `/opt/lpe/bin` or `/opt/lpe-ct/bin`
+- bundled source/vendor content such as the synchronized `takeri` checkout lives under `/opt/lpe-ct/vendor`
+- mutable `LPE` state lives under `/var/lib/lpe`
+- mutable `LPE-CT` state and technical metadata live under `/var/lib/lpe-ct`
+- mutable `LPE-CT` transport and quarantine spool data live under `/var/spool/lpe-ct`
+- configuration lives under `/etc/lpe` and `/etc/lpe-ct`
+- `bayespam` is not installed as a separate package root under `/opt`; its mutable corpus and technical state remain part of `LPE-CT` runtime state under `/var`
+
 For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI, without exposing the core back office on the DMZ server, also provisions a pinned `Magika` CLI binary in `/opt/lpe-ct/bin/magika` for inbound SMTP validation, and now also performs a Git-based sparse synchronization of `takeri` from `https://github.com/AnimeForLife191/Shuhari-CyberForge.git` before building `/opt/lpe-ct/bin/Shuhari-CyberForge-CLI` as the default antivirus provider.
 
 The `LPE-CT` scripts also install an SMTP listener, a local spool in `/var/spool/lpe-ct`, and three test suites:
@@ -158,7 +170,7 @@ Prompt behavior:
 
 The `LPE` installer prompts for:
 
-- installation directory, default `/opt/lpe`
+- installation directory, fixed to `/opt/lpe`
 - public hostname, no default
 - server name, defaulting to the selected public hostname
 - local service host, default `127.0.0.1`
@@ -179,7 +191,7 @@ The `LPE` installer prompts for:
 
 The `LPE-CT` installer prompts for:
 
-- installation directory, default `/opt/lpe-ct`
+- installation directory, fixed to `/opt/lpe-ct`
 - public hostname, no default
 - server name, defaulting to the selected public hostname
 - local management host, default `127.0.0.1`
@@ -208,7 +220,6 @@ Both first-install scripts remain unattended-friendly. In non-interactive mode, 
 
 Typical unattended `LPE` environment variables:
 
-- `INSTALL_ROOT`
 - `LPE_PUBLIC_HOSTNAME`
 - `LPE_SERVER_NAME`
 - `LPE_LOCAL_BIND_HOST`
@@ -229,7 +240,6 @@ Typical unattended `LPE` environment variables:
 
 Typical unattended `LPE-CT` environment variables:
 
-- `INSTALL_ROOT`
 - `LPE_CT_PUBLIC_HOSTNAME`
 - `LPE_CT_SERVER_NAME`
 - `LPE_CT_BIND_HOST`
@@ -249,7 +259,6 @@ Typical unattended `LPE-CT` environment variables:
 Example unattended `LPE` first install:
 
 ```bash
-INSTALL_ROOT=/opt/lpe \
 LPE_PUBLIC_HOSTNAME=mail.example.com \
 LPE_SERVER_NAME=mail.example.com \
 LPE_DB_HOST=127.0.0.1 \
@@ -269,7 +278,6 @@ LPE_RUN_MIGRATIONS=no \
 Example unattended `LPE-CT` first install:
 
 ```bash
-INSTALL_ROOT=/opt/lpe-ct \
 LPE_CT_PUBLIC_HOSTNAME=mx.example.com \
 LPE_CT_SERVER_NAME=mx.example.com \
 LPE_CT_SMTP_HOST=0.0.0.0 \

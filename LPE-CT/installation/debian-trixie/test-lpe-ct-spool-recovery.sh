@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RECOVER_SCRIPT="${RECOVER_SCRIPT:-${SCRIPT_DIR}/lpe-ct-spool-recover.sh}"
-TMP_DIR="$(mktemp -d)"
+TMP_DIR="/tmp/lpe-ct-spool-recovery"
 SPOOL_DIR="${TMP_DIR}/spool"
 
 fail() {
@@ -16,6 +16,7 @@ pass() {
   echo "[OK] $*"
 }
 
+rm -rf "${TMP_DIR}"
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 mkdir -p \
