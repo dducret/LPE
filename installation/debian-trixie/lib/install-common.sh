@@ -57,11 +57,11 @@ prompt_read_line() {
   local __resultvar="$1"
   local -n __resultref="${__resultvar}"
   local input_target
-  local value=""
+  local input_value=""
 
   input_target="$(prompt_input_target)"
-  IFS= read -r value < "${input_target}" || true
-  __resultref="${value}"
+  IFS= read -r input_value < "${input_target}" || true
+  __resultref="${input_value}"
 }
 
 prompt_read_secret() {
@@ -69,13 +69,13 @@ prompt_read_secret() {
   local -n __resultref="${__resultvar}"
   local input_target
   local output_target
-  local value=""
+  local input_value=""
 
   input_target="$(prompt_input_target)"
   output_target="$(prompt_output_target)"
-  IFS= read -r -s value < "${input_target}" || true
+  IFS= read -r -s input_value < "${input_target}" || true
   printf '\n' > "${output_target}"
-  __resultref="${value}"
+  __resultref="${input_value}"
 }
 
 print_section() {
