@@ -69,6 +69,12 @@ struct QueryDiff {
     added: Vec<Value>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum JmapBlobId {
+    Upload(Uuid),
+    Opaque(String),
+}
+
 pub fn router() -> Router<Storage> {
     Router::new()
         .route("/session", get(session_handler))
@@ -355,13 +361,17 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .limit
             .unwrap_or(DEFAULT_GET_LIMIT)
             .min(MAX_QUERY_LIMIT) as usize;
-        let ids = mailboxes
+        let all_ids = mailboxes
+            .iter()
+            .map(|mailbox| mailbox.id.to_string())
+            .collect::<Vec<_>>();
+        let ids = all_ids
             .iter()
             .skip(position)
             .take(limit)
-            .map(|mailbox| mailbox.id.to_string())
+            .cloned()
             .collect::<Vec<_>>();
-        let query_state = encode_query_state("Mailbox/query", None, None, ids.clone())?;
+        let query_state = encode_query_state("Mailbox/query", None, None, all_ids)?;
 
         Ok(json!({
             "accountId": account_id.to_string(),
@@ -1143,6 +1153,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .store
             .query_jmap_email_ids(account_id, mailbox_id, search_text, position, limit)
             .await?;
+        let full_ids = self
+            .resolve_full_email_query_ids(account_id, mailbox_id, search_text, &query)
+            .await?;
         let ids = query
             .ids
             .into_iter()
@@ -1160,7 +1173,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 .as_ref()
                 .map(|sort| serialize_email_query_sort(sort))
                 .transpose()?,
-            ids.clone(),
+            full_ids,
         )?;
 
         Ok(json!({
@@ -1197,11 +1210,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .store
             .query_jmap_email_ids(account_id, mailbox_id, search_text, 0, MAX_QUERY_LIMIT)
             .await?;
-        let current_ids = query
-            .ids
-            .into_iter()
-            .map(|id| id.to_string())
-            .collect::<Vec<_>>();
+        let current_ids = self
+            .resolve_full_email_query_ids(account_id, mailbox_id, search_text, &query)
+            .await?;
         query_changes_response(
             account_id,
             "Email/query",
@@ -1627,6 +1638,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .store
             .query_jmap_thread_ids(account_id, mailbox_id, search_text, position, limit)
             .await?;
+        let full_ids = self
+            .resolve_full_thread_query_ids(account_id, mailbox_id, search_text, &query)
+            .await?;
         let ids = query
             .ids
             .into_iter()
@@ -1644,7 +1658,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 .as_ref()
                 .map(|sort| serialize_email_query_sort(sort))
                 .transpose()?,
-            ids.clone(),
+            full_ids,
         )?;
 
         Ok(json!({
@@ -1813,11 +1827,61 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<JmapUploadBlob> {
         let account = self.authenticate(authorization).await?;
         let requested_account_id = requested_account_id(Some(account_id), &account)?;
-        let blob_id = parse_uuid(blob_id)?;
+        let blob_id = parse_upload_blob_id(blob_id)?;
         self.store
             .fetch_jmap_upload_blob(requested_account_id, blob_id)
             .await?
             .ok_or_else(|| anyhow!("blob not found"))
+    }
+
+    async fn resolve_full_email_query_ids(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        search_text: Option<&str>,
+        query: &lpe_storage::JmapEmailQuery,
+    ) -> Result<Vec<String>> {
+        let ids = if query.total > query.ids.len() as u64 {
+            self.store
+                .query_jmap_email_ids(
+                    account_id,
+                    mailbox_id,
+                    search_text,
+                    0,
+                    full_query_limit(query.total),
+                )
+                .await?
+                .ids
+        } else {
+            query.ids.clone()
+        };
+
+        Ok(ids.into_iter().map(|id| id.to_string()).collect())
+    }
+
+    async fn resolve_full_thread_query_ids(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        search_text: Option<&str>,
+        query: &lpe_storage::JmapThreadQuery,
+    ) -> Result<Vec<String>> {
+        let ids = if query.total > query.ids.len() as u64 {
+            self.store
+                .query_jmap_thread_ids(
+                    account_id,
+                    mailbox_id,
+                    search_text,
+                    0,
+                    full_query_limit(query.total),
+                )
+                .await?
+                .ids
+        } else {
+            query.ids.clone()
+        };
+
+        Ok(ids.into_iter().map(|id| id.to_string()).collect())
     }
 
     async fn create_draft(
@@ -1936,7 +2000,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .and_then(Value::as_str)
             .map(|value| resolve_creation_reference(value, created_ids))
             .ok_or_else(|| anyhow!("blobId is required"))?;
-        let blob_id = parse_uuid(&blob_id)?;
+        let blob_id = parse_upload_blob_id(&blob_id)?;
         let mailbox_ids = object
             .get("mailboxIds")
             .and_then(Value::as_object)
@@ -1968,6 +2032,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             );
         }
         let parsed = parse_rfc822_message(&blob.blob_bytes)?;
+        self.validate_imported_attachments(&parsed.attachments)?;
 
         Ok(JmapImportedEmailInput {
             account_id,
@@ -1994,6 +2059,35 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             received_at: None,
             attachments: parsed.attachments,
         })
+    }
+
+    fn validate_imported_attachments(
+        &self,
+        attachments: &[lpe_storage::AttachmentUploadInput],
+    ) -> Result<()> {
+        for attachment in attachments {
+            let outcome = self.validator.validate_bytes(
+                ValidationRequest {
+                    ingress_context: IngressContext::AttachmentParsing,
+                    declared_mime: Some(attachment.media_type.clone()),
+                    filename: Some(attachment.file_name.clone()),
+                    expected_kind: expected_attachment_kind(
+                        attachment.media_type.as_str(),
+                        attachment.file_name.as_str(),
+                    ),
+                },
+                &attachment.blob_bytes,
+            )?;
+            if outcome.policy_decision != PolicyDecision::Accept {
+                bail!(
+                    "JMAP email import attachment '{}' blocked by Magika validation: {}",
+                    attachment.file_name,
+                    outcome.reason
+                );
+            }
+        }
+
+        Ok(())
     }
 
     async fn authenticate(&self, authorization: Option<&str>) -> Result<AuthenticatedAccount> {
@@ -2431,6 +2525,35 @@ fn compute_query_diff(
     QueryDiff { removed, added }
 }
 
+fn full_query_limit(total: u64) -> u64 {
+    total.max(1).min(i64::MAX as u64)
+}
+
+fn parse_upload_blob_id(value: &str) -> Result<Uuid> {
+    match JmapBlobId::parse(value)? {
+        JmapBlobId::Upload(id) => Ok(id),
+        JmapBlobId::Opaque(_) => bail!("blob not found"),
+    }
+}
+
+fn expected_attachment_kind(media_type: &str, file_name: &str) -> ExpectedKind {
+    let media_type = media_type.trim().to_ascii_lowercase();
+    let file_name = file_name.trim().to_ascii_lowercase();
+    if matches!(
+        media_type.as_str(),
+        "application/pdf"
+            | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            | "application/vnd.oasis.opendocument.text"
+    ) || file_name.ends_with(".pdf")
+        || file_name.ends_with(".docx")
+        || file_name.ends_with(".odt")
+    {
+        ExpectedKind::SupportedAttachmentText
+    } else {
+        ExpectedKind::Any
+    }
+}
+
 fn serialize_email_query_filter(filter: &EmailQueryFilter) -> Result<Value> {
     Ok(serde_json::to_value(filter)?)
 }
@@ -2443,13 +2566,39 @@ fn serialize_email_query_sort(sort: &[EmailQuerySort]) -> Result<Vec<Value>> {
 }
 
 fn blob_id_for_message(email: &JmapEmail) -> String {
-    email
-        .mime_blob_ref
-        .as_deref()
-        .and_then(|value| value.strip_prefix("upload:"))
-        .filter(|value| !value.trim().is_empty())
-        .map(ToString::to_string)
-        .unwrap_or_else(|| format!("message:{}", email.id))
+    JmapBlobId::for_message(email).into_response_id()
+}
+
+impl JmapBlobId {
+    fn parse(value: &str) -> Result<Self> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            bail!("blobId is required");
+        }
+        if let Ok(id) = Uuid::parse_str(trimmed) {
+            return Ok(Self::Upload(id));
+        }
+        if let Some(upload_id) = trimmed.strip_prefix("upload:") {
+            return Ok(Self::Upload(parse_uuid(upload_id)?));
+        }
+        Ok(Self::Opaque(trimmed.to_string()))
+    }
+
+    fn for_message(email: &JmapEmail) -> Self {
+        match email.mime_blob_ref.as_deref() {
+            Some(value) if !value.trim().is_empty() => {
+                Self::parse(value).unwrap_or_else(|_| Self::Opaque(value.trim().to_string()))
+            }
+            _ => Self::Opaque(format!("message:{}", email.id)),
+        }
+    }
+
+    fn into_response_id(self) -> String {
+        match self {
+            Self::Upload(id) => format!("upload:{id}"),
+            Self::Opaque(value) => value,
+        }
+    }
 }
 
 fn email_properties(properties: Option<Vec<String>>) -> HashSet<String> {
@@ -3698,7 +3847,7 @@ mod tests {
     use lpe_magika::{DetectionSource, Detector, MagikaDetection};
     use lpe_storage::{
         AccessibleContact, AccessibleEvent, ClientContact, ClientEvent, CollaborationCollection,
-        CollaborationRights,
+        CollaborationRights, JmapImportedEmailInput,
     };
     use std::sync::{Arc, Mutex};
 
@@ -3710,13 +3859,14 @@ mod tests {
         contacts: Arc<Mutex<Vec<ClientContact>>>,
         events: Arc<Mutex<Vec<ClientEvent>>>,
         uploads: Arc<Mutex<Vec<JmapUploadBlob>>>,
+        imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
         saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
         submitted_drafts: Arc<Mutex<Vec<Uuid>>>,
     }
 
     #[derive(Clone)]
     struct FakeDetector {
-        result: Result<MagikaDetection, String>,
+        results: Arc<Mutex<Vec<Result<MagikaDetection, String>>>>,
     }
 
     #[test]
@@ -3753,7 +3903,11 @@ mod tests {
 
     impl Detector for FakeDetector {
         fn detect(&self, _source: DetectionSource<'_>) -> Result<MagikaDetection> {
-            self.result.clone().map_err(anyhow::Error::msg)
+            self.results
+                .lock()
+                .unwrap()
+                .remove(0)
+                .map_err(anyhow::Error::msg)
         }
     }
 
@@ -3763,16 +3917,22 @@ mod tests {
         extension: &str,
         score: f32,
     ) -> Validator<FakeDetector> {
+        validator_sequence(vec![Ok(MagikaDetection {
+            label: label.to_string(),
+            mime_type: mime_type.to_string(),
+            description: label.to_string(),
+            group: "document".to_string(),
+            extensions: vec![extension.to_string()],
+            score: Some(score),
+        })])
+    }
+
+    fn validator_sequence(
+        results: Vec<Result<MagikaDetection, String>>,
+    ) -> Validator<FakeDetector> {
         Validator::new(
             FakeDetector {
-                result: Ok(MagikaDetection {
-                    label: label.to_string(),
-                    mime_type: mime_type.to_string(),
-                    description: label.to_string(),
-                    group: "document".to_string(),
-                    extensions: vec![extension.to_string()],
-                    score: Some(score),
-                }),
+                results: Arc::new(Mutex::new(results)),
             },
             0.80,
         )
@@ -3781,7 +3941,7 @@ mod tests {
     fn validator_error(message: &str) -> Validator<FakeDetector> {
         Validator::new(
             FakeDetector {
-                result: Err(message.to_string()),
+                results: Arc::new(Mutex::new(vec![Err(message.to_string())])),
             },
             0.80,
         )
@@ -4255,6 +4415,7 @@ mod tests {
             input: JmapImportedEmailInput,
             _audit: AuditEntryInput,
         ) -> Result<JmapEmail> {
+            self.imported_emails.lock().unwrap().push(input.clone());
             Ok(JmapEmail {
                 id: Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap(),
                 thread_id: Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap(),
@@ -4698,6 +4859,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn paged_query_states_keep_full_mailbox_and_email_snapshots() {
+        let initial = JmapService::new_with_validator(
+            FakeStore {
+                session: Some(FakeStore::account()),
+                mailboxes: vec![FakeStore::inbox_mailbox(), FakeStore::draft_mailbox()],
+                emails: vec![FakeStore::inbox_email(), FakeStore::draft_email()],
+                ..Default::default()
+            },
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
+        let initial_response = initial
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Mailbox/query".to_string(),
+                            json!({"position": 0, "limit": 1}),
+                            "c1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Email/query".to_string(),
+                            json!({"position": 0, "limit": 1}),
+                            "c2".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        let mailbox_query_state = initial_response.method_responses[0].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let email_query_state = initial_response.method_responses[1].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let updated = JmapService::new_with_validator(
+            FakeStore {
+                session: Some(FakeStore::account()),
+                mailboxes: vec![FakeStore::inbox_mailbox()],
+                emails: vec![FakeStore::inbox_email()],
+                ..Default::default()
+            },
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
+        let response = updated
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Mailbox/queryChanges".to_string(),
+                            json!({"sinceQueryState": mailbox_query_state}),
+                            "c1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Email/queryChanges".to_string(),
+                            json!({"sinceQueryState": email_query_state}),
+                            "c2".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["removed"][0],
+            Value::String(FakeStore::draft_mailbox().id.to_string())
+        );
+        assert_eq!(
+            response.method_responses[1].1["removed"][0],
+            Value::String(FakeStore::draft_email().id.to_string())
+        );
+    }
+
+    #[tokio::test]
     async fn identity_thread_and_submission_reads_are_available() {
         let store = FakeStore {
             session: Some(FakeStore::account()),
@@ -4788,6 +5032,52 @@ mod tests {
             Value::Number(1.into())
         );
         assert!(response.method_responses[0].1["queryState"].is_string());
+    }
+
+    #[tokio::test]
+    async fn thread_query_state_keeps_full_snapshot_when_page_is_limited() {
+        let mut second_thread_email = FakeStore::draft_email();
+        second_thread_email.thread_id =
+            Uuid::parse_str("12121212-3434-5656-7878-909090909090").unwrap();
+        let service = JmapService::new_with_validator(
+            FakeStore {
+                session: Some(FakeStore::account()),
+                mailboxes: vec![FakeStore::inbox_mailbox(), FakeStore::draft_mailbox()],
+                emails: vec![FakeStore::inbox_email(), second_thread_email],
+                ..Default::default()
+            },
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Thread/query".to_string(),
+                        json!({"position": 0, "limit": 1}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let query_state = response.method_responses[0].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let decoded = decode_query_state(&query_state).unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["ids"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(decoded.ids.len(), 2);
     }
 
     #[tokio::test]
@@ -4889,12 +5179,159 @@ mod tests {
         );
         assert_eq!(
             response.method_responses[2].1["created"]["i1"]["blobId"],
-            Value::String("77777777-7777-7777-7777-777777777777".to_string())
+            Value::String("upload:77777777-7777-7777-7777-777777777777".to_string())
         );
         assert_eq!(
             response.method_responses[3].1["list"][0]["hardLimit"],
             Value::Number(100.into())
         );
+    }
+
+    #[tokio::test]
+    async fn email_import_validates_and_preserves_multipart_attachments() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            ..Default::default()
+        };
+        store.uploads.lock().unwrap().push(JmapUploadBlob {
+            id: Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap(),
+            account_id: FakeStore::account().account_id,
+            media_type: "message/rfc822".to_string(),
+            octet_size: 321,
+            blob_bytes: concat!(
+                "From: Alice <alice@example.test>\r\n",
+                "To: Bob <bob@example.test>\r\n",
+                "Subject: Imported\r\n",
+                "Content-Type: multipart/mixed; boundary=\"b1\"\r\n",
+                "\r\n",
+                "--b1\r\n",
+                "Content-Type: multipart/alternative; boundary=\"b2\"\r\n",
+                "\r\n",
+                "--b2\r\n",
+                "Content-Type: text/plain\r\n",
+                "\r\n",
+                "Hello plain\r\n",
+                "--b2\r\n",
+                "Content-Type: text/html\r\n",
+                "\r\n",
+                "<p>Hello html</p>\r\n",
+                "--b2--\r\n",
+                "--b1\r\n",
+                "Content-Type: application/pdf\r\n",
+                "Content-Disposition: attachment; filename=\"report.pdf\"\r\n",
+                "\r\n",
+                "%PDF-1.7\r\n",
+                "--b1--\r\n"
+            )
+            .as_bytes()
+            .to_vec(),
+        });
+        let service = JmapService::new_with_validator(
+            store.clone(),
+            validator_sequence(vec![
+                Ok(MagikaDetection {
+                    label: "email".to_string(),
+                    mime_type: "message/rfc822".to_string(),
+                    description: "email".to_string(),
+                    group: "document".to_string(),
+                    extensions: vec!["eml".to_string()],
+                    score: Some(0.99),
+                }),
+                Ok(MagikaDetection {
+                    label: "pdf".to_string(),
+                    mime_type: "application/pdf".to_string(),
+                    description: "pdf".to_string(),
+                    group: "document".to_string(),
+                    extensions: vec!["pdf".to_string()],
+                    score: Some(0.99),
+                }),
+            ]),
+        );
+
+        service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/import".to_string(),
+                        json!({"emails": {"i1": {"blobId": "77777777-7777-7777-7777-777777777777", "mailboxIds": {"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb": true}}}}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let imported = store.imported_emails.lock().unwrap();
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0].body_text, "Hello plain");
+        assert_eq!(
+            imported[0].body_html_sanitized.as_deref(),
+            Some("<p>Hello html</p>")
+        );
+        assert_eq!(imported[0].attachments.len(), 1);
+        assert_eq!(imported[0].attachments[0].file_name, "report.pdf");
+        assert_eq!(imported[0].attachments[0].media_type, "application/pdf");
+    }
+
+    #[tokio::test]
+    async fn email_get_exposes_canonical_blob_ids_and_download_accepts_upload_prefix() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::inbox_mailbox(), FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::inbox_email(), FakeStore::draft_email()],
+            uploads: Arc::new(Mutex::new(vec![JmapUploadBlob {
+                id: Uuid::parse_str("88888888-8888-8888-8888-888888888888").unwrap(),
+                account_id: FakeStore::account().account_id,
+                media_type: "message/rfc822".to_string(),
+                octet_size: 9,
+                blob_bytes: b"mime-body".to_vec(),
+            }])),
+            ..Default::default()
+        };
+        let service = JmapService::new_with_validator(
+            store,
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/get".to_string(),
+                        json!({"ids": [
+                            FakeStore::inbox_email().id.to_string(),
+                            FakeStore::draft_email().id.to_string()
+                        ]}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["list"][0]["blobId"],
+            Value::String("upload:88888888-8888-8888-8888-888888888888".to_string())
+        );
+        assert_eq!(
+            response.method_responses[0].1["list"][1]["blobId"],
+            Value::String("draft-message:cccccccc-cccc-cccc-cccc-cccccccccccc".to_string())
+        );
+
+        let blob = service
+            .handle_download(
+                Some("Bearer token"),
+                &FakeStore::account().account_id.to_string(),
+                "upload:88888888-8888-8888-8888-888888888888",
+            )
+            .await
+            .unwrap();
+        assert_eq!(blob.blob_bytes, b"mime-body".to_vec());
     }
 
     #[tokio::test]
@@ -5140,14 +5577,14 @@ mod tests {
             store,
             Validator::new(
                 FakeDetector {
-                    result: Ok(MagikaDetection {
+                    results: Arc::new(Mutex::new(vec![Ok(MagikaDetection {
                         label: "unknown_binary".to_string(),
                         mime_type: "application/octet-stream".to_string(),
                         description: "unknown".to_string(),
                         group: "unknown".to_string(),
                         extensions: Vec::new(),
                         score: Some(0.99),
-                    }),
+                    })])),
                 },
                 0.80,
             ),
