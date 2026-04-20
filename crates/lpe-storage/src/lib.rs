@@ -1689,7 +1689,7 @@ impl Storage {
                 r#"
                 INSERT INTO account_credentials (account_email, tenant_id, password_hash, status)
                 VALUES ($1, $2, $3, 'active')
-                ON CONFLICT (account_email) DO UPDATE SET
+                ON CONFLICT (tenant_id, account_email) DO UPDATE SET
                     password_hash = EXCLUDED.password_hash,
                     status = 'active',
                     updated_at = NOW()
@@ -1931,7 +1931,7 @@ impl Storage {
             r#"
             INSERT INTO admin_credentials (email, tenant_id, password_hash, status)
             VALUES ($1, $2, $3, 'active')
-            ON CONFLICT (email) DO UPDATE SET
+            ON CONFLICT (tenant_id, email) DO UPDATE SET
                 password_hash = EXCLUDED.password_hash,
                 status = 'active',
                 updated_at = NOW()
@@ -1959,7 +1959,7 @@ impl Storage {
             r#"
             INSERT INTO admin_credentials (email, tenant_id, password_hash, status)
             VALUES ($1, $2, 'federated-only', 'active')
-            ON CONFLICT (email) DO UPDATE SET
+            ON CONFLICT (tenant_id, email) DO UPDATE SET
                 status = 'active',
                 updated_at = NOW()
             "#,
@@ -2514,7 +2514,9 @@ impl Storage {
                 s.auth_method,
                 to_char(s.expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS expires_at
             FROM admin_sessions s
-            JOIN admin_credentials ac ON ac.email = s.admin_email
+            JOIN admin_credentials ac
+              ON ac.tenant_id = s.tenant_id
+             AND ac.email = s.admin_email
             LEFT JOIN server_administrators sa
                 ON sa.tenant_id = s.tenant_id AND lower(sa.email) = lower(s.admin_email)
             LEFT JOIN domains d ON d.id = sa.domain_id
@@ -2606,7 +2608,9 @@ impl Storage {
                 a.display_name,
                 to_char(s.expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS expires_at
             FROM account_sessions s
-            JOIN account_credentials ac ON ac.account_email = s.account_email
+            JOIN account_credentials ac
+              ON ac.tenant_id = s.tenant_id
+             AND ac.account_email = s.account_email
             JOIN accounts a
               ON a.tenant_id = s.tenant_id
              AND lower(a.primary_email) = lower(s.account_email)

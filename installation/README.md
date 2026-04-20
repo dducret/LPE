@@ -79,6 +79,8 @@ Files:
 - `update-lpe.sh` also rebuilds `web/admin` and `web/client`, redeploys static assets, and reloads `nginx`
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
+- `create-lpe-database.sql` provides a SQL-native bootstrap alternative for creating the PostgreSQL role and database
+- `crates/lpe-storage/sql/create_lpe_schema.sql` provides the canonical full schema for fresh databases without replaying the historical migration chain
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
 - `run-migrations.sh` applies the project's PostgreSQL SQL migrations
 - `run-migrations.sh` also applies the persistent schema for the administration console
