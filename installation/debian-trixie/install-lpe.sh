@@ -286,9 +286,13 @@ checkout_source() {
 
   if [[ ! -d "${SRC_DIR}/.git" ]]; then
     git clone --branch "${BRANCH}" "${REPO_URL}" "${SRC_DIR}"
+    git -C "${SRC_DIR}" config core.fileMode false
     return 0
   fi
 
+  # Ignore local chmod noise in the installed checkout so maintenance pulls do
+  # not fail on mode-only changes to helper scripts.
+  git -C "${SRC_DIR}" config core.fileMode false
   git -C "${SRC_DIR}" fetch --all --tags
   git -C "${SRC_DIR}" checkout "${BRANCH}"
   git -C "${SRC_DIR}" pull --ff-only origin "${BRANCH}"
