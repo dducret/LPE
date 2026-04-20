@@ -56,6 +56,8 @@ Necessary edge state such as spool or quarantine must remain bounded, explicit, 
 
 `LPE-CT` may still use dedicated local technical databases when bounded file-based state is no longer sufficient, for example for Bayesian filtering, reputation, or cluster coordination. Those databases remain sorting-center-local stores and must not become a second canonical product database.
 
+When such a database is used, private `5432` remains acceptable only on loopback, a private backend segment, or a dedicated `LPE-CT` cluster network. It must never be published on the public `DMZ` edge.
+
 ### Internal transport `LPE-CT <-> LPE`
 
 The target protocol for internal `LPE-CT` to `LPE` exchanges is `gRPC`.

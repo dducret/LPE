@@ -25,6 +25,13 @@ The perimeter pipeline now also executes:
 
 `LPE-CT` may also use dedicated local technical data stores for perimeter-owned state such as Bayesian filtering, reputation, greylisting, quarantine indexes, or cluster coordination. Those stores must remain local to the sorting center and must not become canonical mailbox or collaboration storage.
 
+In the current repository state, the runtime still uses:
+
+- `state.json` for management configuration
+- the local spool for inbound, outbound, quarantine, greylisting, reputation, and throttling artifacts
+
+The target evolution is to keep spool custody for message payloads while allowing a private local database, including private `5432`, for higher-churn technical indexes and cluster metadata.
+
 For outbound `LPE -> LPE-CT` handoff, the sorting center now also covers:
 
 - local outbound routing rules

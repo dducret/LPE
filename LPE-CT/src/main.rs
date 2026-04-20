@@ -26,6 +26,7 @@ mod observability;
 mod smtp;
 
 const MIN_INTEGRATION_SECRET_LEN: usize = 32;
+pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SiteProfile {
@@ -94,6 +95,37 @@ struct NetworkSettings {
     submission_listener_enabled: bool,
     proxy_protocol_enabled: bool,
     max_concurrent_sessions: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct LocalDataStoresSettings {
+    #[serde(default)]
+    state_file_path: String,
+    #[serde(default)]
+    spool_root: String,
+    #[serde(default = "default_spool_queues")]
+    spool_queues: Vec<String>,
+    #[serde(default = "default_policy_artifacts")]
+    policy_artifacts: Vec<String>,
+    #[serde(default = "default_forbidden_canonical_data")]
+    forbidden_canonical_data: Vec<String>,
+    #[serde(default)]
+    dedicated_postgres: LocalPostgresStore,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct LocalPostgresStore {
+    enabled: bool,
+    #[serde(default = "default_local_db_purposes")]
+    purposes: Vec<String>,
+    #[serde(default)]
+    listen_address: Option<String>,
+    #[serde(default = "default_local_db_network_scope")]
+    network_scope: String,
+    #[serde(default = "default_true")]
+    public_exposure_forbidden: bool,
+    #[serde(default = "default_local_db_notes")]
+    notes: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +198,8 @@ struct DashboardState {
     #[serde(default)]
     throttling: ThrottlingSettings,
     network: NetworkSettings,
+    #[serde(default)]
+    local_data_stores: LocalDataStoresSettings,
     policies: PolicySettings,
     updates: UpdateSettings,
     queues: QueueMetrics,
@@ -252,6 +286,7 @@ async fn main() -> Result<()> {
     apply_env_overrides(&mut dashboard);
     ensure_management_bootstrap(&mut dashboard)?;
     normalize_policy_settings(&mut dashboard.policies);
+    normalize_local_data_stores(&mut dashboard.local_data_stores);
     dashboard.site.management_bind = bind_address.clone();
     dashboard.site.public_smtp_bind = smtp_bind_address.clone();
     persist_state(&state_file, &dashboard)?;
@@ -347,6 +382,7 @@ async fn health_ready(State(state): State<AppState>) -> Result<Json<ReadinessRes
 
     checks.push(check_state_file(&state.state_file));
     checks.push(check_spool_layout(&state.spool_dir));
+    checks.push(check_local_data_store_policy(&snapshot.local_data_stores));
     checks.push(check_non_empty_value(
         "primary-relay",
         true,
@@ -733,6 +769,37 @@ fn apply_env_overrides(state: &mut DashboardState) {
             state.policies.max_message_size_mb = parsed.max(1);
         }
     }
+    state.local_data_stores.state_file_path = env::var("LPE_CT_STATE_FILE")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| state.local_data_stores.state_file_path.clone());
+    state.local_data_stores.spool_root = env::var("LPE_CT_SPOOL_DIR")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| state.local_data_stores.spool_root.clone());
+    if let Ok(value) = env::var("LPE_CT_LOCAL_DB_ENABLED") {
+        state.local_data_stores.dedicated_postgres.enabled = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_LOCAL_DB_LISTEN_ADDRESS") {
+        let trimmed = value.trim();
+        state.local_data_stores.dedicated_postgres.listen_address = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        };
+    }
+    if let Ok(value) = env::var("LPE_CT_LOCAL_DB_NETWORK_SCOPE") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            state.local_data_stores.dedicated_postgres.network_scope = trimmed.to_string();
+        }
+    }
+    if let Ok(value) = env::var("LPE_CT_LOCAL_DB_PURPOSES") {
+        let parsed = parse_csv(&value);
+        if !parsed.is_empty() {
+            state.local_data_stores.dedicated_postgres.purposes = parsed;
+        }
+    }
 }
 
 fn normalize_policy_settings(policies: &mut PolicySettings) {
@@ -742,6 +809,33 @@ fn normalize_policy_settings(policies: &mut PolicySettings) {
     if policies.spam_reject_threshold < policies.spam_quarantine_threshold {
         policies.spam_reject_threshold = policies.spam_quarantine_threshold;
     }
+}
+
+fn normalize_local_data_stores(local_data_stores: &mut LocalDataStoresSettings) {
+    if local_data_stores.state_file_path.trim().is_empty() {
+        local_data_stores.state_file_path =
+            "/var/lib/lpe-ct/state.json".to_string();
+    }
+    if local_data_stores.spool_root.trim().is_empty() {
+        local_data_stores.spool_root = "/var/spool/lpe-ct".to_string();
+    }
+    if local_data_stores.spool_queues.is_empty() {
+        local_data_stores.spool_queues = default_spool_queues();
+    }
+    if local_data_stores.policy_artifacts.is_empty() {
+        local_data_stores.policy_artifacts = default_policy_artifacts();
+    }
+    if local_data_stores.forbidden_canonical_data.is_empty() {
+        local_data_stores.forbidden_canonical_data = default_forbidden_canonical_data();
+    }
+    local_data_stores.dedicated_postgres.network_scope = normalize_local_db_network_scope(
+        &local_data_stores.dedicated_postgres.network_scope,
+    );
+    if local_data_stores.dedicated_postgres.purposes.is_empty() {
+        local_data_stores.dedicated_postgres.purposes = default_local_db_purposes();
+    }
+    local_data_stores.dedicated_postgres.purposes.sort();
+    local_data_stores.dedicated_postgres.purposes.dedup();
 }
 
 fn parse_bool(value: &str) -> bool {
@@ -884,6 +978,23 @@ fn default_state() -> DashboardState {
             proxy_protocol_enabled: false,
             max_concurrent_sessions: 250,
         },
+        local_data_stores: LocalDataStoresSettings {
+            state_file_path: env_value("LPE_CT_STATE_FILE")
+                .unwrap_or_else(|| "/var/lib/lpe-ct/state.json".to_string()),
+            spool_root: env_value("LPE_CT_SPOOL_DIR")
+                .unwrap_or_else(|| "/var/spool/lpe-ct".to_string()),
+            spool_queues: default_spool_queues(),
+            policy_artifacts: default_policy_artifacts(),
+            forbidden_canonical_data: default_forbidden_canonical_data(),
+            dedicated_postgres: LocalPostgresStore {
+                enabled: false,
+                purposes: default_local_db_purposes(),
+                listen_address: None,
+                network_scope: default_local_db_network_scope(),
+                public_exposure_forbidden: true,
+                notes: default_local_db_notes(),
+            },
+        },
         policies: PolicySettings {
             drain_mode: false,
             quarantine_enabled: true,
@@ -929,6 +1040,72 @@ fn default_state() -> DashboardState {
 fn default_core_delivery_base_url() -> String {
     env_value("LPE_CT_CORE_DELIVERY_BASE_URL")
         .unwrap_or_else(|| "http://127.0.0.1:8080".to_string())
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_spool_queues() -> Vec<String> {
+    smtp::SPOOL_QUEUES.iter().map(|value| (*value).to_string()).collect()
+}
+
+fn default_policy_artifacts() -> Vec<String> {
+    smtp::POLICY_ARTIFACTS
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect()
+}
+
+fn default_forbidden_canonical_data() -> Vec<String> {
+    [
+        "mailboxes",
+        "inbox",
+        "sent",
+        "drafts",
+        "outbox",
+        "contacts",
+        "calendars",
+        "tasks",
+        "rights",
+        "tenant-administration",
+        "canonical-search",
+        "bcc-business-storage",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+fn default_local_db_purposes() -> Vec<String> {
+    [
+        "bayesian",
+        "reputation",
+        "greylisting",
+        "quarantine-metadata",
+        "cluster-coordination",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+fn default_local_db_network_scope() -> String {
+    "host-local".to_string()
+}
+
+fn default_local_db_notes() -> String {
+    "Dedicated LPE-CT PostgreSQL is optional and may hold only perimeter-owned technical state."
+        .to_string()
+}
+
+fn normalize_local_db_network_scope(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "host-local" | "private-backend" | "lpe-ct-cluster" => {
+            value.trim().to_ascii_lowercase()
+        }
+        _ => default_local_db_network_scope(),
+    }
 }
 
 fn default_dnsbl_enabled() -> bool {
@@ -1095,7 +1272,7 @@ fn check_state_file(path: &Path) -> ReadinessCheck {
 }
 
 fn check_spool_layout(path: &Path) -> ReadinessCheck {
-    let required = ["incoming", "deferred", "quarantine", "held", "sent"];
+    let required = smtp::SPOOL_QUEUES;
     let missing = required
         .iter()
         .map(|entry| path.join(entry))
@@ -1115,6 +1292,83 @@ fn check_spool_layout(path: &Path) -> ReadinessCheck {
             true,
             format!("missing spool directories: {}", missing.join(", ")),
         )
+    }
+}
+
+fn check_local_data_store_policy(local_data_stores: &LocalDataStoresSettings) -> ReadinessCheck {
+    let dedicated_postgres = &local_data_stores.dedicated_postgres;
+    if !dedicated_postgres.enabled {
+        return readiness_ok(
+            "local-data-stores",
+            true,
+            "state.json and spool remain the active local stores; dedicated PostgreSQL is disabled",
+        );
+    }
+
+    let Some(address) = dedicated_postgres.listen_address.as_deref() else {
+        return readiness_failed(
+            "local-data-stores",
+            true,
+            "dedicated PostgreSQL is enabled but LPE_CT_LOCAL_DB_LISTEN_ADDRESS is missing",
+        );
+    };
+
+    if address_binds_publicly(address) {
+        return readiness_failed(
+            "local-data-stores",
+            true,
+            format!("dedicated PostgreSQL bind {address} is public; port 5432 must stay private"),
+        );
+    }
+
+    let purposes = dedicated_postgres.purposes.join(", ");
+    readiness_ok(
+        "local-data-stores",
+        true,
+        format!(
+            "dedicated PostgreSQL is private on {address} for purposes: {purposes} ({})",
+            dedicated_postgres.network_scope
+        ),
+    )
+}
+
+fn address_binds_publicly(address: &str) -> bool {
+    let normalized = address.trim();
+    if matches!(normalized, "0.0.0.0" | "0.0.0.0:5432" | "::" | "[::]" | "[::]:5432") {
+        return true;
+    }
+
+    if let Ok(socket) = normalized.parse::<std::net::SocketAddr>() {
+        return ip_is_public(socket.ip());
+    }
+
+    let host = if normalized.starts_with('[') {
+        normalized
+            .strip_prefix('[')
+            .and_then(|value| value.split(']').next())
+            .unwrap_or(normalized)
+    } else {
+        normalized
+            .rsplit_once(':')
+            .map(|(host, _)| host)
+            .unwrap_or(normalized)
+    };
+
+    if matches!(host, "0.0.0.0" | "::" | "[::]") {
+        return true;
+    }
+
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return ip_is_public(ip);
+    }
+
+    false
+}
+
+fn ip_is_public(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ip) => !(ip.is_loopback() || ip.is_private()),
+        std::net::IpAddr::V6(ip) => !(ip.is_loopback() || ip.is_unique_local()),
     }
 }
 
@@ -1279,15 +1533,15 @@ fn is_known_weak_secret(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ha_activation_check, integration_shared_secret};
+    use super::{
+        address_binds_publicly, apply_env_overrides, default_state, ha_activation_check,
+        integration_shared_secret, normalize_local_data_stores, ENV_LOCK,
+    };
     use std::{
         fs,
         path::PathBuf,
-        sync::Mutex,
         time::{SystemTime, UNIX_EPOCH},
     };
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn temp_file(name: &str) -> PathBuf {
         let suffix = SystemTime::now()
@@ -1341,5 +1595,55 @@ mod tests {
         assert!(invalid.detail.contains("unsupported role"));
 
         std::env::remove_var("LPE_CT_HA_ROLE_FILE");
+    }
+
+    #[test]
+    fn local_db_address_must_not_be_public() {
+        assert!(!address_binds_publicly("127.0.0.1:5432"));
+        assert!(!address_binds_publicly("10.20.0.15:5432"));
+        assert!(!address_binds_publicly("[fd00::15]:5432"));
+        assert!(address_binds_publicly("0.0.0.0:5432"));
+        assert!(address_binds_publicly("[::]:5432"));
+        assert!(address_binds_publicly("198.51.100.10:5432"));
+    }
+
+    #[test]
+    fn env_overrides_enable_private_local_db_profile() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let mut state = default_state();
+
+        std::env::set_var("LPE_CT_LOCAL_DB_ENABLED", "true");
+        std::env::set_var("LPE_CT_LOCAL_DB_LISTEN_ADDRESS", "127.0.0.1:5432");
+        std::env::set_var("LPE_CT_LOCAL_DB_NETWORK_SCOPE", "lpe-ct-cluster");
+        std::env::set_var(
+            "LPE_CT_LOCAL_DB_PURPOSES",
+            "bayesian,reputation,quarantine-metadata",
+        );
+
+        apply_env_overrides(&mut state);
+        normalize_local_data_stores(&mut state.local_data_stores);
+
+        assert!(state.local_data_stores.dedicated_postgres.enabled);
+        assert_eq!(
+            state.local_data_stores.dedicated_postgres.listen_address.as_deref(),
+            Some("127.0.0.1:5432")
+        );
+        assert_eq!(
+            state.local_data_stores.dedicated_postgres.network_scope,
+            "lpe-ct-cluster"
+        );
+        assert_eq!(
+            state.local_data_stores.dedicated_postgres.purposes,
+            vec![
+                "bayesian".to_string(),
+                "quarantine-metadata".to_string(),
+                "reputation".to_string()
+            ]
+        );
+
+        std::env::remove_var("LPE_CT_LOCAL_DB_ENABLED");
+        std::env::remove_var("LPE_CT_LOCAL_DB_LISTEN_ADDRESS");
+        std::env::remove_var("LPE_CT_LOCAL_DB_NETWORK_SCOPE");
+        std::env::remove_var("LPE_CT_LOCAL_DB_PURPOSES");
     }
 }

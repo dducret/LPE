@@ -86,6 +86,16 @@ On the `LPE-CT` side:
 
 Any dedicated local database used by `LPE-CT` remains a sorting-center-private technical store. It must not require direct access from the `DMZ` to the core `LPE` `PostgreSQL` database and must not hold canonical mailbox or collaboration state. The full boundary is documented in `docs/architecture/lpe-ct-local-data-stores.md`.
 
+If `LPE-CT` adopts a dedicated local `PostgreSQL` service, the intended usage is technical only:
+
+- Bayesian filtering
+- reputation and greylisting
+- quarantine metadata
+- throttling and routing coordination
+- `LPE-CT` cluster coordination
+
+That service remains private on `5432` and does not alter the HTTP integration contract between `LPE` and `LPE-CT`.
+
 ### Observability
 
 The two services now expose a Prometheus-compatible `GET /metrics` endpoint on their local HTTP API.

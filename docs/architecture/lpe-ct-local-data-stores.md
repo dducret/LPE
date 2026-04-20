@@ -2,125 +2,242 @@
 
 ### Goal
 
-This document defines which local data stores `LPE-CT` may use on its own `DMZ` host or cluster, and which data must remain canonical in the core `LPE` platform.
+This document formalizes the storage boundary for `LPE-CT`.
 
-The intent is to allow `LPE-CT` to operate independently in the perimeter while preserving the non-negotiable split between:
+It defines:
 
-- `LPE`, the system of record for user-visible state
-- `LPE-CT`, the sorting center for `SMTP`, perimeter policy, quarantine, relay, and traceability
+- the current repository state
+- the target architecture for dedicated local `LPE-CT` databases
+- the data classes allowed in those stores
+- the data classes forbidden because they remain canonical in `LPE`
+- the exact network rules for local database traffic, including private `5432`
 
-### Core rule
+### Non-negotiable split
 
-`LPE-CT` may use dedicated local stores for technical edge needs.
+The split remains strict:
 
-Those stores are allowed only for `LPE-CT`-owned operational data such as:
+- `LPE` is the sole system of record for mailboxes, contacts, calendars, tasks, rights, and all user-visible state
+- `LPE-CT` owns only perimeter transport and security state for `SMTP` ingress, outbound relay, quarantine, filtering, traceability, throttling, and cluster coordination
+- `LPE-CT` must not create a parallel `Inbox`, `Sent`, `Drafts`, or `Outbox`
+- `LPE-CT` must not depend on direct `DMZ` access to the core `LPE` `PostgreSQL` database
 
-- local spool metadata
-- quarantine indexes
-- anti-spam and Bayesian classifier state
-- greylisting state
-- sender, domain, and IP reputation
-- routing and throttling state
-- bounded decision traces and operational correlation indexes
-- cluster coordination and failover metadata between `LPE-CT` nodes
+### Current repository state
 
-Those stores must not become a second canonical mailbox or collaboration database.
+The current `LPE-CT` implementation does not use a relational database yet.
 
-### Canonical data forbidden in `LPE-CT`
+It currently persists local state in three ways:
 
-The following data remains canonical in `LPE` and must not be reimplemented or promoted to authoritative state in `LPE-CT` local databases:
+- `LPE_CT_STATE_FILE`, default `/var/lib/lpe-ct/state.json`
+- `LPE_CT_SPOOL_DIR`, default `/var/spool/lpe-ct`
+- JSON policy artifacts inside the spool
 
-- mailboxes and mailbox hierarchy
-- authoritative `Inbox`, `Sent`, drafts, and user-visible message state
+The active spool layout in the current code is:
+
+- `incoming/`
+- `deferred/`
+- `quarantine/`
+- `held/`
+- `bounces/`
+- `sent/`
+- `outbound/`
+- `policy/`
+- `greylist/`
+
+The currently implemented technical local state already includes:
+
+- management configuration and audit metadata in `state.json`
+- queued inbound and outbound message traces as JSON files in the spool
+- quarantine ownership in `quarantine/`
+- greylisting triplets in `greylist/<triplet>.json`
+- reputation counters in `policy/reputation.json`
+- throttling window artifacts in `policy/<rule>.json`
+- bounded decision traces attached to queued message files
+
+This means the repository already proves the need for sorting-center-local persistence, but it still uses flat files rather than a dedicated local database.
+
+### Target architecture
+
+`LPE-CT` keeps the current spool-first model as the default deployment path.
+
+When operational pressure justifies it, `LPE-CT` may add one or more dedicated local databases that remain strictly technical stores owned by the sorting center.
+
+The target storage model is therefore:
+
+- `state.json` for local management configuration and bootstrap state
+- spool files for raw queue ownership, raw message payload traces, quarantine payload custody, and replay-oriented artifacts
+- optional dedicated local database stores for higher-churn technical indexes and coordination state
+
+The preferred first dedicated store is an `LPE-CT`-owned local `PostgreSQL` service used only for technical state.
+
+Typical target domains for that local database are:
+
+- Bayesian classifier tokens, corpus metadata, and training history
+- sender, domain, and IP reputation history
+- greylisting indexes and cleanup-friendly timestamps
+- quarantine metadata and operational search indexes
+- throttling counters and routing coordination metadata
+- cluster membership, failover coordination, and shared perimeter state across `LPE-CT` nodes
+
+### Allowed data in local `LPE-CT` stores
+
+The following data is explicitly allowed in `LPE-CT` local databases because it is perimeter-owned technical state:
+
+- Bayesian token statistics
+- Bayesian training metadata
+- sender, domain, relay, and IP reputation
+- greylisting triplets and their timers
+- DNSBL, authentication, and policy decision caches
+- quarantine metadata, operational indexes, and release workflow references
+- throttling windows and counters
+- relay routing hints and local transport history
+- bounded traceability indexes keyed by `trace_id`, peer IP, relay, or policy result
+- cluster membership and failover coordination metadata between `LPE-CT` nodes
+
+`LPE-CT` may also keep:
+
+- raw `SMTP` payloads in spool or quarantine storage
+- raw inbound or outbound technical traces
+- bounded operational correlation identifiers
+
+Those artifacts remain technical evidence and replay material. They do not become canonical product state.
+
+### Forbidden data because it is canonical in `LPE`
+
+The following data is forbidden in dedicated local `LPE-CT` databases as authoritative state:
+
+- mailbox hierarchy
+- canonical `Inbox`
+- canonical `Sent`
+- canonical drafts
+- canonical `Outbox`
+- message ownership, mailbox rights, and user-visible flags
 - contacts
 - calendars
 - tasks
-- user rights, ACLs, delegations, and tenant administration state
+- tenant administration state
+- user rights, ACLs, delegations, or sharing state
 - canonical search indexes for user-visible content
 - protected `Bcc` business storage
 
-`LPE-CT` may temporarily hold raw `SMTP` payloads, quarantine copies, and bounded transport metadata, but those remain perimeter-operational artifacts rather than canonical product state.
+Temporary possession is allowed only where the perimeter function requires it, for example:
 
-### Allowed local storage patterns
+- raw inbound `SMTP` bytes before final delivery
+- quarantine copies retained by the sorting center
+- bounded transport metadata required for `DSN`, bounce handling, replay, or incident review
 
-The current v1 implementation already uses:
+Even in those cases, `LPE-CT` remains non-canonical.
 
-- a local JSON state file for management configuration
-- a local disk spool for inbound, deferred, quarantine, held, sent, and policy artifacts
+### Storage assignment by function
 
-That model may evolve toward one or more dedicated local databases when operational pressure justifies it.
+Recommended storage ownership for the target architecture is:
 
-Examples of acceptable local stores include:
+- `state.json`: node identity, relay settings, management bootstrap, local admin audit trail, declared local-store topology
+- spool: inbound/outbound queue files, raw message traces, quarantine payload custody, replay-oriented artifacts
+- local `PostgreSQL`: Bayesian state, reputation, greylisting, quarantine metadata indexes, throttling counters, cluster metadata
 
-- a local Bayesian database for spam classification tokens and training state
-- a local `PostgreSQL` instance for quarantine indexes, routing rules, throttling counters, or cluster coordination
-- a local embedded store for greylisting or reputation caches
+This keeps the spool authoritative for immediate transport custody while allowing indexed technical state to move away from flat files when needed.
 
-The decisive rule is ownership of the data, not the storage engine.
+### Exact `5432` policy
 
-### `PostgreSQL` on port `5432`
+Port `5432` is allowed for `LPE-CT` only under these rules:
 
-`PostgreSQL` is acceptable on `LPE-CT` when it is used as a dedicated local technical store for the sorting center.
+- it must refer to an `LPE-CT`-owned technical database, not the core `LPE` product database
+- it must never be Internet-facing
+- it must never be published on the public `DMZ` edge
+- it must never be used as a path from the `DMZ` toward the core `LPE` `PostgreSQL` service
+- it must stay on one of these scopes only:
+  - loopback on a single `LPE-CT` node
+  - a private backend segment behind the `DMZ`
+  - a dedicated `LPE-CT` cluster network between sorting-center nodes
 
-Typical acceptable uses:
+The accepted network scopes are therefore:
 
-- Bayesian classifier persistence
-- reputation and greylisting state
-- cluster membership and coordination metadata
-- quarantine search and operational lookups
+- `host-local`
+- `private-backend`
+- `lpe-ct-cluster`
 
-Network constraints:
+The following uses of `5432` are explicitly forbidden:
 
-- `5432` must never be publicly exposed on the `DMZ` edge
-- `5432` traffic must remain limited to the local host, a private backend segment, or a dedicated `LPE-CT` cluster network
-- `LPE-CT` must not require direct `DMZ` access to the core `LPE` `PostgreSQL` database
-- if multiple `LPE-CT` nodes coordinate through `5432`, that flow must be documented as sorting-center-internal traffic, not as core-product database access
+- `0.0.0.0:5432` or equivalent wildcard exposure on the public edge
+- perimeter firewall rules exposing `5432` to the Internet
+- direct connections from `LPE-CT` nodes to the core `LPE` `PostgreSQL` writer across the `DMZ`
+- treating an `LPE-CT` local database as an extension schema of the core product database
 
-### Separation from the core `LPE` store
+### Allowed network flows
 
-If `LPE-CT` uses a local `PostgreSQL` database, it must be treated as a sorting-center database, not as an extension of the core `LPE` database.
+The allowed network flows for local database and clustering traffic are:
 
-That means:
+- `LPE-CT` process to loopback `5432` on the same node
+- `LPE-CT` node to private `5432` on another `LPE-CT` node when a documented cluster topology requires it
+- management and backup traffic to the local database from explicitly authorized internal addresses
 
-- schema ownership remains local to `LPE-CT`
-- lifecycle, retention, and rebuild policies remain local to `LPE-CT`
-- data must stay reconstructible or replaceable from spool, perimeter traffic, and bounded operational history where practical
-- failure of the local `LPE-CT` database must not redefine canonical user-visible mailbox truth
+The allowed `LPE` and `LPE-CT` cross-zone flows remain:
+
+- `LPE -> LPE-CT` outbound handoff over the integration API
+- `LPE-CT -> LPE` final delivery over the internal delivery API
+
+No local database flow changes that contract.
+
+### Separation from the core `LPE` database
+
+If `LPE-CT` adopts local `PostgreSQL`, that database remains wholly separate from core `LPE` `PostgreSQL`.
+
+That implies:
+
+- separate schema ownership
+- separate lifecycle and retention policy
+- separate backup and restore procedures
+- no shared tables with the core product
+- no assumption that failure of the local `LPE-CT` database changes canonical mailbox truth
+
+The local `LPE-CT` database should remain operationally replaceable.
+
+Rebuild sources may include:
+
+- the active spool
+- current quarantine artifacts
+- current perimeter traffic
+- bounded retained technical history
 
 ### Clustering guidance
 
-When `LPE-CT` runs as a cluster, a dedicated local database may be preferable to flat files for:
+For single-node deployments, spool plus JSON state remains acceptable.
 
-- shared quarantine indexes
-- shared Bayesian state
-- reputation scoring history
-- throttling windows across nodes
-- election or active/passive coordination metadata
+For active/passive or future clustered `LPE-CT`, a dedicated local database becomes preferable for:
 
-Even in clustered mode, the system should keep the perimeter state bounded and operationally replaceable.
+- shared quarantine metadata
+- shared greylisting timers
+- shared reputation history
+- shared throttling windows
+- node-role and coordination metadata
 
-Clustered `LPE-CT` state must therefore remain:
+Even in clustered mode, the state must stay:
 
 - technical rather than canonical
-- documented with explicit retention and rebuild rules
-- isolated from the core `LPE` tenant and mailbox database
+- bounded by retention rules
+- isolated from the core tenant and mailbox database
+- documented so operators know how to rebuild or discard it safely
 
-### Current implementation status
+### Current implementation decision
 
-In the current repository state, `LPE-CT` does not yet use a relational database.
+The repository now keeps the existing spool-first runtime behavior.
 
-It currently relies on:
+At the same time, the management state and readiness model explicitly describe the future optional dedicated `LPE-CT` PostgreSQL profile with these purposes:
 
-- `LPE_CT_STATE_FILE` for local management state
-- `LPE_CT_SPOOL_DIR` for queue, quarantine, and policy artifacts
+- Bayesian filtering
+- reputation
+- greylisting
+- quarantine metadata
+- cluster coordination
 
-This is compatible with the target architecture, but it does not yet implement a dedicated Bayesian or cluster database.
+That is a foundation only. It does not yet move current runtime policy data out of the spool.
 
 ### Decision
 
-The architecture explicitly allows `LPE-CT` to adopt dedicated local technical databases, including a local `PostgreSQL` service on private `5432`, provided that:
+`LPE-CT` is explicitly allowed to use dedicated local technical databases, including private `PostgreSQL` on `5432`, provided that:
 
-- `LPE` remains the sole system of record for user-visible product state
-- `LPE-CT` stores remain limited to perimeter-owned technical data
-- no direct `DMZ` dependency on the core `LPE` database is introduced
-- `5432` remains non-public and tightly scoped
+- `LPE` remains the only system of record for user-visible product state
+- `LPE-CT` databases remain limited to perimeter-owned technical data
+- `5432` stays private and documented
+- no direct `DMZ` path to the core `LPE` database is introduced
+- spool and quarantine ownership stay under `LPE-CT`

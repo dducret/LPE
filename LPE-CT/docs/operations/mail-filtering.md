@@ -89,6 +89,7 @@ The resulting decision trace is persisted with the queued message JSON in the lo
 
 - `greylist/`: first-seen triplets and release timestamps
 - `policy/reputation.json`: simple accumulated reputation counters
+- `policy/<rule>.json`: local throttling windows keyed by routing/throttle rule
 
 Message trace files now also persist:
 
@@ -149,6 +150,8 @@ The decision matrix is now intentionally stricter:
 This implementation executes inbound SPF, DKIM, and DMARC verification, DNSBL checks, greylisting, reputation weighting, and detailed trace persistence.
 
 It also now executes outbound routing selection, local throttling, and SMTP-result classification into `relayed`, `deferred`, `bounced`, or `failed`, with structured `DSN`/technical trace feedback for the `LPE` worker.
+
+If those policy artifacts outgrow flat files, they may move into a dedicated private `LPE-CT` database on non-public `5432`, but only as technical perimeter state and never as canonical mailbox state.
 
 It does not yet add:
 

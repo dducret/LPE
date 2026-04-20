@@ -253,18 +253,26 @@ struct ReputationEntry {
 
 const GREYLIST_DELAY_SECONDS: u64 = 90;
 
+pub(crate) const SPOOL_QUEUES: [&str; 9] = [
+    "incoming",
+    "deferred",
+    "quarantine",
+    "held",
+    "bounces",
+    "sent",
+    "outbound",
+    "policy",
+    "greylist",
+];
+
+pub(crate) const POLICY_ARTIFACTS: [&str; 3] = [
+    "policy/reputation.json",
+    "policy/<throttle>.json",
+    "greylist/<triplet>.json",
+];
+
 pub(crate) fn initialize_spool(spool_dir: &Path) -> Result<()> {
-    for queue in [
-        "incoming",
-        "deferred",
-        "quarantine",
-        "held",
-        "bounces",
-        "sent",
-        "outbound",
-        "policy",
-        "greylist",
-    ] {
+    for queue in SPOOL_QUEUES {
         fs::create_dir_all(spool_dir.join(queue))
             .with_context(|| format!("unable to create spool queue {queue}"))?;
     }
@@ -2637,6 +2645,7 @@ mod tests {
         AuthenticationAssessment, DkimDisposition, FilterAction, GreylistEntry,
         OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig, SpfDisposition,
     };
+    use crate::ENV_LOCK;
     use axum::{routing::post, Json, Router};
     use email_auth::{dkim::DkimResult, dmarc::Disposition as DmarcDisposition, spf::SpfResult};
     use lpe_domain::{
@@ -2656,8 +2665,6 @@ mod tests {
         net::{TcpListener, TcpStream},
     };
     use uuid::Uuid;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn temp_dir(label: &str) -> PathBuf {
         let suffix = SystemTime::now()
