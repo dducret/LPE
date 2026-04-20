@@ -56,7 +56,7 @@ prompt_println() {
 prompt_read_line() {
   local __resultvar="$1"
   local input_target
-  local value
+  local value=""
 
   input_target="$(prompt_input_target)"
   IFS= read -r value < "${input_target}" || true
@@ -67,7 +67,7 @@ prompt_read_secret() {
   local __resultvar="$1"
   local input_target
   local output_target
-  local value
+  local value=""
 
   input_target="$(prompt_input_target)"
   output_target="$(prompt_output_target)"
@@ -79,7 +79,8 @@ prompt_read_secret() {
 print_section() {
   local title="$1"
   if is_interactive_install; then
-    prompt_print "\n${title}\n"
+    prompt_println ""
+    prompt_println "${title}"
   fi
 }
 
