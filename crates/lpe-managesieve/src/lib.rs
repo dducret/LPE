@@ -15,7 +15,10 @@ pub type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a
 
 pub trait ManageSieveStore: Clone + Send + Sync + 'static {
     fn fetch_account_login<'a>(&'a self, email: &'a str) -> StoreFuture<'a, Option<AccountLogin>>;
-    fn list_sieve_scripts<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<SieveScriptSummary>>;
+    fn list_sieve_scripts<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<SieveScriptSummary>>;
     fn get_sieve_script<'a>(
         &'a self,
         account_id: Uuid,
@@ -165,7 +168,9 @@ async fn handle_connection<S: ManageSieveStore>(store: S, stream: TcpStream) -> 
             "CAPABILITY" => write_capability(&mut writer).await?,
             "AUTHENTICATE" => {
                 authenticated = Some(authenticate(&store, &request.arguments).await?);
-                writer.write_all(b"OK \"authentication successful\"\r\n").await?;
+                writer
+                    .write_all(b"OK \"authentication successful\"\r\n")
+                    .await?;
             }
             "NOOP" => writer.write_all(b"OK\r\n").await?,
             "LOGOUT" => {
@@ -248,7 +253,11 @@ async fn handle_connection<S: ManageSieveStore>(store: S, stream: TcpStream) -> 
                         AuditEntryInput {
                             actor: account.email.clone(),
                             action: "mail.sieve.set-active".to_string(),
-                            subject: if name.is_empty() { "<none>".to_string() } else { name },
+                            subject: if name.is_empty() {
+                                "<none>".to_string()
+                            } else {
+                                name
+                            },
                         },
                     )
                     .await?;
@@ -546,10 +555,7 @@ mod tests {
                     account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
                     email: "alice@example.test".to_string(),
                     password_hash: Argon2::default()
-                        .hash_password(
-                            b"secret",
-                            &SaltString::generate(&mut OsRng),
-                        )
+                        .hash_password(b"secret", &SaltString::generate(&mut OsRng))
                         .unwrap()
                         .to_string(),
                     status: "active".to_string(),
@@ -697,8 +703,7 @@ mod tests {
 
     #[test]
     fn parses_putscript_request_line_with_literal_plus() {
-        let (command, arguments, literal) =
-            parse_request_line("PUTSCRIPT \"main\" {12+}").unwrap();
+        let (command, arguments, literal) = parse_request_line("PUTSCRIPT \"main\" {12+}").unwrap();
         assert_eq!(command, "PUTSCRIPT");
         assert_eq!(as_string(&arguments[0]).unwrap(), "main");
         assert_eq!(literal, Some(12));

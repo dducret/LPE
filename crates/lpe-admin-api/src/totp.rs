@@ -36,7 +36,11 @@ pub fn verify_code(secret: &str, code: &str, unix_time: u64) -> bool {
 
 pub fn otpauth_url(hostname: &str, email: &str, label: &str, secret: &str) -> String {
     let issuer = url_encode(hostname.trim());
-    let account_label = url_encode(&format!("{} ({})", label.trim(), email.trim().to_lowercase()));
+    let account_label = url_encode(&format!(
+        "{} ({})",
+        label.trim(),
+        email.trim().to_lowercase()
+    ));
     format!(
         "otpauth://totp/{issuer}:{account_label}?secret={secret}&issuer={issuer}&algorithm=SHA256&digits={TOTP_DIGITS}&period={TOTP_STEP_SECONDS}"
     )
@@ -146,7 +150,9 @@ mod tests {
     fn generated_secret_is_base32() {
         let secret = generate_secret();
         assert!(!secret.is_empty());
-        assert!(secret.chars().all(|ch| ch.is_ascii_uppercase() || ('2'..='7').contains(&ch)));
+        assert!(secret
+            .chars()
+            .all(|ch| ch.is_ascii_uppercase() || ('2'..='7').contains(&ch)));
     }
 
     #[test]

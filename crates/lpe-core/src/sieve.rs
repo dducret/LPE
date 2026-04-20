@@ -657,12 +657,15 @@ mod tests {
             envelope_from: "sender@example.test".to_string(),
             envelope_to: "alice@example.test".to_string(),
             headers: BTreeMap::from([
+                ("subject".to_string(), vec!["Quarterly report".to_string()]),
                 (
-                    "subject".to_string(),
-                    vec!["Quarterly report".to_string()],
+                    "from".to_string(),
+                    vec!["Sender <sender@example.test>".to_string()],
                 ),
-                ("from".to_string(), vec!["Sender <sender@example.test>".to_string()]),
-                ("to".to_string(), vec!["Alice <alice@example.test>".to_string()]),
+                (
+                    "to".to_string(),
+                    vec!["Alice <alice@example.test>".to_string()],
+                ),
             ]),
         }
     }

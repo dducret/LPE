@@ -222,7 +222,9 @@ fn render_metrics() -> String {
         ));
     }
 
-    output.push_str("# HELP lpe_mail_submissions_total Canonical submitted messages accepted by LPE.\n");
+    output.push_str(
+        "# HELP lpe_mail_submissions_total Canonical submitted messages accepted by LPE.\n",
+    );
     output.push_str("# TYPE lpe_mail_submissions_total counter\n");
     for (source, value) in &guard.mail_submissions_total {
         output.push_str(&format!(
@@ -232,7 +234,9 @@ fn render_metrics() -> String {
         ));
     }
 
-    output.push_str("# HELP lpe_mail_inbound_deliveries_total Final inbound deliveries accepted from LPE-CT.\n");
+    output.push_str(
+        "# HELP lpe_mail_inbound_deliveries_total Final inbound deliveries accepted from LPE-CT.\n",
+    );
     output.push_str("# TYPE lpe_mail_inbound_deliveries_total counter\n");
     for (status, value) in &guard.inbound_deliveries_total {
         output.push_str(&format!(
@@ -252,7 +256,8 @@ fn render_metrics() -> String {
         ));
     }
 
-    output.push_str("# HELP lpe_outbound_worker_batch_size_last Last outbound worker batch size.\n");
+    output
+        .push_str("# HELP lpe_outbound_worker_batch_size_last Last outbound worker batch size.\n");
     output.push_str("# TYPE lpe_outbound_worker_batch_size_last gauge\n");
     output.push_str(&format!(
         "lpe_outbound_worker_batch_size_last {}\n",
@@ -266,7 +271,9 @@ fn render_metrics() -> String {
         guard.outbound_worker_last_poll_timestamp_seconds
     ));
 
-    output.push_str("# HELP lpe_security_events_total Security-significant events observed by LPE.\n");
+    output.push_str(
+        "# HELP lpe_security_events_total Security-significant events observed by LPE.\n",
+    );
     output.push_str("# TYPE lpe_security_events_total counter\n");
     for (event, value) in &guard.security_events_total {
         output.push_str(&format!(
@@ -282,7 +289,12 @@ fn render_metrics() -> String {
 fn metrics_enabled() -> bool {
     env::var("LPE_METRICS_ENABLED")
         .ok()
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(true)
 }
 

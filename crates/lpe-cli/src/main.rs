@@ -1,8 +1,8 @@
 use anyhow::Result;
 use lpe_admin_api::{
-    bootstrap_admin, bootstrap_admin_request_from_env, bootstrap_admin_request_from_env_or_defaults, init_observability,
-    integration_shared_secret, observe_outbound_worker_dispatch, observe_outbound_worker_poll,
-    router,
+    bootstrap_admin, bootstrap_admin_request_from_env,
+    bootstrap_admin_request_from_env_or_defaults, init_observability, integration_shared_secret,
+    observe_outbound_worker_dispatch, observe_outbound_worker_poll, router,
 };
 use lpe_domain::{OutboundMessageHandoffRequest, OutboundMessageHandoffResponse};
 use lpe_imap::ImapServer;
@@ -24,8 +24,8 @@ async fn main() -> Result<()> {
         env::var("LPE_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8080".to_string());
     let imap_bind_address =
         env::var("LPE_IMAP_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:1143".to_string());
-    let managesieve_bind_address = env::var("LPE_MANAGESIEVE_BIND_ADDRESS")
-        .unwrap_or_else(|_| "127.0.0.1:4190".to_string());
+    let managesieve_bind_address =
+        env::var("LPE_MANAGESIEVE_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:4190".to_string());
     let database_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://lpe:change-me@localhost:5432/lpe".to_string());
     integration_shared_secret()?;
