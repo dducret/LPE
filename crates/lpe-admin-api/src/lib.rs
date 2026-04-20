@@ -38,21 +38,20 @@ use tokio::io::AsyncWriteExt;
 use tracing::info;
 use uuid::Uuid;
 
+mod account_oidc;
 mod client_config;
 mod observability;
-mod account_oidc;
 mod oidc;
 mod totp;
 mod types;
 
 use crate::types::{
     AccountAppPasswordsResponse, AccountAuthFactorsResponse, AdminAuthFactorsResponse, ApiResult,
-    AttachmentSupportResponse, BootstrapAdminRequest, BootstrapAdminResponse,
-    ClientLoginResponse, ClientOidcMetadataResponse, ClientOidcStartResponse,
-    ClientOauthAccessTokenResponse,
-    CollaborationOverviewResponse, CreateAccountAppPasswordRequest, CreateAccountAppPasswordResponse,
-    CreateClientOauthAccessTokenRequest,
-    CreateAccountRequest, CreateAliasRequest, CreateDomainRequest, CreateFilterRuleRequest,
+    AttachmentSupportResponse, BootstrapAdminRequest, BootstrapAdminResponse, ClientLoginResponse,
+    ClientOauthAccessTokenResponse, ClientOidcMetadataResponse, ClientOidcStartResponse,
+    CollaborationOverviewResponse, CreateAccountAppPasswordRequest,
+    CreateAccountAppPasswordResponse, CreateAccountRequest, CreateAliasRequest,
+    CreateClientOauthAccessTokenRequest, CreateDomainRequest, CreateFilterRuleRequest,
     CreateMailboxRequest, CreatePstTransferJobRequest, CreateServerAdministratorRequest,
     EmailTraceSearchRequest, EnrollTotpRequest, EnrollTotpResponse, LocalAiHealthResponse,
     LoginRequest, LoginResponse, OidcMetadataResponse, OidcStartResponse, ReadinessCheck,
@@ -86,11 +85,26 @@ pub fn router(storage: Storage) -> Router {
         .route("/mail/auth/me", get(client_me))
         .route("/mail/auth/factors", get(account_auth_factors))
         .route("/mail/auth/factors/totp/enroll", post(enroll_account_totp))
-        .route("/mail/auth/factors/totp/verify", post(verify_account_totp_factor))
-        .route("/mail/auth/factors/{factor_id}", delete(revoke_account_factor))
-        .route("/mail/auth/app-passwords", get(list_account_app_passwords).post(create_account_app_password))
-        .route("/mail/auth/app-passwords/{app_password_id}", delete(revoke_account_app_password))
-        .route("/mail/auth/oauth/access-token", post(create_client_oauth_access_token))
+        .route(
+            "/mail/auth/factors/totp/verify",
+            post(verify_account_totp_factor),
+        )
+        .route(
+            "/mail/auth/factors/{factor_id}",
+            delete(revoke_account_factor),
+        )
+        .route(
+            "/mail/auth/app-passwords",
+            get(list_account_app_passwords).post(create_account_app_password),
+        )
+        .route(
+            "/mail/auth/app-passwords/{app_password_id}",
+            delete(revoke_account_app_password),
+        )
+        .route(
+            "/mail/auth/oauth/access-token",
+            post(create_client_oauth_access_token),
+        )
         .route("/mail/auth/oidc/metadata", get(client_oidc_metadata))
         .route("/mail/auth/oidc/start", get(client_oidc_start))
         .route("/mail/auth/oidc/callback", get(client_oidc_callback))
@@ -617,7 +631,8 @@ async fn client_login(
         .map_err(internal_error)?
         .ok_or((StatusCode::UNAUTHORIZED, "invalid credentials".to_string()))?;
 
-    if candidate.status != "active" || !verify_password(&candidate.password_hash, &request.password) {
+    if candidate.status != "active" || !verify_password(&candidate.password_hash, &request.password)
+    {
         let _ = storage
             .append_audit_event(
                 &candidate.tenant_id,
@@ -781,7 +796,10 @@ async fn verify_account_totp_factor(
         .fetch_pending_account_factor_secret(&account.email, request.factor_id)
         .await
         .map_err(internal_error)?
-        .ok_or((StatusCode::NOT_FOUND, "pending factor not found".to_string()))?;
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            "pending factor not found".to_string(),
+        ))?;
     if !totp::verify_code(&secret, &request.code, totp::unix_time()) {
         return Err((StatusCode::UNAUTHORIZED, "invalid TOTP code".to_string()));
     }
@@ -1526,7 +1544,11 @@ async fn update_security_settings(
                         .to_string(),
                     mailbox_oidc_authorization_endpoint: request
                         .mailbox_oidc_authorization_endpoint
-                        .unwrap_or(existing.security_settings.mailbox_oidc_authorization_endpoint)
+                        .unwrap_or(
+                            existing
+                                .security_settings
+                                .mailbox_oidc_authorization_endpoint,
+                        )
                         .trim()
                         .to_string(),
                     mailbox_oidc_token_endpoint: request
@@ -2111,6 +2133,15 @@ async fn deliver_inbound_message(
     Json(request): Json<InboundDeliveryRequest>,
 ) -> ApiResult<InboundDeliveryResponse> {
     require_integration(&headers)?;
+    if !ha_allows_active_work().map_err(internal_error)? {
+        let role = ha_current_role()
+            .map_err(internal_error)?
+            .unwrap_or_else(|| "standby".to_string());
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("node role {role} does not accept LPE-CT inbound deliveries"),
+        ));
+    }
     let trace_id = request.trace_id.clone();
     let internet_message_id = request.internet_message_id.clone();
     let recipient_count = request.rcpt_to.len();
@@ -2635,6 +2666,17 @@ pub fn init_observability(service_name: &str) {
     observability::init_tracing(service_name);
 }
 
+pub fn ha_allows_active_work() -> anyhow::Result<bool> {
+    match read_ha_role()? {
+        None => Ok(true),
+        Some(role) => Ok(role == "active"),
+    }
+}
+
+pub fn ha_current_role() -> anyhow::Result<Option<String>> {
+    read_ha_role()
+}
+
 pub fn observe_outbound_worker_poll(batch_size: usize) {
     observability::record_outbound_worker_poll(batch_size);
 }
@@ -2722,7 +2764,8 @@ fn generate_app_password_secret() -> String {
 mod tests {
     use super::{
         bootstrap_admin_request_from_env, bootstrap_admin_request_from_env_or_defaults,
-        ha_activation_check, integration_shared_secret, validate_uploaded_pst_file_with_validator,
+        ha_activation_check, ha_allows_active_work, integration_shared_secret,
+        validate_uploaded_pst_file_with_validator,
     };
     use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
     use std::{
@@ -2900,6 +2943,24 @@ mod tests {
         let invalid = ha_activation_check();
         assert_eq!(invalid.status, "failed");
         assert!(invalid.detail.contains("unsupported role"));
+
+        std::env::remove_var("LPE_HA_ROLE_FILE");
+    }
+
+    #[test]
+    fn ha_active_work_follows_role_file() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let role_file = temp_file("ha-active-work");
+
+        std::env::remove_var("LPE_HA_ROLE_FILE");
+        assert!(ha_allows_active_work().unwrap());
+
+        std::env::set_var("LPE_HA_ROLE_FILE", &role_file);
+        fs::write(&role_file, b"active\n").unwrap();
+        assert!(ha_allows_active_work().unwrap());
+
+        fs::write(&role_file, b"maintenance\n").unwrap();
+        assert!(!ha_allows_active_work().unwrap());
 
         std::env::remove_var("LPE_HA_ROLE_FILE");
     }

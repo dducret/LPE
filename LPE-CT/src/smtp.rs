@@ -430,9 +430,7 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
         antivirus_enabled: dashboard.policies.antivirus_enabled,
         antivirus_fail_closed: dashboard.policies.antivirus_fail_closed,
         antivirus_provider_chain: dashboard.policies.antivirus_provider_chain.clone(),
-        antivirus_providers: load_antivirus_providers(
-            &dashboard.policies.antivirus_provider_chain,
-        ),
+        antivirus_providers: load_antivirus_providers(&dashboard.policies.antivirus_provider_chain),
         bayespam_enabled: dashboard.policies.bayespam_enabled,
         bayespam_auto_learn: dashboard.policies.bayespam_auto_learn,
         bayespam_score_weight: dashboard.policies.bayespam_score_weight,
@@ -690,9 +688,10 @@ pub(crate) async fn process_outbound_handoff(
         message.decision_trace.push(DecisionTraceEntry {
             stage: "outbound-policy".to_string(),
             outcome: "quarantine".to_string(),
-            detail: message.relay_error.clone().unwrap_or_else(|| {
-                "antivirus provider requested quarantine".to_string()
-            }),
+            detail: message
+                .relay_error
+                .clone()
+                .unwrap_or_else(|| "antivirus provider requested quarantine".to_string()),
         });
         move_message(spool_dir, &message, "outbound", "quarantine").await?;
         persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
@@ -1049,6 +1048,16 @@ async fn handle_smtp_session(
     let mut helo = String::new();
     let mut mail_from = String::new();
     let mut rcpt_to = Vec::new();
+
+    if let Some(role) = crate::ha_non_active_role_for_traffic()? {
+        write_smtp(
+            &mut writer,
+            &format!("421 node role {role} is not accepting SMTP traffic"),
+        )
+        .await?;
+        observability::record_smtp_session("ha-blocked");
+        return Ok(());
+    }
 
     write_smtp(&mut writer, "220 LPE-CT ESMTP ready").await?;
     loop {
@@ -1450,7 +1459,11 @@ async fn evaluate_antivirus_policy(
             },
             reason: config.antivirus_fail_closed.then_some(detail),
             spam_score_delta: 0.0,
-            security_score_delta: if config.antivirus_fail_closed { 2.0 } else { 0.0 },
+            security_score_delta: if config.antivirus_fail_closed {
+                2.0
+            } else {
+                0.0
+            },
             decision_trace,
         });
     }
@@ -1478,7 +1491,11 @@ async fn evaluate_antivirus_policy(
             },
             reason: config.antivirus_fail_closed.then_some(detail),
             spam_score_delta: 0.0,
-            security_score_delta: if config.antivirus_fail_closed { 2.0 } else { 0.0 },
+            security_score_delta: if config.antivirus_fail_closed {
+                2.0
+            } else {
+                0.0
+            },
             decision_trace,
         });
     }
@@ -1495,10 +1512,7 @@ async fn evaluate_antivirus_policy(
                         AntivirusProviderDecision::Infected => "infected",
                     }
                     .to_string(),
-                    detail: format!(
-                        "{}: {}",
-                        outcome.provider_name, outcome.summary
-                    ),
+                    detail: format!("{}: {}", outcome.provider_name, outcome.summary),
                 });
                 match outcome.decision {
                     AntivirusProviderDecision::Clean => {}
@@ -1573,15 +1587,15 @@ fn prepare_antivirus_scan_target(
     direction: &str,
     message_bytes: &[u8],
 ) -> Result<AntivirusScanTarget> {
-    let root = env::temp_dir().join(format!(
-        "lpe-ct-av-{}-{}",
-        direction,
-        uuid::Uuid::new_v4()
-    ));
+    let root = env::temp_dir().join(format!("lpe-ct-av-{}-{}", direction, uuid::Uuid::new_v4()));
     fs::create_dir_all(&root)
         .with_context(|| format!("unable to create antivirus scan target {}", root.display()))?;
-    fs::write(root.join("message.eml"), message_bytes)
-        .with_context(|| format!("unable to write antivirus message artifact {}", root.display()))?;
+    fs::write(root.join("message.eml"), message_bytes).with_context(|| {
+        format!(
+            "unable to write antivirus message artifact {}",
+            root.display()
+        )
+    })?;
 
     let attachments = collect_mime_attachment_parts(message_bytes)?;
     for (index, attachment) in attachments.iter().enumerate() {
@@ -1599,8 +1613,16 @@ fn prepare_antivirus_scan_target(
             .map(sanitize_attachment_component)
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| format!("attachment-{}", index + 1));
-        fs::write(root.join(format!("{:02}-{}{}", index + 1, file_name, extension)), &attachment.bytes)
-            .with_context(|| format!("unable to write antivirus attachment artifact {}", root.display()))?;
+        fs::write(
+            root.join(format!("{:02}-{}{}", index + 1, file_name, extension)),
+            &attachment.bytes,
+        )
+        .with_context(|| {
+            format!(
+                "unable to write antivirus attachment artifact {}",
+                root.display()
+            )
+        })?;
     }
 
     Ok(AntivirusScanTarget {
@@ -1642,10 +1664,12 @@ async fn run_antivirus_provider(
     if !path_explicitly_bound {
         command.arg(&target.root);
     }
-    let output = command
-        .output()
-        .await
-        .with_context(|| format!("unable to execute antivirus provider {}", provider.display_name))?;
+    let output = command.output().await.with_context(|| {
+        format!(
+            "unable to execute antivirus provider {}",
+            provider.display_name
+        )
+    })?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     parse_antivirus_output(provider, &stdout, &stderr, output.status.code())
@@ -1761,7 +1785,8 @@ async fn evaluate_inbound_policy(
     decision_trace.push(DecisionTraceEntry {
         stage: "pipeline".to_string(),
         outcome: "start".to_string(),
-        detail: "running inbound edge pipeline: rbl/dns, bayespam, antivirus chain, final scoring".to_string(),
+        detail: "running inbound edge pipeline: rbl/dns, bayespam, antivirus chain, final scoring"
+            .to_string(),
     });
 
     if let Some(ip) = peer_ip {
@@ -1898,7 +1923,7 @@ async fn evaluate_inbound_policy(
     security_score += antivirus_verdict.security_score_delta;
     if antivirus_verdict.action == FilterAction::Quarantine {
         if let Some(reason) = antivirus_verdict.reason.clone() {
-        quarantine_reasons.push(reason);
+            quarantine_reasons.push(reason);
         }
     }
     decision_trace.extend(antivirus_verdict.decision_trace);
@@ -3233,11 +3258,7 @@ fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
         quarantine_enabled: bool_at(&value, &["policies", "quarantine_enabled"], true),
         greylisting_enabled: bool_at(&value, &["policies", "greylisting_enabled"], true),
         antivirus_enabled: bool_at(&value, &["policies", "antivirus_enabled"], false),
-        antivirus_fail_closed: bool_at(
-            &value,
-            &["policies", "antivirus_fail_closed"],
-            true,
-        ),
+        antivirus_fail_closed: bool_at(&value, &["policies", "antivirus_fail_closed"], true),
         antivirus_provider_chain: strings_at(
             &value,
             &["policies", "antivirus_provider_chain"],
@@ -3739,13 +3760,14 @@ mod tests {
     use super::{
         apply_authentication_scores, classify_inbound_message, compose_rfc822_message,
         dkim_disposition, dnsbl_query_name, encode_quoted_printable, evaluate_greylisting,
-        initialize_spool, load_antivirus_providers, load_bayespam_corpus, load_reputation_score,
-        parse_antivirus_output, parse_peer_ip, process_outbound_handoff, receive_message,
-        receive_message_with_validator, retry_after_seconds, score_bayespam, spf_disposition,
-        stable_key_id, summarize_dkim, summarize_dmarc, summarize_spf, train_bayespam, unix_now,
-        update_reputation, AntivirusProviderConfig, AntivirusProviderDecision, AuthSummary,
-        AuthenticationAssessment, BayesLabel, DkimDisposition, FilterAction, GreylistEntry,
-        OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig, SpfDisposition,
+        handle_smtp_session, initialize_spool, load_antivirus_providers, load_bayespam_corpus,
+        load_reputation_score, parse_antivirus_output, parse_peer_ip, process_outbound_handoff,
+        receive_message, receive_message_with_validator, retry_after_seconds, score_bayespam,
+        spf_disposition, stable_key_id, summarize_dkim, summarize_dmarc, summarize_spf,
+        train_bayespam, unix_now, update_reputation, AntivirusProviderConfig,
+        AntivirusProviderDecision, AuthSummary, AuthenticationAssessment, BayesLabel,
+        DkimDisposition, FilterAction, GreylistEntry, OutboundRoutingRule, OutboundThrottleRule,
+        QueuedMessage, RuntimeConfig, SpfDisposition,
     };
     use crate::ENV_LOCK;
     use axum::{routing::post, Json, Router};
@@ -3919,6 +3941,40 @@ mod tests {
         assert!(raw.contains("Subject: Relay test"));
         assert!(raw.contains("Content-Type: text/plain; charset=utf-8"));
         assert!(raw.contains("Content-Transfer-Encoding: quoted-printable"));
+    }
+
+    #[tokio::test]
+    async fn smtp_session_rejects_when_ha_role_is_standby() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let spool = temp_dir("smtp-standby");
+        initialize_spool(&spool).unwrap();
+        let role_file = spool.join("ha-role");
+        std::fs::write(&role_file, b"standby\n").unwrap();
+        std::env::set_var("LPE_CT_HA_ROLE_FILE", &role_file);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let spool_for_server = spool.clone();
+        let server = tokio::spawn(async move {
+            let (stream, peer) = listener.accept().await.unwrap();
+            handle_smtp_session(
+                stream,
+                peer,
+                spool_for_server.join("state.json"),
+                spool_for_server,
+            )
+            .await
+            .unwrap();
+        });
+
+        let client = TcpStream::connect(address).await.unwrap();
+        let mut reader = BufReader::new(client);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        assert!(line.starts_with("421 node role standby"));
+
+        server.await.unwrap();
+        std::env::remove_var("LPE_CT_HA_ROLE_FILE");
     }
 
     #[tokio::test]
@@ -4414,8 +4470,14 @@ mod tests {
         let providers = load_antivirus_providers(&["takeri".to_string()]);
         assert_eq!(providers.len(), 1);
         assert_eq!(providers[0].id, "takeri");
-        assert_eq!(providers[0].command, "/opt/lpe-ct/bin/Shuhari-CyberForge-CLI");
-        assert_eq!(providers[0].args, vec!["takeri".to_string(), "scan".to_string()]);
+        assert_eq!(
+            providers[0].command,
+            "/opt/lpe-ct/bin/Shuhari-CyberForge-CLI"
+        );
+        assert_eq!(
+            providers[0].args,
+            vec!["takeri".to_string(), "scan".to_string()]
+        );
     }
 
     #[test]
@@ -4458,7 +4520,8 @@ mod tests {
         .unwrap();
         assert_eq!(suspicious.decision, AntivirusProviderDecision::Suspicious);
 
-        let clean = parse_antivirus_output(&provider, "No threats detected.\n", "", Some(0)).unwrap();
+        let clean =
+            parse_antivirus_output(&provider, "No threats detected.\n", "", Some(0)).unwrap();
         assert_eq!(clean.decision, AntivirusProviderDecision::Clean);
     }
 

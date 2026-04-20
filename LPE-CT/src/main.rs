@@ -605,6 +605,12 @@ async fn outbound_handoff(
     let message_id = payload.message_id;
     let internet_message_id = payload.internet_message_id.clone();
     require_integration_key(&headers)?;
+    if let Some(role) = ha_non_active_role_for_traffic().map_err(ApiError::from)? {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("node role {role} does not accept outbound handoff traffic"),
+        ));
+    }
     let snapshot = read_state(&state)?;
     let runtime = smtp::runtime_config_from_dashboard(&snapshot);
     let response = smtp::process_outbound_handoff(&state.spool_dir, &runtime, payload)
@@ -1286,6 +1292,13 @@ fn read_ha_role() -> Result<Option<String>> {
     Ok(Some(normalized))
 }
 
+pub(crate) fn ha_non_active_role_for_traffic() -> Result<Option<String>> {
+    Ok(match read_ha_role()? {
+        Some(role) if role != "active" => Some(role),
+        _ => None,
+    })
+}
+
 fn ha_activation_check() -> ReadinessCheck {
     match read_ha_role() {
         Ok(None) => readiness_ok(
@@ -1644,7 +1657,8 @@ fn is_known_weak_secret(value: &str) -> bool {
 mod tests {
     use super::{
         address_binds_publicly, apply_env_overrides, default_state, ha_activation_check,
-        integration_shared_secret, normalize_local_data_stores, ENV_LOCK,
+        ha_non_active_role_for_traffic, integration_shared_secret, normalize_local_data_stores,
+        ENV_LOCK,
     };
     use std::{
         fs,
@@ -1702,6 +1716,27 @@ mod tests {
         let invalid = ha_activation_check();
         assert_eq!(invalid.status, "failed");
         assert!(invalid.detail.contains("unsupported role"));
+
+        std::env::remove_var("LPE_CT_HA_ROLE_FILE");
+    }
+
+    #[test]
+    fn ha_non_active_gate_reports_non_active_roles() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let role_file = temp_file("lpe-ct-ha-gate");
+
+        std::env::remove_var("LPE_CT_HA_ROLE_FILE");
+        assert_eq!(ha_non_active_role_for_traffic().unwrap(), None);
+
+        std::env::set_var("LPE_CT_HA_ROLE_FILE", &role_file);
+        fs::write(&role_file, b"active\n").unwrap();
+        assert_eq!(ha_non_active_role_for_traffic().unwrap(), None);
+
+        fs::write(&role_file, b"standby\n").unwrap();
+        assert_eq!(
+            ha_non_active_role_for_traffic().unwrap().as_deref(),
+            Some("standby")
+        );
 
         std::env::remove_var("LPE_CT_HA_ROLE_FILE");
     }

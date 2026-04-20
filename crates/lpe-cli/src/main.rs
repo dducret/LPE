@@ -1,8 +1,9 @@
 use anyhow::Result;
 use lpe_admin_api::{
     bootstrap_admin, bootstrap_admin_request_from_env,
-    bootstrap_admin_request_from_env_or_defaults, init_observability, integration_shared_secret,
-    observe_outbound_worker_dispatch, observe_outbound_worker_poll, router,
+    bootstrap_admin_request_from_env_or_defaults, ha_allows_active_work, ha_current_role,
+    init_observability, integration_shared_secret, observe_outbound_worker_dispatch,
+    observe_outbound_worker_poll, router,
 };
 use lpe_domain::{OutboundMessageHandoffRequest, OutboundMessageHandoffResponse};
 use lpe_imap::ImapServer;
@@ -119,7 +120,41 @@ async fn run_outbound_worker(storage: Storage) -> Result<()> {
         interval_ms
     );
 
+    let mut last_worker_gate_state: Option<String> = None;
     loop {
+        match ha_allows_active_work() {
+            Ok(true) => {
+                if last_worker_gate_state.as_deref() != Some("active") {
+                    let role = ha_current_role()
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| "default".to_string());
+                    info!(role = %role, "lpe outbound worker enabled on this node");
+                    last_worker_gate_state = Some("active".to_string());
+                }
+            }
+            Ok(false) => {
+                let role = ha_current_role()
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| "standby".to_string());
+                if last_worker_gate_state.as_deref() != Some(role.as_str()) {
+                    info!(role = %role, "lpe outbound worker paused because the node is not active");
+                    last_worker_gate_state = Some(role);
+                }
+                sleep(Duration::from_millis(interval_ms)).await;
+                continue;
+            }
+            Err(error) => {
+                if last_worker_gate_state.as_deref() != Some("error") {
+                    warn!(error = %error, "lpe outbound worker paused because HA role state is invalid");
+                    last_worker_gate_state = Some("error".to_string());
+                }
+                sleep(Duration::from_millis(interval_ms)).await;
+                continue;
+            }
+        }
+
         let batch = storage.fetch_outbound_handoff_batch(batch_size).await?;
         observe_outbound_worker_poll(batch.len());
         if batch.is_empty() {

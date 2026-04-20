@@ -18,7 +18,11 @@ The current codebase now implements the first operational HA step:
 - readiness now supports optional HA role gating through a local role file
 - the role file accepts `active`, `standby`, `drain`, or `maintenance`
 - when HA role gating is enabled, only `active` returns `ready`
+- the `LPE` outbound worker now pauses automatically on non-active nodes
+- the core inbound-delivery API now rejects `LPE-CT` traffic on non-active nodes
+- `LPE-CT` now rejects direct `SMTP` ingress and outbound handoff traffic on non-active nodes
 - Debian examples now include readiness probes, role-switch scripts, and `keepalived` example configurations for both zones
+- Debian examples now also include HA validation and spool-recovery scripts
 
 This keeps the single-node majority path unchanged while making the first `active/passive` failover implementable.
 
@@ -203,6 +207,7 @@ For both products:
 - `systemd` restart is the first line of recovery
 - health endpoints expose whether the restarted process is actually ready
 - when HA role gating is enabled, the local role file must be switched to `active` on the promoted node
+- non-active nodes now also stop accepting new active traffic at the application edge
 
 ### Core node recovery
 
@@ -230,6 +235,19 @@ If the active `LPE-CT` node is lost:
 6. verify final delivery toward the core VIP
 7. when the failed node returns, inspect its spool before reusing it
 
+### `LPE-CT` spool return to service
+
+When a failed `LPE-CT` node returns, the local spool must be treated as transport custody, not as disposable cache.
+
+The tracked recovery line is:
+
+1. keep the node in `maintenance` or `standby`
+2. inventory the queues with `lpe-ct-spool-recover.sh summary`
+3. inspect suspicious traces with `lpe-ct-spool-recover.sh show <trace-id>`
+4. requeue safe `deferred` or `held` items with `lpe-ct-spool-recover.sh requeue ...`
+5. keep `quarantine` under manual review
+6. only then return the node to service as `standby` or `active`
+
 ## Debian Trixie Operating Shape
 
 The first practical `Debian Trixie` operating model is:
@@ -238,6 +256,8 @@ The first practical `Debian Trixie` operating model is:
 - one separate `keepalived` instance for the `DMZ` VIP
 - `check-lpe-ready.sh` and `check-lpe-ct-ready.sh` as tracked readiness probes
 - `lpe-ha-set-role.sh` and `lpe-ct-ha-set-role.sh` as role-switch hooks
+- `test-ha-core-active-passive.sh` and `test-ha-lpe-ct-active-passive.sh` as local HA validation scenarios
+- `lpe-ct-spool-recover.sh` and `test-lpe-ct-spool-recovery.sh` as first spool-return tooling
 - one stable writer endpoint for `PostgreSQL`, promoted outside the application
 
 The example files are intentionally limited to the first HA step. They do not attempt to solve:

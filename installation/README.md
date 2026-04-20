@@ -36,6 +36,7 @@ For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trix
 The `LPE-CT` scripts also install an SMTP listener, a local spool in `/var/spool/lpe-ct`, and three test suites:
 
 For the first `active/passive` `DMZ` deployment step, `LPE-CT/installation/debian-trixie` also provides `check-lpe-ct-ready.sh`, `lpe-ct-ha-set-role.sh`, and `keepalived-lpe-ct.conf.example`.
+It now also provides `test-ha-lpe-ct-active-passive.sh`, `lpe-ct-spool-recover.sh`, and `test-lpe-ct-spool-recovery.sh` for traffic gating and spool return-to-service validation.
 
 The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL`, and `LPE_INTEGRATION_SHARED_SECRET` values across the two nodes. `LPE_INTEGRATION_SHARED_SECRET` is now mandatory on both sides at startup, must stay out of public interfaces, and must be set to a strong non-trivial value of at least `32` characters. The contract is documented in `docs/architecture/lpe-ct-integration.md`.
 
@@ -88,6 +89,7 @@ Files:
 - `check-lpe.sh` verifies the installation, PostgreSQL, the service, and the HTTP endpoints
 - `check-lpe-ready.sh` returns success only when the local `LPE` node is ready for traffic
 - `lpe-ha-set-role.sh` writes the local HA role (`active`, `standby`, `drain`, `maintenance`)
+- `test-ha-core-active-passive.sh` validates local core HA role gating and readiness transitions
 - `keepalived-lpe.conf.example` shows the minimal integration with a core-side VIP
 - `lpe.service` describes the initial systemd service
 - `lpe.nginx.conf` is the template used to generate the administration `nginx` site
@@ -202,5 +204,15 @@ During failover:
 3. switch the new master node to `active`
 4. switch the former master to `standby` or `maintenance`
 5. verify `curl http://127.0.0.1:8080/health/ready`
+
+For an `active/passive` `LPE-CT` pair:
+
+1. set `LPE_CT_HA_ROLE_FILE=/var/lib/lpe-ct/ha-role` in `/etc/lpe-ct/lpe-ct.env`
+2. initialize the active node with `LPE-CT/installation/debian-trixie/lpe-ct-ha-set-role.sh active`
+3. initialize the passive node with `LPE-CT/installation/debian-trixie/lpe-ct-ha-set-role.sh standby`
+4. use `check-lpe-ct-ready.sh` as the readiness probe for `keepalived` or an equivalent front end
+5. validate the node locally with `test-ha-lpe-ct-active-passive.sh`
+
+When a failed `LPE-CT` node returns, inventory and requeue its local spool with `lpe-ct-spool-recover.sh` before returning it to service.
 
 
