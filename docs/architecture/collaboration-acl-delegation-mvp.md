@@ -24,7 +24,7 @@ It does not introduce any parallel business-object storage. Rights are added as 
 
 ### Canonical MVP collection model
 
-Each account implicitly owns two canonical collections:
+Each account owns two canonical default collections:
 
 - its default `contacts` collection
 - its default `calendar` collection
@@ -32,9 +32,9 @@ Each account implicitly owns two canonical collections:
 The MVP does not yet create arbitrary persistent collections. It only exposes:
 
 - the owned `default` collection for the owner
-- virtual shared collections derived from grants for other accounts in the same tenant
+- shared collections derived from grants for other accounts in the same tenant
 
-Objects remain physically stored with their owner. A shared collection is therefore a rights projection over the owner's canonical objects, not a copy.
+Objects remain physically stored with their owner. A shared collection is therefore the owner's canonical collection exposed through durable rights, not a copy or adapter-local construct.
 
 ### Grant model
 
@@ -167,7 +167,7 @@ The modified-object detail intentionally remains small in this lot.
 
 ### Intentional MVP limits
 
-- collection-only granularity on the implicit default collections
+- collection-only granularity on the canonical default collections
 - no user-specific renaming of shared collections
 - no sophisticated multi-master conflict handling
 - no real-time rights-change notification

@@ -74,25 +74,25 @@ It remains a thin adapter above the canonical `tasks` table:
 - the canonical `tasks` row remains the single source of truth
 - no `JMAP`-specific task store, sync table, or rights model is introduced
 - all reads and writes remain scoped to the authenticated account
-- the exposed shape stays intentionally close to future `DAV` `VTODO` and `ActiveSync Tasks` reuse
+- the exposed shape stays close to future `DAV` `VTODO` and `ActiveSync Tasks` reuse
 
 #### Task list model
 
-The MVP exposes one virtual `TaskList` per authenticated account:
+The MVP exposes one canonical `TaskList` per authenticated account:
 
 - `TaskList.id`: `default`
 - `TaskList.role`: `inbox`
 - `TaskList.name`: `Tasks`
 - `TaskList` rights: read, create, update, and delete task items for the authenticated account only
 
-`TaskList/set` is rejected in the MVP because the canonical model currently has one personal task collection per account and does not yet model multiple task lists.
+`TaskList/set` is rejected in the MVP because the canonical model currently has one durable personal task collection per account and does not yet model multiple task lists.
 
 #### Canonical mapping
 
 The first `Task` mapping is:
 
 - `Task.id` and `Task.uid` -> canonical `tasks.id`
-- `Task.taskListId` -> virtual `default` task list
+- `Task.taskListId` -> canonical `default` task list
 - `Task.title` -> `tasks.title`
 - `Task.description` -> `tasks.description`
 - `Task.status` -> `tasks.status`
@@ -124,7 +124,7 @@ It remains a thin compatibility layer above the canonical `tasks` table:
 
 #### DAV collection model
 
-The MVP exposes one synthetic task collection per authenticated account:
+The MVP exposes one canonical task collection per authenticated account:
 
 - collection path: `/dav/calendars/me/tasks/`
 - collection display name: `Tasks`
@@ -191,7 +191,7 @@ The MVP sync contract is:
 - `Task/changes` fingerprints include canonical task content together with `sort_order` and `updated_at`
 - `Task/query` is ordered by `sort_order`, then `updated_at`, then `id`
 - `Task/queryChanges` treats `sort_order` moves as ordered-result changes so clients can reconcile task reordering
-- `TaskList/changes` uses the virtual single-list state only; there is no parallel list sync store
+- `TaskList/changes` uses the canonical default task-list state; there is no parallel list sync store
 
 ### Out of scope for the MVP
 

@@ -28,7 +28,7 @@ The `crates/lpe-jmap` crate acts as a `JMAP` adapter on top of the canonical mod
 - `urn:ietf:params:jmap:contacts`
 - `urn:ietf:params:jmap:calendars`
 
-The `JMAP` session exposes the authenticated mailbox account as the primary account and may expose additional accessible shared mailbox accounts in the session account map. Address books and calendars are virtual at the `JMAP` layer, but remain wired to canonical owned or shared data inside the same tenant.
+The `JMAP` session exposes the authenticated mailbox account as the primary account and may expose additional accessible shared mailbox accounts in the session account map. Address books and calendars are exposed as stable canonical collections inside the same tenant, with owned and shared access resolved from the same underlying collection rights.
 
 ### Supported methods
 
@@ -56,7 +56,7 @@ Calendars:
 
 #### Address book
 
-- the owner sees its virtual `default` address book
+- the owner sees its canonical `default` address book
 - extra shared address books may be exposed for same-tenant grants
 - `myRights` advertises read, write, delete, and share access according to the resolved canonical grant
 - `mayCreateTopLevel` remains `false`
@@ -72,11 +72,11 @@ The `JMAP` to `contacts` mapping is:
 - `phones.*.number` -> `contacts.phone`
 - `organizations.*.name` -> `contacts.team`
 - `notes.*.note` -> `contacts.notes`
-- `addressBookIds.{collectionId}` -> an owned or shared virtual collection resolved through the canonical ACL model
+- `addressBookIds.{collectionId}` -> an owned or shared canonical collection resolved through the canonical ACL model
 
 #### Calendar
 
-- the owner sees its virtual `default` calendar
+- the owner sees its canonical `default` calendar
 - extra shared calendars may be exposed for same-tenant grants
 - `myRights` advertises read, write, delete, and share access according to the resolved canonical grant
 - `mayCreateTopLevel` remains `false`
@@ -91,7 +91,7 @@ The `JMAP` to `calendar_events` mapping is:
 - `locations.*.name` -> `calendar_events.location`
 - `participants` -> canonical structured participant metadata stored in `calendar_events.attendees_json`, with attendee labels mirrored into `calendar_events.attendees`
 - `description` -> `calendar_events.notes`
-- `calendarIds.{collectionId}` -> an owned or shared virtual collection resolved through the canonical ACL model
+- `calendarIds.{collectionId}` -> an owned or shared canonical collection resolved through the canonical ACL model
 
 Organizer and participant status are exposed through `participants`:
 
@@ -105,7 +105,7 @@ Organizer and participant status are exposed through `participants`:
 - `CalendarEvent/set` directly creates, replaces, or deletes canonical `calendar_events` rows
 - `JMAP` reads use the same canonical objects as `CardDAV`, `CalDAV`, and `ActiveSync`
 - organizer and attendee status updates are stored only in canonical `calendar_events` metadata; there is no `JMAP`-only scheduling state
-- the owner keeps full rights on its `default` collection
+- the owner keeps full rights on its `default` canonical collection
 - an account in the same tenant may read or mutate a shared collection only through a canonical grant
 - cross-tenant access is not supported
 - rights changes are minimally audited through `audit_events`
@@ -113,7 +113,7 @@ Organizer and participant status are exposed through `participants`:
 
 ### Accepted MVP limitations
 
-- an owning account always has a `default` collection; extra shared collections may also be exposed
+- an owning account always has a durable `default` canonical collection; extra shared collections may also be exposed
 - ACLs remain at the implicit collection level; there is no per-contact or per-event ACL yet
 - sharing and delegation remain limited to the same tenant
 - `ContactCard/query` supports only ascending `name` sort and simple text filtering, with `inAddressBook` limited to one target collection
@@ -125,7 +125,7 @@ Organizer and participant status are exposed through `participants`:
 - updates are full-resource replacements; fine-grained property patches are not implemented
 - calendar participants are still mirrored as text for legacy fallback, but the canonical event metadata now stores one organizer plus attendee status and RSVP intent for interoperable adapters
 - no recurrence, alarms, free/busy, calendar attachments, or extended `VCARD` or `VCALENDAR` semantics
-- `AddressBook` and `Calendar` objects are virtual and cannot be modified through `set`
+- `AddressBook` and `Calendar` objects represent durable canonical collections and cannot be modified through `set` in the MVP
 - no user-specific renaming of shared collections
 - no fine-grained ACL history or real-time rights-change notifications
 
