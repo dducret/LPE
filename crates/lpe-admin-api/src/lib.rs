@@ -32,8 +32,9 @@ use lpe_storage::{
     MailboxDelegationGrantInput, NewAccount, NewAdminAuthFactor, NewAlias, NewDomain,
     NewFilterRule, NewMailbox, NewPstTransferJob, NewServerAdministrator, PstJobExecutionSummary,
     SavedDraftMessage, SecuritySettings, SenderDelegationGrant, SenderDelegationGrantInput,
-    SenderDelegationRight, ServerSettings, SieveScriptDocument, Storage, SubmitMessageInput,
-    SubmittedMessage, SubmittedRecipientInput, UpdateAccount, UpdateDomain,
+    SenderDelegationRight, ServerSettings, SieveScriptDocument, Storage,
+    SubmissionAccountIdentity, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    UpdateAccount, UpdateDomain,
     UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::env;
@@ -2562,8 +2563,9 @@ async fn accept_smtp_submission(
         email: request.account_email.trim().to_lowercase(),
         display_name: request.account_display_name.clone(),
     };
-    let submit_input =
-        build_smtp_submission_input(&principal, &request).map_err(bad_request_error)?;
+    let submit_input = build_smtp_submission_input(&storage, &principal, &request)
+        .await
+        .map_err(bad_request_error)?;
     let submitted = storage
         .submit_message(
             submit_input,
@@ -2595,10 +2597,13 @@ async fn accept_smtp_submission(
     }))
 }
 
-fn build_smtp_submission_input(
+async fn build_smtp_submission_input(
+    storage: &Storage,
     principal: &AccountPrincipal,
     request: &SmtpSubmissionRequest,
 ) -> anyhow::Result<SubmitMessageInput> {
+    let parsed = lpe_storage::mail::parse_rfc822_message(&request.raw_message)?;
+    validate_smtp_submission_attachments(&request.raw_message)?;
     let envelope_from = request
         .mail_from
         .trim()
@@ -2607,27 +2612,37 @@ fn build_smtp_submission_input(
     if envelope_from.is_empty() {
         anyhow::bail!("smtp submission requires MAIL FROM");
     }
-    if envelope_from != principal.email {
-        anyhow::bail!("authenticated account cannot submit a different envelope sender");
-    }
     if request.rcpt_to.is_empty() {
         anyhow::bail!("smtp submission requires at least one RCPT TO recipient");
     }
 
-    let parsed = lpe_storage::mail::parse_rfc822_message(&request.raw_message)?;
-    validate_smtp_submission_attachments(&request.raw_message)?;
     let from = parsed
         .from
         .as_ref()
         .map(|address| address.email.trim().to_lowercase())
         .unwrap_or_else(|| principal.email.clone());
-    if from != principal.email {
-        anyhow::bail!("authenticated account cannot submit a different From address");
+    let owner = if from == principal.email {
+        SubmissionAccountIdentity {
+            account_id: principal.account_id,
+            email: principal.email.clone(),
+            display_name: principal.display_name.clone(),
+        }
+    } else {
+        storage
+            .find_submission_account_by_email_in_same_tenant(principal.account_id, &from)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("delegated From address is not a mailbox in the same tenant"))?
+    };
+    if envelope_from != principal.email && envelope_from != owner.email {
+        anyhow::bail!(
+            "smtp submission MAIL FROM must match the authenticated account or delegated mailbox"
+        );
     }
 
     let visible_to = parsed
         .to
-        .into_iter()
+        .iter()
+        .cloned()
         .map(|recipient| SubmittedRecipientInput {
             address: recipient.email,
             display_name: recipient.display_name,
@@ -2635,7 +2650,8 @@ fn build_smtp_submission_input(
         .collect::<Vec<_>>();
     let visible_cc = parsed
         .cc
-        .into_iter()
+        .iter()
+        .cloned()
         .map(|recipient| SubmittedRecipientInput {
             address: recipient.email,
             display_name: recipient.display_name,
@@ -2647,22 +2663,44 @@ fn build_smtp_submission_input(
         &visible_to,
         &visible_cc,
     );
+    let sender =
+        parse_smtp_submission_sender(&request.raw_message, &from, &principal.email, &owner.email)?;
+
+    Ok(build_smtp_submission_input_for_owner(
+        principal, &owner, request, parsed, visible_to, visible_cc, bcc, sender,
+    ))
+}
+
+fn build_smtp_submission_input_for_owner(
+    principal: &AccountPrincipal,
+    owner: &SubmissionAccountIdentity,
+    request: &SmtpSubmissionRequest,
+    parsed: lpe_storage::mail::ParsedRfc822Message,
+    to: Vec<SubmittedRecipientInput>,
+    cc: Vec<SubmittedRecipientInput>,
+    bcc: Vec<SubmittedRecipientInput>,
+    sender: Option<SubmittedRecipientInput>,
+) -> SubmitMessageInput {
     let from_display = parsed
         .from
-        .and_then(|address| address.display_name)
-        .or_else(|| Some(principal.display_name.clone()));
+        .as_ref()
+        .and_then(|address| address.display_name.clone())
+        .or_else(|| Some(owner.display_name.clone()));
 
-    Ok(SubmitMessageInput {
+    SubmitMessageInput {
         draft_message_id: None,
-        account_id: principal.account_id,
+        account_id: owner.account_id,
         submitted_by_account_id: principal.account_id,
         source: "smtp-submission".to_string(),
         from_display,
-        from_address: principal.email.clone(),
-        sender_display: None,
-        sender_address: None,
-        to: visible_to,
-        cc: visible_cc,
+        from_address: owner.email.clone(),
+        sender_display: sender
+            .as_ref()
+            .and_then(|address| address.display_name.clone())
+            .or_else(|| sender.as_ref().map(|_| principal.display_name.clone())),
+        sender_address: sender.map(|address| address.address),
+        to,
+        cc,
         bcc,
         subject: parsed.subject,
         body_text: parsed.body_text,
@@ -2673,7 +2711,35 @@ fn build_smtp_submission_input(
         unread: Some(false),
         flagged: Some(false),
         attachments: parsed.attachments,
-    })
+    }
+}
+
+fn parse_smtp_submission_sender(
+    raw_message: &[u8],
+    from_address: &str,
+    principal_email: &str,
+    owner_email: &str,
+) -> anyhow::Result<Option<SubmittedRecipientInput>> {
+    let sender = lpe_storage::mail::parse_header_recipients(raw_message, "sender")
+        .into_iter()
+        .next();
+    let Some(sender) = sender else {
+        return Ok(None);
+    };
+    let normalized_sender = sender.address.trim().to_lowercase();
+    if normalized_sender.is_empty()
+        || normalized_sender == from_address
+        || normalized_sender == owner_email
+    {
+        return Ok(None);
+    }
+    if normalized_sender != principal_email {
+        anyhow::bail!("authenticated account cannot submit a different Sender address");
+    }
+    Ok(Some(SubmittedRecipientInput {
+        address: normalized_sender,
+        display_name: sender.display_name,
+    }))
 }
 
 fn merge_smtp_bcc_recipients(
@@ -3349,13 +3415,16 @@ fn generate_app_password_secret() -> String {
 mod tests {
     use super::{
         bootstrap_admin_request_from_env, bootstrap_admin_request_from_env_or_defaults,
-        build_smtp_submission_input, ha_activation_check, ha_allows_active_work,
-        integration_shared_secret, merge_smtp_bcc_recipients,
+        build_smtp_submission_input_for_owner, ha_activation_check, ha_allows_active_work,
+        integration_shared_secret, merge_smtp_bcc_recipients, parse_smtp_submission_sender,
         validate_uploaded_pst_file_with_validator,
     };
     use lpe_domain::SmtpSubmissionRequest;
     use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
     use lpe_mail_auth::AccountPrincipal;
+    use lpe_storage::{
+        mail::parse_rfc822_message, SubmissionAccountIdentity, SubmittedRecipientInput,
+    };
     use std::{
         fs,
         path::PathBuf,
@@ -3614,8 +3683,30 @@ mod tests {
             .as_bytes()
             .to_vec(),
         };
-
-        let input = build_smtp_submission_input(&principal, &request).unwrap();
+        let parsed = parse_rfc822_message(&request.raw_message).unwrap();
+        let sender =
+            parse_smtp_submission_sender(&request.raw_message, &principal.email, &principal.email, &principal.email)
+                .unwrap();
+        let input = build_smtp_submission_input_for_owner(
+            &principal,
+            &SubmissionAccountIdentity {
+                account_id: principal.account_id,
+                email: principal.email.clone(),
+                display_name: principal.display_name.clone(),
+            },
+            &request,
+            parsed,
+            vec![SubmittedRecipientInput {
+                address: "bob@example.test".to_string(),
+                display_name: Some("Bob".to_string()),
+            }],
+            Vec::new(),
+            vec![SubmittedRecipientInput {
+                address: "blind@example.test".to_string(),
+                display_name: None,
+            }],
+            sender,
+        );
 
         assert_eq!(input.source, "smtp-submission");
         assert_eq!(input.from_address, "alice@example.test");
@@ -3623,6 +3714,130 @@ mod tests {
         assert_eq!(input.to[0].address, "bob@example.test");
         assert_eq!(input.bcc.len(), 1);
         assert_eq!(input.bcc[0].address, "blind@example.test");
+    }
+
+    #[test]
+    fn smtp_submission_builds_send_as_input_for_delegated_mailbox() {
+        let principal = AccountPrincipal {
+            tenant_id: "tenant-a".to_string(),
+            account_id: Uuid::new_v4(),
+            email: "delegate@example.test".to_string(),
+            display_name: "Delegate".to_string(),
+        };
+        let owner = SubmissionAccountIdentity {
+            account_id: Uuid::new_v4(),
+            email: "shared@example.test".to_string(),
+            display_name: "Shared Mailbox".to_string(),
+        };
+        let request = SmtpSubmissionRequest {
+            trace_id: "trace-2".to_string(),
+            helo: "laptop.example.test".to_string(),
+            peer: "203.0.113.55:41234".to_string(),
+            account_id: principal.account_id,
+            account_email: principal.email.clone(),
+            account_display_name: principal.display_name.clone(),
+            mail_from: "shared@example.test".to_string(),
+            rcpt_to: vec!["bob@example.test".to_string()],
+            raw_message: concat!(
+                "From: Shared Mailbox <shared@example.test>\r\n",
+                "To: Bob <bob@example.test>\r\n",
+                "Subject: Hello\r\n",
+                "\r\n",
+                "Body\r\n"
+            )
+            .as_bytes()
+            .to_vec(),
+        };
+
+        let parsed = parse_rfc822_message(&request.raw_message).unwrap();
+        let sender = parse_smtp_submission_sender(
+            &request.raw_message,
+            &owner.email,
+            &principal.email,
+            &owner.email,
+        )
+        .unwrap();
+        let input = build_smtp_submission_input_for_owner(
+            &principal,
+            &owner,
+            &request,
+            parsed,
+            vec![SubmittedRecipientInput {
+                address: "bob@example.test".to_string(),
+                display_name: Some("Bob".to_string()),
+            }],
+            Vec::new(),
+            Vec::new(),
+            sender,
+        );
+
+        assert_eq!(input.account_id, owner.account_id);
+        assert_eq!(input.submitted_by_account_id, principal.account_id);
+        assert_eq!(input.from_address, owner.email);
+        assert_eq!(input.sender_address, None);
+    }
+
+    #[test]
+    fn smtp_submission_builds_send_on_behalf_input_for_delegated_mailbox() {
+        let principal = AccountPrincipal {
+            tenant_id: "tenant-a".to_string(),
+            account_id: Uuid::new_v4(),
+            email: "delegate@example.test".to_string(),
+            display_name: "Delegate".to_string(),
+        };
+        let owner = SubmissionAccountIdentity {
+            account_id: Uuid::new_v4(),
+            email: "shared@example.test".to_string(),
+            display_name: "Shared Mailbox".to_string(),
+        };
+        let request = SmtpSubmissionRequest {
+            trace_id: "trace-3".to_string(),
+            helo: "laptop.example.test".to_string(),
+            peer: "203.0.113.55:41234".to_string(),
+            account_id: principal.account_id,
+            account_email: principal.email.clone(),
+            account_display_name: principal.display_name.clone(),
+            mail_from: "delegate@example.test".to_string(),
+            rcpt_to: vec!["bob@example.test".to_string()],
+            raw_message: concat!(
+                "From: Shared Mailbox <shared@example.test>\r\n",
+                "Sender: Delegate <delegate@example.test>\r\n",
+                "To: Bob <bob@example.test>\r\n",
+                "Subject: Hello\r\n",
+                "\r\n",
+                "Body\r\n"
+            )
+            .as_bytes()
+            .to_vec(),
+        };
+
+        let parsed = parse_rfc822_message(&request.raw_message).unwrap();
+        let sender = parse_smtp_submission_sender(
+            &request.raw_message,
+            &owner.email,
+            &principal.email,
+            &owner.email,
+        )
+        .unwrap();
+        let input = build_smtp_submission_input_for_owner(
+            &principal,
+            &owner,
+            &request,
+            parsed,
+            vec![SubmittedRecipientInput {
+                address: "bob@example.test".to_string(),
+                display_name: Some("Bob".to_string()),
+            }],
+            Vec::new(),
+            Vec::new(),
+            sender,
+        );
+
+        assert_eq!(input.account_id, owner.account_id);
+        assert_eq!(input.submitted_by_account_id, principal.account_id);
+        assert_eq!(input.from_address, owner.email);
+        assert_eq!(input.sender_address.as_deref(), Some("delegate@example.test"));
+        assert_eq!(input.sender_display.as_deref(), Some("Delegate"));
     }
 }
 

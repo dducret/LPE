@@ -214,16 +214,9 @@ async fn handle_submission_session(
                     );
                     transaction.reset_message();
                 }
-                Err((status, detail)) if status.is_server_error() => {
-                    write_line(
-                        &mut writer,
-                        &format!("451 submission temporarily unavailable ({detail})"),
-                    )
-                    .await?;
-                    transaction.reset_message();
-                }
-                Err((_, detail)) => {
-                    write_line(&mut writer, &format!("554 submission rejected ({detail})")).await?;
+                Err((status, detail)) => {
+                    write_line(&mut writer, &smtp_submission_failure_reply(status, &detail))
+                        .await?;
                     transaction.reset_message();
                 }
             }
@@ -508,9 +501,34 @@ fn internal_submission_error(error: impl ToString) -> (StatusCode, String) {
     )
 }
 
+fn smtp_submission_failure_reply(status: StatusCode, detail: &str) -> String {
+    if status.is_server_error()
+        || matches!(
+            status,
+            StatusCode::REQUEST_TIMEOUT
+                | StatusCode::TOO_MANY_REQUESTS
+                | StatusCode::BAD_GATEWAY
+                | StatusCode::SERVICE_UNAVAILABLE
+                | StatusCode::GATEWAY_TIMEOUT
+        )
+    {
+        return format!("451 submission temporarily unavailable ({detail})");
+    }
+
+    if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+        return format!("550 submission rejected ({detail})");
+    }
+
+    format!("554 submission rejected ({detail})")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{decode_auth_login_token, decode_auth_plain, sanitize_smtp_text};
+    use super::{
+        decode_auth_login_token, decode_auth_plain, sanitize_smtp_text,
+        smtp_submission_failure_reply,
+    };
+    use reqwest::StatusCode;
 
     #[test]
     fn auth_plain_decodes_username_and_password() {
@@ -531,6 +549,22 @@ mod tests {
         assert_eq!(
             sanitize_smtp_text("bad\nrequest\r\npayload"),
             "bad request payload"
+        );
+    }
+
+    #[test]
+    fn temporary_submission_failures_map_to_451() {
+        assert_eq!(
+            smtp_submission_failure_reply(StatusCode::SERVICE_UNAVAILABLE, "core unavailable"),
+            "451 submission temporarily unavailable (core unavailable)"
+        );
+    }
+
+    #[test]
+    fn permanent_submission_failures_map_to_550_for_authorization_errors() {
+        assert_eq!(
+            smtp_submission_failure_reply(StatusCode::FORBIDDEN, "delegation denied"),
+            "550 submission rejected (delegation denied)"
         );
     }
 }

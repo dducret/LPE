@@ -1133,6 +1133,13 @@ pub struct AttachmentUploadInput {
     pub blob_bytes: Vec<u8>,
 }
 
+#[derive(Debug, Clone)]
+pub struct SubmissionAccountIdentity {
+    pub account_id: Uuid,
+    pub email: String,
+    pub display_name: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SubmittedMessage {
     pub message_id: Uuid,
@@ -11378,6 +11385,37 @@ impl Storage {
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| anyhow!("account not found"))
+    }
+
+    pub async fn find_submission_account_by_email_in_same_tenant(
+        &self,
+        reference_account_id: Uuid,
+        email: &str,
+    ) -> Result<Option<SubmissionAccountIdentity>> {
+        let tenant_id = self.tenant_id_for_account_id(reference_account_id).await?;
+        let normalized_email = normalize_email(email);
+        if normalized_email.is_empty() {
+            return Ok(None);
+        }
+
+        let row = sqlx::query(
+            r#"
+            SELECT id, primary_email, display_name
+            FROM accounts
+            WHERE tenant_id = $1 AND lower(primary_email) = lower($2)
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(&normalized_email)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| SubmissionAccountIdentity {
+            account_id: row.get("id"),
+            email: row.get("primary_email"),
+            display_name: row.get("display_name"),
+        }))
     }
 
     async fn tenant_id_for_account_email(&self, email: &str) -> Result<String> {

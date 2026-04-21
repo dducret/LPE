@@ -58,12 +58,18 @@ The raw `SMTP` body is carried into `LPE` to keep delivery context, but mailbox 
 2. `LPE-CT` authenticates the client mailbox credentials by calling `POST /internal/lpe-ct/submission-auth` on `LPE`
 3. after `AUTH`, `LPE-CT` accepts `MAIL FROM`, `RCPT TO`, and `DATA`
 4. `LPE-CT` forwards the authenticated principal, envelope, and raw RFC 822 body to `POST /internal/lpe-ct/submissions`
-5. `LPE` validates attachments with `Magika`, derives visible and `Bcc` recipients, enforces sender ownership, and invokes the canonical submission workflow
+5. `LPE` validates attachments with `Magika`, derives visible and `Bcc` recipients, enforces sender ownership plus delegated `send-as` / `send-on-behalf` rights from `From` and `Sender`, and invokes the canonical submission workflow
 6. `LPE` creates the authoritative `Sent` copy before inserting the outbound queue row
 7. only after that canonical submission succeeds does `LPE-CT` return a successful SMTP final reply to the client
 8. outbound relay still happens later through the existing `LPE -> LPE-CT` outbound handoff path
 
 This keeps Internet-facing `SMTP` in `LPE-CT` while ensuring every client submission converges on the single `LPE` business workflow.
+
+Bridge failure mapping is transport-aware:
+
+- transient core or bridge unavailability returns a temporary `451` SMTP final reply
+- permanent authorization or policy rejection returns a permanent `550` or `554` SMTP final reply
+- delegated submission remains canonical in `LPE`; `LPE-CT` does not decide delegation rights locally
 
 ### Internal authentication
 
