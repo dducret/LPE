@@ -27,7 +27,6 @@ mod smtp;
 mod submission;
 
 const MIN_INTEGRATION_SECRET_LEN: usize = 32;
-pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SiteProfile {
