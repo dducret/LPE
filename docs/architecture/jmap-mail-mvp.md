@@ -58,11 +58,13 @@ Additional supported `JMAP` routes:
 - `Email/set` accepts draft `keywords` for `$draft`, `$seen`, and `$flagged`; `$seen` and `$flagged` are mapped onto the canonical draft unread-flagged state without creating any parallel priority model
 - `EmailSubmission/set` does not submit raw MIME or direct `SMTP`
 - `EmailSubmission/set` takes an existing draft `emailId` and calls the canonical `LPE` submission workflow
+- for delegated mailbox accounts, `EmailSubmission/set` is available only when canonical sender delegation grants allow `send-as` or `send-on-behalf`
 - canonical submission creates the authoritative copy in `Sent`, marks the message as `queued`, inserts an `outbound_message_queue` row, then removes the source draft
 - `JMAP` object `state` values and WebSocket `StateChange` payloads are derived from the same canonical mailbox, message, contact, and calendar projections already stored in `PostgreSQL`
 - the WebSocket transport is notification and request transport only; it does not introduce a second mailbox cache, event journal, or submission model
 - canonical change signaling stays inside `PostgreSQL`: `lpe-storage` emits account-scoped `LISTEN` / `NOTIFY` payloads after canonical commits, and `lpe-jmap` recomputes only the affected `JMAP` state scopes from canonical tables
 - mail push wakeups are expanded through canonical mailbox delegation so a change in a shared mailbox wakes both the owner session and delegated reader sessions without a protocol-local sharing cache
+- shared mailbox `Session` account flags, `Mailbox/get` `myRights`, and delegated `Identity/get` values are projected from the canonical mailbox delegation plus sender delegation grants rather than adapter-local ACL state
 - `Bcc` remains stored separately in `message_bcc_recipients`
 - `Bcc` is not reinjected into search, `participants_normalized`, or `Email/query`
 - `Email/get` may return `bcc` only when the `bcc` property is explicitly requested for the authenticated account's own sender-side draft or sent message
@@ -77,6 +79,7 @@ Additional supported `JMAP` routes:
 - one `LPE` email currently belongs to one `LPE` mailbox, so `mailboxIds` contains one entry
 - `EmailSubmission/set` currently supports only `create`
 - `EmailSubmission/set` expects an existing draft through `emailId` or a resolved creation reference in the same request
+- `Identity/get` exposes the standard MVP fields plus `LPE`-specific delegated-sender metadata for clients that request it
 - `Mailbox/set` cannot modify or delete system mailboxes (`Inbox`, `Sent`, `Drafts`, etc.)
 - `Email/copy` currently supports only same-account copy
 - `Email/import` consumes a validated `message/rfc822` blob, extracts visible multipart text with plaintext preference, preserves a first HTML body when available, validates each imported attachment with `Magika`, trims structural multipart boundary line endings from imported attachment bytes, and imports multipart attachments into the canonical attachment pipeline

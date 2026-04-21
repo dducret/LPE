@@ -126,7 +126,16 @@ The canonical message record therefore distinguishes:
 
 `ContactCard/set` and `CalendarEvent/set` may create into a shared collection when `may_write=true`.
 
-Mail `JMAP` additionally exposes accessible shared mailbox accounts in the session account map and exposes delegated sender identities through `Identity/get`. Draft creation and submission for shared mailboxes keep using the canonical mailbox owner account plus the authenticated submitting account.
+Mail `JMAP` additionally exposes accessible shared mailbox accounts in the session account map and exposes delegated sender identities through `Identity/get`. Session account read-only state, mailbox `myRights`, and draft submission exposure must be derived from the canonical mailbox delegation grant plus the canonical sender delegation grants, not from adapter-local assumptions.
+
+For delegated mailboxes:
+
+- mailbox visibility comes from `mailbox_delegation_grants`
+- draft submission visibility comes from `sender_delegation_grants`
+- a shared mailbox without `send-as` or `send-on-behalf` must not be advertised as submittable through `Mailbox/get`
+- `Identity/get` may expose `LPE`-specific metadata that makes the canonical sender mode explicit, such as the delegated authorization kind and the authenticated sender identity used for `send-on-behalf`
+
+Draft creation and submission for shared mailboxes keep using the canonical mailbox owner account plus the authenticated submitting account.
 
 #### DAV
 

@@ -266,7 +266,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 SessionAccount {
                     name: accessible.email.clone(),
                     is_personal: accessible.is_owned,
-                    is_read_only: false,
+                    is_read_only: mailbox_account_is_read_only(accessible),
                     account_capabilities: capabilities.clone(),
                 },
             );
@@ -1008,7 +1008,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let list = mailboxes
             .iter()
             .filter(|mailbox| requested_ids.is_none() || requested_set.contains(&mailbox.id))
-            .map(|mailbox| mailbox_to_value(mailbox, &properties))
+            .map(|mailbox| mailbox_to_value(mailbox, &account_access, &properties))
             .collect::<Vec<_>>();
 
         let not_found = requested_ids
@@ -2569,6 +2569,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .requested_account_access(account, arguments.account_id.as_deref())
             .await?;
         let account_id = account_access.account_id;
+        if !mailbox_account_may_submit(&account_access) {
+            bail!("sender delegation is required to submit from a delegated mailbox");
+        }
         let old_state = self.object_state(account_id, "Email").await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
@@ -3606,7 +3609,12 @@ fn task_list_to_value(properties: &HashSet<String>) -> Value {
     Value::Object(object)
 }
 
-fn mailbox_to_value(mailbox: &JmapMailbox, properties: &HashSet<String>) -> Value {
+fn mailbox_to_value(
+    mailbox: &JmapMailbox,
+    access: &MailboxAccountAccess,
+    properties: &HashSet<String>,
+) -> Value {
+    let is_drafts = mailbox.role == "drafts";
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", mailbox.id.to_string());
     insert_if(properties, &mut object, "name", mailbox.name.clone());
@@ -3624,15 +3632,15 @@ fn mailbox_to_value(mailbox: &JmapMailbox, properties: &HashSet<String>) -> Valu
         object.insert(
             "myRights".to_string(),
             json!({
-                "mayReadItems": true,
-                "mayAddItems": mailbox.role == "drafts",
-                "mayRemoveItems": mailbox.role == "drafts",
-                "maySetSeen": true,
-                "maySetKeywords": true,
+                "mayReadItems": access.may_read,
+                "mayAddItems": access.may_write && is_drafts,
+                "mayRemoveItems": access.may_write && is_drafts,
+                "maySetSeen": access.may_write,
+                "maySetKeywords": access.may_write,
                 "mayCreateChild": false,
                 "mayRename": false,
                 "mayDelete": false,
-                "maySubmit": mailbox.role == "drafts",
+                "maySubmit": is_drafts && mailbox_account_may_submit(access),
             }),
         );
     }
@@ -4235,6 +4243,9 @@ fn identity_properties(properties: Option<Vec<String>>) -> HashSet<String> {
                 "textSignature".to_string(),
                 "htmlSignature".to_string(),
                 "mayDelete".to_string(),
+                "xLpeOwnerAccountId".to_string(),
+                "xLpeAuthorizationKind".to_string(),
+                "xLpeSender".to_string(),
             ]
         })
         .into_iter()
@@ -4475,7 +4486,36 @@ fn identity_to_value(identity: &SenderIdentity, properties: &HashSet<String>) ->
     insert_if(properties, &mut object, "textSignature", "");
     insert_if(properties, &mut object, "htmlSignature", "");
     insert_if(properties, &mut object, "mayDelete", false);
+    insert_if(
+        properties,
+        &mut object,
+        "xLpeOwnerAccountId",
+        identity.owner_account_id.to_string(),
+    );
+    insert_if(
+        properties,
+        &mut object,
+        "xLpeAuthorizationKind",
+        identity.authorization_kind.clone(),
+    );
+    if properties.contains("xLpeSender") {
+        let sender = identity.sender_address.as_ref().map(|address| {
+            json!({
+                "email": address,
+                "name": identity.sender_display.clone(),
+            })
+        });
+        object.insert("xLpeSender".to_string(), sender.unwrap_or(Value::Null));
+    }
     Value::Object(object)
+}
+
+fn mailbox_account_may_submit(access: &MailboxAccountAccess) -> bool {
+    access.is_owned || access.may_send_as || access.may_send_on_behalf
+}
+
+fn mailbox_account_is_read_only(access: &MailboxAccountAccess) -> bool {
+    !(access.may_write || mailbox_account_may_submit(access))
 }
 
 fn thread_to_value(thread_id: Uuid, email_ids: Vec<String>, properties: &HashSet<String>) -> Value {
@@ -6716,6 +6756,10 @@ mod tests {
         assert!(session
             .accounts
             .contains_key(&FakeStore::shared_account().account_id.to_string()));
+        assert_eq!(
+            session.accounts[&FakeStore::shared_account().account_id.to_string()].is_read_only,
+            false
+        );
 
         let response = service
             .handle_api_request(
@@ -6728,7 +6772,16 @@ mod tests {
                     ],
                     method_calls: vec![JmapMethodCall(
                         "Identity/get".to_string(),
-                        json!({"accountId": FakeStore::shared_account().account_id.to_string()}),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "properties": [
+                                "id",
+                                "email",
+                                "xLpeOwnerAccountId",
+                                "xLpeAuthorizationKind",
+                                "xLpeSender"
+                            ]
+                        }),
                         "c1".to_string(),
                     )],
                 },
@@ -6743,6 +6796,59 @@ mod tests {
                 .len(),
             2
         );
+        assert_eq!(
+            response.method_responses[0].1["list"][1]["xLpeAuthorizationKind"],
+            Value::String("send-on-behalf".to_string())
+        );
+        assert_eq!(
+            response.method_responses[0].1["list"][1]["xLpeOwnerAccountId"],
+            Value::String(FakeStore::shared_account().account_id.to_string())
+        );
+        assert_eq!(
+            response.method_responses[0].1["list"][1]["xLpeSender"]["email"],
+            Value::String("alice@example.test".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn mailbox_get_projects_delegated_submit_rights_from_sender_grants() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Mailbox/get".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "ids": [FakeStore::draft_mailbox().id.to_string()],
+                            "properties": ["id", "myRights"]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let rights = &response.method_responses[0].1["list"][0]["myRights"];
+        assert_eq!(rights["mayReadItems"], true);
+        assert_eq!(rights["mayAddItems"], true);
+        assert_eq!(rights["maySubmit"], false);
     }
 
     #[tokio::test]
@@ -6981,6 +7087,57 @@ mod tests {
             payload["created"]["send1"]["undoStatus"],
             Value::String("final".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn email_submission_set_rejects_delegated_submit_without_sender_grant() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "EmailSubmission/set".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "create": {
+                                "send1": {
+                                    "emailId": FakeStore::draft_email().id.to_string()
+                                }
+                            }
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(store.submitted_drafts.lock().unwrap().is_empty());
+        assert_eq!(
+            response.method_responses[0].1["type"],
+            Value::String("invalidArguments".to_string())
+        );
+        assert!(response.method_responses[0].1["description"]
+            .as_str()
+            .unwrap()
+            .contains("sender delegation is required"));
     }
 
     #[tokio::test]
