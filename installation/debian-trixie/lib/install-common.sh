@@ -417,6 +417,12 @@ validate_password_nonempty() {
   [[ -n "$(trim "${1-}")" ]]
 }
 
+validate_bootstrap_admin_password() {
+  local value
+  value="$(trim "${1-}")"
+  [[ ${#value} -ge 12 ]]
+}
+
 validate_shared_secret() {
   local value="$1"
   local lowered

@@ -156,7 +156,7 @@ collect_runtime_values() {
   print_section "Administrator"
   LPE_BOOTSTRAP_ADMIN_EMAIL="$(ask_required "Admin email" "${bootstrap_admin_email_default}" validate_email "Enter a valid email address.")"
   LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME="$(ask_with_default "Admin display name" "${LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME_DEFAULT}" validate_nonempty "Enter an administrator display name.")"
-  LPE_BOOTSTRAP_ADMIN_PASSWORD="$(ask_secret_with_default_behavior_when_possible "Admin password" "${bootstrap_admin_password_default}" validate_password_nonempty "Enter an administrator password.")"
+  LPE_BOOTSTRAP_ADMIN_PASSWORD="$(ask_secret_with_default_behavior_when_possible "Admin password" "${bootstrap_admin_password_default}" validate_bootstrap_admin_password "Enter an administrator password with at least 12 characters.")"
 
   print_section "Services"
   LPE_ENABLE_SERVICES="$(ask_yes_no "Enable and start systemd services now" "${service_choice_default}")"

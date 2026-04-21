@@ -184,7 +184,7 @@ The `LPE` installer prompts for:
 - integration shared secret, no default and at least `32` characters
 - bootstrap administrator email, no default
 - bootstrap administrator display name, default `Bootstrap Administrator`
-- bootstrap administrator password, no default
+- bootstrap administrator password, no default and at least `12` characters
 - whether to enable and start services now, default `yes`
 - whether to run `init-schema.sh` now, default `yes` on first install and `no` on later reruns
 
