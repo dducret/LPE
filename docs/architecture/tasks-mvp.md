@@ -246,7 +246,6 @@ The current sync contract is:
 
 ### Out of scope for the MVP
 
-- shared task-list grants
 - cross-tenant shared task lists
 - cross-account delegation
 - recurrence

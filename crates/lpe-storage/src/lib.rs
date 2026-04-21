@@ -7941,11 +7941,7 @@ impl Storage {
                 owner_account_id: task_list.owner_account_id,
                 owner_email: task_list.owner_email.clone(),
                 owner_display_name: task_list.owner_display_name.clone(),
-                display_name: shared_task_list_display_name(
-                    &task_list.name,
-                    &task_list.owner_display_name,
-                    &task_list.owner_email,
-                ),
+                display_name: task_list.name.clone(),
                 is_owned: task_list.is_owned,
                 rights: task_list.rights.clone(),
             })
@@ -12724,19 +12720,6 @@ fn shared_collection_display_name(
         owner_display_name.trim()
     };
     format!("{owner_label} {}", kind.collection_label())
-}
-
-fn shared_task_list_display_name(
-    task_list_name: &str,
-    owner_display_name: &str,
-    owner_email: &str,
-) -> String {
-    let owner_label = if owner_display_name.trim().is_empty() {
-        owner_email.trim()
-    } else {
-        owner_display_name.trim()
-    };
-    format!("{owner_label} / {}", task_list_name.trim())
 }
 
 #[derive(Debug, Clone)]

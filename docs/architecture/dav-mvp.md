@@ -123,6 +123,7 @@ The canonical task model still belongs to `LPE`. The DAV adapter does not mainta
 - read access to contacts, events, and tasks through collection and resource endpoints
 - full-resource create and update for contacts, events, and tasks through `PUT`
 - deletion for contacts, events, and tasks through `DELETE`
+- forbidden `PUT` and `DELETE` operations return `403` when canonical collection rights do not allow the write
 - conditional reads and writes through `ETag`, `If-Match`, and `If-None-Match`
 - collection `REPORT` filtering through:
   - requested `href` resources for multiget-style requests

@@ -1016,6 +1016,12 @@ fn error_response(error: anyhow::Error) -> Response {
             .body(axum::body::Body::from(message))
             .unwrap();
     }
+    if message.contains("access is not granted") {
+        return Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(axum::body::Body::from(message))
+            .unwrap();
+    }
     if message.contains("required") || message.contains("invalid") {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
@@ -1878,6 +1884,7 @@ mod tests {
         login: Option<AccountLogin>,
         contacts: Arc<Mutex<Vec<ClientContact>>>,
         events: Arc<Mutex<Vec<ClientEvent>>>,
+        task_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
         tasks: Arc<Mutex<Vec<DavTask>>>,
     }
 
@@ -1888,6 +1895,15 @@ mod tests {
                 may_write: true,
                 may_delete: true,
                 may_share: true,
+            }
+        }
+
+        fn read_only_rights() -> CollaborationRights {
+            CollaborationRights {
+                may_read: true,
+                may_write: false,
+                may_delete: false,
+                may_share: false,
             }
         }
 
@@ -1924,13 +1940,30 @@ mod tests {
             let task_list_id = Uuid::nil().to_string();
             CollaborationCollection {
                 id: task_list_id,
-                kind: "calendar".to_string(),
+                kind: "tasks".to_string(),
                 owner_account_id: account.account_id,
                 owner_email: account.email.clone(),
                 owner_display_name: account.display_name.clone(),
                 display_name: "Tasks".to_string(),
                 is_owned: true,
                 rights: Self::full_rights(),
+            }
+        }
+
+        fn shared_read_only_task_collection() -> CollaborationCollection {
+            let owner_account_id =
+                Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+            CollaborationCollection {
+                id: Uuid::parse_str("90909090-9090-9090-9090-909090909090")
+                    .unwrap()
+                    .to_string(),
+                kind: "tasks".to_string(),
+                owner_account_id,
+                owner_email: "owner@example.test".to_string(),
+                owner_display_name: "Owner Example".to_string(),
+                display_name: "Shared Ops".to_string(),
+                is_owned: false,
+                rights: Self::read_only_rights(),
             }
         }
 
@@ -2063,14 +2096,30 @@ mod tests {
             &'a self,
             _principal_account_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>> {
-            Box::pin(async move { Ok(vec![Self::calendar_collection(), Self::task_collection()]) })
+            let task_collections = self.task_collections.lock().unwrap().clone();
+            Box::pin(async move {
+                let mut collections = vec![Self::calendar_collection()];
+                if task_collections.is_empty() {
+                    collections.push(Self::task_collection());
+                } else {
+                    collections.extend(task_collections);
+                }
+                Ok(collections)
+            })
         }
 
         fn fetch_accessible_task_collections<'a>(
             &'a self,
             _principal_account_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>> {
-            Box::pin(async move { Ok(vec![Self::task_collection()]) })
+            let task_collections = self.task_collections.lock().unwrap().clone();
+            Box::pin(async move {
+                if task_collections.is_empty() {
+                    Ok(vec![Self::task_collection()])
+                } else {
+                    Ok(task_collections)
+                }
+            })
         }
 
         fn fetch_accessible_contacts<'a>(
@@ -2213,36 +2262,61 @@ mod tests {
             &'a self,
             input: UpsertClientTaskInput,
         ) -> lpe_mail_auth::StoreFuture<'a, DavTask> {
+            let task_collections = self.task_collections.lock().unwrap().clone();
             let mut tasks = self.tasks.lock().unwrap();
-            let account = Self::account();
+            let task_id = input.id.unwrap();
             let task_list_id = input.task_list_id.unwrap_or(Uuid::nil());
-            let task = DavTask {
-                id: input.id.unwrap(),
-                task_list_id,
-                collection_id: task_list_id.to_string(),
-                owner_account_id: account.account_id,
-                owner_email: account.email,
-                owner_display_name: account.display_name,
-                rights: Self::full_rights(),
-                task_list_name: "Tasks".to_string(),
-                title: input.title,
-                description: input.description,
-                status: if input.status.trim().is_empty() {
-                    "needs-action".to_string()
-                } else {
-                    input.status
-                },
-                due_at: input.due_at,
-                completed_at: match input.completed_at {
-                    Some(value) if !value.trim().is_empty() => Some(value),
-                    _ => None,
-                },
-                sort_order: input.sort_order,
-                updated_at: "2026-04-20T09:00:00Z".to_string(),
+            let collection = if task_collections.is_empty() {
+                Ok(Self::task_collection())
+            } else {
+                task_collections
+                    .into_iter()
+                    .find(|collection| collection.id == task_list_id.to_string())
+                    .ok_or_else(|| anyhow!("task list not found"))
             };
-            tasks.retain(|entry| entry.id != task.id);
-            tasks.push(task.clone());
-            Box::pin(async move { Ok(task) })
+            let existing = tasks.iter().find(|entry| entry.id == task_id).cloned();
+            let result = match (collection, existing) {
+                (Ok(_), Some(existing)) if !existing.rights.may_write => {
+                    Err(anyhow!("write access is not granted on this task"))
+                }
+                (Ok(collection), None) if !collection.rights.may_write => {
+                    Err(anyhow!("write access is not granted on this task list"))
+                }
+                (Ok(collection), existing) => {
+                    let task = DavTask {
+                        id: task_id,
+                        task_list_id,
+                        collection_id: task_list_id.to_string(),
+                        owner_account_id: collection.owner_account_id,
+                        owner_email: collection.owner_email,
+                        owner_display_name: collection.owner_display_name,
+                        rights: collection.rights,
+                        task_list_name: collection.display_name,
+                        title: input.title,
+                        description: input.description,
+                        status: if input.status.trim().is_empty() {
+                            "needs-action".to_string()
+                        } else {
+                            input.status
+                        },
+                        due_at: input.due_at,
+                        completed_at: match input.completed_at {
+                            Some(value) if !value.trim().is_empty() => Some(value),
+                            _ => None,
+                        },
+                        sort_order: input.sort_order,
+                        updated_at: "2026-04-20T09:00:00Z".to_string(),
+                    };
+                    tasks.retain(|entry| entry.id != task.id);
+                    if let Some(existing) = existing {
+                        tasks.retain(|entry| entry.id != existing.id);
+                    }
+                    tasks.push(task.clone());
+                    Ok(task)
+                }
+                (Err(error), _) => Err(error),
+            };
+            Box::pin(async move { result })
         }
 
         fn delete_accessible_contact<'a>(
@@ -2274,11 +2348,22 @@ mod tests {
             _principal_account_id: Uuid,
             task_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, ()> {
-            self.tasks
-                .lock()
-                .unwrap()
-                .retain(|entry| entry.id != task_id);
-            Box::pin(async move { Ok(()) })
+            let mut tasks = self.tasks.lock().unwrap();
+            let index = tasks
+                .iter()
+                .position(|entry| entry.id == task_id)
+                .ok_or_else(|| anyhow!("task not found"));
+            let result = match index {
+                Ok(index) if !tasks[index].rights.may_delete => {
+                    Err(anyhow!("delete access is not granted on this task"))
+                }
+                Ok(index) => {
+                    tasks.remove(index);
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            };
+            Box::pin(async move { result })
         }
     }
 
@@ -2718,6 +2803,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn propfind_lists_shared_task_collection_with_canonical_name() {
+        let shared_collection = FakeStore::shared_read_only_task_collection();
+        let task_id = Uuid::parse_str("16161616-1616-1616-1616-161616161616").unwrap();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            task_collections: Arc::new(Mutex::new(vec![shared_collection.clone()])),
+            tasks: Arc::new(Mutex::new(vec![DavTask {
+                id: task_id,
+                task_list_id: Uuid::parse_str(&shared_collection.id).unwrap(),
+                collection_id: shared_collection.id.clone(),
+                owner_account_id: shared_collection.owner_account_id,
+                owner_email: shared_collection.owner_email.clone(),
+                owner_display_name: shared_collection.owner_display_name.clone(),
+                rights: shared_collection.rights.clone(),
+                task_list_name: shared_collection.display_name.clone(),
+                title: "Shared task".to_string(),
+                description: String::new(),
+                status: "needs-action".to_string(),
+                due_at: None,
+                completed_at: None,
+                sort_order: 0,
+                updated_at: "2026-04-20T09:00:00Z".to_string(),
+            }])),
+            ..Default::default()
+        };
+        let service = DavService::new(store);
+        let mut headers = bearer_headers();
+        headers.insert("depth", HeaderValue::from_static("1"));
+
+        let response = service
+            .handle(
+                &Method::from_bytes(b"PROPFIND").unwrap(),
+                &Uri::from_static(CALENDAR_HOME_PATH),
+                &headers,
+                &[],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::from_u16(207).unwrap());
+        let body = response_text(response).await;
+        assert!(body.contains(&task_collection_path(&shared_collection.id)));
+        assert!(body.contains("<d:displayname>Shared Ops</d:displayname>"));
+        assert!(!body.contains("Owner Example / Shared Ops"));
+    }
+
+    #[tokio::test]
     async fn get_returns_vtodo_for_existing_task() {
         let task_id = Uuid::parse_str("13131313-1313-1313-1313-131313131313").unwrap();
         let account = FakeStore::account();
@@ -2819,5 +2951,70 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         assert!(store.tasks.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn put_returns_forbidden_for_read_only_shared_task_collection() {
+        let shared_collection = FakeStore::shared_read_only_task_collection();
+        let task_id = Uuid::parse_str("17171717-1717-1717-1717-171717171717").unwrap();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            task_collections: Arc::new(Mutex::new(vec![shared_collection.clone()])),
+            ..Default::default()
+        };
+        let service = DavService::new(store);
+
+        let response = service
+            .handle(
+                &Method::PUT,
+                &Uri::from_maybe_shared(task_resource_path(&shared_collection.id, task_id)).unwrap(),
+                &bearer_headers(),
+                b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:17171717-1717-1717-1717-171717171717\r\nSUMMARY:Blocked update\r\nEND:VTODO\r\nEND:VCALENDAR",
+            )
+            .await;
+        let response = error_response(response.unwrap_err());
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn delete_returns_forbidden_for_read_only_shared_task() {
+        let shared_collection = FakeStore::shared_read_only_task_collection();
+        let task_id = Uuid::parse_str("18181818-1818-1818-1818-181818181818").unwrap();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            task_collections: Arc::new(Mutex::new(vec![shared_collection.clone()])),
+            tasks: Arc::new(Mutex::new(vec![DavTask {
+                id: task_id,
+                task_list_id: Uuid::parse_str(&shared_collection.id).unwrap(),
+                collection_id: shared_collection.id.clone(),
+                owner_account_id: shared_collection.owner_account_id,
+                owner_email: shared_collection.owner_email.clone(),
+                owner_display_name: shared_collection.owner_display_name.clone(),
+                rights: shared_collection.rights.clone(),
+                task_list_name: shared_collection.display_name.clone(),
+                title: "Read only".to_string(),
+                description: String::new(),
+                status: "needs-action".to_string(),
+                due_at: None,
+                completed_at: None,
+                sort_order: 0,
+                updated_at: "2026-04-20T09:00:00Z".to_string(),
+            }])),
+            ..Default::default()
+        };
+        let service = DavService::new(store);
+
+        let response = service
+            .handle(
+                &Method::DELETE,
+                &Uri::from_maybe_shared(task_resource_path(&shared_collection.id, task_id)).unwrap(),
+                &bearer_headers(),
+                &[],
+            )
+            .await;
+        let response = error_response(response.unwrap_err());
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 }

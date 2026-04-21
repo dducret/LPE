@@ -5938,6 +5938,15 @@ mod tests {
             }
         }
 
+        fn read_only_rights() -> CollaborationRights {
+            CollaborationRights {
+                may_read: true,
+                may_write: false,
+                may_delete: false,
+                may_share: false,
+            }
+        }
+
         fn contact_collection() -> CollaborationCollection {
             let account = Self::account();
             CollaborationCollection {
@@ -6893,34 +6902,42 @@ mod tests {
         }
 
         async fn upsert_jmap_task(&self, input: UpsertClientTaskInput) -> Result<ClientTask> {
-            let account = Self::account();
+            let task_id = input.id.unwrap_or_else(Uuid::new_v4);
+            let task_list_id = input
+                .task_list_id
+                .unwrap_or_else(|| Self::default_task_list().id);
+            let task_list = self
+                .fetch_jmap_task_lists(Self::account().account_id)
+                .await?
+                .into_iter()
+                .find(|task_list| task_list.id == task_list_id)
+                .ok_or_else(|| anyhow!("task list not found"))?;
+            if !task_list.rights.may_write {
+                bail!("write access is not granted on this task list");
+            }
+
+            let existing_task = self
+                .tasks
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|task| task.id == task_id)
+                .cloned();
+            if let Some(existing_task) = existing_task.as_ref() {
+                if !existing_task.rights.may_write {
+                    bail!("write access is not granted on this task");
+                }
+            }
+
             let task = ClientTask {
-                id: input.id.unwrap_or_else(Uuid::new_v4),
-                task_list_id: input
-                    .task_list_id
-                    .unwrap_or_else(|| Self::default_task_list().id),
-                task_list_sort_order: self
-                    .fetch_jmap_task_lists(Self::account().account_id)
-                    .await?
-                    .into_iter()
-                    .find(|task_list| {
-                        task_list.id
-                            == input
-                                .task_list_id
-                                .unwrap_or_else(|| Self::default_task_list().id)
-                    })
-                    .map(|task_list| task_list.sort_order)
-                    .unwrap_or(0),
-                owner_account_id: account.account_id,
-                owner_email: account.email,
-                owner_display_name: account.display_name,
-                is_owned: true,
-                rights: CollaborationRights {
-                    may_read: true,
-                    may_write: true,
-                    may_delete: true,
-                    may_share: true,
-                },
+                id: task_id,
+                task_list_id,
+                task_list_sort_order: task_list.sort_order,
+                owner_account_id: task_list.owner_account_id,
+                owner_email: task_list.owner_email,
+                owner_display_name: task_list.owner_display_name,
+                is_owned: task_list.is_owned,
+                rights: task_list.rights.clone(),
                 title: input.title.trim().to_string(),
                 description: input.description.trim().to_string(),
                 status: input.status.trim().to_ascii_lowercase(),
@@ -6947,6 +6964,14 @@ mod tests {
 
         async fn delete_jmap_task(&self, _account_id: Uuid, task_id: Uuid) -> Result<()> {
             let mut tasks = self.tasks.lock().unwrap();
+            let task = tasks
+                .iter()
+                .find(|entry| entry.id == task_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("task not found"))?;
+            if !task.rights.may_delete {
+                bail!("delete access is not granted on this task");
+            }
             let original_len = tasks.len();
             tasks.retain(|entry| entry.id != task_id);
             if tasks.len() == original_len {
@@ -8538,6 +8563,131 @@ mod tests {
         assert_eq!(rights["mayRename"], false);
         assert_eq!(rights["mayDelete"], false);
         assert_eq!(rights["mayAdmin"], false);
+    }
+
+    #[tokio::test]
+    async fn task_query_includes_shared_accessible_tasks() {
+        let shared_account = FakeStore::shared_account();
+        let shared_task_list = ClientTaskList {
+            id: Uuid::parse_str("91919191-9191-9191-9191-919191919191").unwrap(),
+            name: "Shared Ops".to_string(),
+            role: None,
+            sort_order: 40,
+            owner_account_id: shared_account.account_id,
+            owner_email: shared_account.email,
+            owner_display_name: shared_account.display_name,
+            is_owned: false,
+            rights: CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: false,
+                may_share: false,
+            },
+            updated_at: "2026-04-20T16:10:00Z".to_string(),
+        };
+        let shared_task = ClientTask {
+            id: Uuid::parse_str("92929292-9292-9292-9292-929292929292").unwrap(),
+            owner_account_id: shared_task_list.owner_account_id,
+            owner_email: "shared@example.test".to_string(),
+            owner_display_name: "Shared Mailbox".to_string(),
+            is_owned: false,
+            rights: shared_task_list.rights.clone(),
+            task_list_id: shared_task_list.id,
+            task_list_sort_order: shared_task_list.sort_order,
+            title: "Shared rollout".to_string(),
+            description: "Visible through canonical sharing".to_string(),
+            status: "in-progress".to_string(),
+            due_at: None,
+            completed_at: None,
+            sort_order: 1,
+            updated_at: "2026-04-20T16:20:00Z".to_string(),
+        };
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            task_lists: Arc::new(Mutex::new(vec![
+                FakeStore::default_task_list(),
+                shared_task_list.clone(),
+            ])),
+            tasks: Arc::new(Mutex::new(vec![FakeStore::task(), shared_task.clone()])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_TASKS_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Task/query".to_string(),
+                        json!({
+                            "filter": {"inTaskList": shared_task_list.id.to_string()}
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["ids"],
+            json!([shared_task.id.to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn task_set_rejects_writes_to_read_only_shared_task_list() {
+        let shared_account = FakeStore::shared_account();
+        let shared_task_list = ClientTaskList {
+            id: Uuid::parse_str("93939393-9393-9393-9393-939393939393").unwrap(),
+            name: "Read Only".to_string(),
+            role: None,
+            sort_order: 50,
+            owner_account_id: shared_account.account_id,
+            owner_email: shared_account.email,
+            owner_display_name: shared_account.display_name,
+            is_owned: false,
+            rights: FakeStore::read_only_rights(),
+            updated_at: "2026-04-20T16:30:00Z".to_string(),
+        };
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            task_lists: Arc::new(Mutex::new(vec![
+                FakeStore::default_task_list(),
+                shared_task_list.clone(),
+            ])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_TASKS_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Task/set".to_string(),
+                        json!({
+                            "create": {
+                                "t1": {
+                                    "@type": "Task",
+                                    "title": "Blocked",
+                                    "taskListId": shared_task_list.id.to_string()
+                                }
+                            }
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["notCreated"]["t1"]["description"],
+            "write access is not granted on this task list"
+        );
     }
 
     #[tokio::test]
