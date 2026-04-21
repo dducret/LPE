@@ -325,6 +325,41 @@ impl ImapStore for FakeStore {
         Box::pin(async move { Ok(copied) })
     }
 
+    fn move_imap_email<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ImapEmail> {
+        let mailboxes = self.mailboxes.lock().unwrap();
+        let target_mailbox = mailboxes
+            .iter()
+            .find(|mailbox| mailbox.id == target_mailbox_id)
+            .unwrap()
+            .clone();
+        drop(mailboxes);
+
+        let mut emails = self.emails.lock().unwrap();
+        let next_uid = emails
+            .iter()
+            .filter(|email| email.mailbox_id == target_mailbox_id)
+            .map(|email| email.uid)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let moved = emails
+            .iter_mut()
+            .find(|email| email.id == message_id)
+            .unwrap();
+        moved.mailbox_id = target_mailbox.id;
+        moved.mailbox_role = target_mailbox.role;
+        moved.mailbox_name = target_mailbox.name;
+        moved.uid = next_uid;
+        let moved = moved.clone();
+        Box::pin(async move { Ok(moved) })
+    }
+
     fn save_draft_message<'a>(
         &'a self,
         input: SubmitMessageInput,
@@ -411,8 +446,17 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     let greeting = read_response(&mut stream, None).await;
     assert!(greeting.contains("* OK LPE IMAP ready"));
 
+    let capability = send_command(&mut stream, "A0 CAPABILITY\r\n", "A0").await;
+    assert!(capability.contains("IDLE"));
+    assert!(capability.contains("MOVE"));
+    assert!(capability.contains("NAMESPACE"));
+    assert!(capability.contains("UIDPLUS"));
+
     let login = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
     assert!(login.contains("A1 OK LOGIN completed"));
+
+    let namespace = send_command(&mut stream, "A1B NAMESPACE\r\n", "A1B").await;
+    assert!(namespace.contains("* NAMESPACE ((\"\" \"/\")) NIL NIL"));
 
     let list = send_command(&mut stream, "A2 LIST \"\" \"*\"\r\n", "A2").await;
     assert!(list.contains("* LIST (\\Inbox) \"/\" \"Inbox\""));
@@ -480,10 +524,19 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     .await;
     assert!(richer_search.contains("* SEARCH 1"));
 
-    let select_drafts = send_command(&mut stream, "A14 SELECT Drafts\r\n", "A14").await;
+    let move_response = send_command(&mut stream, "A14 UID MOVE 1 Inbox\r\n", "A14").await;
+    assert!(move_response.contains("* 1 EXPUNGE"));
+    assert!(move_response.contains("* 0 EXISTS"));
+    assert!(move_response.contains("A14 OK [COPYUID 1 1 2] MOVE completed"));
+
+    let select_archive_after_move =
+        send_command(&mut stream, "A15 SELECT Archive\r\n", "A15").await;
+    assert!(select_archive_after_move.contains("* 0 EXISTS"));
+
+    let select_drafts = send_command(&mut stream, "A16 SELECT Drafts\r\n", "A16").await;
     assert!(select_drafts.contains("* 0 EXISTS"));
 
-    let append_prelude = send_partial_command(&mut stream, "A15 APPEND Drafts {80}\r\n").await;
+    let append_prelude = send_partial_command(&mut stream, "A17 APPEND Drafts {80}\r\n").await;
     assert!(append_prelude.contains("+ Ready for literal data"));
     let append = send_command(
         &mut stream,
@@ -495,18 +548,74 @@ async fn login_list_select_fetch_store_search_and_append_work() {
             "Draft body\r\n",
             "\r\n"
         ),
-        "A15",
+        "A17",
     )
     .await;
-    assert!(append.contains("A15 OK APPEND completed"));
+    assert!(append.contains("A17 OK [APPENDUID 1 3] APPEND completed"));
 
-    let drafts = send_command(&mut stream, "A16 UID SEARCH TEXT Draft\r\n", "A16").await;
+    let drafts = send_command(&mut stream, "A18 UID SEARCH TEXT Draft\r\n", "A18").await;
     assert!(drafts.contains("* SEARCH 3"));
 
-    let select_archive_again = send_command(&mut stream, "A17 SELECT Archive\r\n", "A17").await;
-    assert!(select_archive_again.contains("* 1 EXISTS"));
-    let delete_archive = send_command(&mut stream, "A18 DELETE Archive\r\n", "A18").await;
-    assert!(delete_archive.contains("A18 NO mailbox is not empty"));
+    let delete_archive = send_command(&mut stream, "A19 DELETE Archive\r\n", "A19").await;
+    assert!(delete_archive.contains("A19 OK DELETE completed"));
+
+    let select_inbox = send_command(&mut stream, "A20 SELECT Inbox\r\n", "A20").await;
+    assert!(select_inbox.contains("* 2 EXISTS"));
+    let rejected_move = send_command(&mut stream, "A21 MOVE 1 Drafts\r\n", "A21").await;
+    assert!(rejected_move.contains("A21 NO MOVE does not support Sent or Drafts"));
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn idle_reports_selected_mailbox_flag_changes() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    let _ = send_command(&mut stream, "A2 SELECT Inbox\r\n", "A2").await;
+
+    let idle = send_partial_command(&mut stream, "A3 IDLE\r\n").await;
+    assert!(idle.contains("+ idling"));
+
+    {
+        let mut emails = store.emails.lock().unwrap();
+        let inbox_email = emails
+            .iter_mut()
+            .find(|email| email.mailbox_name == "Inbox")
+            .unwrap();
+        inbox_email.unread = false;
+        inbox_email.flagged = true;
+    }
+
+    let update = read_response_with_timeout(&mut stream, None, 2_500).await;
+    assert!(update.contains("* 1 FETCH (FLAGS (\\Seen \\Flagged))"));
+
+    let done = send_command(&mut stream, "DONE\r\n", "A3").await;
+    assert!(done.contains("A3 OK IDLE completed"));
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn idle_requires_a_selected_mailbox() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+
+    let idle = send_command(&mut stream, "A2 IDLE\r\n", "A2").await;
+    assert!(idle.contains("A2 NO SELECT a mailbox first"));
 
     task.abort();
 }
@@ -632,10 +741,18 @@ async fn send_command(stream: &mut TcpStream, command: &str, tag: &str) -> Strin
 }
 
 async fn read_response(stream: &mut TcpStream, tag: Option<&str>) -> String {
+    read_response_with_timeout(stream, tag, 500).await
+}
+
+async fn read_response_with_timeout(
+    stream: &mut TcpStream,
+    tag: Option<&str>,
+    timeout_ms: u64,
+) -> String {
     let mut buffer = vec![0u8; 4096];
     let mut output = String::new();
     loop {
-        let bytes = timeout(Duration::from_millis(500), stream.read(&mut buffer))
+        let bytes = timeout(Duration::from_millis(timeout_ms), stream.read(&mut buffer))
             .await
             .unwrap()
             .unwrap();

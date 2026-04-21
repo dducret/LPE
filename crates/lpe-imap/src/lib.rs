@@ -15,6 +15,7 @@ use std::{collections::HashSet, sync::Arc};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
+    time::{timeout, Duration},
 };
 use uuid::Uuid;
 
@@ -22,7 +23,7 @@ mod store;
 
 use crate::store::ImapStore;
 
-const CAPABILITIES: &str = "IMAP4rev1 AUTH=XOAUTH2 SASL-IR";
+const CAPABILITIES: &str = "IMAP4rev1 AUTH=XOAUTH2 SASL-IR IDLE MOVE NAMESPACE UIDPLUS";
 const UID_VALIDITY: u32 = 1;
 
 #[derive(Clone)]
@@ -154,6 +155,7 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                     .await
             }
             "LIST" => self.handle_list(&request.tag, writer).await,
+            "NAMESPACE" => self.handle_namespace(&request.tag, writer).await,
             "STATUS" => {
                 self.handle_status(&request.tag, &request.arguments, writer)
                     .await
@@ -210,10 +212,20 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                 )
                 .await
             }
+            "MOVE" => {
+                self.handle_move(
+                    &request.tag,
+                    &request.arguments,
+                    writer,
+                    MessageRefKind::Sequence,
+                )
+                .await
+            }
             "UID" => {
                 self.handle_uid(reader, writer, &request.tag, &request.arguments)
                     .await
             }
+            "IDLE" => self.handle_idle(reader, writer, &request.tag).await,
             "APPEND" => {
                 self.handle_append(reader, writer, &request.tag, &request.arguments)
                     .await
@@ -371,6 +383,23 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         }
         writer
             .write_all(format!("{tag} OK LIST completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    async fn handle_namespace<W>(&self, tag: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        self.require_auth()?;
+        writer
+            .write_all(
+                format!(
+                    "* NAMESPACE ((\"\" \"/\")) NIL NIL\r\n{tag} OK NAMESPACE completed\r\n"
+                )
+                .as_bytes(),
+            )
             .await?;
         writer.flush().await?;
         Ok(true)
@@ -767,6 +796,74 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         Ok(true)
     }
 
+    async fn handle_move<W>(
+        &mut self,
+        tag: &str,
+        arguments: &str,
+        writer: &mut W,
+        ref_kind: MessageRefKind,
+    ) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        let (set_token, mailbox_token) = split_two(arguments)?;
+        let target_mailbox = self.resolve_mailbox_by_name(mailbox_token).await?;
+        let selected = self.require_selected()?.clone();
+        ensure_move_allowed(&selected, &target_mailbox)?;
+        let indices = resolve_message_indexes(&selected.emails, set_token, ref_kind)?;
+        let principal = self.require_auth()?;
+        let mut source_uids = Vec::new();
+        let mut target_uids = Vec::new();
+
+        for index in &indices {
+            let email = &selected.emails[*index];
+            let moved = self
+                .store
+                .move_imap_email(
+                    principal.account_id,
+                    email.id,
+                    target_mailbox.id,
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "imap-move".to_string(),
+                        subject: format!(
+                            "move message {} to mailbox {}",
+                            email.id, target_mailbox.name
+                        ),
+                    },
+                )
+                .await?;
+            source_uids.push(email.uid.to_string());
+            target_uids.push(moved.uid.to_string());
+        }
+
+        self.refresh_selected().await?;
+        for index in indices.iter().rev() {
+            writer
+                .write_all(format!("* {} EXPUNGE\r\n", index + 1).as_bytes())
+                .await?;
+        }
+        writer
+            .write_all(
+                format!("* {} EXISTS\r\n", self.require_selected()?.emails.len()).as_bytes(),
+            )
+            .await?;
+
+        let response = if source_uids.is_empty() {
+            format!("{tag} OK MOVE completed\r\n")
+        } else {
+            format!(
+                "{tag} OK [COPYUID {} {} {}] MOVE completed\r\n",
+                UID_VALIDITY,
+                source_uids.join(","),
+                target_uids.join(",")
+            )
+        };
+        writer.write_all(response.as_bytes()).await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
     async fn handle_uid<R, W>(
         &mut self,
         _reader: &mut BufReader<R>,
@@ -796,8 +893,55 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                 self.handle_copy(tag, rest, writer, MessageRefKind::Uid)
                     .await
             }
+            "MOVE" => self.handle_move(tag, rest, writer, MessageRefKind::Uid).await,
             other => bail!("UID {} is not supported", other),
         }
+    }
+
+    async fn handle_idle<R, W>(
+        &mut self,
+        reader: &mut BufReader<R>,
+        writer: &mut W,
+        tag: &str,
+    ) -> Result<bool>
+    where
+        R: AsyncReadExt + Unpin,
+        W: AsyncWriteExt + Unpin,
+    {
+        self.require_auth()?;
+        let mut previous = self.require_selected()?.clone();
+        writer.write_all(b"+ idling\r\n").await?;
+        writer.flush().await?;
+
+        loop {
+            let mut line = String::new();
+            match timeout(Duration::from_secs(1), reader.read_line(&mut line)).await {
+                Ok(Ok(0)) => return Ok(false),
+                Ok(Ok(_)) => {
+                    if line.trim_end_matches(['\r', '\n']).eq_ignore_ascii_case("DONE") {
+                        break;
+                    }
+                    bail!("IDLE expects DONE to terminate");
+                }
+                Ok(Err(error)) => return Err(error.into()),
+                Err(_) => {
+                    self.refresh_selected().await?;
+                    let current = self.require_selected()?.clone();
+                    let updates = render_selected_updates(&previous, &current)?;
+                    if !updates.is_empty() {
+                        writer.write_all(updates.as_bytes()).await?;
+                        writer.flush().await?;
+                    }
+                    previous = current;
+                }
+            }
+        }
+
+        writer
+            .write_all(format!("{tag} OK IDLE completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
     }
 
     async fn handle_append<R, W>(
@@ -842,7 +986,8 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             .map(|address| address.email)
             .unwrap_or_else(|| principal.email.clone());
 
-        self.store
+        let saved = self
+            .store
             .save_draft_message(
                 SubmitMessageInput {
                     draft_message_id: None,
@@ -888,13 +1033,26 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             )
             .await?;
 
-        if matches!(self.selected.as_ref(), Some(selected) if selected.mailbox_name.eq_ignore_ascii_case("Drafts"))
-        {
+        let appended = self
+            .store
+            .fetch_imap_emails(principal.account_id, saved.draft_mailbox_id)
+            .await?
+            .into_iter()
+            .find(|email| email.id == saved.message_id)
+            .ok_or_else(|| anyhow!("saved draft message not found"))?;
+
+        if matches!(self.selected.as_ref(), Some(selected) if selected.mailbox_name.eq_ignore_ascii_case("Drafts")) {
             self.refresh_selected().await?;
         }
 
         writer
-            .write_all(format!("{tag} OK APPEND completed\r\n").as_bytes())
+            .write_all(
+                format!(
+                    "{tag} OK [APPENDUID {} {}] APPEND completed\r\n",
+                    UID_VALIDITY, appended.uid
+                )
+                .as_bytes(),
+            )
             .await?;
         writer.flush().await?;
         Ok(true)
@@ -1737,6 +1895,57 @@ fn ensure_copy_allowed(source_role: &str, target_role: &str) -> Result<()> {
         bail!("COPY does not support Sent or Drafts because those states stay canonical");
     }
     Ok(())
+}
+
+fn ensure_move_allowed(selected: &SelectedMailbox, target_mailbox: &JmapMailbox) -> Result<()> {
+    if selected.mailbox_id == target_mailbox.id {
+        bail!("MOVE target mailbox must differ from the selected mailbox");
+    }
+    if matches!(selected.mailbox_role.as_str(), "drafts" | "sent")
+        || matches!(target_mailbox.role.as_str(), "drafts" | "sent")
+    {
+        bail!("MOVE does not support Sent or Drafts because those states stay canonical");
+    }
+    Ok(())
+}
+
+fn render_selected_updates(previous: &SelectedMailbox, current: &SelectedMailbox) -> Result<String> {
+    let mut output = String::new();
+
+    let current_ids = current
+        .emails
+        .iter()
+        .map(|email| email.id)
+        .collect::<HashSet<_>>();
+    let mut removed_sequences = previous
+        .emails
+        .iter()
+        .enumerate()
+        .filter_map(|(index, email)| (!current_ids.contains(&email.id)).then_some(index + 1))
+        .collect::<Vec<_>>();
+    removed_sequences.sort_unstable_by(|left, right| right.cmp(left));
+    for sequence in removed_sequences {
+        output.push_str(&format!("* {} EXPUNGE\r\n", sequence));
+    }
+
+    if previous.emails.len() != current.emails.len() {
+        output.push_str(&format!("* {} EXISTS\r\n", current.emails.len()));
+    }
+
+    for (index, email) in current.emails.iter().enumerate() {
+        let Some(previous_email) = previous.emails.iter().find(|candidate| candidate.id == email.id) else {
+            continue;
+        };
+        if previous_email.unread != email.unread || previous_email.flagged != email.flagged {
+            output.push_str(&format!(
+                "* {} FETCH (FLAGS ({}))\r\n",
+                index + 1,
+                render_flags(email, &current.mailbox_name)
+            ));
+        }
+    }
+
+    Ok(output)
 }
 
 fn first_unseen_sequence(selected: &SelectedMailbox) -> usize {

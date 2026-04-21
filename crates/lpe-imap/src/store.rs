@@ -58,6 +58,13 @@ pub trait ImapStore: AccountAuthStore {
         target_mailbox_id: Uuid,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, ImapEmail>;
+    fn move_imap_email<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ImapEmail>;
     fn save_draft_message<'a>(
         &'a self,
         input: SubmitMessageInput,
@@ -174,6 +181,25 @@ impl ImapStore for Storage {
                 .into_iter()
                 .find(|email| email.id == copied.id)
                 .ok_or_else(|| anyhow::anyhow!("copied IMAP message not found"))
+        })
+    }
+
+    fn move_imap_email<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ImapEmail> {
+        Box::pin(async move {
+            let moved = self
+                .move_jmap_email(account_id, message_id, target_mailbox_id, audit)
+                .await?;
+            self.fetch_imap_emails(account_id, target_mailbox_id)
+                .await?
+                .into_iter()
+                .find(|email| email.id == moved.id)
+                .ok_or_else(|| anyhow::anyhow!("moved IMAP message not found"))
         })
     }
 

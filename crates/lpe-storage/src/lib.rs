@@ -8397,6 +8397,67 @@ impl Storage {
             .ok_or_else(|| anyhow::anyhow!("copied message not found"))
     }
 
+    pub async fn move_jmap_email(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<JmapEmail> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        self.fetch_jmap_emails(account_id, &[message_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("message not found"))?;
+
+        let target_mailbox_exists = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT 1
+            FROM mailboxes
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(target_mailbox_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .is_some();
+        if !target_mailbox_exists {
+            bail!("target mailbox not found");
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let moved = sqlx::query(
+            r#"
+            UPDATE messages
+            SET mailbox_id = $4, imap_uid = nextval('message_imap_uid_seq')
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .bind(target_mailbox_id)
+        .execute(&mut *tx)
+        .await?;
+        if moved.rows_affected() == 0 {
+            bail!("message not found");
+        }
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
+
+        self.fetch_jmap_emails(account_id, &[message_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("moved message not found"))
+    }
+
     pub async fn import_jmap_email(
         &self,
         input: JmapImportedEmailInput,
