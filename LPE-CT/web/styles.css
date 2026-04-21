@@ -110,6 +110,12 @@ button {
   display: grid;
 }
 
+.locale-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
 .sidebar-stack {
   gap: 24px;
 }
@@ -221,6 +227,32 @@ label span,
 
 .sidebar-footer {
   align-content: end;
+  gap: 12px;
+}
+
+.locale-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.locale-picker span {
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.sidebar-locale span {
+  color: var(--nav-muted);
+}
+
+.sidebar-locale select {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--nav-text);
+  box-shadow: none;
+}
+
+.sidebar-locale select option {
+  color: var(--ink);
 }
 
 .workspace {
