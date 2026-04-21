@@ -115,6 +115,7 @@ const messages = {
     managementBind: "Management bind",
     primaryUpstream: "Primary upstream",
     secondaryUpstream: "Secondary upstream",
+    haEnabled: "HA enabled",
     syncInterval: "Sync interval (s)",
     lanDependencyNote: "LAN dependency note",
     mutualTlsRequired: "Mutual TLS required",
@@ -254,6 +255,7 @@ const messages = {
     managementBind: "Bind management",
     primaryUpstream: "Upstream principal",
     secondaryUpstream: "Upstream secondaire",
+    haEnabled: "HA active",
     syncInterval: "Intervalle de synchro (s)",
     lanDependencyNote: "Note de dependance LAN",
     mutualTlsRequired: "mTLS requis",
@@ -393,6 +395,7 @@ const messages = {
     managementBind: "Management-Bind",
     primaryUpstream: "Primaerer Upstream",
     secondaryUpstream: "Sekundaerer Upstream",
+    haEnabled: "HA aktiv",
     syncInterval: "Sync-Intervall (s)",
     lanDependencyNote: "Hinweis zur LAN-Abhaengigkeit",
     mutualTlsRequired: "mTLS erforderlich",
@@ -532,6 +535,7 @@ const messages = {
     managementBind: "Bind gestione",
     primaryUpstream: "Upstream primario",
     secondaryUpstream: "Upstream secondario",
+    haEnabled: "HA abilitata",
     syncInterval: "Intervallo sync (s)",
     lanDependencyNote: "Nota dipendenza LAN",
     mutualTlsRequired: "mTLS richiesto",
@@ -671,6 +675,7 @@ const messages = {
     managementBind: "Bind de gestion",
     primaryUpstream: "Upstream primario",
     secondaryUpstream: "Upstream secundario",
+    haEnabled: "HA habilitada",
     syncInterval: "Intervalo de sync (s)",
     lanDependencyNote: "Nota de dependencia LAN",
     mutualTlsRequired: "mTLS requerido",
@@ -714,6 +719,9 @@ const messages = {
 
 let currentLocale = getInitialLocale();
 let lastDashboard = null;
+const relayForm = document.getElementById("relay-form");
+const relayHaField = relayForm?.elements.namedItem("ha_enabled");
+const relayHaFields = Array.from(document.querySelectorAll("[data-ha-field]"));
 
 const loginEmailField = document.querySelector("#login-form input[name='email']");
 if (loginEmailField) {
@@ -875,6 +883,17 @@ function assignValues(form, values) {
   });
 }
 
+function syncRelayHaVisibility() {
+  const enabled = relayHaField?.checked ?? true;
+  relayHaFields.forEach((field) => {
+    field.classList.toggle("hidden", !enabled);
+    const input = field.querySelector("input");
+    if (input) {
+      input.required = enabled;
+    }
+  });
+}
+
 function renderAudit(audit) {
   const container = document.getElementById("audit-log");
   container.innerHTML = "";
@@ -908,6 +927,7 @@ function render(dashboard) {
 
   assignValues(document.getElementById("site-form"), dashboard.site);
   assignValues(document.getElementById("relay-form"), dashboard.relay);
+  syncRelayHaVisibility();
   assignValues(document.getElementById("network-form"), dashboard.network);
   assignValues(document.getElementById("policies-form"), dashboard.policies);
   assignValues(document.getElementById("updates-form"), dashboard.updates);
@@ -923,6 +943,7 @@ function formPayloads() {
     relay: () => {
       const form = document.getElementById("relay-form");
       return {
+        ha_enabled: form.elements.namedItem("ha_enabled").checked,
         primary_upstream: form.elements.namedItem("primary_upstream").value,
         secondary_upstream: form.elements.namedItem("secondary_upstream").value,
         sync_interval_seconds: Number(form.elements.namedItem("sync_interval_seconds").value),
@@ -1040,6 +1061,10 @@ panelTriggers.forEach((button) => {
   });
 });
 
+if (relayHaField) {
+  relayHaField.addEventListener("change", syncRelayHaVisibility);
+}
+
 document.getElementById("drawer-close").addEventListener("click", closeDrawer);
 
 configDrawer.addEventListener("click", (event) => {
@@ -1089,4 +1114,5 @@ document.getElementById("login-form").addEventListener("submit", (event) => {
 });
 
 setLocale(currentLocale);
+syncRelayHaVisibility();
 void load();

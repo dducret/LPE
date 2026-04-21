@@ -252,8 +252,10 @@
             <div id="relay-panel" class="drawer-panel hidden">
               <form id="relay-form" class="form-panel">
                 <div class="fields two">
-                  <label><span data-i18n="primaryUpstream">Primary upstream</span><input name="primary_upstream" required /></label>
-                  <label><span data-i18n="secondaryUpstream">Secondary upstream</span><input name="secondary_upstream" required /></label>
+                  <label class="toggle"><span data-i18n="haEnabled">HA enabled</span><input name="ha_enabled" type="checkbox" /></label>
+                  <div class="field-spacer"></div>
+                  <label data-ha-field><span data-i18n="primaryUpstream">Primary upstream</span><input name="primary_upstream" required /></label>
+                  <label data-ha-field><span data-i18n="secondaryUpstream">Secondary upstream</span><input name="secondary_upstream" required /></label>
                   <label><span data-i18n="syncInterval">Sync interval (s)</span><input name="sync_interval_seconds" type="number" min="1" required /></label>
                   <label><span data-i18n="lanDependencyNote">LAN dependency note</span><input name="lan_dependency_note" required /></label>
                   <label class="toggle"><span data-i18n="mutualTlsRequired">Mutual TLS required</span><input name="mutual_tls_required" type="checkbox" /></label>
