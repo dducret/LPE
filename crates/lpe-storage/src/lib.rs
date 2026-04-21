@@ -3391,7 +3391,7 @@ impl Storage {
             r#"
             INSERT INTO account_credentials (account_email, tenant_id, password_hash, status)
             VALUES ($1, $2, $3, 'active')
-            ON CONFLICT (account_email) DO UPDATE SET
+            ON CONFLICT (tenant_id, account_email) DO UPDATE SET
                 password_hash = EXCLUDED.password_hash,
                 status = 'active',
                 updated_at = NOW()
