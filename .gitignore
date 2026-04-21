@@ -5,4 +5,6 @@
 **/dist/
 **/*.tsbuildinfo
 /.DS_Store
+/takeri-inspect/
+/.codex-takeri-inspect/
 
