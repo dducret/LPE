@@ -19,6 +19,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - minimal `FETCH` over canonical message state
 - minimal `STORE` for `\Seen` and `\Flagged`
 - `IDLE` on a selected mailbox, with periodic refresh against canonical mailbox state
+- `CONDSTORE` mailbox sync primitives: `HIGHESTMODSEQ`, per-message `MODSEQ`, and conditional `STORE` with `UNCHANGEDSINCE`
 - `COPY` and `UID COPY` into `Inbox` or custom mailboxes
 - `MOVE` and `UID MOVE` between `Inbox` and custom user mailboxes
 - richer `SEARCH`
@@ -36,6 +37,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - custom IMAP mailbox creation and rename reuse the canonical mailbox records already exposed through `JMAP`
 - `COPY` reuses canonical message-copy persistence and creates a new canonical message row in the target mailbox instead of introducing mailbox replication state
 - `MOVE` reuses a canonical mailbox move on the existing message row, updates the target mailbox projection, and allocates a fresh destination `UID` so the destination mailbox still receives the moved message at the tail of its IMAP order
+- `CONDSTORE` reuses a canonical account-level mail change watermark plus canonical per-message `imap_modseq` values stored on `messages`; the adapter does not maintain an `IMAP`-only sync journal
 - no `IMAP` path creates a parallel `Sent`, `Drafts`, or `Outbox`
 - `Bcc` stays out of `SEARCH`; it is only rendered back in `Drafts` and `Sent` header reconstruction for the authenticated owner view
 
@@ -46,23 +48,26 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 ## Current limitations
 
 - no message submission or `APPEND` to `Sent`; outbound submission remains canonical through `JMAP`, `ActiveSync`, and the web/API submission workflow
-- no subscribe state, hierarchy management, standalone `EXPUNGE`, ACL, or SASL mechanisms other than `XOAUTH2`
+- no subscribe state, hierarchy management, standalone `EXPUNGE`, ACL, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
 - mailbox management remains a flat namespace for now; hierarchical folder trees are not implemented yet
 - the supported `FETCH` body sections are limited to header, text body, and reconstructed full message body without attachment MIME reserialization
 - `COPY` intentionally rejects `Sent` and `Drafts` as source or target mailboxes so the adapter cannot become an alternate sent-message or draft workflow
 - `MOVE` uses the same guardrail and only supports `Inbox` plus custom user mailboxes
 - `SEARCH` now supports `ALL`, `SEEN`, `UNSEEN`, `FLAGGED`, `UNFLAGGED`, `TEXT`, `SUBJECT`, `FROM`, `TO`, `CC`, `BODY`, `HEADER`, `BEFORE`, `ON`, `SINCE`, `LARGER`, `SMALLER`, `NOT`, `OR`, sequence-set criteria, and `UID`
-- `IDLE` currently refreshes by polling canonical mailbox state for the selected mailbox; it does not yet publish a reusable cross-protocol change anchor
+- `IDLE` currently refreshes by polling canonical mailbox state for the selected mailbox; it now coexists with a reusable canonical mail change watermark, but still does not publish `QRESYNC`-grade vanished history
 
 ## UID and sync tradeoffs
 
 - `UIDVALIDITY` remains fixed at `1` for now because the adapter still sits on one canonical mailbox store rather than a dedicated per-mailbox synchronization engine
 - message `UID`s come from the stable `messages.imap_uid` projection column and are globally monotonic for the account data set, not reallocated from a mailbox-local replication log
 - `UIDNEXT` is derived from the highest currently visible message `UID` in the mailbox projection plus one; gaps are expected after copies or future deletions
+- each canonical message now carries a stored `imap_modseq`, and each account carries a canonical mail `HIGHESTMODSEQ` watermark that advances on draft persistence, inbound delivery, copy, move, flag updates, and canonical draft deletion
+- `HIGHESTMODSEQ` is account-scoped canonical mail state rather than an `IMAP`-local shadow counter, so it stays monotonic across mailbox-local deletions and moves; clients may therefore observe a mailbox `HIGHESTMODSEQ` advance because of other mail changes in the same account
 - `COPY` returns a new canonical row with a new `UID` in the target mailbox; it does not create a shared multi-mailbox identity or hidden replication record
 - `MOVE` updates the canonical message row in place but still assigns a new destination `UID`, preserving `UIDPLUS` mapping and keeping the destination mailbox append-like from an IMAP client perspective
+- `FETCH MODSEQ` and `STORE ... (UNCHANGEDSINCE n)` operate directly on those canonical values; mixed conditional `STORE` batches may partially apply and return `MODIFIED` for the stale subset
 - `IDLE` only reports selected-mailbox changes that can be observed from canonical mailbox refreshes, such as flag changes, additions, and removals
-- because there is no dedicated IMAP sync state yet, standalone `EXPUNGE`, `CONDSTORE`, and `QRESYNC` stay deferred until delete and reusable change-anchor semantics are promoted to first-class canonical operations
+- because there is still no canonical vanished-history journal, standalone `EXPUNGE` and `QRESYNC` stay deferred even though `CONDSTORE` now uses canonical first-class change anchors
 - `Bcc` remains protected in those tradeoffs as well: it is preserved in protected storage for owner reconstruction in `Drafts` and `Sent`, but never added to IMAP search matching
 
 ## Runtime

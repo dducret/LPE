@@ -23,7 +23,7 @@ mod store;
 
 use crate::store::ImapStore;
 
-const CAPABILITIES: &str = "IMAP4rev1 AUTH=XOAUTH2 SASL-IR IDLE MOVE NAMESPACE UIDPLUS";
+const CAPABILITIES: &str = "IMAP4rev1 AUTH=XOAUTH2 SASL-IR IDLE MOVE NAMESPACE UIDPLUS CONDSTORE";
 const UID_VALIDITY: u32 = 1;
 
 #[derive(Clone)]
@@ -116,6 +116,11 @@ enum MessageRefKind {
 struct StoreMode {
     replace: bool,
     silent: bool,
+}
+
+#[derive(Clone, Copy)]
+struct StoreCondstore {
+    unchanged_since: Option<u64>,
 }
 
 impl<S: ImapStore, D: Detector> Session<S, D> {
@@ -395,10 +400,8 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         self.require_auth()?;
         writer
             .write_all(
-                format!(
-                    "* NAMESPACE ((\"\" \"/\")) NIL NIL\r\n{tag} OK NAMESPACE completed\r\n"
-                )
-                .as_bytes(),
+                format!("* NAMESPACE ((\"\" \"/\")) NIL NIL\r\n{tag} OK NAMESPACE completed\r\n")
+                    .as_bytes(),
             )
             .await?;
         writer.flush().await?;
@@ -415,8 +418,12 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             .store
             .fetch_imap_emails(principal.account_id, mailbox.id)
             .await?;
+        let highest_modseq = self
+            .store
+            .fetch_imap_highest_modseq(principal.account_id)
+            .await?;
         let requested = parse_status_items(arguments)?;
-        let response = render_status_response(&mailbox, &emails, &requested);
+        let response = render_status_response(&mailbox, &emails, &requested, highest_modseq);
 
         writer.write_all(response.as_bytes()).await?;
         writer
@@ -537,6 +544,10 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             .store
             .fetch_imap_emails(principal.account_id, mailbox.id)
             .await?;
+        let highest_modseq = self
+            .store
+            .fetch_imap_highest_modseq(principal.account_id)
+            .await?;
         let exists = emails.len();
         let uid_next = emails
             .last()
@@ -576,6 +587,11 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             .await?;
         writer
             .write_all(format!("* OK [UIDNEXT {}] next uid\r\n", uid_next).as_bytes())
+            .await?;
+        writer
+            .write_all(
+                format!("* OK [HIGHESTMODSEQ {}] highest modseq\r\n", highest_modseq).as_bytes(),
+            )
             .await?;
         writer
             .write_all(format!("{tag} OK [READ-WRITE] SELECT completed\r\n").as_bytes())
@@ -623,6 +639,7 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                     &mark_seen_ids,
                     Some(false),
                     None,
+                    None,
                 )
                 .await?;
             self.refresh_selected().await?;
@@ -641,12 +658,11 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
     where
         W: AsyncWriteExt + Unpin,
     {
-        let (set_token, rest) = split_two(arguments)?;
-        let (mode_token, flags_token) = split_two(rest)?;
-        let mode = parse_store_mode(mode_token)?;
-        let flags = parse_flag_list(flags_token)?;
+        let (set_token, condstore, mode_token, flags_token) = parse_store_arguments(arguments)?;
+        let mode = parse_store_mode(&mode_token)?;
+        let flags = parse_flag_list(&flags_token)?;
         let selected = self.require_selected()?;
-        let indices = resolve_message_indexes(&selected.emails, set_token, ref_kind)?;
+        let indices = resolve_message_indexes(&selected.emails, &set_token, ref_kind)?;
         let ids = indices
             .iter()
             .map(|index| selected.emails[*index].id)
@@ -665,13 +681,15 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         };
 
         let principal = self.require_auth()?;
-        self.store
+        let modified_ids = self
+            .store
             .update_imap_flags(
                 principal.account_id,
                 selected.mailbox_id,
                 &ids,
                 unread,
                 flagged,
+                condstore.unchanged_since,
             )
             .await?;
         self.refresh_selected().await?;
@@ -680,6 +698,9 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             let selected = self.require_selected()?;
             for index in indices {
                 let email = &selected.emails[index];
+                if modified_ids.contains(&email.id) {
+                    continue;
+                }
                 writer
                     .write_all(
                         format!(
@@ -693,9 +714,23 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             }
         }
 
-        writer
-            .write_all(format!("{tag} OK STORE completed\r\n").as_bytes())
-            .await?;
+        let selected = self.require_selected()?;
+        if modified_ids.is_empty() {
+            writer
+                .write_all(format!("{tag} OK STORE completed\r\n").as_bytes())
+                .await?;
+        } else {
+            let modified_set = render_modified_set(selected, &modified_ids, ref_kind);
+            writer
+                .write_all(
+                    format!(
+                        "{tag} NO [MODIFIED {}] conditional STORE failed\r\n",
+                        modified_set
+                    )
+                    .as_bytes(),
+                )
+                .await?;
+        }
         writer.flush().await?;
         Ok(true)
     }
@@ -844,9 +879,7 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                 .await?;
         }
         writer
-            .write_all(
-                format!("* {} EXISTS\r\n", self.require_selected()?.emails.len()).as_bytes(),
-            )
+            .write_all(format!("* {} EXISTS\r\n", self.require_selected()?.emails.len()).as_bytes())
             .await?;
 
         let response = if source_uids.is_empty() {
@@ -893,7 +926,10 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                 self.handle_copy(tag, rest, writer, MessageRefKind::Uid)
                     .await
             }
-            "MOVE" => self.handle_move(tag, rest, writer, MessageRefKind::Uid).await,
+            "MOVE" => {
+                self.handle_move(tag, rest, writer, MessageRefKind::Uid)
+                    .await
+            }
             other => bail!("UID {} is not supported", other),
         }
     }
@@ -918,7 +954,10 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             match timeout(Duration::from_secs(1), reader.read_line(&mut line)).await {
                 Ok(Ok(0)) => return Ok(false),
                 Ok(Ok(_)) => {
-                    if line.trim_end_matches(['\r', '\n']).eq_ignore_ascii_case("DONE") {
+                    if line
+                        .trim_end_matches(['\r', '\n'])
+                        .eq_ignore_ascii_case("DONE")
+                    {
                         break;
                     }
                     bail!("IDLE expects DONE to terminate");
@@ -1041,7 +1080,8 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             .find(|email| email.id == saved.message_id)
             .ok_or_else(|| anyhow!("saved draft message not found"))?;
 
-        if matches!(self.selected.as_ref(), Some(selected) if selected.mailbox_name.eq_ignore_ascii_case("Drafts")) {
+        if matches!(self.selected.as_ref(), Some(selected) if selected.mailbox_name.eq_ignore_ascii_case("Drafts"))
+        {
             self.refresh_selected().await?;
         }
 
@@ -1206,6 +1246,51 @@ impl SearchExpression {
 struct FetchAttributes {
     items: Vec<String>,
     mark_seen: bool,
+}
+
+fn parse_store_arguments(input: &str) -> Result<(String, StoreCondstore, String, String)> {
+    let tokens = tokenize(input)?;
+    if tokens.len() < 3 {
+        bail!("STORE expects a message set, mode, and flag list");
+    }
+
+    let set_token = tokens[0].clone();
+    let mut cursor = 1usize;
+    let mut condstore = StoreCondstore {
+        unchanged_since: None,
+    };
+    if tokens[cursor]
+        .to_ascii_uppercase()
+        .starts_with("(UNCHANGEDSINCE ")
+    {
+        condstore = parse_store_condstore(&tokens[cursor])?;
+        cursor += 1;
+    }
+    if tokens.len() != cursor + 2 {
+        bail!("STORE expects a message set, mode, and flag list");
+    }
+
+    Ok((
+        set_token,
+        condstore,
+        tokens[cursor].clone(),
+        tokens[cursor + 1].clone(),
+    ))
+}
+
+fn parse_store_condstore(token: &str) -> Result<StoreCondstore> {
+    let source = token
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(')')
+        .trim();
+    let parts = source.split_whitespace().collect::<Vec<_>>();
+    if parts.len() != 2 || !parts[0].eq_ignore_ascii_case("UNCHANGEDSINCE") {
+        bail!("unsupported STORE modifier {}", token);
+    }
+    Ok(StoreCondstore {
+        unchanged_since: Some(parts[1].parse::<u64>()?),
+    })
 }
 
 fn parse_request_line(line: &str) -> Result<RequestLine> {
@@ -1376,6 +1461,7 @@ fn render_fetch_response(
             "FLAGS" => output.extend_from_slice(
                 format!("FLAGS ({})", render_flags(email, &email.mailbox_name)).as_bytes(),
             ),
+            "MODSEQ" => output.extend_from_slice(format!("MODSEQ ({})", email.modseq).as_bytes()),
             "INTERNALDATE" => output.extend_from_slice(
                 format!("INTERNALDATE \"{}\"", format_internal_date(email)).as_bytes(),
             ),
@@ -1420,6 +1506,7 @@ fn render_status_response(
     mailbox: &JmapMailbox,
     emails: &[ImapEmail],
     requested: &[String],
+    highest_modseq: u64,
 ) -> String {
     let uid_next = emails
         .last()
@@ -1434,6 +1521,7 @@ fn render_status_response(
             "UIDNEXT" => format!("UIDNEXT {}", uid_next),
             "UIDVALIDITY" => format!("UIDVALIDITY {}", UID_VALIDITY),
             "UNSEEN" => format!("UNSEEN {}", unseen),
+            "HIGHESTMODSEQ" => format!("HIGHESTMODSEQ {}", highest_modseq),
             _ => format!("{} 0", item),
         })
         .collect::<Vec<_>>()
@@ -1697,7 +1785,7 @@ fn parse_status_items(arguments: &str) -> Result<Vec<String>> {
     for item in &requested {
         if !matches!(
             item.as_str(),
-            "MESSAGES" | "RECENT" | "UIDNEXT" | "UIDVALIDITY" | "UNSEEN"
+            "MESSAGES" | "RECENT" | "UIDNEXT" | "UIDVALIDITY" | "UNSEEN" | "HIGHESTMODSEQ"
         ) {
             bail!("unsupported STATUS item {}", item);
         }
@@ -1716,6 +1804,24 @@ fn parse_flag_list(token: &str) -> Result<HashSet<String>> {
         flags.insert(item.to_string());
     }
     Ok(flags)
+}
+
+fn render_modified_set(
+    selected: &SelectedMailbox,
+    modified_ids: &[Uuid],
+    ref_kind: MessageRefKind,
+) -> String {
+    let mut values = Vec::new();
+    for (index, email) in selected.emails.iter().enumerate() {
+        if !modified_ids.contains(&email.id) {
+            continue;
+        }
+        values.push(match ref_kind {
+            MessageRefKind::Sequence => (index + 1).to_string(),
+            MessageRefKind::Uid => email.uid.to_string(),
+        });
+    }
+    values.join(",")
 }
 
 fn parse_literal_size(token: &str) -> Result<usize> {
@@ -1909,7 +2015,10 @@ fn ensure_move_allowed(selected: &SelectedMailbox, target_mailbox: &JmapMailbox)
     Ok(())
 }
 
-fn render_selected_updates(previous: &SelectedMailbox, current: &SelectedMailbox) -> Result<String> {
+fn render_selected_updates(
+    previous: &SelectedMailbox,
+    current: &SelectedMailbox,
+) -> Result<String> {
     let mut output = String::new();
 
     let current_ids = current
@@ -1933,7 +2042,11 @@ fn render_selected_updates(previous: &SelectedMailbox, current: &SelectedMailbox
     }
 
     for (index, email) in current.emails.iter().enumerate() {
-        let Some(previous_email) = previous.emails.iter().find(|candidate| candidate.id == email.id) else {
+        let Some(previous_email) = previous
+            .emails
+            .iter()
+            .find(|candidate| candidate.id == email.id)
+        else {
             continue;
         };
         if previous_email.unread != email.unread || previous_email.flagged != email.flagged {

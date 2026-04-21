@@ -44,6 +44,7 @@ struct FakeStore {
     login: AccountLogin,
     mailboxes: Arc<Mutex<Vec<JmapMailbox>>>,
     emails: Arc<Mutex<Vec<ImapEmail>>>,
+    highest_modseq: Arc<Mutex<u64>>,
 }
 
 impl FakeStore {
@@ -73,6 +74,7 @@ impl FakeStore {
                 email(
                     "11111111-1111-1111-1111-111111111111",
                     1,
+                    2,
                     "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
                     "inbox",
                     "Inbox",
@@ -83,6 +85,7 @@ impl FakeStore {
                 email(
                     "22222222-2222-2222-2222-222222222222",
                     2,
+                    3,
                     "cccccccc-cccc-cccc-cccc-cccccccccccc",
                     "sent",
                     "Sent",
@@ -91,7 +94,14 @@ impl FakeStore {
                     true,
                 ),
             ])),
+            highest_modseq: Arc::new(Mutex::new(3)),
         }
+    }
+
+    fn next_modseq(&self) -> u64 {
+        let mut highest_modseq = self.highest_modseq.lock().unwrap();
+        *highest_modseq += 1;
+        *highest_modseq
     }
 }
 
@@ -147,6 +157,11 @@ impl ImapStore for FakeStore {
         Box::pin(async move { Ok(mailboxes) })
     }
 
+    fn fetch_imap_highest_modseq<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, u64> {
+        let highest_modseq = *self.highest_modseq.lock().unwrap();
+        Box::pin(async move { Ok(highest_modseq) })
+    }
+
     fn fetch_imap_emails<'a>(
         &'a self,
         _account_id: Uuid,
@@ -170,10 +185,28 @@ impl ImapStore for FakeStore {
         message_ids: &'a [Uuid],
         unread: Option<bool>,
         flagged: Option<bool>,
-    ) -> StoreFuture<'a, ()> {
+        unchanged_since: Option<u64>,
+    ) -> StoreFuture<'a, Vec<Uuid>> {
         let mut emails = self.emails.lock().unwrap();
+        let modified_ids = emails
+            .iter()
+            .filter(|email| {
+                email.mailbox_id == mailbox_id
+                    && message_ids.contains(&email.id)
+                    && unchanged_since.is_some_and(|limit| email.modseq > limit)
+            })
+            .map(|email| email.id)
+            .collect::<Vec<_>>();
+        let next_modseq = if modified_ids.len() == message_ids.len() {
+            None
+        } else {
+            Some(self.next_modseq())
+        };
         for email in emails.iter_mut() {
-            if email.mailbox_id != mailbox_id || !message_ids.contains(&email.id) {
+            if email.mailbox_id != mailbox_id
+                || !message_ids.contains(&email.id)
+                || modified_ids.contains(&email.id)
+            {
                 continue;
             }
             if let Some(unread) = unread {
@@ -182,8 +215,11 @@ impl ImapStore for FakeStore {
             if let Some(flagged) = flagged {
                 email.flagged = flagged;
             }
+            if let Some(modseq) = next_modseq {
+                email.modseq = modseq;
+            }
         }
-        Box::pin(async move { Ok(()) })
+        Box::pin(async move { Ok(modified_ids) })
     }
 
     fn query_jmap_email_ids<'a>(
@@ -284,6 +320,7 @@ impl ImapStore for FakeStore {
         drop(mailboxes);
 
         let mut emails = self.emails.lock().unwrap();
+        let modseq = self.next_modseq();
         let source = emails
             .iter()
             .find(|email| email.id == message_id)
@@ -299,6 +336,7 @@ impl ImapStore for FakeStore {
         let copied = ImapEmail {
             id: Uuid::new_v4(),
             uid: next_uid,
+            modseq,
             thread_id: source.thread_id,
             mailbox_id: target_mailbox.id,
             mailbox_role: target_mailbox.role,
@@ -341,6 +379,7 @@ impl ImapStore for FakeStore {
         drop(mailboxes);
 
         let mut emails = self.emails.lock().unwrap();
+        let modseq = self.next_modseq();
         let next_uid = emails
             .iter()
             .filter(|email| email.mailbox_id == target_mailbox_id)
@@ -356,6 +395,7 @@ impl ImapStore for FakeStore {
         moved.mailbox_role = target_mailbox.role;
         moved.mailbox_name = target_mailbox.name;
         moved.uid = next_uid;
+        moved.modseq = modseq;
         let moved = moved.clone();
         Box::pin(async move { Ok(moved) })
     }
@@ -374,10 +414,12 @@ impl ImapStore for FakeStore {
         drop(mailboxes);
         let mut emails = self.emails.lock().unwrap();
         let next_uid = emails.iter().map(|email| email.uid).max().unwrap_or(0) + 1;
+        let modseq = self.next_modseq();
         let message_id = Uuid::new_v4();
         emails.push(ImapEmail {
             id: message_id,
             uid: next_uid,
+            modseq,
             thread_id: Uuid::new_v4(),
             mailbox_id: mailbox.id,
             mailbox_role: mailbox.role,
@@ -447,6 +489,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     assert!(greeting.contains("* OK LPE IMAP ready"));
 
     let capability = send_command(&mut stream, "A0 CAPABILITY\r\n", "A0").await;
+    assert!(capability.contains("CONDSTORE"));
     assert!(capability.contains("IDLE"));
     assert!(capability.contains("MOVE"));
     assert!(capability.contains("NAMESPACE"));
@@ -465,6 +508,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
 
     let select = send_command(&mut stream, "A3 SELECT Inbox\r\n", "A3").await;
     assert!(select.contains("* 1 EXISTS"));
+    assert!(select.contains("* OK [HIGHESTMODSEQ 3]"));
     assert!(select.contains("A3 OK [READ-WRITE] SELECT completed"));
 
     let fetch = send_command(
@@ -485,6 +529,10 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     .await;
     assert!(store_response.contains("* 1 FETCH (FLAGS (\\Seen \\Flagged))"));
 
+    let fetch_modseq = send_command(&mut stream, "A5B FETCH 1 (UID MODSEQ)\r\n", "A5B").await;
+    assert!(fetch_modseq.contains("UID 1"));
+    assert!(fetch_modseq.contains("MODSEQ (4)"));
+
     let search = send_command(&mut stream, "A6 SEARCH SEEN TEXT Welcome\r\n", "A6").await;
     assert!(search.contains("* SEARCH 1"));
 
@@ -501,11 +549,13 @@ async fn login_list_select_fetch_store_search_and_append_work() {
 
     let status = send_command(
         &mut stream,
-        "A9 STATUS Projects (MESSAGES UIDNEXT UIDVALIDITY UNSEEN)\r\n",
+        "A9 STATUS Projects (MESSAGES UIDNEXT UIDVALIDITY UNSEEN HIGHESTMODSEQ)\r\n",
         "A9",
     )
     .await;
-    assert!(status.contains("* STATUS \"Projects\" (MESSAGES 0 UIDNEXT 1 UIDVALIDITY 1 UNSEEN 0)"));
+    assert!(status.contains(
+        "* STATUS \"Projects\" (MESSAGES 0 UIDNEXT 1 UIDVALIDITY 1 UNSEEN 0 HIGHESTMODSEQ 4)"
+    ));
 
     let rename_projects = send_command(&mut stream, "A10 RENAME Projects Archive\r\n", "A10").await;
     assert!(rename_projects.contains("A10 OK RENAME completed"));
@@ -568,6 +618,85 @@ async fn login_list_select_fetch_store_search_and_append_work() {
 }
 
 #[tokio::test]
+async fn condstore_store_reports_modified_and_keeps_fresh_messages() {
+    let store = FakeStore::new();
+    let archive_id = Uuid::new_v4();
+    {
+        let mut mailboxes = store.mailboxes.lock().unwrap();
+        mailboxes.push(JmapMailbox {
+            id: archive_id,
+            role: String::new(),
+            name: "Archive".to_string(),
+            sort_order: 30,
+            total_emails: 0,
+            unread_emails: 0,
+        });
+    }
+    {
+        let mut emails = store.emails.lock().unwrap();
+        emails.push(email(
+            "33333333-3333-3333-3333-333333333333",
+            1,
+            4,
+            &archive_id.to_string(),
+            "",
+            "Archive",
+            "First",
+            true,
+            false,
+        ));
+        emails.push(email(
+            "44444444-4444-4444-4444-444444444444",
+            2,
+            5,
+            &archive_id.to_string(),
+            "",
+            "Archive",
+            "Second",
+            true,
+            false,
+        ));
+    }
+    *store.highest_modseq.lock().unwrap() = 5;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    let _ = send_command(&mut stream, "A2 SELECT Archive\r\n", "A2").await;
+
+    {
+        let next_modseq = store.next_modseq();
+        let mut emails = store.emails.lock().unwrap();
+        let second = emails
+            .iter_mut()
+            .find(|email| email.subject == "Second")
+            .unwrap();
+        second.flagged = true;
+        second.modseq = next_modseq;
+    }
+
+    let conditional_store = send_command(
+        &mut stream,
+        "A3 STORE 1:2 (UNCHANGEDSINCE 4) +FLAGS (\\Seen)\r\n",
+        "A3",
+    )
+    .await;
+    assert!(conditional_store.contains("* 1 FETCH (FLAGS (\\Seen))"));
+    assert!(conditional_store.contains("A3 NO [MODIFIED 2] conditional STORE failed"));
+
+    let fetch_after = send_command(&mut stream, "A4 FETCH 1:2 (FLAGS MODSEQ)\r\n", "A4").await;
+    assert!(fetch_after.contains("* 1 FETCH (FLAGS (\\Seen) MODSEQ (7))"));
+    assert!(fetch_after.contains("* 2 FETCH (FLAGS (\\Flagged) MODSEQ (6))"));
+
+    task.abort();
+}
+
+#[tokio::test]
 async fn idle_reports_selected_mailbox_flag_changes() {
     let store = FakeStore::new();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -584,6 +713,7 @@ async fn idle_reports_selected_mailbox_flag_changes() {
     assert!(idle.contains("+ idling"));
 
     {
+        let next_modseq = store.next_modseq();
         let mut emails = store.emails.lock().unwrap();
         let inbox_email = emails
             .iter_mut()
@@ -591,6 +721,7 @@ async fn idle_reports_selected_mailbox_flag_changes() {
             .unwrap();
         inbox_email.unread = false;
         inbox_email.flagged = true;
+        inbox_email.modseq = next_modseq;
     }
 
     let update = read_response_with_timeout(&mut stream, None, 2_500).await;
@@ -684,6 +815,7 @@ fn mailbox(id: &str, role: &str, name: &str, sort_order: i32) -> JmapMailbox {
 fn email(
     id: &str,
     uid: u32,
+    modseq: u64,
     mailbox_id: &str,
     mailbox_role: &str,
     mailbox_name: &str,
@@ -694,6 +826,7 @@ fn email(
     ImapEmail {
         id: Uuid::parse_str(id).unwrap(),
         uid,
+        modseq,
         thread_id: Uuid::new_v4(),
         mailbox_id: Uuid::parse_str(mailbox_id).unwrap(),
         mailbox_role: mailbox_role.to_string(),

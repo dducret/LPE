@@ -17,10 +17,11 @@ BEGIN;
 CREATE EXTENSION pg_trgm;
 
 CREATE SEQUENCE message_imap_uid_seq;
+CREATE SEQUENCE message_modseq_seq START WITH 2;
 
 CREATE TABLE schema_metadata (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
-    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.5'),
+    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.6'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -35,6 +36,7 @@ CREATE TABLE accounts (
     gal_visibility TEXT NOT NULL DEFAULT 'tenant' CHECK (gal_visibility IN ('tenant', 'hidden')),
     directory_kind TEXT NOT NULL DEFAULT 'person'
         CHECK (directory_kind IN ('person', 'room', 'equipment')),
+    mail_sync_modseq BIGINT NOT NULL DEFAULT 1 CHECK (mail_sync_modseq > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, primary_email)
@@ -82,6 +84,7 @@ CREATE TABLE messages (
     thread_id UUID NOT NULL,
     internet_message_id TEXT,
     imap_uid BIGINT NOT NULL DEFAULT nextval('message_imap_uid_seq'),
+    imap_modseq BIGINT NOT NULL DEFAULT nextval('message_modseq_seq'),
     received_at TIMESTAMPTZ NOT NULL,
     sent_at TIMESTAMPTZ,
     from_display TEXT,
@@ -136,6 +139,9 @@ CREATE UNIQUE INDEX messages_mailbox_imap_uid_idx
 
 CREATE INDEX messages_account_mailbox_imap_uid_idx
     ON messages (tenant_id, account_id, mailbox_id, imap_uid ASC);
+
+CREATE INDEX messages_account_mailbox_imap_modseq_idx
+    ON messages (tenant_id, account_id, mailbox_id, imap_modseq ASC);
 
 CREATE TABLE message_bodies (
     message_id UUID PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
@@ -961,7 +967,7 @@ LEFT JOIN attachments a
 GROUP BY m.id, m.account_id, m.mailbox_id, m.received_at, m.subject_normalized, mb.search_vector;
 
 INSERT INTO schema_metadata (singleton, schema_version)
-VALUES (TRUE, '0.1.5');
+VALUES (TRUE, '0.1.6');
 
 INSERT INTO security_settings (
     tenant_id,

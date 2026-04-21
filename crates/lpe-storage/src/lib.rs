@@ -37,7 +37,7 @@ const DEFAULT_COLLECTION_ID: &str = "default";
 const DEFAULT_TASK_LIST_NAME: &str = "Tasks";
 const DEFAULT_TASK_LIST_ROLE: &str = "inbox";
 const CANONICAL_CHANGE_CHANNEL: &str = "lpe_canonical_changes";
-const EXPECTED_SCHEMA_VERSION: &str = "0.1.5";
+const EXPECTED_SCHEMA_VERSION: &str = "0.1.6";
 
 #[derive(Clone)]
 pub struct Storage {
@@ -1412,6 +1412,7 @@ pub struct JmapEmail {
 pub struct ImapEmail {
     pub id: Uuid,
     pub uid: u32,
+    pub modseq: u64,
     pub thread_id: Uuid,
     pub mailbox_id: Uuid,
     pub mailbox_role: String,
@@ -1594,7 +1595,6 @@ struct JmapMailboxRow {
 #[derive(Debug, FromRow)]
 struct JmapEmailRow {
     id: Uuid,
-    imap_uid: i64,
     thread_id: Uuid,
     mailbox_id: Uuid,
     mailbox_role: String,
@@ -1617,6 +1617,31 @@ struct JmapEmailRow {
     size_octets: i64,
     internet_message_id: Option<String>,
     mime_blob_ref: Option<String>,
+    delivery_status: String,
+}
+
+#[derive(Debug, FromRow)]
+struct ImapEmailRow {
+    id: Uuid,
+    imap_uid: i64,
+    imap_modseq: i64,
+    thread_id: Uuid,
+    mailbox_id: Uuid,
+    mailbox_role: String,
+    mailbox_name: String,
+    received_at: String,
+    sent_at: Option<String>,
+    from_address: String,
+    from_display: Option<String>,
+    subject: String,
+    preview: String,
+    body_text: String,
+    body_html_sanitized: Option<String>,
+    unread: bool,
+    flagged: bool,
+    has_attachments: bool,
+    size_octets: i64,
+    internet_message_id: Option<String>,
     delivery_status: String,
 }
 
@@ -4712,6 +4737,25 @@ impl Storage {
         self.fetch_jmap_mailboxes(account_id).await
     }
 
+    pub async fn fetch_imap_highest_modseq(&self, account_id: Uuid) -> Result<u64> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let modseq = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT mail_sync_modseq
+            FROM accounts
+            WHERE tenant_id = $1 AND id = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| anyhow!("account not found"))?;
+
+        u64::try_from(modseq).map_err(|_| anyhow!("mail sync modseq is out of range"))
+    }
+
     pub async fn fetch_jmap_mailbox_ids(&self, account_id: Uuid) -> Result<Vec<Uuid>> {
         Ok(self
             .fetch_jmap_mailboxes(account_id)
@@ -5131,7 +5175,7 @@ impl Storage {
             r#"
             SELECT
                 m.id,
-                m.imap_uid,
+                m.imap_modseq,
                 m.thread_id,
                 m.mailbox_id,
                 mb.role AS mailbox_role,
@@ -5273,7 +5317,7 @@ impl Storage {
         mailbox_id: Uuid,
     ) -> Result<Vec<ImapEmail>> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
-        let rows = sqlx::query_as::<_, JmapEmailRow>(
+        let rows = sqlx::query_as::<_, ImapEmailRow>(
             r#"
             SELECT
                 m.id,
@@ -5363,6 +5407,8 @@ impl Storage {
             .map(|row| {
                 let uid = u32::try_from(row.imap_uid)
                     .map_err(|_| anyhow!("message IMAP UID is out of range"))?;
+                let modseq = u64::try_from(row.imap_modseq)
+                    .map_err(|_| anyhow!("message IMAP modseq is out of range"))?;
                 let to = recipient_rows
                     .iter()
                     .filter(|recipient| recipient.message_id == row.id && recipient.kind == "to")
@@ -5391,6 +5437,7 @@ impl Storage {
                 Ok(ImapEmail {
                     id: row.id,
                     uid,
+                    modseq,
                     thread_id: row.thread_id,
                     mailbox_id: row.mailbox_id,
                     mailbox_role: row.mailbox_role,
@@ -5424,23 +5471,61 @@ impl Storage {
         message_ids: &[Uuid],
         unread: Option<bool>,
         flagged: Option<bool>,
-    ) -> Result<()> {
+        unchanged_since: Option<u64>,
+    ) -> Result<Vec<Uuid>> {
         if message_ids.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
+        let unchanged_since_i64 = unchanged_since
+            .map(i64::try_from)
+            .transpose()
+            .map_err(|_| anyhow!("UNCHANGEDSINCE is out of range"))?;
+        let modified_ids = if let Some(limit) = unchanged_since_i64 {
+            sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT id
+                FROM messages
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND mailbox_id = $3
+                  AND id = ANY($4)
+                  AND imap_modseq > $5
+                ORDER BY imap_uid ASC
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(mailbox_id)
+            .bind(message_ids)
+            .bind(limit)
+            .fetch_all(&mut *tx)
+            .await?
+        } else {
+            Vec::new()
+        };
+        if modified_ids.len() == message_ids.len() {
+            tx.rollback().await?;
+            return Ok(modified_ids);
+        }
+
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
 
         sqlx::query(
             r#"
             UPDATE messages
             SET
                 unread = COALESCE($4, unread),
-                flagged = COALESCE($5, flagged)
+                flagged = COALESCE($5, flagged),
+                imap_modseq = $6
             WHERE tenant_id = $1
               AND account_id = $2
               AND mailbox_id = $3
-              AND id = ANY($6)
+              AND id = ANY($7)
+              AND ($8::bigint IS NULL OR imap_modseq <= $8)
             "#,
         )
         .bind(&tenant_id)
@@ -5448,14 +5533,16 @@ impl Storage {
         .bind(mailbox_id)
         .bind(unread)
         .bind(flagged)
+        .bind(modseq)
         .bind(message_ids)
+        .bind(unchanged_since_i64)
         .execute(&mut *tx)
         .await?;
 
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         tx.commit().await?;
 
-        Ok(())
+        Ok(modified_ids)
     }
 
     pub async fn fetch_jmap_draft(&self, account_id: Uuid, id: Uuid) -> Result<Option<JmapEmail>> {
@@ -6211,20 +6298,23 @@ impl Storage {
         attachments: &[AttachmentUploadInput],
     ) -> Result<()> {
         let mime_blob_ref = format!("lpe-ct-inbound:{}:{message_id}", request.trace_id);
+        let modseq = self
+            .allocate_mail_modseq_in_tx(tx, tenant_id, account_id)
+            .await?;
 
         sqlx::query(
             r#"
             INSERT INTO messages (
                 id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                received_at, sent_at, from_display, from_address, sender_display,
+                imap_modseq, received_at, sent_at, from_display, from_address, sender_display,
                 sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
                 preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
                 submission_source, delivery_status
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                NOW(), NULL, NULL, $7, NULL,
-                NULL, 'self', $3, $8, $9, TRUE, FALSE, FALSE, $10, $11,
+                $7, NOW(), NULL, NULL, $8, NULL,
+                NULL, 'self', $3, $9, $10, TRUE, FALSE, FALSE, $11, $12,
                 'lpe-ct', 'stored'
             )
             "#,
@@ -6235,6 +6325,7 @@ impl Storage {
         .bind(mailbox_id)
         .bind(thread_id)
         .bind(request.internet_message_id.as_deref())
+        .bind(modseq)
         .bind(mail_from)
         .bind(subject)
         .bind(preview)
@@ -6459,6 +6550,9 @@ impl Storage {
         let content_hash = format!("draft:{message_id}");
         let unread = input.unread.unwrap_or(false);
         let flagged = input.flagged.unwrap_or(false);
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, input.account_id)
+            .await?;
 
         if input.draft_message_id.is_some() {
             let updated = sqlx::query(
@@ -6482,6 +6576,7 @@ impl Storage {
                     flagged = $17,
                     has_attachments = FALSE,
                     submission_source = $18,
+                    imap_modseq = $19,
                     delivery_status = 'draft'
                 FROM mailboxes mb
                 WHERE m.mailbox_id = mb.id
@@ -6510,6 +6605,7 @@ impl Storage {
             .bind(unread)
             .bind(flagged)
             .bind(input.source.trim().to_lowercase())
+            .bind(modseq)
             .execute(&mut *tx)
             .await?;
 
@@ -6539,16 +6635,16 @@ impl Storage {
                 r#"
                 INSERT INTO messages (
                     id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                    received_at, sent_at, from_display, from_address, sender_display,
+                    imap_modseq, received_at, sent_at, from_display, from_address, sender_display,
                     sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
                     preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
                     submission_source, delivery_status
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6,
-                    NOW(), NULL, $7, $8, $9,
-                    $10, $11, $12, $13, $14, $15, FALSE, $16, $17,
-                    $18, 'draft'
+                    $7, NOW(), NULL, $8, $9, $10,
+                    $11, $12, $13, $14, $15, $16, FALSE, $17, $18,
+                    $19, 'draft'
                 )
                 "#,
             )
@@ -6558,6 +6654,7 @@ impl Storage {
             .bind(draft_mailbox_id)
             .bind(thread_id)
             .bind(input.internet_message_id)
+            .bind(modseq)
             .bind(input.from_display.map(|value| value.trim().to_string()))
             .bind(&from_address)
             .bind(input.sender_display.map(|value| value.trim().to_string()))
@@ -6817,11 +6914,14 @@ impl Storage {
                 .ok_or_else(|| anyhow!("task list not found"))?,
             None => {
                 if let Some(existing_task) = existing_task.as_ref() {
-                    self.fetch_task_lists_by_ids(principal_account_id, &[existing_task.task_list_id])
-                        .await?
-                        .into_iter()
-                        .next()
-                        .ok_or_else(|| anyhow!("task list not found"))?
+                    self.fetch_task_lists_by_ids(
+                        principal_account_id,
+                        &[existing_task.task_list_id],
+                    )
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("task list not found"))?
                 } else {
                     let task_lists = self.fetch_task_lists(input.account_id).await?;
                     task_lists
@@ -6928,13 +7028,8 @@ impl Storage {
         .fetch_one(&mut *tx)
         .await?;
 
-        Self::emit_task_access_change(
-            &mut tx,
-            &tenant_id,
-            owner_account_id,
-            principal_account_id,
-        )
-        .await?;
+        Self::emit_task_access_change(&mut tx, &tenant_id, owner_account_id, principal_account_id)
+            .await?;
         tx.commit().await?;
 
         Ok(map_task(row))
@@ -7201,7 +7296,9 @@ impl Storage {
         input: TaskListGrantInput,
         audit: AuditEntryInput,
     ) -> Result<TaskListGrant> {
-        let tenant_id = self.tenant_id_for_account_id(input.owner_account_id).await?;
+        let tenant_id = self
+            .tenant_id_for_account_id(input.owner_account_id)
+            .await?;
         let grantee_email = normalize_email(&input.grantee_email);
         validate_collaboration_rights(
             input.may_read,
@@ -8474,7 +8571,9 @@ impl Storage {
             bail!("delete access is not granted on this task");
         }
 
-        let tenant_id = self.tenant_id_for_account_id(existing.owner_account_id).await?;
+        let tenant_id = self
+            .tenant_id_for_account_id(existing.owner_account_id)
+            .await?;
         let mut tx = self.pool.begin().await?;
         let deleted = sqlx::query(
             r#"
@@ -8492,13 +8591,8 @@ impl Storage {
             bail!("task not found");
         }
 
-        Self::emit_task_access_change(
-            &mut tx,
-            &tenant_id,
-            existing.owner_account_id,
-            account_id,
-        )
-        .await?;
+        Self::emit_task_access_change(&mut tx, &tenant_id, existing.owner_account_id, account_id)
+            .await?;
         tx.commit().await?;
 
         Ok(())
@@ -8762,21 +8856,24 @@ impl Storage {
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| format!("canonical-message:{message_id}"));
         let content_hash = format!("message:{message_id}");
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, input.account_id)
+            .await?;
 
         sqlx::query(
             r#"
             INSERT INTO messages (
                 id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                received_at, sent_at, from_display, from_address, sender_display,
+                imap_modseq, received_at, sent_at, from_display, from_address, sender_display,
                 sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
                 preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
                 submission_source, delivery_status
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                NOW(), NOW(), $7, $8, $9,
-                $10, $11, $12, $13, FALSE, FALSE, FALSE, $14, $15,
-                $16, 'queued'
+                $7, NOW(), NOW(), $8, $9, $10,
+                $11, $12, $13, $14, FALSE, FALSE, FALSE, $15, $16,
+                $17, 'queued'
             )
             "#,
         )
@@ -8786,6 +8883,7 @@ impl Storage {
         .bind(sent_mailbox_id)
         .bind(thread_id)
         .bind(input.internet_message_id)
+        .bind(modseq)
         .bind(authorization.from_display.as_deref())
         .bind(&authorization.from_address)
         .bind(authorization.sender_display.as_deref())
@@ -9041,23 +9139,26 @@ impl Storage {
         };
 
         let mut tx = self.pool.begin().await?;
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
         sqlx::query(
             r#"
             INSERT INTO messages (
                 id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                received_at, sent_at, from_display, from_address, sender_display,
+                imap_modseq, received_at, sent_at, from_display, from_address, sender_display,
                 sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
                 preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
                 submission_source, delivery_status
             )
             SELECT
                 $4, tenant_id, account_id, $5, thread_id, internet_message_id,
-                NOW(),
-                CASE WHEN $6 = 'draft' THEN NULL ELSE sent_at END,
+                $6, NOW(),
+                CASE WHEN $7 = 'draft' THEN NULL ELSE sent_at END,
                 from_display, from_address, sender_display,
                 sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
                 preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
-                submission_source, $6
+                submission_source, $7
             FROM messages
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             "#,
@@ -9067,6 +9168,7 @@ impl Storage {
         .bind(message_id)
         .bind(copied_message_id)
         .bind(target_mailbox_id)
+        .bind(modseq)
         .bind(delivery_status)
         .execute(&mut *tx)
         .await?;
@@ -9231,10 +9333,16 @@ impl Storage {
         }
 
         let mut tx = self.pool.begin().await?;
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
         let moved = sqlx::query(
             r#"
             UPDATE messages
-            SET mailbox_id = $4, imap_uid = nextval('message_imap_uid_seq')
+            SET
+                mailbox_id = $4,
+                imap_uid = nextval('message_imap_uid_seq'),
+                imap_modseq = $5
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             "#,
         )
@@ -9242,6 +9350,7 @@ impl Storage {
         .bind(account_id)
         .bind(message_id)
         .bind(target_mailbox_id)
+        .bind(modseq)
         .execute(&mut *tx)
         .await?;
         if moved.rows_affected() == 0 {
@@ -9303,20 +9412,23 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         self.ensure_account_exists(&mut tx, &tenant_id, input.account_id)
             .await?;
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, input.account_id)
+            .await?;
         sqlx::query(
             r#"
             INSERT INTO messages (
                 id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                received_at, sent_at, from_display, from_address, sender_display,
+                imap_modseq, received_at, sent_at, from_display, from_address, sender_display,
                 sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
                 preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
                 submission_source, delivery_status
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                NOW(), NULL, $7, $8, $9,
-                $10, $11, $12, $13, $14, FALSE, FALSE, FALSE, $15, $16,
-                $17, $18
+                $7, NOW(), NULL, $8, $9, $10,
+                $11, $12, $13, $14, $15, FALSE, FALSE, FALSE, $16, $17,
+                $18, $19
             )
             "#,
         )
@@ -9326,6 +9438,7 @@ impl Storage {
         .bind(input.mailbox_id)
         .bind(thread_id)
         .bind(input.internet_message_id)
+        .bind(modseq)
         .bind(input.from_display)
         .bind(normalize_email(&input.from_address))
         .bind(input.sender_display)
@@ -11026,6 +11139,9 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(job.account_id).await?;
         let message_id = Uuid::new_v4();
         let preview_text = preview_text(&message.body_text);
+        let modseq = self
+            .allocate_mail_modseq_in_tx(tx, &tenant_id, job.account_id)
+            .await?;
         let size_octets = message.body_text.len().saturating_add(
             message
                 .attachments
@@ -11038,15 +11154,15 @@ impl Storage {
             r#"
             INSERT INTO messages (
                 id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                received_at, sent_at, from_display, from_address, sender_display,
+                imap_modseq, received_at, sent_at, from_display, from_address, sender_display,
                 sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
                 preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
                 submission_source, delivery_status
             )
             VALUES (
                 $1, $2, $3, $4, $5, NULLIF($6, ''),
-                NOW(), NULL, NULL, $7, NULL,
-                NULL, 'self', $3, $8, $9, TRUE, FALSE, FALSE, $10, $11,
+                $7, NOW(), NULL, NULL, $8, NULL,
+                NULL, 'self', $3, $9, $10, TRUE, FALSE, FALSE, $11, $12,
                 'pst-import', 'stored'
             )
             "#,
@@ -11057,6 +11173,7 @@ impl Storage {
         .bind(job.mailbox_id)
         .bind(Uuid::new_v4())
         .bind(message.internet_message_id)
+        .bind(modseq)
         .bind(message.from_address)
         .bind(message.subject.clone())
         .bind(preview_text)
@@ -11093,6 +11210,35 @@ impl Storage {
         Ok(())
     }
 
+    async fn allocate_mail_modseq_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Uuid,
+    ) -> Result<i64> {
+        let modseq = sqlx::query_scalar::<_, i64>("SELECT nextval('message_modseq_seq')")
+            .fetch_one(&mut **tx)
+            .await?;
+
+        let updated = sqlx::query(
+            r#"
+            UPDATE accounts
+            SET mail_sync_modseq = GREATEST(mail_sync_modseq, $3)
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(modseq)
+        .execute(&mut **tx)
+        .await?;
+        if updated.rows_affected() == 0 {
+            bail!("account not found");
+        }
+
+        Ok(modseq)
+    }
+
     async fn ensure_account_exists(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
@@ -11126,6 +11272,8 @@ impl Storage {
         account_id: Uuid,
         message_id: Uuid,
     ) -> Result<()> {
+        self.allocate_mail_modseq_in_tx(tx, tenant_id, account_id)
+            .await?;
         let deleted = sqlx::query(
             r#"
             DELETE FROM messages m
