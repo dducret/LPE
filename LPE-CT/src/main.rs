@@ -199,7 +199,7 @@ struct AuditEvent {
     details: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct ManagementAuthState {
     admin_email: String,
     password_hash: String,
@@ -219,7 +219,9 @@ struct DashboardState {
     policies: PolicySettings,
     updates: UpdateSettings,
     queues: QueueMetrics,
+    #[serde(default)]
     management_auth: ManagementAuthState,
+    #[serde(default)]
     audit: Vec<AuditEvent>,
 }
 
