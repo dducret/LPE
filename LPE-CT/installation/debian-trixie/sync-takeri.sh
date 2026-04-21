@@ -9,11 +9,11 @@ CARGO_BIN="${CARGO_BIN:-cargo}"
 
 if [[ -d "${TAKERI_SYNC_DIR}/.git" ]]; then
   git -C "${TAKERI_SYNC_DIR}" remote set-url origin "${TAKERI_REPO_URL}" || true
-  git -C "${TAKERI_SYNC_DIR}" sparse-checkout init --cone
+  git -C "${TAKERI_SYNC_DIR}" sparse-checkout init --no-cone
 else
   mkdir -p "$(dirname "${TAKERI_SYNC_DIR}")"
   git clone --filter=blob:none --no-checkout --branch "${TAKERI_BRANCH}" "${TAKERI_REPO_URL}" "${TAKERI_SYNC_DIR}"
-  git -C "${TAKERI_SYNC_DIR}" sparse-checkout init --cone
+  git -C "${TAKERI_SYNC_DIR}" sparse-checkout init --no-cone
 fi
 
 git -C "${TAKERI_SYNC_DIR}" sparse-checkout set Cargo.toml cli tools/takeri tools/shugo LICENSE README.md
