@@ -376,7 +376,7 @@ activate_services() {
 
 run_schema_init_if_requested() {
   if [[ "${LPE_RUN_MIGRATIONS}" == "yes" ]]; then
-    "${SCRIPT_DIR}/init-schema.sh"
+    bash "${SCRIPT_DIR}/init-schema.sh"
   fi
 }
 
