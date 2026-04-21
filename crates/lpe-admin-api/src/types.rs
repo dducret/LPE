@@ -2,7 +2,7 @@ use axum::{http::StatusCode, Json};
 use lpe_storage::{
     AccountAppPassword, AccountAuthFactor, AdminAuthFactor, AuthenticatedAccount,
     AuthenticatedAdmin, CollaborationCollection, CollaborationGrant, MailFlowEntry,
-    MailboxDelegationOverview, SieveScriptDocument, SieveScriptSummary,
+    MailboxDelegationOverview, SieveScriptDocument, SieveScriptSummary, TaskListGrant,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -406,8 +406,10 @@ pub struct UpsertCollaborationGrantRequest {
 pub struct CollaborationOverviewResponse {
     pub outgoing_contacts: Vec<CollaborationGrant>,
     pub outgoing_calendars: Vec<CollaborationGrant>,
+    pub outgoing_task_lists: Vec<TaskListGrant>,
     pub incoming_contact_collections: Vec<CollaborationCollection>,
     pub incoming_calendar_collections: Vec<CollaborationCollection>,
+    pub incoming_task_list_collections: Vec<CollaborationCollection>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -474,4 +476,14 @@ pub struct UpsertClientTaskRequest {
     pub due_at: Option<String>,
     pub completed_at: Option<String>,
     pub sort_order: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertTaskListGrantRequest {
+    pub grantee_email: String,
+    pub may_read: bool,
+    pub may_write: bool,
+    pub may_delete: bool,
+    pub may_share: bool,
 }

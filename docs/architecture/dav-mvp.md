@@ -4,7 +4,7 @@
 
 This document describes the current `CardDAV`, `CalDAV`, and first `VTODO` interoperability adapter implemented in `LPE`.
 
-The `crates/lpe-dav` crate exposes a deliberately small but more interoperable DAV compatibility layer for contacts, calendar data, and canonical personal tasks without introducing a DAV-specific storage model. It remains an adapter over the canonical collaboration data already owned by `LPE`.
+The `crates/lpe-dav` crate exposes a deliberately small but more interoperable DAV compatibility layer for contacts, calendar data, and canonical tasks without introducing a DAV-specific storage model. It remains an adapter over the canonical collaboration data already owned by `LPE`.
 
 ## Architectural principles
 
@@ -50,7 +50,7 @@ The MVP supports:
 
 The implementation keeps discovery and synchronization intentionally minimal:
 
-- `PROPFIND` exposes the root, current principal, every accessible address-book collection, every accessible calendar collection, the owner-only task collection, and collection members
+- `PROPFIND` exposes the root, current principal, every accessible address-book collection, every accessible calendar collection, every accessible task collection, and collection members
 - `REPORT` supports collection reads, multiget-style `href` targeting, simple text-match filtering, minimal calendar `time-range` filtering on event start, and minimal task `time-range` filtering on `DUE`
 - `GET` returns one `vCard`, `VEVENT`, or `VTODO` object and honors `If-None-Match`
 - `PUT` performs full-resource replacement for one `vCard`, `VEVENT`, or `VTODO` object and honors `If-Match` and `If-None-Match`
@@ -116,7 +116,8 @@ The canonical task model still belongs to `LPE`. The DAV adapter does not mainta
 - account authentication reuse
 - owned default `CardDAV` address-book collection
 - owned default `CalDAV` calendar collection
-- owned default `VTODO` task collection
+- owned canonical `VTODO` task collections
+- same-tenant shared canonical `VTODO` task collections when canonical task-list grants exist
 - same-tenant shared address-book and calendar collections when canonical grants exist
 - collection discovery through minimal DAV properties
 - read access to contacts, events, and tasks through collection and resource endpoints
@@ -151,13 +152,14 @@ The canonical task model still belongs to `LPE`. The DAV adapter does not mainta
 - DAV compatibility does not create a separate collaboration authority outside `LPE`
 - the adapter does not reuse any `Stalwart` code
 - the adapter stores organizer and attendee interoperability metadata only in canonical `LPE` event fields; there is still no DAV-only storage layer
-- task compatibility reuses mailbox-account scoping directly; there is still no DAV-only task rights layer
+- task compatibility reuses the canonical task-list grant model directly; there is still no DAV-only task rights layer
 - rights for contacts and calendar events come from the canonical collection-grant model shared with `JMAP`
+- rights for tasks come from the canonical `task_list_grants` model shared with `JMAP` and the account APIs
 
 ## Known limitations
 
 - the MVP always exposes the owner's default collections and may expose additional same-tenant shared collections
-- the task collection is owner-only in the MVP; shared DAV task collections are not implemented
+- DAV task collections are published as `/dav/calendars/me/tasks-{task-list-id}/`
 - the MVP supports only a minimal subset of DAV discovery and query semantics
 - contact updates replace the whole `vCard`; partial patch semantics are not implemented
 - calendar updates still replace the whole `VEVENT`

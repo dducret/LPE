@@ -20,7 +20,7 @@ CREATE SEQUENCE message_imap_uid_seq;
 
 CREATE TABLE schema_metadata (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
-    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.4'),
+    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.5'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -760,6 +760,37 @@ CREATE INDEX tasks_account_status_due_idx
 CREATE INDEX tasks_account_updated_idx
     ON tasks (tenant_id, account_id, updated_at DESC);
 
+CREATE TABLE task_list_grants (
+    id UUID PRIMARY KEY,
+    tenant_id TEXT NOT NULL CHECK (btrim(tenant_id) <> ''),
+    task_list_id UUID NOT NULL,
+    owner_account_id UUID NOT NULL,
+    grantee_account_id UUID NOT NULL,
+    may_read BOOLEAN NOT NULL DEFAULT TRUE,
+    may_write BOOLEAN NOT NULL DEFAULT FALSE,
+    may_delete BOOLEAN NOT NULL DEFAULT FALSE,
+    may_share BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, task_list_id, grantee_account_id),
+    CHECK (owner_account_id <> grantee_account_id),
+    CHECK (may_read OR (NOT may_write AND NOT may_delete AND NOT may_share)),
+    CHECK ((NOT may_delete) OR may_write),
+    CHECK ((NOT may_share) OR may_write),
+    FOREIGN KEY (tenant_id, owner_account_id, task_list_id)
+        REFERENCES task_lists (tenant_id, account_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, grantee_account_id)
+        REFERENCES accounts (tenant_id, id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX task_list_grants_grantee_idx
+    ON task_list_grants (tenant_id, grantee_account_id, owner_account_id, task_list_id);
+
+CREATE INDEX task_list_grants_owner_idx
+    ON task_list_grants (tenant_id, owner_account_id, task_list_id, grantee_account_id);
+
 CREATE TABLE jmap_upload_blobs (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL CHECK (btrim(tenant_id) <> ''),
@@ -930,7 +961,7 @@ LEFT JOIN attachments a
 GROUP BY m.id, m.account_id, m.mailbox_id, m.received_at, m.subject_normalized, mb.search_vector;
 
 INSERT INTO schema_metadata (singleton, schema_version)
-VALUES (TRUE, '0.1.4');
+VALUES (TRUE, '0.1.5');
 
 INSERT INTO security_settings (
     tenant_id,

@@ -3658,17 +3658,16 @@ fn task_list_to_value(task_list: &ClientTaskList, properties: &HashSet<String>) 
     insert_if(properties, &mut object, "isSubscribed", true);
     insert_if(properties, &mut object, "isVisible", true);
     if properties.contains("myRights") {
-        let may_delete = task_list.role.is_none();
         object.insert(
             "myRights".to_string(),
             json!({
-                "mayRead": true,
-                "mayAddItems": true,
-                "mayModifyItems": true,
-                "mayRemoveItems": true,
-                "mayRename": true,
-                "mayDelete": may_delete,
-                "mayAdmin": false,
+                "mayRead": task_list.rights.may_read,
+                "mayAddItems": task_list.rights.may_write,
+                "mayModifyItems": task_list.rights.may_write,
+                "mayRemoveItems": task_list.rights.may_delete,
+                "mayRename": task_list.is_owned,
+                "mayDelete": task_list.is_owned && task_list.role.is_none(),
+                "mayAdmin": task_list.rights.may_share,
             }),
         );
     }
@@ -5301,6 +5300,7 @@ fn parse_task_input(
 
     Ok(UpsertClientTaskInput {
         id,
+        principal_account_id: account_id,
         account_id,
         task_list_id,
         title: parse_required_string(object.get("title"), "title")?,
@@ -6156,10 +6156,21 @@ mod tests {
         }
 
         fn task() -> ClientTask {
+            let account = Self::account();
             ClientTask {
                 id: Uuid::parse_str("56565656-5656-5656-5656-565656565656").unwrap(),
                 task_list_id: Self::default_task_list().id,
                 task_list_sort_order: 0,
+                owner_account_id: account.account_id,
+                owner_email: account.email,
+                owner_display_name: account.display_name,
+                is_owned: true,
+                rights: CollaborationRights {
+                    may_read: true,
+                    may_write: true,
+                    may_delete: true,
+                    may_share: true,
+                },
                 title: "Prepare release".to_string(),
                 description: "Confirm the release checklist".to_string(),
                 status: "needs-action".to_string(),
@@ -6171,11 +6182,22 @@ mod tests {
         }
 
         fn default_task_list() -> ClientTaskList {
+            let account = Self::account();
             ClientTaskList {
                 id: Uuid::parse_str("10101010-1010-1010-1010-101010101010").unwrap(),
                 name: "Tasks".to_string(),
                 role: Some("inbox".to_string()),
                 sort_order: 0,
+                owner_account_id: account.account_id,
+                owner_email: account.email,
+                owner_display_name: account.display_name,
+                is_owned: true,
+                rights: CollaborationRights {
+                    may_read: true,
+                    may_write: true,
+                    may_delete: true,
+                    may_share: true,
+                },
                 updated_at: "2026-04-20T15:00:00Z".to_string(),
             }
         }
@@ -6794,6 +6816,16 @@ mod tests {
                 name: input.name.trim().to_string(),
                 role: None,
                 sort_order: input.sort_order,
+                owner_account_id: Self::account().account_id,
+                owner_email: Self::account().email,
+                owner_display_name: Self::account().display_name,
+                is_owned: true,
+                rights: CollaborationRights {
+                    may_read: true,
+                    may_write: true,
+                    may_delete: true,
+                    may_share: true,
+                },
                 updated_at: "2026-04-20T15:30:00Z".to_string(),
             };
             let mut task_lists = self.task_lists.lock().unwrap();
@@ -6861,6 +6893,7 @@ mod tests {
         }
 
         async fn upsert_jmap_task(&self, input: UpsertClientTaskInput) -> Result<ClientTask> {
+            let account = Self::account();
             let task = ClientTask {
                 id: input.id.unwrap_or_else(Uuid::new_v4),
                 task_list_id: input
@@ -6878,6 +6911,16 @@ mod tests {
                     })
                     .map(|task_list| task_list.sort_order)
                     .unwrap_or(0),
+                owner_account_id: account.account_id,
+                owner_email: account.email,
+                owner_display_name: account.display_name,
+                is_owned: true,
+                rights: CollaborationRights {
+                    may_read: true,
+                    may_write: true,
+                    may_delete: true,
+                    may_share: true,
+                },
                 title: input.title.trim().to_string(),
                 description: input.description.trim().to_string(),
                 status: input.status.trim().to_ascii_lowercase(),
@@ -8441,6 +8484,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_list_get_projects_shared_task_list_rights() {
+        let shared_task_list = ClientTaskList {
+            id: Uuid::parse_str("90909090-9090-9090-9090-909090909090").unwrap(),
+            name: "Shared Ops".to_string(),
+            role: None,
+            sort_order: 40,
+            owner_account_id: FakeStore::shared_account().account_id,
+            owner_email: FakeStore::shared_account().email,
+            owner_display_name: FakeStore::shared_account().display_name,
+            is_owned: false,
+            rights: CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: false,
+                may_share: false,
+            },
+            updated_at: "2026-04-20T16:10:00Z".to_string(),
+        };
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            task_lists: Arc::new(Mutex::new(vec![
+                FakeStore::default_task_list(),
+                shared_task_list.clone(),
+            ])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_TASKS_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "TaskList/get".to_string(),
+                        json!({
+                            "ids": [shared_task_list.id.to_string()],
+                            "properties": ["id", "myRights"]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let rights = &response.method_responses[0].1["list"][0]["myRights"];
+        assert_eq!(rights["mayRead"], true);
+        assert_eq!(rights["mayAddItems"], true);
+        assert_eq!(rights["mayModifyItems"], true);
+        assert_eq!(rights["mayRemoveItems"], false);
+        assert_eq!(rights["mayRename"], false);
+        assert_eq!(rights["mayDelete"], false);
+        assert_eq!(rights["mayAdmin"], false);
+    }
+
+    #[tokio::test]
     async fn task_query_changes_tracks_sort_order_and_updates() {
         let mut second_task = FakeStore::task();
         second_task.id = Uuid::parse_str("67676767-6767-6767-6767-676767676767").unwrap();
@@ -8558,6 +8658,16 @@ mod tests {
             name: "Operations".to_string(),
             role: None,
             sort_order: 20,
+            owner_account_id: FakeStore::account().account_id,
+            owner_email: FakeStore::account().email,
+            owner_display_name: FakeStore::account().display_name,
+            is_owned: true,
+            rights: CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: true,
+            },
             updated_at: "2026-04-20T15:10:00Z".to_string(),
         };
         let deletable_task_list = ClientTaskList {
@@ -8565,6 +8675,16 @@ mod tests {
             name: "Archive".to_string(),
             role: None,
             sort_order: 30,
+            owner_account_id: FakeStore::account().account_id,
+            owner_email: FakeStore::account().email,
+            owner_display_name: FakeStore::account().display_name,
+            is_owned: true,
+            rights: CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: true,
+            },
             updated_at: "2026-04-20T15:10:00Z".to_string(),
         };
         let store = FakeStore {
@@ -8626,6 +8746,16 @@ mod tests {
             name: "Ops".to_string(),
             role: None,
             sort_order: 50,
+            owner_account_id: FakeStore::account().account_id,
+            owner_email: FakeStore::account().email,
+            owner_display_name: FakeStore::account().display_name,
+            is_owned: true,
+            rights: CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: true,
+            },
             updated_at: "2026-04-20T15:00:00Z".to_string(),
         };
         let mut custom_task = FakeStore::task();

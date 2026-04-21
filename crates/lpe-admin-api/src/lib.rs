@@ -34,7 +34,7 @@ use lpe_storage::{
     SavedDraftMessage, SecuritySettings, SenderDelegationGrant, SenderDelegationGrantInput,
     SenderDelegationRight, ServerSettings, SieveScriptDocument, Storage,
     SubmissionAccountIdentity, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
-    UpdateAccount, UpdateDomain,
+    TaskListGrantInput, UpdateAccount, UpdateDomain,
     UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::env;
@@ -67,7 +67,8 @@ use crate::types::{
     UpdateDomainRequest, UpdateLocalAiSettingsRequest, UpdateSecuritySettingsRequest,
     UpdateServerSettingsRequest, UpsertClientContactRequest, UpsertClientEventRequest,
     UpsertClientTaskRequest, UpsertCollaborationGrantRequest, UpsertMailboxDelegationGrantRequest,
-    UpsertSenderDelegationGrantRequest, UpsertSieveScriptRequest, VerifyTotpRequest,
+    UpsertSenderDelegationGrantRequest, UpsertSieveScriptRequest, UpsertTaskListGrantRequest,
+    VerifyTotpRequest,
 };
 
 const MIN_ADMIN_PASSWORD_LEN: usize = 12;
@@ -171,6 +172,14 @@ pub fn router(storage: Storage) -> Router {
         .route(
             "/mail/shares/{kind}/{grantee_account_id}",
             delete(delete_collaboration_grant),
+        )
+        .route(
+            "/mail/task-lists/{task_list_id}/shares",
+            put(upsert_task_list_grant),
+        )
+        .route(
+            "/mail/task-lists/{task_list_id}/shares/{grantee_account_id}",
+            delete(delete_task_list_grant),
         )
         .route("/mail/delegation", get(get_mailbox_delegation))
         .route(
@@ -2064,6 +2073,10 @@ async fn list_collaboration_overview(
         .into_iter()
         .filter(|collection| !collection.is_owned)
         .collect();
+    let incoming_task_list_collections = storage
+        .fetch_accessible_task_list_collections(account.account_id)
+        .await
+        .map_err(internal_error)?;
 
     Ok(Json(CollaborationOverviewResponse {
         outgoing_contacts: storage
@@ -2080,8 +2093,13 @@ async fn list_collaboration_overview(
             )
             .await
             .map_err(internal_error)?,
+        outgoing_task_lists: storage
+            .fetch_outgoing_task_list_grants(account.account_id)
+            .await
+            .map_err(internal_error)?,
         incoming_contact_collections,
         incoming_calendar_collections,
+        incoming_task_list_collections,
     }))
 }
 
@@ -2131,6 +2149,62 @@ async fn delete_collaboration_grant(
                 actor: account.email,
                 action: format!("collaboration-share-delete:{}", kind.as_str()),
                 subject: grantee_account_id.to_string(),
+            },
+        )
+        .await
+        .map_err(bad_request_error)?;
+
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+async fn upsert_task_list_grant(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(task_list_id): AxumPath<Uuid>,
+    Json(request): Json<UpsertTaskListGrantRequest>,
+) -> ApiResult<lpe_storage::TaskListGrant> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .upsert_task_list_grant(
+                TaskListGrantInput {
+                    owner_account_id: account.account_id,
+                    task_list_id,
+                    grantee_email: request.grantee_email.clone(),
+                    may_read: request.may_read,
+                    may_write: request.may_write,
+                    may_delete: request.may_delete,
+                    may_share: request.may_share,
+                },
+                AuditEntryInput {
+                    actor: account.email,
+                    action: "task-list-share-upsert".to_string(),
+                    subject: format!("{task_list_id}:{}", request.grantee_email),
+                },
+            )
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+async fn delete_task_list_grant(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath((task_list_id, grantee_account_id)): AxumPath<(Uuid, Uuid)>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    storage
+        .delete_task_list_grant(
+            account.account_id,
+            task_list_id,
+            grantee_account_id,
+            AuditEntryInput {
+                actor: account.email,
+                action: "task-list-share-delete".to_string(),
+                subject: format!("{task_list_id}:{grantee_account_id}"),
             },
         )
         .await
@@ -2451,6 +2525,7 @@ async fn upsert_client_task(
         storage
             .upsert_client_task(UpsertClientTaskInput {
                 id: request.id,
+                principal_account_id: account.account_id,
                 account_id: account.account_id,
                 task_list_id: request.task_list_id,
                 title: request.title,

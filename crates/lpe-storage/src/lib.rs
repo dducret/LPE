@@ -37,7 +37,7 @@ const DEFAULT_COLLECTION_ID: &str = "default";
 const DEFAULT_TASK_LIST_NAME: &str = "Tasks";
 const DEFAULT_TASK_LIST_ROLE: &str = "inbox";
 const CANONICAL_CHANGE_CHANNEL: &str = "lpe_canonical_changes";
-const EXPECTED_SCHEMA_VERSION: &str = "0.1.4";
+const EXPECTED_SCHEMA_VERSION: &str = "0.1.5";
 
 #[derive(Clone)]
 pub struct Storage {
@@ -735,6 +735,7 @@ pub struct ClientContact {
 pub enum CollaborationResourceKind {
     Contacts,
     Calendar,
+    Tasks,
 }
 
 impl CollaborationResourceKind {
@@ -742,6 +743,7 @@ impl CollaborationResourceKind {
         match self {
             Self::Contacts => "contacts",
             Self::Calendar => "calendar",
+            Self::Tasks => "tasks",
         }
     }
 
@@ -749,6 +751,7 @@ impl CollaborationResourceKind {
         match self {
             Self::Contacts => "Contacts",
             Self::Calendar => "Calendar",
+            Self::Tasks => "Task List",
         }
     }
 }
@@ -840,6 +843,34 @@ pub struct CollaborationGrantInput {
     pub may_share: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskListGrant {
+    pub id: Uuid,
+    pub task_list_id: Uuid,
+    pub task_list_name: String,
+    pub owner_account_id: Uuid,
+    pub owner_email: String,
+    pub owner_display_name: String,
+    pub grantee_account_id: Uuid,
+    pub grantee_email: String,
+    pub grantee_display_name: String,
+    pub rights: CollaborationRights,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct TaskListGrantInput {
+    pub owner_account_id: Uuid,
+    pub task_list_id: Uuid,
+    pub grantee_email: String,
+    pub may_read: bool,
+    pub may_write: bool,
+    pub may_delete: bool,
+    pub may_share: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct UpsertClientContactInput {
     pub id: Option<Uuid>,
@@ -856,6 +887,11 @@ pub struct UpsertClientContactInput {
 #[serde(rename_all = "camelCase")]
 pub struct ClientTaskList {
     pub id: Uuid,
+    pub owner_account_id: Uuid,
+    pub owner_email: String,
+    pub owner_display_name: String,
+    pub is_owned: bool,
+    pub rights: CollaborationRights,
     pub name: String,
     pub role: Option<String>,
     pub sort_order: i32,
@@ -866,6 +902,11 @@ pub struct ClientTaskList {
 #[serde(rename_all = "camelCase")]
 pub struct ClientTask {
     pub id: Uuid,
+    pub owner_account_id: Uuid,
+    pub owner_email: String,
+    pub owner_display_name: String,
+    pub is_owned: bool,
+    pub rights: CollaborationRights,
     pub task_list_id: Uuid,
     pub task_list_sort_order: i32,
     pub title: String,
@@ -881,7 +922,13 @@ pub struct ClientTask {
 #[serde(rename_all = "camelCase")]
 pub struct DavTask {
     pub id: Uuid,
+    pub collection_id: String,
+    pub owner_account_id: Uuid,
+    pub owner_email: String,
+    pub owner_display_name: String,
+    pub rights: CollaborationRights,
     pub task_list_id: Uuid,
+    pub task_list_name: String,
     pub title: String,
     pub description: String,
     pub status: String,
@@ -1086,6 +1133,7 @@ pub struct UpdateTaskListInput {
 #[derive(Debug, Clone)]
 pub struct UpsertClientTaskInput {
     pub id: Option<Uuid>,
+    pub principal_account_id: Uuid,
     pub account_id: Uuid,
     pub task_list_id: Option<Uuid>,
     pub title: String,
@@ -1922,6 +1970,14 @@ struct ResolvedSubmissionAuthorization {
 #[derive(Debug, FromRow)]
 struct ClientTaskListRow {
     id: Uuid,
+    owner_account_id: Uuid,
+    owner_email: String,
+    owner_display_name: String,
+    is_owned: bool,
+    may_read: bool,
+    may_write: bool,
+    may_delete: bool,
+    may_share: bool,
     name: String,
     role: Option<String>,
     sort_order: i32,
@@ -1931,6 +1987,14 @@ struct ClientTaskListRow {
 #[derive(Debug, FromRow)]
 struct ClientTaskRow {
     id: Uuid,
+    owner_account_id: Uuid,
+    owner_email: String,
+    owner_display_name: String,
+    is_owned: bool,
+    may_read: bool,
+    may_write: bool,
+    may_delete: bool,
+    may_share: bool,
     task_list_id: Uuid,
     task_list_sort_order: i32,
     title: String,
@@ -1945,13 +2009,40 @@ struct ClientTaskRow {
 #[derive(Debug, FromRow)]
 struct DavTaskRow {
     id: Uuid,
+    owner_account_id: Uuid,
+    owner_email: String,
+    owner_display_name: String,
+    may_read: bool,
+    may_write: bool,
+    may_delete: bool,
+    may_share: bool,
     task_list_id: Uuid,
+    task_list_name: String,
     title: String,
     description: String,
     status: String,
     due_at: Option<String>,
     completed_at: Option<String>,
     sort_order: i32,
+    updated_at: String,
+}
+
+#[derive(Debug, FromRow)]
+struct TaskListGrantRow {
+    id: Uuid,
+    task_list_id: Uuid,
+    task_list_name: String,
+    owner_account_id: Uuid,
+    owner_email: String,
+    owner_display_name: String,
+    grantee_account_id: Uuid,
+    grantee_email: String,
+    grantee_display_name: String,
+    may_read: bool,
+    may_write: bool,
+    may_delete: bool,
+    may_share: bool,
+    created_at: String,
     updated_at: String,
 }
 
@@ -2081,7 +2172,7 @@ impl Storage {
 
         if schema_version != EXPECTED_SCHEMA_VERSION {
             bail!(
-                "unsupported database schema version {schema_version}; expected {EXPECTED_SCHEMA_VERSION}. Release 0.1.4 requires a fresh database initialized from crates/lpe-storage/sql/schema.sql"
+                "unsupported database schema version {schema_version}; expected {EXPECTED_SCHEMA_VERSION}. Release 0.1.5 requires a fresh database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -6707,19 +6798,58 @@ impl Storage {
         }
 
         let status = normalize_task_status(&input.status)?;
+        let principal_account_id = input.principal_account_id;
         let task_id = input.id.unwrap_or_else(Uuid::new_v4);
-        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
-        let mut tx = self.pool.begin().await?;
-        let default_task_list =
-            Self::ensure_default_task_list(&mut tx, &tenant_id, input.account_id).await?;
-        let task_list_id = match input.task_list_id {
-            Some(task_list_id) => {
-                Self::load_task_list_in_tx(&mut tx, &tenant_id, input.account_id, task_list_id)
-                    .await?
-                    .id
-            }
-            None => default_task_list.id,
+        let existing_task = match input.id {
+            Some(task_id) => self
+                .fetch_client_tasks_by_ids(principal_account_id, &[task_id])
+                .await?
+                .into_iter()
+                .next(),
+            None => None,
         };
+        let target_task_list = match input.task_list_id {
+            Some(task_list_id) => self
+                .fetch_task_lists_by_ids(principal_account_id, &[task_list_id])
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow!("task list not found"))?,
+            None => {
+                if let Some(existing_task) = existing_task.as_ref() {
+                    self.fetch_task_lists_by_ids(principal_account_id, &[existing_task.task_list_id])
+                        .await?
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| anyhow!("task list not found"))?
+                } else {
+                    let task_lists = self.fetch_task_lists(input.account_id).await?;
+                    task_lists
+                        .into_iter()
+                        .find(|task_list| {
+                            task_list.owner_account_id == input.account_id
+                                && task_list.role.as_deref() == Some(DEFAULT_TASK_LIST_ROLE)
+                        })
+                        .ok_or_else(|| anyhow!("default task list not found"))?
+                }
+            }
+        };
+        if !target_task_list.rights.may_write {
+            bail!("write access is not granted on this task list");
+        }
+        if let Some(existing_task) = existing_task.as_ref() {
+            if !existing_task.rights.may_write {
+                bail!("write access is not granted on this task");
+            }
+        }
+
+        let owner_account_id = target_task_list.owner_account_id;
+        let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        if owner_account_id == input.account_id {
+            Self::ensure_default_task_list(&mut tx, &tenant_id, owner_account_id).await?;
+        }
+        let task_list_id = target_task_list.id;
         let row = sqlx::query_as::<_, ClientTaskRow>(
             r#"
             INSERT INTO tasks (
@@ -6787,7 +6917,7 @@ impl Storage {
         )
         .bind(task_id)
         .bind(&tenant_id)
-        .bind(input.account_id)
+        .bind(owner_account_id)
         .bind(task_list_id)
         .bind(title)
         .bind(input.description.trim())
@@ -6798,7 +6928,13 @@ impl Storage {
         .fetch_one(&mut *tx)
         .await?;
 
-        Self::emit_task_change(&mut tx, &tenant_id, input.account_id).await?;
+        Self::emit_task_access_change(
+            &mut tx,
+            &tenant_id,
+            owner_account_id,
+            principal_account_id,
+        )
+        .await?;
         tx.commit().await?;
 
         Ok(map_task(row))
@@ -7058,6 +7194,202 @@ impl Storage {
         .await?;
 
         Ok(rows.into_iter().map(map_collaboration_grant).collect())
+    }
+
+    pub async fn upsert_task_list_grant(
+        &self,
+        input: TaskListGrantInput,
+        audit: AuditEntryInput,
+    ) -> Result<TaskListGrant> {
+        let tenant_id = self.tenant_id_for_account_id(input.owner_account_id).await?;
+        let grantee_email = normalize_email(&input.grantee_email);
+        validate_collaboration_rights(
+            input.may_read,
+            input.may_write,
+            input.may_delete,
+            input.may_share,
+        )?;
+        if grantee_email.is_empty() {
+            bail!("grantee email is required");
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let owner = self
+            .load_account_identity_in_tx(&mut tx, &tenant_id, input.owner_account_id)
+            .await?;
+        let task_list =
+            Self::load_task_list_in_tx(&mut tx, &tenant_id, owner.id, input.task_list_id).await?;
+        let grantee = self
+            .load_account_identity_by_email_in_tx(&mut tx, &tenant_id, &grantee_email)
+            .await?;
+
+        if owner.id == grantee.id {
+            bail!("self-delegation is not supported");
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO task_list_grants (
+                id, tenant_id, task_list_id, owner_account_id, grantee_account_id,
+                may_read, may_write, may_delete, may_share
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (tenant_id, task_list_id, grantee_account_id)
+            DO UPDATE SET
+                may_read = EXCLUDED.may_read,
+                may_write = EXCLUDED.may_write,
+                may_delete = EXCLUDED.may_delete,
+                may_share = EXCLUDED.may_share,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&tenant_id)
+        .bind(task_list.id)
+        .bind(owner.id)
+        .bind(grantee.id)
+        .bind(input.may_read)
+        .bind(input.may_write)
+        .bind(input.may_delete)
+        .bind(input.may_share)
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_task_access_change(&mut tx, &tenant_id, owner.id, grantee.id).await?;
+        tx.commit().await?;
+
+        self.fetch_task_list_grant(owner.id, task_list.id, grantee.id)
+            .await?
+            .ok_or_else(|| anyhow!("task-list grant not found after upsert"))
+    }
+
+    pub async fn delete_task_list_grant(
+        &self,
+        owner_account_id: Uuid,
+        task_list_id: Uuid,
+        grantee_account_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let deleted = sqlx::query(
+            r#"
+            DELETE FROM task_list_grants
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND task_list_id = $3
+              AND grantee_account_id = $4
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(owner_account_id)
+        .bind(task_list_id)
+        .bind(grantee_account_id)
+        .execute(&mut *tx)
+        .await?;
+
+        if deleted.rows_affected() == 0 {
+            bail!("task-list grant not found");
+        }
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_task_access_change(&mut tx, &tenant_id, owner_account_id, grantee_account_id)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn fetch_task_list_grant(
+        &self,
+        owner_account_id: Uuid,
+        task_list_id: Uuid,
+        grantee_account_id: Uuid,
+    ) -> Result<Option<TaskListGrant>> {
+        let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        let row = sqlx::query_as::<_, TaskListGrantRow>(
+            r#"
+            SELECT
+                g.id,
+                g.task_list_id,
+                task_lists.name AS task_list_name,
+                g.owner_account_id,
+                owner.primary_email AS owner_email,
+                owner.display_name AS owner_display_name,
+                g.grantee_account_id,
+                grantee.primary_email AS grantee_email,
+                grantee.display_name AS grantee_display_name,
+                g.may_read,
+                g.may_write,
+                g.may_delete,
+                g.may_share,
+                to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM task_list_grants g
+            JOIN task_lists
+              ON task_lists.tenant_id = g.tenant_id
+             AND task_lists.account_id = g.owner_account_id
+             AND task_lists.id = g.task_list_id
+            JOIN accounts owner ON owner.id = g.owner_account_id
+            JOIN accounts grantee ON grantee.id = g.grantee_account_id
+            WHERE g.tenant_id = $1
+              AND g.owner_account_id = $2
+              AND g.task_list_id = $3
+              AND g.grantee_account_id = $4
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(owner_account_id)
+        .bind(task_list_id)
+        .bind(grantee_account_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(map_task_list_grant))
+    }
+
+    pub async fn fetch_outgoing_task_list_grants(
+        &self,
+        owner_account_id: Uuid,
+    ) -> Result<Vec<TaskListGrant>> {
+        let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        let rows = sqlx::query_as::<_, TaskListGrantRow>(
+            r#"
+            SELECT
+                g.id,
+                g.task_list_id,
+                task_lists.name AS task_list_name,
+                g.owner_account_id,
+                owner.primary_email AS owner_email,
+                owner.display_name AS owner_display_name,
+                g.grantee_account_id,
+                grantee.primary_email AS grantee_email,
+                grantee.display_name AS grantee_display_name,
+                g.may_read,
+                g.may_write,
+                g.may_delete,
+                g.may_share,
+                to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM task_list_grants g
+            JOIN task_lists
+              ON task_lists.tenant_id = g.tenant_id
+             AND task_lists.account_id = g.owner_account_id
+             AND task_lists.id = g.task_list_id
+            JOIN accounts owner ON owner.id = g.owner_account_id
+            JOIN accounts grantee ON grantee.id = g.grantee_account_id
+            WHERE g.tenant_id = $1
+              AND g.owner_account_id = $2
+            ORDER BY lower(task_lists.name) ASC, lower(grantee.primary_email) ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(owner_account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_task_list_grant).collect())
     }
 
     pub async fn fetch_account_identity(&self, account_id: Uuid) -> Result<MailboxAccountAccess> {
@@ -7596,6 +7928,42 @@ impl Storage {
             .await
     }
 
+    pub async fn fetch_accessible_task_collections(
+        &self,
+        principal_account_id: Uuid,
+    ) -> Result<Vec<CollaborationCollection>> {
+        let task_lists = self.fetch_task_lists(principal_account_id).await?;
+        Ok(task_lists
+            .into_iter()
+            .map(|task_list| CollaborationCollection {
+                id: task_list.id.to_string(),
+                kind: CollaborationResourceKind::Tasks.as_str().to_string(),
+                owner_account_id: task_list.owner_account_id,
+                owner_email: task_list.owner_email.clone(),
+                owner_display_name: task_list.owner_display_name.clone(),
+                display_name: shared_task_list_display_name(
+                    &task_list.name,
+                    &task_list.owner_display_name,
+                    &task_list.owner_email,
+                ),
+                is_owned: task_list.is_owned,
+                rights: task_list.rights.clone(),
+            })
+            .collect())
+    }
+
+    pub async fn fetch_accessible_task_list_collections(
+        &self,
+        principal_account_id: Uuid,
+    ) -> Result<Vec<CollaborationCollection>> {
+        Ok(self
+            .fetch_accessible_task_collections(principal_account_id)
+            .await?
+            .into_iter()
+            .filter(|collection| !collection.is_owned)
+            .collect())
+    }
+
     pub async fn fetch_accessible_contacts(
         &self,
         principal_account_id: Uuid,
@@ -7851,14 +8219,46 @@ impl Storage {
         let rows = sqlx::query_as::<_, ClientTaskListRow>(
             r#"
             SELECT
-                id,
-                name,
-                role,
-                sort_order,
-                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                task_lists.id,
+                task_lists.account_id AS owner_account_id,
+                owner.primary_email AS owner_email,
+                owner.display_name AS owner_display_name,
+                (task_lists.account_id = $2) AS is_owned,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_read, FALSE)
+                END AS may_read,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_write, FALSE)
+                END AS may_write,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_delete, FALSE)
+                END AS may_delete,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_share, FALSE)
+                END AS may_share,
+                task_lists.name,
+                task_lists.role,
+                task_lists.sort_order,
+                to_char(task_lists.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             FROM task_lists
-            WHERE tenant_id = $1 AND account_id = $2
-            ORDER BY sort_order ASC, created_at ASC, id ASC
+            JOIN accounts owner ON owner.id = task_lists.account_id
+            LEFT JOIN task_list_grants g
+              ON g.tenant_id = task_lists.tenant_id
+             AND g.task_list_id = task_lists.id
+             AND g.owner_account_id = task_lists.account_id
+             AND g.grantee_account_id = $2
+            WHERE task_lists.tenant_id = $1
+              AND (task_lists.account_id = $2 OR COALESCE(g.may_read, FALSE))
+            ORDER BY
+                CASE WHEN task_lists.account_id = $2 THEN 0 ELSE 1 END ASC,
+                lower(owner.primary_email) ASC,
+                task_lists.sort_order ASC,
+                task_lists.created_at ASC,
+                task_lists.id ASC
             "#,
         )
         .bind(&tenant_id)
@@ -7884,16 +8284,47 @@ impl Storage {
         let rows = sqlx::query_as::<_, ClientTaskListRow>(
             r#"
             SELECT
-                id,
-                name,
-                role,
-                sort_order,
-                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                task_lists.id,
+                task_lists.account_id AS owner_account_id,
+                owner.primary_email AS owner_email,
+                owner.display_name AS owner_display_name,
+                (task_lists.account_id = $2) AS is_owned,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_read, FALSE)
+                END AS may_read,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_write, FALSE)
+                END AS may_write,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_delete, FALSE)
+                END AS may_delete,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_share, FALSE)
+                END AS may_share,
+                task_lists.name,
+                task_lists.role,
+                task_lists.sort_order,
+                to_char(task_lists.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             FROM task_lists
-            WHERE tenant_id = $1
-              AND account_id = $2
-              AND id = ANY($3)
-            ORDER BY sort_order ASC, created_at ASC, id ASC
+            JOIN accounts owner ON owner.id = task_lists.account_id
+            LEFT JOIN task_list_grants g
+              ON g.tenant_id = task_lists.tenant_id
+             AND g.task_list_id = task_lists.id
+             AND g.owner_account_id = task_lists.account_id
+             AND g.grantee_account_id = $2
+            WHERE task_lists.tenant_id = $1
+              AND task_lists.id = ANY($3)
+              AND (task_lists.account_id = $2 OR COALESCE(g.may_read, FALSE))
+            ORDER BY
+                CASE WHEN task_lists.account_id = $2 THEN 0 ELSE 1 END ASC,
+                lower(owner.primary_email) ASC,
+                task_lists.sort_order ASC,
+                task_lists.created_at ASC,
+                task_lists.id ASC
             "#,
         )
         .bind(&tenant_id)
@@ -7917,6 +8348,14 @@ impl Storage {
             VALUES ($1, $2, $3, $4, NULL, $5)
             RETURNING
                 id,
+                account_id AS owner_account_id,
+                ''::text AS owner_email,
+                ''::text AS owner_display_name,
+                TRUE AS is_owned,
+                TRUE AS may_read,
+                TRUE AS may_write,
+                TRUE AS may_delete,
+                TRUE AS may_share,
                 name,
                 role,
                 sort_order,
@@ -7960,6 +8399,14 @@ impl Storage {
               AND id = $3
             RETURNING
                 id,
+                account_id AS owner_account_id,
+                ''::text AS owner_email,
+                ''::text AS owner_display_name,
+                TRUE AS is_owned,
+                TRUE AS may_read,
+                TRUE AS may_write,
+                TRUE AS may_delete,
+                TRUE AS may_share,
                 name,
                 role,
                 sort_order,
@@ -8021,7 +8468,17 @@ impl Storage {
     }
 
     pub async fn delete_client_task(&self, account_id: Uuid, task_id: Uuid) -> Result<()> {
-        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let existing = self
+            .fetch_client_tasks_by_ids(account_id, &[task_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("task not found"))?;
+        if !existing.rights.may_delete {
+            bail!("delete access is not granted on this task");
+        }
+
+        let tenant_id = self.tenant_id_for_account_id(existing.owner_account_id).await?;
         let mut tx = self.pool.begin().await?;
         let deleted = sqlx::query(
             r#"
@@ -8030,7 +8487,7 @@ impl Storage {
             "#,
         )
         .bind(&tenant_id)
-        .bind(account_id)
+        .bind(existing.owner_account_id)
         .bind(task_id)
         .execute(&mut *tx)
         .await?;
@@ -8039,7 +8496,13 @@ impl Storage {
             bail!("task not found");
         }
 
-        Self::emit_task_change(&mut tx, &tenant_id, account_id).await?;
+        Self::emit_task_access_change(
+            &mut tx,
+            &tenant_id,
+            existing.owner_account_id,
+            account_id,
+        )
+        .await?;
         tx.commit().await?;
 
         Ok(())
@@ -8048,13 +8511,33 @@ impl Storage {
     pub async fn fetch_dav_tasks(&self, account_id: Uuid) -> Result<Vec<DavTask>> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
-        let default_task_list =
-            Self::ensure_default_task_list(&mut tx, &tenant_id, account_id).await?;
+        Self::ensure_default_task_list(&mut tx, &tenant_id, account_id).await?;
         let rows = sqlx::query_as::<_, DavTaskRow>(
             r#"
             SELECT
                 tasks.id,
+                task_lists.account_id AS owner_account_id,
+                owner.primary_email AS owner_email,
+                owner.display_name AS owner_display_name,
+                (task_lists.account_id = $2) AS is_owned,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_read, FALSE)
+                END AS may_read,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_write, FALSE)
+                END AS may_write,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_delete, FALSE)
+                END AS may_delete,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_share, FALSE)
+                END AS may_share,
                 tasks.task_list_id,
+                task_lists.name AS task_list_name,
                 tasks.title,
                 tasks.description,
                 tasks.status,
@@ -8069,10 +8552,22 @@ impl Storage {
                 tasks.sort_order,
                 to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             FROM tasks
+            JOIN task_lists
+              ON task_lists.tenant_id = tasks.tenant_id
+             AND task_lists.account_id = tasks.account_id
+             AND task_lists.id = tasks.task_list_id
+            JOIN accounts owner ON owner.id = task_lists.account_id
+            LEFT JOIN task_list_grants g
+              ON g.tenant_id = task_lists.tenant_id
+             AND g.task_list_id = task_lists.id
+             AND g.owner_account_id = task_lists.account_id
+             AND g.grantee_account_id = $2
             WHERE tasks.tenant_id = $1
-              AND tasks.account_id = $2
-              AND tasks.task_list_id = $3
+              AND (task_lists.account_id = $2 OR COALESCE(g.may_read, FALSE))
             ORDER BY
+                CASE WHEN task_lists.account_id = $2 THEN 0 ELSE 1 END ASC,
+                lower(owner.primary_email) ASC,
+                task_lists.sort_order ASC,
                 tasks.sort_order ASC,
                 tasks.updated_at ASC,
                 tasks.id ASC
@@ -8080,7 +8575,6 @@ impl Storage {
         )
         .bind(&tenant_id)
         .bind(account_id)
-        .bind(default_task_list.id)
         .fetch_all(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -8098,13 +8592,33 @@ impl Storage {
         }
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
-        let default_task_list =
-            Self::ensure_default_task_list(&mut tx, &tenant_id, account_id).await?;
+        Self::ensure_default_task_list(&mut tx, &tenant_id, account_id).await?;
         let rows = sqlx::query_as::<_, DavTaskRow>(
             r#"
             SELECT
                 tasks.id,
+                task_lists.account_id AS owner_account_id,
+                owner.primary_email AS owner_email,
+                owner.display_name AS owner_display_name,
+                (task_lists.account_id = $2) AS is_owned,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_read, FALSE)
+                END AS may_read,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_write, FALSE)
+                END AS may_write,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_delete, FALSE)
+                END AS may_delete,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_share, FALSE)
+                END AS may_share,
                 tasks.task_list_id,
+                task_lists.name AS task_list_name,
                 tasks.title,
                 tasks.description,
                 tasks.status,
@@ -8119,11 +8633,23 @@ impl Storage {
                 tasks.sort_order,
                 to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             FROM tasks
+            JOIN task_lists
+              ON task_lists.tenant_id = tasks.tenant_id
+             AND task_lists.account_id = tasks.account_id
+             AND task_lists.id = tasks.task_list_id
+            JOIN accounts owner ON owner.id = task_lists.account_id
+            LEFT JOIN task_list_grants g
+              ON g.tenant_id = task_lists.tenant_id
+             AND g.task_list_id = task_lists.id
+             AND g.owner_account_id = task_lists.account_id
+             AND g.grantee_account_id = $2
             WHERE tasks.tenant_id = $1
-              AND tasks.account_id = $2
-              AND tasks.task_list_id = $3
-              AND tasks.id = ANY($4)
+              AND tasks.id = ANY($3)
+              AND (task_lists.account_id = $2 OR COALESCE(g.may_read, FALSE))
             ORDER BY
+                CASE WHEN task_lists.account_id = $2 THEN 0 ELSE 1 END ASC,
+                lower(owner.primary_email) ASC,
+                task_lists.sort_order ASC,
                 tasks.sort_order ASC,
                 tasks.updated_at ASC,
                 tasks.id ASC
@@ -8131,7 +8657,6 @@ impl Storage {
         )
         .bind(&tenant_id)
         .bind(account_id)
-        .bind(default_task_list.id)
         .bind(ids)
         .fetch_all(&mut *tx)
         .await?;
@@ -8144,12 +8669,25 @@ impl Storage {
         let task = self
             .upsert_client_task(UpsertClientTaskInput {
                 task_list_id: None,
-                ..input
+                ..input.clone()
             })
             .await?;
+        let task_list_name = self
+            .fetch_task_lists_by_ids(input.principal_account_id, &[task.task_list_id])
+            .await?
+            .into_iter()
+            .next()
+            .map(|task_list| task_list.name)
+            .unwrap_or_default();
         Ok(DavTask {
             id: task.id,
+            collection_id: task.task_list_id.to_string(),
+            owner_account_id: task.owner_account_id,
+            owner_email: task.owner_email,
+            owner_display_name: task.owner_display_name,
+            rights: task.rights,
             task_list_id: task.task_list_id,
+            task_list_name,
             title: task.title,
             description: task.description,
             status: task.status,
@@ -10064,6 +10602,26 @@ impl Storage {
             r#"
             SELECT
                 tasks.id,
+                task_lists.account_id AS owner_account_id,
+                owner.primary_email AS owner_email,
+                owner.display_name AS owner_display_name,
+                (task_lists.account_id = $2) AS is_owned,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_read, FALSE)
+                END AS may_read,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_write, FALSE)
+                END AS may_write,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_delete, FALSE)
+                END AS may_delete,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_share, FALSE)
+                END AS may_share,
                 tasks.task_list_id,
                 task_lists.sort_order AS task_list_sort_order,
                 tasks.title,
@@ -10084,8 +10642,17 @@ impl Storage {
               ON task_lists.tenant_id = tasks.tenant_id
              AND task_lists.account_id = tasks.account_id
              AND task_lists.id = tasks.task_list_id
-            WHERE tasks.tenant_id = $1 AND tasks.account_id = $2
+            JOIN accounts owner ON owner.id = task_lists.account_id
+            LEFT JOIN task_list_grants g
+              ON g.tenant_id = task_lists.tenant_id
+             AND g.task_list_id = task_lists.id
+             AND g.owner_account_id = task_lists.account_id
+             AND g.grantee_account_id = $2
+            WHERE tasks.tenant_id = $1
+              AND (task_lists.account_id = $2 OR COALESCE(g.may_read, FALSE))
             ORDER BY
+                CASE WHEN task_lists.account_id = $2 THEN 0 ELSE 1 END ASC,
+                lower(owner.primary_email) ASC,
                 task_lists.sort_order ASC,
                 tasks.sort_order ASC,
                 tasks.updated_at ASC,
@@ -10117,6 +10684,26 @@ impl Storage {
             r#"
             SELECT
                 tasks.id,
+                task_lists.account_id AS owner_account_id,
+                owner.primary_email AS owner_email,
+                owner.display_name AS owner_display_name,
+                (task_lists.account_id = $2) AS is_owned,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_read, FALSE)
+                END AS may_read,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_write, FALSE)
+                END AS may_write,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_delete, FALSE)
+                END AS may_delete,
+                CASE
+                    WHEN task_lists.account_id = $2 THEN TRUE
+                    ELSE COALESCE(g.may_share, FALSE)
+                END AS may_share,
                 tasks.task_list_id,
                 task_lists.sort_order AS task_list_sort_order,
                 tasks.title,
@@ -10137,10 +10724,18 @@ impl Storage {
               ON task_lists.tenant_id = tasks.tenant_id
              AND task_lists.account_id = tasks.account_id
              AND task_lists.id = tasks.task_list_id
+            JOIN accounts owner ON owner.id = task_lists.account_id
+            LEFT JOIN task_list_grants g
+              ON g.tenant_id = task_lists.tenant_id
+             AND g.task_list_id = task_lists.id
+             AND g.owner_account_id = task_lists.account_id
+             AND g.grantee_account_id = $2
             WHERE tasks.tenant_id = $1
-              AND tasks.account_id = $2
               AND tasks.id = ANY($3)
+              AND (task_lists.account_id = $2 OR COALESCE(g.may_read, FALSE))
             ORDER BY
+                CASE WHEN task_lists.account_id = $2 THEN 0 ELSE 1 END ASC,
+                lower(owner.primary_email) ASC,
                 task_lists.sort_order ASC,
                 tasks.sort_order ASC,
                 tasks.updated_at ASC,
@@ -10717,6 +11312,7 @@ impl Storage {
         let collection_kind = match category {
             CanonicalChangeCategory::Contacts => CollaborationResourceKind::Contacts,
             CanonicalChangeCategory::Calendar => CollaborationResourceKind::Calendar,
+            CanonicalChangeCategory::Tasks => CollaborationResourceKind::Tasks,
             _ => bail!("unsupported collaboration change category"),
         };
 
@@ -10760,6 +11356,7 @@ impl Storage {
         let category = match kind {
             CollaborationResourceKind::Contacts => CanonicalChangeCategory::Contacts,
             CollaborationResourceKind::Calendar => CanonicalChangeCategory::Calendar,
+            CollaborationResourceKind::Tasks => CanonicalChangeCategory::Tasks,
         };
         let mut principal_account_ids = vec![owner_account_id, grantee_account_id];
         principal_account_ids.sort();
@@ -10780,12 +11377,24 @@ impl Storage {
         tenant_id: &str,
         account_id: Uuid,
     ) -> Result<()> {
+        Self::emit_task_access_change(tx, tenant_id, account_id, account_id).await
+    }
+
+    async fn emit_task_access_change(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        owner_account_id: Uuid,
+        principal_account_id: Uuid,
+    ) -> Result<()> {
+        let mut principal_account_ids = vec![owner_account_id, principal_account_id];
+        principal_account_ids.sort();
+        principal_account_ids.dedup();
         Self::emit_canonical_change(
             &mut **tx,
             tenant_id,
             CanonicalChangeCategory::Tasks,
-            &[account_id],
-            &[account_id],
+            &principal_account_ids,
+            &principal_account_ids,
         )
         .await
     }
@@ -10927,6 +11536,14 @@ impl Storage {
                 name = task_lists.name
             RETURNING
                 id,
+                account_id AS owner_account_id,
+                ''::text AS owner_email,
+                ''::text AS owner_display_name,
+                TRUE AS is_owned,
+                TRUE AS may_read,
+                TRUE AS may_write,
+                TRUE AS may_delete,
+                TRUE AS may_share,
                 name,
                 role,
                 sort_order,
@@ -10953,6 +11570,14 @@ impl Storage {
             r#"
             SELECT
                 id,
+                account_id AS owner_account_id,
+                ''::text AS owner_email,
+                ''::text AS owner_display_name,
+                TRUE AS is_owned,
+                TRUE AS may_read,
+                TRUE AS may_write,
+                TRUE AS may_delete,
+                TRUE AS may_share,
                 name,
                 role,
                 sort_order,
@@ -11804,9 +12429,41 @@ fn map_contact(row: ClientContactRow) -> ClientContact {
 fn map_task_list(row: ClientTaskListRow) -> ClientTaskList {
     ClientTaskList {
         id: row.id,
+        owner_account_id: row.owner_account_id,
+        owner_email: row.owner_email,
+        owner_display_name: row.owner_display_name,
+        is_owned: row.is_owned,
+        rights: CollaborationRights {
+            may_read: row.may_read,
+            may_write: row.may_write,
+            may_delete: row.may_delete,
+            may_share: row.may_share,
+        },
         name: row.name,
         role: row.role,
         sort_order: row.sort_order,
+        updated_at: row.updated_at,
+    }
+}
+
+fn map_task_list_grant(row: TaskListGrantRow) -> TaskListGrant {
+    TaskListGrant {
+        id: row.id,
+        task_list_id: row.task_list_id,
+        task_list_name: row.task_list_name,
+        owner_account_id: row.owner_account_id,
+        owner_email: row.owner_email,
+        owner_display_name: row.owner_display_name,
+        grantee_account_id: row.grantee_account_id,
+        grantee_email: row.grantee_email,
+        grantee_display_name: row.grantee_display_name,
+        rights: CollaborationRights {
+            may_read: row.may_read,
+            may_write: row.may_write,
+            may_delete: row.may_delete,
+            may_share: row.may_share,
+        },
+        created_at: row.created_at,
         updated_at: row.updated_at,
     }
 }
@@ -11864,6 +12521,16 @@ fn map_sender_delegation_grant(row: SenderDelegationGrantRow) -> SenderDelegatio
 fn map_task(row: ClientTaskRow) -> ClientTask {
     ClientTask {
         id: row.id,
+        owner_account_id: row.owner_account_id,
+        owner_email: row.owner_email,
+        owner_display_name: row.owner_display_name,
+        is_owned: row.is_owned,
+        rights: CollaborationRights {
+            may_read: row.may_read,
+            may_write: row.may_write,
+            may_delete: row.may_delete,
+            may_share: row.may_share,
+        },
         task_list_id: row.task_list_id,
         task_list_sort_order: row.task_list_sort_order,
         title: row.title,
@@ -11879,7 +12546,18 @@ fn map_task(row: ClientTaskRow) -> ClientTask {
 fn map_dav_task(row: DavTaskRow) -> DavTask {
     DavTask {
         id: row.id,
+        collection_id: row.task_list_id.to_string(),
+        owner_account_id: row.owner_account_id,
+        owner_email: row.owner_email,
+        owner_display_name: row.owner_display_name,
+        rights: CollaborationRights {
+            may_read: row.may_read,
+            may_write: row.may_write,
+            may_delete: row.may_delete,
+            may_share: row.may_share,
+        },
         task_list_id: row.task_list_id,
+        task_list_name: row.task_list_name,
         title: row.title,
         description: row.description,
         status: row.status,
@@ -12046,6 +12724,19 @@ fn shared_collection_display_name(
         owner_display_name.trim()
     };
     format!("{owner_label} {}", kind.collection_label())
+}
+
+fn shared_task_list_display_name(
+    task_list_name: &str,
+    owner_display_name: &str,
+    owner_email: &str,
+) -> String {
+    let owner_label = if owner_display_name.trim().is_empty() {
+        owner_email.trim()
+    } else {
+        owner_display_name.trim()
+    };
+    format!("{owner_label} / {}", task_list_name.trim())
 }
 
 #[derive(Debug, Clone)]

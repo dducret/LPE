@@ -30,8 +30,7 @@ const ADDRESSBOOK_COLLECTION_PATH: &str = "/dav/addressbooks/me/default/";
 const CALENDAR_HOME_PATH: &str = "/dav/calendars/me/";
 const CALENDAR_COLLECTION_PREFIX: &str = "/dav/calendars/me/";
 const CALENDAR_COLLECTION_PATH: &str = "/dav/calendars/me/default/";
-const TASK_COLLECTION_ID: &str = "tasks";
-const TASK_COLLECTION_PATH: &str = "/dav/calendars/me/tasks/";
+const TASK_COLLECTION_PREFIX: &str = "tasks-";
 
 #[derive(Debug, Default)]
 struct ReportFilter {
@@ -55,6 +54,10 @@ pub trait DavStore: AccountAuthStore {
         principal_account_id: Uuid,
     ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>>;
     fn fetch_accessible_calendar_collections<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>>;
+    fn fetch_accessible_task_collections<'a>(
         &'a self,
         principal_account_id: Uuid,
     ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>>;
@@ -149,6 +152,13 @@ impl DavStore for Storage {
             self.fetch_accessible_calendar_collections(principal_account_id)
                 .await
         })
+    }
+
+    fn fetch_accessible_task_collections<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>> {
+        Box::pin(async move { self.fetch_accessible_task_collections(principal_account_id).await })
     }
 
     fn fetch_accessible_contacts<'a>(
@@ -382,13 +392,19 @@ impl<S: DavStore> DavService<S> {
                     collection_resourcetype("collection"),
                 )];
                 if depth == "1" {
-                    entries.push(task_collection_entry());
                     entries.extend(
                         self.store
                             .fetch_accessible_calendar_collections(principal.account_id)
                             .await?
                             .into_iter()
                             .map(calendar_collection_entry),
+                    );
+                    entries.extend(
+                        self.store
+                            .fetch_accessible_task_collections(principal.account_id)
+                            .await?
+                            .into_iter()
+                            .map(task_collection_entry),
                     );
                 }
                 entries
@@ -423,14 +439,23 @@ impl<S: DavStore> DavService<S> {
                         );
                     }
                     entries
-                } else if is_task_collection_path(path) {
-                    let mut entries = vec![task_collection_entry()];
+                } else if let Some(collection_id) = task_collection_id_from_path(path) {
+                    let collections = self
+                        .store
+                        .fetch_accessible_task_collections(principal.account_id)
+                        .await?;
+                    let collection = collections
+                        .into_iter()
+                        .find(|entry| entry.id == collection_id)
+                        .ok_or_else(|| anyhow!("not found"))?;
+                    let mut entries = vec![task_collection_entry(collection.clone())];
                     if depth == "1" {
                         entries.extend(
                             self.store
                                 .fetch_dav_tasks(principal.account_id)
                                 .await?
                                 .into_iter()
+                        .filter(|task| task.collection_id == collection.id)
                                 .map(task_resource_entry),
                         );
                     }
@@ -481,11 +506,12 @@ impl<S: DavStore> DavService<S> {
                 .filter(|contact| contact_matches_report(contact, &filter))
                 .map(contact_report_entry)
                 .collect()
-        } else if is_task_collection_path(path) {
+        } else if let Some(collection_id) = task_collection_id_from_path(path) {
             self.store
                 .fetch_dav_tasks(principal.account_id)
                 .await?
                 .into_iter()
+                        .filter(|task| task.collection_id == collection_id)
                 .filter(|task| task_matches_report(task, &filter))
                 .map(task_report_entry)
                 .collect()
@@ -570,12 +596,17 @@ impl<S: DavStore> DavService<S> {
                 etag_for_contact(&contact),
             ));
         }
-        if let Some(resource_id) = resource_id_for_task_path(path) {
+        if let Some((collection_id, resource_id)) = resource_id_for_task_path(path) {
             let existing = self.task_for_path(principal.account_id, path).await?;
             check_write_preconditions(headers, existing.as_ref().map(etag_for_task))?;
             let task = self
                 .store
-                .upsert_dav_task(parse_vtodo(resource_id, principal.account_id, body)?)
+                .upsert_dav_task(parse_vtodo(
+                    resource_id,
+                    principal.account_id,
+                    Some(&collection_id),
+                    body,
+                )?)
                 .await?;
             return Ok(status_with_etag(
                 if existing.is_some() { 204 } else { 201 },
@@ -617,7 +648,7 @@ impl<S: DavStore> DavService<S> {
                 .await?;
             return Ok(status_only(204));
         }
-        if let Some(resource_id) = resource_id_for_task_path(path) {
+        if let Some((_, resource_id)) = resource_id_for_task_path(path) {
             let existing = self.task_for_path(principal.account_id, path).await?;
             check_delete_preconditions(headers, existing.as_ref().map(etag_for_task))?;
             self.store
@@ -669,7 +700,7 @@ impl<S: DavStore> DavService<S> {
     }
 
     async fn task_for_path(&self, account_id: Uuid, path: &str) -> Result<Option<DavTask>> {
-        let Some(resource_id) = resource_id_for_task_path(path) else {
+        let Some((collection_id, resource_id)) = resource_id_for_task_path(path) else {
             return Ok(None);
         };
         Ok(self
@@ -677,7 +708,7 @@ impl<S: DavStore> DavService<S> {
             .fetch_dav_tasks_by_ids(account_id, &[resource_id])
             .await?
             .into_iter()
-            .next())
+            .find(|task| task.collection_id == collection_id))
     }
 }
 
@@ -734,11 +765,11 @@ fn addressbook_collection_entry(collection: CollaborationCollection) -> String {
     )
 }
 
-fn task_collection_entry() -> String {
+fn task_collection_entry(collection: CollaborationCollection) -> String {
     response_entry(
-        TASK_COLLECTION_PATH,
+        &task_collection_href(&collection.id),
         collection_props(
-            "Tasks",
+            &collection.display_name,
             "<d:collection/><cal:calendar/>",
             None,
             None,
@@ -802,7 +833,7 @@ fn event_resource_entry(event: AccessibleEvent) -> String {
 fn task_resource_entry(task: DavTask) -> String {
     let body = serialize_vtodo(&task);
     response_entry(
-        &task_href(task.id),
+        &task_href(&task.collection_id, task.id),
         collection_props(
             &task.title,
             "",
@@ -828,7 +859,7 @@ fn contact_report_entry(contact: AccessibleContact) -> String {
 fn task_report_entry(task: DavTask) -> String {
     let body = serialize_vtodo(&task);
     response_entry(
-        &task_href(task.id),
+        &task_href(&task.collection_id, task.id),
         format!(
             "<d:propstat><d:prop><d:getetag>{}</d:getetag><cal:calendar-data>{}</cal:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>",
             xml_escape(&etag(&body)),
@@ -1005,8 +1036,19 @@ fn event_collection_href(collection_id: &str) -> String {
     format!("{CALENDAR_COLLECTION_PREFIX}{collection_id}/")
 }
 
-fn task_collection_href() -> &'static str {
-    TASK_COLLECTION_PATH
+fn dav_task_collection_id(collection_id: &str) -> String {
+    format!("{TASK_COLLECTION_PREFIX}{collection_id}")
+}
+
+fn task_collection_id_from_path(path: &str) -> Option<String> {
+    let collection_id = collection_id_from_path(path, CALENDAR_COLLECTION_PREFIX)?;
+    collection_id
+        .strip_prefix(TASK_COLLECTION_PREFIX)
+        .map(ToString::to_string)
+}
+
+fn task_collection_href(collection_id: &str) -> String {
+    event_collection_href(&dav_task_collection_id(collection_id))
 }
 
 fn contact_href(collection_id: &str, id: Uuid) -> String {
@@ -1017,8 +1059,8 @@ fn event_href(collection_id: &str, id: Uuid) -> String {
     format!("{}{id}.ics", event_collection_href(collection_id))
 }
 
-fn task_href(id: Uuid) -> String {
-    format!("{}{id}.ics", task_collection_href())
+fn task_href(collection_id: &str, id: Uuid) -> String {
+    format!("{}{id}.ics", task_collection_href(collection_id))
 }
 
 fn collection_id_from_contact_path(path: &str) -> Option<String> {
@@ -1027,14 +1069,10 @@ fn collection_id_from_contact_path(path: &str) -> Option<String> {
 
 fn collection_id_from_event_path(path: &str) -> Option<String> {
     let collection_id = collection_id_from_path(path, CALENDAR_COLLECTION_PREFIX)?;
-    if collection_id == TASK_COLLECTION_ID {
+    if collection_id.starts_with(TASK_COLLECTION_PREFIX) {
         return None;
     }
     Some(collection_id)
-}
-
-fn is_task_collection_path(path: &str) -> bool {
-    collection_id_from_path(path, CALENDAR_COLLECTION_PREFIX).as_deref() == Some(TASK_COLLECTION_ID)
 }
 
 fn collection_id_from_path(path: &str, prefix: &str) -> Option<String> {
@@ -1054,14 +1092,12 @@ fn resource_id_for_event_path(path: &str) -> Option<(String, Uuid)> {
     resource_id_for_path(path, CALENDAR_COLLECTION_PREFIX, ".ics")
 }
 
-fn resource_id_for_task_path(path: &str) -> Option<Uuid> {
+fn resource_id_for_task_path(path: &str) -> Option<(String, Uuid)> {
     let (collection_id, resource_id) =
         resource_id_for_path(path, CALENDAR_COLLECTION_PREFIX, ".ics")?;
-    if collection_id == TASK_COLLECTION_ID {
-        Some(resource_id)
-    } else {
-        None
-    }
+    collection_id
+        .strip_prefix(TASK_COLLECTION_PREFIX)
+        .map(|collection_id| (collection_id.to_string(), resource_id))
 }
 
 fn resource_id_for_path(path: &str, prefix: &str, suffix: &str) -> Option<(String, Uuid)> {
@@ -1294,7 +1330,12 @@ fn parse_ical(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientEve
     })
 }
 
-fn parse_vtodo(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientTaskInput> {
+fn parse_vtodo(
+    id: Uuid,
+    account_id: Uuid,
+    collection_id: Option<&str>,
+    body: &[u8],
+) -> Result<UpsertClientTaskInput> {
     let content = std::str::from_utf8(body)?;
     let mut title = String::new();
     let mut description = String::new();
@@ -1334,8 +1375,9 @@ fn parse_vtodo(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientTa
 
     Ok(UpsertClientTaskInput {
         id: Some(id),
+        principal_account_id: account_id,
         account_id,
-        task_list_id: None,
+        task_list_id: collection_id.map(Uuid::parse_str).transpose()?,
         title,
         description,
         status,
@@ -1669,7 +1711,12 @@ fn event_matches_report(event: &AccessibleEvent, filter: &ReportFilter) -> bool 
 }
 
 fn task_matches_report(task: &DavTask, filter: &ReportFilter) -> bool {
-    if !filter.hrefs.is_empty() && !filter.hrefs.iter().any(|href| href == &task_href(task.id)) {
+    if !filter.hrefs.is_empty()
+        && !filter
+            .hrefs
+            .iter()
+            .any(|href| href == &task_href(&task.collection_id, task.id))
+    {
         return false;
     }
     if !filter.text_terms.is_empty() {
@@ -1817,6 +1864,14 @@ mod tests {
     };
     use std::sync::{Arc, Mutex};
 
+    fn task_collection_path(collection_id: &str) -> String {
+        format!("/dav/calendars/me/{TASK_COLLECTION_PREFIX}{collection_id}/")
+    }
+
+    fn task_resource_path(collection_id: &str, task_id: Uuid) -> String {
+        format!("{}{}.ics", task_collection_path(collection_id), task_id)
+    }
+
     #[derive(Clone, Default)]
     struct FakeStore {
         session: Option<AuthenticatedAccount>,
@@ -1866,8 +1921,9 @@ mod tests {
 
         fn task_collection() -> CollaborationCollection {
             let account = Self::account();
+            let task_list_id = Uuid::nil().to_string();
             CollaborationCollection {
-                id: TASK_COLLECTION_ID.to_string(),
+                id: task_list_id,
                 kind: "calendar".to_string(),
                 owner_account_id: account.account_id,
                 owner_email: account.email.clone(),
@@ -1919,9 +1975,16 @@ mod tests {
         }
 
         fn task(id: Uuid, title: &str) -> DavTask {
+            let account = Self::account();
             DavTask {
                 id,
                 task_list_id: Uuid::nil(),
+                collection_id: Uuid::nil().to_string(),
+                owner_account_id: account.account_id,
+                owner_email: account.email,
+                owner_display_name: "Alice".to_string(),
+                rights: Self::full_rights(),
+                task_list_name: "Tasks".to_string(),
                 title: title.to_string(),
                 description: String::new(),
                 status: "needs-action".to_string(),
@@ -2001,6 +2064,13 @@ mod tests {
             _principal_account_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>> {
             Box::pin(async move { Ok(vec![Self::calendar_collection(), Self::task_collection()]) })
+        }
+
+        fn fetch_accessible_task_collections<'a>(
+            &'a self,
+            _principal_account_id: Uuid,
+        ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>> {
+            Box::pin(async move { Ok(vec![Self::task_collection()]) })
         }
 
         fn fetch_accessible_contacts<'a>(
@@ -2144,9 +2214,17 @@ mod tests {
             input: UpsertClientTaskInput,
         ) -> lpe_mail_auth::StoreFuture<'a, DavTask> {
             let mut tasks = self.tasks.lock().unwrap();
+            let account = Self::account();
+            let task_list_id = input.task_list_id.unwrap_or(Uuid::nil());
             let task = DavTask {
                 id: input.id.unwrap(),
-                task_list_id: Uuid::nil(),
+                task_list_id,
+                collection_id: task_list_id.to_string(),
+                owner_account_id: account.account_id,
+                owner_email: account.email,
+                owner_display_name: account.display_name,
+                rights: Self::full_rights(),
+                task_list_name: "Tasks".to_string(),
                 title: input.title,
                 description: input.description,
                 status: if input.status.trim().is_empty() {
@@ -2595,11 +2673,19 @@ mod tests {
     #[tokio::test]
     async fn propfind_lists_task_collection_and_resources() {
         let task_id = Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap();
+        let account = FakeStore::account();
+        let collection_id = Uuid::nil().to_string();
         let store = FakeStore {
-            session: Some(FakeStore::account()),
+            session: Some(account.clone()),
             tasks: Arc::new(Mutex::new(vec![DavTask {
                 id: task_id,
                 task_list_id: Uuid::nil(),
+                collection_id: collection_id.clone(),
+                owner_account_id: account.account_id,
+                owner_email: account.email,
+                owner_display_name: account.display_name,
+                rights: FakeStore::full_rights(),
+                task_list_name: "Tasks".to_string(),
                 title: "Prepare launch".to_string(),
                 description: "Review the last checklist".to_string(),
                 status: "in-progress".to_string(),
@@ -2617,7 +2703,7 @@ mod tests {
         let response = service
             .handle(
                 &Method::from_bytes(b"PROPFIND").unwrap(),
-                &Uri::from_static(TASK_COLLECTION_PATH),
+                &Uri::from_maybe_shared(task_collection_path(&collection_id)).unwrap(),
                 &headers,
                 &[],
             )
@@ -2626,19 +2712,27 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::from_u16(207).unwrap());
         let body = response_text(response).await;
-        assert!(body.contains(TASK_COLLECTION_PATH));
-        assert!(body.contains(&task_href(task_id)));
+        assert!(body.contains(&task_collection_path(&collection_id)));
+        assert!(body.contains(&task_href(&collection_id, task_id)));
         assert!(body.contains("VTODO"));
     }
 
     #[tokio::test]
     async fn get_returns_vtodo_for_existing_task() {
         let task_id = Uuid::parse_str("13131313-1313-1313-1313-131313131313").unwrap();
+        let account = FakeStore::account();
+        let collection_id = Uuid::nil().to_string();
         let store = FakeStore {
-            session: Some(FakeStore::account()),
+            session: Some(account.clone()),
             tasks: Arc::new(Mutex::new(vec![DavTask {
                 id: task_id,
                 task_list_id: Uuid::nil(),
+                collection_id: collection_id.clone(),
+                owner_account_id: account.account_id,
+                owner_email: account.email,
+                owner_display_name: account.display_name,
+                rights: FakeStore::full_rights(),
+                task_list_name: "Tasks".to_string(),
                 title: "File quarterly report".to_string(),
                 description: "Publish before the board review".to_string(),
                 status: "completed".to_string(),
@@ -2654,9 +2748,7 @@ mod tests {
         let response = service
             .handle(
                 &Method::GET,
-                &Uri::from_static(
-                    "/dav/calendars/me/tasks/13131313-1313-1313-1313-131313131313.ics",
-                ),
+                &Uri::from_maybe_shared(task_resource_path(&collection_id, task_id)).unwrap(),
                 &bearer_headers(),
                 &[],
             )
@@ -2674,6 +2766,7 @@ mod tests {
     #[tokio::test]
     async fn put_upserts_task_from_vtodo() {
         let task_id = Uuid::parse_str("14141414-1414-1414-1414-141414141414").unwrap();
+        let collection_id = Uuid::nil().to_string();
         let store = FakeStore {
             session: Some(FakeStore::account()),
             ..Default::default()
@@ -2683,9 +2776,7 @@ mod tests {
         let response = service
             .handle(
                 &Method::PUT,
-                &Uri::from_static(
-                    "/dav/calendars/me/tasks/14141414-1414-1414-1414-141414141414.ics",
-                ),
+                &Uri::from_maybe_shared(task_resource_path(&collection_id, task_id)).unwrap(),
                 &bearer_headers(),
                 b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:14141414-1414-1414-1414-141414141414\r\nSUMMARY:Prepare migration\r\nDESCRIPTION:Freeze tenant changes before the window\r\nSTATUS:IN-PROCESS\r\nDUE:20260501T083000Z\r\nX-LPE-SORT-ORDER:5\r\nEND:VTODO\r\nEND:VCALENDAR",
             )
@@ -2696,6 +2787,7 @@ mod tests {
         let tasks = store.tasks.lock().unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].id, task_id);
+        assert_eq!(tasks[0].collection_id, collection_id);
         assert_eq!(tasks[0].status, "in-progress");
         assert_eq!(tasks[0].due_at.as_deref(), Some("2026-05-01T08:30:00Z"));
         assert_eq!(tasks[0].sort_order, 5);
@@ -2704,6 +2796,7 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_task() {
         let task_id = Uuid::parse_str("15151515-1515-1515-1515-151515151515").unwrap();
+        let collection_id = Uuid::nil().to_string();
         let store = FakeStore {
             session: Some(FakeStore::account()),
             tasks: Arc::new(Mutex::new(vec![FakeStore::task(
@@ -2717,9 +2810,7 @@ mod tests {
         let response = service
             .handle(
                 &Method::DELETE,
-                &Uri::from_static(
-                    "/dav/calendars/me/tasks/15151515-1515-1515-1515-151515151515.ics",
-                ),
+                &Uri::from_maybe_shared(task_resource_path(&collection_id, task_id)).unwrap(),
                 &bearer_headers(),
                 &[],
             )

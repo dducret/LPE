@@ -4,7 +4,7 @@
 
 This document describes the current canonical tasks and to-do model implemented in `LPE`.
 
-The first increment added one internal business model for personal account-scoped tasks without introducing any protocol-specific parallel logic. The current increment keeps that rule and extends it with canonical multi-list support. Future `JMAP Tasks`, `DAV`, and mobile adapters must reuse the same store and access rules.
+The first increment added one internal business model for personal account-scoped tasks without introducing any protocol-specific parallel logic. The current increment keeps that rule and extends it with canonical multi-list support and canonical same-tenant task-list sharing. Future `JMAP Tasks`, `DAV`, and mobile adapters must reuse the same store and access rules.
 
 ### Architectural principles
 
@@ -12,7 +12,7 @@ The first increment added one internal business model for personal account-scope
 - task lists are stored in one canonical `task_lists` table
 - tasks are stored in one canonical `tasks` table and always belong to one canonical task list
 - each task list and task is owned by one `account_id`
-- MVP rights are enforced through the authenticated mailbox account; no parallel rights model is introduced
+- task-list sharing rights are enforced canonically in PostgreSQL; no protocol-local rights model is introduced
 - the internal API writes directly to the canonical model
 - no `Stalwart` code is reused
 
@@ -50,6 +50,32 @@ The `tasks` table exposes the following fields:
 
 The status set is intentionally aligned with a future `VTODO` mapping and remains reusable for later `JMAP Tasks` and mobile clients.
 
+### Canonical sharing model
+
+The current increment adds a canonical `task_list_grants` table.
+
+Each grant is scoped by:
+
+- `tenant_id`
+- `task_list_id`
+- `owner_account_id`
+- `grantee_account_id`
+
+Each grant carries the following rights:
+
+- `may_read`
+- `may_write`
+- `may_delete`
+- `may_share`
+
+The grant rules match the existing canonical collaboration-grant rules:
+
+- sharing remains limited to accounts inside the same tenant
+- self-sharing is not allowed
+- `may_write`, `may_delete`, and `may_share` imply `may_read`
+- `may_delete` and `may_share` also imply `may_write`
+- tasks remain stored only in the owner's canonical task list; a shared task list is a projection, not a copy
+
 ### MVP internal API
 
 The following account-scoped endpoints are exposed by `lpe-admin-api`:
@@ -58,11 +84,13 @@ The following account-scoped endpoints are exposed by `lpe-admin-api`:
 - `GET /api/mail/tasks/{task_id}`
 - `POST /api/mail/tasks`
 - `DELETE /api/mail/tasks/{task_id}`
+- `PUT /api/mail/task-lists/{task_list_id}/shares`
+- `DELETE /api/mail/task-lists/{task_list_id}/shares/{grantee_account_id}`
 
 `POST /api/mail/tasks` is the MVP upsert endpoint:
 
 - create when `id` is absent
-- update when `id` is present and belongs to the authenticated account
+- update when `id` is present and the authenticated principal has canonical write access to the target task
 - when `task_list_id` is absent, the canonical default task list is used
 
 The `/api/mail/workspace` payload now also includes `tasks` so clients can load one unified mailbox and collaboration workspace snapshot.
@@ -73,7 +101,9 @@ The `/api/mail/workspace` payload now also includes `tasks` so clients can load 
 - an empty status is normalized to `needs-action`
 - `completed_at` is retained only for `completed`
 - when a task moves to `completed` without an explicit completion timestamp, `LPE` fills `completed_at`
-- read, write, and delete operations are always scoped to the authenticated account
+- read, write, and delete operations are scoped to the authenticated principal plus canonical task-list grants
+- task-list sharing does not allow cross-tenant visibility
+- task-list rename and destroy remain owner-only operations; sharing governs list contents, not ownership of the list row
 
 ### Future adapter preparation
 
@@ -92,7 +122,7 @@ It remains a thin adapter above the canonical `task_lists` and `tasks` tables:
 
 - the canonical `task_lists` and `tasks` rows remain the single source of truth
 - no `JMAP`-specific task store, sync table, or rights model is introduced
-- all reads and writes remain scoped to the authenticated account
+- shared task lists and tasks are resolved from canonical storage rights
 - the exposed shape stays close to future `DAV` `VTODO` and `ActiveSync Tasks` reuse
 
 #### Task list model
@@ -100,12 +130,14 @@ It remains a thin adapter above the canonical `task_lists` and `tasks` tables:
 The current increment exposes canonical `TaskList` objects per authenticated account:
 
 - one canonical default list with role `inbox`
-- zero or more additional owner-only personal lists
+- zero or more additional owned personal lists
+- zero or more same-tenant shared task lists granted from another account
 - `TaskList/set` now creates, updates, and destroys canonical task lists
 - the default list may be renamed and reordered but not destroyed
 - destroying a non-default list is allowed only when the list is empty
+- shared task lists are visible through `TaskList/get` and `Task/get` with `myRights` derived from canonical task-list grants
 
-Task-list grants and shared task lists remain deferred. This increment deliberately stops before introducing cross-account task rights.
+Task-list sharing is now part of the canonical model. Cross-tenant task sharing remains deferred.
 
 #### Canonical mapping
 
@@ -139,21 +171,19 @@ It remains a thin compatibility layer above the canonical `task_lists` and `task
 - the canonical `task_lists` and `tasks` rows remain the single source of truth
 - there is no DAV-specific task table, sync state, or rights store
 - mailbox-account authentication is reused directly
-- MVP task rights remain bounded to the authenticated account only
-- the `DAV` layer exposes one owner-only `VTODO` collection and does not introduce shared task collections
+- task rights come from canonical task-list grants
+- the `DAV` layer exposes one `VTODO` collection per accessible canonical task list
 
 #### DAV collection model
 
-The current DAV increment still exposes one canonical task collection per authenticated account:
+The current DAV increment exposes one canonical task collection per accessible task list:
 
-- collection path: `/dav/calendars/me/tasks/`
-- collection display name: `Tasks`
+- collection path: `/dav/calendars/me/tasks-{task-list-id}/`
+- collection display name: canonical task-list name
 - collection component set: `VTODO`
-- collection rights: read, create, update, and delete for the authenticated account only
+- collection rights: derived from canonical task-list grants and owner access
 
-The task collection is intentionally separate from the default `VEVENT` collection so the first interoperability layer stays predictable for clients and for future protocol adapters.
-
-The DAV adapter currently maps that collection to the canonical default task list only. Additional canonical task lists already exist in storage for future DAV collection expansion, but DAV multi-list publication is intentionally deferred in this increment.
+Task collections remain intentionally separate from `VEVENT` collections so interoperability stays predictable for clients and for future protocol adapters.
 
 #### Canonical mapping
 
@@ -201,8 +231,6 @@ The first adapter implements:
 
 The current increment intentionally does not yet implement:
 
-- shared task-list grants
-- shared task lists
 - `Task/copy`
 - task notifications
 - recurrence, alerts, subtasks, assignees, or attachments
@@ -219,13 +247,12 @@ The current sync contract is:
 ### Out of scope for the MVP
 
 - shared task-list grants
-- shared task lists
+- cross-tenant shared task lists
 - cross-account delegation
 - recurrence
 - subtasks
 - task attachments
 - reminders and alarms
-- shared DAV task collections
 - partial `VTODO` patch semantics
 - alarms, organizers, attendees, recurrence, and scheduling workflows on `VTODO`
 - `ActiveSync Tasks`

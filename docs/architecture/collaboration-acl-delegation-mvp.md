@@ -2,12 +2,14 @@
 
 ### Objective
 
-This document describes the first `LPE` MVP sharing, delegation, and fine ACL model for contacts, calendars, and mailbox delegation.
+This document describes the first `LPE` MVP sharing, delegation, and fine ACL model for contacts, calendars, task lists, and mailbox delegation.
 
 The MVP stays strictly aligned with the existing canonical tables:
 
 - `contacts`
 - `calendar_events`
+- `task_lists`
+- `tasks`
 - `audit_events`
 
 It does not introduce any parallel business-object storage. Rights are added as canonical layers over the objects already owned by an account.
@@ -15,6 +17,7 @@ It does not introduce any parallel business-object storage. Rights are added as 
 ### Principles
 
 - contacts and events remain stored only in their existing canonical tables
+- task lists and tasks remain stored only in their canonical task tables
 - sharing and delegation stay limited to accounts inside the same tenant
 - the rights model is shared by `JMAP`, `DAV`, the web client, and account APIs
 - no protocol creates its own sharing model
@@ -38,7 +41,10 @@ Objects remain physically stored with their owner. A shared collection is theref
 
 ### Grant model
 
-The MVP introduces a canonical `collaboration_collection_grants` table.
+The MVP introduces canonical grant tables:
+
+- `collaboration_collection_grants` for default contacts and calendar collections
+- `task_list_grants` for canonical task lists
 
 Each grant is scoped by:
 
@@ -62,13 +68,19 @@ MVP constraints:
 - `may_delete` and `may_share` also imply `may_write`
 - only one grant exists per `(tenant_id, collection_kind, owner_account_id, grantee_account_id)`
 
+For task lists, the uniqueness boundary is:
+
+- `(tenant_id, task_list_id, owner_account_id, grantee_account_id)`
+
 ### MVP semantics
 
 The MVP supports:
 
 - calendar sharing between accounts in the same tenant
 - contact sharing between accounts in the same tenant
+- task-list sharing between accounts in the same tenant
 - minimal read/write/delete/share delegation over the full collection
+- minimal read/write/delete/share delegation over the full canonical task list
 - organizer and attendee-status interoperability on shared calendar collections through the same canonical event rows
 - coherent exposure of the same rights through `JMAP` and `DAV`
 - minimal audit of grant changes
@@ -137,6 +149,15 @@ For delegated mailboxes:
 
 Draft creation and submission for shared mailboxes keep using the canonical mailbox owner account plus the authenticated submitting account.
 
+`JMAP Tasks` exposes:
+
+- the authenticated account's owned canonical task lists
+- accessible shared task lists through `TaskList/*`
+- tasks from both owned and shared lists through `Task/*`
+- `myRights` on `TaskList` derived from canonical `task_list_grants`
+
+Task creation and updates may target a shared canonical task list when `may_write=true`. Task deletion requires `may_delete=true`. Task-list rename and destroy remain owner-only operations.
+
 #### DAV
 
 `CardDAV` and `CalDAV` expose:
@@ -148,6 +169,8 @@ DAV home `PROPFIND` depth `1` returns every accessible collection.
 
 DAV reads and writes apply the same canonical grants as `JMAP`, including organizer and attendee-status updates on accessible shared calendar collections.
 
+`CalDAV` task exposure also applies the same canonical task-list grants as `JMAP`. DAV task collections are projections of canonical task lists, not DAV-local ACL objects.
+
 The mailbox delegation lot does not add mailbox access through `DAV`.
 
 ### MVP audit
@@ -158,6 +181,8 @@ The minimally audited actions are:
 
 - share-grant creation or update
 - share-grant deletion
+- task-list grant creation or update
+- task-list grant deletion
 - mailbox delegation grant creation or update
 - mailbox delegation grant deletion
 - sender delegation grant creation or update
