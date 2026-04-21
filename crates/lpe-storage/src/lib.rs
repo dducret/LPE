@@ -2486,7 +2486,10 @@ impl Storage {
 
     pub async fn create_domain(&self, input: NewDomain, audit: AuditEntryInput) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        let tenant_id = self.tenant_id_for_domain_name(&input.name).await?;
+        // The admin console manages the platform tenant domain inventory, so
+        // newly created domains must stay in the same tenant scope that the
+        // dashboard, updates, and related admin records already use.
+        let tenant_id = PLATFORM_TENANT_ID;
         let result = sqlx::query(
             r#"
             INSERT INTO domains (
