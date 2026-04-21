@@ -16,7 +16,7 @@ else
   git -C "${TAKERI_SYNC_DIR}" sparse-checkout init --no-cone
 fi
 
-git -C "${TAKERI_SYNC_DIR}" sparse-checkout set Cargo.toml cli tools/takeri tools/shugo LICENSE README.md
+git -C "${TAKERI_SYNC_DIR}" sparse-checkout set /Cargo.toml cli tools/takeri tools/shugo /LICENSE /README.md
 git -C "${TAKERI_SYNC_DIR}" fetch --depth 1 origin "${TAKERI_BRANCH}"
 git -C "${TAKERI_SYNC_DIR}" checkout -B "${TAKERI_BRANCH}" "origin/${TAKERI_BRANCH}"
 
