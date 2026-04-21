@@ -1,17 +1,21 @@
 use anyhow::Result;
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount,
-    CanonicalChangeCategory, CanonicalChangeListener, ClientTask, CollaborationCollection,
-    JmapEmail, JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapThreadQuery, JmapUploadBlob,
-    MailboxAccountAccess, SavedDraftMessage, SenderIdentity, Storage, SubmitMessageInput,
-    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    CanonicalChangeCategory, CanonicalChangeListener, CanonicalPushChangeSet, ClientTask,
+    CollaborationCollection, JmapEmail, JmapEmailQuery, JmapEmailSubmission,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
+    JmapThreadQuery, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, SenderIdentity,
+    Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientTaskInput,
 };
 use uuid::Uuid;
 
 #[allow(async_fn_in_trait)]
 pub trait JmapPushListener: Send {
-    async fn wait_for_change(&mut self, categories: &[CanonicalChangeCategory]) -> Result<()>;
+    async fn wait_for_change(
+        &mut self,
+        categories: &[CanonicalChangeCategory],
+    ) -> Result<CanonicalPushChangeSet>;
 }
 
 #[allow(async_fn_in_trait)]
@@ -185,7 +189,10 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
 }
 
 impl JmapPushListener for CanonicalChangeListener {
-    async fn wait_for_change(&mut self, categories: &[CanonicalChangeCategory]) -> Result<()> {
+    async fn wait_for_change(
+        &mut self,
+        categories: &[CanonicalChangeCategory],
+    ) -> Result<CanonicalPushChangeSet> {
         CanonicalChangeListener::wait_for_change(self, categories).await
     }
 }

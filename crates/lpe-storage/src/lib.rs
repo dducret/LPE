@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{postgres::PgListener, Executor, FromRow, Pool, Postgres, Row};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
@@ -59,21 +59,66 @@ impl CanonicalChangeCategory {
             Self::Tasks => "tasks",
         }
     }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "mail" => Some(Self::Mail),
+            "contacts" => Some(Self::Contacts),
+            "calendar" => Some(Self::Calendar),
+            "tasks" => Some(Self::Tasks),
+            _ => None,
+        }
+    }
 }
 
 pub struct CanonicalChangeListener {
+    principal_account_id: Uuid,
     tenant_id: String,
     listener: PgListener,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CanonicalPushChangeSet {
+    scoped_accounts: HashMap<CanonicalChangeCategory, HashSet<Uuid>>,
+}
+
+impl CanonicalPushChangeSet {
+    pub fn is_empty(&self) -> bool {
+        self.scoped_accounts.values().all(HashSet::is_empty)
+    }
+
+    pub fn insert_accounts<I>(&mut self, category: CanonicalChangeCategory, account_ids: I)
+    where
+        I: IntoIterator<Item = Uuid>,
+    {
+        self.scoped_accounts
+            .entry(category)
+            .or_default()
+            .extend(account_ids);
+    }
+
+    pub fn accounts_for(&self, category: CanonicalChangeCategory) -> HashSet<Uuid> {
+        self.scoped_accounts
+            .get(&category)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub fn contains_category(&self, category: CanonicalChangeCategory) -> bool {
+        self.scoped_accounts
+            .get(&category)
+            .is_some_and(|accounts| !accounts.is_empty())
+    }
+}
+
 impl CanonicalChangeListener {
-    pub async fn wait_for_change(&mut self, categories: &[CanonicalChangeCategory]) -> Result<()> {
-        let categories = categories
-            .iter()
-            .map(|category| category.as_str())
-            .collect::<HashSet<_>>();
+    pub async fn wait_for_change(
+        &mut self,
+        categories: &[CanonicalChangeCategory],
+    ) -> Result<CanonicalPushChangeSet> {
+        let categories = categories.iter().copied().collect::<HashSet<_>>();
         if categories.is_empty() {
-            return Ok(());
+            return Ok(CanonicalPushChangeSet::default());
         }
 
         loop {
@@ -83,9 +128,34 @@ impl CanonicalChangeListener {
             else {
                 continue;
             };
-            if payload.tenant_id == self.tenant_id && categories.contains(payload.category.as_str())
+            if payload.tenant_id != self.tenant_id {
+                continue;
+            }
+
+            let Some(category) = CanonicalChangeCategory::from_str(&payload.category) else {
+                continue;
+            };
+            if !categories.contains(&category) {
+                continue;
+            }
+            if !payload
+                .principal_account_ids
+                .iter()
+                .any(|value| value == &self.principal_account_id.to_string())
             {
-                return Ok(());
+                continue;
+            }
+
+            let mut changes = CanonicalPushChangeSet::default();
+            changes.insert_accounts(
+                category,
+                payload
+                    .account_ids
+                    .iter()
+                    .filter_map(|value| Uuid::parse_str(value).ok()),
+            );
+            if !changes.is_empty() {
+                return Ok(changes);
             }
         }
     }
@@ -1911,6 +1981,8 @@ struct MailFlowRow {
 struct CanonicalChangeNotification {
     tenant_id: String,
     category: String,
+    principal_account_ids: Vec<String>,
+    account_ids: Vec<String>,
 }
 
 impl Storage {
@@ -1933,6 +2005,7 @@ impl Storage {
         let mut listener = PgListener::connect_with(&self.pool).await?;
         listener.listen(CANONICAL_CHANGE_CHANNEL).await?;
         Ok(CanonicalChangeListener {
+            principal_account_id,
             tenant_id,
             listener,
         })
@@ -2292,8 +2365,7 @@ impl Storage {
             .await?;
 
             self.insert_audit(&mut tx, &tenant_id, audit).await?;
-            Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail)
-                .await?;
+            Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         }
 
         tx.commit().await?;
@@ -4651,7 +4723,7 @@ impl Storage {
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, input.account_id).await?;
         tx.commit().await?;
 
         self.fetch_jmap_mailboxes(input.account_id)
@@ -4718,7 +4790,7 @@ impl Storage {
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -5216,6 +5288,7 @@ impl Storage {
             return Ok(());
         }
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
 
         sqlx::query(
             r#"
@@ -5235,10 +5308,11 @@ impl Storage {
         .bind(unread)
         .bind(flagged)
         .bind(message_ids)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
-        Self::emit_canonical_change(&self.pool, &tenant_id, CanonicalChangeCategory::Mail).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
 
         Ok(())
     }
@@ -6433,7 +6507,7 @@ impl Storage {
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, input.account_id).await?;
         tx.commit().await?;
 
         Ok(SavedDraftMessage {
@@ -6457,6 +6531,7 @@ impl Storage {
 
         let contact_id = input.id.unwrap_or_else(Uuid::new_v4);
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
+        let mut tx = self.pool.begin().await?;
         let row = sqlx::query_as::<_, ClientContactRow>(
             r#"
             INSERT INTO contacts (
@@ -6485,11 +6560,17 @@ impl Storage {
         .bind(input.phone.trim())
         .bind(input.team.trim())
         .bind(input.notes.trim())
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
 
-        Self::emit_canonical_change(&self.pool, &tenant_id, CanonicalChangeCategory::Contacts)
-            .await?;
+        Self::emit_collaboration_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Contacts,
+            input.account_id,
+        )
+        .await?;
+        tx.commit().await?;
 
         Ok(map_contact(row))
     }
@@ -6504,6 +6585,7 @@ impl Storage {
 
         let event_id = input.id.unwrap_or_else(Uuid::new_v4);
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
+        let mut tx = self.pool.begin().await?;
         let row = sqlx::query_as::<_, ClientEventRow>(
             r#"
             INSERT INTO calendar_events (
@@ -6553,11 +6635,17 @@ impl Storage {
         .bind(input.attendees.trim())
         .bind(input.attendees_json.trim())
         .bind(input.notes.trim())
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
 
-        Self::emit_canonical_change(&self.pool, &tenant_id, CanonicalChangeCategory::Calendar)
-            .await?;
+        Self::emit_collaboration_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Calendar,
+            input.account_id,
+        )
+        .await?;
+        tx.commit().await?;
 
         Ok(map_event(row))
     }
@@ -6571,6 +6659,7 @@ impl Storage {
         let status = normalize_task_status(&input.status)?;
         let task_id = input.id.unwrap_or_else(Uuid::new_v4);
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
+        let mut tx = self.pool.begin().await?;
         let row = sqlx::query_as::<_, ClientTaskRow>(
             r#"
             INSERT INTO tasks (
@@ -6626,16 +6715,18 @@ impl Storage {
         .bind(input.due_at.as_deref().unwrap_or_default().trim())
         .bind(input.completed_at.as_deref().unwrap_or_default().trim())
         .bind(input.sort_order)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
 
-        Self::emit_canonical_change(&self.pool, &tenant_id, CanonicalChangeCategory::Tasks).await?;
+        Self::emit_task_change(&mut tx, &tenant_id, input.account_id).await?;
+        tx.commit().await?;
 
         Ok(map_task(row))
     }
 
     pub async fn delete_client_contact(&self, account_id: Uuid, contact_id: Uuid) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
         let deleted = sqlx::query(
             r#"
             DELETE FROM contacts
@@ -6645,21 +6736,28 @@ impl Storage {
         .bind(&tenant_id)
         .bind(account_id)
         .bind(contact_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         if deleted.rows_affected() == 0 {
             bail!("contact not found");
         }
 
-        Self::emit_canonical_change(&self.pool, &tenant_id, CanonicalChangeCategory::Contacts)
-            .await?;
+        Self::emit_collaboration_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Contacts,
+            account_id,
+        )
+        .await?;
+        tx.commit().await?;
 
         Ok(())
     }
 
     pub async fn delete_client_event(&self, account_id: Uuid, event_id: Uuid) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
         let deleted = sqlx::query(
             r#"
             DELETE FROM calendar_events
@@ -6669,15 +6767,21 @@ impl Storage {
         .bind(&tenant_id)
         .bind(account_id)
         .bind(event_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         if deleted.rows_affected() == 0 {
             bail!("event not found");
         }
 
-        Self::emit_canonical_change(&self.pool, &tenant_id, CanonicalChangeCategory::Calendar)
-            .await?;
+        Self::emit_collaboration_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Calendar,
+            account_id,
+        )
+        .await?;
+        tx.commit().await?;
 
         Ok(())
     }
@@ -6779,10 +6883,14 @@ impl Storage {
         }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Contacts)
-            .await?;
-        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Calendar)
-            .await?;
+        Self::emit_collaboration_grant_change(
+            &mut tx,
+            &tenant_id,
+            kind,
+            owner_account_id,
+            grantee_account_id,
+        )
+        .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -6929,6 +7037,7 @@ impl Storage {
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_mail_delegation_change(&mut tx, &tenant_id, owner.id, grantee.id).await?;
         tx.commit().await?;
 
         self.fetch_mailbox_delegation_grant(owner.id, grantee.id)
@@ -6963,7 +7072,13 @@ impl Storage {
         }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
+        Self::emit_mail_delegation_change(
+            &mut tx,
+            &tenant_id,
+            owner_account_id,
+            grantee_account_id,
+        )
+        .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -7048,7 +7163,7 @@ impl Storage {
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
+        Self::emit_mail_delegation_change(&mut tx, &tenant_id, owner.id, grantee.id).await?;
         tx.commit().await?;
 
         self.fetch_sender_delegation_grant(owner.id, grantee.id, input.sender_right)
@@ -7086,7 +7201,13 @@ impl Storage {
         }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
+        Self::emit_mail_delegation_change(
+            &mut tx,
+            &tenant_id,
+            owner_account_id,
+            grantee_account_id,
+        )
+        .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -7645,6 +7766,7 @@ impl Storage {
 
     pub async fn delete_client_task(&self, account_id: Uuid, task_id: Uuid) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
         let deleted = sqlx::query(
             r#"
             DELETE FROM tasks
@@ -7654,12 +7776,15 @@ impl Storage {
         .bind(&tenant_id)
         .bind(account_id)
         .bind(task_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
         if deleted.rows_affected() == 0 {
             bail!("task not found");
         }
+
+        Self::emit_task_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
 
         Ok(())
     }
@@ -7966,7 +8091,7 @@ impl Storage {
         }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, input.account_id).await?;
         tx.commit().await?;
 
         Ok(SubmittedMessage {
@@ -8436,7 +8561,7 @@ impl Storage {
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, input.account_id).await?;
         tx.commit().await?;
 
         self.fetch_jmap_emails(input.account_id, &[message_id])
@@ -8457,7 +8582,7 @@ impl Storage {
         self.delete_draft_message_in_tx(&mut tx, &tenant_id, account_id, message_id)
             .await?;
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        Self::emit_canonical_change(&mut *tx, &tenant_id, CanonicalChangeCategory::Mail).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -10173,6 +10298,8 @@ impl Storage {
         executor: E,
         tenant_id: &str,
         category: CanonicalChangeCategory,
+        principal_account_ids: &[Uuid],
+        account_ids: &[Uuid],
     ) -> Result<()>
     where
         E: Executor<'e, Database = Postgres>,
@@ -10180,6 +10307,8 @@ impl Storage {
         let payload = serde_json::to_string(&CanonicalChangeNotification {
             tenant_id: tenant_id.to_string(),
             category: category.as_str().to_string(),
+            principal_account_ids: principal_account_ids.iter().map(Uuid::to_string).collect(),
+            account_ids: account_ids.iter().map(Uuid::to_string).collect(),
         })?;
         sqlx::query("SELECT pg_notify($1, $2)")
             .bind(CANONICAL_CHANGE_CHANNEL)
@@ -10187,6 +10316,140 @@ impl Storage {
             .execute(executor)
             .await?;
         Ok(())
+    }
+
+    async fn emit_mail_change(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Uuid,
+    ) -> Result<()> {
+        let mut principal_account_ids = HashSet::from([account_id]);
+        let delegated_account_ids = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT grantee_account_id
+            FROM mailbox_delegation_grants
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .fetch_all(&mut **tx)
+        .await?;
+        principal_account_ids.extend(delegated_account_ids);
+
+        let mut principal_account_ids = principal_account_ids.into_iter().collect::<Vec<_>>();
+        principal_account_ids.sort();
+
+        Self::emit_canonical_change(
+            &mut **tx,
+            tenant_id,
+            CanonicalChangeCategory::Mail,
+            &principal_account_ids,
+            &[account_id],
+        )
+        .await
+    }
+
+    async fn emit_mail_delegation_change(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+    ) -> Result<()> {
+        let mut principal_account_ids = vec![owner_account_id, grantee_account_id];
+        principal_account_ids.sort();
+        principal_account_ids.dedup();
+        Self::emit_canonical_change(
+            &mut **tx,
+            tenant_id,
+            CanonicalChangeCategory::Mail,
+            &principal_account_ids,
+            &[owner_account_id],
+        )
+        .await
+    }
+
+    async fn emit_collaboration_change(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        category: CanonicalChangeCategory,
+        owner_account_id: Uuid,
+    ) -> Result<()> {
+        let collection_kind = match category {
+            CanonicalChangeCategory::Contacts => CollaborationResourceKind::Contacts,
+            CanonicalChangeCategory::Calendar => CollaborationResourceKind::Calendar,
+            _ => bail!("unsupported collaboration change category"),
+        };
+
+        let mut principal_account_ids = HashSet::from([owner_account_id]);
+        let shared_with = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT grantee_account_id
+            FROM collaboration_collection_grants
+            WHERE tenant_id = $1
+              AND collection_kind = $2
+              AND owner_account_id = $3
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(collection_kind.as_str())
+        .bind(owner_account_id)
+        .fetch_all(&mut **tx)
+        .await?;
+        principal_account_ids.extend(shared_with);
+
+        let mut principal_account_ids = principal_account_ids.into_iter().collect::<Vec<_>>();
+        principal_account_ids.sort();
+
+        Self::emit_canonical_change(
+            &mut **tx,
+            tenant_id,
+            category,
+            &principal_account_ids,
+            &principal_account_ids,
+        )
+        .await
+    }
+
+    async fn emit_collaboration_grant_change(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        kind: CollaborationResourceKind,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+    ) -> Result<()> {
+        let category = match kind {
+            CollaborationResourceKind::Contacts => CanonicalChangeCategory::Contacts,
+            CollaborationResourceKind::Calendar => CanonicalChangeCategory::Calendar,
+        };
+        let mut principal_account_ids = vec![owner_account_id, grantee_account_id];
+        principal_account_ids.sort();
+        principal_account_ids.dedup();
+
+        Self::emit_canonical_change(
+            &mut **tx,
+            tenant_id,
+            category,
+            &principal_account_ids,
+            &principal_account_ids,
+        )
+        .await
+    }
+
+    async fn emit_task_change(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Uuid,
+    ) -> Result<()> {
+        Self::emit_canonical_change(
+            &mut **tx,
+            tenant_id,
+            CanonicalChangeCategory::Tasks,
+            &[account_id],
+            &[account_id],
+        )
+        .await
     }
 
     async fn tenant_id_for_domain_name(&self, domain_name: &str) -> Result<String> {
@@ -11416,10 +11679,9 @@ fn env_bind_address(name: &str, fallback: &str) -> String {
 mod tests {
     use super::{
         attachment_kind, default_permissions_for_role, domain_from_email,
-        normalize_admin_permissions, normalize_admin_session_auth_method,
-        normalize_bcc_recipients, normalize_task_status, normalize_visible_recipients,
-        participants_normalized, validate_pst_import_path, SubmitMessageInput,
-        SubmittedRecipientInput,
+        normalize_admin_permissions, normalize_admin_session_auth_method, normalize_bcc_recipients,
+        normalize_task_status, normalize_visible_recipients, participants_normalized,
+        validate_pst_import_path, SubmitMessageInput, SubmittedRecipientInput,
     };
     use lpe_magika::{
         write_validation_record, ExpectedKind, IngressContext, PolicyDecision, ValidationOutcome,

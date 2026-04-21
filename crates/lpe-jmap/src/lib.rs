@@ -17,11 +17,11 @@ use lpe_storage::{
     normalize_calendar_participation_status, parse_calendar_participants_metadata,
     serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent, AuditEntryInput,
     AuthenticatedAccount, CalendarOrganizerMetadata, CalendarParticipantMetadata,
-    CalendarParticipantsMetadata, CanonicalChangeCategory, ClientTask, CollaborationCollection,
-    JmapEmail, JmapEmailAddress, JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob,
-    MailboxAccountAccess, SavedDraftMessage, SenderIdentity, Storage, SubmitMessageInput,
-    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    CalendarParticipantsMetadata, CanonicalChangeCategory, CanonicalPushChangeSet, ClientTask,
+    CollaborationCollection, JmapEmail, JmapEmailAddress, JmapEmailSubmission,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
+    JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, SenderIdentity, Storage,
+    SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
     UpsertClientTaskInput,
 };
 use serde::{Deserialize, Serialize};
@@ -430,11 +430,16 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     }
                 }
                 changed = listener.wait_for_change(&push_categories), if !subscription.enabled_types.is_empty() => {
-                    if changed.is_err() {
+                    let Ok(change_set) = changed else {
                         break;
-                    }
+                    };
                     if self
-                        .publish_state_changes(&mut socket, account.account_id, &mut subscription)
+                        .publish_state_changes(
+                            &mut socket,
+                            account.account_id,
+                            &mut subscription,
+                            &change_set,
+                        )
                         .await
                         .is_err()
                     {
@@ -569,12 +574,129 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     async fn publish_state_changes(
         &self,
         socket: &mut WebSocket,
-        account_id: Uuid,
+        principal_account_id: Uuid,
         subscription: &mut PushSubscription,
+        change_set: &CanonicalPushChangeSet,
     ) -> Result<()> {
-        let current_type_states = self
-            .current_push_states(account_id, &subscription.enabled_types)
+        let (changed, current_type_states) = self
+            .compute_push_changes(principal_account_id, subscription, change_set)
             .await?;
+
+        if changed.is_empty() {
+            subscription.last_type_states = current_type_states;
+            return Ok(());
+        }
+
+        let push_state = encode_push_state(&current_type_states)?;
+        subscription.last_type_states = current_type_states;
+        subscription.last_push_state = Some(push_state.clone());
+        self.send_state_change(socket, changed, push_state).await
+    }
+
+    async fn compute_push_changes(
+        &self,
+        principal_account_id: Uuid,
+        subscription: &PushSubscription,
+        change_set: &CanonicalPushChangeSet,
+    ) -> Result<(
+        HashMap<String, HashMap<String, String>>,
+        HashMap<String, HashMap<String, String>>,
+    )> {
+        let mut current_type_states = subscription.last_type_states.clone();
+        let mut mail_topology_changed = false;
+
+        if change_set.contains_category(CanonicalChangeCategory::Mail)
+            && subscription
+                .enabled_types
+                .iter()
+                .any(|value| self.is_mail_push_type(value))
+        {
+            let visible_mail_accounts = self
+                .store
+                .fetch_accessible_mailbox_accounts(principal_account_id)
+                .await?
+                .into_iter()
+                .map(|entry| entry.account_id)
+                .collect::<HashSet<_>>();
+            let mut tracked_mail_accounts = change_set.accounts_for(CanonicalChangeCategory::Mail);
+            tracked_mail_accounts.extend(visible_mail_accounts.iter().copied());
+            tracked_mail_accounts.extend(
+                subscription
+                    .last_type_states
+                    .iter()
+                    .filter(|(_, states)| {
+                        states
+                            .keys()
+                            .any(|data_type| self.is_mail_push_type(data_type))
+                    })
+                    .filter_map(|(account_id, _)| Uuid::parse_str(account_id).ok()),
+            );
+
+            let previous_visible_mail_accounts = subscription
+                .last_type_states
+                .iter()
+                .filter(|(_, states)| {
+                    states
+                        .keys()
+                        .any(|data_type| self.is_mail_push_type(data_type))
+                })
+                .filter_map(|(account_id, _)| Uuid::parse_str(account_id).ok())
+                .collect::<HashSet<_>>();
+            mail_topology_changed = previous_visible_mail_accounts != visible_mail_accounts;
+
+            for account_id in tracked_mail_accounts {
+                let account_key = account_id.to_string();
+                if visible_mail_accounts.contains(&account_id) {
+                    for data_type in subscription
+                        .enabled_types
+                        .iter()
+                        .filter(|value| self.is_mail_push_type(value))
+                    {
+                        let state = self.object_state(account_id, data_type).await?;
+                        current_type_states
+                            .entry(account_key.clone())
+                            .or_default()
+                            .insert(data_type.clone(), state);
+                    }
+                } else if let Some(states) = current_type_states.get_mut(&account_key) {
+                    states.retain(|data_type, _| !self.is_mail_push_type(data_type));
+                    if states.is_empty() {
+                        current_type_states.remove(&account_key);
+                    }
+                }
+            }
+        }
+
+        let principal_key = principal_account_id.to_string();
+        for (category, data_types) in [
+            (
+                CanonicalChangeCategory::Contacts,
+                ["AddressBook", "ContactCard"].as_slice(),
+            ),
+            (
+                CanonicalChangeCategory::Calendar,
+                ["Calendar", "CalendarEvent"].as_slice(),
+            ),
+            (
+                CanonicalChangeCategory::Tasks,
+                ["TaskList", "Task"].as_slice(),
+            ),
+        ] {
+            if !change_set.contains_category(category) {
+                continue;
+            }
+            for data_type in data_types {
+                if !subscription.enabled_types.contains(*data_type) {
+                    continue;
+                }
+                let state = self.object_state(principal_account_id, data_type).await?;
+                current_type_states
+                    .entry(principal_key.clone())
+                    .or_default()
+                    .insert((*data_type).to_string(), state);
+            }
+        }
+
         let mut changed = HashMap::new();
         for (push_account_id, states) in &current_type_states {
             let mut account_changed = HashMap::new();
@@ -593,14 +715,23 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             }
         }
 
-        if changed.is_empty() {
-            return Ok(());
+        if mail_topology_changed {
+            let principal_states = current_type_states
+                .get(&principal_key)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|(data_type, _)| self.is_mail_push_type(data_type))
+                .collect::<HashMap<_, _>>();
+            if !principal_states.is_empty() {
+                changed
+                    .entry(principal_key)
+                    .or_default()
+                    .extend(principal_states);
+            }
         }
 
-        let push_state = encode_push_state(&current_type_states)?;
-        subscription.last_type_states = current_type_states;
-        subscription.last_push_state = Some(push_state.clone());
-        self.send_state_change(socket, changed, push_state).await
+        Ok((changed, current_type_states))
     }
 
     async fn send_request_error(
@@ -5525,9 +5656,9 @@ mod tests {
     use super::*;
     use lpe_magika::{DetectionSource, Detector, MagikaDetection};
     use lpe_storage::{
-        AccessibleContact, AccessibleEvent, CanonicalChangeCategory, ClientContact, ClientEvent,
-        CollaborationCollection, CollaborationRights, JmapImportedEmailInput, MailboxAccountAccess,
-        SenderIdentity,
+        AccessibleContact, AccessibleEvent, CanonicalChangeCategory, CanonicalPushChangeSet,
+        ClientContact, ClientEvent, CollaborationCollection, CollaborationRights,
+        JmapImportedEmailInput, MailboxAccountAccess, SenderIdentity,
     };
     use std::sync::{Arc, Mutex};
 
@@ -5633,8 +5764,11 @@ mod tests {
     }
 
     impl JmapPushListener for FakePushListener {
-        async fn wait_for_change(&mut self, _categories: &[CanonicalChangeCategory]) -> Result<()> {
-            Ok(())
+        async fn wait_for_change(
+            &mut self,
+            _categories: &[CanonicalChangeCategory],
+        ) -> Result<CanonicalPushChangeSet> {
+            Ok(CanonicalPushChangeSet::default())
         }
     }
 
@@ -5930,6 +6064,17 @@ mod tests {
                 sender_address: None,
                 sender_display: None,
             }
+        }
+    }
+
+    fn push_subscription(
+        enabled_types: HashSet<String>,
+        last_type_states: HashMap<String, HashMap<String, String>>,
+    ) -> PushSubscription {
+        PushSubscription {
+            enabled_types,
+            last_push_state: Some(encode_push_state(&last_type_states).unwrap()),
+            last_type_states,
         }
     }
 
@@ -7562,6 +7707,109 @@ mod tests {
         assert!(states[&shared.account_id.to_string()].contains_key("Mailbox"));
         assert!(!states[&shared.account_id.to_string()].contains_key("AddressBook"));
         assert!(!states[&shared.account_id.to_string()].contains_key("Task"));
+    }
+
+    #[tokio::test]
+    async fn scoped_push_change_is_stable_for_noop_mail_notifications() {
+        let account = FakeStore::account();
+        let enabled_types = HashSet::from(["Mailbox".to_string()]);
+        let service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            mailboxes: vec![FakeStore::inbox_mailbox()],
+            ..Default::default()
+        });
+        let last_type_states = service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+        let subscription = push_subscription(enabled_types, last_type_states.clone());
+        let mut change_set = CanonicalPushChangeSet::default();
+        change_set.insert_accounts(CanonicalChangeCategory::Mail, [account.account_id]);
+
+        let (changed, current_type_states) = service
+            .compute_push_changes(account.account_id, &subscription, &change_set)
+            .await
+            .unwrap();
+
+        assert!(changed.is_empty());
+        assert_eq!(current_type_states, last_type_states);
+    }
+
+    #[tokio::test]
+    async fn scoped_push_change_wakes_principal_when_shared_mailbox_visibility_changes() {
+        let account = FakeStore::account();
+        let shared = FakeStore::shared_account();
+        let enabled_types = HashSet::from(["Mailbox".to_string()]);
+        let initial_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            mailboxes: vec![FakeStore::inbox_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        });
+        let last_type_states = initial_service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+        let subscription = push_subscription(enabled_types, last_type_states);
+
+        let updated_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            mailboxes: vec![FakeStore::inbox_mailbox()],
+            accessible_mailbox_accounts: vec![FakeStore::mailbox_access()],
+            ..Default::default()
+        });
+        let mut change_set = CanonicalPushChangeSet::default();
+        change_set.insert_accounts(CanonicalChangeCategory::Mail, [shared.account_id]);
+
+        let (changed, current_type_states) = updated_service
+            .compute_push_changes(account.account_id, &subscription, &change_set)
+            .await
+            .unwrap();
+
+        assert!(!current_type_states.contains_key(&shared.account_id.to_string()));
+        assert_eq!(
+            changed[&account.account_id.to_string()]["Mailbox"],
+            current_type_states[&account.account_id.to_string()]["Mailbox"]
+        );
+    }
+
+    #[tokio::test]
+    async fn scoped_push_change_limits_recompute_to_requested_categories() {
+        let account = FakeStore::account();
+        let mut updated_task = FakeStore::task();
+        updated_task.updated_at = "2026-04-21T08:00:00Z".to_string();
+        let enabled_types = HashSet::from(["Mailbox".to_string(), "Task".to_string()]);
+        let initial_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            mailboxes: vec![FakeStore::inbox_mailbox()],
+            tasks: Arc::new(Mutex::new(vec![FakeStore::task()])),
+            ..Default::default()
+        });
+        let last_type_states = initial_service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+        let subscription = push_subscription(enabled_types, last_type_states);
+
+        let updated_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            mailboxes: vec![FakeStore::inbox_mailbox()],
+            tasks: Arc::new(Mutex::new(vec![updated_task])),
+            ..Default::default()
+        });
+        let mut change_set = CanonicalPushChangeSet::default();
+        change_set.insert_accounts(CanonicalChangeCategory::Tasks, [account.account_id]);
+
+        let (changed, _) = updated_service
+            .compute_push_changes(account.account_id, &subscription, &change_set)
+            .await
+            .unwrap();
+
+        assert!(changed[&account.account_id.to_string()].contains_key("Task"));
+        assert!(!changed[&account.account_id.to_string()].contains_key("Mailbox"));
     }
 
     #[tokio::test]

@@ -61,6 +61,8 @@ Additional supported `JMAP` routes:
 - canonical submission creates the authoritative copy in `Sent`, marks the message as `queued`, inserts an `outbound_message_queue` row, then removes the source draft
 - `JMAP` object `state` values and WebSocket `StateChange` payloads are derived from the same canonical mailbox, message, contact, and calendar projections already stored in `PostgreSQL`
 - the WebSocket transport is notification and request transport only; it does not introduce a second mailbox cache, event journal, or submission model
+- canonical change signaling stays inside `PostgreSQL`: `lpe-storage` emits account-scoped `LISTEN` / `NOTIFY` payloads after canonical commits, and `lpe-jmap` recomputes only the affected `JMAP` state scopes from canonical tables
+- mail push wakeups are expanded through canonical mailbox delegation so a change in a shared mailbox wakes both the owner session and delegated reader sessions without a protocol-local sharing cache
 - `Bcc` remains stored separately in `message_bcc_recipients`
 - `Bcc` is not reinjected into search, `participants_normalized`, or `Email/query`
 - `Email/get` may return `bcc` only when the `bcc` property is explicitly requested for the authenticated account's own sender-side draft or sent message
@@ -82,8 +84,9 @@ Additional supported `JMAP` routes:
 - message `blobId` values now expose the canonical `mime_blob_ref` shape when one already exists, including `upload:{uuid}` for imported MIME uploads, and fall back to adapter-scoped opaque identifiers for messages that do not yet expose a persistent downloadable MIME blob
 - no `JMAP Blob/get`, blob copy, or persistent message download contract is advertised yet; the current blob model is intentionally limited to uploaded-imported MIME reuse and internal canonical references
 - the session keeps `eventSourceUrl` empty; this MVP uses `JMAP` over WebSocket rather than the older event-source transport
-- WebSocket push uses `PostgreSQL` `LISTEN` / `NOTIFY` to wake the adapter on canonical storage commits, then recomputes canonical object states from `PostgreSQL` instead of introducing a durable push-history table or a second state database
+- WebSocket push uses `PostgreSQL` `LISTEN` / `NOTIFY` with principal-filtered account scopes, so the adapter wakes only on relevant canonical commits and recomputes only the affected canonical object states instead of polling or maintaining a durable push-history table
 - mail push state spans every mailbox account visible through canonical mailbox delegation so one authenticated session can receive `StateChange` payloads for owned and delegated mailboxes without a protocol-local sharing cache
+- collaboration and task push stay principal-scoped: shared contacts and calendars notify every affected principal account, while tasks remain local to the owning account
 - supported push data types are limited to `Mailbox`, `Email`, `Thread`, `AddressBook`, `ContactCard`, `Calendar`, `CalendarEvent`, `TaskList`, and `Task`
 
 ### Next methods to add
