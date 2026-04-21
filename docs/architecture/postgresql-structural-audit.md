@@ -14,7 +14,7 @@ Reviewed sources:
 - `docs/architecture/lpe-ct-integration.md`
 - `LPE-CT/docs/architecture/center-de-tri.md`
 - `LPE-CT/docs/operations/mail-filtering.md`
-- `crates/lpe-storage/migrations/*.sql`
+- `crates/lpe-storage/sql/schema.sql`
 - `crates/lpe-storage/src/lib.rs`
 
 Requested file divergence:
@@ -103,16 +103,16 @@ Rust impact:
 - no Rust code change required
 - current Rust normalization remains valid and now matches database guarantees
 
-### 5. Historical migration chain remains fragile for fresh installs
+### 5. Historical migration chain was fragile for fresh installs
 
-The repository contains duplicate migration prefixes:
+The old repository history contained duplicate migration prefixes:
 
 - `0006_admin_auth.sql`
 - `0006_lpe_ct_integration.sql`
 - `0007_outbound_transport_status_details.sql`
 - `0007_pst_job_execution.sql`
 
-The current Debian runner executes files lexicographically, so it works today, but the chain is not robust enough for a modern migration tool that expects unique versions.
+Release `0.1.3` removes that historical chain for fresh installs and replaces it with one canonical schema bootstrap script.
 
 Correction implemented:
 
