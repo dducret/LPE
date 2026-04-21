@@ -198,10 +198,11 @@ The `LPE-CT` installer prompts for:
 - SMTP ingress host, default `0.0.0.0`
 - SMTP ingress port, default `25`
 - HTTPS port, default `80`
-- internal `LPE` delivery URL, no default
+- internal `LPE` delivery URL, default `http://127.0.0.1:8080`
 - integration shared secret, no default and at least `32` characters
-- primary relay endpoint, default `smtp://10.20.0.12:2525`
-- secondary relay endpoint, default `smtp://10.20.0.13:2525`
+- whether high availability relay endpoints should be configured, default `no`
+- primary relay endpoint, default `smtp://10.20.0.12:2525`, only when HA relay endpoints are enabled
+- secondary relay endpoint, default `smtp://10.20.0.13:2525`, only when HA relay endpoints are enabled
 - quarantine root path, default `/var/spool/lpe-ct`
 - bootstrap administrator email, no default
 - bootstrap administrator password, no default
