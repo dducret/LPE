@@ -84,7 +84,7 @@ install_magika() {
 
   rm -rf "${temp_dir}"
   mkdir -p "${temp_dir}"
-  trap 'rm -rf "${temp_dir}"' RETURN
+  trap "rm -rf '${temp_dir}'" RETURN
 
   curl --proto '=https' --tlsv1.2 -LsSf "${url}" -o "${temp_dir}/${archive}"
   echo "${expected_sha}  ${temp_dir}/${archive}" | sha256sum -c -
@@ -92,6 +92,8 @@ install_magika() {
   extracted_bin="$(find "${temp_dir}" -type f -name magika | head -n 1)"
   [[ -n "${extracted_bin}" ]] || fail_install "magika binary not found after archive extraction."
   install -m 0755 "${extracted_bin}" "${BIN_DIR}/magika"
+  trap - RETURN
+  rm -rf "${temp_dir}"
 }
 
 require_root() {
