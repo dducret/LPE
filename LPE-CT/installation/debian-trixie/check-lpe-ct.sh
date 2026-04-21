@@ -57,6 +57,14 @@ if [[ "${LPE_CT_ANTIVIRUS_ENABLED:-false}" == "true" ]]; then
   pass "Antivirus provider chain is configured"
 fi
 
+if [[ "${LPE_CT_LOCAL_DB_ENABLED:-false}" == "true" ]]; then
+  check_command psql
+  [[ -n "${LPE_CT_LOCAL_DB_URL:-}" ]] || fail "LPE_CT_LOCAL_DB_URL is not set in $ENV_FILE"
+  db_probe="$(psql "${LPE_CT_LOCAL_DB_URL}" -tAc "SELECT 1" 2>/dev/null || true)"
+  [[ "${db_probe}" == "1" ]] || fail "Dedicated LPE-CT PostgreSQL probe failed"
+  pass "Dedicated LPE-CT PostgreSQL responded correctly"
+fi
+
 API_HEALTH_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/health"
 API_DASHBOARD_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/api/v1/dashboard"
 SMTP_HOST="${LPE_CT_SMTP_TEST_HOST:-127.0.0.1}"

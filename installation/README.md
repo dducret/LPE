@@ -42,10 +42,11 @@ Path conventions:
 - mutable `LPE` state lives under `/var/lib/lpe`
 - mutable `LPE-CT` state and technical metadata live under `/var/lib/lpe-ct`
 - mutable `LPE-CT` transport and quarantine spool data live under `/var/spool/lpe-ct`
+- the default indexed `LPE-CT` technical state lives in a private dedicated `PostgreSQL` database, typically `postgres://lpe_ct@127.0.0.1:5432/lpe_ct`
 - configuration lives under `/etc/lpe` and `/etc/lpe-ct`
 - `bayespam` is not installed as a separate package root under `/opt`; its mutable corpus and technical state remain part of `LPE-CT` runtime state under `/var`
 
-For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI, without exposing the core back office on the DMZ server, also provisions a pinned `Magika` CLI binary in `/opt/lpe-ct/bin/magika` for inbound SMTP validation, and now also performs a Git-based sparse synchronization of `takeri` from `https://github.com/AnimeForLife191/Shuhari-CyberForge.git` before building `/opt/lpe-ct/bin/Shuhari-CyberForge-CLI` as the default antivirus provider.
+For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI, without exposing the core back office on the DMZ server, also provisions a pinned `Magika` CLI binary in `/opt/lpe-ct/bin/magika` for inbound SMTP validation, performs a Git-based sparse synchronization of `takeri` from `https://github.com/AnimeForLife191/Shuhari-CyberForge.git` before building `/opt/lpe-ct/bin/Shuhari-CyberForge-CLI` as the default antivirus provider, and now provisions the default private `LPE-CT` PostgreSQL store for greylisting, reputation, `bayespam`, throttling, and quarantine metadata.
 
 The `LPE-CT` scripts also install an SMTP listener, a local spool in `/var/spool/lpe-ct`, and three test suites:
 
@@ -204,6 +205,11 @@ The `LPE-CT` installer prompts for:
 - primary relay endpoint, default `smtp://10.20.0.12:2525`, only when HA relay endpoints are enabled
 - secondary relay endpoint, default `smtp://10.20.0.13:2525`, only when HA relay endpoints are enabled
 - quarantine root path, default `/var/spool/lpe-ct`
+- local `PostgreSQL` host, default `127.0.0.1`
+- local `PostgreSQL` port, default `5432`
+- local `PostgreSQL` database name, default `lpe_ct`
+- local `PostgreSQL` username, default `lpe_ct`
+- local `PostgreSQL` password, no default
 - bootstrap administrator email, no default
 - bootstrap administrator password, no default
 - whether to enable and start services now, default `yes`
@@ -264,6 +270,11 @@ Typical unattended `LPE-CT` environment variables:
 - `LPE_CT_RELAY_PRIMARY`
 - `LPE_CT_RELAY_SECONDARY`
 - `SPOOL_DIR`
+- `LPE_CT_LOCAL_DB_HOST`
+- `LPE_CT_LOCAL_DB_PORT`
+- `LPE_CT_LOCAL_DB_NAME`
+- `LPE_CT_LOCAL_DB_USER`
+- `LPE_CT_LOCAL_DB_PASSWORD`
 - `LPE_CT_BOOTSTRAP_ADMIN_EMAIL`
 - `LPE_CT_BOOTSTRAP_ADMIN_PASSWORD`
 - `LPE_CT_ENABLE_SERVICES`
@@ -298,6 +309,11 @@ LPE_CT_CORE_DELIVERY_BASE_URL=http://10.20.0.40:8080 \
 LPE_INTEGRATION_SHARED_SECRET='replace-with-a-secret-of-at-least-32-characters' \
 LPE_CT_RELAY_PRIMARY=smtp://10.20.0.12:2525 \
 LPE_CT_RELAY_SECONDARY=smtp://10.20.0.13:2525 \
+LPE_CT_LOCAL_DB_HOST=127.0.0.1 \
+LPE_CT_LOCAL_DB_PORT=5432 \
+LPE_CT_LOCAL_DB_NAME=lpe_ct \
+LPE_CT_LOCAL_DB_USER=lpe_ct \
+LPE_CT_LOCAL_DB_PASSWORD='replace-with-strong-password' \
 LPE_CT_BOOTSTRAP_ADMIN_EMAIL=admin@example.com \
 LPE_CT_BOOTSTRAP_ADMIN_PASSWORD='replace-with-strong-password' \
 LPE_CT_ENABLE_SERVICES=yes \

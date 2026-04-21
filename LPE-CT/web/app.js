@@ -212,6 +212,9 @@ async function loginAdmin() {
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
+    if (response.status === 502) {
+      throw new Error("Management API unreachable (502). Check lpe-ct.service and nginx.");
+    }
     throw new Error(`login request failed: ${response.status}`);
   }
   const body = await response.json();

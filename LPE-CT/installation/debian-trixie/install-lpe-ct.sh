@@ -46,6 +46,10 @@ LPE_CT_USE_HA_DEFAULT="${LPE_CT_USE_HA:-no}"
 LPE_CT_RELAY_PRIMARY_DEFAULT="${LPE_CT_RELAY_PRIMARY:-smtp://10.20.0.12:2525}"
 LPE_CT_RELAY_SECONDARY_DEFAULT="${LPE_CT_RELAY_SECONDARY:-smtp://10.20.0.13:2525}"
 LPE_CT_ENABLE_SERVICES_DEFAULT="${LPE_CT_ENABLE_SERVICES:-yes}"
+LPE_CT_LOCAL_DB_HOST_DEFAULT="${LPE_CT_LOCAL_DB_HOST:-127.0.0.1}"
+LPE_CT_LOCAL_DB_PORT_DEFAULT="${LPE_CT_LOCAL_DB_PORT:-5432}"
+LPE_CT_LOCAL_DB_NAME_DEFAULT="${LPE_CT_LOCAL_DB_NAME:-lpe_ct}"
+LPE_CT_LOCAL_DB_USER_DEFAULT="${LPE_CT_LOCAL_DB_USER:-lpe_ct}"
 
 usage() {
   cat <<'EOF'
@@ -114,6 +118,7 @@ recompute_layout() {
 
 collect_runtime_values() {
   local shared_secret_default="${LPE_INTEGRATION_SHARED_SECRET:-}"
+  local local_db_password_default="${LPE_CT_LOCAL_DB_PASSWORD:-}"
 
   print_section "Installation"
   INSTALL_ROOT="$(ask_with_default "Installation directory" "/opt/lpe-ct" "validate_exact_path /opt/lpe-ct" "Use /opt/lpe-ct.")"
@@ -144,6 +149,21 @@ collect_runtime_values() {
 
   print_section "Storage"
   SPOOL_DIR="$(ask_with_default "Quarantine root path" "${SPOOL_DIR}" validate_directory_path "Enter an absolute directory path.")"
+
+  print_section "Database"
+  LPE_CT_LOCAL_DB_HOST="$(ask_with_default "Local PostgreSQL host" "${LPE_CT_LOCAL_DB_HOST_DEFAULT}" validate_host_token "Enter a valid PostgreSQL host.")"
+  LPE_CT_LOCAL_DB_PORT="$(ask_with_default "Local PostgreSQL port" "${LPE_CT_LOCAL_DB_PORT_DEFAULT}" validate_port "Enter a valid PostgreSQL port.")"
+  LPE_CT_LOCAL_DB_NAME="$(ask_with_default "Local PostgreSQL database name" "${LPE_CT_LOCAL_DB_NAME_DEFAULT}" validate_nonempty "Enter a PostgreSQL database name.")"
+  LPE_CT_LOCAL_DB_USER="$(ask_with_default "Local PostgreSQL username" "${LPE_CT_LOCAL_DB_USER_DEFAULT}" validate_nonempty "Enter a PostgreSQL username.")"
+  LPE_CT_LOCAL_DB_PASSWORD="$(ask_secret_with_default_behavior_when_possible "Local PostgreSQL password" "${local_db_password_default}" validate_password_nonempty "Enter a PostgreSQL password.")"
+  LPE_CT_LOCAL_DB_URL="$(build_postgres_url "${LPE_CT_LOCAL_DB_HOST}" "${LPE_CT_LOCAL_DB_PORT}" "${LPE_CT_LOCAL_DB_NAME}" "${LPE_CT_LOCAL_DB_USER}" "${LPE_CT_LOCAL_DB_PASSWORD}")"
+  LPE_CT_LOCAL_DB_ENABLED="true"
+  LPE_CT_LOCAL_DB_LISTEN_ADDRESS="${LPE_CT_LOCAL_DB_HOST}:${LPE_CT_LOCAL_DB_PORT}"
+  if [[ "${LPE_CT_LOCAL_DB_HOST}" == "127.0.0.1" || "${LPE_CT_LOCAL_DB_HOST}" == "localhost" ]]; then
+    LPE_CT_LOCAL_DB_NETWORK_SCOPE="host-local"
+  else
+    LPE_CT_LOCAL_DB_NETWORK_SCOPE="private-backend"
+  fi
 
   print_section "Administrator"
   LPE_CT_BOOTSTRAP_ADMIN_EMAIL="$(ask_required "Admin email" "${LPE_CT_BOOTSTRAP_ADMIN_EMAIL_DEFAULT}" validate_email "Enter a valid email address.")"
@@ -191,6 +211,15 @@ write_runtime_env_file() {
   write_env_value "${ENV_FILE}" "LPE_CT_NGINX_LISTEN_PORT" "${LPE_CT_NGINX_LISTEN_PORT}"
   write_env_value "${ENV_FILE}" "LPE_CT_STATE_FILE" "${STATE_DIR}/state.json"
   write_env_value "${ENV_FILE}" "LPE_CT_SPOOL_DIR" "${SPOOL_DIR}"
+  write_env_value "${ENV_FILE}" "LPE_CT_LOCAL_DB_ENABLED" "${LPE_CT_LOCAL_DB_ENABLED}"
+  write_env_value "${ENV_FILE}" "LPE_CT_LOCAL_DB_HOST" "${LPE_CT_LOCAL_DB_HOST}"
+  write_env_value "${ENV_FILE}" "LPE_CT_LOCAL_DB_PORT" "${LPE_CT_LOCAL_DB_PORT}"
+  write_env_value "${ENV_FILE}" "LPE_CT_LOCAL_DB_NAME" "${LPE_CT_LOCAL_DB_NAME}"
+  write_env_value "${ENV_FILE}" "LPE_CT_LOCAL_DB_USER" "${LPE_CT_LOCAL_DB_USER}"
+  write_env_value "${ENV_FILE}" "LPE_CT_LOCAL_DB_PASSWORD" "${LPE_CT_LOCAL_DB_PASSWORD}"
+  write_env_value "${ENV_FILE}" "LPE_CT_LOCAL_DB_URL" "${LPE_CT_LOCAL_DB_URL}"
+  write_env_value "${ENV_FILE}" "LPE_CT_LOCAL_DB_LISTEN_ADDRESS" "${LPE_CT_LOCAL_DB_LISTEN_ADDRESS}"
+  write_env_value "${ENV_FILE}" "LPE_CT_LOCAL_DB_NETWORK_SCOPE" "${LPE_CT_LOCAL_DB_NETWORK_SCOPE}"
   write_env_value "${ENV_FILE}" "LPE_CT_BOOTSTRAP_ADMIN_EMAIL" "${LPE_CT_BOOTSTRAP_ADMIN_EMAIL}"
   write_env_value "${ENV_FILE}" "LPE_CT_BOOTSTRAP_ADMIN_PASSWORD" "${LPE_CT_BOOTSTRAP_ADMIN_PASSWORD}"
   write_env_value "${ENV_FILE}" "LPE_CT_CORE_DELIVERY_BASE_URL" "${LPE_CT_CORE_DELIVERY_BASE_URL}"
@@ -216,9 +245,48 @@ install_prerequisites() {
     curl \
     git \
     nginx \
+    postgresql \
+    postgresql-client \
     pkg-config \
     rustup \
     xz-utils
+}
+
+bootstrap_local_postgresql() {
+  if [[ "${LPE_CT_LOCAL_DB_HOST}" != "127.0.0.1" && "${LPE_CT_LOCAL_DB_HOST}" != "localhost" ]]; then
+    return 0
+  fi
+
+  systemctl enable postgresql >/dev/null 2>&1 || true
+  systemctl start postgresql
+
+  if ! id -u postgres >/dev/null 2>&1; then
+    fail_install "postgres user not found after PostgreSQL installation."
+  fi
+
+  run_as_postgres() {
+    if command -v runuser >/dev/null 2>&1; then
+      runuser -u postgres -- "$@"
+      return
+    fi
+
+    su -s /bin/sh postgres -c "$(printf '%q ' "$@")"
+  }
+
+  run_as_postgres psql <<SQL
+DO \$\$
+BEGIN
+   IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${LPE_CT_LOCAL_DB_USER}') THEN
+      CREATE ROLE ${LPE_CT_LOCAL_DB_USER} LOGIN PASSWORD '${LPE_CT_LOCAL_DB_PASSWORD}';
+   ELSE
+      ALTER ROLE ${LPE_CT_LOCAL_DB_USER} WITH LOGIN PASSWORD '${LPE_CT_LOCAL_DB_PASSWORD}';
+   END IF;
+END
+\$\$;
+SQL
+
+  run_as_postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = '${LPE_CT_LOCAL_DB_NAME}'" | grep -q 1 || \
+    run_as_postgres createdb --owner="${LPE_CT_LOCAL_DB_USER}" "${LPE_CT_LOCAL_DB_NAME}"
 }
 
 ensure_service_user() {
@@ -323,6 +391,7 @@ main() {
   require_root
   collect_runtime_values
   install_prerequisites
+  bootstrap_local_postgresql
   ensure_service_user
   prepare_directories
   write_install_layout_file

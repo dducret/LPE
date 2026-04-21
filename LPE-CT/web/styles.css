@@ -508,7 +508,9 @@ select:focus {
 .login-shell {
   min-height: 100vh;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
+  padding: 24px 16px;
 }
 
 .login-card {

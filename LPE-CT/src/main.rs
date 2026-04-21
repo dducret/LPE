@@ -28,6 +28,9 @@ mod submission;
 
 const MIN_INTEGRATION_SECRET_LEN: usize = 32;
 
+#[cfg(test)]
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SiteProfile {
     node_name: String,
@@ -306,6 +309,8 @@ async fn main() -> Result<()> {
     ensure_management_bootstrap(&mut dashboard)?;
     normalize_policy_settings(&mut dashboard.policies);
     normalize_local_data_stores(&mut dashboard.local_data_stores);
+    let runtime = smtp::runtime_config_from_dashboard(&dashboard);
+    smtp::prepare_local_store(&spool_dir, &runtime).await?;
     dashboard.site.management_bind = bind_address.clone();
     dashboard.site.public_smtp_bind = smtp_bind_address.clone();
     dashboard.network.submission_listener_enabled =
@@ -920,6 +925,15 @@ fn normalize_local_data_stores(local_data_stores: &mut LocalDataStoresSettings) 
     }
     local_data_stores.dedicated_postgres.network_scope =
         normalize_local_db_network_scope(&local_data_stores.dedicated_postgres.network_scope);
+    if local_data_stores.dedicated_postgres.enabled
+        && local_data_stores
+            .dedicated_postgres
+            .listen_address
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        local_data_stores.dedicated_postgres.listen_address = Some(default_local_db_listen_address());
+    }
     if local_data_stores.dedicated_postgres.purposes.is_empty() {
         local_data_stores.dedicated_postgres.purposes = default_local_db_purposes();
     }
@@ -1076,9 +1090,9 @@ fn default_state() -> DashboardState {
             policy_artifacts: default_policy_artifacts(),
             forbidden_canonical_data: default_forbidden_canonical_data(),
             dedicated_postgres: LocalPostgresStore {
-                enabled: false,
+                enabled: true,
                 purposes: default_local_db_purposes(),
-                listen_address: None,
+                listen_address: Some(default_local_db_listen_address()),
                 network_scope: default_local_db_network_scope(),
                 public_exposure_forbidden: true,
                 notes: default_local_db_notes(),
@@ -1210,8 +1224,12 @@ fn default_local_db_network_scope() -> String {
     "host-local".to_string()
 }
 
+fn default_local_db_listen_address() -> String {
+    "127.0.0.1:5432".to_string()
+}
+
 fn default_local_db_notes() -> String {
-    "Dedicated LPE-CT PostgreSQL is optional and may hold only perimeter-owned technical state."
+    "Dedicated LPE-CT PostgreSQL is the default technical state store and may hold only perimeter-owned technical state."
         .to_string()
 }
 
@@ -1454,7 +1472,7 @@ fn check_local_data_store_policy(local_data_stores: &LocalDataStoresSettings) ->
         return readiness_ok(
             "local-data-stores",
             true,
-            "state.json and spool remain the active local stores; dedicated PostgreSQL is disabled",
+            "dedicated PostgreSQL is disabled; only spool custody and state.json remain active",
         );
     }
 
@@ -1471,6 +1489,17 @@ fn check_local_data_store_policy(local_data_stores: &LocalDataStoresSettings) ->
             "local-data-stores",
             true,
             format!("dedicated PostgreSQL bind {address} is public; port 5432 must stay private"),
+        );
+    }
+
+    let has_database_url = env::var("LPE_CT_LOCAL_DB_URL")
+        .ok()
+        .is_some_and(|value| !value.trim().is_empty());
+    if !has_database_url {
+        return readiness_failed(
+            "local-data-stores",
+            true,
+            "dedicated PostgreSQL is enabled but LPE_CT_LOCAL_DB_URL is missing",
         );
     }
 

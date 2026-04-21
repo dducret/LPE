@@ -20,7 +20,7 @@ use lpe_magika::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{postgres::PgPoolOptions, types::Json};
+use sqlx::{postgres::PgPoolOptions, types::Json, PgPool, Row};
 use std::{
     collections::{hash_map::DefaultHasher, HashMap, HashSet},
     convert::TryFrom,
@@ -28,12 +28,14 @@ use std::{
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
+    sync::OnceLock,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{tcp::OwnedReadHalf, tcp::OwnedWriteHalf, TcpListener, TcpStream},
     process::Command,
+    sync::OnceCell,
 };
 use tracing::{info, warn};
 
@@ -365,17 +367,265 @@ pub(crate) const SPOOL_QUEUES: [&str; 9] = [
 ];
 
 pub(crate) const POLICY_ARTIFACTS: [&str; 4] = [
-    "policy/reputation.json",
-    "policy/bayespam.json",
-    "policy/<throttle>.json",
-    "greylist/<triplet>.json",
+    "postgres: reputation_entries",
+    "postgres: bayespam_corpora",
+    "postgres: throttle_windows",
+    "postgres: greylist_entries",
 ];
+
+static LOCAL_DB_POOL: OnceCell<PgPool> = OnceCell::const_new();
+static LOCAL_DB_POOL_URL: OnceLock<String> = OnceLock::new();
+static LOCAL_DB_SCHEMA_READY: OnceCell<()> = OnceCell::const_new();
 
 pub(crate) fn initialize_spool(spool_dir: &Path) -> Result<()> {
     for queue in SPOOL_QUEUES {
         fs::create_dir_all(spool_dir.join(queue))
             .with_context(|| format!("unable to create spool queue {queue}"))?;
     }
+    Ok(())
+}
+
+pub(crate) async fn prepare_local_store(spool_dir: &Path, config: &RuntimeConfig) -> Result<()> {
+    let Some(pool) = ensure_local_db_schema(config).await? else {
+        return Ok(());
+    };
+    migrate_legacy_policy_artifacts(spool_dir, pool).await
+}
+
+async fn ensure_local_db_schema(config: &RuntimeConfig) -> Result<Option<&'static PgPool>> {
+    let Some(pool) = local_db_pool(config).await? else {
+        return Ok(None);
+    };
+
+    LOCAL_DB_SCHEMA_READY
+        .get_or_try_init(|| async {
+            sqlx::query(
+                r#"
+                CREATE TABLE IF NOT EXISTS greylist_entries (
+                    entry_key TEXT PRIMARY KEY,
+                    state JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                "#,
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                r#"
+                CREATE TABLE IF NOT EXISTS reputation_entries (
+                    entry_key TEXT PRIMARY KEY,
+                    state JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                "#,
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                r#"
+                CREATE TABLE IF NOT EXISTS bayespam_corpora (
+                    corpus_key TEXT PRIMARY KEY,
+                    corpus JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                "#,
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                r#"
+                CREATE TABLE IF NOT EXISTS throttle_windows (
+                    rule_id TEXT NOT NULL,
+                    bucket_key TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    state JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (rule_id, bucket_key)
+                )
+                "#,
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                r#"
+                CREATE TABLE IF NOT EXISTS quarantine_messages (
+                    trace_id TEXT PRIMARY KEY,
+                    direction TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    received_at TEXT NOT NULL,
+                    peer TEXT NOT NULL,
+                    helo TEXT NOT NULL,
+                    mail_from TEXT NOT NULL,
+                    rcpt_to JSONB NOT NULL,
+                    subject TEXT NOT NULL,
+                    internet_message_id TEXT,
+                    spool_path TEXT NOT NULL,
+                    reason TEXT,
+                    spam_score REAL NOT NULL,
+                    security_score REAL NOT NULL,
+                    reputation_score INTEGER NOT NULL,
+                    dnsbl_hits JSONB NOT NULL,
+                    auth_summary JSONB NOT NULL,
+                    decision_trace JSONB NOT NULL,
+                    magika_summary TEXT,
+                    magika_decision TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                "#,
+            )
+            .execute(pool)
+            .await?;
+            Ok::<(), anyhow::Error>(())
+        })
+        .await?;
+
+    Ok(Some(pool))
+}
+
+async fn local_db_pool(config: &RuntimeConfig) -> Result<Option<&'static PgPool>> {
+    if !config.local_db_enabled {
+        return Ok(None);
+    }
+
+    let database_url = config
+        .local_db_url
+        .as_deref()
+        .ok_or_else(|| anyhow!("LPE_CT_LOCAL_DB_URL must be set when LPE_CT_LOCAL_DB_ENABLED=true"))?;
+
+    if let Some(initialized_url) = LOCAL_DB_POOL_URL.get() {
+        if initialized_url != database_url {
+            return Err(anyhow!(
+                "LPE_CT_LOCAL_DB_URL changed after pool initialization; restart LPE-CT to switch databases"
+            ));
+        }
+    }
+
+    let pool = LOCAL_DB_POOL
+        .get_or_try_init(|| async move {
+            let pool = PgPoolOptions::new()
+                .max_connections(8)
+                .connect(database_url)
+                .await
+                .with_context(|| "unable to connect to the dedicated LPE-CT PostgreSQL store")?;
+            let _ = LOCAL_DB_POOL_URL.set(database_url.to_string());
+            Ok::<PgPool, anyhow::Error>(pool)
+        })
+        .await?;
+
+    Ok(Some(pool))
+}
+
+async fn migrate_legacy_policy_artifacts(spool_dir: &Path, pool: &PgPool) -> Result<()> {
+    migrate_legacy_reputation_store(spool_dir, pool).await?;
+    migrate_legacy_bayespam_corpus(spool_dir, pool).await?;
+    migrate_legacy_greylist_entries(spool_dir, pool).await?;
+    Ok(())
+}
+
+async fn migrate_legacy_reputation_store(spool_dir: &Path, pool: &PgPool) -> Result<()> {
+    let legacy_path = spool_dir.join("policy").join("reputation.json");
+    if !legacy_path.exists() {
+        return Ok(());
+    }
+
+    let existing_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM reputation_entries")
+        .fetch_one(pool)
+        .await?;
+    if existing_count > 0 {
+        return Ok(());
+    }
+
+    let store: ReputationStore = serde_json::from_str(&fs::read_to_string(&legacy_path)?)?;
+    for (entry_key, state) in store.entries {
+        sqlx::query(
+            r#"
+            INSERT INTO reputation_entries (entry_key, state, updated_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (entry_key) DO UPDATE SET
+                state = EXCLUDED.state,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(entry_key)
+        .bind(Json(state))
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
+}
+
+async fn migrate_legacy_bayespam_corpus(spool_dir: &Path, pool: &PgPool) -> Result<()> {
+    let legacy_path = spool_dir.join("policy").join("bayespam.json");
+    if !legacy_path.exists() {
+        return Ok(());
+    }
+
+    let existing = sqlx::query("SELECT corpus FROM bayespam_corpora WHERE corpus_key = $1")
+        .bind("default")
+        .fetch_optional(pool)
+        .await?;
+    if existing.is_some() {
+        return Ok(());
+    }
+
+    let corpus: BayesCorpus = serde_json::from_str(&fs::read_to_string(&legacy_path)?)?;
+    sqlx::query(
+        r#"
+        INSERT INTO bayespam_corpora (corpus_key, corpus, updated_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (corpus_key) DO UPDATE SET
+            corpus = EXCLUDED.corpus,
+            updated_at = NOW()
+        "#,
+    )
+    .bind("default")
+    .bind(Json(corpus))
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+async fn migrate_legacy_greylist_entries(spool_dir: &Path, pool: &PgPool) -> Result<()> {
+    let legacy_dir = spool_dir.join("greylist");
+    if !legacy_dir.is_dir() {
+        return Ok(());
+    }
+
+    let existing_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM greylist_entries")
+        .fetch_one(pool)
+        .await?;
+    if existing_count > 0 {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(&legacy_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(key) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let state: GreylistEntry = serde_json::from_str(&fs::read_to_string(&path)?)?;
+        sqlx::query(
+            r#"
+            INSERT INTO greylist_entries (entry_key, state, updated_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (entry_key) DO UPDATE SET
+                state = EXCLUDED.state,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(key)
+        .bind(Json(state))
+        .execute(pool)
+        .await?;
+    }
+
     Ok(())
 }
 
@@ -642,7 +892,9 @@ pub(crate) async fn process_outbound_handoff(
         &payload.body_text,
         &payload.from_address,
         "lpe-core",
-    )? {
+    )
+    .await?
+    {
         Some(outcome) => {
             message.spam_score += outcome.contribution;
             message.decision_trace.push(DecisionTraceEntry {
@@ -780,7 +1032,7 @@ pub(crate) async fn process_outbound_handoff(
         });
     }
 
-    if let Some(throttle) = evaluate_outbound_throttle(spool_dir, config, &payload)? {
+    if let Some(throttle) = evaluate_outbound_throttle(spool_dir, config, &payload).await? {
         message.status = "deferred".to_string();
         message.throttle = Some(throttle.clone());
         message.route = Some(route.clone());
@@ -942,7 +1194,7 @@ fn resolve_outbound_route(
     }
 }
 
-fn evaluate_outbound_throttle(
+async fn evaluate_outbound_throttle(
     spool_dir: &Path,
     config: &RuntimeConfig,
     payload: &OutboundMessageHandoffRequest,
@@ -974,14 +1226,28 @@ fn evaluate_outbound_throttle(
                 .cloned()
                 .unwrap_or_else(|| "unknown".to_string()),
         };
-        let state_path = spool_dir.join("policy").join(format!(
-            "throttle-{}.json",
-            stable_key_id(&(rule.id.clone(), key.clone()))
-        ));
-        let mut state = if state_path.exists() {
-            serde_json::from_str::<ThrottleState>(&fs::read_to_string(&state_path)?)?
+        let mut state = if let Some(pool) = ensure_local_db_schema(config).await? {
+            let row = sqlx::query(
+                "SELECT state FROM throttle_windows WHERE rule_id = $1 AND bucket_key = $2",
+            )
+            .bind(&rule.id)
+            .bind(&key)
+            .fetch_optional(pool)
+            .await?;
+            row.map(|row| row.try_get::<Json<ThrottleState>, _>("state"))
+                .transpose()?
+                .map(|value| value.0)
+                .unwrap_or_default()
         } else {
-            ThrottleState::default()
+            let state_path = spool_dir.join("policy").join(format!(
+                "throttle-{}.json",
+                stable_key_id(&(rule.id.clone(), key.clone()))
+            ));
+            if state_path.exists() {
+                serde_json::from_str::<ThrottleState>(&fs::read_to_string(&state_path)?)?
+            } else {
+                ThrottleState::default()
+            }
         };
         let now = unix_now();
         state
@@ -998,7 +1264,30 @@ fn evaluate_outbound_throttle(
         }
 
         state.hits.push(now);
-        fs::write(&state_path, serde_json::to_string_pretty(&state)?)?;
+        if let Some(pool) = ensure_local_db_schema(config).await? {
+            sqlx::query(
+                r#"
+                INSERT INTO throttle_windows (rule_id, bucket_key, scope, state, updated_at)
+                VALUES ($1, $2, $3, $4, NOW())
+                ON CONFLICT (rule_id, bucket_key) DO UPDATE SET
+                    scope = EXCLUDED.scope,
+                    state = EXCLUDED.state,
+                    updated_at = NOW()
+                "#,
+            )
+            .bind(&rule.id)
+            .bind(&key)
+            .bind(&rule.scope)
+            .bind(Json(&state))
+            .execute(pool)
+            .await?;
+        } else {
+            let state_path = spool_dir.join("policy").join(format!(
+                "throttle-{}.json",
+                stable_key_id(&(rule.id.clone(), key.clone()))
+            ));
+            fs::write(&state_path, serde_json::to_string_pretty(&state)?)?;
+        }
     }
 
     Ok(None)
@@ -1317,8 +1606,8 @@ async fn receive_message_with_validator<D: Detector>(
                     detail: "message delivered to the core LPE inbound-delivery API".to_string(),
                 });
                 move_message(spool_dir, &message, "incoming", "sent").await?;
-                update_reputation(spool_dir, &message, FilterAction::Accept)?;
-                train_bayespam(spool_dir, config, &message, BayesLabel::Ham)?;
+                update_reputation(spool_dir, config, &message, FilterAction::Accept).await?;
+                train_bayespam(spool_dir, config, &message, BayesLabel::Ham).await?;
                 observability::record_smtp_session("delivered");
             }
             Err(error) => {
@@ -1339,7 +1628,7 @@ async fn receive_message_with_validator<D: Detector>(
                     "deferred"
                 };
                 move_message(spool_dir, &message, "incoming", destination).await?;
-                update_reputation(spool_dir, &message, FilterAction::Defer)?;
+                update_reputation(spool_dir, config, &message, FilterAction::Defer).await?;
                 observability::record_security_event("inbound_delivery_deferred");
                 observability::record_smtp_session("deferred");
             }
@@ -1349,8 +1638,8 @@ async fn receive_message_with_validator<D: Detector>(
             message.status = "quarantined".to_string();
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
-            update_reputation(spool_dir, &message, FilterAction::Quarantine)?;
-            train_bayespam(spool_dir, config, &message, BayesLabel::Spam)?;
+            update_reputation(spool_dir, config, &message, FilterAction::Quarantine).await?;
+            train_bayespam(spool_dir, config, &message, BayesLabel::Spam).await?;
             observability::record_smtp_session("quarantined");
         }
         FilterAction::Reject => {
@@ -1358,15 +1647,15 @@ async fn receive_message_with_validator<D: Detector>(
             message.status = "rejected".to_string();
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
-            update_reputation(spool_dir, &message, FilterAction::Reject)?;
-            train_bayespam(spool_dir, config, &message, BayesLabel::Spam)?;
+            update_reputation(spool_dir, config, &message, FilterAction::Reject).await?;
+            train_bayespam(spool_dir, config, &message, BayesLabel::Spam).await?;
             observability::record_smtp_session("rejected");
         }
         FilterAction::Defer => {
             observability::record_security_event("inbound_defer");
             message.status = "deferred".to_string();
             move_message(spool_dir, &message, "incoming", "deferred").await?;
-            update_reputation(spool_dir, &message, FilterAction::Defer)?;
+            update_reputation(spool_dir, config, &message, FilterAction::Defer).await?;
             observability::record_smtp_session("deferred");
         }
     }
@@ -1758,7 +2047,7 @@ async fn evaluate_inbound_policy(
     let mut reject_reasons = Vec::new();
     let mut quarantine_reasons = Vec::new();
     let reputation_score = if config.reputation_enabled {
-        load_reputation_score(spool_dir, peer_ip, mail_from)?
+        load_reputation_score(spool_dir, config, peer_ip, mail_from).await?
     } else {
         0
     };
@@ -1791,7 +2080,7 @@ async fn evaluate_inbound_policy(
 
     if let Some(ip) = peer_ip {
         if config.greylisting_enabled {
-            match evaluate_greylisting(spool_dir, ip, mail_from, rcpt_to)? {
+            match evaluate_greylisting(spool_dir, config, ip, mail_from, rcpt_to).await? {
                 Some(reason) => {
                     decision_trace.push(DecisionTraceEntry {
                         stage: "greylisting".to_string(),
@@ -1884,7 +2173,7 @@ async fn evaluate_inbound_policy(
 
     let subject = parse_rfc822_header_value(message_bytes, "subject").unwrap_or_default();
     let visible_text = extract_visible_text(message_bytes)?;
-    match score_bayespam(spool_dir, config, &subject, &visible_text, mail_from, helo)? {
+    match score_bayespam(spool_dir, config, &subject, &visible_text, mail_from, helo).await? {
         Some(outcome) => {
             spam_score += outcome.contribution;
             decision_trace.push(DecisionTraceEntry {
@@ -2395,8 +2684,9 @@ fn parse_peer_ip(peer: &str) -> Option<IpAddr> {
     peer.parse::<IpAddr>().ok()
 }
 
-fn evaluate_greylisting(
+async fn evaluate_greylisting(
     spool_dir: &Path,
+    config: &RuntimeConfig,
     ip: IpAddr,
     mail_from: &str,
     rcpt_to: &[String],
@@ -2407,21 +2697,53 @@ fn evaluate_greylisting(
         mail_from.to_ascii_lowercase(),
         rcpt.to_ascii_lowercase(),
     ));
-    let path = spool_dir.join("greylist").join(format!("{key}.json"));
     let now = unix_now();
-    let mut entry = if path.exists() {
-        serde_json::from_str::<GreylistEntry>(&fs::read_to_string(&path)?)?
+    let mut entry = if let Some(pool) = ensure_local_db_schema(config).await? {
+        let row = sqlx::query("SELECT state FROM greylist_entries WHERE entry_key = $1")
+            .bind(&key)
+            .fetch_optional(pool)
+            .await?;
+        row.map(|row| row.try_get::<Json<GreylistEntry>, _>("state"))
+            .transpose()?
+            .map(|value| value.0)
+            .unwrap_or_else(|| GreylistEntry {
+                first_seen_unix: now,
+                release_after_unix: now + GREYLIST_DELAY_SECONDS,
+                pass_count: 0,
+            })
     } else {
-        GreylistEntry {
-            first_seen_unix: now,
-            release_after_unix: now + GREYLIST_DELAY_SECONDS,
-            pass_count: 0,
+        let path = spool_dir.join("greylist").join(format!("{key}.json"));
+        if path.exists() {
+            serde_json::from_str::<GreylistEntry>(&fs::read_to_string(&path)?)?
+        } else {
+            GreylistEntry {
+                first_seen_unix: now,
+                release_after_unix: now + GREYLIST_DELAY_SECONDS,
+                pass_count: 0,
+            }
         }
     };
 
     if now < entry.release_after_unix {
-        if !path.exists() {
-            fs::write(&path, serde_json::to_string_pretty(&entry)?)?;
+        if let Some(pool) = ensure_local_db_schema(config).await? {
+            sqlx::query(
+                r#"
+                INSERT INTO greylist_entries (entry_key, state, updated_at)
+                VALUES ($1, $2, NOW())
+                ON CONFLICT (entry_key) DO UPDATE SET
+                    state = EXCLUDED.state,
+                    updated_at = NOW()
+                "#,
+            )
+            .bind(&key)
+            .bind(Json(&entry))
+            .execute(pool)
+            .await?;
+        } else {
+            let path = spool_dir.join("greylist").join(format!("{key}.json"));
+            if !path.exists() {
+                fs::write(&path, serde_json::to_string_pretty(&entry)?)?;
+            }
         }
         return Ok(Some(format!(
             "greylisted triplet {} for {} seconds",
@@ -2430,39 +2752,99 @@ fn evaluate_greylisting(
     }
 
     entry.pass_count += 1;
-    fs::write(&path, serde_json::to_string_pretty(&entry)?)?;
+    if let Some(pool) = ensure_local_db_schema(config).await? {
+        sqlx::query(
+            r#"
+            INSERT INTO greylist_entries (entry_key, state, updated_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (entry_key) DO UPDATE SET
+                state = EXCLUDED.state,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(&key)
+        .bind(Json(&entry))
+        .execute(pool)
+        .await?;
+    } else {
+        let path = spool_dir.join("greylist").join(format!("{key}.json"));
+        fs::write(&path, serde_json::to_string_pretty(&entry)?)?;
+    }
     Ok(None)
 }
 
-fn load_reputation_score(
+async fn load_reputation_score(
     spool_dir: &Path,
+    config: &RuntimeConfig,
     peer_ip: Option<IpAddr>,
     mail_from: &str,
 ) -> Result<i32> {
-    let store = load_reputation_store(spool_dir)?;
     let key = reputation_key(peer_ip, mail_from);
-    let entry = store.entries.get(&key).cloned().unwrap_or_default();
+    let entry = if let Some(pool) = ensure_local_db_schema(config).await? {
+        let row = sqlx::query("SELECT state FROM reputation_entries WHERE entry_key = $1")
+            .bind(&key)
+            .fetch_optional(pool)
+            .await?;
+        row.map(|row| row.try_get::<Json<ReputationEntry>, _>("state"))
+            .transpose()?
+            .map(|value| value.0)
+            .unwrap_or_default()
+    } else {
+        let store = load_reputation_store(spool_dir)?;
+        store.entries.get(&key).cloned().unwrap_or_default()
+    };
     Ok(entry.accepted as i32
         - entry.deferred as i32
         - (entry.quarantined as i32 * 2)
         - (entry.rejected as i32 * 3))
 }
 
-fn update_reputation(
+async fn update_reputation(
     spool_dir: &Path,
+    config: &RuntimeConfig,
     message: &QueuedMessage,
     action: FilterAction,
 ) -> Result<()> {
-    let mut store = load_reputation_store(spool_dir)?;
     let key = reputation_key(parse_peer_ip(&message.peer), &message.mail_from);
-    let entry = store.entries.entry(key).or_default();
+    let mut entry = if let Some(pool) = ensure_local_db_schema(config).await? {
+        let row = sqlx::query("SELECT state FROM reputation_entries WHERE entry_key = $1")
+            .bind(&key)
+            .fetch_optional(pool)
+            .await?;
+        row.map(|row| row.try_get::<Json<ReputationEntry>, _>("state"))
+            .transpose()?
+            .map(|value| value.0)
+            .unwrap_or_default()
+    } else {
+        let store = load_reputation_store(spool_dir)?;
+        store.entries.get(&key).cloned().unwrap_or_default()
+    };
     match action {
         FilterAction::Accept => entry.accepted += 1,
         FilterAction::Quarantine => entry.quarantined += 1,
         FilterAction::Reject => entry.rejected += 1,
         FilterAction::Defer => entry.deferred += 1,
     }
-    save_reputation_store(spool_dir, &store)
+    if let Some(pool) = ensure_local_db_schema(config).await? {
+        sqlx::query(
+            r#"
+            INSERT INTO reputation_entries (entry_key, state, updated_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (entry_key) DO UPDATE SET
+                state = EXCLUDED.state,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(&key)
+        .bind(Json(&entry))
+        .execute(pool)
+        .await?;
+        Ok(())
+    } else {
+        let mut store = load_reputation_store(spool_dir)?;
+        store.entries.insert(key, entry);
+        save_reputation_store(spool_dir, &store)
+    }
 }
 
 fn reputation_key(peer_ip: Option<IpAddr>, mail_from: &str) -> String {
@@ -2498,7 +2880,19 @@ fn save_reputation_store(spool_dir: &Path, store: &ReputationStore) -> Result<()
     Ok(())
 }
 
-fn load_bayespam_corpus(spool_dir: &Path) -> Result<BayesCorpus> {
+async fn load_bayespam_corpus(spool_dir: &Path, config: &RuntimeConfig) -> Result<BayesCorpus> {
+    if let Some(pool) = ensure_local_db_schema(config).await? {
+        let row = sqlx::query("SELECT corpus FROM bayespam_corpora WHERE corpus_key = $1")
+            .bind("default")
+            .fetch_optional(pool)
+            .await?;
+        return Ok(row
+            .map(|row| row.try_get::<Json<BayesCorpus>, _>("corpus"))
+            .transpose()?
+            .map(|value| value.0)
+            .unwrap_or_default());
+    }
+
     let path = spool_dir.join("policy").join("bayespam.json");
     if !path.exists() {
         return Ok(BayesCorpus::default());
@@ -2506,7 +2900,28 @@ fn load_bayespam_corpus(spool_dir: &Path) -> Result<BayesCorpus> {
     Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
 }
 
-fn save_bayespam_corpus(spool_dir: &Path, corpus: &BayesCorpus) -> Result<()> {
+async fn save_bayespam_corpus(
+    spool_dir: &Path,
+    config: &RuntimeConfig,
+    corpus: &BayesCorpus,
+) -> Result<()> {
+    if let Some(pool) = ensure_local_db_schema(config).await? {
+        sqlx::query(
+            r#"
+            INSERT INTO bayespam_corpora (corpus_key, corpus, updated_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (corpus_key) DO UPDATE SET
+                corpus = EXCLUDED.corpus,
+                updated_at = NOW()
+            "#,
+        )
+        .bind("default")
+        .bind(Json(corpus))
+        .execute(pool)
+        .await?;
+        return Ok(());
+    }
+
     let path = spool_dir.join("policy").join("bayespam.json");
     fs::write(path, serde_json::to_string_pretty(corpus)?)?;
     Ok(())
@@ -2589,7 +3004,7 @@ fn score_bayespam_tokens(
     })
 }
 
-fn score_bayespam(
+async fn score_bayespam(
     spool_dir: &Path,
     config: &RuntimeConfig,
     subject: &str,
@@ -2600,7 +3015,7 @@ fn score_bayespam(
     if !config.bayespam_enabled {
         return Ok(None);
     }
-    let corpus = load_bayespam_corpus(spool_dir)?;
+    let corpus = load_bayespam_corpus(spool_dir, config).await?;
     let tokens = tokenize_for_bayespam(
         subject,
         visible_text,
@@ -2616,7 +3031,7 @@ fn score_bayespam(
     ))
 }
 
-fn train_bayespam(
+async fn train_bayespam(
     spool_dir: &Path,
     config: &RuntimeConfig,
     message: &QueuedMessage,
@@ -2640,7 +3055,7 @@ fn train_bayespam(
         return Ok(());
     }
 
-    let mut corpus = load_bayespam_corpus(spool_dir)?;
+    let mut corpus = load_bayespam_corpus(spool_dir, config).await?;
     match label {
         BayesLabel::Ham => {
             corpus.ham_messages = corpus.ham_messages.saturating_add(1);
@@ -2657,7 +3072,7 @@ fn train_bayespam(
             }
         }
     }
-    save_bayespam_corpus(spool_dir, &corpus)
+    save_bayespam_corpus(spool_dir, config, &corpus).await
 }
 
 fn stable_key_id<T: Hash>(value: &T) -> String {
@@ -3308,7 +3723,7 @@ fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
         local_db_enabled: bool_at(
             &value,
             &["local_data_stores", "dedicated_postgres", "enabled"],
-            false,
+            true,
         ),
         local_db_url: env::var("LPE_CT_LOCAL_DB_URL")
             .ok()
@@ -3354,51 +3769,9 @@ async fn persist_quarantine_metadata(
     config: &RuntimeConfig,
     message: &QueuedMessage,
 ) -> Result<()> {
-    if !config.local_db_enabled {
-        return Ok(());
-    }
-
-    let Some(database_url) = config.local_db_url.as_deref() else {
-        warn!(
-            trace_id = %message.id,
-            "quarantine metadata store enabled but LPE_CT_LOCAL_DB_URL is not configured"
-        );
+    let Some(pool) = ensure_local_db_schema(config).await? else {
         return Ok(());
     };
-
-    let pool = PgPoolOptions::new()
-        .max_connections(2)
-        .connect_lazy(database_url)?;
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS quarantine_messages (
-            trace_id TEXT PRIMARY KEY,
-            direction TEXT NOT NULL,
-            status TEXT NOT NULL,
-            received_at TEXT NOT NULL,
-            peer TEXT NOT NULL,
-            helo TEXT NOT NULL,
-            mail_from TEXT NOT NULL,
-            rcpt_to JSONB NOT NULL,
-            subject TEXT NOT NULL,
-            internet_message_id TEXT,
-            spool_path TEXT NOT NULL,
-            reason TEXT,
-            spam_score REAL NOT NULL,
-            security_score REAL NOT NULL,
-            reputation_score INTEGER NOT NULL,
-            dnsbl_hits JSONB NOT NULL,
-            auth_summary JSONB NOT NULL,
-            decision_trace JSONB NOT NULL,
-            magika_summary TEXT,
-            magika_decision TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        "#,
-    )
-    .execute(&pool)
-    .await?;
 
     let metadata = quarantine_metadata(spool_dir, message);
     sqlx::query(
@@ -3456,7 +3829,7 @@ async fn persist_quarantine_metadata(
     .bind(Json(metadata.decision_trace))
     .bind(&metadata.magika_summary)
     .bind(&metadata.magika_decision)
-    .execute(&pool)
+    .execute(pool)
     .await?;
 
     Ok(())
@@ -3894,6 +4267,9 @@ mod tests {
                 account_id: Uuid::new_v4(),
                 from_address: "sender@example.test".to_string(),
                 from_display: Some("Sender".to_string()),
+                sender_address: None,
+                sender_display: None,
+                sender_authorization_kind: "self".to_string(),
                 to: vec![TransportRecipient {
                     address: "dest@example.test".to_string(),
                     display_name: Some("Dest".to_string()),
@@ -3991,6 +4367,9 @@ mod tests {
                 account_id: Uuid::new_v4(),
                 from_address: "sender@example.test".to_string(),
                 from_display: None,
+                sender_address: None,
+                sender_display: None,
+                sender_authorization_kind: "self".to_string(),
                 to: vec![TransportRecipient {
                     address: "dest@example.test".to_string(),
                     display_name: None,
@@ -4246,6 +4625,9 @@ mod tests {
             account_id: Uuid::nil(),
             from_address: "sender@example.test".to_string(),
             from_display: None,
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
             to: vec![TransportRecipient {
                 address: "dest@example.test".to_string(),
                 display_name: None,
@@ -4322,14 +4704,17 @@ mod tests {
         std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 
-    #[test]
-    fn greylisting_defers_first_triplet_then_allows_after_release_window() {
+    #[tokio::test]
+    async fn greylisting_defers_first_triplet_then_allows_after_release_window() {
         let spool = temp_dir("greylisting");
         initialize_spool(&spool).unwrap();
+        let config = runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
         let ip: IpAddr = "192.0.2.45".parse().unwrap();
         let rcpt = vec!["dest@example.test".to_string()];
 
-        let first = evaluate_greylisting(&spool, ip, "sender@example.test", &rcpt).unwrap();
+        let first = evaluate_greylisting(&spool, &config, ip, "sender@example.test", &rcpt)
+            .await
+            .unwrap();
         assert!(first.unwrap().contains("greylisted triplet"));
 
         let key = stable_key_id(&(
@@ -4343,14 +4728,17 @@ mod tests {
         entry.release_after_unix = unix_now().saturating_sub(1);
         std::fs::write(&path, serde_json::to_string_pretty(&entry).unwrap()).unwrap();
 
-        let second = evaluate_greylisting(&spool, ip, "sender@example.test", &rcpt).unwrap();
+        let second = evaluate_greylisting(&spool, &config, ip, "sender@example.test", &rcpt)
+            .await
+            .unwrap();
         assert!(second.is_none());
     }
 
-    #[test]
-    fn reputation_score_penalizes_quarantine_and_rejects() {
+    #[tokio::test]
+    async fn reputation_score_penalizes_quarantine_and_rejects() {
         let spool = temp_dir("reputation");
         initialize_spool(&spool).unwrap();
+        let config = runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
         let mut message = QueuedMessage {
             id: "trace-1".to_string(),
             direction: "inbound".to_string(),
@@ -4377,18 +4765,30 @@ mod tests {
             data: b"Subject: test\r\n\r\nbody".to_vec(),
         };
 
-        update_reputation(&spool, &message, FilterAction::Accept).unwrap();
-        update_reputation(&spool, &message, FilterAction::Quarantine).unwrap();
-        message.id = "trace-2".to_string();
-        update_reputation(&spool, &message, FilterAction::Reject).unwrap();
-
-        let score = load_reputation_score(&spool, parse_peer_ip(&message.peer), &message.mail_from)
+        update_reputation(&spool, &config, &message, FilterAction::Accept)
+            .await
             .unwrap();
+        update_reputation(&spool, &config, &message, FilterAction::Quarantine)
+            .await
+            .unwrap();
+        message.id = "trace-2".to_string();
+        update_reputation(&spool, &config, &message, FilterAction::Reject)
+            .await
+            .unwrap();
+
+        let score = load_reputation_score(
+            &spool,
+            &config,
+            parse_peer_ip(&message.peer),
+            &message.mail_from,
+        )
+        .await
+        .unwrap();
         assert_eq!(score, -4);
     }
 
-    #[test]
-    fn bayespam_learns_tokens_and_scores_spammy_message() {
+    #[tokio::test]
+    async fn bayespam_learns_tokens_and_scores_spammy_message() {
         let spool = temp_dir("bayespam-train");
         initialize_spool(&spool).unwrap();
         let config = runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
@@ -4399,6 +4799,7 @@ mod tests {
             &training_message("Weekly report", "meeting agenda project status"),
             BayesLabel::Ham,
         )
+        .await
         .unwrap();
         train_bayespam(
             &spool,
@@ -4406,9 +4807,10 @@ mod tests {
             &training_message("Cheap pills", "cheap pills winner casino bonus pills"),
             BayesLabel::Spam,
         )
+        .await
         .unwrap();
 
-        let corpus = load_bayespam_corpus(&spool).unwrap();
+        let corpus = load_bayespam_corpus(&spool, &config).await.unwrap();
         assert_eq!(corpus.ham_messages, 1);
         assert_eq!(corpus.spam_messages, 1);
         assert!(corpus.spam_tokens.contains_key("cheap"));
@@ -4421,6 +4823,7 @@ mod tests {
             "sender@example.test",
             "mx.example.test",
         )
+        .await
         .unwrap()
         .unwrap();
 
@@ -4442,6 +4845,7 @@ mod tests {
             &training_message("Project update", "meeting notes roadmap delivery"),
             BayesLabel::Ham,
         )
+        .await
         .unwrap();
         train_bayespam(
             &spool,
@@ -4449,6 +4853,7 @@ mod tests {
             &training_message("Cheap pills", "cheap pills winner casino bonus pills"),
             BayesLabel::Spam,
         )
+        .await
         .unwrap();
 
         let mut request = outbound_request("Cheap pills now");
@@ -4696,6 +5101,9 @@ mod tests {
             account_id: Uuid::new_v4(),
             from_address: "sender@example.test".to_string(),
             from_display: Some("Sender".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
             to: vec![TransportRecipient {
                 address: "dest@example.test".to_string(),
                 display_name: Some("Dest".to_string()),

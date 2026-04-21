@@ -23,13 +23,13 @@ The split remains strict:
 
 ### Current repository state
 
-The current `LPE-CT` implementation does not use a relational database yet.
+The current `LPE-CT` implementation now uses a dedicated private `PostgreSQL` store as its default technical state backend.
 
 It currently persists local state in three ways:
 
 - `LPE_CT_STATE_FILE`, default `/var/lib/lpe-ct/state.json`
 - `LPE_CT_SPOOL_DIR`, default `/var/spool/lpe-ct`
-- JSON policy artifacts inside the spool
+- private `PostgreSQL` technical tables on the dedicated `LPE-CT` local database
 
 The active spool layout in the current code is:
 
@@ -48,29 +48,30 @@ The currently implemented technical local state already includes:
 - management configuration and audit metadata in `state.json`
 - queued inbound and outbound message traces as JSON files in the spool
 - quarantine ownership in `quarantine/`
-- greylisting triplets in `greylist/<triplet>.json`
-- reputation counters in `policy/reputation.json`
-- throttling window artifacts in `policy/<rule>.json`
+- greylisting triplets in `greylist_entries`
+- reputation counters in `reputation_entries`
+- throttling window artifacts in `throttle_windows`
+- `bayespam` corpus state in `bayespam_corpora`
+- quarantine metadata in `quarantine_messages`
 - bounded decision traces attached to queued message files
 
-This means the repository already proves the need for sorting-center-local persistence, but it still uses flat files rather than a dedicated local database.
+This keeps indexed perimeter state in a private database while leaving payload custody and queue ownership in the spool.
 
 ### Target architecture
 
-`LPE-CT` keeps the current spool-first model as the default deployment path.
+`LPE-CT` keeps spool custody for transport artifacts, but the default deployment path now also includes a private dedicated `PostgreSQL` service for indexed technical state.
 
-When operational pressure justifies it, `LPE-CT` may add one or more dedicated local databases that remain strictly technical stores owned by the sorting center.
+`LPE-CT` may still add additional dedicated local databases later when operational pressure justifies it, but they remain strictly technical stores owned by the sorting center.
 
 The target storage model is therefore:
 
 - `state.json` for local management configuration and bootstrap state
 - spool files for raw queue ownership, raw message payload traces, quarantine payload custody, and replay-oriented artifacts
-- optional dedicated local database stores for higher-churn technical indexes and coordination state
+- dedicated local database stores for higher-churn technical indexes and coordination state
 
 The preferred first dedicated store is an `LPE-CT`-owned local `PostgreSQL` service used only for technical state.
 
-The current implementation may now upsert quarantined-message metadata into a private `quarantine_messages` table when `LPE_CT_LOCAL_DB_ENABLED=true` and `LPE_CT_LOCAL_DB_URL` is configured. That table is technical only; payload custody remains in the spool and quarantine directories.
-The first `bayespam` implementation remains spool-first through `policy/bayespam.json`, which keeps the classifier operational even when the optional local PostgreSQL service is disabled.
+The current implementation now persists the default indexed perimeter state into private tables such as `greylist_entries`, `reputation_entries`, `bayespam_corpora`, `throttle_windows`, and `quarantine_messages` when `LPE_CT_LOCAL_DB_ENABLED=true` and `LPE_CT_LOCAL_DB_URL` is configured. Those tables are technical only; payload custody remains in the spool and quarantine directories.
 
 Typical target domains for that local database are:
 
@@ -223,17 +224,18 @@ Even in clustered mode, the state must stay:
 
 ### Current implementation decision
 
-The repository now keeps the existing spool-first runtime behavior.
+The repository now uses private dedicated `PostgreSQL` as the default persisted state for indexed `LPE-CT` technical data.
 
-At the same time, the management state and readiness model explicitly describe the future optional dedicated `LPE-CT` PostgreSQL profile with these purposes:
+That current default profile covers:
 
 - Bayesian filtering
 - reputation
 - greylisting
 - quarantine metadata
 - cluster coordination
+- outbound throttling state
 
-That is a foundation only. It does not yet move current runtime policy data out of the spool.
+The spool remains authoritative for queue ownership, raw message traces, quarantine payload custody, and replay-oriented artifacts.
 
 ### Decision
 
