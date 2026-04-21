@@ -2,11 +2,11 @@ use anyhow::Result;
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount,
     CanonicalChangeCategory, CanonicalChangeListener, CanonicalPushChangeSet, ClientTask,
-    CollaborationCollection, JmapEmail, JmapEmailQuery, JmapEmailSubmission,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
-    JmapThreadQuery, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, SenderIdentity,
-    Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientTaskInput,
+    ClientTaskList, CollaborationCollection, CreateTaskListInput, JmapEmail, JmapEmailQuery,
+    JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, JmapQuota, JmapThreadQuery, JmapUploadBlob, MailboxAccountAccess,
+    SavedDraftMessage, SenderIdentity, Storage, SubmitMessageInput, SubmittedMessage,
+    UpdateTaskListInput, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use uuid::Uuid;
 
@@ -178,6 +178,15 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         principal_account_id: Uuid,
         event_id: Uuid,
     ) -> Result<()>;
+    async fn fetch_jmap_task_lists(&self, account_id: Uuid) -> Result<Vec<ClientTaskList>>;
+    async fn fetch_jmap_task_lists_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientTaskList>>;
+    async fn create_jmap_task_list(&self, input: CreateTaskListInput) -> Result<ClientTaskList>;
+    async fn update_jmap_task_list(&self, input: UpdateTaskListInput) -> Result<ClientTaskList>;
+    async fn delete_jmap_task_list(&self, account_id: Uuid, task_list_id: Uuid) -> Result<()>;
     async fn fetch_jmap_tasks(&self, account_id: Uuid) -> Result<Vec<ClientTask>>;
     async fn fetch_jmap_tasks_by_ids(
         &self,
@@ -482,6 +491,30 @@ impl JmapStore for Storage {
     ) -> Result<()> {
         self.delete_accessible_event(principal_account_id, event_id)
             .await
+    }
+
+    async fn fetch_jmap_task_lists(&self, account_id: Uuid) -> Result<Vec<ClientTaskList>> {
+        self.fetch_task_lists(account_id).await
+    }
+
+    async fn fetch_jmap_task_lists_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientTaskList>> {
+        self.fetch_task_lists_by_ids(account_id, ids).await
+    }
+
+    async fn create_jmap_task_list(&self, input: CreateTaskListInput) -> Result<ClientTaskList> {
+        self.create_task_list(input).await
+    }
+
+    async fn update_jmap_task_list(&self, input: UpdateTaskListInput) -> Result<ClientTaskList> {
+        self.update_task_list(input).await
+    }
+
+    async fn delete_jmap_task_list(&self, account_id: Uuid, task_list_id: Uuid) -> Result<()> {
+        self.delete_task_list(account_id, task_list_id).await
     }
 
     async fn fetch_jmap_tasks(&self, account_id: Uuid) -> Result<Vec<ClientTask>> {

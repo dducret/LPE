@@ -18,11 +18,11 @@ use lpe_storage::{
     serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent, AuditEntryInput,
     AuthenticatedAccount, CalendarOrganizerMetadata, CalendarParticipantMetadata,
     CalendarParticipantsMetadata, CanonicalChangeCategory, CanonicalPushChangeSet, ClientTask,
-    CollaborationCollection, JmapEmail, JmapEmailAddress, JmapEmailSubmission,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
-    JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, SenderIdentity, Storage,
-    SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientTaskInput,
+    ClientTaskList, CollaborationCollection, CreateTaskListInput, JmapEmail, JmapEmailAddress,
+    JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage,
+    SenderIdentity, Storage, SubmitMessageInput, SubmittedRecipientInput, UpdateTaskListInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -968,10 +968,16 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     })
                     .collect())
             }
-            "TaskList" => Ok(vec![StateEntry {
-                id: default_task_list_id().to_string(),
-                fingerprint: default_task_list_state_fingerprint(),
-            }]),
+            "TaskList" => {
+                let task_lists = self.store.fetch_jmap_task_lists(account_id).await?;
+                Ok(task_lists
+                    .into_iter()
+                    .map(|task_list| StateEntry {
+                        id: task_list.id.to_string(),
+                        fingerprint: task_list_state_fingerprint(&task_list),
+                    })
+                    .collect())
+            }
             "Task" => {
                 let tasks = self.store.fetch_jmap_tasks(account_id).await?;
                 Ok(tasks
@@ -1838,18 +1844,23 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let arguments: TaskListGetArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
         let properties = task_list_properties(arguments.properties);
-        let requested_ids = arguments.ids.unwrap_or_default();
-        let list = if requested_ids.is_empty()
-            || requested_ids.iter().any(|id| id == default_task_list_id())
-        {
-            vec![task_list_to_value(&properties)]
+        let requested_ids = parse_uuid_list(arguments.ids)?;
+        let task_lists = if let Some(ids) = requested_ids.as_ref() {
+            self.store
+                .fetch_jmap_task_lists_by_ids(account_id, ids)
+                .await?
         } else {
-            Vec::new()
+            self.store.fetch_jmap_task_lists(account_id).await?
         };
+        let list = task_lists
+            .iter()
+            .map(|task_list| task_list_to_value(task_list, &properties))
+            .collect::<Vec<_>>();
         let not_found = requested_ids
+            .unwrap_or_default()
             .into_iter()
-            .filter(|id| id != default_task_list_id())
-            .map(Value::String)
+            .filter(|id| !task_lists.iter().any(|task_list| task_list.id == *id))
+            .map(|id| Value::String(id.to_string()))
             .collect::<Vec<_>>();
         let state = self.object_state(account_id, "TaskList").await?;
 
@@ -1886,44 +1897,86 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let arguments: TaskListSetArguments = serde_json::from_value(arguments)?;
         let account_id = requested_account_id(arguments.account_id.as_deref(), account)?;
         let old_state = self.object_state(account_id, "TaskList").await?;
+        let properties = task_list_properties(None);
+        let mut created = Map::new();
         let mut not_created = Map::new();
+        let mut updated = Map::new();
         let mut not_updated = Map::new();
+        let mut destroyed = Vec::new();
         let mut not_destroyed = Map::new();
 
         if let Some(create) = arguments.create {
-            for (creation_id, _) in create {
-                not_created.insert(
-                    creation_id,
-                    method_error("forbidden", "TaskList/set is not supported in the MVP"),
-                );
+            for (creation_id, value) in create {
+                match parse_task_list_create(account_id, value) {
+                    Ok(input) => match self.store.create_jmap_task_list(input).await {
+                        Ok(task_list) => {
+                            created
+                                .insert(creation_id, task_list_to_value(&task_list, &properties));
+                        }
+                        Err(error) => {
+                            not_created.insert(creation_id, set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_created.insert(creation_id, set_error(&error.to_string()));
+                    }
+                }
             }
         }
         if let Some(update) = arguments.update {
-            for (id, _) in update {
-                not_updated.insert(
-                    id,
-                    method_error("forbidden", "TaskList/set is not supported in the MVP"),
-                );
+            for (id, value) in update {
+                match parse_uuid(&id) {
+                    Ok(task_list_id) => {
+                        match parse_task_list_update(account_id, task_list_id, value) {
+                            Ok(input) => match self.store.update_jmap_task_list(input).await {
+                                Ok(task_list) => {
+                                    updated.insert(id, task_list_to_value(&task_list, &properties));
+                                }
+                                Err(error) => {
+                                    not_updated.insert(id, set_error(&error.to_string()));
+                                }
+                            },
+                            Err(error) => {
+                                not_updated.insert(id, set_error(&error.to_string()));
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        not_updated.insert(id, set_error(&error.to_string()));
+                    }
+                }
             }
         }
         if let Some(ids) = arguments.destroy {
             for id in ids {
-                not_destroyed.insert(
-                    id,
-                    method_error("forbidden", "TaskList/set is not supported in the MVP"),
-                );
+                match parse_uuid(&id) {
+                    Ok(task_list_id) => match self
+                        .store
+                        .delete_jmap_task_list(account_id, task_list_id)
+                        .await
+                    {
+                        Ok(()) => destroyed.push(Value::String(id)),
+                        Err(error) => {
+                            not_destroyed.insert(id, set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_destroyed.insert(id, set_error(&error.to_string()));
+                    }
+                }
             }
         }
 
+        let new_state = self.object_state(account_id, "TaskList").await?;
         Ok(json!({
             "accountId": account_id.to_string(),
-            "oldState": old_state.clone(),
-            "newState": old_state,
-            "created": Value::Object(Map::new()),
+            "oldState": old_state,
+            "newState": new_state,
+            "created": Value::Object(created),
             "notCreated": Value::Object(not_created),
-            "updated": Value::Object(Map::new()),
+            "updated": Value::Object(updated),
             "notUpdated": Value::Object(not_updated),
-            "destroyed": Vec::<String>::new(),
+            "destroyed": destroyed,
             "notDestroyed": Value::Object(not_destroyed),
         }))
     }
@@ -2112,17 +2165,35 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if let Some(update) = arguments.update {
             for (id, value) in update {
-                match parse_uuid(&id)
-                    .and_then(|task_id| parse_task_input(Some(task_id), account_id, value))
-                {
-                    Ok(input) => match self.store.upsert_jmap_task(input).await {
-                        Ok(_) => {
-                            updated.insert(id, Value::Object(Map::new()));
+                match parse_uuid(&id) {
+                    Ok(task_id) => {
+                        let existing_task = self
+                            .store
+                            .fetch_jmap_tasks_by_ids(account_id, &[task_id])
+                            .await?
+                            .into_iter()
+                            .next()
+                            .ok_or_else(|| anyhow!("task not found"));
+                        match existing_task.and_then(|existing_task| {
+                            let mut input = parse_task_input(Some(task_id), account_id, value)?;
+                            if input.task_list_id.is_none() {
+                                input.task_list_id = Some(existing_task.task_list_id);
+                            }
+                            Ok(input)
+                        }) {
+                            Ok(input) => match self.store.upsert_jmap_task(input).await {
+                                Ok(_) => {
+                                    updated.insert(id, Value::Object(Map::new()));
+                                }
+                                Err(error) => {
+                                    not_updated.insert(id, set_error(&error.to_string()));
+                                }
+                            },
+                            Err(error) => {
+                                not_updated.insert(id, set_error(&error.to_string()));
+                            }
                         }
-                        Err(error) => {
-                            not_updated.insert(id, set_error(&error.to_string()));
-                        }
-                    },
+                    }
                     Err(error) => {
                         not_updated.insert(id, set_error(&error.to_string()));
                     }
@@ -3323,7 +3394,7 @@ fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {
             json!({
                 "minDateTime": "1970-01-01T00:00:00",
                 "maxDateTime": "9999-12-31T23:59:59",
-                "mayCreateTaskList": false,
+                "mayCreateTaskList": true,
             }),
         ),
         (
@@ -3429,9 +3500,7 @@ fn validate_task_sort(sort: Option<&[TaskQuerySort]>) -> Result<()> {
 fn validate_task_filter(filter: Option<&TaskQueryFilter>) -> Result<()> {
     if let Some(filter) = filter {
         if let Some(task_list_id) = filter.in_task_list.as_deref() {
-            if task_list_id != default_task_list_id() {
-                bail!("only taskListId=default is supported");
-            }
+            parse_uuid(task_list_id)?;
         }
         if let Some(status) = filter.status.as_deref() {
             validate_task_status_value(status)?;
@@ -3445,10 +3514,6 @@ fn require_collection_id(value: &str, kind: &str) -> Result<()> {
         bail!("{kind} id is required");
     }
     Ok(())
-}
-
-fn default_task_list_id() -> &'static str {
-    "default"
 }
 
 fn validate_task_status_value(status: &str) -> Result<()> {
@@ -3584,15 +3649,16 @@ fn calendar_to_value(collection: &CollaborationCollection, properties: &HashSet<
     Value::Object(object)
 }
 
-fn task_list_to_value(properties: &HashSet<String>) -> Value {
+fn task_list_to_value(task_list: &ClientTaskList, properties: &HashSet<String>) -> Value {
     let mut object = Map::new();
-    insert_if(properties, &mut object, "id", default_task_list_id());
-    insert_if(properties, &mut object, "name", "Tasks");
-    insert_if(properties, &mut object, "role", "inbox");
-    insert_if(properties, &mut object, "sortOrder", 0);
+    insert_if(properties, &mut object, "id", task_list.id.to_string());
+    insert_if(properties, &mut object, "name", task_list.name.clone());
+    insert_if(properties, &mut object, "role", task_list.role.clone());
+    insert_if(properties, &mut object, "sortOrder", task_list.sort_order);
     insert_if(properties, &mut object, "isSubscribed", true);
     insert_if(properties, &mut object, "isVisible", true);
     if properties.contains("myRights") {
+        let may_delete = task_list.role.is_none();
         object.insert(
             "myRights".to_string(),
             json!({
@@ -3600,8 +3666,8 @@ fn task_list_to_value(properties: &HashSet<String>) -> Value {
                 "mayAddItems": true,
                 "mayModifyItems": true,
                 "mayRemoveItems": true,
-                "mayRename": false,
-                "mayDelete": false,
+                "mayRename": true,
+                "mayDelete": may_delete,
                 "mayAdmin": false,
             }),
         );
@@ -3704,7 +3770,8 @@ fn event_state_fingerprint(event: &AccessibleEvent) -> String {
 
 fn task_state_fingerprint(task: &ClientTask) -> String {
     format!(
-        "{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}",
+        task.task_list_id,
         task.title,
         task.description,
         task.status,
@@ -3715,8 +3782,14 @@ fn task_state_fingerprint(task: &ClientTask) -> String {
     )
 }
 
-fn default_task_list_state_fingerprint() -> String {
-    "default|Tasks|inbox|0|rw".to_string()
+fn task_list_state_fingerprint(task_list: &ClientTaskList) -> String {
+    format!(
+        "{}|{}|{}|{}",
+        task_list.name,
+        task_list.role.clone().unwrap_or_default(),
+        task_list.sort_order,
+        task_list.updated_at
+    )
 }
 
 fn email_state_fingerprint(email: &JmapEmail) -> String {
@@ -4736,7 +4809,7 @@ fn task_to_value(task: &ClientTask, properties: &HashSet<String>) -> Value {
         properties,
         &mut object,
         "taskListId",
-        default_task_list_id(),
+        task.task_list_id.to_string(),
     );
     insert_if(properties, &mut object, "title", task.title.clone());
     insert_if(
@@ -4930,7 +5003,7 @@ fn event_matches_filter(event: &AccessibleEvent, filter: &CalendarEventQueryFilt
 
 fn task_matches_filter(task: &ClientTask, filter: &TaskQueryFilter) -> bool {
     if let Some(task_list_id) = filter.in_task_list.as_deref() {
-        if task_list_id != default_task_list_id() {
+        if task_list_id != task.task_list_id.to_string() {
             return false;
         }
     }
@@ -4955,8 +5028,9 @@ fn calendar_event_sort_key(event: &AccessibleEvent) -> String {
     calendar_event_start(event)
 }
 
-fn task_sort_key(task: &ClientTask) -> (i32, String, String) {
+fn task_sort_key(task: &ClientTask) -> (i32, i32, String, String) {
     (
+        task.task_list_sort_order,
         task.sort_order,
         task.updated_at.clone(),
         task.id.to_string(),
@@ -5210,7 +5284,7 @@ fn parse_task_input(
         .as_object()
         .ok_or_else(|| anyhow!("task arguments must be an object"))?;
     reject_unknown_task_properties(object)?;
-    validate_task_list_id(object.get("taskListId"))?;
+    let task_list_id = validate_task_list_id(object.get("taskListId"))?;
 
     let task_type = object
         .get("@type")
@@ -5228,6 +5302,7 @@ fn parse_task_input(
     Ok(UpsertClientTaskInput {
         id,
         account_id,
+        task_list_id,
         title: parse_required_string(object.get("title"), "title")?,
         description: parse_optional_string(object.get("description"))?.unwrap_or_default(),
         status: parse_optional_string(object.get("status"))?
@@ -5235,6 +5310,38 @@ fn parse_task_input(
         due_at: parse_optional_string(object.get("due"))?,
         completed_at: parse_optional_string(object.get("completed"))?,
         sort_order: object.get("sortOrder").and_then(Value::as_i64).unwrap_or(0) as i32,
+    })
+}
+
+fn parse_task_list_create(account_id: Uuid, value: Value) -> Result<CreateTaskListInput> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("task list arguments must be an object"))?;
+    reject_unknown_task_list_properties(object)?;
+    Ok(CreateTaskListInput {
+        account_id,
+        name: parse_required_string(object.get("name"), "name")?,
+        sort_order: object.get("sortOrder").and_then(Value::as_i64).unwrap_or(0) as i32,
+    })
+}
+
+fn parse_task_list_update(
+    account_id: Uuid,
+    task_list_id: Uuid,
+    value: Value,
+) -> Result<UpdateTaskListInput> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("task list arguments must be an object"))?;
+    reject_unknown_task_list_properties(object)?;
+    Ok(UpdateTaskListInput {
+        account_id,
+        task_list_id,
+        name: parse_optional_string(object.get("name"))?,
+        sort_order: object
+            .get("sortOrder")
+            .and_then(Value::as_i64)
+            .map(|value| value as i32),
     })
 }
 
@@ -5293,6 +5400,16 @@ fn reject_unknown_task_properties(object: &Map<String, Value>) -> Result<()> {
     Ok(())
 }
 
+fn reject_unknown_task_list_properties(object: &Map<String, Value>) -> Result<()> {
+    for key in object.keys() {
+        match key.as_str() {
+            "name" | "sortOrder" => {}
+            _ => bail!("unsupported task list property: {key}"),
+        }
+    }
+    Ok(())
+}
+
 fn validate_address_book_ids(value: Option<&Value>) -> Result<Option<String>> {
     if let Some(value) = value {
         let object = value
@@ -5327,16 +5444,14 @@ fn validate_calendar_ids(value: Option<&Value>) -> Result<Option<String>> {
     Ok(None)
 }
 
-fn validate_task_list_id(value: Option<&Value>) -> Result<()> {
+fn validate_task_list_id(value: Option<&Value>) -> Result<Option<Uuid>> {
     if let Some(value) = value {
         let task_list_id = value
             .as_str()
             .ok_or_else(|| anyhow!("taskListId must be a string"))?;
-        if task_list_id != default_task_list_id() {
-            bail!("only taskListId=default is supported");
-        }
+        return Ok(Some(parse_uuid(task_list_id)?));
     }
-    Ok(())
+    Ok(None)
 }
 
 fn reject_unknown_email_properties(object: &Map<String, Value>) -> Result<()> {
@@ -5697,7 +5812,7 @@ mod tests {
     use lpe_magika::{DetectionSource, Detector, MagikaDetection};
     use lpe_storage::{
         AccessibleContact, AccessibleEvent, CanonicalChangeCategory, CanonicalPushChangeSet,
-        ClientContact, ClientEvent, CollaborationCollection, CollaborationRights,
+        ClientContact, ClientEvent, ClientTaskList, CollaborationCollection, CollaborationRights,
         JmapImportedEmailInput, MailboxAccountAccess, SenderIdentity,
     };
     use std::sync::{Arc, Mutex};
@@ -5711,6 +5826,7 @@ mod tests {
         sender_identities: Vec<SenderIdentity>,
         contacts: Arc<Mutex<Vec<ClientContact>>>,
         events: Arc<Mutex<Vec<ClientEvent>>>,
+        task_lists: Arc<Mutex<Vec<ClientTaskList>>>,
         tasks: Arc<Mutex<Vec<ClientTask>>>,
         uploads: Arc<Mutex<Vec<JmapUploadBlob>>>,
         imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
@@ -6042,12 +6158,24 @@ mod tests {
         fn task() -> ClientTask {
             ClientTask {
                 id: Uuid::parse_str("56565656-5656-5656-5656-565656565656").unwrap(),
+                task_list_id: Self::default_task_list().id,
+                task_list_sort_order: 0,
                 title: "Prepare release".to_string(),
                 description: "Confirm the release checklist".to_string(),
                 status: "needs-action".to_string(),
                 due_at: Some("2026-04-21T09:00:00Z".to_string()),
                 completed_at: None,
                 sort_order: 10,
+                updated_at: "2026-04-20T15:00:00Z".to_string(),
+            }
+        }
+
+        fn default_task_list() -> ClientTaskList {
+            ClientTaskList {
+                id: Uuid::parse_str("10101010-1010-1010-1010-101010101010").unwrap(),
+                name: "Tasks".to_string(),
+                role: Some("inbox".to_string()),
+                sort_order: 0,
                 updated_at: "2026-04-20T15:00:00Z".to_string(),
             }
         }
@@ -6635,6 +6763,84 @@ mod tests {
             Ok(())
         }
 
+        async fn fetch_jmap_task_lists(&self, _account_id: Uuid) -> Result<Vec<ClientTaskList>> {
+            let task_lists = self.task_lists.lock().unwrap();
+            if task_lists.is_empty() {
+                Ok(vec![Self::default_task_list()])
+            } else {
+                Ok(task_lists.clone())
+            }
+        }
+
+        async fn fetch_jmap_task_lists_by_ids(
+            &self,
+            _account_id: Uuid,
+            ids: &[Uuid],
+        ) -> Result<Vec<ClientTaskList>> {
+            Ok(self
+                .fetch_jmap_task_lists(Self::account().account_id)
+                .await?
+                .into_iter()
+                .filter(|task_list| ids.contains(&task_list.id))
+                .collect())
+        }
+
+        async fn create_jmap_task_list(
+            &self,
+            input: CreateTaskListInput,
+        ) -> Result<ClientTaskList> {
+            let task_list = ClientTaskList {
+                id: Uuid::new_v4(),
+                name: input.name.trim().to_string(),
+                role: None,
+                sort_order: input.sort_order,
+                updated_at: "2026-04-20T15:30:00Z".to_string(),
+            };
+            let mut task_lists = self.task_lists.lock().unwrap();
+            task_lists.push(task_list.clone());
+            Ok(task_list)
+        }
+
+        async fn update_jmap_task_list(
+            &self,
+            input: UpdateTaskListInput,
+        ) -> Result<ClientTaskList> {
+            let mut task_lists = self.task_lists.lock().unwrap();
+            let task_list = task_lists
+                .iter_mut()
+                .find(|task_list| task_list.id == input.task_list_id)
+                .ok_or_else(|| anyhow!("task list not found"))?;
+            if let Some(name) = input.name {
+                task_list.name = name;
+            }
+            if let Some(sort_order) = input.sort_order {
+                task_list.sort_order = sort_order;
+            }
+            task_list.updated_at = "2026-04-20T16:00:00Z".to_string();
+            Ok(task_list.clone())
+        }
+
+        async fn delete_jmap_task_list(&self, _account_id: Uuid, task_list_id: Uuid) -> Result<()> {
+            let mut task_lists = self.task_lists.lock().unwrap();
+            if task_lists
+                .iter()
+                .any(|task_list| task_list.id == task_list_id && task_list.role.is_some())
+            {
+                bail!("default task list cannot be destroyed");
+            }
+            if self
+                .tasks
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|task| task.task_list_id == task_list_id)
+            {
+                bail!("task list must be empty before it can be destroyed");
+            }
+            task_lists.retain(|task_list| task_list.id != task_list_id);
+            Ok(())
+        }
+
         async fn fetch_jmap_tasks(&self, _account_id: Uuid) -> Result<Vec<ClientTask>> {
             Ok(self.tasks.lock().unwrap().clone())
         }
@@ -6657,6 +6863,21 @@ mod tests {
         async fn upsert_jmap_task(&self, input: UpsertClientTaskInput) -> Result<ClientTask> {
             let task = ClientTask {
                 id: input.id.unwrap_or_else(Uuid::new_v4),
+                task_list_id: input
+                    .task_list_id
+                    .unwrap_or_else(|| Self::default_task_list().id),
+                task_list_sort_order: self
+                    .fetch_jmap_task_lists(Self::account().account_id)
+                    .await?
+                    .into_iter()
+                    .find(|task_list| {
+                        task_list.id
+                            == input
+                                .task_list_id
+                                .unwrap_or_else(|| Self::default_task_list().id)
+                    })
+                    .map(|task_list| task_list.sort_order)
+                    .unwrap_or(0),
                 title: input.title.trim().to_string(),
                 description: input.description.trim().to_string(),
                 status: input.status.trim().to_ascii_lowercase(),
@@ -8193,7 +8414,7 @@ mod tests {
                                         "status": "in-progress",
                                         "due": "2026-04-22T08:30:00Z",
                                         "sortOrder": 20,
-                                        "taskListId": "default"
+                                        "taskListId": FakeStore::default_task_list().id.to_string()
                                     }
                                 }
                             }),
@@ -8207,7 +8428,7 @@ mod tests {
 
         assert_eq!(
             response.method_responses[0].1["list"][0]["id"],
-            Value::String("default".to_string())
+            Value::String(FakeStore::default_task_list().id.to_string())
         );
         assert_eq!(
             response.method_responses[1].1["list"][0]["status"],
@@ -8275,7 +8496,7 @@ mod tests {
                                     "status": "completed",
                                     "completed": "2026-04-20T16:00:00Z",
                                     "sortOrder": 5,
-                                    "taskListId": "default"
+                                    "taskListId": FakeStore::default_task_list().id.to_string()
                                 }
                             }
                         }),
@@ -8328,6 +8549,123 @@ mod tests {
             .unwrap()
             .iter()
             .any(|value| value == &Value::String(second_task.id.to_string())));
+    }
+
+    #[tokio::test]
+    async fn task_list_set_creates_updates_and_destroys_custom_lists() {
+        let custom_task_list = ClientTaskList {
+            id: Uuid::parse_str("20202020-2020-2020-2020-202020202020").unwrap(),
+            name: "Operations".to_string(),
+            role: None,
+            sort_order: 20,
+            updated_at: "2026-04-20T15:10:00Z".to_string(),
+        };
+        let deletable_task_list = ClientTaskList {
+            id: Uuid::parse_str("21212121-2121-2121-2121-212121212121").unwrap(),
+            name: "Archive".to_string(),
+            role: None,
+            sort_order: 30,
+            updated_at: "2026-04-20T15:10:00Z".to_string(),
+        };
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            task_lists: Arc::new(Mutex::new(vec![
+                FakeStore::default_task_list(),
+                custom_task_list.clone(),
+                deletable_task_list.clone(),
+            ])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_TASKS_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "TaskList/set".to_string(),
+                        json!({
+                            "create": {
+                                "newList": {
+                                    "name": "Roadmap",
+                                    "sortOrder": 30
+                                }
+                            },
+                            "update": {
+                                custom_task_list.id.to_string(): {
+                                    "name": "Ops",
+                                    "sortOrder": 5
+                                }
+                            },
+                            "destroy": [deletable_task_list.id.to_string()]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(response.method_responses[0].1["created"]["newList"]["id"].is_string());
+        assert_eq!(
+            response.method_responses[0].1["updated"][&custom_task_list.id.to_string()]["name"],
+            "Ops"
+        );
+        assert!(response.method_responses[0].1["destroyed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == &Value::String(deletable_task_list.id.to_string())));
+    }
+
+    #[tokio::test]
+    async fn task_query_filters_and_reorders_across_task_lists() {
+        let custom_task_list = ClientTaskList {
+            id: Uuid::parse_str("30303030-3030-3030-3030-303030303030").unwrap(),
+            name: "Ops".to_string(),
+            role: None,
+            sort_order: 50,
+            updated_at: "2026-04-20T15:00:00Z".to_string(),
+        };
+        let mut custom_task = FakeStore::task();
+        custom_task.id = Uuid::parse_str("40404040-4040-4040-4040-404040404040").unwrap();
+        custom_task.task_list_id = custom_task_list.id;
+        custom_task.task_list_sort_order = custom_task_list.sort_order;
+        custom_task.sort_order = 1;
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            task_lists: Arc::new(Mutex::new(vec![
+                FakeStore::default_task_list(),
+                custom_task_list.clone(),
+            ])),
+            tasks: Arc::new(Mutex::new(vec![FakeStore::task(), custom_task.clone()])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_TASKS_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Task/query".to_string(),
+                        json!({
+                            "filter": {"inTaskList": custom_task_list.id.to_string()},
+                            "sort": [{"property": "sortOrder", "isAscending": true}]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["ids"],
+            json!([custom_task.id.to_string()])
+        );
     }
 
     #[tokio::test]

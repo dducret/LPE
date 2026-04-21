@@ -467,6 +467,7 @@ pub struct MailboxDelegationResponse {
 #[derive(Debug, Deserialize)]
 pub struct UpsertClientTaskRequest {
     pub id: Option<Uuid>,
+    pub task_list_id: Option<Uuid>,
     pub title: String,
     pub description: String,
     pub status: String,

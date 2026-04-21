@@ -34,8 +34,10 @@ const MAX_SIEVE_SCRIPTS_PER_ACCOUNT: i64 = 16;
 const MAX_SIEVE_REDIRECTS_PER_MESSAGE: usize = 4;
 const DEFAULT_SIEVE_MAILBOX_RETENTION_DAYS: i32 = 365;
 const DEFAULT_COLLECTION_ID: &str = "default";
+const DEFAULT_TASK_LIST_NAME: &str = "Tasks";
+const DEFAULT_TASK_LIST_ROLE: &str = "inbox";
 const CANONICAL_CHANGE_CHANNEL: &str = "lpe_canonical_changes";
-const EXPECTED_SCHEMA_VERSION: &str = "0.1.3";
+const EXPECTED_SCHEMA_VERSION: &str = "0.1.4";
 
 #[derive(Clone)]
 pub struct Storage {
@@ -852,8 +854,20 @@ pub struct UpsertClientContactInput {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ClientTaskList {
+    pub id: Uuid,
+    pub name: String,
+    pub role: Option<String>,
+    pub sort_order: i32,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClientTask {
     pub id: Uuid,
+    pub task_list_id: Uuid,
+    pub task_list_sort_order: i32,
     pub title: String,
     pub description: String,
     pub status: String,
@@ -867,6 +881,7 @@ pub struct ClientTask {
 #[serde(rename_all = "camelCase")]
 pub struct DavTask {
     pub id: Uuid,
+    pub task_list_id: Uuid,
     pub title: String,
     pub description: String,
     pub status: String,
@@ -1054,9 +1069,25 @@ fn normalize_calendar_participants_metadata(
 }
 
 #[derive(Debug, Clone)]
+pub struct CreateTaskListInput {
+    pub account_id: Uuid,
+    pub name: String,
+    pub sort_order: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateTaskListInput {
+    pub account_id: Uuid,
+    pub task_list_id: Uuid,
+    pub name: Option<String>,
+    pub sort_order: Option<i32>,
+}
+
+#[derive(Debug, Clone)]
 pub struct UpsertClientTaskInput {
     pub id: Option<Uuid>,
     pub account_id: Uuid,
+    pub task_list_id: Option<Uuid>,
     pub title: String,
     pub description: String,
     pub status: String,
@@ -1882,8 +1913,19 @@ struct ResolvedSubmissionAuthorization {
 }
 
 #[derive(Debug, FromRow)]
+struct ClientTaskListRow {
+    id: Uuid,
+    name: String,
+    role: Option<String>,
+    sort_order: i32,
+    updated_at: String,
+}
+
+#[derive(Debug, FromRow)]
 struct ClientTaskRow {
     id: Uuid,
+    task_list_id: Uuid,
+    task_list_sort_order: i32,
     title: String,
     description: String,
     status: String,
@@ -1896,6 +1938,7 @@ struct ClientTaskRow {
 #[derive(Debug, FromRow)]
 struct DavTaskRow {
     id: Uuid,
+    task_list_id: Uuid,
     title: String,
     description: String,
     status: String,
@@ -2026,12 +2069,12 @@ impl Storage {
         .fetch_one(&self.pool)
         .await
         .context(
-            "database schema is not initialized for LPE 0.1.3; recreate the database and apply crates/lpe-storage/sql/schema.sql",
+            "database schema is not initialized for LPE 0.1.4; recreate the database and apply crates/lpe-storage/sql/schema.sql",
         )?;
 
         if schema_version != EXPECTED_SCHEMA_VERSION {
             bail!(
-                "unsupported database schema version {schema_version}; expected {EXPECTED_SCHEMA_VERSION}. Release 0.1.3 requires a fresh database initialized from crates/lpe-storage/sql/schema.sql"
+                "unsupported database schema version {schema_version}; expected {EXPECTED_SCHEMA_VERSION}. Release 0.1.4 requires a fresh database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 
@@ -6660,10 +6703,29 @@ impl Storage {
         let task_id = input.id.unwrap_or_else(Uuid::new_v4);
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         let mut tx = self.pool.begin().await?;
+        let default_task_list =
+            Self::ensure_default_task_list(&mut tx, &tenant_id, input.account_id).await?;
+        let task_list_id = match input.task_list_id {
+            Some(task_list_id) => {
+                Self::load_task_list_in_tx(&mut tx, &tenant_id, input.account_id, task_list_id)
+                    .await?
+                    .id
+            }
+            None => default_task_list.id,
+        };
         let row = sqlx::query_as::<_, ClientTaskRow>(
             r#"
             INSERT INTO tasks (
-                id, tenant_id, account_id, title, description, status, due_at, completed_at, sort_order
+                id,
+                tenant_id,
+                account_id,
+                task_list_id,
+                title,
+                description,
+                status,
+                due_at,
+                completed_at,
+                sort_order
             )
             VALUES (
                 $1,
@@ -6672,14 +6734,16 @@ impl Storage {
                 $4,
                 $5,
                 $6,
-                NULLIF($7, '')::timestamptz,
+                $7,
+                NULLIF($8, '')::timestamptz,
                 CASE
-                    WHEN $6 = 'completed' THEN COALESCE(NULLIF($8, '')::timestamptz, NOW())
+                    WHEN $7 = 'completed' THEN COALESCE(NULLIF($9, '')::timestamptz, NOW())
                     ELSE NULL
                 END,
-                $9
+                $10
             )
             ON CONFLICT (id) DO UPDATE SET
+                task_list_id = EXCLUDED.task_list_id,
                 title = EXCLUDED.title,
                 description = EXCLUDED.description,
                 status = EXCLUDED.status,
@@ -6690,25 +6754,34 @@ impl Storage {
             WHERE tasks.tenant_id = EXCLUDED.tenant_id
               AND tasks.account_id = EXCLUDED.account_id
             RETURNING
-                id,
-                title,
-                description,
-                status,
+                tasks.id,
+                tasks.task_list_id,
+                (
+                    SELECT sort_order
+                    FROM task_lists
+                    WHERE task_lists.tenant_id = tasks.tenant_id
+                      AND task_lists.account_id = tasks.account_id
+                      AND task_lists.id = tasks.task_list_id
+                ) AS task_list_sort_order,
+                tasks.title,
+                tasks.description,
+                tasks.status,
                 CASE
-                    WHEN due_at IS NULL THEN NULL
-                    ELSE to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                    WHEN tasks.due_at IS NULL THEN NULL
+                    ELSE to_char(tasks.due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS due_at,
                 CASE
-                    WHEN completed_at IS NULL THEN NULL
-                    ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                    WHEN tasks.completed_at IS NULL THEN NULL
+                    ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS completed_at,
-                sort_order,
-                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                tasks.sort_order,
+                to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             "#,
         )
         .bind(task_id)
         .bind(&tenant_id)
         .bind(input.account_id)
+        .bind(task_list_id)
         .bind(title)
         .bind(input.description.trim())
         .bind(status)
@@ -7764,6 +7837,182 @@ impl Storage {
             .await
     }
 
+    pub async fn fetch_task_lists(&self, account_id: Uuid) -> Result<Vec<ClientTaskList>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        Self::ensure_default_task_list(&mut tx, &tenant_id, account_id).await?;
+        let rows = sqlx::query_as::<_, ClientTaskListRow>(
+            r#"
+            SELECT
+                id,
+                name,
+                role,
+                sort_order,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM task_lists
+            WHERE tenant_id = $1 AND account_id = $2
+            ORDER BY sort_order ASC, created_at ASC, id ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        tx.commit().await?;
+
+        Ok(rows.into_iter().map(map_task_list).collect())
+    }
+
+    pub async fn fetch_task_lists_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientTaskList>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        Self::ensure_default_task_list(&mut tx, &tenant_id, account_id).await?;
+        let rows = sqlx::query_as::<_, ClientTaskListRow>(
+            r#"
+            SELECT
+                id,
+                name,
+                role,
+                sort_order,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM task_lists
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND id = ANY($3)
+            ORDER BY sort_order ASC, created_at ASC, id ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(ids)
+        .fetch_all(&mut *tx)
+        .await?;
+        tx.commit().await?;
+
+        Ok(rows.into_iter().map(map_task_list).collect())
+    }
+
+    pub async fn create_task_list(&self, input: CreateTaskListInput) -> Result<ClientTaskList> {
+        let name = normalize_task_list_name(&input.name)?;
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        Self::ensure_default_task_list(&mut tx, &tenant_id, input.account_id).await?;
+        let row = sqlx::query_as::<_, ClientTaskListRow>(
+            r#"
+            INSERT INTO task_lists (id, tenant_id, account_id, name, role, sort_order)
+            VALUES ($1, $2, $3, $4, NULL, $5)
+            RETURNING
+                id,
+                name,
+                role,
+                sort_order,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&tenant_id)
+        .bind(input.account_id)
+        .bind(name)
+        .bind(input.sort_order)
+        .fetch_one(&mut *tx)
+        .await?;
+        Self::emit_task_change(&mut tx, &tenant_id, input.account_id).await?;
+        tx.commit().await?;
+
+        Ok(map_task_list(row))
+    }
+
+    pub async fn update_task_list(&self, input: UpdateTaskListInput) -> Result<ClientTaskList> {
+        let normalized_name = input
+            .name
+            .as_deref()
+            .map(normalize_task_list_name)
+            .transpose()?;
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        Self::ensure_default_task_list(&mut tx, &tenant_id, input.account_id).await?;
+        let row = sqlx::query_as::<_, ClientTaskListRow>(
+            r#"
+            UPDATE task_lists
+            SET
+                name = COALESCE($4, name),
+                sort_order = COALESCE($5, sort_order),
+                updated_at = CASE
+                    WHEN $4 IS NULL AND $5 IS NULL THEN updated_at
+                    ELSE NOW()
+                END
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND id = $3
+            RETURNING
+                id,
+                name,
+                role,
+                sort_order,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(input.account_id)
+        .bind(input.task_list_id)
+        .bind(normalized_name)
+        .bind(input.sort_order)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| anyhow!("task list not found"))?;
+        Self::emit_task_change(&mut tx, &tenant_id, input.account_id).await?;
+        tx.commit().await?;
+
+        Ok(map_task_list(row))
+    }
+
+    pub async fn delete_task_list(&self, account_id: Uuid, task_list_id: Uuid) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let target =
+            Self::load_task_list_in_tx(&mut tx, &tenant_id, account_id, task_list_id).await?;
+        if target.role.as_deref() == Some(DEFAULT_TASK_LIST_ROLE) {
+            bail!("default task list cannot be destroyed");
+        }
+        let task_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM tasks
+            WHERE tenant_id = $1 AND account_id = $2 AND task_list_id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(task_list_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if task_count > 0 {
+            bail!("task list must be empty before it can be destroyed");
+        }
+        sqlx::query(
+            r#"
+            DELETE FROM task_lists
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(task_list_id)
+        .execute(&mut *tx)
+        .await?;
+        Self::emit_task_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
+
+        Ok(())
+    }
+
     pub async fn delete_client_task(&self, account_id: Uuid, task_id: Uuid) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
@@ -7791,40 +8040,43 @@ impl Storage {
 
     pub async fn fetch_dav_tasks(&self, account_id: Uuid) -> Result<Vec<DavTask>> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let default_task_list =
+            Self::ensure_default_task_list(&mut tx, &tenant_id, account_id).await?;
         let rows = sqlx::query_as::<_, DavTaskRow>(
             r#"
             SELECT
-                id,
-                title,
-                description,
-                status,
+                tasks.id,
+                tasks.task_list_id,
+                tasks.title,
+                tasks.description,
+                tasks.status,
                 CASE
-                    WHEN due_at IS NULL THEN NULL
-                    ELSE to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                    WHEN tasks.due_at IS NULL THEN NULL
+                    ELSE to_char(tasks.due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS due_at,
                 CASE
-                    WHEN completed_at IS NULL THEN NULL
-                    ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                    WHEN tasks.completed_at IS NULL THEN NULL
+                    ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS completed_at,
-                sort_order,
-                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                tasks.sort_order,
+                to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             FROM tasks
-            WHERE tenant_id = $1 AND account_id = $2
+            WHERE tasks.tenant_id = $1
+              AND tasks.account_id = $2
+              AND tasks.task_list_id = $3
             ORDER BY
-                CASE status
-                    WHEN 'completed' THEN 2
-                    WHEN 'cancelled' THEN 3
-                    ELSE 1
-                END ASC,
-                due_at ASC NULLS LAST,
-                sort_order ASC,
-                created_at ASC
+                tasks.sort_order ASC,
+                tasks.updated_at ASC,
+                tasks.id ASC
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
-        .fetch_all(&self.pool)
+        .bind(default_task_list.id)
+        .fetch_all(&mut *tx)
         .await?;
+        tx.commit().await?;
 
         Ok(rows.into_iter().map(map_dav_task).collect())
     }
@@ -7838,51 +8090,59 @@ impl Storage {
             return Ok(Vec::new());
         }
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let default_task_list =
+            Self::ensure_default_task_list(&mut tx, &tenant_id, account_id).await?;
         let rows = sqlx::query_as::<_, DavTaskRow>(
             r#"
             SELECT
-                id,
-                title,
-                description,
-                status,
+                tasks.id,
+                tasks.task_list_id,
+                tasks.title,
+                tasks.description,
+                tasks.status,
                 CASE
-                    WHEN due_at IS NULL THEN NULL
-                    ELSE to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                    WHEN tasks.due_at IS NULL THEN NULL
+                    ELSE to_char(tasks.due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS due_at,
                 CASE
-                    WHEN completed_at IS NULL THEN NULL
-                    ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                    WHEN tasks.completed_at IS NULL THEN NULL
+                    ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS completed_at,
-                sort_order,
-                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                tasks.sort_order,
+                to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             FROM tasks
-            WHERE tenant_id = $1
-              AND account_id = $2
-              AND id = ANY($3)
+            WHERE tasks.tenant_id = $1
+              AND tasks.account_id = $2
+              AND tasks.task_list_id = $3
+              AND tasks.id = ANY($4)
             ORDER BY
-                CASE status
-                    WHEN 'completed' THEN 2
-                    WHEN 'cancelled' THEN 3
-                    ELSE 1
-                END ASC,
-                due_at ASC NULLS LAST,
-                sort_order ASC,
-                created_at ASC
+                tasks.sort_order ASC,
+                tasks.updated_at ASC,
+                tasks.id ASC
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
+        .bind(default_task_list.id)
         .bind(ids)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await?;
+        tx.commit().await?;
 
         Ok(rows.into_iter().map(map_dav_task).collect())
     }
 
     pub async fn upsert_dav_task(&self, input: UpsertClientTaskInput) -> Result<DavTask> {
-        let task = self.upsert_client_task(input).await?;
+        let task = self
+            .upsert_client_task(UpsertClientTaskInput {
+                task_list_id: None,
+                ..input
+            })
+            .await?;
         Ok(DavTask {
             id: task.id,
+            task_list_id: task.task_list_id,
             title: task.title,
             description: task.description,
             status: task.status,
@@ -9791,40 +10051,45 @@ impl Storage {
 
     pub async fn fetch_client_tasks(&self, account_id: Uuid) -> Result<Vec<ClientTask>> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        Self::ensure_default_task_list(&mut tx, &tenant_id, account_id).await?;
         let rows = sqlx::query_as::<_, ClientTaskRow>(
             r#"
             SELECT
-                id,
-                title,
-                description,
-                status,
+                tasks.id,
+                tasks.task_list_id,
+                task_lists.sort_order AS task_list_sort_order,
+                tasks.title,
+                tasks.description,
+                tasks.status,
                 CASE
-                    WHEN due_at IS NULL THEN NULL
-                    ELSE to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                    WHEN tasks.due_at IS NULL THEN NULL
+                    ELSE to_char(tasks.due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS due_at,
                 CASE
-                    WHEN completed_at IS NULL THEN NULL
-                    ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                    WHEN tasks.completed_at IS NULL THEN NULL
+                    ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS completed_at,
-                sort_order,
-                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                tasks.sort_order,
+                to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             FROM tasks
-            WHERE tenant_id = $1 AND account_id = $2
+            JOIN task_lists
+              ON task_lists.tenant_id = tasks.tenant_id
+             AND task_lists.account_id = tasks.account_id
+             AND task_lists.id = tasks.task_list_id
+            WHERE tasks.tenant_id = $1 AND tasks.account_id = $2
             ORDER BY
-                CASE status
-                    WHEN 'completed' THEN 2
-                    WHEN 'cancelled' THEN 3
-                    ELSE 1
-                END ASC,
-                due_at ASC NULLS LAST,
-                sort_order ASC,
-                created_at ASC
+                task_lists.sort_order ASC,
+                tasks.sort_order ASC,
+                tasks.updated_at ASC,
+                tasks.id ASC
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await?;
+        tx.commit().await?;
 
         Ok(rows.into_iter().map(map_task).collect())
     }
@@ -9838,44 +10103,49 @@ impl Storage {
             return Ok(Vec::new());
         }
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        Self::ensure_default_task_list(&mut tx, &tenant_id, account_id).await?;
 
         let rows = sqlx::query_as::<_, ClientTaskRow>(
             r#"
             SELECT
-                id,
-                title,
-                description,
-                status,
+                tasks.id,
+                tasks.task_list_id,
+                task_lists.sort_order AS task_list_sort_order,
+                tasks.title,
+                tasks.description,
+                tasks.status,
                 CASE
-                    WHEN due_at IS NULL THEN NULL
-                    ELSE to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                    WHEN tasks.due_at IS NULL THEN NULL
+                    ELSE to_char(tasks.due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS due_at,
                 CASE
-                    WHEN completed_at IS NULL THEN NULL
-                    ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                    WHEN tasks.completed_at IS NULL THEN NULL
+                    ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS completed_at,
-                sort_order,
-                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                tasks.sort_order,
+                to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             FROM tasks
-            WHERE tenant_id = $1
-              AND account_id = $2
-              AND id = ANY($3)
+            JOIN task_lists
+              ON task_lists.tenant_id = tasks.tenant_id
+             AND task_lists.account_id = tasks.account_id
+             AND task_lists.id = tasks.task_list_id
+            WHERE tasks.tenant_id = $1
+              AND tasks.account_id = $2
+              AND tasks.id = ANY($3)
             ORDER BY
-                CASE status
-                    WHEN 'completed' THEN 2
-                    WHEN 'cancelled' THEN 3
-                    ELSE 1
-                END ASC,
-                due_at ASC NULLS LAST,
-                sort_order ASC,
-                created_at ASC
+                task_lists.sort_order ASC,
+                tasks.sort_order ASC,
+                tasks.updated_at ASC,
+                tasks.id ASC
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
         .bind(ids)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await?;
+        tx.commit().await?;
 
         Ok(rows.into_iter().map(map_task).collect())
     }
@@ -10637,6 +10907,64 @@ impl Storage {
             .ok_or_else(|| anyhow!("collection not found"))
     }
 
+    async fn ensure_default_task_list(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Uuid,
+    ) -> Result<ClientTaskListRow> {
+        sqlx::query_as::<_, ClientTaskListRow>(
+            r#"
+            INSERT INTO task_lists (id, tenant_id, account_id, name, role, sort_order)
+            VALUES ($1, $2, $3, $4, $5, 0)
+            ON CONFLICT (tenant_id, account_id, role) DO UPDATE SET
+                name = task_lists.name
+            RETURNING
+                id,
+                name,
+                role,
+                sort_order,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(DEFAULT_TASK_LIST_NAME)
+        .bind(DEFAULT_TASK_LIST_ROLE)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(Into::into)
+    }
+
+    async fn load_task_list_in_tx(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Uuid,
+        task_list_id: Uuid,
+    ) -> Result<ClientTaskListRow> {
+        sqlx::query_as::<_, ClientTaskListRow>(
+            r#"
+            SELECT
+                id,
+                name,
+                role,
+                sort_order,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM task_lists
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND id = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(task_list_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| anyhow!("task list not found"))
+    }
+
     async fn fetch_accessible_contacts_internal(
         &self,
         principal_account_id: Uuid,
@@ -11147,6 +11475,14 @@ fn normalize_task_status(value: &str) -> Result<&'static str> {
     }
 }
 
+fn normalize_task_list_name(value: &str) -> Result<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        bail!("task list name is required");
+    }
+    Ok(trimmed.to_string())
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -11427,6 +11763,16 @@ fn map_contact(row: ClientContactRow) -> ClientContact {
     }
 }
 
+fn map_task_list(row: ClientTaskListRow) -> ClientTaskList {
+    ClientTaskList {
+        id: row.id,
+        name: row.name,
+        role: row.role,
+        sort_order: row.sort_order,
+        updated_at: row.updated_at,
+    }
+}
+
 fn map_collaboration_grant(row: CollaborationGrantRow) -> CollaborationGrant {
     CollaborationGrant {
         id: row.id,
@@ -11480,6 +11826,8 @@ fn map_sender_delegation_grant(row: SenderDelegationGrantRow) -> SenderDelegatio
 fn map_task(row: ClientTaskRow) -> ClientTask {
     ClientTask {
         id: row.id,
+        task_list_id: row.task_list_id,
+        task_list_sort_order: row.task_list_sort_order,
         title: row.title,
         description: row.description,
         status: row.status,
@@ -11493,6 +11841,7 @@ fn map_task(row: ClientTaskRow) -> ClientTask {
 fn map_dav_task(row: DavTaskRow) -> DavTask {
     DavTask {
         id: row.id,
+        task_list_id: row.task_list_id,
         title: row.title,
         description: row.description,
         status: row.status,

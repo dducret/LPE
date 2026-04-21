@@ -2451,6 +2451,7 @@ async fn upsert_client_task(
             .upsert_client_task(UpsertClientTaskInput {
                 id: request.id,
                 account_id: account.account_id,
+                task_list_id: request.task_list_id,
                 title: request.title,
                 description: request.description,
                 status: request.status,

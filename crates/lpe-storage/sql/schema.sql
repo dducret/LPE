@@ -20,7 +20,7 @@ CREATE SEQUENCE message_imap_uid_seq;
 
 CREATE TABLE schema_metadata (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
-    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.3'),
+    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.4'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -713,10 +713,30 @@ CREATE TABLE calendar_events (
 CREATE INDEX calendar_events_account_datetime_idx
     ON calendar_events (tenant_id, account_id, event_date, event_time);
 
+CREATE TABLE task_lists (
+    id UUID PRIMARY KEY,
+    tenant_id TEXT NOT NULL CHECK (btrim(tenant_id) <> ''),
+    account_id UUID NOT NULL,
+    name TEXT NOT NULL CHECK (btrim(name) <> ''),
+    role TEXT CHECK (role IS NULL OR role IN ('inbox')),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (tenant_id, account_id)
+        REFERENCES accounts (tenant_id, id)
+        ON DELETE CASCADE,
+    UNIQUE (tenant_id, account_id, id),
+    UNIQUE (tenant_id, account_id, role)
+);
+
+CREATE INDEX task_lists_account_sort_idx
+    ON task_lists (tenant_id, account_id, sort_order, created_at);
+
 CREATE TABLE tasks (
     id UUID PRIMARY KEY,
     tenant_id TEXT NOT NULL CHECK (btrim(tenant_id) <> ''),
     account_id UUID NOT NULL,
+    task_list_id UUID NOT NULL,
     title TEXT NOT NULL CHECK (btrim(title) <> ''),
     description TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'needs-action'
@@ -728,11 +748,14 @@ CREATE TABLE tasks (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     FOREIGN KEY (tenant_id, account_id)
         REFERENCES accounts (tenant_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, account_id, task_list_id)
+        REFERENCES task_lists (tenant_id, account_id, id)
         ON DELETE CASCADE
 );
 
 CREATE INDEX tasks_account_status_due_idx
-    ON tasks (tenant_id, account_id, status, sort_order, due_at);
+    ON tasks (tenant_id, account_id, task_list_id, status, sort_order, due_at);
 
 CREATE INDEX tasks_account_updated_idx
     ON tasks (tenant_id, account_id, updated_at DESC);
@@ -907,7 +930,7 @@ LEFT JOIN attachments a
 GROUP BY m.id, m.account_id, m.mailbox_id, m.received_at, m.subject_normalized, mb.search_vector;
 
 INSERT INTO schema_metadata (singleton, schema_version)
-VALUES (TRUE, '0.1.3');
+VALUES (TRUE, '0.1.4');
 
 INSERT INTO security_settings (
     tenant_id,

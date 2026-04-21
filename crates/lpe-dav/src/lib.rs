@@ -1335,6 +1335,7 @@ fn parse_vtodo(id: Uuid, account_id: Uuid, body: &[u8]) -> Result<UpsertClientTa
     Ok(UpsertClientTaskInput {
         id: Some(id),
         account_id,
+        task_list_id: None,
         title,
         description,
         status,
@@ -1920,6 +1921,7 @@ mod tests {
         fn task(id: Uuid, title: &str) -> DavTask {
             DavTask {
                 id,
+                task_list_id: Uuid::nil(),
                 title: title.to_string(),
                 description: String::new(),
                 status: "needs-action".to_string(),
@@ -2144,6 +2146,7 @@ mod tests {
             let mut tasks = self.tasks.lock().unwrap();
             let task = DavTask {
                 id: input.id.unwrap(),
+                task_list_id: Uuid::nil(),
                 title: input.title,
                 description: input.description,
                 status: if input.status.trim().is_empty() {
@@ -2596,6 +2599,7 @@ mod tests {
             session: Some(FakeStore::account()),
             tasks: Arc::new(Mutex::new(vec![DavTask {
                 id: task_id,
+                task_list_id: Uuid::nil(),
                 title: "Prepare launch".to_string(),
                 description: "Review the last checklist".to_string(),
                 status: "in-progress".to_string(),
@@ -2634,6 +2638,7 @@ mod tests {
             session: Some(FakeStore::account()),
             tasks: Arc::new(Mutex::new(vec![DavTask {
                 id: task_id,
+                task_list_id: Uuid::nil(),
                 title: "File quarterly report".to_string(),
                 description: "Publish before the board review".to_string(),
                 status: "completed".to_string(),
