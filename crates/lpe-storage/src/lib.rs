@@ -7278,7 +7278,7 @@ impl Storage {
                     WHEN q.next_attempt_at IS NULL THEN NULL
                     ELSE to_char(q.next_attempt_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS next_attempt_at,
-                q.trace_id,
+                NULL::TEXT AS trace_id,
                 q.remote_message_ref,
                 q.last_error
             FROM outbound_message_queue q
