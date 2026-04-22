@@ -51,6 +51,8 @@ The core `LPE` server is multi-tenant. Each tenant manages its domain and domain
 
 - `JMAP` is the primary modern protocol
 - `IMAP` is a mailbox compatibility layer
+- finish current protocol depth and interoperability before adding new protocol breadth
+- prioritize protocol completion in this order: `JMAP`, `IMAP`, `ActiveSync`, `DAV`, then `ManageSieve` / mailbox `Sieve`
 - internet-facing `SMTP` must stay in `LPE-CT`, not move back into the core `LPE` server
 - client autodiscovery and autoconfiguration must publish only endpoints that are truly implemented and exposed
 - the internal `LPE -> LPE-CT` relay must never be advertised as a client `SMTP` submission endpoint unless a real authenticated client-submission service is explicitly deployed and documented
@@ -76,6 +78,7 @@ The core `LPE` server remains responsible for the canonical sent-message copy in
 Native Outlook and mobile support is a first-class requirement.
 
 - `ActiveSync` is the first targeted native Outlook/mobile compatibility layer
+- protocol planning must treat `ActiveSync` compatibility labs, long-poll stability, send flow correctness, and folder sync edge cases as a flagship requirement before introducing new client protocols
 - `EWS` stays a future extension
 - `IMAP` + `SMTP` + autodiscover must not be treated as sufficient for Outlook adoption
 - every client layer must use the canonical `LPE` submission and synchronization model
@@ -108,6 +111,7 @@ Web interfaces must support at least `en`, `fr`, `de`, `it`, and `es`, with Engl
 - do not contradict documented architecture choices without updating the documentation explicitly
 - if a change affects behavior, prerequisites, installation, release framing, or architecture, update the relevant documentation in the same work
 - if a new durable rule appears, update `AGENTS.md`
+- when protocol work is planned, prefer correctness, state consistency, long-lived sync reliability, and real-client interoperability testing over introducing additional protocol surface area
 - prefer explicit architectural documentation over leaving structural assumptions implicit in code
 - for Rust crates, `lib.rs` must act only as a central hub for module declarations, re-exports, and minimal crate wiring; do not add implementation code to `lib.rs` when that code can be placed in helper modules
 - keep demo data, mock content, placeholder marketing copy, and nonfunctional placeholder actions out of runtime UI, published API responses, published configuration, and bootstrap product state; confine them to tests or documentation previews only

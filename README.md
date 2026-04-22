@@ -20,6 +20,17 @@ See `docs/releases/0.1.3.md` for the short release note.
 - `EWS` remains a future extension after the canonical submission and synchronization model is stable
 - the architecture remains compatible with future local AI without data leaving the server
 
+## Current Priority
+
+The current repository priority is to finish the coherence of the implemented protocol set before adding new protocols.
+
+The near-term order is:
+
+- `JMAP` depth first: state or change semantics, WebSocket reliability, delegation, and shared-collection consistency
+- `IMAP` correctness next: sync behavior, `UID` handling, flags, and client compatibility
+- `ActiveSync` as the flagship compatibility target for `Outlook` and mobile clients
+- `DAV` and `ManageSieve` interoperability work after the higher-priority mail protocols are stable
+
 ## Structure
 
 - `crates/` Rust services and libraries, with `lpe-storage` also centralizing shared mail parsing used by imports and protocol adapters

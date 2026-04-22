@@ -177,3 +177,14 @@ The canonical task model still belongs to `LPE`. The DAV adapter does not mainta
 - task `time-range` filtering currently evaluates canonical `due_at` only
 - alarms, free-busy, `VALARM`, and scheduling workflows are not implemented
 - `VTODO` recurrence, attendees, alarms, organizers, priorities, categories, percent-complete, and scheduling workflows are not implemented
+
+## Current completion priorities
+
+The current `DAV` phase is correctness and interoperability, not broader DAV feature growth.
+
+That means:
+
+- add client-matrix tests for `CardDAV`, `CalDAV`, and canonical `VTODO` collections against real clients
+- improve consistency of discovery, `ETag`, conditional writes, collection grants, and canonical item replacement semantics
+- validate shared collection behavior and filtering results under realistic synchronization patterns
+- defer broader DAV scheduling or feature-surface expansion until the implemented compatibility slice is stable across clients

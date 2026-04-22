@@ -59,4 +59,15 @@ The MVP supports:
 - `redirect` and `vacation` currently create a canonical outbound copy in `Sent` with a `sieve-*` technical source; this is accepted for the MVP in order to avoid parallel outbound logic
 - there is no dedicated web administration UI for scripts in this first iteration
 
+### Current completion priorities
+
+The current `ManageSieve` and mailbox `Sieve` phase is to improve correctness and interoperability rather than add more extensions.
+
+The priority is to:
+
+- validate mailbox-side script execution against canonical final-delivery behavior under realistic inbound delivery scenarios
+- add interoperability coverage for `ManageSieve` clients and mailbox `Sieve` execution outcomes
+- keep feature work focused on reliable script storage, activation, execution, and canonical outbound reuse for `redirect` and `vacation`
+- defer broader extension coverage until the implemented mailbox filtering slice behaves consistently across supported clients and delivery flows
+
 

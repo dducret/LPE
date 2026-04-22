@@ -79,3 +79,12 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - the listener is started by `lpe-cli`
 - the bind address is configured through `LPE_IMAP_BIND_ADDRESS`
 - the default bind is `127.0.0.1:1143`
+
+## Current completion priorities
+
+Before expanding `IMAP` breadth, the current priority is to improve correctness and interoperability of the implemented slice:
+
+- tighten sync correctness across `SELECT`, `FETCH`, `STORE`, `COPY`, `MOVE`, `IDLE`, and `CONDSTORE`
+- validate that `UID`, `UIDNEXT`, `UIDVALIDITY`, and `MODSEQ` behavior remain coherent under realistic mailbox operations
+- ensure flag handling stays consistent with the canonical message model across concurrent protocol activity
+- add compatibility testing against common real-world `IMAP` clients and mailbox workflows instead of broadening protocol surface prematurely

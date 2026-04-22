@@ -99,4 +99,13 @@ Additional supported `JMAP` routes:
 - persistent message-blob retrieval beyond temporary uploaded blobs
 - durable server-side push cursors beyond the current per-connection database wakeup model for very large mailbox counts
 
+### Current completion priorities
+
+Before broadening `JMAP` method surface further, the current priority is to finish protocol depth and interoperability:
+
+- complete canonical `state`, `changes`, and `queryChanges` behavior so refresh and resync semantics stay coherent under concurrent mailbox operations
+- harden WebSocket reliability, including wakeup delivery, reconnect behavior, principal filtering, and delegated-mailbox push consistency
+- validate mailbox delegation and shared collection behavior so `Session`, `Mailbox`, `Identity`, and push views stay aligned
+- add interoperability tests against real `JMAP` clients and keep those tests focused on canonical-state correctness rather than synthetic method-count growth
+
 

@@ -21,6 +21,19 @@ Its stable architectural base is:
 - `LPE` as the system of record for mailboxes, contacts, calendars, tasks, rights, and user-visible state
 - future local AI supported without requiring data to leave the server
 
+## Current Delivery Priority
+
+The current product priority is to finish the depth, correctness, and interoperability of the already selected protocol set before adding new protocols.
+
+That means:
+
+- `JMAP` first: complete state or change semantics, WebSocket reliability, and shared-mailbox behavior
+- `IMAP` next: improve sync correctness, `UID` behavior, flag handling, and real-client compatibility
+- `ActiveSync` as the flagship native-client story: prioritize Outlook and iOS compatibility labs, long-poll stability, send-flow correctness, and folder-sync edge cases
+- `DAV` and `ManageSieve` after that: focus on correctness, canonical execution, and client-matrix interoperability rather than feature sprawl
+
+Any proposal to add protocol breadth must be weighed against unfinished interoperability, sync, and canonical-state work in these existing adapters.
+
 ## High-Level Topology
 
 The architecture is split into two responsibility zones:

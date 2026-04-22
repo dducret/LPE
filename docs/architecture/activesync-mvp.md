@@ -117,4 +117,15 @@ Those mutations still write directly into the canonical `contacts` and `calendar
 - the first `Sync` with `SyncKey = 0` uses a conservative priming round-trip before emitting the paged server changes; this is targeted for Outlook/mobile but has not yet been validated against the full diversity of `ActiveSync` clients
 - `Sync` continuation is stabilized around a compact collection fingerprint set rather than persisted full payload snapshots; if an item targeted by an unfinished paged batch mutates before that page is emitted, the server may invalidate that continuation `SyncKey` and require a fresh sync instead of replaying a stale payload
 
+### Current completion priorities
+
+`ActiveSync` is the current flagship compatibility story for native `Outlook` and mobile support.
+
+The next phase must prioritize:
+
+- structured `Outlook` and iOS compatibility labs over additional protocol surface area
+- `Ping` and long-poll stability so device refresh behavior is dependable under long-lived sessions
+- `SendMail`, `SmartReply`, and `SmartForward` correctness so native-client submission always lands in canonical `Sent` without edge-case divergence
+- `FolderSync` and `Sync` edge cases, especially around first sync, continuation, shared-mailbox behavior, and mixed folder collections
+
 

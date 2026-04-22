@@ -125,4 +125,18 @@ Separate sorting center for exposed `SMTP` ingress, outbound relay, perimeter fi
 - attachment indexing for `PDF`, `DOCX`, and `ODT`
 - multilingual web interfaces for `en`, `fr`, `de`, `it`, `es`
 
+### Current protocol-completion phase
+
+The current delivery phase is to finish the existing protocol adapters before introducing new protocol families.
+
+This phase is explicitly depth-first:
+
+- `JMAP`: complete canonical `state` and `changes` semantics, WebSocket reliability, mailbox delegation behavior, and shared collection consistency
+- `IMAP`: improve synchronization correctness, `UID` behavior, flag handling, and compatibility coverage under realistic mailbox operations
+- `ActiveSync`: treat `Outlook` and iOS compatibility as a strategic flagship, with emphasis on long-poll stability, send-flow correctness, and `FolderSync` plus `Sync` edge cases
+- `DAV`: focus on `CardDAV`, `CalDAV`, and `VTODO` correctness plus client-matrix interoperability instead of broader DAV surface expansion
+- `ManageSieve` and mailbox `Sieve`: focus on script correctness, canonical execution during final delivery, and interoperability of mailbox-side filtering rather than additional extension breadth
+
+During this phase, protocol work should prefer real-client interoperability tests, deterministic canonical-state behavior, and long-lived sync reliability over new exposed protocol features.
+
 
