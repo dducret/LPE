@@ -113,6 +113,14 @@ Sender grants are distinct durable rights:
 - `send_as`
 - `send_on_behalf`
 
+`IMAP ACL` admin commands are an adapter projection over those same canonical grants. The current `IMAP` slice does not create a per-mailbox ACL database or a protocol-local rights journal. Instead:
+
+- mailbox access rights are projected from `mailbox_delegation_grants`
+- `p` maps to canonical `send_as`
+- `b` is reserved by `LPE` as an `IMAP ACL` projection of canonical `send_on_behalf`
+- `SETACL` and `DELETEACL` update the canonical delegation tables directly
+- delegated mailbox projection through `IMAP` remains deferred even though the rights are already canonical
+
 Submission always flows through the same canonical `submit_message` path. That path resolves:
 
 - the mailbox owner account
@@ -155,6 +163,7 @@ Draft creation and submission for shared mailboxes keep using the canonical mail
 - accessible shared task lists through `TaskList/*`
 - tasks from both owned and shared lists through `Task/*`
 - `myRights` on `TaskList` derived from canonical `task_list_grants`
+- canonical share-grant changes and shared-task updates now wake the affected `JMAP` principals through the shared canonical push channel instead of relying on owner-local polling assumptions
 
 Task creation and updates may target a shared canonical task list when `may_write=true`. Task deletion requires `may_delete=true`. Task-list rename and destroy remain owner-only operations.
 
@@ -195,6 +204,6 @@ The modified-object detail intentionally remains small in this lot.
 - collection-only granularity on the canonical default collections
 - no user-specific renaming of shared collections
 - no sophisticated multi-master conflict handling
-- no real-time rights-change notification
+- no durable per-right historical sync journal beyond the current canonical push wakeups
 
 

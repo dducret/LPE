@@ -26,6 +26,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `UID FETCH`, `UID STORE`, and `UID SEARCH`
 - `APPEND` to `Drafts` only, persisted through the canonical draft workflow
 - `UIDPLUS` response codes where the current canonical workflow can supply them directly
+- `ACL` admin commands `GETACL`, `MYRIGHTS`, `LISTRIGHTS`, `SETACL`, and `DELETEACL` projected from canonical mailbox and sender delegation grants
 
 ## Canonical model alignment
 
@@ -38,6 +39,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `COPY` reuses canonical message-copy persistence and creates a new canonical message row in the target mailbox instead of introducing mailbox replication state
 - `MOVE` reuses a canonical mailbox move on the existing message row, updates the target mailbox projection, and allocates a fresh destination `UID` so the destination mailbox still receives the moved message at the tail of its IMAP order
 - `CONDSTORE` reuses a canonical account-level mail change watermark plus canonical per-message `imap_modseq` values stored on `messages`; the adapter does not maintain an `IMAP`-only sync journal
+- `ACL` reuses canonical `mailbox_delegation_grants` and `sender_delegation_grants`; the adapter does not maintain a separate IMAP ACL store
 - no `IMAP` path creates a parallel `Sent`, `Drafts`, or `Outbox`
 - `Bcc` stays out of `SEARCH`; it is only rendered back in `Drafts` and `Sent` header reconstruction for the authenticated owner view
 
@@ -48,13 +50,14 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 ## Current limitations
 
 - no message submission or `APPEND` to `Sent`; outbound submission remains canonical through `JMAP`, `ActiveSync`, and the web/API submission workflow
-- no subscribe state, hierarchy management, standalone `EXPUNGE`, ACL, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
+- no subscribe state, hierarchy management, standalone `EXPUNGE`, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
 - mailbox management remains a flat namespace for now; hierarchical folder trees are not implemented yet
 - the supported `FETCH` body sections are limited to header, text body, and reconstructed full message body without attachment MIME reserialization
 - `COPY` intentionally rejects `Sent` and `Drafts` as source or target mailboxes so the adapter cannot become an alternate sent-message or draft workflow
 - `MOVE` uses the same guardrail and only supports `Inbox` plus custom user mailboxes
 - `SEARCH` now supports `ALL`, `SEEN`, `UNSEEN`, `FLAGGED`, `UNFLAGGED`, `TEXT`, `SUBJECT`, `FROM`, `TO`, `CC`, `BODY`, `HEADER`, `BEFORE`, `ON`, `SINCE`, `LARGER`, `SMALLER`, `NOT`, `OR`, sequence-set criteria, and `UID`
 - `IDLE` currently refreshes by polling canonical mailbox state for the selected mailbox; it now coexists with a reusable canonical mail change watermark, but still does not publish `QRESYNC`-grade vanished history
+- the current `ACL` slice is administrative only for the authenticated owner mailbox namespace; delegated mailbox projection through IMAP remains deferred even though the grants are canonical today
 
 ## UID and sync tradeoffs
 
@@ -68,6 +71,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `FETCH MODSEQ` and `STORE ... (UNCHANGEDSINCE n)` operate directly on those canonical values; mixed conditional `STORE` batches may partially apply and return `MODIFIED` for the stale subset
 - `IDLE` only reports selected-mailbox changes that can be observed from canonical mailbox refreshes, such as flag changes, additions, and removals
 - because there is still no canonical vanished-history journal, standalone `EXPUNGE` and `QRESYNC` stay deferred even though `CONDSTORE` now uses canonical first-class change anchors
+- `ACL` rights are a truthful projection over canonical delegation: mailbox access rights map to mailbox visibility and mutation, `p` maps to canonical `send-as`, and `b` is an `LPE`-specific right for canonical `send-on-behalf`
 - `Bcc` remains protected in those tradeoffs as well: it is preserved in protected storage for owner reconstruction in `Drafts` and `Sent`, but never added to IMAP search matching
 
 ## Runtime

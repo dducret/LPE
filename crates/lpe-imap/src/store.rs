@@ -2,7 +2,9 @@ use anyhow::Result;
 use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
     AuditEntryInput, ImapEmail, JmapEmailQuery, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, SavedDraftMessage, Storage, SubmitMessageInput,
+    JmapMailboxUpdateInput, MailboxAccountAccess, MailboxDelegationGrant,
+    MailboxDelegationGrantInput, SavedDraftMessage, SenderDelegationGrant,
+    SenderDelegationGrantInput, SenderDelegationRight, Storage, SubmitMessageInput,
 };
 use std::{future::Future, pin::Pin};
 use uuid::Uuid;
@@ -72,6 +74,41 @@ pub trait ImapStore: AccountAuthStore {
         input: SubmitMessageInput,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, SavedDraftMessage>;
+    fn fetch_account_identity<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, MailboxAccountAccess>;
+    fn fetch_outgoing_mailbox_delegation_grants<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MailboxDelegationGrant>>;
+    fn fetch_outgoing_sender_delegation_grants<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<SenderDelegationGrant>>;
+    fn upsert_mailbox_delegation_grant<'a>(
+        &'a self,
+        input: MailboxDelegationGrantInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, MailboxDelegationGrant>;
+    fn delete_mailbox_delegation_grant<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
+    fn upsert_sender_delegation_grant<'a>(
+        &'a self,
+        input: SenderDelegationGrantInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, SenderDelegationGrant>;
+    fn delete_sender_delegation_grant<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+        sender_right: SenderDelegationRight,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
 }
 
 impl ImapStore for Storage {
@@ -223,5 +260,78 @@ impl ImapStore for Storage {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, SavedDraftMessage> {
         Box::pin(async move { self.save_draft_message(input, audit).await })
+    }
+
+    fn fetch_account_identity<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, MailboxAccountAccess> {
+        Box::pin(async move { self.fetch_account_identity(account_id).await })
+    }
+
+    fn fetch_outgoing_mailbox_delegation_grants<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MailboxDelegationGrant>> {
+        Box::pin(async move {
+            self.fetch_outgoing_mailbox_delegation_grants(owner_account_id)
+                .await
+        })
+    }
+
+    fn fetch_outgoing_sender_delegation_grants<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<SenderDelegationGrant>> {
+        Box::pin(async move {
+            self.fetch_outgoing_sender_delegation_grants(owner_account_id)
+                .await
+        })
+    }
+
+    fn upsert_mailbox_delegation_grant<'a>(
+        &'a self,
+        input: MailboxDelegationGrantInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, MailboxDelegationGrant> {
+        Box::pin(async move { self.upsert_mailbox_delegation_grant(input, audit).await })
+    }
+
+    fn delete_mailbox_delegation_grant<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.delete_mailbox_delegation_grant(owner_account_id, grantee_account_id, audit)
+                .await
+        })
+    }
+
+    fn upsert_sender_delegation_grant<'a>(
+        &'a self,
+        input: SenderDelegationGrantInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, SenderDelegationGrant> {
+        Box::pin(async move { self.upsert_sender_delegation_grant(input, audit).await })
+    }
+
+    fn delete_sender_delegation_grant<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+        sender_right: SenderDelegationRight,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.delete_sender_delegation_grant(
+                owner_account_id,
+                grantee_account_id,
+                sender_right,
+                audit,
+            )
+            .await
+        })
     }
 }

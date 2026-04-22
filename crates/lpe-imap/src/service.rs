@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::{parse::parse_request_line, render::sanitize_imap_text, store::ImapStore};
 
 const CAPABILITIES: &str =
-    "IMAP4rev1 AUTH=XOAUTH2 SASL-IR IDLE MOVE NAMESPACE UIDPLUS CONDSTORE";
+    "IMAP4rev1 AUTH=XOAUTH2 SASL-IR IDLE MOVE NAMESPACE UIDPLUS CONDSTORE ACL";
 pub(crate) const UID_VALIDITY: u32 = 1;
 
 #[derive(Clone)]
@@ -63,7 +63,9 @@ impl<S: ImapStore, D: Detector> ImapServer<S, D> {
             if line.is_empty() {
                 continue;
             }
-            let keep_running = session.handle_request(&mut reader, &mut write_half, line).await?;
+            let keep_running = session
+                .handle_request(&mut reader, &mut write_half, line)
+                .await?;
             if !keep_running {
                 break;
             }
@@ -123,42 +125,114 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         let result = match request.command.as_str() {
             "CAPABILITY" => self.handle_capability(&request.tag, writer).await,
             "NOOP" => self.handle_noop(&request.tag, writer).await,
-            "LOGOUT" => self.handle_logout(&request.tag, writer).await.map(|_| false),
-            "LOGIN" => self.handle_login(&request.tag, &request.arguments, writer).await,
+            "LOGOUT" => self
+                .handle_logout(&request.tag, writer)
+                .await
+                .map(|_| false),
+            "LOGIN" => {
+                self.handle_login(&request.tag, &request.arguments, writer)
+                    .await
+            }
             "AUTHENTICATE" => {
                 self.handle_authenticate(&request.tag, &request.arguments, writer)
                     .await
             }
             "LIST" => self.handle_list(&request.tag, writer).await,
             "NAMESPACE" => self.handle_namespace(&request.tag, writer).await,
-            "STATUS" => self.handle_status(&request.tag, &request.arguments, writer).await,
-            "CREATE" => self.handle_create(&request.tag, &request.arguments, writer).await,
-            "DELETE" => self.handle_delete(&request.tag, &request.arguments, writer).await,
-            "RENAME" => self.handle_rename(&request.tag, &request.arguments, writer).await,
-            "SELECT" => self.handle_select(&request.tag, &request.arguments, writer).await,
-            "FETCH" => {
-                self.handle_fetch(&request.tag, &request.arguments, writer, MessageRefKind::Sequence)
+            "STATUS" => {
+                self.handle_status(&request.tag, &request.arguments, writer)
                     .await
+            }
+            "CREATE" => {
+                self.handle_create(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "DELETE" => {
+                self.handle_delete(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "RENAME" => {
+                self.handle_rename(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "SELECT" => {
+                self.handle_select(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "GETACL" => {
+                self.handle_getacl(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "MYRIGHTS" => {
+                self.handle_myrights(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "LISTRIGHTS" => {
+                self.handle_listrights(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "SETACL" => {
+                self.handle_setacl(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "DELETEACL" => {
+                self.handle_deleteacl(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "FETCH" => {
+                self.handle_fetch(
+                    &request.tag,
+                    &request.arguments,
+                    writer,
+                    MessageRefKind::Sequence,
+                )
+                .await
             }
             "STORE" => {
-                self.handle_store(&request.tag, &request.arguments, writer, MessageRefKind::Sequence)
-                    .await
+                self.handle_store(
+                    &request.tag,
+                    &request.arguments,
+                    writer,
+                    MessageRefKind::Sequence,
+                )
+                .await
             }
             "SEARCH" => {
-                self.handle_search(&request.tag, &request.arguments, writer, MessageRefKind::Sequence)
-                    .await
+                self.handle_search(
+                    &request.tag,
+                    &request.arguments,
+                    writer,
+                    MessageRefKind::Sequence,
+                )
+                .await
             }
             "COPY" => {
-                self.handle_copy(&request.tag, &request.arguments, writer, MessageRefKind::Sequence)
-                    .await
+                self.handle_copy(
+                    &request.tag,
+                    &request.arguments,
+                    writer,
+                    MessageRefKind::Sequence,
+                )
+                .await
             }
             "MOVE" => {
-                self.handle_move(&request.tag, &request.arguments, writer, MessageRefKind::Sequence)
+                self.handle_move(
+                    &request.tag,
+                    &request.arguments,
+                    writer,
+                    MessageRefKind::Sequence,
+                )
+                .await
+            }
+            "UID" => {
+                self.handle_uid(reader, writer, &request.tag, &request.arguments)
                     .await
             }
-            "UID" => self.handle_uid(reader, writer, &request.tag, &request.arguments).await,
             "IDLE" => self.handle_idle(reader, writer, &request.tag).await,
-            "APPEND" => self.handle_append(reader, writer, &request.tag, &request.arguments).await,
+            "APPEND" => {
+                self.handle_append(reader, writer, &request.tag, &request.arguments)
+                    .await
+            }
             other => {
                 writer
                     .write_all(
@@ -175,8 +249,12 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             Err(error) => {
                 writer
                     .write_all(
-                        format!("{} NO {}\r\n", request.tag, sanitize_imap_text(&error.to_string()))
-                            .as_bytes(),
+                        format!(
+                            "{} NO {}\r\n",
+                            request.tag,
+                            sanitize_imap_text(&error.to_string())
+                        )
+                        .as_bytes(),
                     )
                     .await?;
                 writer.flush().await?;

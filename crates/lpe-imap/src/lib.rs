@@ -1,3 +1,4 @@
+mod acl;
 mod append;
 mod auth;
 mod idle;

@@ -9,7 +9,9 @@ use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_mail_auth::{issue_oauth_access_token, AccountAuthStore, StoreFuture};
 use lpe_storage::{
     AccountLogin, AuditEntryInput, AuthenticatedAccount, ImapEmail, JmapEmailAddress,
-    JmapEmailQuery, JmapMailbox, SavedDraftMessage, SubmitMessageInput,
+    JmapEmailQuery, JmapMailbox, MailboxAccountAccess, MailboxDelegationGrant,
+    MailboxDelegationGrantInput, SavedDraftMessage, SenderDelegationGrant,
+    SenderDelegationGrantInput, SenderDelegationRight, SubmitMessageInput,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -45,6 +47,8 @@ struct FakeStore {
     mailboxes: Arc<Mutex<Vec<JmapMailbox>>>,
     emails: Arc<Mutex<Vec<ImapEmail>>>,
     highest_modseq: Arc<Mutex<u64>>,
+    mailbox_grants: Arc<Mutex<Vec<MailboxDelegationGrant>>>,
+    sender_grants: Arc<Mutex<Vec<SenderDelegationGrant>>>,
 }
 
 impl FakeStore {
@@ -95,6 +99,8 @@ impl FakeStore {
                 ),
             ])),
             highest_modseq: Arc::new(Mutex::new(3)),
+            mailbox_grants: Arc::new(Mutex::new(Vec::new())),
+            sender_grants: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -474,6 +480,152 @@ impl ImapStore for FakeStore {
             })
         })
     }
+
+    fn fetch_account_identity<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, MailboxAccountAccess> {
+        let identity = if account_id == self.login.account_id {
+            MailboxAccountAccess {
+                account_id: self.login.account_id,
+                email: self.login.email.clone(),
+                display_name: self.login.display_name.clone(),
+                is_owned: true,
+                may_read: true,
+                may_write: true,
+                may_send_as: true,
+                may_send_on_behalf: false,
+            }
+        } else {
+            panic!("unexpected account lookup");
+        };
+        Box::pin(async move { Ok(identity) })
+    }
+
+    fn fetch_outgoing_mailbox_delegation_grants<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MailboxDelegationGrant>> {
+        assert_eq!(owner_account_id, self.login.account_id);
+        let grants = self.mailbox_grants.lock().unwrap().clone();
+        Box::pin(async move { Ok(grants) })
+    }
+
+    fn fetch_outgoing_sender_delegation_grants<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<SenderDelegationGrant>> {
+        assert_eq!(owner_account_id, self.login.account_id);
+        let grants = self.sender_grants.lock().unwrap().clone();
+        Box::pin(async move { Ok(grants) })
+    }
+
+    fn upsert_mailbox_delegation_grant<'a>(
+        &'a self,
+        input: MailboxDelegationGrantInput,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, MailboxDelegationGrant> {
+        let mut grants = self.mailbox_grants.lock().unwrap();
+        let normalized_email = input.grantee_email.trim().to_ascii_lowercase();
+        let grantee_account_id = fake_grantee_account_id(&normalized_email);
+        let grant = grants
+            .iter_mut()
+            .find(|grant| grant.grantee_email.eq_ignore_ascii_case(&normalized_email))
+            .map(|grant| {
+                grant.updated_at = "2026-04-22T10:05:00Z".to_string();
+                grant.clone()
+            })
+            .unwrap_or_else(|| {
+                let created = MailboxDelegationGrant {
+                    id: Uuid::new_v4(),
+                    owner_account_id: input.owner_account_id,
+                    owner_email: self.login.email.clone(),
+                    owner_display_name: self.login.display_name.clone(),
+                    grantee_account_id,
+                    grantee_email: normalized_email.clone(),
+                    grantee_display_name: normalized_email.clone(),
+                    created_at: "2026-04-22T10:00:00Z".to_string(),
+                    updated_at: "2026-04-22T10:00:00Z".to_string(),
+                };
+                grants.push(created.clone());
+                created
+            });
+        Box::pin(async move { Ok(grant) })
+    }
+
+    fn delete_mailbox_delegation_grant<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        assert_eq!(owner_account_id, self.login.account_id);
+        let mut grants = self.mailbox_grants.lock().unwrap();
+        let before = grants.len();
+        grants.retain(|grant| grant.grantee_account_id != grantee_account_id);
+        if grants.len() == before {
+            return Box::pin(async move { anyhow::bail!("mailbox delegation grant not found") });
+        }
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn upsert_sender_delegation_grant<'a>(
+        &'a self,
+        input: SenderDelegationGrantInput,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, SenderDelegationGrant> {
+        let mut grants = self.sender_grants.lock().unwrap();
+        let normalized_email = input.grantee_email.trim().to_ascii_lowercase();
+        let grantee_account_id = fake_grantee_account_id(&normalized_email);
+        let sender_right = input.sender_right.as_str().to_string();
+        let grant = grants
+            .iter_mut()
+            .find(|grant| {
+                grant.grantee_email.eq_ignore_ascii_case(&normalized_email)
+                    && grant.sender_right == sender_right
+            })
+            .map(|grant| {
+                grant.updated_at = "2026-04-22T10:05:00Z".to_string();
+                grant.clone()
+            })
+            .unwrap_or_else(|| {
+                let created = SenderDelegationGrant {
+                    id: Uuid::new_v4(),
+                    owner_account_id: input.owner_account_id,
+                    owner_email: self.login.email.clone(),
+                    owner_display_name: self.login.display_name.clone(),
+                    grantee_account_id,
+                    grantee_email: normalized_email.clone(),
+                    grantee_display_name: normalized_email.clone(),
+                    sender_right,
+                    created_at: "2026-04-22T10:00:00Z".to_string(),
+                    updated_at: "2026-04-22T10:00:00Z".to_string(),
+                };
+                grants.push(created.clone());
+                created
+            });
+        Box::pin(async move { Ok(grant) })
+    }
+
+    fn delete_sender_delegation_grant<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+        sender_right: SenderDelegationRight,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        assert_eq!(owner_account_id, self.login.account_id);
+        let mut grants = self.sender_grants.lock().unwrap();
+        let before = grants.len();
+        grants.retain(|grant| {
+            !(grant.grantee_account_id == grantee_account_id
+                && grant.sender_right == sender_right.as_str())
+        });
+        if grants.len() == before {
+            return Box::pin(async move { anyhow::bail!("sender delegation grant not found") });
+        }
+        Box::pin(async move { Ok(()) })
+    }
 }
 
 #[tokio::test]
@@ -801,6 +953,73 @@ async fn xoauth2_authenticate_is_accepted() {
     task.abort();
 }
 
+#[tokio::test]
+async fn acl_commands_project_canonical_mailbox_and_sender_delegation() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+
+    let capability = send_command(&mut stream, "A2 CAPABILITY\r\n", "A2").await;
+    assert!(capability.contains("ACL"));
+
+    let setacl = send_command(
+        &mut stream,
+        "A3 SETACL Inbox bob@example.test lrswitepb\r\n",
+        "A3",
+    )
+    .await;
+    assert!(setacl.contains("A3 OK SETACL completed"));
+
+    let getacl = send_command(&mut stream, "A4 GETACL Inbox\r\n", "A4").await;
+    assert!(getacl.contains("* ACL \"Inbox\" alice@example.test lrswiteapb"));
+    assert!(getacl.contains("bob@example.test lrswitepb"));
+
+    let myrights = send_command(&mut stream, "A5 MYRIGHTS Inbox\r\n", "A5").await;
+    assert!(myrights.contains("* MYRIGHTS \"Inbox\" lrswiteapb"));
+
+    let listrights = send_command(
+        &mut stream,
+        "A6 LISTRIGHTS Inbox bob@example.test\r\n",
+        "A6",
+    )
+    .await;
+    assert!(listrights.contains("* LISTRIGHTS \"Inbox\" \"bob@example.test\" \"\" lrswiteapb"));
+
+    let remove_send_as =
+        send_command(&mut stream, "A7 SETACL Inbox bob@example.test -p\r\n", "A7").await;
+    assert!(remove_send_as.contains("A7 OK SETACL completed"));
+
+    let getacl_after_remove = send_command(&mut stream, "A8 GETACL Inbox\r\n", "A8").await;
+    assert!(getacl_after_remove.contains("bob@example.test lrswiteb"));
+    assert!(!getacl_after_remove.contains("bob@example.test lrswitepb"));
+
+    let deleteacl =
+        send_command(&mut stream, "A9 DELETEACL Inbox bob@example.test\r\n", "A9").await;
+    assert!(deleteacl.contains("A9 OK DELETEACL completed"));
+
+    let getacl_after_delete = send_command(&mut stream, "A10 GETACL Inbox\r\n", "A10").await;
+    assert!(getacl_after_delete.contains("* ACL \"Inbox\" alice@example.test lrswiteapb"));
+    assert!(!getacl_after_delete.contains("bob@example.test"));
+
+    let invalid_send_only = send_command(
+        &mut stream,
+        "A11 SETACL Inbox bob@example.test p\r\n",
+        "A11",
+    )
+    .await;
+    assert!(
+        invalid_send_only.contains("A11 NO sender delegation rights require mailbox access rights")
+    );
+
+    task.abort();
+}
+
 fn mailbox(id: &str, role: &str, name: &str, sort_order: i32) -> JmapMailbox {
     JmapMailbox {
         id: Uuid::parse_str(id).unwrap(),
@@ -859,6 +1078,14 @@ fn password_hash() -> String {
         .hash_password(b"secret", &SaltString::generate(&mut OsRng))
         .unwrap()
         .to_string()
+}
+
+fn fake_grantee_account_id(email: &str) -> Uuid {
+    let mut bytes = [0u8; 16];
+    for (index, byte) in email.as_bytes().iter().enumerate() {
+        bytes[index % 16] ^= *byte;
+    }
+    Uuid::from_bytes(bytes)
 }
 
 async fn send_partial_command(stream: &mut TcpStream, value: &str) -> String {
