@@ -67,6 +67,7 @@ The important non-negotiable rules are:
 - `docs/architecture/lpe-ct-local-data-stores.md`
 - `docs/architecture/mail-security-and-traceability.md`
 - `docs/architecture/observability.md`
+- `docs/architecture/operations-and-disaster-recovery.md`
 - `docs/architecture/client-autoconfiguration.md`
 
 ### Protocols

@@ -1,13 +1,34 @@
 # High Availability
 
-This document defines the first realistic high-availability strategy for `LPE` and `LPE-CT`.
+This document defines the supported high-availability strategy for `LPE` and `LPE-CT`.
 
 The strategy is intentionally incremental:
 
 - the default deployment remains one `LPE` node and one `LPE-CT` node
-- the first HA target is `active/passive`, not `active/active`
+- the core `LPE` pattern is explicitly `active/standby`, not `active/active`
+- `LPE-CT` supports either `active/standby` edge publication or replaceable horizontal nodes behind stable publication
 - the design must stay compatible with `Debian Trixie`
 - the `DMZ` / core split remains strict
+
+## Supported patterns
+
+The supported HA patterns are now explicit:
+
+- core `LPE`: `active/standby` only
+- `PostgreSQL`: primary plus standby, promoted outside the application
+- `LPE-CT`: either one active node plus one standby, or a replaceable horizontal pool of equivalent nodes
+
+Unsupported patterns remain:
+
+- `active/active` core writers
+- more than one traffic-writing core node at a time
+- shared canonical mailbox state outside core `PostgreSQL`
+- any `LPE-CT` topology that makes the sorting center canonical for mailbox state
+
+The core reason for that split is different failure semantics:
+
+- the core owns canonical mailbox and protocol state, so write leadership must stay singular
+- `LPE-CT` owns perimeter transport and technical state, so nodes must be replaceable and horizontally repeatable
 
 ## Implemented MVP Status
 
@@ -19,6 +40,8 @@ The current codebase now implements the first operational HA step:
 - the role file accepts `active`, `standby`, `drain`, or `maintenance`
 - when HA role gating is enabled, only `active` returns `ready`
 - the `LPE` outbound worker now pauses automatically on non-active nodes
+- `JMAP` push publication must follow the active core node only
+- authenticated submission through `LPE-CT` now follows the currently published edge node only
 - the core inbound-delivery API now rejects `LPE-CT` traffic on non-active nodes
 - `LPE-CT` now rejects direct `SMTP` ingress and outbound handoff traffic on non-active nodes
 - Debian examples now include readiness probes, role-switch scripts, and `keepalived` example configurations for both zones
@@ -74,26 +97,43 @@ Recovery is local:
 - `LPE-CT` keeps local transport state in `/var/spool/lpe-ct`
 - operators restore the node from backup if the host is lost
 
-### Mode 2: First HA target
+### Mode 2: Supported HA baseline
 
 This is the first supported HA topology:
 
 - `2 x LPE` nodes on the `LAN`
 - `PostgreSQL` primary + standby, with promotion outside the application
-- `2 x LPE-CT` nodes in the `DMZ`
+- `2+ x LPE-CT` nodes in the `DMZ`
 - one floating IP or equivalent stable endpoint per zone
 
 The service model is:
 
-- `LPE`: active/passive
-- `LPE-CT`: active/passive
+- `LPE`: active/standby
+- `LPE-CT`: active/standby or replaceable horizontal publication
 - `PostgreSQL`: primary/standby
 
 The application remains stateless enough for this:
 
 - `LPE` durable state is in `PostgreSQL`
 - the binaries and web assets are installed from the same Git revision on both nodes
-- the internal `LPE <-> LPE-CT` contract already uses stable HTTP endpoints that can sit behind a VIP
+- the internal `LPE <-> LPE-CT` contract already uses stable HTTP endpoints that can sit behind a VIP or edge load-balancer
+
+### Mode 3: Replaceable horizontal `LPE-CT`
+
+This is the preferred scale-out shape for the sorting center once a site needs more than one spare node:
+
+- one active core `LPE` node plus one standby core node
+- primary plus standby `PostgreSQL`
+- multiple equivalent `LPE-CT` nodes published behind stable `MX`, NAT, or load-balancer entry points
+- optional shared `LPE-CT` technical database or coordination layer for perimeter-only state
+
+The architectural rules stay unchanged:
+
+- queue payload custody remains in node-local spool unless a deployment explicitly adds replicated transport storage
+- horizontal `LPE-CT` does not create distributed canonical mailbox state
+- any node may be replaced, rebuilt, or reintroduced after manual spool review
+
+This pattern is supported because `LPE-CT` is a perimeter service, not because the core has become multi-writer.
 
 ## Core HA Strategy
 
@@ -138,19 +178,19 @@ The `DMZ` critical path is:
 - the `LPE` integration secret
 - the core delivery base URL
 
-The first HA strategy for `LPE-CT` is also active/passive:
+The first supported publication strategy for `LPE-CT` is active/standby:
 
 - one active `LPE-CT` node receives Internet SMTP and handles outbound relay
-- one passive `LPE-CT` node is preinstalled and synchronized by configuration management
+- one standby `LPE-CT` node is preinstalled and synchronized by configuration management
 - the core uses the `LPE-CT` VIP for outbound handoff
 - public `MX` or perimeter NAT points to the active `LPE-CT` endpoint
 
-This first strategy deliberately keeps the spool local to the active node.
+This baseline strategy deliberately keeps the spool local to the node that accepted the traffic.
 
 That has two consequences:
 
-- a service failover is simple because the passive node can start receiving immediately
-- a host loss on the active `LPE-CT` can leave some in-flight spool data on the failed node until it comes back
+- a service failover is simple because the standby node can start receiving immediately
+- a host loss on one `LPE-CT` node can leave some in-flight spool data on that node until it comes back
 
 This tradeoff is accepted for the first HA iteration because it avoids introducing:
 
@@ -158,7 +198,63 @@ This tradeoff is accepted for the first HA iteration because it avoids introduci
 - cross-node spool replication
 - a custom transport quorum layer
 
-When the failed `LPE-CT` node returns, operators must inspect and replay `deferred`, `held`, or `quarantine` items as needed.
+When a failed `LPE-CT` node returns, operators must inspect and replay `deferred`, `held`, or `quarantine` items as needed.
+
+### Replaceable horizontal `LPE-CT` behavior
+
+When `LPE-CT` is run as a horizontal pool:
+
+- inbound `SMTP` may land on any published healthy edge node
+- authenticated submission may land on any published healthy submission node
+- outbound handoff from the core may target any healthy published `LPE-CT` integration endpoint
+- each node owns the spool items it accepted unless the deployment adds an explicit transport-replication layer
+
+This means horizontal scale improves perimeter availability and node replaceability, but it does not remove the need for per-node spool recovery after host loss.
+
+## Failover behavior by function
+
+### Core outbound queue worker
+
+The outbound queue worker is a core-only active-node function.
+
+Rules:
+
+- only the active core node may poll and dispatch `outbound_message_queue`
+- standby core nodes must stay paused
+- after core failover, the promoted node resumes dispatch from canonical `PostgreSQL` queue state
+- duplicate dispatch must be prevented by the single-active-core rule, not by assuming safe multi-writer behavior
+
+### `JMAP` push listeners
+
+`JMAP` push publication and WebSocket-adjacent notification wakeups are active-core functions.
+
+Rules:
+
+- only the active core node may be published as traffic-ready for `JMAP`
+- after core failover, clients must reconnect to the newly active endpoint
+- long-lived listener state must be treated as disposable; canonical mailbox state remains in `PostgreSQL`
+- failover correctness is based on replay from canonical state tokens, not on preserving in-memory listener sessions
+
+### `ActiveSync` long-poll listeners
+
+`ActiveSync` long-poll listeners are also active-core functions.
+
+Rules:
+
+- long-poll requests on the failed node may terminate during failover
+- clients are expected to reconnect to the active node
+- correctness depends on canonical sync state in the core database, not on preserving the original TCP session
+
+### Authenticated submission
+
+Authenticated client submission is an edge-publication function on `LPE-CT`.
+
+Rules:
+
+- only healthy published `LPE-CT` nodes may accept client submission
+- if a submission node fails before canonical acceptance by `LPE`, the client receives a temporary failure and must retry
+- if canonical submission in `LPE` succeeded before the edge failure, the authoritative `Sent` copy already exists and outbound relay continues through the normal queue path
+- submission failover must never create a second non-canonical submission path
 
 ## Health And Readiness
 
@@ -228,7 +324,7 @@ The outbound worker resumes naturally in this model because queue state stays in
 If the active `LPE-CT` node is lost:
 
 1. move the `DMZ` VIP or perimeter publication
-2. set the promoted node role file to `active`
+2. set the promoted or replacement node role file to `active`
 3. set the former active node role file to `standby` or `maintenance` before reusing it
 4. verify `curl http://<lpe-ct-vip>:8380/health/ready`
 5. verify SMTP banner and accepted spool writes
@@ -269,10 +365,10 @@ The example files are intentionally limited to the first HA step. They do not at
 
 ## Explicit Non-Goals Of This First Iteration
 
-This first HA strategy does not yet implement:
+This supported HA strategy does not yet implement:
 
 - `active/active` `LPE`
-- `active/active` `LPE-CT`
+- queue-replicated `LPE-CT` with zero-loss host failover guarantees
 - replicated `DMZ` spool storage
 - automatic `PostgreSQL` failover inside the application
 - application-managed fencing or split-brain control
