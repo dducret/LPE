@@ -122,6 +122,98 @@ pub struct UpsertClientTaskInput {
     pub sort_order: i32,
 }
 
+pub(crate) fn map_task_list(row: ClientTaskListRow) -> ClientTaskList {
+    ClientTaskList {
+        id: row.id,
+        owner_account_id: row.owner_account_id,
+        owner_email: row.owner_email,
+        owner_display_name: row.owner_display_name,
+        is_owned: row.is_owned,
+        rights: CollaborationRights {
+            may_read: row.may_read,
+            may_write: row.may_write,
+            may_delete: row.may_delete,
+            may_share: row.may_share,
+        },
+        name: row.name,
+        role: row.role,
+        sort_order: row.sort_order,
+        updated_at: row.updated_at,
+    }
+}
+
+pub(crate) fn map_task_list_grant(row: TaskListGrantRow) -> TaskListGrant {
+    TaskListGrant {
+        id: row.id,
+        task_list_id: row.task_list_id,
+        task_list_name: row.task_list_name,
+        owner_account_id: row.owner_account_id,
+        owner_email: row.owner_email,
+        owner_display_name: row.owner_display_name,
+        grantee_account_id: row.grantee_account_id,
+        grantee_email: row.grantee_email,
+        grantee_display_name: row.grantee_display_name,
+        rights: CollaborationRights {
+            may_read: row.may_read,
+            may_write: row.may_write,
+            may_delete: row.may_delete,
+            may_share: row.may_share,
+        },
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    }
+}
+
+pub(crate) fn map_task(row: ClientTaskRow) -> ClientTask {
+    ClientTask {
+        id: row.id,
+        owner_account_id: row.owner_account_id,
+        owner_email: row.owner_email,
+        owner_display_name: row.owner_display_name,
+        is_owned: row.is_owned,
+        rights: CollaborationRights {
+            may_read: row.may_read,
+            may_write: row.may_write,
+            may_delete: row.may_delete,
+            may_share: row.may_share,
+        },
+        task_list_id: row.task_list_id,
+        task_list_sort_order: row.task_list_sort_order,
+        title: row.title,
+        description: row.description,
+        status: row.status,
+        due_at: row.due_at,
+        completed_at: row.completed_at,
+        sort_order: row.sort_order,
+        updated_at: row.updated_at,
+    }
+}
+
+pub(crate) fn map_dav_task(row: DavTaskRow) -> DavTask {
+    DavTask {
+        id: row.id,
+        collection_id: row.task_list_id.to_string(),
+        owner_account_id: row.owner_account_id,
+        owner_email: row.owner_email,
+        owner_display_name: row.owner_display_name,
+        rights: CollaborationRights {
+            may_read: row.may_read,
+            may_write: row.may_write,
+            may_delete: row.may_delete,
+            may_share: row.may_share,
+        },
+        task_list_id: row.task_list_id,
+        task_list_name: row.task_list_name,
+        title: row.title,
+        description: row.description,
+        status: row.status,
+        due_at: row.due_at,
+        completed_at: row.completed_at,
+        sort_order: row.sort_order,
+        updated_at: row.updated_at,
+    }
+}
+
 impl Storage {
     pub async fn upsert_client_task(&self, input: UpsertClientTaskInput) -> Result<ClientTask> {
         let title = input.title.trim();
