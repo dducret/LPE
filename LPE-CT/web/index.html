@@ -199,16 +199,16 @@
 
           <article class="panel ops-card">
             <div class="section-head">
-              <h3>Quarantine queue</h3>
-              <p>Live perimeter backlog with trace and release controls.</p>
+              <h3 data-i18n="quarantineQueueTitle">Quarantine queue</h3>
+              <p data-i18n="quarantineQueueCopy">Live perimeter backlog with trace and release controls.</p>
             </div>
             <div id="quarantine-list" class="quarantine-focus"></div>
           </article>
 
           <article class="panel ops-card">
             <div class="section-head">
-              <h3>Route diagnostics</h3>
-              <p>Relay targets, routing rules, and throttle windows currently in force.</p>
+              <h3 data-i18n="routeDiagnosticsTitle">Route diagnostics</h3>
+              <p data-i18n="routeDiagnosticsCopy">Relay targets, routing rules, and throttle windows currently in force.</p>
             </div>
             <div id="route-diagnostics" class="quarantine-focus"></div>
           </article>
@@ -216,10 +216,10 @@
 
         <section class="panel">
           <div class="section-head">
-            <h3>Trace details</h3>
-            <p>Decision trace, DSN, route, and operator actions for the selected transport item.</p>
+            <h3 data-i18n="traceDetailsTitle">Trace details</h3>
+            <p data-i18n="traceDetailsCopy">Decision trace, DSN, route, and operator actions for the selected transport item.</p>
           </div>
-          <div id="trace-details" class="trace-card empty-state">Select a quarantined or deferred trace.</div>
+          <div id="trace-details" class="trace-card empty-state" data-i18n="traceEmptyState">Select a quarantined or deferred trace.</div>
         </section>
 
         <div id="config-drawer" class="management-modal-backdrop hidden" role="presentation">
@@ -320,6 +320,7 @@
       </section>
     </main>
 
+    <script src="./i18n.js" defer></script>
     <script src="./app.js" defer></script>
   </body>
 </html>

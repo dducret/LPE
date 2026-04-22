@@ -8,6 +8,7 @@ const drawerSummary = document.getElementById("drawer-summary");
 const drawerPanels = Array.from(document.querySelectorAll(".drawer-panel"));
 const panelTriggers = Array.from(document.querySelectorAll("[data-open-panel]"));
 const localePickers = Array.from(document.querySelectorAll("[data-locale-picker]"));
+const { createI18n, defineLocaleCatalog } = window.LpeCtI18n;
 const AUTH_TOKEN_KEY = "lpeCtAdminToken";
 const LAST_ADMIN_EMAIL_KEY = "lpeCtAdminLastEmail";
 const LOCALE_KEY = "lpe.locale";
@@ -153,6 +154,33 @@ const messages = {
     statusProduction: "Production",
     relayReachable: "LAN relay reachable",
     relayUnreachable: "LAN relay unreachable",
+    quarantineQueueTitle: "Quarantine queue",
+    quarantineQueueCopy: "Live perimeter backlog with trace and release controls.",
+    routeDiagnosticsTitle: "Route diagnostics",
+    routeDiagnosticsCopy: "Relay targets, routing rules, and throttle windows currently in force.",
+    traceDetailsTitle: "Trace details",
+    traceDetailsCopy: "Decision trace, DSN, route, and operator actions for the selected transport item.",
+    traceEmptyState: "Select a quarantined or deferred trace.",
+    queueClearTitle: "Queue is clear",
+    queueClearCopy: "No quarantined messages are waiting for review.",
+    traceActionOpen: "Trace",
+    traceActionRelease: "Release",
+    traceActionRetry: "Retry",
+    relayChainTitle: "Relay chain",
+    primaryTemplate: "Primary {value}",
+    secondaryTemplate: "Secondary {value}",
+    unset: "unset",
+    noRoutingOverridesTitle: "No routing overrides",
+    noRoutingOverridesCopy: "Default relay routing is active.",
+    noThrottleRulesTitle: "No throttle rules",
+    noThrottleRulesCopy: "Outbound throttle coordination is currently disabled.",
+    anySender: "any sender",
+    anyRecipient: "any recipient",
+    allSenders: "all senders",
+    allRecipients: "all recipients",
+    retryAfterTemplate: "retry {seconds}s",
+    noRelayTarget: "no relay target",
+    traceActionCompleted: "Trace action completed for {traceId}.",
     heroSummaryTemplate: "{dmzZone} · MX {publishedMx} · primary relay {primaryUpstream}",
   },
   fr: {
@@ -293,6 +321,33 @@ const messages = {
     statusProduction: "Production",
     relayReachable: "Relais LAN joignable",
     relayUnreachable: "Relais LAN injoignable",
+    quarantineQueueTitle: "File de quarantaine",
+    quarantineQueueCopy: "Arriere-plan perimetrique en direct avec controles de trace et de liberation.",
+    routeDiagnosticsTitle: "Diagnostic de routage",
+    routeDiagnosticsCopy: "Cibles de relais, regles de routage et fenetres de limitation actuellement actives.",
+    traceDetailsTitle: "Details de trace",
+    traceDetailsCopy: "Trace de decision, DSN, route et actions operateur pour l'element de transport selectionne.",
+    traceEmptyState: "Selectionnez une trace en quarantaine ou differee.",
+    queueClearTitle: "File vide",
+    queueClearCopy: "Aucun message en quarantaine n'attend une revue.",
+    traceActionOpen: "Trace",
+    traceActionRelease: "Liberer",
+    traceActionRetry: "Relancer",
+    relayChainTitle: "Chaine de relais",
+    primaryTemplate: "Primaire {value}",
+    secondaryTemplate: "Secondaire {value}",
+    unset: "non defini",
+    noRoutingOverridesTitle: "Aucune surcharge de routage",
+    noRoutingOverridesCopy: "Le routage relais par defaut est actif.",
+    noThrottleRulesTitle: "Aucune regle de limitation",
+    noThrottleRulesCopy: "La coordination de limitation sortante est actuellement desactivee.",
+    anySender: "tout expediteur",
+    anyRecipient: "tout destinataire",
+    allSenders: "tous les expediteurs",
+    allRecipients: "tous les destinataires",
+    retryAfterTemplate: "nouvel essai {seconds}s",
+    noRelayTarget: "aucune cible relais",
+    traceActionCompleted: "Action de trace terminee pour {traceId}.",
     heroSummaryTemplate: "{dmzZone} · MX {publishedMx} · relais primaire {primaryUpstream}",
   },
   de: {
@@ -433,6 +488,33 @@ const messages = {
     statusProduction: "Produktion",
     relayReachable: "LAN-Relay erreichbar",
     relayUnreachable: "LAN-Relay nicht erreichbar",
+    quarantineQueueTitle: "Quarantaene-Warteschlange",
+    quarantineQueueCopy: "Live-Perimeter-Rueckstand mit Trace- und Freigabeaktionen.",
+    routeDiagnosticsTitle: "Routing-Diagnose",
+    routeDiagnosticsCopy: "Relay-Ziele, Routing-Regeln und aktuell aktive Drosselfenster.",
+    traceDetailsTitle: "Trace-Details",
+    traceDetailsCopy: "Entscheidungsspur, DSN, Route und Operator-Aktionen fuer das ausgewaehlte Transportelement.",
+    traceEmptyState: "Waehlen Sie eine quarantanisierte oder zurueckgestellte Trace aus.",
+    queueClearTitle: "Warteschlange ist leer",
+    queueClearCopy: "Keine quarantanisierten Nachrichten warten auf Pruefung.",
+    traceActionOpen: "Trace",
+    traceActionRelease: "Freigeben",
+    traceActionRetry: "Erneut versuchen",
+    relayChainTitle: "Relay-Kette",
+    primaryTemplate: "Primaer {value}",
+    secondaryTemplate: "Sekundaer {value}",
+    unset: "nicht gesetzt",
+    noRoutingOverridesTitle: "Keine Routing-Ueberschreibungen",
+    noRoutingOverridesCopy: "Standard-Relay-Routing ist aktiv.",
+    noThrottleRulesTitle: "Keine Drosselregeln",
+    noThrottleRulesCopy: "Die Koordination der ausgehenden Drosselung ist derzeit deaktiviert.",
+    anySender: "beliebiger Absender",
+    anyRecipient: "beliebiger Empfaenger",
+    allSenders: "alle Absender",
+    allRecipients: "alle Empfaenger",
+    retryAfterTemplate: "erneut in {seconds}s",
+    noRelayTarget: "kein Relay-Ziel",
+    traceActionCompleted: "Trace-Aktion fuer {traceId} abgeschlossen.",
     heroSummaryTemplate: "{dmzZone} · MX {publishedMx} · primaeres Relay {primaryUpstream}",
   },
   it: {
@@ -573,6 +655,33 @@ const messages = {
     statusProduction: "Produzione",
     relayReachable: "Relay LAN raggiungibile",
     relayUnreachable: "Relay LAN non raggiungibile",
+    quarantineQueueTitle: "Coda quarantena",
+    quarantineQueueCopy: "Backlog perimetrale live con controlli di trace e rilascio.",
+    routeDiagnosticsTitle: "Diagnostica routing",
+    routeDiagnosticsCopy: "Target relay, regole di routing e finestre di throttle attualmente attive.",
+    traceDetailsTitle: "Dettagli trace",
+    traceDetailsCopy: "Trace decisionale, DSN, route e azioni operatore per l'elemento di trasporto selezionato.",
+    traceEmptyState: "Seleziona una trace in quarantena o differita.",
+    queueClearTitle: "Coda libera",
+    queueClearCopy: "Nessun messaggio in quarantena e in attesa di revisione.",
+    traceActionOpen: "Trace",
+    traceActionRelease: "Rilascia",
+    traceActionRetry: "Riprova",
+    relayChainTitle: "Catena relay",
+    primaryTemplate: "Primario {value}",
+    secondaryTemplate: "Secondario {value}",
+    unset: "non impostato",
+    noRoutingOverridesTitle: "Nessun override di routing",
+    noRoutingOverridesCopy: "Il routing relay predefinito e attivo.",
+    noThrottleRulesTitle: "Nessuna regola di throttle",
+    noThrottleRulesCopy: "Il coordinamento del throttle in uscita e attualmente disattivato.",
+    anySender: "qualsiasi mittente",
+    anyRecipient: "qualsiasi destinatario",
+    allSenders: "tutti i mittenti",
+    allRecipients: "tutti i destinatari",
+    retryAfterTemplate: "riprova tra {seconds}s",
+    noRelayTarget: "nessun target relay",
+    traceActionCompleted: "Azione trace completata per {traceId}.",
     heroSummaryTemplate: "{dmzZone} · MX {publishedMx} · relay primario {primaryUpstream}",
   },
   es: {
@@ -713,11 +822,54 @@ const messages = {
     statusProduction: "Produccion",
     relayReachable: "Relay LAN accesible",
     relayUnreachable: "Relay LAN inaccesible",
+    quarantineQueueTitle: "Cola de cuarentena",
+    quarantineQueueCopy: "Acumulado perimetral en vivo con controles de trace y liberacion.",
+    routeDiagnosticsTitle: "Diagnostico de rutas",
+    routeDiagnosticsCopy: "Objetivos de relay, reglas de enrutamiento y ventanas de limitacion actualmente activas.",
+    traceDetailsTitle: "Detalles de trace",
+    traceDetailsCopy: "Trace de decision, DSN, ruta y acciones del operador para el elemento de transporte seleccionado.",
+    traceEmptyState: "Seleccione una trace en cuarentena o diferida.",
+    queueClearTitle: "La cola esta vacia",
+    queueClearCopy: "No hay mensajes en cuarentena esperando revision.",
+    traceActionOpen: "Trace",
+    traceActionRelease: "Liberar",
+    traceActionRetry: "Reintentar",
+    relayChainTitle: "Cadena de relay",
+    primaryTemplate: "Primario {value}",
+    secondaryTemplate: "Secundario {value}",
+    unset: "sin definir",
+    noRoutingOverridesTitle: "Sin sobrescrituras de enrutamiento",
+    noRoutingOverridesCopy: "El enrutamiento relay predeterminado esta activo.",
+    noThrottleRulesTitle: "Sin reglas de limitacion",
+    noThrottleRulesCopy: "La coordinacion de limitacion saliente esta desactivada actualmente.",
+    anySender: "cualquier remitente",
+    anyRecipient: "cualquier destinatario",
+    allSenders: "todos los remitentes",
+    allRecipients: "todos los destinatarios",
+    retryAfterTemplate: "reintento en {seconds}s",
+    noRelayTarget: "sin objetivo relay",
+    traceActionCompleted: "Accion de trace completada para {traceId}.",
     heroSummaryTemplate: "{dmzZone} · MX {publishedMx} · relay primario {primaryUpstream}",
   },
 };
 
-let currentLocale = getInitialLocale();
+const localeCatalog = defineLocaleCatalog({
+  supportedLocales,
+  defaultLocale: "en",
+  base: messages.en,
+  localized: {
+    fr: messages.fr,
+    de: messages.de,
+    it: messages.it,
+    es: messages.es,
+  },
+});
+const i18n = createI18n({
+  storageKey: LOCALE_KEY,
+  supportedLocales,
+  localeLabels,
+  messages: localeCatalog,
+});
 let lastDashboard = null;
 let lastQuarantine = [];
 let lastRouteDiagnostics = null;
@@ -732,59 +884,29 @@ if (loginEmailField) {
 }
 
 function getCopy() {
-  return messages[currentLocale] ?? messages.en;
-}
-
-function getInitialLocale() {
-  const stored = window.localStorage.getItem(LOCALE_KEY);
-  return supportedLocales.includes(stored) ? stored : "en";
+  return i18n.getCopy();
 }
 
 function setLocale(locale) {
-  currentLocale = supportedLocales.includes(locale) ? locale : "en";
-  window.localStorage.setItem(LOCALE_KEY, currentLocale);
-  document.documentElement.lang = currentLocale;
-  document.title = getCopy().pageTitle;
-  syncLocalePickers();
-  applyTranslations();
+  i18n.setLocale(locale);
+  syncPanelTriggerCopy();
+  setLoadingState();
   if (lastDashboard) {
     render(lastDashboard);
   }
-}
-
-function syncLocalePickers() {
-  localePickers.forEach((picker) => {
-    picker.value = currentLocale;
-  });
+  renderQuarantine(lastQuarantine);
+  if (lastRouteDiagnostics) {
+    renderRouteDiagnostics(lastRouteDiagnostics);
+  }
+  renderTrace(lastTrace);
 }
 
 function translate(template, values = {}) {
-  return template.replace(/\{(\w+)\}/g, (_, key) => String(values[key] ?? ""));
+  return i18n.translate(template, values);
 }
 
-function applyTranslations() {
+function syncPanelTriggerCopy() {
   const copy = getCopy();
-
-  document.querySelectorAll("[data-i18n]").forEach((element) => {
-    const key = element.dataset.i18n;
-    if (key && copy[key]) {
-      element.textContent = copy[key];
-    }
-  });
-
-  document.querySelectorAll("[data-i18n-placeholder]").forEach((element) => {
-    const key = element.dataset.i18nPlaceholder;
-    if (key && copy[key]) {
-      element.setAttribute("placeholder", copy[key]);
-    }
-  });
-
-  document.querySelectorAll("[data-i18n-aria-label]").forEach((element) => {
-    const key = element.dataset.i18nAriaLabel;
-    if (key && copy[key]) {
-      element.setAttribute("aria-label", copy[key]);
-    }
-  });
 
   panelTriggers.forEach((trigger) => {
     const titleKey = trigger.dataset.panelTitleKey;
@@ -804,6 +926,15 @@ function applyTranslations() {
       drawerSummary.textContent = activeTrigger.dataset.summary ?? copy.drawerSummaryDefault;
     }
   }
+}
+
+function setLoadingState() {
+  if (lastDashboard) {
+    return;
+  }
+  const copy = getCopy();
+  document.getElementById("node-name").textContent = copy.heroLoadingTitle;
+  document.getElementById("hero-summary").textContent = copy.heroLoadingSummary;
 }
 
 function authHeaders() {
@@ -922,12 +1053,13 @@ function renderAudit(audit) {
 
 function renderQuarantine(items) {
   lastQuarantine = items;
+  const copy = getCopy();
   const container = document.getElementById("quarantine-list");
   if (!container) {
     return;
   }
   if (!items.length) {
-    container.innerHTML = `<div class="quarantine-item"><strong>Queue is clear</strong><span>No quarantined messages are waiting for review.</span></div>`;
+    container.innerHTML = `<div class="quarantine-item"><strong>${copy.queueClearTitle}</strong><span>${copy.queueClearCopy}</span></div>`;
     return;
   }
   container.innerHTML = items
@@ -944,8 +1076,8 @@ function renderQuarantine(items) {
             <span class="pill">security ${item.security_score.toFixed(1)}</span>
           </div>
           <div class="trace-actions">
-            <button class="secondary-button" type="button" data-trace-open="${item.trace_id}">Trace</button>
-            <button class="secondary-button" type="button" data-trace-release="${item.trace_id}">Release</button>
+            <button class="secondary-button" type="button" data-trace-open="${item.trace_id}">${copy.traceActionOpen}</button>
+            <button class="secondary-button" type="button" data-trace-release="${item.trace_id}">${copy.traceActionRelease}</button>
           </div>
         </div>
       `,
@@ -966,6 +1098,7 @@ function renderQuarantine(items) {
 
 function renderRouteDiagnostics(data) {
   lastRouteDiagnostics = data;
+  const copy = getCopy();
   const container = document.getElementById("route-diagnostics");
   if (!container) {
     return;
@@ -977,8 +1110,8 @@ function renderRouteDiagnostics(data) {
           <strong>${rule.id}</strong>
           <span>${rule.description}</span>
           <div class="route-tags">
-            <span class="pill">${rule.sender_domain || "any sender"}</span>
-            <span class="pill">${rule.recipient_domain || "any recipient"}</span>
+            <span class="pill">${rule.sender_domain || copy.anySender}</span>
+            <span class="pill">${rule.recipient_domain || copy.anyRecipient}</span>
             <span class="badge ok">${rule.relay_target}</span>
           </div>
         </div>
@@ -992,9 +1125,9 @@ function renderRouteDiagnostics(data) {
           <strong>${rule.id}</strong>
           <span>${rule.scope} limit ${rule.max_messages}/${rule.window_seconds}s</span>
           <div class="route-tags">
-            <span class="pill">${rule.sender_domain || "all senders"}</span>
-            <span class="pill">${rule.recipient_domain || "all recipients"}</span>
-            <span class="badge warn">retry ${rule.retry_after_seconds}s</span>
+            <span class="pill">${rule.sender_domain || copy.allSenders}</span>
+            <span class="pill">${rule.recipient_domain || copy.allRecipients}</span>
+            <span class="badge warn">${translate(copy.retryAfterTemplate, { seconds: rule.retry_after_seconds })}</span>
           </div>
         </div>
       `,
@@ -1002,23 +1135,24 @@ function renderRouteDiagnostics(data) {
     .join("");
   container.innerHTML = `
     <div class="quarantine-item">
-      <strong>Relay chain</strong>
-      <span>Primary ${data.primary_upstream || "unset"}</span>
-      <span>Secondary ${data.secondary_upstream || "unset"}</span>
+      <strong>${copy.relayChainTitle}</strong>
+      <span>${translate(copy.primaryTemplate, { value: data.primary_upstream || copy.unset })}</span>
+      <span>${translate(copy.secondaryTemplate, { value: data.secondary_upstream || copy.unset })}</span>
     </div>
-    ${rules || '<div class="quarantine-item"><strong>No routing overrides</strong><span>Default relay routing is active.</span></div>'}
-    ${throttles || '<div class="quarantine-item"><strong>No throttle rules</strong><span>Outbound throttle coordination is currently disabled.</span></div>'}
+    ${rules || `<div class="quarantine-item"><strong>${copy.noRoutingOverridesTitle}</strong><span>${copy.noRoutingOverridesCopy}</span></div>`}
+    ${throttles || `<div class="quarantine-item"><strong>${copy.noThrottleRulesTitle}</strong><span>${copy.noThrottleRulesCopy}</span></div>`}
   `;
 }
 
 function renderTrace(trace) {
   lastTrace = trace;
+  const copy = getCopy();
   const container = document.getElementById("trace-details");
   if (!container) {
     return;
   }
   if (!trace) {
-    container.textContent = "Select a quarantined or deferred trace.";
+    container.textContent = copy.traceEmptyState;
     container.className = "trace-card empty-state";
     return;
   }
@@ -1031,11 +1165,11 @@ function renderTrace(trace) {
     <div class="trace-meta">
       <span class="badge">${trace.queue}</span>
       <span class="pill">${trace.status}</span>
-      <span class="pill">${trace.route?.relay_target || "no relay target"}</span>
+      <span class="pill">${trace.route?.relay_target || copy.noRelayTarget}</span>
     </div>
     <div class="trace-actions">
-      <button class="secondary-button" type="button" data-trace-retry="${trace.trace_id}">Retry</button>
-      <button class="secondary-button" type="button" data-trace-release="${trace.trace_id}">Release</button>
+      <button class="secondary-button" type="button" data-trace-retry="${trace.trace_id}">${copy.traceActionRetry}</button>
+      <button class="secondary-button" type="button" data-trace-release="${trace.trace_id}">${copy.traceActionRelease}</button>
     </div>
     <div class="trace-decision-list">
       ${(trace.decision_trace ?? [])
@@ -1066,7 +1200,7 @@ async function loadTrace(traceId) {
 
 async function triggerTraceAction(traceId, action) {
   await fetchJson(`/api/traces/${traceId}/${action}`, { method: "POST" });
-  showFeedback(`Trace ${traceId} moved via ${action}.`, false);
+  showFeedback(translate(getCopy().traceActionCompleted, { traceId }), false);
   await loadOps();
   await loadTrace(traceId).catch(() => renderTrace(null));
 }
@@ -1207,17 +1341,7 @@ async function loginAdmin() {
   await load();
 }
 
-localePickers.forEach((picker) => {
-  supportedLocales.forEach((locale) => {
-    const option = document.createElement("option");
-    option.value = locale;
-    option.textContent = localeLabels[locale];
-    picker.appendChild(option);
-  });
-  picker.addEventListener("change", (event) => {
-    setLocale(event.target.value);
-  });
-});
+i18n.bindLocalePickers(localePickers, setLocale);
 
 document.getElementById("refresh").addEventListener("click", () => {
   void load();
@@ -1288,6 +1412,6 @@ document.getElementById("login-form").addEventListener("submit", (event) => {
   });
 });
 
-setLocale(currentLocale);
+setLocale(i18n.getLocale());
 syncRelayHaVisibility();
 void load();
