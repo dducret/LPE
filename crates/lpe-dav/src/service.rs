@@ -49,12 +49,12 @@ pub fn router() -> Router<Storage> {
 }
 
 #[derive(Clone)]
-struct DavService<S> {
+pub(crate) struct DavService<S> {
     store: S,
 }
 
 impl<S> DavService<S> {
-    fn new(store: S) -> Self {
+    pub(crate) fn new(store: S) -> Self {
         Self { store }
     }
 }
@@ -82,7 +82,7 @@ async fn dav_handler(
 }
 
 impl<S: DavStore> DavService<S> {
-    async fn handle(
+    pub(crate) async fn handle(
         &self,
         method: &Method,
         uri: &Uri,

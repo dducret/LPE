@@ -2,7 +2,7 @@ use anyhow::Result;
 use lpe_storage::{AccessibleContact, AccessibleEvent, DavTask};
 
 use crate::{
-    paths::{contact_href, event_href, task_href, DEFAULT_COLLECTION_ID},
+    paths::{contact_href, event_href, task_href},
     serialize::{format_ical_datetime, format_ical_timestamp},
 };
 
@@ -85,7 +85,7 @@ pub(crate) fn contact_matches_report(contact: &AccessibleContact, filter: &Repor
         && !filter
             .hrefs
             .iter()
-            .any(|href| href == &contact_href(DEFAULT_COLLECTION_ID, contact.id))
+            .any(|href| href == &contact_href(&contact.collection_id, contact.id))
     {
         return false;
     }
@@ -108,7 +108,7 @@ pub(crate) fn event_matches_report(event: &AccessibleEvent, filter: &ReportFilte
         && !filter
             .hrefs
             .iter()
-            .any(|href| href == &event_href(DEFAULT_COLLECTION_ID, event.id))
+            .any(|href| href == &event_href(&event.collection_id, event.id))
     {
         return false;
     }

@@ -12,15 +12,23 @@ pub use crate::service::router;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::paths::{DEFAULT_COLLECTION_ID, TASK_COLLECTION_PREFIX};
+    use anyhow::anyhow;
+    use crate::paths::{
+        contact_href, etag_for_event, event_href, task_href, ADDRESSBOOK_COLLECTION_PATH,
+        CALENDAR_HOME_PATH, DEFAULT_COLLECTION_ID, TASK_COLLECTION_PREFIX,
+    };
+    use crate::responses::error_response;
+    use crate::service::DavService;
     use crate::store::DavStore;
     use axum::body::to_bytes;
-    use axum::http::HeaderValue;
+    use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
+    use axum::response::Response;
     use lpe_mail_auth::AccountAuthStore;
     use lpe_storage::{
-        AccessibleContact, AccessibleEvent, AccountLogin, AuthenticatedAccount, ClientContact,
-        ClientEvent, CollaborationCollection, CollaborationRights,
+        AccessibleContact, AccessibleEvent, AccountLogin, AuthenticatedAccount,
+        CalendarOrganizerMetadata, CalendarParticipantMetadata, CalendarParticipantsMetadata,
+        CollaborationCollection, CollaborationRights, DavTask, UpsertClientContactInput,
+        UpsertClientEventInput, UpsertClientTaskInput, serialize_calendar_participants_metadata,
     };
     use std::sync::{Arc, Mutex};
     use uuid::Uuid;
@@ -37,8 +45,10 @@ mod tests {
     struct FakeStore {
         session: Option<AuthenticatedAccount>,
         login: Option<AccountLogin>,
-        contacts: Arc<Mutex<Vec<ClientContact>>>,
-        events: Arc<Mutex<Vec<ClientEvent>>>,
+        contact_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
+        contacts: Arc<Mutex<Vec<AccessibleContact>>>,
+        calendar_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
+        events: Arc<Mutex<Vec<AccessibleEvent>>>,
         task_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
         tasks: Arc<Mutex<Vec<DavTask>>>,
     }
@@ -62,39 +72,42 @@ mod tests {
             }
         }
 
-        fn contact_collection() -> CollaborationCollection {
+        fn account() -> AuthenticatedAccount {
+            AuthenticatedAccount {
+                tenant_id: "tenant-a".to_string(),
+                account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
+                email: "alice@example.test".to_string(),
+                display_name: "Alice".to_string(),
+                expires_at: "2026-04-19T09:00:00Z".to_string(),
+            }
+        }
+
+        fn owned_collection(kind: &str, display_name: &str) -> CollaborationCollection {
             let account = Self::account();
             CollaborationCollection {
                 id: DEFAULT_COLLECTION_ID.to_string(),
-                kind: "contacts".to_string(),
+                kind: kind.to_string(),
                 owner_account_id: account.account_id,
                 owner_email: account.email.clone(),
                 owner_display_name: account.display_name.clone(),
-                display_name: "Contacts".to_string(),
+                display_name: display_name.to_string(),
                 is_owned: true,
                 rights: Self::full_rights(),
             }
         }
 
+        fn contact_collection() -> CollaborationCollection {
+            Self::owned_collection("contacts", "Contacts")
+        }
+
         fn calendar_collection() -> CollaborationCollection {
-            let account = Self::account();
-            CollaborationCollection {
-                id: DEFAULT_COLLECTION_ID.to_string(),
-                kind: "calendar".to_string(),
-                owner_account_id: account.account_id,
-                owner_email: account.email.clone(),
-                owner_display_name: account.display_name.clone(),
-                display_name: "Calendar".to_string(),
-                is_owned: true,
-                rights: Self::full_rights(),
-            }
+            Self::owned_collection("calendar", "Calendar")
         }
 
         fn task_collection() -> CollaborationCollection {
             let account = Self::account();
-            let task_list_id = Uuid::nil().to_string();
             CollaborationCollection {
-                id: task_list_id,
+                id: Uuid::nil().to_string(),
                 kind: "tasks".to_string(),
                 owner_account_id: account.account_id,
                 owner_email: account.email.clone(),
@@ -105,59 +118,120 @@ mod tests {
             }
         }
 
-        fn shared_read_only_task_collection() -> CollaborationCollection {
-            let owner_account_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+        fn shared_collection(
+            id: &str,
+            kind: &str,
+            owner_account_id: &str,
+            owner_email: &str,
+            owner_display_name: &str,
+            display_name: &str,
+            rights: CollaborationRights,
+        ) -> CollaborationCollection {
             CollaborationCollection {
-                id: Uuid::parse_str("90909090-9090-9090-9090-909090909090")
+                id: id.to_string(),
+                kind: kind.to_string(),
+                owner_account_id: Uuid::parse_str(owner_account_id).unwrap(),
+                owner_email: owner_email.to_string(),
+                owner_display_name: owner_display_name.to_string(),
+                display_name: display_name.to_string(),
+                is_owned: false,
+                rights,
+            }
+        }
+
+        fn shared_read_only_contact_collection() -> CollaborationCollection {
+            Self::shared_collection(
+                "shared-contacts-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                "contacts",
+                "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                "owner@example.test",
+                "Owner Example",
+                "Owner Example Contacts",
+                Self::read_only_rights(),
+            )
+        }
+
+        fn shared_writable_calendar_collection() -> CollaborationCollection {
+            Self::shared_collection(
+                "shared-calendar-cccccccc-cccc-cccc-cccc-cccccccccccc",
+                "calendar",
+                "cccccccc-cccc-cccc-cccc-cccccccccccc",
+                "calendar.owner@example.test",
+                "Calendar Owner",
+                "Calendar Owner Calendar",
+                Self::full_rights(),
+            )
+        }
+
+        fn shared_read_only_calendar_collection() -> CollaborationCollection {
+            Self::shared_collection(
+                "shared-calendar-dddddddd-dddd-dddd-dddd-dddddddddddd",
+                "calendar",
+                "dddddddd-dddd-dddd-dddd-dddddddddddd",
+                "readonly.owner@example.test",
+                "Readonly Owner",
+                "Readonly Owner Calendar",
+                Self::read_only_rights(),
+            )
+        }
+
+        fn shared_read_only_task_collection() -> CollaborationCollection {
+            Self::shared_collection(
+                &Uuid::parse_str("90909090-9090-9090-9090-909090909090")
                     .unwrap()
                     .to_string(),
-                kind: "tasks".to_string(),
-                owner_account_id,
-                owner_email: "owner@example.test".to_string(),
-                owner_display_name: "Owner Example".to_string(),
-                display_name: "Shared Ops".to_string(),
-                is_owned: false,
-                rights: Self::read_only_rights(),
-            }
+                "tasks",
+                "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                "owner@example.test",
+                "Owner Example",
+                "Shared Ops",
+                Self::read_only_rights(),
+            )
         }
 
-        fn accessible_contact(contact: ClientContact) -> AccessibleContact {
-            let account = Self::account();
+        fn accessible_contact(
+            collection: &CollaborationCollection,
+            id: Uuid,
+            name: &str,
+        ) -> AccessibleContact {
             AccessibleContact {
-                id: contact.id,
-                collection_id: DEFAULT_COLLECTION_ID.to_string(),
-                owner_account_id: account.account_id,
-                owner_email: account.email.clone(),
-                owner_display_name: account.display_name.clone(),
-                rights: Self::full_rights(),
-                name: contact.name,
-                role: contact.role,
-                email: contact.email,
-                phone: contact.phone,
-                team: contact.team,
-                notes: contact.notes,
+                id,
+                collection_id: collection.id.clone(),
+                owner_account_id: collection.owner_account_id,
+                owner_email: collection.owner_email.clone(),
+                owner_display_name: collection.owner_display_name.clone(),
+                rights: collection.rights.clone(),
+                name: name.to_string(),
+                role: String::new(),
+                email: format!("{}@example.test", name.to_lowercase().replace(' ', ".")),
+                phone: String::new(),
+                team: String::new(),
+                notes: String::new(),
             }
         }
 
-        fn accessible_event(event: ClientEvent) -> AccessibleEvent {
-            let account = Self::account();
+        fn accessible_event(
+            collection: &CollaborationCollection,
+            id: Uuid,
+            title: &str,
+        ) -> AccessibleEvent {
             AccessibleEvent {
-                id: event.id,
-                collection_id: DEFAULT_COLLECTION_ID.to_string(),
-                owner_account_id: account.account_id,
-                owner_email: account.email.clone(),
-                owner_display_name: account.display_name.clone(),
-                rights: Self::full_rights(),
-                date: event.date,
-                time: event.time,
-                time_zone: event.time_zone,
-                duration_minutes: event.duration_minutes,
-                recurrence_rule: event.recurrence_rule,
-                title: event.title,
-                location: event.location,
-                attendees: event.attendees,
-                attendees_json: event.attendees_json,
-                notes: event.notes,
+                id,
+                collection_id: collection.id.clone(),
+                owner_account_id: collection.owner_account_id,
+                owner_email: collection.owner_email.clone(),
+                owner_display_name: collection.owner_display_name.clone(),
+                rights: collection.rights.clone(),
+                date: "2026-04-20".to_string(),
+                time: "09:30".to_string(),
+                time_zone: String::new(),
+                duration_minutes: 0,
+                recurrence_rule: String::new(),
+                title: title.to_string(),
+                location: String::new(),
+                attendees: String::new(),
+                attendees_json: "[]".to_string(),
+                notes: String::new(),
             }
         }
 
@@ -179,16 +253,6 @@ mod tests {
                 completed_at: None,
                 sort_order: 0,
                 updated_at: "2026-04-20T09:00:00Z".to_string(),
-            }
-        }
-
-        fn account() -> AuthenticatedAccount {
-            AuthenticatedAccount {
-                tenant_id: "tenant-a".to_string(),
-                account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
-                email: "alice@example.test".to_string(),
-                display_name: "Alice".to_string(),
-                expires_at: "2026-04-19T09:00:00Z".to_string(),
             }
         }
     }
@@ -243,22 +307,27 @@ mod tests {
             &'a self,
             _principal_account_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>> {
-            Box::pin(async move { Ok(vec![Self::contact_collection()]) })
+            let collections = self.contact_collections.lock().unwrap().clone();
+            Box::pin(async move {
+                if collections.is_empty() {
+                    Ok(vec![FakeStore::contact_collection()])
+                } else {
+                    Ok(collections)
+                }
+            })
         }
 
         fn fetch_accessible_calendar_collections<'a>(
             &'a self,
             _principal_account_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, Vec<CollaborationCollection>> {
-            let task_collections = self.task_collections.lock().unwrap().clone();
+            let collections = self.calendar_collections.lock().unwrap().clone();
             Box::pin(async move {
-                let mut collections = vec![Self::calendar_collection()];
-                if task_collections.is_empty() {
-                    collections.push(Self::task_collection());
+                if collections.is_empty() {
+                    Ok(vec![FakeStore::calendar_collection()])
                 } else {
-                    collections.extend(task_collections);
+                    Ok(collections)
                 }
-                Ok(collections)
             })
         }
 
@@ -269,7 +338,7 @@ mod tests {
             let task_collections = self.task_collections.lock().unwrap().clone();
             Box::pin(async move {
                 if task_collections.is_empty() {
-                    Ok(vec![Self::task_collection()])
+                    Ok(vec![FakeStore::task_collection()])
                 } else {
                     Ok(task_collections)
                 }
@@ -280,46 +349,48 @@ mod tests {
             &'a self,
             _principal_account_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleContact>> {
-            let contacts = self
-                .contacts
-                .lock()
-                .unwrap()
-                .clone()
-                .into_iter()
-                .map(Self::accessible_contact)
-                .collect();
+            let contacts = self.contacts.lock().unwrap().clone();
             Box::pin(async move { Ok(contacts) })
         }
 
         fn fetch_accessible_contacts_in_collection<'a>(
             &'a self,
-            principal_account_id: Uuid,
-            _collection_id: &'a str,
+            _principal_account_id: Uuid,
+            collection_id: &'a str,
         ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleContact>> {
-            self.fetch_accessible_contacts(principal_account_id)
+            let contacts = self
+                .contacts
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|entry| entry.collection_id == collection_id)
+                .cloned()
+                .collect();
+            Box::pin(async move { Ok(contacts) })
         }
 
         fn fetch_accessible_events<'a>(
             &'a self,
             _principal_account_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleEvent>> {
-            let events = self
-                .events
-                .lock()
-                .unwrap()
-                .clone()
-                .into_iter()
-                .map(Self::accessible_event)
-                .collect();
+            let events = self.events.lock().unwrap().clone();
             Box::pin(async move { Ok(events) })
         }
 
         fn fetch_accessible_events_in_collection<'a>(
             &'a self,
-            principal_account_id: Uuid,
-            _collection_id: &'a str,
+            _principal_account_id: Uuid,
+            collection_id: &'a str,
         ) -> lpe_mail_auth::StoreFuture<'a, Vec<AccessibleEvent>> {
-            self.fetch_accessible_events(principal_account_id)
+            let events = self
+                .events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|entry| entry.collection_id == collection_id)
+                .cloned()
+                .collect();
+            Box::pin(async move { Ok(events) })
         }
 
         fn fetch_dav_tasks<'a>(
@@ -349,67 +420,173 @@ mod tests {
         fn create_accessible_contact<'a>(
             &'a self,
             _principal_account_id: Uuid,
-            _collection_id: Option<&'a str>,
+            collection_id: Option<&'a str>,
             input: UpsertClientContactInput,
         ) -> lpe_mail_auth::StoreFuture<'a, AccessibleContact> {
+            let collection_id = collection_id.unwrap_or(DEFAULT_COLLECTION_ID).to_string();
+            let collections = self.contact_collections.lock().unwrap().clone();
             let mut contacts = self.contacts.lock().unwrap();
-            let contact = ClientContact {
-                id: input.id.unwrap(),
-                name: input.name,
-                role: input.role,
-                email: input.email,
-                phone: input.phone,
-                team: input.team,
-                notes: input.notes,
+            let collection = if collections.is_empty() {
+                FakeStore::contact_collection()
+            } else {
+                collections
+                    .into_iter()
+                    .find(|entry| entry.id == collection_id)
+                    .ok_or_else(|| anyhow!("address book not found"))
+                    .unwrap()
             };
-            contacts.retain(|entry| entry.id != contact.id);
-            contacts.push(contact.clone());
-            Box::pin(async move { Ok(Self::accessible_contact(contact)) })
+            let result = if !collection.rights.may_write {
+                Err(anyhow!("write access is not granted on this address book"))
+            } else {
+                let contact = AccessibleContact {
+                    id: input.id.unwrap(),
+                    collection_id: collection.id.clone(),
+                    owner_account_id: collection.owner_account_id,
+                    owner_email: collection.owner_email.clone(),
+                    owner_display_name: collection.owner_display_name.clone(),
+                    rights: collection.rights.clone(),
+                    name: input.name,
+                    role: input.role,
+                    email: input.email,
+                    phone: input.phone,
+                    team: input.team,
+                    notes: input.notes,
+                };
+                contacts.retain(|entry| entry.id != contact.id);
+                contacts.push(contact.clone());
+                Ok(contact)
+            };
+            Box::pin(async move { result })
         }
 
         fn create_accessible_event<'a>(
             &'a self,
             _principal_account_id: Uuid,
-            _collection_id: Option<&'a str>,
+            collection_id: Option<&'a str>,
             input: UpsertClientEventInput,
         ) -> lpe_mail_auth::StoreFuture<'a, AccessibleEvent> {
+            let collection_id = collection_id.unwrap_or(DEFAULT_COLLECTION_ID).to_string();
+            let collections = self.calendar_collections.lock().unwrap().clone();
             let mut events = self.events.lock().unwrap();
-            let event = ClientEvent {
-                id: input.id.unwrap(),
-                date: input.date,
-                time: input.time,
-                time_zone: input.time_zone,
-                duration_minutes: input.duration_minutes,
-                recurrence_rule: input.recurrence_rule,
-                title: input.title,
-                location: input.location,
-                attendees: input.attendees,
-                attendees_json: input.attendees_json,
-                notes: input.notes,
+            let collection = if collections.is_empty() {
+                FakeStore::calendar_collection()
+            } else {
+                collections
+                    .into_iter()
+                    .find(|entry| entry.id == collection_id)
+                    .ok_or_else(|| anyhow!("calendar not found"))
+                    .unwrap()
             };
-            events.retain(|entry| entry.id != event.id);
-            events.push(event.clone());
-            Box::pin(async move { Ok(Self::accessible_event(event)) })
+            let result = if !collection.rights.may_write {
+                Err(anyhow!("write access is not granted on this calendar"))
+            } else {
+                let event = AccessibleEvent {
+                    id: input.id.unwrap(),
+                    collection_id: collection.id.clone(),
+                    owner_account_id: collection.owner_account_id,
+                    owner_email: collection.owner_email.clone(),
+                    owner_display_name: collection.owner_display_name.clone(),
+                    rights: collection.rights.clone(),
+                    date: input.date,
+                    time: input.time,
+                    time_zone: input.time_zone,
+                    duration_minutes: input.duration_minutes,
+                    recurrence_rule: input.recurrence_rule,
+                    title: input.title,
+                    location: input.location,
+                    attendees: input.attendees,
+                    attendees_json: input.attendees_json,
+                    notes: input.notes,
+                };
+                events.retain(|entry| entry.id != event.id);
+                events.push(event.clone());
+                Ok(event)
+            };
+            Box::pin(async move { result })
         }
 
         fn update_accessible_contact<'a>(
             &'a self,
-            principal_account_id: Uuid,
+            _principal_account_id: Uuid,
             contact_id: Uuid,
-            mut input: UpsertClientContactInput,
+            input: UpsertClientContactInput,
         ) -> lpe_mail_auth::StoreFuture<'a, AccessibleContact> {
-            input.id = Some(contact_id);
-            self.create_accessible_contact(principal_account_id, Some(DEFAULT_COLLECTION_ID), input)
+            let mut contacts = self.contacts.lock().unwrap();
+            let existing = contacts
+                .iter()
+                .find(|entry| entry.id == contact_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("contact not found"));
+            let result = match existing {
+                Ok(existing) if !existing.rights.may_write => {
+                    Err(anyhow!("write access is not granted on this address book"))
+                }
+                Ok(existing) => {
+                    let contact = AccessibleContact {
+                        id: contact_id,
+                        collection_id: existing.collection_id,
+                        owner_account_id: existing.owner_account_id,
+                        owner_email: existing.owner_email,
+                        owner_display_name: existing.owner_display_name,
+                        rights: existing.rights,
+                        name: input.name,
+                        role: input.role,
+                        email: input.email,
+                        phone: input.phone,
+                        team: input.team,
+                        notes: input.notes,
+                    };
+                    contacts.retain(|entry| entry.id != contact.id);
+                    contacts.push(contact.clone());
+                    Ok(contact)
+                }
+                Err(error) => Err(error),
+            };
+            Box::pin(async move { result })
         }
 
         fn update_accessible_event<'a>(
             &'a self,
-            principal_account_id: Uuid,
+            _principal_account_id: Uuid,
             event_id: Uuid,
-            mut input: UpsertClientEventInput,
+            input: UpsertClientEventInput,
         ) -> lpe_mail_auth::StoreFuture<'a, AccessibleEvent> {
-            input.id = Some(event_id);
-            self.create_accessible_event(principal_account_id, Some(DEFAULT_COLLECTION_ID), input)
+            let mut events = self.events.lock().unwrap();
+            let existing = events
+                .iter()
+                .find(|entry| entry.id == event_id)
+                .cloned()
+                .ok_or_else(|| anyhow!("event not found"));
+            let result = match existing {
+                Ok(existing) if !existing.rights.may_write => {
+                    Err(anyhow!("write access is not granted on this calendar"))
+                }
+                Ok(existing) => {
+                    let event = AccessibleEvent {
+                        id: event_id,
+                        collection_id: existing.collection_id,
+                        owner_account_id: existing.owner_account_id,
+                        owner_email: existing.owner_email,
+                        owner_display_name: existing.owner_display_name,
+                        rights: existing.rights,
+                        date: input.date,
+                        time: input.time,
+                        time_zone: input.time_zone,
+                        duration_minutes: input.duration_minutes,
+                        recurrence_rule: input.recurrence_rule,
+                        title: input.title,
+                        location: input.location,
+                        attendees: input.attendees,
+                        attendees_json: input.attendees_json,
+                        notes: input.notes,
+                    };
+                    events.retain(|entry| entry.id != event.id);
+                    events.push(event.clone());
+                    Ok(event)
+                }
+                Err(error) => Err(error),
+            };
+            Box::pin(async move { result })
         }
 
         fn upsert_dav_task<'a>(
@@ -421,7 +598,7 @@ mod tests {
             let task_id = input.id.unwrap();
             let task_list_id = input.task_list_id.unwrap_or(Uuid::nil());
             let collection = if task_collections.is_empty() {
-                Ok(Self::task_collection())
+                Ok(FakeStore::task_collection())
             } else {
                 task_collections
                     .into_iter()
@@ -478,11 +655,22 @@ mod tests {
             _principal_account_id: Uuid,
             contact_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, ()> {
-            self.contacts
-                .lock()
-                .unwrap()
-                .retain(|entry| entry.id != contact_id);
-            Box::pin(async move { Ok(()) })
+            let mut contacts = self.contacts.lock().unwrap();
+            let index = contacts
+                .iter()
+                .position(|entry| entry.id == contact_id)
+                .ok_or_else(|| anyhow!("contact not found"));
+            let result = match index {
+                Ok(index) if !contacts[index].rights.may_delete => {
+                    Err(anyhow!("delete access is not granted on this address book"))
+                }
+                Ok(index) => {
+                    contacts.remove(index);
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            };
+            Box::pin(async move { result })
         }
 
         fn delete_accessible_event<'a>(
@@ -490,11 +678,22 @@ mod tests {
             _principal_account_id: Uuid,
             event_id: Uuid,
         ) -> lpe_mail_auth::StoreFuture<'a, ()> {
-            self.events
-                .lock()
-                .unwrap()
-                .retain(|entry| entry.id != event_id);
-            Box::pin(async move { Ok(()) })
+            let mut events = self.events.lock().unwrap();
+            let index = events
+                .iter()
+                .position(|entry| entry.id == event_id)
+                .ok_or_else(|| anyhow!("event not found"));
+            let result = match index {
+                Ok(index) if !events[index].rights.may_delete => {
+                    Err(anyhow!("delete access is not granted on this calendar"))
+                }
+                Ok(index) => {
+                    events.remove(index);
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            };
+            Box::pin(async move { result })
         }
 
         fn delete_dav_task<'a>(
@@ -538,17 +737,16 @@ mod tests {
     #[tokio::test]
     async fn propfind_lists_contact_resources() {
         let contact_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        let contact = AccessibleContact {
+            role: "Sales".to_string(),
+            phone: "+331234".to_string(),
+            team: "North".to_string(),
+            notes: "VIP".to_string(),
+            ..FakeStore::accessible_contact(&FakeStore::contact_collection(), contact_id, "Bob")
+        };
         let store = FakeStore {
             session: Some(FakeStore::account()),
-            contacts: Arc::new(Mutex::new(vec![ClientContact {
-                id: contact_id,
-                name: "Bob".to_string(),
-                role: "Sales".to_string(),
-                email: "bob@example.test".to_string(),
-                phone: "+331234".to_string(),
-                team: "North".to_string(),
-                notes: "VIP".to_string(),
-            }])),
+            contacts: Arc::new(Mutex::new(vec![contact])),
             ..Default::default()
         };
         let service = DavService::new(store);
@@ -574,21 +772,15 @@ mod tests {
     #[tokio::test]
     async fn get_returns_ical_for_existing_event() {
         let event_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+        let event = AccessibleEvent {
+            location: "Room A".to_string(),
+            attendees: "alice@example.test".to_string(),
+            notes: "Daily".to_string(),
+            ..FakeStore::accessible_event(&FakeStore::calendar_collection(), event_id, "Standup")
+        };
         let store = FakeStore {
             session: Some(FakeStore::account()),
-            events: Arc::new(Mutex::new(vec![ClientEvent {
-                id: event_id,
-                date: "2026-04-20".to_string(),
-                time: "09:30".to_string(),
-                time_zone: "".to_string(),
-                duration_minutes: 0,
-                recurrence_rule: "".to_string(),
-                title: "Standup".to_string(),
-                location: "Room A".to_string(),
-                attendees: "alice@example.test".to_string(),
-                attendees_json: "[]".to_string(),
-                notes: "Daily".to_string(),
-            }])),
+            events: Arc::new(Mutex::new(vec![event])),
             ..Default::default()
         };
         let service = DavService::new(store);
@@ -623,7 +815,9 @@ mod tests {
         let response = service
             .handle(
                 &Method::PUT,
-                &Uri::from_static("/dav/addressbooks/me/default/33333333-3333-3333-3333-333333333333.vcf"),
+                &Uri::from_static(
+                    "/dav/addressbooks/me/default/33333333-3333-3333-3333-333333333333.vcf",
+                ),
                 &bearer_headers(),
                 b"BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Carol\r\nEMAIL:carol@example.test\r\nTITLE:Ops\r\nEND:VCARD",
             )
@@ -640,21 +834,14 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_event() {
         let event_id = Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
+        let event = AccessibleEvent {
+            date: "2026-04-21".to_string(),
+            time: "11:00".to_string(),
+            ..FakeStore::accessible_event(&FakeStore::calendar_collection(), event_id, "Review")
+        };
         let store = FakeStore {
             session: Some(FakeStore::account()),
-            events: Arc::new(Mutex::new(vec![ClientEvent {
-                id: event_id,
-                date: "2026-04-21".to_string(),
-                time: "11:00".to_string(),
-                time_zone: "".to_string(),
-                duration_minutes: 0,
-                recurrence_rule: "".to_string(),
-                title: "Review".to_string(),
-                location: "".to_string(),
-                attendees: "".to_string(),
-                attendees_json: "[]".to_string(),
-                notes: "".to_string(),
-            }])),
+            events: Arc::new(Mutex::new(vec![event])),
             ..Default::default()
         };
         let service = DavService::new(store.clone());
@@ -678,14 +865,12 @@ mod tests {
     #[tokio::test]
     async fn get_returns_not_modified_when_if_none_match_matches() {
         let event_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
-        let event = ClientEvent {
-            id: event_id,
+        let event = AccessibleEvent {
             date: "2026-04-22".to_string(),
             time: "14:00".to_string(),
             time_zone: "Europe/Berlin".to_string(),
             duration_minutes: 45,
             recurrence_rule: "FREQ=WEEKLY;BYDAY=WE".to_string(),
-            title: "Planning".to_string(),
             location: "Room B".to_string(),
             attendees: "Alice".to_string(),
             attendees_json: serialize_calendar_participants_metadata(
@@ -704,6 +889,7 @@ mod tests {
                 },
             ),
             notes: "Weekly planning".to_string(),
+            ..FakeStore::accessible_event(&FakeStore::calendar_collection(), event_id, "Planning")
         };
         let store = FakeStore {
             session: Some(FakeStore::account()),
@@ -714,8 +900,7 @@ mod tests {
         let mut headers = bearer_headers();
         headers.insert(
             "if-none-match",
-            HeaderValue::from_str(&etag_for_event(&FakeStore::accessible_event(event.clone())))
-                .unwrap(),
+            HeaderValue::from_str(&etag_for_event(&event)).unwrap(),
         );
 
         let response = service
@@ -737,26 +922,17 @@ mod tests {
     async fn report_filters_collection_by_text_and_href() {
         let first_id = Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap();
         let second_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+        let collection = FakeStore::contact_collection();
         let store = FakeStore {
             session: Some(FakeStore::account()),
             contacts: Arc::new(Mutex::new(vec![
-                ClientContact {
-                    id: first_id,
-                    name: "Bob Example".to_string(),
+                AccessibleContact {
                     role: "Sales".to_string(),
-                    email: "bob@example.test".to_string(),
-                    phone: "".to_string(),
-                    team: "".to_string(),
-                    notes: "".to_string(),
+                    ..FakeStore::accessible_contact(&collection, first_id, "Bob Example")
                 },
-                ClientContact {
-                    id: second_id,
-                    name: "Carol Example".to_string(),
+                AccessibleContact {
                     role: "Ops".to_string(),
-                    email: "carol@example.test".to_string(),
-                    phone: "".to_string(),
-                    team: "".to_string(),
-                    notes: "".to_string(),
+                    ..FakeStore::accessible_contact(&collection, second_id, "Carol Example")
                 },
             ])),
             ..Default::default()
@@ -790,17 +966,13 @@ mod tests {
     #[tokio::test]
     async fn put_rejects_stale_if_match() {
         let contact_id = Uuid::parse_str("88888888-8888-8888-8888-888888888888").unwrap();
+        let contact = AccessibleContact {
+            email: "dora@example.test".to_string(),
+            ..FakeStore::accessible_contact(&FakeStore::contact_collection(), contact_id, "Dora")
+        };
         let store = FakeStore {
             session: Some(FakeStore::account()),
-            contacts: Arc::new(Mutex::new(vec![ClientContact {
-                id: contact_id,
-                name: "Dora".to_string(),
-                role: "".to_string(),
-                email: "dora@example.test".to_string(),
-                phone: "".to_string(),
-                team: "".to_string(),
-                notes: "".to_string(),
-            }])),
+            contacts: Arc::new(Mutex::new(vec![contact])),
             ..Default::default()
         };
         let service = DavService::new(store);
@@ -810,7 +982,9 @@ mod tests {
         let error = service
             .handle(
                 &Method::PUT,
-                &Uri::from_static("/dav/addressbooks/me/default/88888888-8888-8888-8888-888888888888.vcf"),
+                &Uri::from_static(
+                    "/dav/addressbooks/me/default/88888888-8888-8888-8888-888888888888.vcf",
+                ),
                 &headers,
                 b"BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Dora Updated\r\nEMAIL:dora@example.test\r\nEND:VCARD",
             )
@@ -832,7 +1006,9 @@ mod tests {
         let response = service
             .handle(
                 &Method::PUT,
-                &Uri::from_static("/dav/calendars/me/default/99999999-9999-9999-9999-999999999999.ics"),
+                &Uri::from_static(
+                    "/dav/calendars/me/default/99999999-9999-9999-9999-999999999999.ics",
+                ),
                 &bearer_headers(),
                 b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:99999999-9999-9999-9999-999999999999\r\nDTSTART;TZID=Europe/Berlin:20260423T103000\r\nDURATION:PT45M\r\nRRULE:FREQ=WEEKLY;BYDAY=TH\r\nSUMMARY:Interop review\r\nORGANIZER;CN=Owner Example:mailto:owner@example.test\r\nATTENDEE;CN=Alice Example;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE:mailto:alice@example.test\r\nDESCRIPTION:Calendar interop\r\nEND:VEVENT\r\nEND:VCALENDAR",
             )
@@ -855,35 +1031,36 @@ mod tests {
     #[tokio::test]
     async fn get_serializes_organizer_and_participant_status() {
         let event_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
+        let event = AccessibleEvent {
+            date: "2026-04-24".to_string(),
+            time: "15:00".to_string(),
+            time_zone: "Europe/Berlin".to_string(),
+            duration_minutes: 30,
+            attendees: "Bob".to_string(),
+            attendees_json: serialize_calendar_participants_metadata(
+                &CalendarParticipantsMetadata {
+                    organizer: Some(CalendarOrganizerMetadata {
+                        email: "owner@example.test".to_string(),
+                        common_name: "Owner Example".to_string(),
+                    }),
+                    attendees: vec![CalendarParticipantMetadata {
+                        email: "bob@example.test".to_string(),
+                        common_name: "Bob".to_string(),
+                        role: "REQ-PARTICIPANT".to_string(),
+                        partstat: "declined".to_string(),
+                        rsvp: true,
+                    }],
+                },
+            ),
+            ..FakeStore::accessible_event(
+                &FakeStore::calendar_collection(),
+                event_id,
+                "Status review",
+            )
+        };
         let store = FakeStore {
             session: Some(FakeStore::account()),
-            events: Arc::new(Mutex::new(vec![ClientEvent {
-                id: event_id,
-                date: "2026-04-24".to_string(),
-                time: "15:00".to_string(),
-                time_zone: "Europe/Berlin".to_string(),
-                duration_minutes: 30,
-                recurrence_rule: "".to_string(),
-                title: "Status review".to_string(),
-                location: "".to_string(),
-                attendees: "Bob".to_string(),
-                attendees_json: serialize_calendar_participants_metadata(
-                    &CalendarParticipantsMetadata {
-                        organizer: Some(CalendarOrganizerMetadata {
-                            email: "owner@example.test".to_string(),
-                            common_name: "Owner Example".to_string(),
-                        }),
-                        attendees: vec![CalendarParticipantMetadata {
-                            email: "bob@example.test".to_string(),
-                            common_name: "Bob".to_string(),
-                            role: "REQ-PARTICIPANT".to_string(),
-                            partstat: "declined".to_string(),
-                            rsvp: true,
-                        }],
-                    },
-                ),
-                notes: "".to_string(),
-            }])),
+            events: Arc::new(Mutex::new(vec![event])),
             ..Default::default()
         };
         let service = DavService::new(store);
@@ -1085,10 +1262,7 @@ mod tests {
         let collection_id = Uuid::nil().to_string();
         let store = FakeStore {
             session: Some(FakeStore::account()),
-            tasks: Arc::new(Mutex::new(vec![FakeStore::task(
-                task_id,
-                "Retire old export",
-            )])),
+            tasks: Arc::new(Mutex::new(vec![FakeStore::task(task_id, "Retire old export")])),
             ..Default::default()
         };
         let service = DavService::new(store.clone());
@@ -1124,6 +1298,138 @@ mod tests {
                 &Uri::from_maybe_shared(task_resource_path(&shared_collection.id, task_id)).unwrap(),
                 &bearer_headers(),
                 b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:17171717-1717-1717-1717-171717171717\r\nSUMMARY:Blocked update\r\nEND:VTODO\r\nEND:VCALENDAR",
+            )
+            .await;
+        let response = error_response(response.unwrap_err());
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn propfind_lists_shared_contact_collection_with_read_only_privileges() {
+        let collection = FakeStore::shared_read_only_contact_collection();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            contact_collections: Arc::new(Mutex::new(vec![collection.clone()])),
+            ..Default::default()
+        };
+        let service = DavService::new(store);
+        let mut headers = bearer_headers();
+        headers.insert("depth", HeaderValue::from_static("0"));
+
+        let response = service
+            .handle(
+                &Method::from_bytes(b"PROPFIND").unwrap(),
+                &Uri::from_maybe_shared(format!("/dav/addressbooks/me/{}/", collection.id)).unwrap(),
+                &headers,
+                &[],
+            )
+            .await
+            .unwrap();
+
+        let body = response_text(response).await;
+        assert!(body.contains("<d:owner><d:href>mailto:owner@example.test</d:href></d:owner>"));
+        assert!(body.contains("<d:current-user-privilege-set>"));
+        assert!(body.contains("<d:read/>"));
+        assert!(!body.contains("<d:write/>"));
+        assert!(!body.contains("<d:bind/>"));
+    }
+
+    #[tokio::test]
+    async fn report_filters_shared_contact_collection_by_shared_href() {
+        let collection = FakeStore::shared_read_only_contact_collection();
+        let first_id = Uuid::parse_str("19191919-1919-1919-1919-191919191919").unwrap();
+        let second_id = Uuid::parse_str("20202020-2020-2020-2020-202020202020").unwrap();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            contact_collections: Arc::new(Mutex::new(vec![collection.clone()])),
+            contacts: Arc::new(Mutex::new(vec![
+                FakeStore::accessible_contact(&collection, first_id, "Bob Shared"),
+                FakeStore::accessible_contact(&collection, second_id, "Carol Shared"),
+            ])),
+            ..Default::default()
+        };
+        let service = DavService::new(store);
+        let body = format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\
+<card:addressbook-query xmlns:d=\"DAV:\" xmlns:card=\"urn:ietf:params:xml:ns:carddav\">\
+<d:prop><d:getetag/><card:address-data/></d:prop>\
+<d:href>{}</d:href>\
+</card:addressbook-query>",
+            contact_href(&collection.id, first_id)
+        );
+
+        let response = service
+            .handle(
+                &Method::from_bytes(b"REPORT").unwrap(),
+                &Uri::from_maybe_shared(format!("/dav/addressbooks/me/{}/", collection.id)).unwrap(),
+                &bearer_headers(),
+                body.as_bytes(),
+            )
+            .await
+            .unwrap();
+
+        let payload = response_text(response).await;
+        assert!(payload.contains(&contact_href(&collection.id, first_id)));
+        assert!(!payload.contains(&contact_href(&collection.id, second_id)));
+    }
+
+    #[tokio::test]
+    async fn report_filters_shared_calendar_collection_by_shared_href() {
+        let collection = FakeStore::shared_writable_calendar_collection();
+        let first_id = Uuid::parse_str("21212121-2121-2121-2121-212121212121").unwrap();
+        let second_id = Uuid::parse_str("22222223-2222-2222-2222-222222222223").unwrap();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            calendar_collections: Arc::new(Mutex::new(vec![collection.clone()])),
+            events: Arc::new(Mutex::new(vec![
+                FakeStore::accessible_event(&collection, first_id, "Shared review"),
+                FakeStore::accessible_event(&collection, second_id, "Shared planning"),
+            ])),
+            ..Default::default()
+        };
+        let service = DavService::new(store);
+        let body = format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\
+<cal:calendar-query xmlns:d=\"DAV:\" xmlns:cal=\"urn:ietf:params:xml:ns:caldav\">\
+<d:prop><d:getetag/><cal:calendar-data/></d:prop>\
+<d:href>{}</d:href>\
+</cal:calendar-query>",
+            event_href(&collection.id, first_id)
+        );
+
+        let response = service
+            .handle(
+                &Method::from_bytes(b"REPORT").unwrap(),
+                &Uri::from_maybe_shared(format!("/dav/calendars/me/{}/", collection.id)).unwrap(),
+                &bearer_headers(),
+                body.as_bytes(),
+            )
+            .await
+            .unwrap();
+
+        let payload = response_text(response).await;
+        assert!(payload.contains(&event_href(&collection.id, first_id)));
+        assert!(!payload.contains(&event_href(&collection.id, second_id)));
+    }
+
+    #[tokio::test]
+    async fn put_returns_forbidden_for_read_only_shared_calendar_collection() {
+        let collection = FakeStore::shared_read_only_calendar_collection();
+        let event_id = Uuid::parse_str("23232323-2323-2323-2323-232323232323").unwrap();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            calendar_collections: Arc::new(Mutex::new(vec![collection.clone()])),
+            ..Default::default()
+        };
+        let service = DavService::new(store);
+
+        let response = service
+            .handle(
+                &Method::PUT,
+                &Uri::from_maybe_shared(format!("/dav/calendars/me/{}/{}.ics", collection.id, event_id)).unwrap(),
+                &bearer_headers(),
+                b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:23232323-2323-2323-2323-232323232323\r\nDTSTART:20260423T103000Z\r\nSUMMARY:Blocked update\r\nEND:VEVENT\r\nEND:VCALENDAR",
             )
             .await;
         let response = error_response(response.unwrap_err());

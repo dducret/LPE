@@ -107,7 +107,7 @@ pub(crate) fn error_response(error: Error) -> Response {
             .body(axum::body::Body::from(message))
             .unwrap();
     }
-    if message.contains("forbidden") {
+    if message.contains("forbidden") || message.contains("not granted") {
         return Response::builder()
             .status(StatusCode::FORBIDDEN)
             .body(axum::body::Body::from(message))

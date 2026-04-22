@@ -11,6 +11,7 @@ use uuid::Uuid;
 pub(crate) const ROOT_PATH: &str = "/dav/";
 pub(crate) const PRINCIPAL_PATH: &str = "/dav/principals/me/";
 pub(crate) const ADDRESSBOOK_HOME_PATH: &str = "/dav/addressbooks/me/";
+#[allow(dead_code)]
 pub(crate) const DEFAULT_COLLECTION_ID: &str = "default";
 pub(crate) const ADDRESSBOOK_COLLECTION_PREFIX: &str = "/dav/addressbooks/me/";
 pub(crate) const ADDRESSBOOK_COLLECTION_PATH: &str = "/dav/addressbooks/me/default/";

@@ -1,4 +1,6 @@
-use lpe_storage::{AccessibleContact, AccessibleEvent, CollaborationCollection, DavTask};
+use lpe_storage::{
+    AccessibleContact, AccessibleEvent, CollaborationCollection, CollaborationRights, DavTask,
+};
 
 use crate::{
     paths::{
@@ -49,9 +51,12 @@ pub(crate) fn addressbook_collection_entry(collection: CollaborationCollection) 
             "<d:collection/><card:addressbook/>",
             None,
             None,
-            Some(
-                "<d:supported-report-set><d:supported-report><d:report><card:addressbook-query/></d:report></d:supported-report><d:supported-report><d:report><card:addressbook-multiget/></d:report></d:supported-report></d:supported-report-set>".to_string(),
-            ),
+            Some(collection_metadata(
+                &collection.owner_email,
+                &collection.rights,
+                true,
+                "<d:supported-report-set><d:supported-report><d:report><card:addressbook-query/></d:report></d:supported-report><d:supported-report><d:report><card:addressbook-multiget/></d:report></d:supported-report></d:supported-report-set>",
+            )),
         ),
     )
 }
@@ -64,9 +69,12 @@ pub(crate) fn task_collection_entry(collection: CollaborationCollection) -> Stri
             "<d:collection/><cal:calendar/>",
             None,
             None,
-            Some(
-                "<d:supported-report-set><d:supported-report><d:report><cal:calendar-query/></d:report></d:supported-report><d:supported-report><d:report><cal:calendar-multiget/></d:report></d:supported-report></d:supported-report-set><cal:supported-calendar-component-set><cal:comp name=\"VTODO\"/></cal:supported-calendar-component-set>".to_string(),
-            ),
+            Some(collection_metadata(
+                &collection.owner_email,
+                &collection.rights,
+                true,
+                "<d:supported-report-set><d:supported-report><d:report><cal:calendar-query/></d:report></d:supported-report><d:supported-report><d:report><cal:calendar-multiget/></d:report></d:supported-report></d:supported-report-set><cal:supported-calendar-component-set><cal:comp name=\"VTODO\"/></cal:supported-calendar-component-set>",
+            )),
         ),
     )
 }
@@ -79,9 +87,12 @@ pub(crate) fn calendar_collection_entry(collection: CollaborationCollection) -> 
             "<d:collection/><cal:calendar/>",
             None,
             None,
-            Some(
-                "<d:supported-report-set><d:supported-report><d:report><cal:calendar-query/></d:report></d:supported-report><d:supported-report><d:report><cal:calendar-multiget/></d:report></d:supported-report></d:supported-report-set>".to_string(),
-            ),
+            Some(collection_metadata(
+                &collection.owner_email,
+                &collection.rights,
+                true,
+                "<d:supported-report-set><d:supported-report><d:report><cal:calendar-query/></d:report></d:supported-report><d:supported-report><d:report><cal:calendar-multiget/></d:report></d:supported-report></d:supported-report-set>",
+            )),
         ),
     )
 }
@@ -106,7 +117,12 @@ pub(crate) fn contact_resource_entry(contact: AccessibleContact) -> String {
             "",
             Some("text/vcard; charset=utf-8"),
             Some(etag(&body)),
-            None,
+            Some(collection_metadata(
+                &contact.owner_email,
+                &contact.rights,
+                false,
+                "",
+            )),
         ),
     )
 }
@@ -120,7 +136,12 @@ pub(crate) fn event_resource_entry(event: AccessibleEvent) -> String {
             "",
             Some("text/calendar; charset=utf-8"),
             Some(etag(&body)),
-            None,
+            Some(collection_metadata(
+                &event.owner_email,
+                &event.rights,
+                false,
+                "",
+            )),
         ),
     )
 }
@@ -134,7 +155,12 @@ pub(crate) fn task_resource_entry(task: DavTask) -> String {
             "",
             Some("text/calendar; charset=utf-8"),
             Some(etag(&body)),
-            None,
+            Some(collection_metadata(
+                &task.owner_email,
+                &task.rights,
+                false,
+                "",
+            )),
         ),
     )
 }
@@ -200,6 +226,39 @@ fn collection_props(
         prop.push_str(&extra);
     }
     format!("<d:propstat><d:prop>{prop}</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>")
+}
+
+fn collection_metadata(
+    owner_email: &str,
+    rights: &CollaborationRights,
+    is_collection: bool,
+    extra: &str,
+) -> String {
+    format!(
+        "<d:owner><d:href>mailto:{}</d:href></d:owner>{}{}",
+        xml_escape(owner_email),
+        current_user_privilege_set(rights, is_collection),
+        extra
+    )
+}
+
+fn current_user_privilege_set(rights: &CollaborationRights, is_collection: bool) -> String {
+    let mut privileges = vec!["<d:privilege><d:read/></d:privilege>".to_string()];
+    if rights.may_write {
+        privileges.push("<d:privilege><d:write/></d:privilege>".to_string());
+        privileges.push("<d:privilege><d:write-content/></d:privilege>".to_string());
+        privileges.push("<d:privilege><d:write-properties/></d:privilege>".to_string());
+        if is_collection {
+            privileges.push("<d:privilege><d:bind/></d:privilege>".to_string());
+        }
+    }
+    if rights.may_delete {
+        privileges.push("<d:privilege><d:unbind/></d:privilege>".to_string());
+    }
+    format!(
+        "<d:current-user-privilege-set>{}</d:current-user-privilege-set>",
+        privileges.join("")
+    )
 }
 
 pub(crate) fn collection_resourcetype(kind: &str) -> String {

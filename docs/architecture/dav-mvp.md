@@ -51,6 +51,7 @@ The MVP supports:
 The implementation keeps discovery and synchronization intentionally minimal:
 
 - `PROPFIND` exposes the root, current principal, every accessible address-book collection, every accessible calendar collection, every accessible task collection, and collection members
+- `PROPFIND` projects canonical owner and grant-derived DAV privileges on shared and owned collections so clients can distinguish read-only from writable access without a DAV-local ACL store
 - `REPORT` supports collection reads, multiget-style `href` targeting, simple text-match filtering, minimal calendar `time-range` filtering on event start, and minimal task `time-range` filtering on `DUE`
 - `GET` returns one `vCard`, `VEVENT`, or `VTODO` object and honors `If-None-Match`
 - `PUT` performs full-resource replacement for one `vCard`, `VEVENT`, or `VTODO` object and honors `If-Match` and `If-None-Match`
@@ -120,6 +121,7 @@ The canonical task model still belongs to `LPE`. The DAV adapter does not mainta
 - same-tenant shared canonical `VTODO` task collections when canonical task-list grants exist
 - same-tenant shared address-book and calendar collections when canonical grants exist
 - collection discovery through minimal DAV properties
+- grant-projected DAV discovery through `owner` and `current-user-privilege-set` on owned and shared collections
 - read access to contacts, events, and tasks through collection and resource endpoints
 - full-resource create and update for contacts, events, and tasks through `PUT`
 - deletion for contacts, events, and tasks through `DELETE`
@@ -170,6 +172,7 @@ The canonical task model still belongs to `LPE`. The DAV adapter does not mainta
 - calendar recurrence support is limited to preserving one raw `RRULE`; recurrence expansion, exceptions, and detached instances are not implemented
 - time-zone support is limited to preserving `TZID` on `DTSTART`; `VTIMEZONE` definitions are not stored or expanded
 - `REPORT` filtering remains intentionally small and does not implement the full CardDAV or CalDAV filter grammar
+- `REPORT` multiget-style `href` filtering is scoped to the canonical shared collection path; there is still no adapter-local aliasing or per-user collection rename layer
 - calendar time-range filtering currently evaluates the canonical event start and does not expand recurrence sets
 - task `time-range` filtering currently evaluates canonical `due_at` only
 - alarms, free-busy, `VALARM`, and scheduling workflows are not implemented
