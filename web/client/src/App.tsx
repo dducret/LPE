@@ -341,6 +341,7 @@ export function App() {
                   current={workspace.current}
                   mode={workspace.mode}
                   draft={workspace.draft}
+                  composerMailboxes={workspace.composerMailboxes}
                   setDraft={workspace.setDraft}
                   onReply={(message) => workspace.openComposer("reply", message)}
                   onForward={(message) => workspace.openComposer("forward", message)}

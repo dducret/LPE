@@ -52,6 +52,8 @@ export type ContactItem = {
 };
 
 export type MessageDraft = {
+  mailboxAccountId: string;
+  senderMode: "send_as" | "send_on_behalf";
   to: string;
   cc: string;
   subject: string;

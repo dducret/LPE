@@ -1,12 +1,13 @@
 import React from "react";
 import type { ClientCopy } from "../i18n";
-import type { Message, MessageDraft, Mode } from "../client-types";
+import type { MailboxAccountAccess, Message, MessageDraft, Mode } from "../client-types";
 
 export function MailDetail(props: {
   copy: ClientCopy;
   current: Message | null;
   mode: Mode;
   draft: MessageDraft;
+  composerMailboxes: MailboxAccountAccess[];
   setDraft: React.Dispatch<React.SetStateAction<MessageDraft>>;
   onReply: (message: Message) => void;
   onForward: (message: Message) => void;
@@ -16,6 +17,18 @@ export function MailDetail(props: {
   onDeleteDraft: () => void;
 }) {
   if (props.mode !== "closed") {
+    const selectedMailbox =
+      props.composerMailboxes.find((entry) => entry.accountId === props.draft.mailboxAccountId)
+      ?? props.composerMailboxes[0]
+      ?? null;
+    const delegatedModeOptions = selectedMailbox
+      ? [
+          ...(selectedMailbox.maySendAs ? [{ value: "send_as" as const, label: props.copy.senderModes.sendAs }] : []),
+          ...(selectedMailbox.maySendOnBehalf ? [{ value: "send_on_behalf" as const, label: props.copy.senderModes.sendOnBehalf }] : [])
+        ]
+      : [];
+    const showSenderMode = selectedMailbox && !selectedMailbox.isOwned;
+
     return (
       <section className="editor-shell">
         <div className="editor-shell-header">
@@ -28,6 +41,38 @@ export function MailDetail(props: {
         </div>
 
         <div className="form-grid">
+          <label className="field field-wide">
+            <span>{props.copy.fields.from}</span>
+            <select
+              value={props.draft.mailboxAccountId}
+              onChange={(event) => props.setDraft((value) => ({ ...value, mailboxAccountId: event.target.value }))}
+            >
+              {props.composerMailboxes.map((mailbox) => (
+                <option key={mailbox.accountId} value={mailbox.accountId}>
+                  {`${mailbox.displayName} <${mailbox.email}>`}
+                </option>
+              ))}
+            </select>
+          </label>
+          {showSenderMode ? (
+            <label className="field field-wide">
+              <span>{props.copy.fields.senderMode}</span>
+              <select
+                value={props.draft.senderMode}
+                onChange={(event) => props.setDraft((value) => ({
+                  ...value,
+                  senderMode: event.target.value as MessageDraft["senderMode"]
+                }))}
+                disabled={delegatedModeOptions.length <= 1}
+              >
+                {delegatedModeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <label className="field field-wide">
             <span>{props.copy.fields.to}</span>
             <input value={props.draft.to} onChange={(event) => props.setDraft((value) => ({ ...value, to: event.target.value }))} />

@@ -339,6 +339,8 @@ pub struct SubmitMessageRequest {
     pub source: Option<String>,
     pub from_display: Option<String>,
     pub from_address: String,
+    pub sender_display: Option<String>,
+    pub sender_address: Option<String>,
     pub to: Vec<SubmitRecipientRequest>,
     pub cc: Option<Vec<SubmitRecipientRequest>>,
     pub bcc: Option<Vec<SubmitRecipientRequest>>,

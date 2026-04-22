@@ -4,8 +4,8 @@ use axum::{
     Json,
 };
 use lpe_storage::{
-    AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, ClientTask,
-    ClientWorkspace, HealthResponse, SavedDraftMessage, Storage, SubmitMessageInput,
+    AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, ClientTask, ClientWorkspace,
+    HealthResponse, MailboxAccountAccess, SavedDraftMessage, Storage, SubmitMessageInput,
     SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
     UpsertClientTaskInput,
 };
@@ -14,12 +14,11 @@ use uuid::Uuid;
 
 use crate::{
     http::{bad_request_error, internal_error},
-    observability,
+    observability, require_account,
     types::{
         ApiResult, SubmitMessageRequest, SubmitRecipientRequest, UpsertClientContactRequest,
         UpsertClientEventRequest, UpsertClientTaskRequest,
     },
-    require_account,
 };
 
 pub(crate) async fn client_workspace(
@@ -41,16 +40,24 @@ pub(crate) async fn submit_message(
     Json(request): Json<SubmitMessageRequest>,
 ) -> ApiResult<SubmittedMessage> {
     let account = require_account(&storage, &headers).await?;
+    let mailbox_access = resolve_client_mailbox_access(&storage, &account, request.account_id).await?;
     let trace_id = observability::trace_id_from_headers(&headers);
     let subject_for_audit = request.subject.clone();
     let recipient_count = request.to.len()
-        + request.cc.as_ref().map(|entries| entries.len()).unwrap_or(0)
-        + request.bcc.as_ref().map(|entries| entries.len()).unwrap_or(0);
+        + request
+            .cc
+            .as_ref()
+            .map(|entries| entries.len())
+            .unwrap_or(0)
+        + request
+            .bcc
+            .as_ref()
+            .map(|entries| entries.len())
+            .unwrap_or(0);
     let internet_message_id = request.internet_message_id.clone();
-    ensure_client_message_owner(&account, &request)?;
     let submitted = storage
         .submit_message(
-            map_submit_message_request(request),
+            map_submit_message_request(&account, &mailbox_access, request),
             AuditEntryInput {
                 actor: account.email,
                 action: "submit-message".to_string(),
@@ -78,11 +85,12 @@ pub(crate) async fn save_draft_message(
     Json(request): Json<SubmitMessageRequest>,
 ) -> ApiResult<SavedDraftMessage> {
     let account = require_account(&storage, &headers).await?;
+    let mailbox_access = resolve_client_mailbox_access(&storage, &account, request.account_id).await?;
     let subject_for_audit = request.subject.clone();
-    ensure_client_message_owner(&account, &request)?;
+    ensure_client_mailbox_write_access(&mailbox_access)?;
     let draft = storage
         .save_draft_message(
-            map_submit_message_request(request),
+            map_submit_message_request(&account, &mailbox_access, request),
             AuditEntryInput {
                 actor: account.email,
                 action: "save-draft-message".to_string(),
@@ -275,32 +283,53 @@ pub(crate) async fn delete_client_task(
     }))
 }
 
-fn ensure_client_message_owner(
+async fn resolve_client_mailbox_access(
+    storage: &Storage,
     account: &AuthenticatedAccount,
-    request: &SubmitMessageRequest,
+    requested_account_id: Uuid,
+) -> std::result::Result<MailboxAccountAccess, (StatusCode, String)> {
+    let accessible = storage
+        .fetch_accessible_mailbox_accounts(account.account_id)
+        .await
+        .map_err(internal_error)?;
+    accessible
+        .into_iter()
+        .find(|entry| entry.account_id == requested_account_id)
+        .ok_or((
+            StatusCode::FORBIDDEN,
+            "authenticated account cannot access this mailbox".to_string(),
+        ))
+}
+
+fn ensure_client_mailbox_write_access(
+    mailbox_access: &MailboxAccountAccess,
 ) -> std::result::Result<(), (StatusCode, String)> {
-    if account.account_id == request.account_id
-        && account.email.to_lowercase() == request.from_address.trim().to_lowercase()
-    {
+    if mailbox_access.is_owned || mailbox_access.may_write {
         Ok(())
     } else {
         Err((
             StatusCode::FORBIDDEN,
-            "authenticated account cannot submit this message".to_string(),
+            "authenticated account cannot write drafts in this mailbox".to_string(),
         ))
     }
 }
 
-fn map_submit_message_request(request: SubmitMessageRequest) -> SubmitMessageInput {
+fn map_submit_message_request(
+    authenticated_account: &AuthenticatedAccount,
+    mailbox_access: &MailboxAccountAccess,
+    request: SubmitMessageRequest,
+) -> SubmitMessageInput {
+    let (sender_display, sender_address) =
+        resolve_client_sender_fields(authenticated_account, mailbox_access, &request);
     SubmitMessageInput {
         draft_message_id: request.draft_message_id,
         account_id: request.account_id,
-        submitted_by_account_id: request.account_id,
+        submitted_by_account_id: authenticated_account.account_id,
         source: request.source.unwrap_or_else(|| "jmap".to_string()),
         from_display: request.from_display,
         from_address: request.from_address,
-        sender_display: None,
-        sender_address: None,
+        sender_display,
+        sender_address,
         to: map_recipients(request.to),
         cc: map_recipients(request.cc.unwrap_or_default()),
         bcc: map_recipients(request.bcc.unwrap_or_default()),
@@ -316,6 +345,31 @@ fn map_submit_message_request(request: SubmitMessageRequest) -> SubmitMessageInp
     }
 }
 
+fn resolve_client_sender_fields(
+    authenticated_account: &AuthenticatedAccount,
+    mailbox_access: &MailboxAccountAccess,
+    request: &SubmitMessageRequest,
+) -> (Option<String>, Option<String>) {
+    if request.sender_address.is_some() {
+        return (
+            request.sender_display.clone(),
+            request.sender_address.clone(),
+        );
+    }
+
+    if mailbox_access.account_id != authenticated_account.account_id
+        && mailbox_access.may_send_on_behalf
+        && !mailbox_access.may_send_as
+    {
+        return (
+            Some(authenticated_account.display_name.clone()),
+            Some(authenticated_account.email.clone()),
+        );
+    }
+
+    (None, None)
+}
+
 fn map_recipients(input: Vec<SubmitRecipientRequest>) -> Vec<SubmittedRecipientInput> {
     input
         .into_iter()
@@ -324,4 +378,109 @@ fn map_recipients(input: Vec<SubmitRecipientRequest>) -> Vec<SubmittedRecipientI
             display_name: recipient.display_name,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_client_sender_fields;
+    use crate::types::SubmitMessageRequest;
+    use lpe_storage::{AuthenticatedAccount, MailboxAccountAccess};
+    use uuid::Uuid;
+
+    fn account() -> AuthenticatedAccount {
+        AuthenticatedAccount {
+            tenant_id: "tenant-a".to_string(),
+            account_id: Uuid::new_v4(),
+            email: "delegate@example.test".to_string(),
+            display_name: "Delegate".to_string(),
+            expires_at: "2026-04-22T00:00:00Z".to_string(),
+        }
+    }
+
+    fn submit_request() -> SubmitMessageRequest {
+        SubmitMessageRequest {
+            draft_message_id: None,
+            account_id: Uuid::new_v4(),
+            source: Some("web-client".to_string()),
+            from_display: Some("Shared Mailbox".to_string()),
+            from_address: "shared@example.test".to_string(),
+            sender_display: None,
+            sender_address: None,
+            to: Vec::new(),
+            cc: None,
+            bcc: None,
+            subject: "Subject".to_string(),
+            body_text: "Body".to_string(),
+            body_html_sanitized: None,
+            internet_message_id: None,
+            mime_blob_ref: None,
+            size_octets: Some(32),
+        }
+    }
+
+    #[test]
+    fn delegated_send_on_behalf_defaults_sender_to_authenticated_account() {
+        let authenticated = account();
+        let mailbox_access = MailboxAccountAccess {
+            account_id: Uuid::new_v4(),
+            email: "shared@example.test".to_string(),
+            display_name: "Shared Mailbox".to_string(),
+            is_owned: false,
+            may_read: true,
+            may_write: true,
+            may_send_as: false,
+            may_send_on_behalf: true,
+        };
+
+        let (sender_display, sender_address) =
+            resolve_client_sender_fields(&authenticated, &mailbox_access, &submit_request());
+
+        assert_eq!(sender_display.as_deref(), Some("Delegate"));
+        assert_eq!(sender_address.as_deref(), Some("delegate@example.test"));
+    }
+
+    #[test]
+    fn delegated_send_as_without_explicit_sender_keeps_sender_empty() {
+        let authenticated = account();
+        let mailbox_access = MailboxAccountAccess {
+            account_id: Uuid::new_v4(),
+            email: "shared@example.test".to_string(),
+            display_name: "Shared Mailbox".to_string(),
+            is_owned: false,
+            may_read: true,
+            may_write: true,
+            may_send_as: true,
+            may_send_on_behalf: true,
+        };
+
+        let (sender_display, sender_address) =
+            resolve_client_sender_fields(&authenticated, &mailbox_access, &submit_request());
+
+        assert_eq!(sender_display, None);
+        assert_eq!(sender_address, None);
+    }
+
+    #[test]
+    fn explicit_sender_fields_are_preserved() {
+        let authenticated = account();
+        let mailbox_access = MailboxAccountAccess {
+            account_id: Uuid::new_v4(),
+            email: "shared@example.test".to_string(),
+            display_name: "Shared Mailbox".to_string(),
+            is_owned: false,
+            may_read: true,
+            may_write: true,
+            may_send_as: false,
+            may_send_on_behalf: true,
+        };
+        let mut request = submit_request();
+        request.sender_display = Some("Delegate".to_string());
+        request.sender_address = Some("delegate@example.test".to_string());
+
+        let (sender_display, sender_address) =
+            resolve_client_sender_fields(&authenticated, &mailbox_access, &request);
+
+        assert_eq!(sender_display.as_deref(), Some("Delegate"));
+        assert_eq!(sender_address.as_deref(), Some("delegate@example.test"));
+    }
 }

@@ -206,11 +206,6 @@ impl Storage {
         audit: AuditEntryInput,
     ) -> Result<SavedDraftMessage> {
         let from_address = normalize_email(&input.from_address);
-        let sender_address = input
-            .sender_address
-            .as_deref()
-            .map(normalize_email)
-            .filter(|value| !value.is_empty());
         let subject = normalize_subject(&input.subject);
         let body_text = input.body_text.trim().to_string();
         let visible_recipients = normalize_visible_recipients(&input);
@@ -225,6 +220,9 @@ impl Storage {
         self.ensure_account_exists(&mut tx, &tenant_id, input.account_id)
             .await?;
         self.ensure_same_tenant_account_in_tx(&mut tx, &tenant_id, input.submitted_by_account_id)
+            .await?;
+        let authorization = self
+            .resolve_submission_authorization_in_tx(&mut tx, &tenant_id, &input)
             .await?;
         let draft_mailbox_id = self
             .ensure_mailbox(
@@ -291,12 +289,12 @@ impl Storage {
             .bind(message_id)
             .bind(draft_mailbox_id)
             .bind(input.internet_message_id)
-            .bind(input.from_display.map(|value| value.trim().to_string()))
-            .bind(&from_address)
-            .bind(input.sender_display.map(|value| value.trim().to_string()))
-            .bind(sender_address.as_deref())
-            .bind(SenderAuthorizationKind::SelfSend.as_str())
-            .bind(input.submitted_by_account_id)
+            .bind(authorization.from_display.as_deref())
+            .bind(&authorization.from_address)
+            .bind(authorization.sender_display.as_deref())
+            .bind(authorization.sender_address.as_deref())
+            .bind(authorization.authorization_kind.as_str())
+            .bind(authorization.submitted_by.id)
             .bind(&subject)
             .bind(&preview_text)
             .bind(input.size_octets.max(0))
@@ -354,12 +352,12 @@ impl Storage {
             .bind(thread_id)
             .bind(input.internet_message_id)
             .bind(modseq)
-            .bind(input.from_display.map(|value| value.trim().to_string()))
-            .bind(&from_address)
-            .bind(input.sender_display.map(|value| value.trim().to_string()))
-            .bind(sender_address.as_deref())
-            .bind(SenderAuthorizationKind::SelfSend.as_str())
-            .bind(input.submitted_by_account_id)
+            .bind(authorization.from_display.as_deref())
+            .bind(&authorization.from_address)
+            .bind(authorization.sender_display.as_deref())
+            .bind(authorization.sender_address.as_deref())
+            .bind(authorization.authorization_kind.as_str())
+            .bind(authorization.submitted_by.id)
             .bind(&subject)
             .bind(&preview_text)
             .bind(unread)

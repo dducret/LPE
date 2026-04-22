@@ -8,6 +8,7 @@ import type {
   ContactItem,
   EventItem,
   Folder,
+  MailboxAccountAccess,
   MailboxDelegationOverview,
   Message,
   MessageDraft,
@@ -49,13 +50,21 @@ function splitRecipients(value: string) {
     .map((address) => ({ address }));
 }
 
-function buildMessagePayload(identity: ClientIdentity, draft: MessageDraft, draftMessageId: string | null) {
+function buildMessagePayload(
+  identity: ClientIdentity,
+  mailbox: MailboxAccountAccess,
+  draft: MessageDraft,
+  draftMessageId: string | null
+) {
+  const sendOnBehalf = mailbox.accountId !== identity.account_id && draft.senderMode === "send_on_behalf";
   return {
     draft_message_id: draftMessageId,
-    account_id: identity.account_id,
+    account_id: mailbox.accountId,
     source: "web-client",
-    from_display: identity.display_name,
-    from_address: identity.email,
+    from_display: mailbox.displayName,
+    from_address: mailbox.email,
+    sender_display: sendOnBehalf ? identity.display_name : null,
+    sender_address: sendOnBehalf ? identity.email : null,
     to: splitRecipients(draft.to),
     cc: splitRecipients(draft.cc),
     bcc: [],
@@ -68,8 +77,10 @@ function buildMessagePayload(identity: ClientIdentity, draft: MessageDraft, draf
   };
 }
 
-function draftFromMessage(message: Message): MessageDraft {
+function draftFromMessage(message: Message, mailboxAccountId: string): MessageDraft {
   return {
+    mailboxAccountId,
+    senderMode: "send_as",
     to: message.to,
     cc: message.cc,
     subject: message.subject,
@@ -91,7 +102,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   const [notice, setNotice] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState("");
-  const [draft, setDraft] = React.useState(blankDraft());
+  const [draft, setDraft] = React.useState<MessageDraft>(() => blankDraft(identity?.account_id));
   const [draftMessageId, setDraftMessageId] = React.useState<string | null>(null);
   const [eventForm, setEventForm] = React.useState(blankEvent());
   const [contactForm, setContactForm] = React.useState(blankContact());
@@ -175,6 +186,39 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     void loadSettings();
   }, [loadSettings]);
 
+  const composerMailboxes = React.useMemo<MailboxAccountAccess[]>(() => {
+    if (!identity) return [];
+    return [
+      {
+        accountId: identity.account_id,
+        email: identity.email,
+        displayName: identity.display_name,
+        isOwned: true,
+        mayRead: true,
+        mayWrite: true,
+        maySendAs: true,
+        maySendOnBehalf: false
+      },
+      ...(mailboxDelegation?.incomingMailboxes ?? []).filter((entry) => entry.accountId !== identity.account_id)
+    ];
+  }, [identity, mailboxDelegation]);
+
+  React.useEffect(() => {
+    if (!identity || composerMailboxes.length === 0) return;
+    setDraft((current) => {
+      const selected = composerMailboxes.find((entry) => entry.accountId === current.mailboxAccountId) ?? composerMailboxes[0];
+      const nextSenderMode = selected.accountId === identity.account_id || !selected.maySendOnBehalf
+        ? "send_as"
+        : !selected.maySendAs
+          ? "send_on_behalf"
+          : current.senderMode;
+      if (selected.accountId === current.mailboxAccountId && nextSenderMode === current.senderMode) {
+        return current;
+      }
+      return { ...current, mailboxAccountId: selected.accountId, senderMode: nextSenderMode };
+    });
+  }, [composerMailboxes, identity]);
+
   React.useEffect(() => {
     if (!authToken) return;
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -244,14 +288,17 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   );
 
   const openComposer = React.useCallback((next: Mode, item?: Message) => {
+    const defaultMailboxAccountId = identity?.account_id ?? "";
     setSection("mail");
     setMode(next);
     setDraftMessageId(next === "draft" && item ? item.id : null);
     setMessageId(item?.id ?? "");
-    if (next === "draft" && item) return setDraft(draftFromMessage(item));
-    if (!item || next === "new") return setDraft(blankDraft());
+    if (next === "draft" && item) return setDraft(draftFromMessage(item, defaultMailboxAccountId));
+    if (!item || next === "new") return setDraft(blankDraft(defaultMailboxAccountId));
     if (next === "reply") {
       return setDraft({
+        mailboxAccountId: defaultMailboxAccountId,
+        senderMode: "send_as",
         to: item.fromAddress,
         cc: "",
         subject: item.subject.toLowerCase().startsWith("re:") ? item.subject : `Re: ${item.subject}`,
@@ -259,19 +306,21 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       });
     }
     setDraft({
+      mailboxAccountId: defaultMailboxAccountId,
+      senderMode: "send_as",
       to: "",
       cc: "",
       subject: item.subject.toLowerCase().startsWith("fwd:") ? item.subject : `Fwd: ${item.subject}`,
       body: quoteMessage(item)
     });
-  }, []);
+  }, [identity]);
 
   const closeComposer = React.useCallback(() => {
     setMode("closed");
     setDraftMessageId(null);
-    setDraft(blankDraft());
+    setDraft(blankDraft(identity?.account_id));
     setMessageId("");
-  }, []);
+  }, [identity]);
 
   const selectMessage = React.useCallback((id: string) => {
     const item = mail.find((message) => message.id === id);
@@ -288,23 +337,37 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     if (!authToken || !identity) return;
     if (!draft.subject.trim() && !draft.body.trim()) return pushNotice(copy.validationMessage);
     if (!asDraft && !draft.to.trim()) return pushNotice(copy.validationMessage);
+    const mailbox = composerMailboxes.find((entry) => entry.accountId === draft.mailboxAccountId) ?? composerMailboxes[0];
+    if (!mailbox) return pushNotice(copy.saveError);
+    if (asDraft && mailbox.accountId !== identity.account_id && !mailbox.mayWrite) {
+      return pushNotice(copy.saveError);
+    }
+    if (!asDraft && mailbox.accountId !== identity.account_id && !mailbox.maySendAs && !mailbox.maySendOnBehalf) {
+      return pushNotice(copy.saveError);
+    }
+    if (!asDraft && draft.senderMode === "send_on_behalf" && !mailbox.maySendOnBehalf) {
+      return pushNotice(copy.saveError);
+    }
+    if (!asDraft && draft.senderMode === "send_as" && mailbox.accountId !== identity.account_id && !mailbox.maySendAs) {
+      return pushNotice(copy.saveError);
+    }
 
     try {
       await apiJson(asDraft ? "mail/messages/draft" : "mail/messages/submit", authToken, {
         method: "POST",
-        body: JSON.stringify(buildMessagePayload(identity, draft, draftMessageId))
+        body: JSON.stringify(buildMessagePayload(identity, mailbox, draft, draftMessageId))
       });
       setFolder(asDraft ? "drafts" : draftMessageId ? "inbox" : "sent");
       setMode("closed");
       setDraftMessageId(null);
       setMessageId("");
-      setDraft(blankDraft());
+      setDraft(blankDraft(identity.account_id));
       await loadWorkspace();
       pushNotice(asDraft ? copy.noticeDraft : copy.noticeSent);
     } catch {
       pushNotice(copy.saveError);
     }
-  }, [authToken, copy, draft, draftMessageId, identity, loadWorkspace, pushNotice]);
+  }, [authToken, composerMailboxes, copy, draft, draftMessageId, identity, loadWorkspace, pushNotice]);
 
   const refreshWorkspace = React.useCallback(async () => {
     await loadWorkspace();
@@ -318,13 +381,13 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       setMode("closed");
       setDraftMessageId(null);
       setMessageId("");
-      setDraft(blankDraft());
+      setDraft(blankDraft(identity?.account_id));
       await loadWorkspace();
       pushNotice(copy.noticeDraftDeleted);
     } catch {
       pushNotice(copy.saveError);
     }
-  }, [authToken, copy.noticeDraftDeleted, copy.saveError, draftMessageId, loadWorkspace, pushNotice]);
+  }, [authToken, copy.noticeDraftDeleted, copy.saveError, draftMessageId, identity, loadWorkspace, pushNotice]);
 
   const saveContact = React.useCallback(async () => {
     if (!authToken) return;
@@ -530,6 +593,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     filteredEvents,
     filteredContacts,
     current,
+    composerMailboxes,
     currentEvent,
     currentContact,
     openComposer,

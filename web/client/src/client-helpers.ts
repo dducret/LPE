@@ -1,6 +1,13 @@
 import type { ContactDraft, ContactItem, EventDraft, EventItem, Folder, Message, MessageDraft } from "./client-types";
 
-export const blankDraft = (): MessageDraft => ({ to: "", cc: "", subject: "", body: "" });
+export const blankDraft = (mailboxAccountId = ""): MessageDraft => ({
+  mailboxAccountId,
+  senderMode: "send_as",
+  to: "",
+  cc: "",
+  subject: "",
+  body: ""
+});
 
 export const blankContact = (contact?: ContactItem): ContactDraft => ({
   name: contact?.name ?? "",
