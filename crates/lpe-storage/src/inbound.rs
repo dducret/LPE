@@ -3,7 +3,7 @@ use lpe_core::sieve::{
     evaluate_script, ExecutionOutcome as SieveExecutionOutcome,
     MessageContext as SieveMessageContext, VacationAction,
 };
-use lpe_domain::{InboundDeliveryRequest, InboundDeliveryResponse, TransportDeliveryStatus};
+use lpe_domain::{InboundDeliveryRequest, InboundDeliveryResponse};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row};
 use std::collections::BTreeMap;
@@ -202,16 +202,13 @@ impl Storage {
             }
         }
 
+        let mut delivered_mailboxes = accepted;
+        delivered_mailboxes.extend(rejected.into_iter().map(|recipient| format!("rejected:{recipient}")));
+        delivered_mailboxes.extend(stored_message_ids.into_iter().map(|id| format!("message:{id}")));
+
         Ok(InboundDeliveryResponse {
-            trace_id: request.trace_id,
-            status: if accepted.is_empty() {
-                TransportDeliveryStatus::Failed
-            } else {
-                TransportDeliveryStatus::Relayed
-            },
-            accepted_recipients: accepted,
-            rejected_recipients: rejected,
-            stored_message_ids,
+            accepted: !delivered_mailboxes.is_empty(),
+            delivered_mailboxes,
             detail: if followup_errors.is_empty() {
                 None
             } else {

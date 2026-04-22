@@ -22,7 +22,35 @@ use lpe_storage::{
     SubmittedRecipientInput,
 };
 use tracing::info;
-use uuid::Uuid;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SmtpSubmissionError {
+    Invalid(String),
+    Forbidden(String),
+    Temporary(String),
+}
+
+impl SmtpSubmissionError {
+    fn invalid(message: impl Into<String>) -> Self {
+        Self::Invalid(message.into())
+    }
+
+    fn forbidden(message: impl Into<String>) -> Self {
+        Self::Forbidden(message.into())
+    }
+
+    fn temporary(message: impl Into<String>) -> Self {
+        Self::Temporary(message.into())
+    }
+
+    fn into_http_error(self) -> (StatusCode, String) {
+        match self {
+            Self::Invalid(message) => (StatusCode::BAD_REQUEST, message),
+            Self::Forbidden(message) => (StatusCode::FORBIDDEN, message),
+            Self::Temporary(message) => (StatusCode::SERVICE_UNAVAILABLE, message),
+        }
+    }
+}
 
 pub(crate) async fn deliver_inbound_message(
     State(storage): State<Storage>,
@@ -46,13 +74,15 @@ pub(crate) async fn deliver_inbound_message(
         .deliver_inbound_message(request)
         .await
         .map_err(bad_request_error)?;
-    observability::record_inbound_delivery(response.status.as_str());
+    observability::record_inbound_delivery(if response.accepted {
+        "relayed"
+    } else {
+        "failed"
+    });
     info!(
         trace_id = %trace_id,
-        status = response.status.as_str(),
-        accepted_recipients = response.accepted_recipients.len(),
-        rejected_recipients = response.rejected_recipients.len(),
-        stored_messages = response.stored_message_ids.len(),
+        accepted = response.accepted,
+        delivered_mailboxes = response.delivered_mailboxes.len(),
         recipient_count,
         internet_message_id = internet_message_id.as_deref().unwrap_or(""),
         "inbound delivery processed"
@@ -69,17 +99,17 @@ pub(crate) async fn authenticate_smtp_submission(
     let principal = authenticate_plain_credentials(
         &storage,
         None,
-        &request.username,
+        &request.login,
         &request.password,
         "smtp",
     )
     .await
     .map_err(|error| (StatusCode::UNAUTHORIZED, error.to_string()))?;
     Ok(Json(SmtpSubmissionAuthResponse {
-        tenant_id: principal.tenant_id,
-        account_id: principal.account_id,
-        email: principal.email,
-        display_name: principal.display_name,
+        accepted: true,
+        account_id: Some(principal.account_id),
+        account_email: Some(principal.email),
+        account_display_name: Some(principal.display_name),
     }))
 }
 
@@ -99,15 +129,12 @@ pub(crate) async fn accept_smtp_submission(
         ));
     }
 
-    let principal = AccountPrincipal {
-        tenant_id: String::new(),
-        account_id: request.account_id,
-        email: request.account_email.trim().to_lowercase(),
-        display_name: request.account_display_name.clone(),
-    };
+    let principal = load_authenticated_submission_principal(&storage, &request)
+        .await
+        .map_err(SmtpSubmissionError::into_http_error)?;
     let submit_input = build_smtp_submission_input(&storage, &principal, &request)
         .await
-        .map_err(bad_request_error)?;
+        .map_err(SmtpSubmissionError::into_http_error)?;
     let submitted = storage
         .submit_message(
             submit_input,
@@ -118,13 +145,12 @@ pub(crate) async fn accept_smtp_submission(
             },
         )
         .await
-        .map_err(bad_request_error)?;
+        .map_err(classify_submission_storage_error)?;
     observability::record_mail_submission("smtp");
     info!(
         trace_id = %request.trace_id,
         account_id = %principal.account_id,
-        message_id = %submitted.message_id,
-        outbound_queue_id = %submitted.outbound_queue_id,
+        submitted = true,
         peer = %request.peer,
         helo = %request.helo,
         recipient_count = request.rcpt_to.len(),
@@ -132,10 +158,12 @@ pub(crate) async fn accept_smtp_submission(
     );
 
     Ok(Json(SmtpSubmissionResponse {
+        accepted: true,
         trace_id: request.trace_id,
-        message_id: submitted.message_id,
-        outbound_queue_id: submitted.outbound_queue_id,
-        delivery_status: submitted.delivery_status,
+        detail: Some(format!(
+            "accepted message {} queued as {}",
+            submitted.message_id, submitted.outbound_queue_id
+        )),
     }))
 }
 
@@ -143,27 +171,33 @@ async fn build_smtp_submission_input(
     storage: &Storage,
     principal: &AccountPrincipal,
     request: &SmtpSubmissionRequest,
-) -> anyhow::Result<SubmitMessageInput> {
-    let parsed = lpe_storage::mail::parse_rfc822_message(&request.raw_message)?;
-    validate_smtp_submission_attachments(&request.raw_message)?;
+) -> Result<SubmitMessageInput, SmtpSubmissionError> {
+    let mut parsed = lpe_storage::mail::parse_rfc822_message(&request.raw_message)
+        .map_err(|error| SmtpSubmissionError::invalid(error.to_string()))?;
+    let from = parse_required_submission_from(&request.raw_message)?;
+    parsed.from = Some(lpe_storage::mail::ParsedMailAddress {
+        email: from.address.clone(),
+        display_name: from.display_name.clone(),
+    });
+    validate_smtp_submission_attachments(&request.raw_message)
+        .map_err(|error| SmtpSubmissionError::invalid(error.to_string()))?;
     let envelope_from = request
         .mail_from
         .trim()
         .trim_matches(['<', '>'])
         .to_lowercase();
     if envelope_from.is_empty() {
-        anyhow::bail!("smtp submission requires MAIL FROM");
+        return Err(SmtpSubmissionError::invalid(
+            "smtp submission requires MAIL FROM",
+        ));
     }
     if request.rcpt_to.is_empty() {
-        anyhow::bail!("smtp submission requires at least one RCPT TO recipient");
+        return Err(SmtpSubmissionError::invalid(
+            "smtp submission requires at least one RCPT TO recipient",
+        ));
     }
 
-    let from = parsed
-        .from
-        .as_ref()
-        .map(|address| address.email.trim().to_lowercase())
-        .unwrap_or_else(|| principal.email.clone());
-    let owner = if from == principal.email {
+    let owner = if from.address == principal.email {
         SubmissionAccountIdentity {
             account_id: principal.account_id,
             email: principal.email.clone(),
@@ -171,16 +205,19 @@ async fn build_smtp_submission_input(
         }
     } else {
         storage
-            .find_submission_account_by_email_in_same_tenant(principal.account_id, &from)
-            .await?
+            .find_submission_account_by_email_in_same_tenant(principal.account_id, &from.address)
+            .await
+            .map_err(|error| SmtpSubmissionError::temporary(error.to_string()))?
             .ok_or_else(|| {
-                anyhow::anyhow!("delegated From address is not a mailbox in the same tenant")
+                SmtpSubmissionError::forbidden(
+                    "delegated From address is not a mailbox in the same tenant",
+                )
             })?
     };
     if envelope_from != principal.email && envelope_from != owner.email {
-        anyhow::bail!(
-            "smtp submission MAIL FROM must match the authenticated account or delegated mailbox"
-        );
+        return Err(SmtpSubmissionError::forbidden(
+            "smtp submission MAIL FROM must match the authenticated account or delegated mailbox",
+        ));
     }
 
     let visible_to = parsed
@@ -207,12 +244,55 @@ async fn build_smtp_submission_input(
         &visible_to,
         &visible_cc,
     );
-    let sender =
-        parse_smtp_submission_sender(&request.raw_message, &from, &principal.email, &owner.email)?;
+    let sender = parse_smtp_submission_sender(
+        &request.raw_message,
+        &from.address,
+        &principal.email,
+        &owner.email,
+    )
+    .map_err(|error| SmtpSubmissionError::forbidden(error.to_string()))?;
 
     Ok(build_smtp_submission_input_for_owner(
         principal, &owner, request, parsed, visible_to, visible_cc, bcc, sender,
     ))
+}
+
+async fn load_authenticated_submission_principal(
+    storage: &Storage,
+    request: &SmtpSubmissionRequest,
+) -> Result<AccountPrincipal, SmtpSubmissionError> {
+    let identity = storage
+        .fetch_account_identity(request.account_id)
+        .await
+        .map_err(|error| SmtpSubmissionError::forbidden(error.to_string()))?;
+    let requested_email = request.account_email.trim().to_lowercase();
+    if !requested_email.is_empty() && requested_email != identity.email {
+        return Err(SmtpSubmissionError::forbidden(
+            "smtp submission principal does not match authenticated account",
+        ));
+    }
+
+    Ok(AccountPrincipal {
+        tenant_id: String::new(),
+        account_id: identity.account_id,
+        email: identity.email,
+        display_name: identity.display_name,
+    })
+}
+
+fn parse_required_submission_from(
+    raw_message: &[u8],
+) -> Result<SubmittedRecipientInput, SmtpSubmissionError> {
+    let from = lpe_storage::mail::parse_header_recipients(raw_message, "from");
+    match from.as_slice() {
+        [] => Err(SmtpSubmissionError::invalid(
+            "smtp submission requires exactly one From mailbox",
+        )),
+        [address] => Ok(address.clone()),
+        _ => Err(SmtpSubmissionError::invalid(
+            "smtp submission requires exactly one From mailbox",
+        )),
+    }
 }
 
 pub(crate) fn build_smtp_submission_input_for_owner(
@@ -250,7 +330,7 @@ pub(crate) fn build_smtp_submission_input_for_owner(
         body_text: parsed.body_text,
         body_html_sanitized: parsed.body_html_sanitized,
         internet_message_id: parsed.message_id,
-        mime_blob_ref: Some(format!("smtp-submission-mime:{}", Uuid::new_v4())),
+        mime_blob_ref: Some(format!("smtp-submission-mime:{}", request.trace_id)),
         size_octets: request.raw_message.len() as i64,
         unread: Some(false),
         flagged: Some(false),
@@ -264,9 +344,11 @@ pub(crate) fn parse_smtp_submission_sender(
     principal_email: &str,
     owner_email: &str,
 ) -> anyhow::Result<Option<SubmittedRecipientInput>> {
-    let sender = lpe_storage::mail::parse_header_recipients(raw_message, "sender")
-        .into_iter()
-        .next();
+    let sender_addresses = lpe_storage::mail::parse_header_recipients(raw_message, "sender");
+    if sender_addresses.len() > 1 {
+        anyhow::bail!("smtp submission supports at most one Sender mailbox");
+    }
+    let sender = sender_addresses.into_iter().next();
     let Some(sender) = sender else {
         return Ok(None);
     };
@@ -347,6 +429,29 @@ fn validate_smtp_submission_attachments(raw_message: &[u8]) -> anyhow::Result<()
     Ok(())
 }
 
+fn classify_submission_storage_error(error: anyhow::Error) -> (StatusCode, String) {
+    let message = error.to_string();
+    let lowered = message.to_ascii_lowercase();
+    if lowered.contains("send as is not granted")
+        || lowered.contains("send on behalf is not granted")
+        || lowered.contains("from email must match delegated mailbox")
+        || lowered.contains("sender email must match authenticated account")
+        || lowered.contains("account not found")
+    {
+        return (StatusCode::FORBIDDEN, message);
+    }
+
+    if lowered.contains("from_address is required")
+        || lowered.contains("at least one recipient")
+        || lowered.contains("subject")
+        || lowered.contains("mail from")
+    {
+        return (StatusCode::BAD_REQUEST, message);
+    }
+
+    internal_error(message)
+}
+
 fn require_integration(headers: &HeaderMap) -> std::result::Result<(), (StatusCode, String)> {
     let provided = headers
         .get("x-lpe-integration-key")
@@ -369,5 +474,90 @@ fn require_integration(headers: &HeaderMap) -> std::result::Result<(), (StatusCo
             StatusCode::UNAUTHORIZED,
             "invalid integration key".to_string(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        parse_required_submission_from, parse_smtp_submission_sender, SmtpSubmissionError,
+    };
+
+    #[test]
+    fn smtp_submission_requires_exactly_one_from_mailbox() {
+        let missing = parse_required_submission_from(b"Subject: Hi\r\n\r\nBody\r\n").unwrap_err();
+        assert_eq!(
+            missing,
+            SmtpSubmissionError::Invalid(
+                "smtp submission requires exactly one From mailbox".to_string()
+            )
+        );
+
+        let multiple = parse_required_submission_from(
+            concat!(
+                "From: Alice <alice@example.test>, Shared <shared@example.test>\r\n",
+                "Subject: Hi\r\n",
+                "\r\n",
+                "Body\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            multiple,
+            SmtpSubmissionError::Invalid(
+                "smtp submission requires exactly one From mailbox".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn smtp_submission_sender_rejects_multiple_sender_mailboxes() {
+        let error = parse_smtp_submission_sender(
+            concat!(
+                "From: Shared <shared@example.test>\r\n",
+                "Sender: Delegate <delegate@example.test>, Other <other@example.test>\r\n",
+                "To: Bob <bob@example.test>\r\n",
+                "Subject: Hi\r\n",
+                "\r\n",
+                "Body\r\n"
+            )
+            .as_bytes(),
+            "shared@example.test",
+            "delegate@example.test",
+            "shared@example.test",
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("smtp submission supports at most one Sender mailbox")
+        );
+    }
+
+    #[test]
+    fn smtp_submission_sender_rejects_unrelated_sender_identity() {
+        let error = parse_smtp_submission_sender(
+            concat!(
+                "From: Shared <shared@example.test>\r\n",
+                "Sender: Other <other@example.test>\r\n",
+                "To: Bob <bob@example.test>\r\n",
+                "Subject: Hi\r\n",
+                "\r\n",
+                "Body\r\n"
+            )
+            .as_bytes(),
+            "shared@example.test",
+            "delegate@example.test",
+            "shared@example.test",
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("authenticated account cannot submit a different Sender address")
+        );
     }
 }

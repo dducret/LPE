@@ -26,6 +26,13 @@ struct SubmissionPrincipal {
     display_name: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SmtpAuthFailureKind {
+    InvalidCredentials,
+    Temporary,
+    Permanent,
+}
+
 #[derive(Debug, Default)]
 struct SubmissionTransaction {
     helo: String,
@@ -144,9 +151,9 @@ async fn handle_submission_session(
                     principal = Some(value);
                     write_line(&mut writer, "235 authentication succeeded").await?;
                 }
-                Err(error) => {
+                Err((kind, error)) => {
                     warn!(peer = %peer, error = %error, "smtp submission authentication failed");
-                    write_line(&mut writer, "535 authentication credentials invalid").await?;
+                    write_line(&mut writer, smtp_auth_failure_reply(kind)).await?;
                 }
             }
             continue;
@@ -200,16 +207,13 @@ async fn handle_submission_session(
             };
             match submit_message(&client, &core_base_url, &request).await {
                 Ok(response) => {
-                    write_line(
-                        &mut writer,
-                        &format!("250 submitted as {}", response.message_id),
-                    )
-                    .await?;
+                    let detail = response.detail.as_deref().unwrap_or("submission accepted");
+                    write_line(&mut writer, &format!("250 {detail}")).await?;
                     info!(
                         trace_id = %response.trace_id,
                         peer = %peer,
                         account_id = %principal.account_id,
-                        message_id = %response.message_id,
+                        accepted = response.accepted,
                         "smtp submission relayed to lpe core"
                     );
                     transaction.reset_message();
@@ -233,19 +237,32 @@ async fn authenticate_smtp_client<R, W>(
     reader: &mut R,
     writer: &mut W,
     command: &str,
-) -> Result<SubmissionPrincipal>
+) -> std::result::Result<SubmissionPrincipal, (SmtpAuthFailureKind, String)>
 where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
 {
     let credentials = if command.to_ascii_uppercase().starts_with("AUTH PLAIN") {
         let initial = command.split_whitespace().nth(2).map(str::to_string);
-        parse_auth_plain(reader, writer, initial).await?
+        parse_auth_plain(reader, writer, initial).await.map_err(|error| {
+            (
+                SmtpAuthFailureKind::InvalidCredentials,
+                sanitize_smtp_text(&error.to_string()),
+            )
+        })?
     } else if command.to_ascii_uppercase().starts_with("AUTH LOGIN") {
         let initial = command.split_whitespace().nth(2).map(str::to_string);
-        parse_auth_login(reader, writer, initial).await?
+        parse_auth_login(reader, writer, initial).await.map_err(|error| {
+            (
+                SmtpAuthFailureKind::InvalidCredentials,
+                sanitize_smtp_text(&error.to_string()),
+            )
+        })?
     } else {
-        bail!("unsupported auth mechanism");
+        return Err((
+            SmtpAuthFailureKind::Permanent,
+            "unsupported auth mechanism".to_string(),
+        ));
     };
 
     let response = client
@@ -253,22 +270,60 @@ where
             "{}/internal/lpe-ct/submission-auth",
             core_base_url.trim_end_matches('/')
         ))
-        .header("x-lpe-integration-key", integration_shared_secret()?)
+        .header(
+            "x-lpe-integration-key",
+            integration_shared_secret().map_err(|error| {
+                (
+                    SmtpAuthFailureKind::Temporary,
+                    sanitize_smtp_text(&error.to_string()),
+                )
+            })?,
+        )
+        .header("x-trace-id", format!("lpe-ct-auth-{}", Uuid::new_v4()))
         .json(&SmtpSubmissionAuthRequest {
-            username: credentials.0,
+            login: credentials.0,
             password: credentials.1,
         })
         .send()
-        .await?;
-    if !response.status().is_success() {
-        bail!("core rejected smtp auth with status {}", response.status());
+        .await
+        .map_err(|error| {
+            (
+                SmtpAuthFailureKind::Temporary,
+                sanitize_smtp_text(&error.to_string()),
+            )
+        })?;
+    if response.status().is_success() {
+        let body: SmtpSubmissionAuthResponse = response.json().await.map_err(|error| {
+            (
+                SmtpAuthFailureKind::Temporary,
+                sanitize_smtp_text(&error.to_string()),
+            )
+        })?;
+        return Ok(SubmissionPrincipal {
+            account_id: body.account_id.ok_or_else(|| {
+                (
+                    SmtpAuthFailureKind::Permanent,
+                    "smtp auth response omitted account_id".to_string(),
+                )
+            })?,
+            email: body
+                .account_email
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_lowercase(),
+            display_name: body.account_display_name.unwrap_or_default(),
+        });
     }
-    let body: SmtpSubmissionAuthResponse = response.json().await?;
-    Ok(SubmissionPrincipal {
-        account_id: body.account_id,
-        email: body.email.trim().to_lowercase(),
-        display_name: body.display_name,
-    })
+    let status = response.status();
+    let detail = response
+        .text()
+        .await
+        .unwrap_or_else(|_| "smtp submission authentication failed".to_string());
+    Err((
+        classify_auth_failure_status(status),
+        sanitize_smtp_text(&detail),
+    ))
 }
 
 async fn submit_message(
@@ -285,6 +340,7 @@ async fn submit_message(
             "x-lpe-integration-key",
             integration_shared_secret().map_err(internal_submission_error)?,
         )
+        .header("x-trace-id", &request.trace_id)
         .json(request)
         .send()
         .await
@@ -501,6 +557,33 @@ fn internal_submission_error(error: impl ToString) -> (StatusCode, String) {
     )
 }
 
+fn classify_auth_failure_status(status: StatusCode) -> SmtpAuthFailureKind {
+    if status.is_server_error()
+        || matches!(
+            status,
+            StatusCode::REQUEST_TIMEOUT
+                | StatusCode::TOO_MANY_REQUESTS
+                | StatusCode::BAD_GATEWAY
+                | StatusCode::SERVICE_UNAVAILABLE
+                | StatusCode::GATEWAY_TIMEOUT
+        )
+    {
+        SmtpAuthFailureKind::Temporary
+    } else if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+        SmtpAuthFailureKind::InvalidCredentials
+    } else {
+        SmtpAuthFailureKind::Permanent
+    }
+}
+
+fn smtp_auth_failure_reply(kind: SmtpAuthFailureKind) -> &'static str {
+    match kind {
+        SmtpAuthFailureKind::InvalidCredentials => "535 authentication credentials invalid",
+        SmtpAuthFailureKind::Temporary => "454 temporary authentication failure",
+        SmtpAuthFailureKind::Permanent => "535 authentication mechanism rejected",
+    }
+}
+
 fn smtp_submission_failure_reply(status: StatusCode, detail: &str) -> String {
     if status.is_server_error()
         || matches!(
@@ -525,10 +608,26 @@ fn smtp_submission_failure_reply(status: StatusCode, detail: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        decode_auth_login_token, decode_auth_plain, sanitize_smtp_text,
-        smtp_submission_failure_reply,
+        classify_auth_failure_status, decode_auth_login_token, decode_auth_plain,
+        sanitize_smtp_text, smtp_auth_failure_reply, smtp_submission_failure_reply,
+        submit_message, SmtpAuthFailureKind,
     };
+    use axum::{
+        extract::State,
+        http::HeaderMap,
+        routing::post,
+        Json, Router,
+    };
+    use lpe_domain::{SmtpSubmissionRequest, SmtpSubmissionResponse};
+    use std::sync::{Arc, Mutex};
     use reqwest::StatusCode;
+    use tokio::net::TcpListener;
+    use uuid::Uuid;
+
+    #[derive(Clone, Default)]
+    struct Capture {
+        trace_id: Arc<Mutex<Option<String>>>,
+    }
 
     #[test]
     fn auth_plain_decodes_username_and_password() {
@@ -566,5 +665,78 @@ mod tests {
             smtp_submission_failure_reply(StatusCode::FORBIDDEN, "delegation denied"),
             "550 submission rejected (delegation denied)"
         );
+    }
+
+    #[test]
+    fn auth_failures_distinguish_temporary_and_invalid_credentials() {
+        assert_eq!(
+            classify_auth_failure_status(StatusCode::SERVICE_UNAVAILABLE),
+            SmtpAuthFailureKind::Temporary
+        );
+        assert_eq!(
+            classify_auth_failure_status(StatusCode::UNAUTHORIZED),
+            SmtpAuthFailureKind::InvalidCredentials
+        );
+        assert_eq!(
+            smtp_auth_failure_reply(SmtpAuthFailureKind::Temporary),
+            "454 temporary authentication failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn submit_message_posts_trace_header_and_returns_success() {
+        async fn accept(
+            State(capture): State<Capture>,
+            headers: HeaderMap,
+        ) -> Json<SmtpSubmissionResponse> {
+            *capture.trace_id.lock().unwrap() = headers
+                .get("x-trace-id")
+                .and_then(|value| value.to_str().ok())
+                .map(ToString::to_string);
+            Json(SmtpSubmissionResponse {
+                accepted: true,
+                trace_id: "trace-1".to_string(),
+                detail: Some("accepted".to_string()),
+            })
+        }
+
+        let capture = Capture::default();
+        let router = Router::new()
+            .route("/internal/lpe-ct/submissions", post(accept))
+            .with_state(capture.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
+        let request = SmtpSubmissionRequest {
+            trace_id: "trace-1".to_string(),
+            helo: "client.example.test".to_string(),
+            peer: "203.0.113.10:12345".to_string(),
+            account_id: Uuid::new_v4(),
+            account_email: "alice@example.test".to_string(),
+            account_display_name: "Alice".to_string(),
+            mail_from: "alice@example.test".to_string(),
+            rcpt_to: vec!["bob@example.test".to_string()],
+            raw_message: b"From: Alice <alice@example.test>\r\nTo: Bob <bob@example.test>\r\nSubject: Hi\r\n\r\nBody\r\n".to_vec(),
+        };
+        let client = reqwest::Client::builder().build().unwrap();
+
+        let response = submit_message(&client, &format!("http://{address}"), &request)
+            .await
+            .unwrap();
+
+        assert!(response.accepted);
+        assert_eq!(response.trace_id, "trace-1");
+        assert_eq!(
+            capture.trace_id.lock().unwrap().as_deref(),
+            Some("trace-1")
+        );
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 }

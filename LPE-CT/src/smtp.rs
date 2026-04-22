@@ -3207,19 +3207,18 @@ async fn deliver_inbound_message(
     }
 
     let delivery: InboundDeliveryResponse = response.json().await?;
-    if delivery.accepted_recipients.is_empty() {
+    if !delivery.accepted {
         observability::record_inbound_delivery("failed");
         return Err(anyhow!(
-            "core delivery rejected all recipients: {:?}",
-            delivery.rejected_recipients
+            "core delivery rejected inbound delivery: {}",
+            delivery.detail.unwrap_or_else(|| "no detail".to_string())
         ));
     }
-    observability::record_inbound_delivery(delivery.status.as_str());
+    observability::record_inbound_delivery("relayed");
     info!(
-        trace_id = %delivery.trace_id,
-        status = delivery.status.as_str(),
-        accepted_recipients = delivery.accepted_recipients.len(),
-        rejected_recipients = delivery.rejected_recipients.len(),
+        trace_id = %request.trace_id,
+        accepted = delivery.accepted,
+        delivered_mailboxes = delivery.delivered_mailboxes.len(),
         internet_message_id = request.internet_message_id.as_deref().unwrap_or(""),
         "inbound message delivered to lpe core"
     );
@@ -5128,11 +5127,8 @@ mod tests {
         ) -> Json<InboundDeliveryResponse> {
             *captured.lock().unwrap() = Some(request.clone());
             Json(InboundDeliveryResponse {
-                trace_id: request.trace_id,
-                status: TransportDeliveryStatus::Relayed,
-                accepted_recipients: request.rcpt_to.clone(),
-                rejected_recipients: Vec::new(),
-                stored_message_ids: Vec::new(),
+                accepted: true,
+                delivered_mailboxes: request.rcpt_to.clone(),
                 detail: None,
             })
         }
