@@ -1,0 +1,159 @@
+use anyhow::{bail, Result};
+use axum::http::HeaderMap;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use uuid::Uuid;
+
+use lpe_storage::{AuthenticatedAccount, MailboxAccountAccess};
+
+use crate::{
+    parse::parse_uuid,
+    protocol::{SessionAccount, SessionDocument},
+    JmapService, JMAP_CALENDARS_CAPABILITY, JMAP_CONTACTS_CAPABILITY, JMAP_CORE_CAPABILITY,
+    JMAP_MAIL_CAPABILITY, JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY,
+    JMAP_WEBSOCKET_CAPABILITY, SESSION_STATE,
+};
+
+impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
+    pub async fn session_document(
+        &self,
+        authorization: Option<&str>,
+        websocket_url: Option<&str>,
+    ) -> Result<SessionDocument> {
+        let account = self.authenticate(authorization).await?;
+        let capabilities = session_capabilities(websocket_url.unwrap_or("ws://localhost/jmap/ws"));
+        let accessible_accounts = self
+            .store
+            .fetch_accessible_mailbox_accounts(account.account_id)
+            .await?;
+        let mut accounts = HashMap::new();
+        for accessible in &accessible_accounts {
+            accounts.insert(
+                accessible.account_id.to_string(),
+                SessionAccount {
+                    name: accessible.email.clone(),
+                    is_personal: accessible.is_owned,
+                    is_read_only: mailbox_account_is_read_only(accessible),
+                    account_capabilities: capabilities.clone(),
+                },
+            );
+        }
+
+        let mut primary_accounts = HashMap::new();
+        let account_id = account.account_id.to_string();
+        primary_accounts.insert(JMAP_CORE_CAPABILITY.to_string(), account_id.clone());
+        primary_accounts.insert(JMAP_MAIL_CAPABILITY.to_string(), account_id.clone());
+        primary_accounts.insert(JMAP_SUBMISSION_CAPABILITY.to_string(), account_id.clone());
+        primary_accounts.insert(JMAP_CONTACTS_CAPABILITY.to_string(), account_id.clone());
+        primary_accounts.insert(JMAP_CALENDARS_CAPABILITY.to_string(), account_id.clone());
+        primary_accounts.insert(JMAP_TASKS_CAPABILITY.to_string(), account_id.clone());
+
+        Ok(SessionDocument {
+            capabilities,
+            accounts,
+            primary_accounts,
+            username: account.email,
+            api_url: "/jmap/api".to_string(),
+            download_url: "/jmap/download/{accountId}/{blobId}/{name}".to_string(),
+            upload_url: "/jmap/upload/{accountId}".to_string(),
+            event_source_url: None,
+            state: SESSION_STATE.to_string(),
+        })
+    }
+}
+
+pub(crate) fn websocket_url(headers: &HeaderMap) -> Option<String> {
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))
+        .and_then(|value| value.to_str().ok())?;
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| match value {
+            "https" => "wss",
+            "http" => "ws",
+            other if other.starts_with("ws") => other,
+            _ => "ws",
+        })
+        .unwrap_or("ws");
+    Some(format!("{scheme}://{host}/jmap/ws"))
+}
+
+fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {
+    HashMap::from([
+        (
+            JMAP_CORE_CAPABILITY.to_string(),
+            json!({
+                "maxSizeUpload": 0,
+                "maxCallsInRequest": 16,
+                "maxConcurrentUpload": 0,
+                "maxObjectsInGet": 250,
+                "maxObjectsInSet": 128,
+                "collationAlgorithms": ["i;ascii-casemap"],
+            }),
+        ),
+        (
+            JMAP_MAIL_CAPABILITY.to_string(),
+            json!({
+                "maxMailboxesPerEmail": 1,
+                "maxMailboxDepth": 1,
+                "emailQuerySortOptions": ["receivedAt"],
+            }),
+        ),
+        (
+            JMAP_SUBMISSION_CAPABILITY.to_string(),
+            json!({
+                "maxDelayedSend": 0,
+            }),
+        ),
+        (
+            JMAP_CONTACTS_CAPABILITY.to_string(),
+            json!({
+                "maxAddressBooksPerCard": 1,
+            }),
+        ),
+        (
+            JMAP_CALENDARS_CAPABILITY.to_string(),
+            json!({
+                "maxCalendarsPerEvent": 1,
+            }),
+        ),
+        (
+            JMAP_TASKS_CAPABILITY.to_string(),
+            json!({
+                "minDateTime": "1970-01-01T00:00:00",
+                "maxDateTime": "9999-12-31T23:59:59",
+                "mayCreateTaskList": true,
+            }),
+        ),
+        (
+            JMAP_WEBSOCKET_CAPABILITY.to_string(),
+            json!({
+                "url": websocket_url,
+                "supportsPush": true,
+            }),
+        ),
+    ])
+}
+
+pub(crate) fn requested_account_id(
+    requested_account_id: Option<&str>,
+    account: &AuthenticatedAccount,
+) -> Result<Uuid> {
+    match requested_account_id {
+        Some(value) => {
+            let id = parse_uuid(value)?;
+            if id == account.account_id {
+                Ok(id)
+            } else {
+                bail!("accountId does not match authenticated account");
+            }
+        }
+        None => Ok(account.account_id),
+    }
+}
+
+fn mailbox_account_is_read_only(access: &MailboxAccountAccess) -> bool {
+    !(access.may_write || access.is_owned || access.may_send_as || access.may_send_on_behalf)
+}
