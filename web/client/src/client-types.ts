@@ -74,6 +74,25 @@ export type ClientWorkspacePayload = {
   messages: Message[];
   events: EventItem[];
   contacts: ContactItem[];
+  tasks: TaskItem[];
+};
+
+export type TaskItem = {
+  id: string;
+  ownerAccountId: string;
+  ownerEmail: string;
+  ownerDisplayName: string;
+  isOwned: boolean;
+  rights: CollaborationRights;
+  taskListId: string;
+  taskListSortOrder: number;
+  title: string;
+  description: string;
+  status: string;
+  dueAt: string | null;
+  completedAt: string | null;
+  sortOrder: number;
+  updatedAt: string;
 };
 
 export type CollaborationRights = {
@@ -111,8 +130,38 @@ export type CollaborationCollection = {
 export type CollaborationOverview = {
   outgoingContacts: CollaborationGrant[];
   outgoingCalendars: CollaborationGrant[];
+  outgoingTaskLists: TaskListGrant[];
   incomingContactCollections: CollaborationCollection[];
   incomingCalendarCollections: CollaborationCollection[];
+  incomingTaskListCollections: CollaborationCollection[];
+};
+
+export type TaskListGrant = {
+  id: string;
+  taskListId: string;
+  taskListName: string;
+  ownerAccountId: string;
+  ownerEmail: string;
+  ownerDisplayName: string;
+  granteeAccountId: string;
+  granteeEmail: string;
+  granteeDisplayName: string;
+  rights: CollaborationRights;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ClientTaskList = {
+  id: string;
+  ownerAccountId: string;
+  ownerEmail: string;
+  ownerDisplayName: string;
+  isOwned: boolean;
+  rights: CollaborationRights;
+  name: string;
+  role: string | null;
+  sortOrder: number;
+  updatedAt: string;
 };
 
 export type MailboxAccountAccess = {

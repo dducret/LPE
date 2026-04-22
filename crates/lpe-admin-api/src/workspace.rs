@@ -4,10 +4,10 @@ use axum::{
     Json,
 };
 use lpe_storage::{
-    AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, ClientTask, ClientWorkspace,
-    HealthResponse, MailboxAccountAccess, SavedDraftMessage, Storage, SubmitMessageInput,
-    SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientTaskInput,
+    AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, ClientTask,
+    ClientTaskList, ClientWorkspace, HealthResponse, MailboxAccountAccess, SavedDraftMessage,
+    Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use tracing::info;
 use uuid::Uuid;
@@ -220,6 +220,19 @@ pub(crate) async fn list_client_tasks(
     Ok(Json(
         storage
             .fetch_client_tasks(account.account_id)
+            .await
+            .map_err(internal_error)?,
+    ))
+}
+
+pub(crate) async fn list_client_task_lists(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<Vec<ClientTaskList>> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .fetch_task_lists(account.account_id)
             .await
             .map_err(internal_error)?,
     ))

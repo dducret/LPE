@@ -75,8 +75,8 @@ use crate::{
     util::{parse_collaboration_kind, parse_sender_delegation_right},
     workspace::{
         client_workspace, delete_client_task, delete_draft_message, get_client_task,
-        list_client_tasks, save_draft_message, submit_message, upsert_client_contact,
-        upsert_client_event, upsert_client_task,
+        list_client_task_lists, list_client_tasks, save_draft_message, submit_message,
+        upsert_client_contact, upsert_client_event, upsert_client_task,
     },
 };
 
@@ -132,6 +132,7 @@ pub fn router(storage: Storage) -> Router {
             "/mail/tasks",
             get(list_client_tasks).post(upsert_client_task),
         )
+        .route("/mail/task-lists", get(list_client_task_lists))
         .route(
             "/mail/tasks/{task_id}",
             get(get_client_task).delete(delete_client_task),

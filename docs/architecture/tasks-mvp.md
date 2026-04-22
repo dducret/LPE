@@ -83,6 +83,7 @@ The following account-scoped endpoints are exposed by `lpe-admin-api`:
 - `GET /api/mail/tasks`
 - `GET /api/mail/tasks/{task_id}`
 - `POST /api/mail/tasks`
+- `GET /api/mail/task-lists`
 - `DELETE /api/mail/tasks/{task_id}`
 - `PUT /api/mail/task-lists/{task_list_id}/shares`
 - `DELETE /api/mail/task-lists/{task_list_id}/shares/{grantee_account_id}`
@@ -94,6 +95,8 @@ The following account-scoped endpoints are exposed by `lpe-admin-api`:
 - when `task_list_id` is absent, the canonical default task list is used
 
 The `/api/mail/workspace` payload now also includes `tasks` so clients can load one unified mailbox and collaboration workspace snapshot.
+
+`GET /api/mail/task-lists` exposes the canonical owned plus accessible shared task lists for the authenticated mailbox account so web and account clients can discover shareable task-list targets and render shared-list access without introducing a client-local task-list model.
 
 ### MVP rules
 
@@ -243,6 +246,7 @@ The current sync contract is:
 - `Task/query` is ordered by canonical task-list `sort_order`, then task `sort_order`, then `updated_at`, then `id`
 - `Task/queryChanges` treats task reordering, task-list moves, and task-list ordering changes as ordered-result changes so clients can reconcile list-aware task ordering
 - `TaskList/changes` uses canonical task-list rows directly; there is no parallel list sync store
+- canonical task-list grant changes and shared-task updates now wake every affected `JMAP` principal account through the shared canonical change channel instead of notifying only the owner session
 
 ### Out of scope for the MVP
 

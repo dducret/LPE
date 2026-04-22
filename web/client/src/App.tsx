@@ -1,5 +1,5 @@
 import React from "react";
-import { getInitialLocale, localeLabels, messages, supportedLocales, type Locale } from "./i18n";
+import { getInitialLocale, localeLabels, messages, setStoredLocale, supportedLocales, type Locale } from "./i18n";
 import { Sidebar } from "./components/Sidebar";
 import { MasterPane } from "./components/MasterPane";
 import { MailDetail } from "./components/MailDetail";
@@ -50,7 +50,7 @@ export function App() {
 
   React.useEffect(() => {
     document.documentElement.lang = locale;
-    window.localStorage.setItem("lpe.locale", locale);
+    setStoredLocale(locale);
   }, [locale]);
 
   React.useEffect(() => {
@@ -212,6 +212,7 @@ export function App() {
         ? workspace.filteredContacts.length
         : (workspace.collaboration?.outgoingContacts.length ?? 0)
           + (workspace.collaboration?.outgoingCalendars.length ?? 0)
+          + (workspace.collaboration?.outgoingTaskLists.length ?? 0)
           + (workspace.mailboxDelegation?.outgoingMailboxes.length ?? 0)
           + (workspace.sieve?.scripts.length ?? 0);
   const attachmentCount = workspace.section === "mail"
@@ -385,6 +386,7 @@ export function App() {
               <SettingsWorkspace
                 copy={copy}
                 collaboration={workspace.collaboration}
+                taskLists={workspace.taskLists}
                 mailboxDelegation={workspace.mailboxDelegation}
                 sieve={workspace.sieve}
                 shareForm={workspace.shareForm}
@@ -394,7 +396,7 @@ export function App() {
                 sieveForm={workspace.sieveForm}
                 setSieveForm={workspace.setSieveForm}
                 onSaveShare={() => void workspace.saveShare()}
-                onDeleteShare={(kind, granteeAccountId) => void workspace.deleteShare(kind, granteeAccountId)}
+                onDeleteShare={(kind, granteeAccountId, taskListId) => void workspace.deleteShare(kind, granteeAccountId, taskListId)}
                 onSaveMailboxDelegation={() => void workspace.saveMailboxDelegation()}
                 onDeleteMailboxDelegation={(granteeAccountId) => void workspace.deleteMailboxDelegation(granteeAccountId)}
                 onSaveSenderDelegation={() => void workspace.saveSenderDelegation()}

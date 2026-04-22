@@ -6,6 +6,7 @@ import type {
   CollaborationOverview,
   ClientWorkspacePayload,
   ContactItem,
+  ClientTaskList,
   EventItem,
   Folder,
   MailboxAccountAccess,
@@ -95,6 +96,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   const [mail, setMail] = React.useState<Message[]>([]);
   const [events, setEvents] = React.useState<EventItem[]>([]);
   const [contacts, setContacts] = React.useState<ContactItem[]>([]);
+  const [taskLists, setTaskLists] = React.useState<ClientTaskList[]>([]);
   const [messageId, setMessageId] = React.useState("");
   const [eventId, setEventId] = React.useState("");
   const [contactId, setContactId] = React.useState("");
@@ -110,7 +112,8 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   const [mailboxDelegation, setMailboxDelegation] = React.useState<MailboxDelegationOverview | null>(null);
   const [sieve, setSieve] = React.useState<SieveOverview | null>(null);
   const [shareForm, setShareForm] = React.useState({
-    kind: "contacts" as "contacts" | "calendar",
+    kind: "contacts" as "contacts" | "calendar" | "tasks",
+    taskListId: "",
     granteeEmail: "",
     mayRead: true,
     mayWrite: false,
@@ -132,6 +135,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       setMail([]);
       setEvents([]);
       setContacts([]);
+      setTaskLists([]);
       return;
     }
 
@@ -154,18 +158,21 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       setCollaboration(null);
       setMailboxDelegation(null);
       setSieve(null);
+      setTaskLists([]);
       return;
     }
 
     try {
-      const [nextCollaboration, nextMailboxDelegation, nextSieve] = await Promise.all([
+      const [nextCollaboration, nextMailboxDelegation, nextSieve, nextTaskLists] = await Promise.all([
         apiJson<CollaborationOverview>("mail/shares", authToken),
         apiJson<{ overview: MailboxDelegationOverview }>("mail/delegation", authToken),
-        apiJson<SieveOverview>("mail/sieve", authToken)
+        apiJson<SieveOverview>("mail/sieve", authToken),
+        apiJson<ClientTaskList[]>("mail/task-lists", authToken)
       ]);
       setCollaboration(nextCollaboration);
       setMailboxDelegation(nextMailboxDelegation.overview);
       setSieve(nextSieve);
+      setTaskLists(nextTaskLists);
       if (nextSieve.activeScript) {
         setSieveForm({
           name: nextSieve.activeScript.name,
@@ -185,6 +192,15 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   React.useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
+
+  const ownedTaskLists = React.useMemo(() => taskLists.filter((item) => item.isOwned), [taskLists]);
+
+  React.useEffect(() => {
+    if (shareForm.kind !== "tasks") return;
+    const selected = ownedTaskLists.find((item) => item.id === shareForm.taskListId);
+    if (selected) return;
+    setShareForm((value) => ({ ...value, taskListId: ownedTaskLists[0]?.id ?? "" }));
+  }, [ownedTaskLists, shareForm.kind, shareForm.taskListId]);
 
   const composerMailboxes = React.useMemo<MailboxAccountAccess[]>(() => {
     if (!identity) return [];
@@ -434,35 +450,54 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   const saveShare = React.useCallback(async () => {
     if (!authToken || !shareForm.granteeEmail.trim()) return pushNotice(copy.validationContact);
     try {
-      await apiJson("mail/shares", authToken, {
-        method: "PUT",
-        body: JSON.stringify({
-          kind: shareForm.kind,
-          granteeEmail: shareForm.granteeEmail,
-          mayRead: shareForm.mayRead,
-          mayWrite: shareForm.mayWrite,
-          mayDelete: shareForm.mayDelete,
-          mayShare: shareForm.mayShare
-        })
-      });
+      if (shareForm.kind === "tasks") {
+        if (!shareForm.taskListId) return pushNotice(copy.settings.validationTaskList);
+        await apiJson(`mail/task-lists/${shareForm.taskListId}/shares`, authToken, {
+          method: "PUT",
+          body: JSON.stringify({
+            granteeEmail: shareForm.granteeEmail,
+            mayRead: shareForm.mayRead,
+            mayWrite: shareForm.mayWrite,
+            mayDelete: shareForm.mayDelete,
+            mayShare: shareForm.mayShare
+          })
+        });
+      } else {
+        await apiJson("mail/shares", authToken, {
+          method: "PUT",
+          body: JSON.stringify({
+            kind: shareForm.kind,
+            granteeEmail: shareForm.granteeEmail,
+            mayRead: shareForm.mayRead,
+            mayWrite: shareForm.mayWrite,
+            mayDelete: shareForm.mayDelete,
+            mayShare: shareForm.mayShare
+          })
+        });
+      }
       await loadSettings();
       setShareForm((value) => ({ ...value, granteeEmail: "" }));
-      pushNotice("Share updated.");
+      pushNotice(copy.settings.shareUpdated);
     } catch (error) {
       pushNotice(mapClientError(error, copy.saveError));
     }
-  }, [authToken, copy.saveError, copy.validationContact, loadSettings, pushNotice, shareForm]);
+  }, [authToken, copy.saveError, copy.settings.shareUpdated, copy.settings.validationTaskList, copy.validationContact, loadSettings, pushNotice, shareForm]);
 
-  const deleteShare = React.useCallback(async (kind: string, granteeAccountId: string) => {
+  const deleteShare = React.useCallback(async (kind: string, granteeAccountId: string, taskListId?: string) => {
     if (!authToken) return;
     try {
-      await apiJson(`mail/shares/${kind}/${granteeAccountId}`, authToken, { method: "DELETE" });
+      if (kind === "tasks") {
+        if (!taskListId) return pushNotice(copy.saveError);
+        await apiJson(`mail/task-lists/${taskListId}/shares/${granteeAccountId}`, authToken, { method: "DELETE" });
+      } else {
+        await apiJson(`mail/shares/${kind}/${granteeAccountId}`, authToken, { method: "DELETE" });
+      }
       await loadSettings();
-      pushNotice("Share removed.");
+      pushNotice(copy.settings.shareRemoved);
     } catch (error) {
       pushNotice(mapClientError(error, copy.saveError));
     }
-  }, [authToken, copy.saveError, loadSettings, pushNotice]);
+  }, [authToken, copy.saveError, copy.settings.shareRemoved, loadSettings, pushNotice]);
 
   const saveMailboxDelegation = React.useCallback(async () => {
     if (!authToken || !mailboxForm.granteeEmail.trim()) return pushNotice(copy.validationContact);
@@ -573,6 +608,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     mail,
     events,
     contacts,
+    taskLists: ownedTaskLists,
     messageId,
     setMessageId: selectMessage,
     eventId,
