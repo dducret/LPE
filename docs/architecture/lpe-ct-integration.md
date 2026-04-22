@@ -20,6 +20,7 @@ The architectural split remains strict:
 6. `LPE-CT` applies local policy and attempts `SMTP` relay
 7. `LPE-CT` replies with an explicit status and a `trace_id`
 8. `LPE` updates `outbound_message_queue.status`, `messages.delivery_status`, `remote_message_ref`, `attempts`, `last_error`, `next_attempt_at`, and the latest structured transport result
+9. `LPE` persists the latest `trace_id` returned by `LPE-CT`, exposes that traceability through the admin mail-flow view, and treats repeated handoff results with the same queue item plus the same `trace_id` as idempotent
 
 Minimum supported statuses:
 
@@ -40,6 +41,11 @@ The outbound handoff result is now structured. In addition to the status and `tr
 - `throttle`: throttling scope, key, window, limit, and suggested delay
 
 `LPE` persists that detailed result on `outbound_message_queue` so queue state remains operationally useful without moving MTA logic into the core platform.
+
+Queue-state handling is replay-safe:
+
+- repeated handoff results for the same queue item and `trace_id` must not increment attempts again
+- once a queue item reaches `relayed`, `quarantined`, `bounced`, or `failed`, later duplicate or stale responses must not regress it into another state
 
 ### Inbound flow `LPE-CT -> LPE`
 

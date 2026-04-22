@@ -192,6 +192,15 @@ pub(crate) struct PendingOutboundQueueRow {
 }
 
 #[derive(Debug, FromRow)]
+pub(crate) struct OutboundQueueStateRow {
+    pub(crate) tenant_id: String,
+    pub(crate) message_id: Uuid,
+    pub(crate) status: String,
+    pub(crate) last_trace_id: Option<String>,
+    pub(crate) remote_message_ref: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
 pub(crate) struct MessageBccRecipientRow {
     pub(crate) address: String,
     pub(crate) display_name: Option<String>,
@@ -563,10 +572,16 @@ pub(crate) struct MailFlowRow {
     pub(crate) subject: String,
     pub(crate) status: String,
     pub(crate) delivery_status: String,
+    pub(crate) attempts: i32,
     pub(crate) submitted_at: String,
     pub(crate) last_attempt_at: Option<String>,
     pub(crate) next_attempt_at: Option<String>,
     pub(crate) trace_id: Option<String>,
     pub(crate) remote_message_ref: Option<String>,
     pub(crate) last_error: Option<String>,
+    pub(crate) retry_after_seconds: Option<i32>,
+    pub(crate) retry_policy: Option<String>,
+    pub(crate) last_dsn_status: Option<String>,
+    pub(crate) last_smtp_code: Option<i32>,
+    pub(crate) last_enhanced_status: Option<String>,
 }

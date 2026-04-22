@@ -23,17 +23,18 @@ pub(crate) use crate::parse::parse_submission_email_id;
 pub(crate) use crate::service::{
     collection_state_fingerprint, trim_snippet, DEFAULT_GET_LIMIT, JMAP_CALENDARS_CAPABILITY,
     JMAP_CONTACTS_CAPABILITY, JMAP_CORE_CAPABILITY, JMAP_MAIL_CAPABILITY,
-    JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY, JMAP_WEBSOCKET_CAPABILITY,
-    MAX_QUERY_LIMIT, QUERY_STATE_VERSION, SESSION_STATE, STATE_TOKEN_VERSION,
+    JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY, JMAP_WEBSOCKET_CAPABILITY, MAX_QUERY_LIMIT,
+    QUERY_STATE_VERSION, SESSION_STATE, STATE_TOKEN_VERSION,
 };
 pub(crate) use crate::session::requested_account_id;
 pub(crate) use crate::state::encode_query_state;
 pub(crate) use crate::upload::blob_id_for_message;
 
 #[cfg(test)]
-use anyhow::Result;
-#[cfg(test)]
-use lpe_storage::{AuthenticatedAccount, ClientTask, JmapEmail, JmapEmailQuery, JmapMailbox, JmapUploadBlob, MailboxAccountAccess, SubmittedMessage, SubmitMessageInput};
+use lpe_storage::{
+    AuthenticatedAccount, ClientTask, JmapEmail, JmapEmailQuery, JmapMailbox, JmapUploadBlob,
+    SubmitMessageInput, SubmittedMessage,
+};
 #[cfg(test)]
 use serde_json::{json, Value};
 #[cfg(test)]
@@ -42,13 +43,28 @@ use uuid::Uuid;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpe_magika::{DetectionSource, Detector, MagikaDetection};
-    use lpe_storage::{
-        AccessibleContact, AccessibleEvent, CanonicalChangeCategory, CanonicalPushChangeSet,
-        ClientContact, ClientEvent, ClientTaskList, CollaborationCollection, CollaborationRights,
-        JmapImportedEmailInput, MailboxAccountAccess, SenderIdentity,
+    use crate::{
+        protocol::{JmapApiRequest, JmapMethodCall},
+        state::{decode_query_state, encode_push_state},
+        store::{JmapPushListener, JmapStore},
     };
-    use std::sync::{Arc, Mutex};
+    use anyhow::{anyhow, bail, Result};
+    use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
+    use lpe_storage::mail::parse_rfc822_message;
+    use lpe_storage::{
+        serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent,
+        AuditEntryInput, CalendarOrganizerMetadata, CalendarParticipantMetadata,
+        CalendarParticipantsMetadata, CanonicalChangeCategory, CanonicalPushChangeSet,
+        ClientContact, ClientEvent, ClientTaskList, CollaborationCollection, CollaborationRights,
+        CreateTaskListInput, JmapEmailAddress, JmapEmailSubmission, JmapImportedEmailInput,
+        JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, MailboxAccountAccess,
+        SavedDraftMessage, SenderIdentity, UpdateTaskListInput, UpsertClientContactInput,
+        UpsertClientEventInput, UpsertClientTaskInput,
+    };
+    use std::{
+        collections::{HashMap, HashSet},
+        sync::{Arc, Mutex},
+    };
 
     #[derive(Clone, Default)]
     struct FakeStore {
@@ -1663,6 +1679,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn email_get_only_returns_bcc_for_explicit_owner_draft_request() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email(), FakeStore::inbox_email()],
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/get".to_string(),
+                        json!({
+                            "ids": [
+                                FakeStore::draft_email().id.to_string(),
+                                FakeStore::inbox_email().id.to_string()
+                            ],
+                            "properties": ["id", "bcc"]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let list = response.method_responses[0].1["list"].as_array().unwrap();
+        assert_eq!(
+            list[0]["bcc"][0]["email"],
+            Value::String("hidden@example.test".to_string())
+        );
+        assert_eq!(list[1]["bcc"], Value::Null);
+    }
+
+    #[tokio::test]
     async fn mailbox_and_email_changes_return_existing_ids_from_initial_state() {
         let store = FakeStore {
             session: Some(FakeStore::account()),
@@ -2489,6 +2547,89 @@ mod tests {
 
         assert!(changed[&account.account_id.to_string()].contains_key("Task"));
         assert!(!changed[&account.account_id.to_string()].contains_key("Mailbox"));
+    }
+
+    #[tokio::test]
+    async fn shared_task_push_change_wakes_grantee_principal() {
+        let account = FakeStore::account();
+        let shared_owner = FakeStore::shared_account();
+        let shared_task_list = ClientTaskList {
+            id: Uuid::parse_str("94949494-9494-9494-9494-949494949494").unwrap(),
+            name: "Shared Ops".to_string(),
+            role: None,
+            sort_order: 40,
+            owner_account_id: shared_owner.account_id,
+            owner_email: shared_owner.email.clone(),
+            owner_display_name: shared_owner.display_name.clone(),
+            is_owned: false,
+            rights: CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: false,
+                may_share: false,
+            },
+            updated_at: "2026-04-20T16:10:00Z".to_string(),
+        };
+        let shared_task_id = Uuid::parse_str("95959595-9595-9595-9595-959595959595").unwrap();
+        let initial_shared_task = ClientTask {
+            id: shared_task_id,
+            owner_account_id: shared_task_list.owner_account_id,
+            owner_email: shared_task_list.owner_email.clone(),
+            owner_display_name: shared_task_list.owner_display_name.clone(),
+            is_owned: false,
+            rights: shared_task_list.rights.clone(),
+            task_list_id: shared_task_list.id,
+            task_list_sort_order: shared_task_list.sort_order,
+            title: "Shared rollout".to_string(),
+            description: "Visible through canonical sharing".to_string(),
+            status: "in-progress".to_string(),
+            due_at: None,
+            completed_at: None,
+            sort_order: 1,
+            updated_at: "2026-04-20T16:20:00Z".to_string(),
+        };
+        let mut updated_shared_task = initial_shared_task.clone();
+        updated_shared_task.updated_at = "2026-04-21T09:00:00Z".to_string();
+        updated_shared_task.status = "completed".to_string();
+        updated_shared_task.completed_at = Some("2026-04-21T09:00:00Z".to_string());
+
+        let enabled_types = HashSet::from(["Task".to_string()]);
+        let initial_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            task_lists: Arc::new(Mutex::new(vec![
+                FakeStore::default_task_list(),
+                shared_task_list.clone(),
+            ])),
+            tasks: Arc::new(Mutex::new(vec![FakeStore::task(), initial_shared_task])),
+            ..Default::default()
+        });
+        let last_type_states = initial_service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+        let subscription = push_subscription(enabled_types, last_type_states);
+
+        let updated_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            task_lists: Arc::new(Mutex::new(vec![
+                FakeStore::default_task_list(),
+                shared_task_list,
+            ])),
+            tasks: Arc::new(Mutex::new(vec![FakeStore::task(), updated_shared_task])),
+            ..Default::default()
+        });
+        let mut change_set = CanonicalPushChangeSet::default();
+        change_set.insert_accounts(CanonicalChangeCategory::Tasks, [shared_owner.account_id]);
+
+        let (changed, current_type_states) = updated_service
+            .compute_push_changes(account.account_id, &subscription, &change_set)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            changed[&account.account_id.to_string()]["Task"],
+            current_type_states[&account.account_id.to_string()]["Task"]
+        );
     }
 
     #[tokio::test]

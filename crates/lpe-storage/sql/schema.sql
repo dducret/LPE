@@ -21,7 +21,7 @@ CREATE SEQUENCE message_modseq_seq START WITH 2;
 
 CREATE TABLE schema_metadata (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
-    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.6'),
+    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.7'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -648,6 +648,7 @@ CREATE TABLE outbound_message_queue (
     next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_attempt_at TIMESTAMPTZ,
     last_error TEXT,
+    last_trace_id TEXT,
     remote_message_ref TEXT,
     retry_after_seconds INTEGER CHECK (retry_after_seconds IS NULL OR retry_after_seconds >= 0),
     retry_policy TEXT,
@@ -967,7 +968,7 @@ LEFT JOIN attachments a
 GROUP BY m.id, m.account_id, m.mailbox_id, m.received_at, m.subject_normalized, mb.search_vector;
 
 INSERT INTO schema_metadata (singleton, schema_version)
-VALUES (TRUE, '0.1.6');
+VALUES (TRUE, '0.1.7');
 
 INSERT INTO security_settings (
     tenant_id,

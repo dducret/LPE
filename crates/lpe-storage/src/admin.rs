@@ -11,11 +11,11 @@ use crate::{
     DashboardUpdate, DomainRecord, DomainRow, EmailTraceResult, EmailTraceRow,
     EmailTraceSearchInput, FilterRule, FilterRuleRow, HealthResponse, LocalAiSettings,
     MailFlowEntry, MailFlowRow, MailboxRecord, MailboxRow, NewAccount, NewAlias, NewDomain,
-    NewMailbox, NewPstTransferJob, NewServerAdministrator, OverviewStats,
-    ProtocolStatus, PstTransferJobRecord, PstTransferJobRow, QuarantineItem, QuarantineRow,
-    SecuritySettings, ServerAdministrator, ServerAdministratorRow, ServerSettings,
-    SieveScriptDocument, SieveScriptSummary, Storage, StorageOverview, UpdateAccount,
-    UpdateDomain, MAX_SIEVE_SCRIPTS_PER_ACCOUNT, PLATFORM_TENANT_ID,
+    NewMailbox, NewPstTransferJob, NewServerAdministrator, OverviewStats, ProtocolStatus,
+    PstTransferJobRecord, PstTransferJobRow, QuarantineItem, QuarantineRow, SecuritySettings,
+    ServerAdministrator, ServerAdministratorRow, ServerSettings, SieveScriptDocument,
+    SieveScriptSummary, Storage, StorageOverview, UpdateAccount, UpdateDomain,
+    MAX_SIEVE_SCRIPTS_PER_ACCOUNT, PLATFORM_TENANT_ID,
 };
 
 impl Storage {
@@ -600,7 +600,9 @@ impl Storage {
 
     pub async fn create_alias(&self, input: NewAlias, audit: AuditEntryInput) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        let tenant_id = self.tenant_id_for_account_email(input.source.trim()).await?;
+        let tenant_id = self
+            .tenant_id_for_account_email(input.source.trim())
+            .await?;
         let result = sqlx::query(
             r#"
             INSERT INTO aliases (id, tenant_id, source, target, kind, status)
@@ -1069,7 +1071,8 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
-        self.insert_audit(&mut tx, PLATFORM_TENANT_ID, audit).await?;
+        self.insert_audit(&mut tx, PLATFORM_TENANT_ID, audit)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1271,7 +1274,8 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
-        self.insert_audit(&mut tx, PLATFORM_TENANT_ID, audit).await?;
+        self.insert_audit(&mut tx, PLATFORM_TENANT_ID, audit)
+            .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1286,6 +1290,7 @@ impl Storage {
                 m.subject_normalized AS subject,
                 q.status,
                 m.delivery_status,
+                q.attempts,
                 to_char(q.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS submitted_at,
                 CASE
                     WHEN q.last_attempt_at IS NULL THEN NULL
@@ -1295,9 +1300,14 @@ impl Storage {
                     WHEN q.next_attempt_at IS NULL THEN NULL
                     ELSE to_char(q.next_attempt_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS next_attempt_at,
-                NULL::TEXT AS trace_id,
+                q.last_trace_id AS trace_id,
                 q.remote_message_ref,
-                q.last_error
+                q.last_error,
+                q.retry_after_seconds,
+                q.retry_policy,
+                q.last_dsn_status,
+                q.last_smtp_code,
+                q.last_enhanced_status
             FROM outbound_message_queue q
             JOIN messages m ON m.id = q.message_id
             JOIN accounts a ON a.id = m.account_id
@@ -1319,12 +1329,18 @@ impl Storage {
                 subject: row.subject,
                 status: row.status,
                 delivery_status: row.delivery_status,
+                attempts: row.attempts.max(0) as u32,
                 submitted_at: row.submitted_at,
                 last_attempt_at: row.last_attempt_at,
                 next_attempt_at: row.next_attempt_at,
                 trace_id: row.trace_id,
                 remote_message_ref: row.remote_message_ref,
                 last_error: row.last_error,
+                retry_after_seconds: row.retry_after_seconds,
+                retry_policy: row.retry_policy,
+                last_dsn_status: row.last_dsn_status,
+                last_smtp_code: row.last_smtp_code,
+                last_enhanced_status: row.last_enhanced_status,
             })
             .collect())
     }
@@ -1478,30 +1494,70 @@ impl Storage {
                 oidc_login_enabled: row.try_get("oidc_login_enabled")?,
                 oidc_provider_label: row.try_get("oidc_provider_label")?,
                 oidc_auto_link_by_email: row.try_get("oidc_auto_link_by_email")?,
-                oidc_issuer_url: row.try_get::<Option<String>, _>("issuer_url")?.unwrap_or_default(),
-                oidc_authorization_endpoint: row.try_get::<Option<String>, _>("authorization_endpoint")?.unwrap_or_default(),
-                oidc_token_endpoint: row.try_get::<Option<String>, _>("token_endpoint")?.unwrap_or_default(),
-                oidc_userinfo_endpoint: row.try_get::<Option<String>, _>("userinfo_endpoint")?.unwrap_or_default(),
-                oidc_client_id: row.try_get::<Option<String>, _>("client_id")?.unwrap_or_default(),
-                oidc_client_secret: row.try_get::<Option<String>, _>("client_secret")?.unwrap_or_default(),
-                oidc_scopes: row.try_get::<Option<String>, _>("scopes")?.unwrap_or_else(|| "openid profile email".to_string()),
-                oidc_claim_email: row.try_get::<Option<String>, _>("claim_email")?.unwrap_or_else(|| "email".to_string()),
-                oidc_claim_display_name: row.try_get::<Option<String>, _>("claim_display_name")?.unwrap_or_else(|| "name".to_string()),
-                oidc_claim_subject: row.try_get::<Option<String>, _>("claim_subject")?.unwrap_or_else(|| "sub".to_string()),
+                oidc_issuer_url: row
+                    .try_get::<Option<String>, _>("issuer_url")?
+                    .unwrap_or_default(),
+                oidc_authorization_endpoint: row
+                    .try_get::<Option<String>, _>("authorization_endpoint")?
+                    .unwrap_or_default(),
+                oidc_token_endpoint: row
+                    .try_get::<Option<String>, _>("token_endpoint")?
+                    .unwrap_or_default(),
+                oidc_userinfo_endpoint: row
+                    .try_get::<Option<String>, _>("userinfo_endpoint")?
+                    .unwrap_or_default(),
+                oidc_client_id: row
+                    .try_get::<Option<String>, _>("client_id")?
+                    .unwrap_or_default(),
+                oidc_client_secret: row
+                    .try_get::<Option<String>, _>("client_secret")?
+                    .unwrap_or_default(),
+                oidc_scopes: row
+                    .try_get::<Option<String>, _>("scopes")?
+                    .unwrap_or_else(|| "openid profile email".to_string()),
+                oidc_claim_email: row
+                    .try_get::<Option<String>, _>("claim_email")?
+                    .unwrap_or_else(|| "email".to_string()),
+                oidc_claim_display_name: row
+                    .try_get::<Option<String>, _>("claim_display_name")?
+                    .unwrap_or_else(|| "name".to_string()),
+                oidc_claim_subject: row
+                    .try_get::<Option<String>, _>("claim_subject")?
+                    .unwrap_or_else(|| "sub".to_string()),
                 mailbox_password_login_enabled: row.try_get("mailbox_password_login_enabled")?,
                 mailbox_oidc_login_enabled: row.try_get("mailbox_oidc_login_enabled")?,
                 mailbox_oidc_provider_label: row.try_get("mailbox_oidc_provider_label")?,
                 mailbox_oidc_auto_link_by_email: row.try_get("mailbox_oidc_auto_link_by_email")?,
-                mailbox_oidc_issuer_url: row.try_get::<Option<String>, _>("mailbox_issuer_url")?.unwrap_or_default(),
-                mailbox_oidc_authorization_endpoint: row.try_get::<Option<String>, _>("mailbox_authorization_endpoint")?.unwrap_or_default(),
-                mailbox_oidc_token_endpoint: row.try_get::<Option<String>, _>("mailbox_token_endpoint")?.unwrap_or_default(),
-                mailbox_oidc_userinfo_endpoint: row.try_get::<Option<String>, _>("mailbox_userinfo_endpoint")?.unwrap_or_default(),
-                mailbox_oidc_client_id: row.try_get::<Option<String>, _>("mailbox_client_id")?.unwrap_or_default(),
-                mailbox_oidc_client_secret: row.try_get::<Option<String>, _>("mailbox_client_secret")?.unwrap_or_default(),
-                mailbox_oidc_scopes: row.try_get::<Option<String>, _>("mailbox_scopes")?.unwrap_or_else(|| "openid profile email".to_string()),
-                mailbox_oidc_claim_email: row.try_get::<Option<String>, _>("mailbox_claim_email")?.unwrap_or_else(|| "email".to_string()),
-                mailbox_oidc_claim_display_name: row.try_get::<Option<String>, _>("mailbox_claim_display_name")?.unwrap_or_else(|| "name".to_string()),
-                mailbox_oidc_claim_subject: row.try_get::<Option<String>, _>("mailbox_claim_subject")?.unwrap_or_else(|| "sub".to_string()),
+                mailbox_oidc_issuer_url: row
+                    .try_get::<Option<String>, _>("mailbox_issuer_url")?
+                    .unwrap_or_default(),
+                mailbox_oidc_authorization_endpoint: row
+                    .try_get::<Option<String>, _>("mailbox_authorization_endpoint")?
+                    .unwrap_or_default(),
+                mailbox_oidc_token_endpoint: row
+                    .try_get::<Option<String>, _>("mailbox_token_endpoint")?
+                    .unwrap_or_default(),
+                mailbox_oidc_userinfo_endpoint: row
+                    .try_get::<Option<String>, _>("mailbox_userinfo_endpoint")?
+                    .unwrap_or_default(),
+                mailbox_oidc_client_id: row
+                    .try_get::<Option<String>, _>("mailbox_client_id")?
+                    .unwrap_or_default(),
+                mailbox_oidc_client_secret: row
+                    .try_get::<Option<String>, _>("mailbox_client_secret")?
+                    .unwrap_or_default(),
+                mailbox_oidc_scopes: row
+                    .try_get::<Option<String>, _>("mailbox_scopes")?
+                    .unwrap_or_else(|| "openid profile email".to_string()),
+                mailbox_oidc_claim_email: row
+                    .try_get::<Option<String>, _>("mailbox_claim_email")?
+                    .unwrap_or_else(|| "email".to_string()),
+                mailbox_oidc_claim_display_name: row
+                    .try_get::<Option<String>, _>("mailbox_claim_display_name")?
+                    .unwrap_or_else(|| "name".to_string()),
+                mailbox_oidc_claim_subject: row
+                    .try_get::<Option<String>, _>("mailbox_claim_subject")?
+                    .unwrap_or_else(|| "sub".to_string()),
                 mailbox_app_passwords_enabled: row.try_get("mailbox_app_passwords_enabled")?,
             },
             None => SecuritySettings {
@@ -1588,7 +1644,8 @@ impl Storage {
                 content_filtering_enabled: row.try_get("content_filtering_enabled")?,
                 spam_engine: row.try_get("spam_engine")?,
                 quarantine_enabled: row.try_get("quarantine_enabled")?,
-                quarantine_retention_days: row.try_get::<i32, _>("quarantine_retention_days")? as u32,
+                quarantine_retention_days: row.try_get::<i32, _>("quarantine_retention_days")?
+                    as u32,
             },
             None => AntispamSettings {
                 content_filtering_enabled: true,

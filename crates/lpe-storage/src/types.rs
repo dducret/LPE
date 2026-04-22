@@ -331,12 +331,18 @@ pub struct MailFlowEntry {
     pub subject: String,
     pub status: String,
     pub delivery_status: String,
+    pub attempts: u32,
     pub submitted_at: String,
     pub last_attempt_at: Option<String>,
     pub next_attempt_at: Option<String>,
     pub trace_id: Option<String>,
     pub remote_message_ref: Option<String>,
     pub last_error: Option<String>,
+    pub retry_after_seconds: Option<i32>,
+    pub retry_policy: Option<String>,
+    pub last_dsn_status: Option<String>,
+    pub last_smtp_code: Option<i32>,
+    pub last_enhanced_status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -344,6 +350,7 @@ pub struct OutboundQueueStatusUpdate {
     pub queue_id: Uuid,
     pub message_id: Uuid,
     pub status: String,
+    pub trace_id: Option<String>,
     pub remote_message_ref: Option<String>,
     pub retry_after_seconds: Option<i32>,
     pub retry_policy: Option<String>,
