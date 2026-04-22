@@ -244,20 +244,24 @@ where
 {
     let credentials = if command.to_ascii_uppercase().starts_with("AUTH PLAIN") {
         let initial = command.split_whitespace().nth(2).map(str::to_string);
-        parse_auth_plain(reader, writer, initial).await.map_err(|error| {
-            (
-                SmtpAuthFailureKind::InvalidCredentials,
-                sanitize_smtp_text(&error.to_string()),
-            )
-        })?
+        parse_auth_plain(reader, writer, initial)
+            .await
+            .map_err(|error| {
+                (
+                    SmtpAuthFailureKind::InvalidCredentials,
+                    sanitize_smtp_text(&error.to_string()),
+                )
+            })?
     } else if command.to_ascii_uppercase().starts_with("AUTH LOGIN") {
         let initial = command.split_whitespace().nth(2).map(str::to_string);
-        parse_auth_login(reader, writer, initial).await.map_err(|error| {
-            (
-                SmtpAuthFailureKind::InvalidCredentials,
-                sanitize_smtp_text(&error.to_string()),
-            )
-        })?
+        parse_auth_login(reader, writer, initial)
+            .await
+            .map_err(|error| {
+                (
+                    SmtpAuthFailureKind::InvalidCredentials,
+                    sanitize_smtp_text(&error.to_string()),
+                )
+            })?
     } else {
         return Err((
             SmtpAuthFailureKind::Permanent,
@@ -609,18 +613,14 @@ fn smtp_submission_failure_reply(status: StatusCode, detail: &str) -> String {
 mod tests {
     use super::{
         classify_auth_failure_status, decode_auth_login_token, decode_auth_plain,
-        sanitize_smtp_text, smtp_auth_failure_reply, smtp_submission_failure_reply,
-        submit_message, SmtpAuthFailureKind,
+        sanitize_smtp_text, smtp_auth_failure_reply, smtp_submission_failure_reply, submit_message,
+        SmtpAuthFailureKind,
     };
-    use axum::{
-        extract::State,
-        http::HeaderMap,
-        routing::post,
-        Json, Router,
-    };
+    use crate::env_test_lock;
+    use axum::{extract::State, http::HeaderMap, routing::post, Json, Router};
     use lpe_domain::{SmtpSubmissionRequest, SmtpSubmissionResponse};
-    use std::sync::{Arc, Mutex};
     use reqwest::StatusCode;
+    use std::sync::{Arc, Mutex};
     use tokio::net::TcpListener;
     use uuid::Uuid;
 
@@ -684,7 +684,10 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "env-sensitive"]
     async fn submit_message_posts_trace_header_and_returns_success() {
+        let _guard = env_test_lock();
+
         async fn accept(
             State(capture): State<Capture>,
             headers: HeaderMap,
@@ -733,10 +736,7 @@ mod tests {
 
         assert!(response.accepted);
         assert_eq!(response.trace_id, "trace-1");
-        assert_eq!(
-            capture.trace_id.lock().unwrap().as_deref(),
-            Some("trace-1")
-        );
+        assert_eq!(capture.trace_id.lock().unwrap().as_deref(), Some("trace-1"));
         std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 }
