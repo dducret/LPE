@@ -27,6 +27,8 @@ struct CtMetrics {
     outbound_handoffs_total: BTreeMap<String, u64>,
     inbound_delivery_total: BTreeMap<String, u64>,
     smtp_sessions_total: BTreeMap<String, u64>,
+    smtp_backpressure_total: u64,
+    active_smtp_sessions: u32,
     security_events_total: BTreeMap<String, u64>,
 }
 
@@ -148,6 +150,18 @@ pub fn record_smtp_session(result: &str) {
     }
 }
 
+pub fn record_smtp_backpressure() {
+    if let Ok(mut guard) = metrics().lock() {
+        guard.smtp_backpressure_total += 1;
+    }
+}
+
+pub fn set_active_smtp_sessions(value: u32) {
+    if let Ok(mut guard) = metrics().lock() {
+        guard.active_smtp_sessions = value;
+    }
+}
+
 pub fn record_security_event(event: &str) {
     if let Ok(mut guard) = metrics().lock() {
         *guard
@@ -245,6 +259,22 @@ fn render_metrics(spool_dir: &Path) -> String {
             value
         ));
     }
+    output.push_str(
+        "# HELP lpe_ct_smtp_backpressure_total SMTP sessions rejected because concurrency limits were reached.\n",
+    );
+    output.push_str("# TYPE lpe_ct_smtp_backpressure_total counter\n");
+    output.push_str(&format!(
+        "lpe_ct_smtp_backpressure_total {}\n",
+        guard.smtp_backpressure_total
+    ));
+    output.push_str(
+        "# HELP lpe_ct_active_smtp_sessions Current number of active SMTP ingress sessions.\n",
+    );
+    output.push_str("# TYPE lpe_ct_active_smtp_sessions gauge\n");
+    output.push_str(&format!(
+        "lpe_ct_active_smtp_sessions {}\n",
+        guard.active_smtp_sessions
+    ));
 
     output.push_str(
         "# HELP lpe_ct_security_events_total Security-significant decisions observed by LPE-CT.\n",

@@ -10,9 +10,10 @@ use email_auth::{
 use hickory_resolver::{proto::rr::RecordType, TokioResolver};
 use lpe_domain::{
     InboundDeliveryRequest, InboundDeliveryResponse, OutboundMessageHandoffRequest,
-    OutboundMessageHandoffResponse, TransportDeliveryStatus, TransportDsnReport,
-    TransportRetryAdvice, TransportRouteDecision, TransportTechnicalStatus,
-    TransportThrottleStatus,
+    OutboundMessageHandoffResponse, SignedIntegrationHeaders, TransportDeliveryStatus,
+    TransportDsnReport, TransportRetryAdvice, TransportRouteDecision, TransportTechnicalStatus,
+    TransportThrottleStatus, INTEGRATION_KEY_HEADER, INTEGRATION_NONCE_HEADER,
+    INTEGRATION_SIGNATURE_HEADER, INTEGRATION_TIMESTAMP_HEADER,
 };
 use lpe_magika::{
     collect_mime_attachment_parts, extract_visible_text, parse_rfc822_header_value, Detector,
@@ -28,7 +29,7 @@ use std::{
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
-    sync::OnceLock,
+    sync::{atomic::{AtomicU32, Ordering}, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::{
@@ -40,6 +41,10 @@ use tokio::{
 use tracing::{info, warn};
 
 use crate::{integration_shared_secret, observability};
+
+const INBOUND_DELIVERY_PATH: &str = "/internal/lpe-ct/inbound-deliveries";
+
+static SMTP_ACTIVE_SESSIONS: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
@@ -72,6 +77,7 @@ pub(crate) struct RuntimeConfig {
     spam_quarantine_threshold: f32,
     spam_reject_threshold: f32,
     max_message_size_mb: u32,
+    max_concurrent_sessions: u32,
     routing_rules: Vec<OutboundRoutingRule>,
     throttle_enabled: bool,
     throttle_rules: Vec<OutboundThrottleRule>,
@@ -106,7 +112,7 @@ struct AuthSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct DecisionTraceEntry {
+pub(crate) struct DecisionTraceEntry {
     stage: String,
     outcome: String,
     detail: String,
@@ -134,6 +140,57 @@ struct QuarantineMetadata {
     decision_trace: Vec<DecisionTraceEntry>,
     magika_summary: Option<String>,
     magika_decision: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct QuarantineSummary {
+    pub trace_id: String,
+    pub queue: String,
+    pub direction: String,
+    pub status: String,
+    pub received_at: String,
+    pub mail_from: String,
+    pub rcpt_to: Vec<String>,
+    pub subject: String,
+    pub reason: Option<String>,
+    pub spam_score: f32,
+    pub security_score: f32,
+    pub reputation_score: i32,
+    pub route_target: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct TraceDetails {
+    pub trace_id: String,
+    pub queue: String,
+    pub direction: String,
+    pub status: String,
+    pub received_at: String,
+    pub peer: String,
+    pub helo: String,
+    pub mail_from: String,
+    pub rcpt_to: Vec<String>,
+    pub subject: String,
+    pub internet_message_id: Option<String>,
+    pub reason: Option<String>,
+    pub remote_message_ref: Option<String>,
+    pub spam_score: f32,
+    pub security_score: f32,
+    pub reputation_score: i32,
+    pub technical_status: Option<TransportTechnicalStatus>,
+    pub dsn: Option<TransportDsnReport>,
+    pub route: Option<TransportRouteDecision>,
+    pub throttle: Option<TransportThrottleStatus>,
+    pub decision_trace: Vec<DecisionTraceEntry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct TraceActionResult {
+    pub trace_id: String,
+    pub from_queue: String,
+    pub to_queue: String,
+    pub status: String,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -173,6 +230,25 @@ struct QueuedMessage {
     throttle: Option<TransportThrottleStatus>,
     #[serde(with = "base64_bytes")]
     data: Vec<u8>,
+}
+
+#[derive(Debug, Serialize)]
+struct TransportAuditEvent {
+    timestamp: String,
+    trace_id: String,
+    direction: String,
+    queue: String,
+    status: String,
+    peer: String,
+    mail_from: String,
+    rcpt_to: Vec<String>,
+    subject: String,
+    reason: Option<String>,
+    route_target: Option<String>,
+    remote_message_ref: Option<String>,
+    spam_score: f32,
+    security_score: f32,
+    reputation_score: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -655,6 +731,25 @@ pub(crate) async fn run_smtp_listener(
 
     loop {
         let (stream, peer) = listener.accept().await?;
+        let max_concurrent_sessions = runtime_config(&state_file)
+            .map(|config| config.max_concurrent_sessions.max(1))
+            .unwrap_or(250);
+        let current = SMTP_ACTIVE_SESSIONS.fetch_add(1, Ordering::SeqCst) + 1;
+        observability::set_active_smtp_sessions(current);
+        if current > max_concurrent_sessions {
+            SMTP_ACTIVE_SESSIONS.fetch_sub(1, Ordering::SeqCst);
+            observability::set_active_smtp_sessions(SMTP_ACTIVE_SESSIONS.load(Ordering::SeqCst));
+            observability::record_smtp_backpressure();
+            tokio::spawn(async move {
+                let (_, mut writer) = stream.into_split();
+                let _ = write_smtp(
+                    &mut writer,
+                    "421 too many concurrent SMTP sessions; try again later",
+                )
+                .await;
+            });
+            continue;
+        }
         let state_file = state_file.clone();
         let spool_dir = spool_dir.clone();
         tokio::spawn(async move {
@@ -662,6 +757,8 @@ pub(crate) async fn run_smtp_listener(
                 observability::record_smtp_session("failed");
                 warn!(peer = %peer, error = %error, "smtp session failed");
             }
+            let remaining = SMTP_ACTIVE_SESSIONS.fetch_sub(1, Ordering::SeqCst) - 1;
+            observability::set_active_smtp_sessions(remaining);
         });
     }
 }
@@ -697,6 +794,7 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
         spam_quarantine_threshold: dashboard.policies.spam_quarantine_threshold,
         spam_reject_threshold: dashboard.policies.spam_reject_threshold,
         max_message_size_mb: dashboard.policies.max_message_size_mb,
+        max_concurrent_sessions: dashboard.network.max_concurrent_sessions.max(1),
         routing_rules: dashboard
             .routing
             .rules
@@ -946,6 +1044,7 @@ pub(crate) async fn process_outbound_handoff(
         });
         move_message(spool_dir, &message, "outbound", "quarantine").await?;
         persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
+        let _ = append_transport_audit(spool_dir, "quarantine", &message);
         observability::record_security_event("outbound_quarantine");
         return Ok(OutboundMessageHandoffResponse {
             queue_id: payload.queue_id,
@@ -981,6 +1080,7 @@ pub(crate) async fn process_outbound_handoff(
         });
         move_message(spool_dir, &message, "outbound", "quarantine").await?;
         persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
+        let _ = append_transport_audit(spool_dir, "quarantine", &message);
         observability::record_security_event("outbound_quarantine");
         info!(
             trace_id = %message.id,
@@ -1016,6 +1116,7 @@ pub(crate) async fn process_outbound_handoff(
         });
         move_message(spool_dir, &message, "outbound", "quarantine").await?;
         persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
+        let _ = append_transport_audit(spool_dir, "quarantine", &message);
         observability::record_security_event("outbound_quarantine");
         return Ok(OutboundMessageHandoffResponse {
             queue_id: payload.queue_id,
@@ -1052,6 +1153,7 @@ pub(crate) async fn process_outbound_handoff(
             ),
         });
         move_message(spool_dir, &message, "outbound", "deferred").await?;
+        let _ = append_transport_audit(spool_dir, "deferred", &message);
         info!(
             trace_id = %message.id,
             message_id = %message_id,
@@ -1120,6 +1222,7 @@ pub(crate) async fn process_outbound_handoff(
     if destination == "quarantine" {
         persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
     }
+    let _ = append_transport_audit(spool_dir, destination, &message);
     if matches!(
         execution.status,
         TransportDeliveryStatus::Quarantined
@@ -1516,6 +1619,7 @@ async fn receive_message_with_validator<D: Detector>(
             detail: "drain mode is enabled on the sorting center".to_string(),
         });
         move_message(spool_dir, &message, "incoming", "held").await?;
+        let _ = append_transport_audit(spool_dir, "held", &message);
         return Ok(message);
     }
 
@@ -1534,6 +1638,7 @@ async fn receive_message_with_validator<D: Detector>(
             });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
+            let _ = append_transport_audit(spool_dir, "quarantine", &message);
             info!(
                 trace_id = %message.id,
                 status = %message.status,
@@ -1554,6 +1659,7 @@ async fn receive_message_with_validator<D: Detector>(
             });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
+            let _ = append_transport_audit(spool_dir, "quarantine", &message);
             info!(
                 trace_id = %message.id,
                 status = %message.status,
@@ -1574,6 +1680,7 @@ async fn receive_message_with_validator<D: Detector>(
             });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
+            let _ = append_transport_audit(spool_dir, "quarantine", &message);
             info!(
                 trace_id = %message.id,
                 status = %message.status,
@@ -1605,6 +1712,7 @@ async fn receive_message_with_validator<D: Detector>(
                     detail: "message delivered to the core LPE inbound-delivery API".to_string(),
                 });
                 move_message(spool_dir, &message, "incoming", "sent").await?;
+                let _ = append_transport_audit(spool_dir, "sent", &message);
                 update_reputation(spool_dir, config, &message, FilterAction::Accept).await?;
                 train_bayespam(spool_dir, config, &message, BayesLabel::Ham).await?;
                 observability::record_smtp_session("delivered");
@@ -1627,6 +1735,7 @@ async fn receive_message_with_validator<D: Detector>(
                     "deferred"
                 };
                 move_message(spool_dir, &message, "incoming", destination).await?;
+                let _ = append_transport_audit(spool_dir, destination, &message);
                 update_reputation(spool_dir, config, &message, FilterAction::Defer).await?;
                 observability::record_security_event("inbound_delivery_deferred");
                 observability::record_smtp_session("deferred");
@@ -1637,6 +1746,7 @@ async fn receive_message_with_validator<D: Detector>(
             message.status = "quarantined".to_string();
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
+            let _ = append_transport_audit(spool_dir, "quarantine", &message);
             update_reputation(spool_dir, config, &message, FilterAction::Quarantine).await?;
             train_bayespam(spool_dir, config, &message, BayesLabel::Spam).await?;
             observability::record_smtp_session("quarantined");
@@ -1646,6 +1756,7 @@ async fn receive_message_with_validator<D: Detector>(
             message.status = "rejected".to_string();
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
+            let _ = append_transport_audit(spool_dir, "quarantine", &message);
             update_reputation(spool_dir, config, &message, FilterAction::Reject).await?;
             train_bayespam(spool_dir, config, &message, BayesLabel::Spam).await?;
             observability::record_smtp_session("rejected");
@@ -1654,6 +1765,7 @@ async fn receive_message_with_validator<D: Detector>(
             observability::record_security_event("inbound_defer");
             message.status = "deferred".to_string();
             move_message(spool_dir, &message, "incoming", "deferred").await?;
+            let _ = append_transport_audit(spool_dir, "deferred", &message);
             update_reputation(spool_dir, config, &message, FilterAction::Defer).await?;
             observability::record_smtp_session("deferred");
         }
@@ -3171,8 +3283,9 @@ async fn deliver_inbound_message(
     message: &QueuedMessage,
 ) -> Result<InboundDeliveryResponse> {
     let endpoint = format!(
-        "{}/internal/lpe-ct/inbound-deliveries",
-        config.core_delivery_base_url.trim_end_matches('/')
+        "{}{}",
+        config.core_delivery_base_url.trim_end_matches('/'),
+        INBOUND_DELIVERY_PATH
     );
     let subject = parse_rfc822_header_value(&message.data, "subject").unwrap_or_default();
     let internet_message_id = parse_rfc822_header_value(&message.data, "message-id");
@@ -3191,9 +3304,19 @@ async fn deliver_inbound_message(
 
     let client = reqwest::Client::builder().build()?;
     let integration_secret = integration_shared_secret()?;
+    let signed = SignedIntegrationHeaders::sign(
+        &integration_secret,
+        "POST",
+        INBOUND_DELIVERY_PATH,
+        &request,
+    )
+    .map_err(|error| anyhow!(error.to_string()))?;
     let response = client
         .post(endpoint)
-        .header("x-lpe-integration-key", integration_secret)
+        .header(INTEGRATION_KEY_HEADER, signed.integration_key)
+        .header(INTEGRATION_TIMESTAMP_HEADER, signed.timestamp)
+        .header(INTEGRATION_NONCE_HEADER, signed.nonce)
+        .header(INTEGRATION_SIGNATURE_HEADER, signed.signature)
         .header("x-trace-id", request.trace_id.clone())
         .json(&request)
         .send()
@@ -3624,11 +3747,10 @@ async fn write_smtp(writer: &mut OwnedWriteHalf, line: &str) -> Result<()> {
 }
 
 async fn persist_message(spool_dir: &Path, queue: &str, message: &QueuedMessage) -> Result<()> {
-    tokio::fs::write(
-        spool_path(spool_dir, queue, &message.id),
-        serde_json::to_string_pretty(message)?,
-    )
-    .await?;
+    let destination = spool_path(spool_dir, queue, &message.id);
+    let temp_path = spool_dir.join(queue).join(format!("{}.tmp", message.id));
+    tokio::fs::write(&temp_path, serde_json::to_vec_pretty(message)?).await?;
+    tokio::fs::rename(&temp_path, &destination).await?;
     Ok(())
 }
 
@@ -3640,6 +3762,35 @@ async fn move_message(
 ) -> Result<()> {
     persist_message(spool_dir, to, message).await?;
     let _ = tokio::fs::remove_file(spool_path(spool_dir, from, &message.id)).await;
+    Ok(())
+}
+
+fn append_transport_audit(spool_dir: &Path, queue: &str, message: &QueuedMessage) -> Result<()> {
+    let event = TransportAuditEvent {
+        timestamp: current_timestamp(),
+        trace_id: message.id.clone(),
+        direction: message.direction.clone(),
+        queue: queue.to_string(),
+        status: message.status.clone(),
+        peer: message.peer.clone(),
+        mail_from: message.mail_from.clone(),
+        rcpt_to: message.rcpt_to.clone(),
+        subject: parse_rfc822_header_value(&message.data, "subject").unwrap_or_default(),
+        reason: message.relay_error.clone(),
+        route_target: message
+            .route
+            .as_ref()
+            .and_then(|route| route.relay_target.clone()),
+        remote_message_ref: message.remote_message_ref.clone(),
+        spam_score: message.spam_score,
+        security_score: message.security_score,
+        reputation_score: message.reputation_score,
+    };
+    let line = format!("{}\n", serde_json::to_string(&event)?);
+    let path = spool_dir.join("policy").join("transport-audit.jsonl");
+    let mut file = fs::OpenOptions::new().create(true).append(true).open(path)?;
+    use std::io::Write;
+    file.write_all(line.as_bytes())?;
     Ok(())
 }
 
@@ -3655,6 +3806,155 @@ fn count_queue(spool_dir: &Path, queue: &str) -> Result<u32> {
     Ok(fs::read_dir(path)?
         .filter_map(std::result::Result::ok)
         .count() as u32)
+}
+
+pub(crate) fn list_quarantine_items(spool_dir: &Path) -> Result<Vec<QuarantineSummary>> {
+    let mut items = Vec::new();
+    for entry in fs::read_dir(spool_dir.join("quarantine"))? {
+        let entry = entry?;
+        if entry.path().extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let message = load_message_from_path(&entry.path())?;
+        items.push(QuarantineSummary {
+            trace_id: message.id.clone(),
+            queue: "quarantine".to_string(),
+            direction: message.direction.clone(),
+            status: message.status.clone(),
+            received_at: message.received_at.clone(),
+            mail_from: message.mail_from.clone(),
+            rcpt_to: message.rcpt_to.clone(),
+            subject: parse_rfc822_header_value(&message.data, "subject").unwrap_or_default(),
+            reason: message.relay_error.clone(),
+            spam_score: message.spam_score,
+            security_score: message.security_score,
+            reputation_score: message.reputation_score,
+            route_target: message
+                .route
+                .as_ref()
+                .and_then(|route| route.relay_target.clone()),
+        });
+    }
+    items.sort_by(|left, right| right.received_at.cmp(&left.received_at));
+    Ok(items)
+}
+
+pub(crate) fn load_trace_details(spool_dir: &Path, trace_id: &str) -> Result<Option<TraceDetails>> {
+    let Some((queue, message)) = find_message(spool_dir, trace_id)? else {
+        return Ok(None);
+    };
+    Ok(Some(trace_details_from_message(&queue, &message)))
+}
+
+pub(crate) async fn retry_trace(
+    spool_dir: &Path,
+    trace_id: &str,
+) -> Result<Option<TraceActionResult>> {
+    transition_trace(spool_dir, trace_id, TraceAction::Retry).await
+}
+
+pub(crate) async fn release_trace(
+    spool_dir: &Path,
+    trace_id: &str,
+) -> Result<Option<TraceActionResult>> {
+    transition_trace(spool_dir, trace_id, TraceAction::Release).await
+}
+
+fn trace_details_from_message(queue: &str, message: &QueuedMessage) -> TraceDetails {
+    TraceDetails {
+        trace_id: message.id.clone(),
+        queue: queue.to_string(),
+        direction: message.direction.clone(),
+        status: message.status.clone(),
+        received_at: message.received_at.clone(),
+        peer: message.peer.clone(),
+        helo: message.helo.clone(),
+        mail_from: message.mail_from.clone(),
+        rcpt_to: message.rcpt_to.clone(),
+        subject: parse_rfc822_header_value(&message.data, "subject").unwrap_or_default(),
+        internet_message_id: parse_rfc822_header_value(&message.data, "message-id"),
+        reason: message.relay_error.clone(),
+        remote_message_ref: message.remote_message_ref.clone(),
+        spam_score: message.spam_score,
+        security_score: message.security_score,
+        reputation_score: message.reputation_score,
+        technical_status: message.technical_status.clone(),
+        dsn: message.dsn.clone(),
+        route: message.route.clone(),
+        throttle: message.throttle.clone(),
+        decision_trace: message.decision_trace.clone(),
+    }
+}
+
+fn load_message_from_path(path: &Path) -> Result<QueuedMessage> {
+    Ok(serde_json::from_str(&fs::read_to_string(path)?)?)
+}
+
+fn find_message(spool_dir: &Path, trace_id: &str) -> Result<Option<(String, QueuedMessage)>> {
+    for queue in SPOOL_QUEUES {
+        let path = spool_path(spool_dir, queue, trace_id);
+        if path.exists() {
+            return Ok(Some((queue.to_string(), load_message_from_path(&path)?)));
+        }
+    }
+    Ok(None)
+}
+
+#[derive(Clone, Copy)]
+enum TraceAction {
+    Retry,
+    Release,
+}
+
+async fn transition_trace(
+    spool_dir: &Path,
+    trace_id: &str,
+    action: TraceAction,
+) -> Result<Option<TraceActionResult>> {
+    let Some((queue, mut message)) = find_message(spool_dir, trace_id)? else {
+        return Ok(None);
+    };
+    let Some(target_queue) = transition_target(&queue, &message.direction, action) else {
+        return Ok(Some(TraceActionResult {
+            trace_id: message.id.clone(),
+            from_queue: queue,
+            to_queue: String::new(),
+            status: message.status.clone(),
+            detail: "trace is not eligible for the requested action".to_string(),
+        }));
+    };
+    message.status = target_queue.to_string();
+    message.relay_error = None;
+    message.decision_trace.push(DecisionTraceEntry {
+        stage: "operator-action".to_string(),
+        outcome: match action {
+            TraceAction::Retry => "retry".to_string(),
+            TraceAction::Release => "release".to_string(),
+        },
+        detail: format!("operator moved trace into {target_queue}"),
+    });
+    move_message(spool_dir, &message, &queue, target_queue).await?;
+    Ok(Some(TraceActionResult {
+        trace_id: message.id.clone(),
+        from_queue: queue,
+        to_queue: target_queue.to_string(),
+        status: message.status.clone(),
+        detail: format!("trace moved into {target_queue}"),
+    }))
+}
+
+fn transition_target(queue: &str, direction: &str, action: TraceAction) -> Option<&'static str> {
+    match (queue, direction, action) {
+        ("deferred", "outbound", TraceAction::Retry) => Some("outbound"),
+        ("held", "outbound", TraceAction::Retry) => Some("outbound"),
+        ("deferred", "inbound", TraceAction::Retry) => Some("incoming"),
+        ("held", "inbound", TraceAction::Retry) => Some("incoming"),
+        ("quarantine", "outbound", TraceAction::Release) => Some("outbound"),
+        ("quarantine", "inbound", TraceAction::Release) => Some("incoming"),
+        ("held", "outbound", TraceAction::Release) => Some("outbound"),
+        ("held", "inbound", TraceAction::Release) => Some("incoming"),
+        _ => None,
+    }
 }
 
 fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
@@ -3715,6 +4015,8 @@ fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
         spam_quarantine_threshold: f32_at(&value, &["policies", "spam_quarantine_threshold"], 5.0),
         spam_reject_threshold: f32_at(&value, &["policies", "spam_reject_threshold"], 9.0),
         max_message_size_mb: u32_at(&value, &["policies", "max_message_size_mb"], 64),
+        max_concurrent_sessions: u32_at(&value, &["network", "max_concurrent_sessions"], 250)
+            .max(1),
         routing_rules: routing_rules_at(&value),
         throttle_enabled: bool_at(&value, &["throttling", "enabled"], true),
         throttle_rules: throttle_rules_at(&value),
@@ -4202,6 +4504,7 @@ mod tests {
             spam_quarantine_threshold: 5.0,
             spam_reject_threshold: 9.0,
             max_message_size_mb: 16,
+            max_concurrent_sessions: 250,
             routing_rules: Vec::new(),
             throttle_enabled: false,
             throttle_rules: Vec::new(),

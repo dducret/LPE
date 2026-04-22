@@ -694,6 +694,41 @@ select:focus {
   background: rgba(255, 255, 255, 0.6);
 }
 
+.trace-card,
+.empty-state {
+  display: grid;
+  gap: 14px;
+}
+
+.trace-meta,
+.trace-actions,
+.route-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.trace-actions button {
+  margin-top: 0;
+}
+
+.trace-decision-list {
+  display: grid;
+  gap: 10px;
+}
+
+.trace-decision {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(248, 251, 253, 0.9);
+  border: 1px solid rgba(216, 226, 234, 0.76);
+}
+
+.trace-decision strong,
+.quarantine-item strong {
+  font-size: 0.95rem;
+}
+
 @media (max-width: 920px) {
   .workspace-toolbar,
   .ops-grid {

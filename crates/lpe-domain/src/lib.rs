@@ -1,10 +1,16 @@
 pub mod account;
+pub mod bridge_auth;
 pub mod document;
 mod encoding;
 pub mod submission;
 pub mod transport;
 
 pub use crate::account::{Account, AccountId};
+pub use crate::bridge_auth::{
+    current_unix_timestamp, BridgeAuthError, SignedIntegrationHeaders, DEFAULT_MAX_SKEW_SECONDS,
+    INTEGRATION_KEY_HEADER, INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER,
+    INTEGRATION_TIMESTAMP_HEADER,
+};
 pub use crate::document::{
     AccessScope, DocumentAnnotation, DocumentChunk, DocumentKind, DocumentProjection,
 };

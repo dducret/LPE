@@ -69,6 +69,8 @@ On `LPE-CT`:
 - `lpe_ct_outbound_handoffs_total{status=...}`
 - `lpe_ct_inbound_delivery_total{status=...}`
 - `lpe_ct_smtp_sessions_total{result=...}`
+- `lpe_ct_smtp_backpressure_total`
+- `lpe_ct_active_smtp_sessions`
 - `lpe_ct_spool_messages{queue=...}`
 
 These cover queue movement, relay handoff, final LAN delivery, and SMTP-edge activity.
@@ -144,5 +146,6 @@ Routes use the matched path when available so labels stay operationally useful w
 - Use JSON logs in production together with `RUST_LOG=info` or a stricter target-specific filter.
 - Scrape both `/metrics` endpoints; `LPE` and `LPE-CT` expose complementary signals rather than duplicates.
 - Probe `/health/ready` on both nodes when HA role gating is enabled; only the node marked `active` should be considered traffic-ready.
+- `LPE-CT` readiness now also reports relay reachability, spool pressure, quarantine backlog, and core API reachability separately so operators can distinguish safe queueing from edge degradation.
 - Use `trace_id` for request-chain correlation and `message_id` for canonical message correlation.
 - Alert primarily on sustained `deferred`, `failed`, `quarantined`, `rejected`, and spool-growth patterns rather than on single transient events.

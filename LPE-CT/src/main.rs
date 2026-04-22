@@ -4,13 +4,18 @@ use argon2::{
     Argon2,
 };
 use axum::{
-    extract::State,
+    extract::{Path as AxumPath, State},
     http::{HeaderMap, StatusCode},
     middleware,
     routing::{get, post, put},
     Json, Router,
 };
-use lpe_domain::{OutboundMessageHandoffRequest, OutboundMessageHandoffResponse};
+use lpe_domain::{
+    current_unix_timestamp, BridgeAuthError, OutboundMessageHandoffRequest,
+    OutboundMessageHandoffResponse, SignedIntegrationHeaders, DEFAULT_MAX_SKEW_SECONDS,
+    INTEGRATION_KEY_HEADER, INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER,
+    INTEGRATION_TIMESTAMP_HEADER,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     env, fs,
@@ -27,6 +32,11 @@ mod smtp;
 mod submission;
 
 const MIN_INTEGRATION_SECRET_LEN: usize = 32;
+const OUTBOUND_HANDOFF_PATH: &str = "/api/v1/integration/outbound-messages";
+
+static INTEGRATION_REPLAY_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::BTreeMap<String, i64>>,
+> = std::sync::OnceLock::new();
 
 #[cfg(test)]
 pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -289,6 +299,14 @@ struct LoginResponse {
     admin: ManagementIdentity,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct RouteDiagnosticsResponse {
+    primary_upstream: String,
+    secondary_upstream: String,
+    routing: RoutingSettings,
+    throttling: ThrottlingSettings,
+}
+
 #[derive(Debug, Clone)]
 struct ManagementSession {
     email: String,
@@ -382,6 +400,11 @@ fn router(state: AppState) -> Router {
             }),
         )
         .route("/api/v1/dashboard", get(dashboard))
+        .route("/api/v1/quarantine", get(quarantine_items))
+        .route("/api/v1/traces/{trace_id}", get(trace_details))
+        .route("/api/v1/traces/{trace_id}/retry", post(retry_trace))
+        .route("/api/v1/traces/{trace_id}/release", post(release_trace))
+        .route("/api/v1/routes/diagnostics", get(route_diagnostics))
         .route("/api/v1/site", put(update_site))
         .route("/api/v1/relay", put(update_relay))
         .route("/api/v1/network", put(update_network))
@@ -460,6 +483,17 @@ async fn health_ready(State(state): State<AppState>) -> Result<Json<ReadinessRes
         )
         .await,
     );
+    checks.push(
+        check_optional_tcp_dependency(
+            "relay-reachability",
+            &snapshot.relay.primary_upstream,
+            "primary relay target accepted a TCP connection",
+            "primary relay target is unreachable; outbound spool will grow until recovery",
+        )
+        .await,
+    );
+    checks.push(check_spool_pressure(&state.spool_dir));
+    checks.push(check_quarantine_backlog(&state.spool_dir));
 
     Ok(Json(ReadinessResponse {
         status: readiness_status(&checks).to_string(),
@@ -571,6 +605,79 @@ async fn dashboard(
     Ok(Json(snapshot))
 }
 
+async fn quarantine_items(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<smtp::QuarantineSummary>>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    let items = smtp::list_quarantine_items(&state.spool_dir).map_err(ApiError::from)?;
+    Ok(Json(items))
+}
+
+async fn trace_details(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(trace_id): AxumPath<String>,
+) -> Result<Json<smtp::TraceDetails>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    let details = smtp::load_trace_details(&state.spool_dir, &trace_id)
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "trace not found"))?;
+    Ok(Json(details))
+}
+
+async fn retry_trace(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(trace_id): AxumPath<String>,
+) -> Result<Json<smtp::TraceActionResult>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let result = smtp::retry_trace(&state.spool_dir, &trace_id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "trace not found"))?;
+    append_audit_event_with_actor(
+        &state,
+        &admin.email,
+        "trace-retry",
+        &format!("requested retry for {}", result.trace_id),
+    )?;
+    Ok(Json(result))
+}
+
+async fn release_trace(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(trace_id): AxumPath<String>,
+) -> Result<Json<smtp::TraceActionResult>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let result = smtp::release_trace(&state.spool_dir, &trace_id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "trace not found"))?;
+    append_audit_event_with_actor(
+        &state,
+        &admin.email,
+        "trace-release",
+        &format!("requested release for {}", result.trace_id),
+    )?;
+    Ok(Json(result))
+}
+
+async fn route_diagnostics(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<RouteDiagnosticsResponse>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    let snapshot = read_state(&state)?;
+    Ok(Json(RouteDiagnosticsResponse {
+        primary_upstream: snapshot.relay.primary_upstream,
+        secondary_upstream: snapshot.relay.secondary_upstream,
+        routing: snapshot.routing,
+        throttling: snapshot.throttling,
+    }))
+}
+
 async fn update_site(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -636,7 +743,7 @@ async fn outbound_handoff(
     let queue_id = payload.queue_id;
     let message_id = payload.message_id;
     let internet_message_id = payload.internet_message_id.clone();
-    require_integration_key(&headers)?;
+    require_integration_request(&headers, OUTBOUND_HANDOFF_PATH, &payload)?;
     if let Some(role) = ha_non_active_role_for_traffic().map_err(ApiError::from)? {
         return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1602,6 +1709,103 @@ async fn check_optional_http_dependency(
     }
 }
 
+async fn check_optional_tcp_dependency(
+    name: &str,
+    target: &str,
+    ok_detail: &str,
+    warn_detail: &str,
+) -> ReadinessCheck {
+    let normalized = target.trim();
+    if normalized.is_empty() {
+        return readiness_warn(name, "no relay target configured for connectivity probing");
+    }
+    let address = smtp_target_socket_address(normalized);
+    match tokio::time::timeout(Duration::from_millis(1_500), tokio::net::TcpStream::connect(&address))
+        .await
+    {
+        Ok(Ok(_)) => readiness_ok(name, false, ok_detail),
+        Ok(Err(error)) => readiness_warn(
+            name,
+            format!("{warn_detail} ({normalized} -> {address}: {error})"),
+        ),
+        Err(_) => readiness_warn(
+            name,
+            format!("{warn_detail} ({normalized} -> {address}: timed out)"),
+        ),
+    }
+}
+
+fn check_spool_pressure(path: &Path) -> ReadinessCheck {
+    let warn_threshold = env_u32("LPE_CT_READY_SPOOL_PRESSURE_WARN", 250);
+    let deferred = count_queue_files(path, "deferred");
+    let held = count_queue_files(path, "held");
+    let outbound = count_queue_files(path, "outbound");
+    let total = deferred + held + outbound;
+    if total >= warn_threshold {
+        readiness_warn(
+            "spool-pressure",
+            format!(
+                "transport backlog is {total} message(s) across outbound={outbound}, deferred={deferred}, held={held}"
+            ),
+        )
+    } else {
+        readiness_ok(
+            "spool-pressure",
+            false,
+            format!(
+                "transport backlog is {total} message(s) across outbound={outbound}, deferred={deferred}, held={held}"
+            ),
+        )
+    }
+}
+
+fn check_quarantine_backlog(path: &Path) -> ReadinessCheck {
+    let warn_threshold = env_u32("LPE_CT_READY_QUARANTINE_BACKLOG_WARN", 50);
+    let quarantined = count_queue_files(path, "quarantine");
+    if quarantined >= warn_threshold {
+        readiness_warn(
+            "quarantine-backlog",
+            format!("quarantine backlog is {quarantined} message(s)"),
+        )
+    } else {
+        readiness_ok(
+            "quarantine-backlog",
+            false,
+            format!("quarantine backlog is {quarantined} message(s)"),
+        )
+    }
+}
+
+fn count_queue_files(path: &Path, queue: &str) -> u32 {
+    fs::read_dir(path.join(queue))
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(std::result::Result::ok))
+        .filter(|entry| entry.path().extension().and_then(|value| value.to_str()) == Some("json"))
+        .count() as u32
+}
+
+fn env_u32(name: &str, default: u32) -> u32 {
+    env::var(name)
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .unwrap_or(default)
+        .max(1)
+}
+
+fn smtp_target_socket_address(target: &str) -> String {
+    let normalized = target
+        .trim()
+        .trim_start_matches("smtp://")
+        .trim_start_matches("smtps://");
+    if normalized.contains(':') {
+        normalized.to_string()
+    } else {
+        format!("{normalized}:25")
+    }
+}
+
+#[derive(Debug)]
 struct ApiError {
     status: StatusCode,
     message: String,
@@ -1654,9 +1858,13 @@ fn bearer_token(headers: &HeaderMap) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn require_integration_key(headers: &HeaderMap) -> Result<(), ApiError> {
+fn require_integration_request<T: serde::Serialize>(
+    headers: &HeaderMap,
+    path: &str,
+    payload: &T,
+) -> Result<(), ApiError> {
     let provided = headers
-        .get("x-lpe-integration-key")
+        .get(INTEGRATION_KEY_HEADER)
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -1666,15 +1874,64 @@ fn require_integration_key(headers: &HeaderMap) -> Result<(), ApiError> {
         })?;
     let expected = integration_shared_secret()
         .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-    if provided == expected {
-        Ok(())
-    } else {
+    if provided != expected {
         observability::record_security_event("integration_auth_failure");
-        Err(ApiError::new(
+        return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid integration key",
-        ))
+        ));
     }
+    let signed = SignedIntegrationHeaders {
+        integration_key: provided.to_string(),
+        timestamp: required_header(headers, INTEGRATION_TIMESTAMP_HEADER)?,
+        nonce: required_header(headers, INTEGRATION_NONCE_HEADER)?,
+        signature: required_header(headers, INTEGRATION_SIGNATURE_HEADER)?,
+    };
+    signed
+        .validate_payload(
+            &expected,
+            "POST",
+            path,
+            payload,
+            current_unix_timestamp(),
+            DEFAULT_MAX_SKEW_SECONDS,
+        )
+        .map_err(integration_auth_api_error)?;
+    ensure_not_replayed(&signed).map_err(integration_auth_api_error)?;
+    Ok(())
+}
+
+fn required_header(headers: &HeaderMap, name: &'static str) -> Result<String, ApiError> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .ok_or_else(|| integration_auth_api_error(BridgeAuthError::MissingHeader(name)))
+}
+
+fn ensure_not_replayed(signed: &SignedIntegrationHeaders) -> Result<(), BridgeAuthError> {
+    let cache = INTEGRATION_REPLAY_CACHE
+        .get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()));
+    let now = current_unix_timestamp();
+    let mut guard = cache.lock().map_err(|_| {
+        BridgeAuthError::InvalidPayload("integration replay cache lock poisoned".to_string())
+    })?;
+    let cutoff = now - DEFAULT_MAX_SKEW_SECONDS;
+    guard.retain(|_, seen_at| *seen_at >= cutoff);
+    let key = signed.replay_key();
+    if guard.insert(key, now).is_some() {
+        return Err(BridgeAuthError::InvalidPayload(
+            "integration request replay detected".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn integration_auth_api_error(error: BridgeAuthError) -> ApiError {
+    observability::record_security_event("integration_auth_failure");
+    ApiError::new(StatusCode::UNAUTHORIZED, error.to_string())
 }
 
 pub(crate) fn integration_shared_secret() -> Result<String> {
@@ -1737,13 +1994,21 @@ mod tests {
     use super::{
         address_binds_publicly, apply_env_overrides, default_state, env_test_lock,
         ha_activation_check, ha_non_active_role_for_traffic, integration_shared_secret,
-        normalize_local_data_stores, submission_listener_is_configured,
+        normalize_local_data_stores, require_integration_request,
+        submission_listener_is_configured, OUTBOUND_HANDOFF_PATH,
+    };
+    use axum::http::HeaderMap;
+    use lpe_domain::{
+        current_unix_timestamp, OutboundMessageHandoffRequest, SignedIntegrationHeaders,
+        TransportRecipient, INTEGRATION_KEY_HEADER, INTEGRATION_NONCE_HEADER,
+        INTEGRATION_SIGNATURE_HEADER, INTEGRATION_TIMESTAMP_HEADER,
     };
     use std::{
         fs,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
+    use uuid::Uuid;
 
     fn temp_file(name: &str) -> PathBuf {
         let suffix = SystemTime::now()
@@ -1900,5 +2165,64 @@ mod tests {
 
         std::env::remove_var("LPE_CT_SUBMISSION_TLS_CERT_PATH");
         std::env::remove_var("LPE_CT_SUBMISSION_TLS_KEY_PATH");
+    }
+
+    #[test]
+    #[ignore = "env-sensitive"]
+    fn signed_integration_requests_reject_replay() {
+        let _guard = env_test_lock();
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "abcdef0123456789abcdef0123456789",
+        );
+        let payload = OutboundMessageHandoffRequest {
+            queue_id: Uuid::new_v4(),
+            message_id: Uuid::new_v4(),
+            account_id: Uuid::new_v4(),
+            from_address: "sender@example.test".to_string(),
+            from_display: None,
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            to: vec![TransportRecipient {
+                address: "dest@example.test".to_string(),
+                display_name: None,
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Signed".to_string(),
+            body_text: "Body".to_string(),
+            body_html_sanitized: None,
+            internet_message_id: None,
+            attempt_count: 0,
+            last_attempt_error: None,
+        };
+        let signed = SignedIntegrationHeaders::sign_with_timestamp_and_nonce(
+            "abcdef0123456789abcdef0123456789",
+            "POST",
+            OUTBOUND_HANDOFF_PATH,
+            &payload,
+            current_unix_timestamp(),
+            "nonce-outbound-1",
+        )
+        .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            INTEGRATION_KEY_HEADER,
+            signed.integration_key.parse().unwrap(),
+        );
+        headers.insert(
+            INTEGRATION_TIMESTAMP_HEADER,
+            signed.timestamp.parse().unwrap(),
+        );
+        headers.insert(INTEGRATION_NONCE_HEADER, signed.nonce.parse().unwrap());
+        headers.insert(
+            INTEGRATION_SIGNATURE_HEADER,
+            signed.signature.parse().unwrap(),
+        );
+
+        require_integration_request(&headers, OUTBOUND_HANDOFF_PATH, &payload).unwrap();
+        assert!(require_integration_request(&headers, OUTBOUND_HANDOFF_PATH, &payload).is_err());
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 }

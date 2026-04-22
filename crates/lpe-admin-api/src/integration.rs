@@ -1,7 +1,6 @@
 use crate::{
     bad_request_error, ha_allows_active_work, ha_current_role, integration_shared_secret,
-    internal_error, observability,
-    types::ApiResult,
+    internal_error, observability, types::ApiResult,
 };
 use axum::{
     extract::State,
@@ -9,12 +8,15 @@ use axum::{
     Json,
 };
 use lpe_domain::{
-    InboundDeliveryRequest, InboundDeliveryResponse, SmtpSubmissionAuthRequest,
-    SmtpSubmissionAuthResponse, SmtpSubmissionRequest, SmtpSubmissionResponse,
+    current_unix_timestamp, BridgeAuthError, InboundDeliveryRequest, InboundDeliveryResponse,
+    SignedIntegrationHeaders, SmtpSubmissionAuthRequest, SmtpSubmissionAuthResponse,
+    SmtpSubmissionRequest, SmtpSubmissionResponse, DEFAULT_MAX_SKEW_SECONDS,
+    INTEGRATION_KEY_HEADER, INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER,
+    INTEGRATION_TIMESTAMP_HEADER,
 };
 use lpe_magika::{
-    collect_mime_attachment_parts, ExpectedKind, IngressContext, PolicyDecision,
-    ValidationRequest, Validator,
+    collect_mime_attachment_parts, ExpectedKind, IngressContext, PolicyDecision, ValidationRequest,
+    Validator,
 };
 use lpe_mail_auth::{authenticate_plain_credentials, AccountPrincipal};
 use lpe_storage::{
@@ -22,6 +24,10 @@ use lpe_storage::{
     SubmittedRecipientInput,
 };
 use tracing::info;
+
+static INTEGRATION_REPLAY_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::BTreeMap<String, i64>>,
+> = std::sync::OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SmtpSubmissionError {
@@ -57,7 +63,11 @@ pub(crate) async fn deliver_inbound_message(
     headers: HeaderMap,
     Json(request): Json<InboundDeliveryRequest>,
 ) -> ApiResult<InboundDeliveryResponse> {
-    require_integration(&headers)?;
+    require_integration(
+        &headers,
+        "/internal/lpe-ct/inbound-deliveries",
+        &request,
+    )?;
     if !ha_allows_active_work().map_err(internal_error)? {
         let role = ha_current_role()
             .map_err(internal_error)?
@@ -95,16 +105,15 @@ pub(crate) async fn authenticate_smtp_submission(
     headers: HeaderMap,
     Json(request): Json<SmtpSubmissionAuthRequest>,
 ) -> ApiResult<SmtpSubmissionAuthResponse> {
-    require_integration(&headers)?;
-    let principal = authenticate_plain_credentials(
-        &storage,
-        None,
-        &request.login,
-        &request.password,
-        "smtp",
-    )
-    .await
-    .map_err(|error| (StatusCode::UNAUTHORIZED, error.to_string()))?;
+    require_integration(
+        &headers,
+        "/internal/lpe-ct/submission-auth",
+        &request,
+    )?;
+    let principal =
+        authenticate_plain_credentials(&storage, None, &request.login, &request.password, "smtp")
+            .await
+            .map_err(|error| (StatusCode::UNAUTHORIZED, error.to_string()))?;
     Ok(Json(SmtpSubmissionAuthResponse {
         accepted: true,
         account_id: Some(principal.account_id),
@@ -118,7 +127,7 @@ pub(crate) async fn accept_smtp_submission(
     headers: HeaderMap,
     Json(request): Json<SmtpSubmissionRequest>,
 ) -> ApiResult<SmtpSubmissionResponse> {
-    require_integration(&headers)?;
+    require_integration(&headers, "/internal/lpe-ct/submissions", &request)?;
     if !ha_allows_active_work().map_err(internal_error)? {
         let role = ha_current_role()
             .map_err(internal_error)?
@@ -452,9 +461,13 @@ fn classify_submission_storage_error(error: anyhow::Error) -> (StatusCode, Strin
     internal_error(message)
 }
 
-fn require_integration(headers: &HeaderMap) -> std::result::Result<(), (StatusCode, String)> {
+fn require_integration<T: serde::Serialize>(
+    headers: &HeaderMap,
+    path: &str,
+    payload: &T,
+) -> std::result::Result<(), (StatusCode, String)> {
     let provided = headers
-        .get("x-lpe-integration-key")
+        .get(INTEGRATION_KEY_HEADER)
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -466,22 +479,93 @@ fn require_integration(headers: &HeaderMap) -> std::result::Result<(), (StatusCo
             )
         })?;
     let expected = integration_shared_secret().map_err(internal_error)?;
-    if provided == expected {
-        Ok(())
-    } else {
+    if provided != expected {
         observability::record_security_event("integration_auth_failure");
-        Err((
+        return Err((
             StatusCode::UNAUTHORIZED,
             "invalid integration key".to_string(),
-        ))
+        ));
     }
+
+    let signed = SignedIntegrationHeaders {
+        integration_key: provided.to_string(),
+        timestamp: required_header(headers, INTEGRATION_TIMESTAMP_HEADER)?,
+        nonce: required_header(headers, INTEGRATION_NONCE_HEADER)?,
+        signature: required_header(headers, INTEGRATION_SIGNATURE_HEADER)?,
+    };
+    signed
+        .validate_payload(
+            &expected,
+            "POST",
+            path,
+            payload,
+            current_unix_timestamp(),
+            DEFAULT_MAX_SKEW_SECONDS,
+        )
+        .map_err(integration_auth_error)?;
+    ensure_not_replayed(&signed).map_err(integration_auth_error)?;
+    Ok(())
+}
+
+fn required_header(
+    headers: &HeaderMap,
+    name: &'static str,
+) -> std::result::Result<String, (StatusCode, String)> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .ok_or_else(|| integration_auth_error(BridgeAuthError::MissingHeader(name)))
+}
+
+fn ensure_not_replayed(
+    signed: &SignedIntegrationHeaders,
+) -> std::result::Result<(), BridgeAuthError> {
+    let cache = INTEGRATION_REPLAY_CACHE
+        .get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()));
+    let now = current_unix_timestamp();
+    let mut guard = cache.lock().map_err(|_| {
+        BridgeAuthError::InvalidPayload("integration replay cache lock poisoned".to_string())
+    })?;
+    let cutoff = now - DEFAULT_MAX_SKEW_SECONDS;
+    guard.retain(|_, seen_at| *seen_at >= cutoff);
+    let key = signed.replay_key();
+    if guard.insert(key, now).is_some() {
+        return Err(BridgeAuthError::InvalidPayload(
+            "integration request replay detected".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn integration_auth_error(error: BridgeAuthError) -> (StatusCode, String) {
+    observability::record_security_event("integration_auth_failure");
+    let status = match error {
+        BridgeAuthError::MissingHeader(_)
+        | BridgeAuthError::InvalidTimestamp(_)
+        | BridgeAuthError::TimestampOutsideTolerance { .. }
+        | BridgeAuthError::InvalidSignature
+        | BridgeAuthError::InvalidPayload(_) => StatusCode::UNAUTHORIZED,
+    };
+    (status, error.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_required_submission_from, parse_smtp_submission_sender, SmtpSubmissionError,
+        parse_required_submission_from, parse_smtp_submission_sender, require_integration,
+        SmtpSubmissionError,
     };
+    use axum::http::HeaderMap;
+    use lpe_domain::{
+        SignedIntegrationHeaders, SmtpSubmissionAuthRequest, INTEGRATION_KEY_HEADER,
+        INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER, INTEGRATION_TIMESTAMP_HEADER,
+    };
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn smtp_submission_requires_exactly_one_from_mailbox() {
@@ -529,11 +613,9 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("smtp submission supports at most one Sender mailbox")
-        );
+        assert!(error
+            .to_string()
+            .contains("smtp submission supports at most one Sender mailbox"));
     }
 
     #[test]
@@ -554,10 +636,49 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("authenticated account cannot submit a different Sender address")
+        assert!(error
+            .to_string()
+            .contains("authenticated account cannot submit a different Sender address"));
+    }
+
+    #[test]
+    fn integration_requests_require_signed_headers_and_reject_replay() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
         );
+        let payload = SmtpSubmissionAuthRequest {
+            login: "user@example.test".to_string(),
+            password: "secret".to_string(),
+        };
+        let signed = SignedIntegrationHeaders::sign_with_timestamp_and_nonce(
+            "0123456789abcdef0123456789abcdef",
+            "POST",
+            "/internal/lpe-ct/submission-auth",
+            &payload,
+            lpe_domain::current_unix_timestamp(),
+            "nonce-auth-1",
+        )
+        .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            INTEGRATION_KEY_HEADER,
+            signed.integration_key.parse().unwrap(),
+        );
+        headers.insert(
+            INTEGRATION_TIMESTAMP_HEADER,
+            signed.timestamp.parse().unwrap(),
+        );
+        headers.insert(INTEGRATION_NONCE_HEADER, signed.nonce.parse().unwrap());
+        headers.insert(
+            INTEGRATION_SIGNATURE_HEADER,
+            signed.signature.parse().unwrap(),
+        );
+
+        require_integration(&headers, "/internal/lpe-ct/submission-auth", &payload).unwrap();
+        let replay = require_integration(&headers, "/internal/lpe-ct/submission-auth", &payload);
+        assert!(replay.is_err());
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 }

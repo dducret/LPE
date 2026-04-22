@@ -719,6 +719,9 @@ const messages = {
 
 let currentLocale = getInitialLocale();
 let lastDashboard = null;
+let lastQuarantine = [];
+let lastRouteDiagnostics = null;
+let lastTrace = null;
 const relayForm = document.getElementById("relay-form");
 const relayHaField = relayForm?.elements.namedItem("ha_enabled");
 const relayHaFields = Array.from(document.querySelectorAll("[data-ha-field]"));
@@ -816,6 +819,17 @@ async function fetchDashboard() {
   return response.json();
 }
 
+async function fetchJson(path, init = {}) {
+  const response = await fetch(path, {
+    ...init,
+    headers: { ...authHeaders(), ...(init.headers ?? {}) },
+  });
+  if (!response.ok) {
+    throw new Error(`request failed: ${response.status}`);
+  }
+  return response.json();
+}
+
 async function submitForm(path, payload, successMessage) {
   const response = await fetch(path, {
     method: "PUT",
@@ -906,6 +920,166 @@ function renderAudit(audit) {
   });
 }
 
+function renderQuarantine(items) {
+  lastQuarantine = items;
+  const container = document.getElementById("quarantine-list");
+  if (!container) {
+    return;
+  }
+  if (!items.length) {
+    container.innerHTML = `<div class="quarantine-item"><strong>Queue is clear</strong><span>No quarantined messages are waiting for review.</span></div>`;
+    return;
+  }
+  container.innerHTML = items
+    .slice(0, 6)
+    .map(
+      (item) => `
+        <div class="quarantine-item">
+          <strong>${item.subject || item.trace_id}</strong>
+          <span>${item.mail_from} -> ${item.rcpt_to.join(", ")}</span>
+          <span>${item.reason || item.status}</span>
+          <div class="quarantine-tags">
+            <span class="badge danger">${item.status}</span>
+            <span class="pill">spam ${item.spam_score.toFixed(1)}</span>
+            <span class="pill">security ${item.security_score.toFixed(1)}</span>
+          </div>
+          <div class="trace-actions">
+            <button class="secondary-button" type="button" data-trace-open="${item.trace_id}">Trace</button>
+            <button class="secondary-button" type="button" data-trace-release="${item.trace_id}">Release</button>
+          </div>
+        </div>
+      `,
+    )
+    .join("");
+
+  container.querySelectorAll("[data-trace-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void loadTrace(button.dataset.traceOpen);
+    });
+  });
+  container.querySelectorAll("[data-trace-release]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void triggerTraceAction(button.dataset.traceRelease, "release");
+    });
+  });
+}
+
+function renderRouteDiagnostics(data) {
+  lastRouteDiagnostics = data;
+  const container = document.getElementById("route-diagnostics");
+  if (!container) {
+    return;
+  }
+  const rules = (data.routing?.rules ?? [])
+    .map(
+      (rule) => `
+        <div class="quarantine-item">
+          <strong>${rule.id}</strong>
+          <span>${rule.description}</span>
+          <div class="route-tags">
+            <span class="pill">${rule.sender_domain || "any sender"}</span>
+            <span class="pill">${rule.recipient_domain || "any recipient"}</span>
+            <span class="badge ok">${rule.relay_target}</span>
+          </div>
+        </div>
+      `,
+    )
+    .join("");
+  const throttles = (data.throttling?.rules ?? [])
+    .map(
+      (rule) => `
+        <div class="quarantine-item">
+          <strong>${rule.id}</strong>
+          <span>${rule.scope} limit ${rule.max_messages}/${rule.window_seconds}s</span>
+          <div class="route-tags">
+            <span class="pill">${rule.sender_domain || "all senders"}</span>
+            <span class="pill">${rule.recipient_domain || "all recipients"}</span>
+            <span class="badge warn">retry ${rule.retry_after_seconds}s</span>
+          </div>
+        </div>
+      `,
+    )
+    .join("");
+  container.innerHTML = `
+    <div class="quarantine-item">
+      <strong>Relay chain</strong>
+      <span>Primary ${data.primary_upstream || "unset"}</span>
+      <span>Secondary ${data.secondary_upstream || "unset"}</span>
+    </div>
+    ${rules || '<div class="quarantine-item"><strong>No routing overrides</strong><span>Default relay routing is active.</span></div>'}
+    ${throttles || '<div class="quarantine-item"><strong>No throttle rules</strong><span>Outbound throttle coordination is currently disabled.</span></div>'}
+  `;
+}
+
+function renderTrace(trace) {
+  lastTrace = trace;
+  const container = document.getElementById("trace-details");
+  if (!container) {
+    return;
+  }
+  if (!trace) {
+    container.textContent = "Select a quarantined or deferred trace.";
+    container.className = "trace-card empty-state";
+    return;
+  }
+  container.className = "trace-card";
+  container.innerHTML = `
+    <div>
+      <strong>${trace.subject || trace.trace_id}</strong>
+      <p>${trace.mail_from} -> ${trace.rcpt_to.join(", ")}</p>
+    </div>
+    <div class="trace-meta">
+      <span class="badge">${trace.queue}</span>
+      <span class="pill">${trace.status}</span>
+      <span class="pill">${trace.route?.relay_target || "no relay target"}</span>
+    </div>
+    <div class="trace-actions">
+      <button class="secondary-button" type="button" data-trace-retry="${trace.trace_id}">Retry</button>
+      <button class="secondary-button" type="button" data-trace-release="${trace.trace_id}">Release</button>
+    </div>
+    <div class="trace-decision-list">
+      ${(trace.decision_trace ?? [])
+        .map(
+          (entry) => `
+            <div class="trace-decision">
+              <strong>${entry.stage}</strong>
+              <span>${entry.outcome}</span>
+              <p>${entry.detail}</p>
+            </div>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+  container.querySelector("[data-trace-retry]")?.addEventListener("click", () => {
+    void triggerTraceAction(trace.trace_id, "retry");
+  });
+  container.querySelector("[data-trace-release]")?.addEventListener("click", () => {
+    void triggerTraceAction(trace.trace_id, "release");
+  });
+}
+
+async function loadTrace(traceId) {
+  const trace = await fetchJson(`/api/traces/${traceId}`);
+  renderTrace(trace);
+}
+
+async function triggerTraceAction(traceId, action) {
+  await fetchJson(`/api/traces/${traceId}/${action}`, { method: "POST" });
+  showFeedback(`Trace ${traceId} moved via ${action}.`, false);
+  await loadOps();
+  await loadTrace(traceId).catch(() => renderTrace(null));
+}
+
+async function loadOps() {
+  const [quarantine, routes] = await Promise.all([
+    fetchJson("/api/quarantine"),
+    fetchJson("/api/routes/diagnostics"),
+  ]);
+  renderQuarantine(quarantine);
+  renderRouteDiagnostics(routes);
+}
+
 function render(dashboard) {
   lastDashboard = dashboard;
   const copy = getCopy();
@@ -994,6 +1168,7 @@ async function load() {
   try {
     const dashboard = await fetchDashboard();
     render(dashboard);
+    await loadOps();
     loginShell.classList.add("hidden");
     consoleShell.classList.remove("hidden");
     feedback.className = "feedback hidden";

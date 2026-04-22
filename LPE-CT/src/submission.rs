@@ -1,8 +1,9 @@
 use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lpe_domain::{
-    SmtpSubmissionAuthRequest, SmtpSubmissionAuthResponse, SmtpSubmissionRequest,
-    SmtpSubmissionResponse,
+    SignedIntegrationHeaders, SmtpSubmissionAuthRequest, SmtpSubmissionAuthResponse,
+    SmtpSubmissionRequest, SmtpSubmissionResponse, INTEGRATION_KEY_HEADER,
+    INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER, INTEGRATION_TIMESTAMP_HEADER,
 };
 use reqwest::StatusCode;
 use std::{env, fs::File, io::BufReader, net::SocketAddr, sync::Arc};
@@ -18,6 +19,9 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::integration_shared_secret;
+
+const SUBMISSION_AUTH_PATH: &str = "/internal/lpe-ct/submission-auth";
+const SUBMISSION_ACCEPT_PATH: &str = "/internal/lpe-ct/submissions";
 
 #[derive(Debug, Clone)]
 struct SubmissionPrincipal {
@@ -268,26 +272,37 @@ where
             "unsupported auth mechanism".to_string(),
         ));
     };
+    let auth_request = SmtpSubmissionAuthRequest {
+        login: credentials.0,
+        password: credentials.1,
+    };
+    let integration_secret = integration_shared_secret().map_err(|error| {
+        (
+            SmtpAuthFailureKind::Temporary,
+            sanitize_smtp_text(&error.to_string()),
+        )
+    })?;
+    let signed = SignedIntegrationHeaders::sign(
+        &integration_secret,
+        "POST",
+        SUBMISSION_AUTH_PATH,
+        &auth_request,
+    )
+    .map_err(|error| {
+        (
+            SmtpAuthFailureKind::Temporary,
+            sanitize_smtp_text(&error.to_string()),
+        )
+    })?;
 
     let response = client
-        .post(format!(
-            "{}/internal/lpe-ct/submission-auth",
-            core_base_url.trim_end_matches('/')
-        ))
-        .header(
-            "x-lpe-integration-key",
-            integration_shared_secret().map_err(|error| {
-                (
-                    SmtpAuthFailureKind::Temporary,
-                    sanitize_smtp_text(&error.to_string()),
-                )
-            })?,
-        )
+        .post(format!("{}{}", core_base_url.trim_end_matches('/'), SUBMISSION_AUTH_PATH))
+        .header(INTEGRATION_KEY_HEADER, &signed.integration_key)
+        .header(INTEGRATION_TIMESTAMP_HEADER, &signed.timestamp)
+        .header(INTEGRATION_NONCE_HEADER, &signed.nonce)
+        .header(INTEGRATION_SIGNATURE_HEADER, &signed.signature)
         .header("x-trace-id", format!("lpe-ct-auth-{}", Uuid::new_v4()))
-        .json(&SmtpSubmissionAuthRequest {
-            login: credentials.0,
-            password: credentials.1,
-        })
+        .json(&auth_request)
         .send()
         .await
         .map_err(|error| {
@@ -335,15 +350,24 @@ async fn submit_message(
     core_base_url: &str,
     request: &SmtpSubmissionRequest,
 ) -> Result<SmtpSubmissionResponse, (StatusCode, String)> {
+    let integration_secret = integration_shared_secret().map_err(internal_submission_error)?;
+    let signed = SignedIntegrationHeaders::sign(
+        &integration_secret,
+        "POST",
+        SUBMISSION_ACCEPT_PATH,
+        request,
+    )
+    .map_err(|error| internal_submission_error(anyhow!(error.to_string())))?;
     let response = client
         .post(format!(
-            "{}/internal/lpe-ct/submissions",
-            core_base_url.trim_end_matches('/')
+            "{}{}",
+            core_base_url.trim_end_matches('/'),
+            SUBMISSION_ACCEPT_PATH
         ))
-        .header(
-            "x-lpe-integration-key",
-            integration_shared_secret().map_err(internal_submission_error)?,
-        )
+        .header(INTEGRATION_KEY_HEADER, signed.integration_key)
+        .header(INTEGRATION_TIMESTAMP_HEADER, signed.timestamp)
+        .header(INTEGRATION_NONCE_HEADER, signed.nonce)
+        .header(INTEGRATION_SIGNATURE_HEADER, signed.signature)
         .header("x-trace-id", &request.trace_id)
         .json(request)
         .send()

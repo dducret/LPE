@@ -83,11 +83,21 @@ Bridge failure mapping is transport-aware:
 Both HTTP calls use the header:
 
 - `x-lpe-integration-key`
+- `x-lpe-integration-timestamp`
+- `x-lpe-integration-nonce`
+- `x-lpe-integration-signature`
 
 The authenticated client-submission bridge uses the same header for:
 
 - `POST /internal/lpe-ct/submission-auth`
 - `POST /internal/lpe-ct/submissions`
+
+The integration bridge is now fail-closed and replay-aware:
+
+- every signed internal request includes method, path, serialized payload, timestamp, and nonce in the signature input
+- receivers reject requests with missing signature headers, invalid signatures, expired timestamps, or replayed nonce/signature combinations
+- the shared secret alone is no longer considered sufficient proof for an internal bridge call
+- `LPE-CT` keeps messages in local custody when bridge validation or LAN delivery fails; canonical mailbox state is not mutated on the `DMZ` side
 
 The shared secret is provided through:
 

@@ -199,28 +199,27 @@
 
           <article class="panel ops-card">
             <div class="section-head">
-              <h3 data-i18n="quarantineFocus">Quarantine focus</h3>
-              <p data-i18n="quarantineFocusCopy">Items that should remain one click away for perimeter review.</p>
+              <h3>Quarantine queue</h3>
+              <p>Live perimeter backlog with trace and release controls.</p>
             </div>
-            <div class="quarantine-focus">
-              <div class="quarantine-item">
-                <strong data-i18n="quarantineItemOneTitle">invoice-0427.zip</strong>
-                <span data-i18n="quarantineItemOneCopy">Detected as exotic payload by Magika. Held in LPE-CT.</span>
-                <div class="quarantine-tags">
-                  <span class="badge danger" data-i18n="quarantine">Quarantine</span>
-                  <span class="pill">Score 9.1</span>
-                </div>
-              </div>
-              <div class="quarantine-item">
-                <strong data-i18n="quarantineItemTwoTitle">board-minutes.p7m</strong>
-                <span data-i18n="quarantineItemTwoCopy">Encrypted payload marked uninspectable. Awaiting policy review.</span>
-                <div class="quarantine-tags">
-                  <span class="badge warn" data-i18n="pendingReview">Pending review</span>
-                  <span class="pill" data-i18n="encrypted">Encrypted</span>
-                </div>
-              </div>
-            </div>
+            <div id="quarantine-list" class="quarantine-focus"></div>
           </article>
+
+          <article class="panel ops-card">
+            <div class="section-head">
+              <h3>Route diagnostics</h3>
+              <p>Relay targets, routing rules, and throttle windows currently in force.</p>
+            </div>
+            <div id="route-diagnostics" class="quarantine-focus"></div>
+          </article>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h3>Trace details</h3>
+            <p>Decision trace, DSN, route, and operator actions for the selected transport item.</p>
+          </div>
+          <div id="trace-details" class="trace-card empty-state">Select a quarantined or deferred trace.</div>
         </section>
 
         <div id="config-drawer" class="management-modal-backdrop hidden" role="presentation">

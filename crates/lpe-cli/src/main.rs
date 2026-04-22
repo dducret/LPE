@@ -5,7 +5,11 @@ use lpe_admin_api::{
     init_observability, integration_shared_secret, observe_outbound_worker_dispatch,
     observe_outbound_worker_poll, router,
 };
-use lpe_domain::{OutboundMessageHandoffRequest, OutboundMessageHandoffResponse};
+use lpe_domain::{
+    OutboundMessageHandoffRequest, OutboundMessageHandoffResponse, SignedIntegrationHeaders,
+    INTEGRATION_KEY_HEADER, INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER,
+    INTEGRATION_TIMESTAMP_HEADER,
+};
 use lpe_imap::ImapServer;
 use lpe_managesieve::ManageSieveServer;
 use lpe_storage::Storage;
@@ -247,9 +251,15 @@ async fn send_outbound_handoff(
     trace_id: &str,
     item: &OutboundMessageHandoffRequest,
 ) -> std::result::Result<OutboundMessageHandoffResponse, String> {
+    let path = "/api/v1/integration/outbound-messages";
+    let signed = SignedIntegrationHeaders::sign(integration_key, "POST", path, item)
+        .map_err(|error| error.to_string())?;
     let response = client
         .post(endpoint)
-        .header("x-lpe-integration-key", integration_key)
+        .header(INTEGRATION_KEY_HEADER, signed.integration_key)
+        .header(INTEGRATION_TIMESTAMP_HEADER, signed.timestamp)
+        .header(INTEGRATION_NONCE_HEADER, signed.nonce)
+        .header(INTEGRATION_SIGNATURE_HEADER, signed.signature)
         .header("x-trace-id", trace_id)
         .json(item)
         .send()
@@ -270,8 +280,9 @@ mod tests {
     use super::send_outbound_handoff;
     use axum::{extract::State, http::HeaderMap, routing::post, Json, Router};
     use lpe_domain::{
-        OutboundMessageHandoffRequest, OutboundMessageHandoffResponse, TransportDeliveryStatus,
-        TransportRecipient,
+        OutboundMessageHandoffRequest, OutboundMessageHandoffResponse, SignedIntegrationHeaders,
+        TransportDeliveryStatus, TransportRecipient, INTEGRATION_KEY_HEADER,
+        INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER, INTEGRATION_TIMESTAMP_HEADER,
     };
     use std::sync::{Arc, Mutex};
     use tokio::net::TcpListener;
@@ -282,6 +293,9 @@ mod tests {
         #[derive(Clone, Default)]
         struct Capture {
             header: Arc<Mutex<Option<String>>>,
+            timestamp: Arc<Mutex<Option<String>>>,
+            nonce: Arc<Mutex<Option<String>>>,
+            signature: Arc<Mutex<Option<String>>>,
             queue_id: Arc<Mutex<Option<Uuid>>>,
         }
 
@@ -291,7 +305,19 @@ mod tests {
             Json(request): Json<OutboundMessageHandoffRequest>,
         ) -> Json<OutboundMessageHandoffResponse> {
             *capture.header.lock().unwrap() = headers
-                .get("x-lpe-integration-key")
+                .get(INTEGRATION_KEY_HEADER)
+                .and_then(|value| value.to_str().ok())
+                .map(ToString::to_string);
+            *capture.timestamp.lock().unwrap() = headers
+                .get(INTEGRATION_TIMESTAMP_HEADER)
+                .and_then(|value| value.to_str().ok())
+                .map(ToString::to_string);
+            *capture.nonce.lock().unwrap() = headers
+                .get(INTEGRATION_NONCE_HEADER)
+                .and_then(|value| value.to_str().ok())
+                .map(ToString::to_string);
+            *capture.signature.lock().unwrap() = headers
+                .get(INTEGRATION_SIGNATURE_HEADER)
                 .and_then(|value| value.to_str().ok())
                 .map(ToString::to_string);
             *capture.queue_id.lock().unwrap() = Some(request.queue_id);
@@ -359,6 +385,22 @@ mod tests {
             capture.header.lock().unwrap().as_deref(),
             Some("shared-secret")
         );
+        let signed = SignedIntegrationHeaders {
+            integration_key: capture.header.lock().unwrap().clone().unwrap(),
+            timestamp: capture.timestamp.lock().unwrap().clone().unwrap(),
+            nonce: capture.nonce.lock().unwrap().clone().unwrap(),
+            signature: capture.signature.lock().unwrap().clone().unwrap(),
+        };
+        signed
+            .validate_payload(
+                "shared-secret",
+                "POST",
+                "/api/v1/integration/outbound-messages",
+                &request,
+                signed.timestamp.parse::<i64>().unwrap(),
+                0,
+            )
+            .unwrap();
         assert_eq!(*capture.queue_id.lock().unwrap(), Some(request.queue_id));
     }
 }
