@@ -10,7 +10,6 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
 use lpe_storage::{
     calendar_attendee_labels, mail::parse_rfc822_message, normalize_calendar_email,
@@ -18,13 +17,12 @@ use lpe_storage::{
     serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent, AuditEntryInput,
     AuthenticatedAccount, CalendarOrganizerMetadata, CalendarParticipantMetadata,
     CalendarParticipantsMetadata, CanonicalChangeCategory, CanonicalPushChangeSet, ClientTask,
-    ClientTaskList, CollaborationCollection, CreateTaskListInput, JmapEmail, JmapEmailAddress,
+    ClientTaskList, CollaborationCollection, CreateTaskListInput, JmapEmail,
     JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JmapQuota, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage,
-    SenderIdentity, Storage, SubmitMessageInput, SubmittedRecipientInput, UpdateTaskListInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    SenderIdentity, Storage, SubmitMessageInput, UpdateTaskListInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientTaskInput,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -33,25 +31,37 @@ use uuid::Uuid;
 use lpe_storage::{JmapEmailQuery, SubmittedMessage};
 
 mod protocol;
+mod convert;
+mod error;
+mod parse;
+mod state;
 mod store;
+mod upload;
+mod validation;
 
+use crate::convert::*;
+use crate::error::*;
+use crate::parse::*;
 use crate::protocol::{
     AddressBookGetArguments, AddressBookQueryArguments, CalendarEventGetArguments,
     CalendarEventQueryArguments, CalendarEventQueryFilter, CalendarEventSetArguments,
     CalendarGetArguments, CalendarQueryArguments, ChangesArguments, ContactCardGetArguments,
     ContactCardQueryArguments, ContactCardQueryFilter, ContactCardSetArguments, DraftMutation,
-    EmailAddressInput, EmailCopyArguments, EmailGetArguments, EmailImportArguments,
-    EmailQueryArguments, EmailQueryFilter, EmailQuerySort, EmailSetArguments,
-    EmailSubmissionGetArguments, EmailSubmissionSetArguments, EntityQuerySort,
-    IdentityGetArguments, JmapApiRequest, JmapApiResponse, JmapMethodCall, JmapMethodResponse,
-    MailboxCreateInput, MailboxGetArguments, MailboxQueryArguments, MailboxSetArguments,
+    EmailCopyArguments, EmailGetArguments, EmailImportArguments, EmailQueryArguments,
+    EmailQueryFilter, EmailQuerySort, EmailSetArguments,
+    EmailSubmissionGetArguments, EmailSubmissionSetArguments, IdentityGetArguments,
+    JmapApiRequest, JmapApiResponse, JmapMethodCall, JmapMethodResponse, MailboxCreateInput,
+    MailboxGetArguments, MailboxQueryArguments, MailboxSetArguments,
     MailboxUpdateInput, QueryChangesArguments, QuotaGetArguments, SearchSnippetGetArguments,
     SessionAccount, SessionDocument, TaskGetArguments, TaskListGetArguments, TaskListSetArguments,
     TaskQueryArguments, TaskQueryFilter, TaskQuerySort, TaskSetArguments, ThreadGetArguments,
     ThreadQueryArguments, WebSocketPushDisable, WebSocketPushEnable, WebSocketRequestEnvelope,
     WebSocketRequestError, WebSocketResponse, WebSocketStateChange,
 };
+use crate::state::*;
 use crate::store::{JmapPushListener, JmapStore};
+use crate::upload::*;
+use crate::validation::*;
 
 const JMAP_CORE_CAPABILITY: &str = "urn:ietf:params:jmap:core";
 const JMAP_MAIL_CAPABILITY: &str = "urn:ietf:params:jmap:mail";
@@ -67,45 +77,11 @@ const MAX_QUERY_LIMIT: u64 = 250;
 const DEFAULT_GET_LIMIT: u64 = 100;
 type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 
-#[derive(Debug, Serialize, Deserialize)]
-struct QueryStateToken {
-    version: String,
-    kind: String,
-    filter: Option<Value>,
-    sort: Option<Vec<Value>>,
-    ids: Vec<String>,
-}
-
-#[derive(Debug, Default)]
-struct QueryDiff {
-    removed: Vec<String>,
-    added: Vec<Value>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct StateToken {
-    version: String,
-    kind: String,
-    entries: Vec<StateEntry>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct StateEntry {
-    id: String,
-    fingerprint: String,
-}
-
 #[derive(Debug, Default)]
 struct PushSubscription {
     enabled_types: HashSet<String>,
     last_type_states: HashMap<String, HashMap<String, String>>,
     last_push_state: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum JmapBlobId {
-    Upload(Uuid),
-    Opaque(String),
 }
 
 pub fn router() -> Router<Storage> {
@@ -3334,22 +3310,6 @@ fn bearer_token(authorization: Option<&str>) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
-fn http_error(error: anyhow::Error) -> (StatusCode, String) {
-    let message = error.to_string();
-    let status = if message.contains("bearer token") || message.contains("expired account session")
-    {
-        StatusCode::UNAUTHORIZED
-    } else if message.contains("Magika command")
-        || message.contains("spawn Magika")
-        || message.contains("Magika stdin")
-    {
-        StatusCode::INTERNAL_SERVER_ERROR
-    } else {
-        StatusCode::BAD_REQUEST
-    };
-    (status, message)
-}
-
 fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {
     HashMap::from([
         (
@@ -3421,105 +3381,6 @@ fn requested_account_id(
             }
         }
         None => Ok(account.account_id),
-    }
-}
-
-fn parse_uuid(value: &str) -> Result<Uuid> {
-    Uuid::parse_str(value).map_err(|_| anyhow!("invalid id: {value}"))
-}
-
-fn parse_uuid_list(value: Option<Vec<String>>) -> Result<Option<Vec<Uuid>>> {
-    value
-        .map(|values| values.into_iter().map(|value| parse_uuid(&value)).collect())
-        .transpose()
-}
-
-fn validate_query_sort(sort: Option<&[EmailQuerySort]>) -> Result<()> {
-    if let Some(sort) = sort {
-        for item in sort {
-            if item.property != "receivedAt" || item.is_ascending.unwrap_or(false) {
-                bail!("only receivedAt descending sort is supported");
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_entity_sort(
-    sort: Option<&[EntityQuerySort]>,
-    expected_property: &str,
-    ascending: bool,
-) -> Result<()> {
-    if let Some(sort) = sort {
-        for item in sort {
-            if item.property != expected_property || item.is_ascending.unwrap_or(true) != ascending
-            {
-                let direction = if ascending { "ascending" } else { "descending" };
-                bail!("only {expected_property} {direction} sort is supported");
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_contact_filter(filter: Option<&ContactCardQueryFilter>) -> Result<()> {
-    if let Some(filter) = filter {
-        if let Some(address_book_id) = filter.in_address_book.as_deref() {
-            require_collection_id(address_book_id, "addressBook")?;
-        }
-    }
-    Ok(())
-}
-
-fn validate_calendar_event_filter(filter: Option<&CalendarEventQueryFilter>) -> Result<()> {
-    if let Some(filter) = filter {
-        if let Some(calendar_id) = filter.in_calendar.as_deref() {
-            require_collection_id(calendar_id, "calendar")?;
-        }
-        if let Some(after) = filter.after.as_deref() {
-            parse_local_datetime(after)?;
-        }
-        if let Some(before) = filter.before.as_deref() {
-            parse_local_datetime(before)?;
-        }
-    }
-    Ok(())
-}
-
-fn validate_task_sort(sort: Option<&[TaskQuerySort]>) -> Result<()> {
-    if let Some(sort) = sort {
-        for item in sort {
-            if item.property != "sortOrder" || item.is_ascending.unwrap_or(true) != true {
-                bail!("only sortOrder ascending sort is supported");
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_task_filter(filter: Option<&TaskQueryFilter>) -> Result<()> {
-    if let Some(filter) = filter {
-        if let Some(task_list_id) = filter.in_task_list.as_deref() {
-            parse_uuid(task_list_id)?;
-        }
-        if let Some(status) = filter.status.as_deref() {
-            validate_task_status_value(status)?;
-        }
-    }
-    Ok(())
-}
-
-fn require_collection_id(value: &str, kind: &str) -> Result<()> {
-    if value.trim().is_empty() {
-        bail!("{kind} id is required");
-    }
-    Ok(())
-}
-
-fn validate_task_status_value(status: &str) -> Result<()> {
-    match status.trim().to_ascii_lowercase().as_str() {
-        "" | "needs-action" | "in-progress" | "completed" | "cancelled" => Ok(()),
-        other => bail!("unsupported task status: {other}"),
     }
 }
 
@@ -3820,331 +3681,8 @@ fn email_state_fingerprint(email: &JmapEmail) -> String {
     )
 }
 
-fn format_addresses(addresses: &[JmapEmailAddress]) -> String {
-    addresses
-        .iter()
-        .map(|address| {
-            format!(
-                "{}:{}",
-                address.address,
-                address.display_name.clone().unwrap_or_default()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-fn changes_response(
-    account_id: Uuid,
-    kind: &str,
-    since_state: &str,
-    max_changes: Option<u64>,
-    current_entries: Vec<StateEntry>,
-) -> Value {
-    let max_changes = max_changes.unwrap_or(u64::MAX) as usize;
-    let new_state =
-        encode_state(kind, current_entries.clone()).unwrap_or_else(|_| SESSION_STATE.to_string());
-    let Ok(previous) = decode_state(since_state) else {
-        let created = current_entries
-            .into_iter()
-            .take(max_changes)
-            .map(|entry| entry.id)
-            .collect::<Vec<_>>();
-        return json!({
-            "accountId": account_id.to_string(),
-            "oldState": since_state,
-            "newState": new_state,
-            "hasMoreChanges": false,
-            "created": created,
-            "updated": Vec::<String>::new(),
-            "destroyed": Vec::<String>::new(),
-        });
-    };
-
-    if previous.kind != kind {
-        let created = current_entries
-            .into_iter()
-            .take(max_changes)
-            .map(|entry| entry.id)
-            .collect::<Vec<_>>();
-        return json!({
-            "accountId": account_id.to_string(),
-            "oldState": since_state,
-            "newState": new_state,
-            "hasMoreChanges": false,
-            "created": created,
-            "updated": Vec::<String>::new(),
-            "destroyed": Vec::<String>::new(),
-        });
-    }
-
-    let previous_map = previous
-        .entries
-        .into_iter()
-        .map(|entry| (entry.id, entry.fingerprint))
-        .collect::<HashMap<_, _>>();
-    let current_map = current_entries
-        .into_iter()
-        .map(|entry| (entry.id, entry.fingerprint))
-        .collect::<HashMap<_, _>>();
-
-    let mut created = current_map
-        .keys()
-        .filter(|id| !previous_map.contains_key(*id))
-        .cloned()
-        .collect::<Vec<_>>();
-    let mut updated = current_map
-        .iter()
-        .filter_map(|(id, fingerprint)| {
-            previous_map
-                .get(id)
-                .filter(|previous| *previous != fingerprint)
-                .map(|_| id.clone())
-        })
-        .collect::<Vec<_>>();
-    let mut destroyed = previous_map
-        .keys()
-        .filter(|id| !current_map.contains_key(*id))
-        .cloned()
-        .collect::<Vec<_>>();
-
-    created.sort();
-    updated.sort();
-    destroyed.sort();
-
-    let total_changes = created.len() + updated.len() + destroyed.len();
-    let has_more_changes = total_changes > max_changes;
-    if total_changes > max_changes {
-        let mut remaining = max_changes;
-        created.truncate(remaining.min(created.len()));
-        remaining = remaining.saturating_sub(created.len());
-        updated.truncate(remaining.min(updated.len()));
-        remaining = remaining.saturating_sub(updated.len());
-        destroyed.truncate(remaining.min(destroyed.len()));
-    }
-
-    json!({
-        "accountId": account_id.to_string(),
-        "oldState": since_state,
-        "newState": new_state,
-        "hasMoreChanges": has_more_changes,
-        "created": created,
-        "updated": updated,
-        "destroyed": destroyed,
-    })
-}
-
-fn encode_state(kind: &str, entries: Vec<StateEntry>) -> Result<String> {
-    let mut entries = entries;
-    entries.sort_by(|left, right| left.id.cmp(&right.id));
-    let token = StateToken {
-        version: STATE_TOKEN_VERSION.to_string(),
-        kind: kind.to_string(),
-        entries,
-    };
-    Ok(URL_SAFE_NO_PAD.encode(serde_json::to_vec(&token)?))
-}
-
-fn decode_state(value: &str) -> Result<StateToken> {
-    let bytes = URL_SAFE_NO_PAD
-        .decode(value)
-        .map_err(|_| anyhow!("invalid state"))?;
-    let token: StateToken = serde_json::from_slice(&bytes).map_err(|_| anyhow!("invalid state"))?;
-    if token.version != STATE_TOKEN_VERSION {
-        bail!("unsupported state version");
-    }
-    Ok(token)
-}
-
-fn encode_push_state(type_states: &HashMap<String, HashMap<String, String>>) -> Result<String> {
-    let mut entries = type_states
-        .iter()
-        .flat_map(|(account_id, states)| {
-            states.iter().map(move |(data_type, state)| StateEntry {
-                id: format!("{account_id}:{data_type}"),
-                fingerprint: state.clone(),
-            })
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by(|left, right| left.id.cmp(&right.id));
-    encode_state("Push", entries)
-}
-
-fn encode_query_state(
-    kind: &str,
-    filter: Option<Value>,
-    sort: Option<Vec<Value>>,
-    ids: Vec<String>,
-) -> Result<String> {
-    let token = QueryStateToken {
-        version: QUERY_STATE_VERSION.to_string(),
-        kind: kind.to_string(),
-        filter,
-        sort,
-        ids,
-    };
-    Ok(URL_SAFE_NO_PAD.encode(serde_json::to_vec(&token)?))
-}
-
-fn decode_query_state(value: &str) -> Result<QueryStateToken> {
-    let bytes = URL_SAFE_NO_PAD
-        .decode(value)
-        .map_err(|_| anyhow!("invalid queryState"))?;
-    let token: QueryStateToken =
-        serde_json::from_slice(&bytes).map_err(|_| anyhow!("invalid queryState"))?;
-    if token.version != QUERY_STATE_VERSION {
-        bail!("unsupported queryState version");
-    }
-    Ok(token)
-}
-
-fn query_changes_response(
-    account_id: Uuid,
-    kind: &str,
-    since_query_state: String,
-    filter: Option<Value>,
-    sort: Option<Vec<Value>>,
-    current_ids: Vec<String>,
-    total: u64,
-    max_changes: Option<u64>,
-) -> Result<Value> {
-    let previous = decode_query_state(&since_query_state)?;
-    if previous.kind != kind {
-        bail!("queryState does not match requested method");
-    }
-    if previous.filter != filter || previous.sort != sort {
-        bail!("queryState does not match requested filter or sort");
-    }
-
-    let next_query_state = encode_query_state(kind, filter, sort, current_ids.clone())?;
-    let diff = if kind == "Task" {
-        compute_query_diff_with_reorders(&previous.ids, &current_ids, max_changes)
-    } else {
-        compute_query_diff(&previous.ids, &current_ids, max_changes)
-    };
-    let change_count = diff.removed.len() + diff.added.len();
-    let change_limit = max_changes.unwrap_or(u64::MAX) as usize;
-
-    Ok(json!({
-        "accountId": account_id.to_string(),
-        "oldQueryState": since_query_state,
-        "newQueryState": next_query_state,
-        "removed": diff.removed,
-        "added": diff.added,
-        "total": total,
-        "hasMoreChanges": change_count >= change_limit && change_limit != usize::MAX,
-    }))
-}
-
-fn compute_query_diff(
-    previous_ids: &[String],
-    current_ids: &[String],
-    max_changes: Option<u64>,
-) -> QueryDiff {
-    let mut removed = Vec::new();
-    let mut added = Vec::new();
-    let max_changes = max_changes.unwrap_or(u64::MAX) as usize;
-
-    for id in previous_ids {
-        if !current_ids.contains(id) {
-            removed.push(id.clone());
-            if removed.len() + added.len() >= max_changes {
-                return QueryDiff { removed, added };
-            }
-        }
-    }
-
-    for (index, id) in current_ids.iter().enumerate() {
-        if !previous_ids.contains(id) {
-            added.push(json!({
-                "id": id,
-                "index": index,
-            }));
-            if removed.len() + added.len() >= max_changes {
-                break;
-            }
-        }
-    }
-
-    QueryDiff { removed, added }
-}
-
-fn compute_query_diff_with_reorders(
-    previous_ids: &[String],
-    current_ids: &[String],
-    max_changes: Option<u64>,
-) -> QueryDiff {
-    let mut removed = Vec::new();
-    let mut added = Vec::new();
-    let max_changes = max_changes.unwrap_or(u64::MAX) as usize;
-    let previous_positions = previous_ids
-        .iter()
-        .enumerate()
-        .map(|(index, id)| (id.as_str(), index))
-        .collect::<HashMap<_, _>>();
-    let current_positions = current_ids
-        .iter()
-        .enumerate()
-        .map(|(index, id)| (id.as_str(), index))
-        .collect::<HashMap<_, _>>();
-
-    for (index, id) in previous_ids.iter().enumerate() {
-        let moved = current_positions
-            .get(id.as_str())
-            .is_some_and(|current_index| *current_index != index);
-        if !current_positions.contains_key(id.as_str()) || moved {
-            removed.push(id.clone());
-            if removed.len() + added.len() >= max_changes {
-                return QueryDiff { removed, added };
-            }
-        }
-    }
-
-    for (index, id) in current_ids.iter().enumerate() {
-        let moved = previous_positions
-            .get(id.as_str())
-            .is_some_and(|previous_index| *previous_index != index);
-        if !previous_positions.contains_key(id.as_str()) || moved {
-            added.push(json!({
-                "id": id,
-                "index": index,
-            }));
-            if removed.len() + added.len() >= max_changes {
-                break;
-            }
-        }
-    }
-
-    QueryDiff { removed, added }
-}
-
 fn full_query_limit(total: u64) -> u64 {
     total.max(1).min(i64::MAX as u64)
-}
-
-fn parse_upload_blob_id(value: &str) -> Result<Uuid> {
-    match JmapBlobId::parse(value)? {
-        JmapBlobId::Upload(id) => Ok(id),
-        JmapBlobId::Opaque(_) => bail!("blob not found"),
-    }
-}
-
-fn expected_attachment_kind(media_type: &str, file_name: &str) -> ExpectedKind {
-    let media_type = media_type.trim().to_ascii_lowercase();
-    let file_name = file_name.trim().to_ascii_lowercase();
-    if matches!(
-        media_type.as_str(),
-        "application/pdf"
-            | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            | "application/vnd.oasis.opendocument.text"
-    ) || file_name.ends_with(".pdf")
-        || file_name.ends_with(".docx")
-        || file_name.ends_with(".odt")
-    {
-        ExpectedKind::SupportedAttachmentText
-    } else {
-        ExpectedKind::Any
-    }
 }
 
 fn serialize_email_query_filter(filter: &EmailQueryFilter) -> Result<Value> {
@@ -4156,42 +3694,6 @@ fn serialize_email_query_sort(sort: &[EmailQuerySort]) -> Result<Vec<Value>> {
         .map(serde_json::to_value)
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(Into::into)
-}
-
-fn blob_id_for_message(email: &JmapEmail) -> String {
-    JmapBlobId::for_message(email).into_response_id()
-}
-
-impl JmapBlobId {
-    fn parse(value: &str) -> Result<Self> {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            bail!("blobId is required");
-        }
-        if let Ok(id) = Uuid::parse_str(trimmed) {
-            return Ok(Self::Upload(id));
-        }
-        if let Some(upload_id) = trimmed.strip_prefix("upload:") {
-            return Ok(Self::Upload(parse_uuid(upload_id)?));
-        }
-        Ok(Self::Opaque(trimmed.to_string()))
-    }
-
-    fn for_message(email: &JmapEmail) -> Self {
-        match email.mime_blob_ref.as_deref() {
-            Some(value) if !value.trim().is_empty() => {
-                Self::parse(value).unwrap_or_else(|_| Self::Opaque(value.trim().to_string()))
-            }
-            _ => Self::Opaque(format!("message:{}", email.id)),
-        }
-    }
-
-    fn into_response_id(self) -> String {
-        match self {
-            Self::Upload(id) => format!("upload:{id}"),
-            Self::Opaque(value) => value,
-        }
-    }
 }
 
 fn email_properties(properties: Option<Vec<String>>) -> HashSet<String> {
@@ -5040,65 +4542,6 @@ fn calendar_event_start(event: &AccessibleEvent) -> String {
     format!("{}T{}:00", event.date, event.time)
 }
 
-fn insert_if<T: Serialize>(
-    properties: &HashSet<String>,
-    object: &mut Map<String, Value>,
-    key: &str,
-    value: T,
-) {
-    if properties.contains(key) {
-        object.insert(
-            key.to_string(),
-            serde_json::to_value(value).unwrap_or(Value::Null),
-        );
-    }
-}
-
-fn address_value(email: &str, name: Option<&str>) -> Value {
-    json!({
-        "email": email,
-        "name": name,
-    })
-}
-
-fn method_error(kind: &str, description: &str) -> Value {
-    json!({
-        "type": kind,
-        "description": description,
-    })
-}
-
-fn set_error(description: &str) -> Value {
-    method_error("invalidProperties", description)
-}
-
-fn parse_submission_email_id(
-    value: &Value,
-    created_ids: &HashMap<String, String>,
-) -> Result<Option<String>> {
-    let object = value
-        .as_object()
-        .ok_or_else(|| anyhow!("submission create arguments must be an object"))?;
-    if let Some(email_id) = object.get("emailId").and_then(Value::as_str) {
-        return Ok(Some(resolve_creation_reference(email_id, created_ids)));
-    }
-    if let Some(reference) = object.get("#emailId").and_then(Value::as_str) {
-        return Ok(created_ids.get(reference).cloned());
-    }
-    Ok(None)
-}
-
-fn resolve_creation_reference(value: &str, created_ids: &HashMap<String, String>) -> String {
-    if let Some(reference) = value.strip_prefix('#') {
-        created_ids
-            .get(reference)
-            .cloned()
-            .unwrap_or_else(|| value.to_string())
-    } else {
-        value.to_string()
-    }
-}
-
 fn parse_draft_mutation(value: Value) -> Result<DraftMutation> {
     let object = value
         .as_object()
@@ -5626,184 +5069,6 @@ fn parse_calendar_duration(value: Option<&Value>) -> Result<i32> {
             .map_err(|_| anyhow!("invalid duration"));
     }
     bail!("invalid duration")
-}
-
-fn parse_first_property_object_string(
-    value: Option<&Value>,
-    property_name: &str,
-    field_name: &str,
-) -> Result<String> {
-    let Some(value) = value else {
-        return Ok(String::new());
-    };
-    let object = value
-        .as_object()
-        .ok_or_else(|| anyhow!("{property_name} must be an object"))?;
-    let Some(first) = object.values().next() else {
-        return Ok(String::new());
-    };
-    let first = first
-        .as_object()
-        .ok_or_else(|| anyhow!("{property_name} entries must be objects"))?;
-    Ok(first
-        .get(field_name)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .unwrap_or_default()
-        .to_string())
-}
-
-fn parse_address_list(value: Option<&Value>) -> Result<Option<Vec<EmailAddressInput>>> {
-    match value {
-        None => Ok(None),
-        Some(Value::Null) => Ok(Some(Vec::new())),
-        Some(value) => Ok(Some(serde_json::from_value(value.clone())?)),
-    }
-}
-
-fn parse_optional_string(value: Option<&Value>) -> Result<Option<String>> {
-    match value {
-        None => Ok(None),
-        Some(Value::Null) => Ok(Some(String::new())),
-        Some(Value::String(value)) => Ok(Some(value.clone())),
-        _ => bail!("string property expected"),
-    }
-}
-
-fn parse_required_string(value: Option<&Value>, field_name: &str) -> Result<String> {
-    let value = value
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("{field_name} is required"))?;
-    Ok(value.to_string())
-}
-
-fn parse_optional_nullable_string(value: Option<&Value>) -> Result<Option<Option<String>>> {
-    match value {
-        None => Ok(None),
-        Some(Value::Null) => Ok(Some(None)),
-        Some(Value::String(value)) => Ok(Some(Some(value.clone()))),
-        _ => bail!("string or null property expected"),
-    }
-}
-
-fn parse_local_datetime(value: &str) -> Result<(String, String)> {
-    let trimmed = value.trim();
-    let (date, time) = trimmed
-        .split_once('T')
-        .ok_or_else(|| anyhow!("invalid local date-time"))?;
-    if date.len() != 10 || time.len() < 5 {
-        bail!("invalid local date-time");
-    }
-    let time = time.trim_end_matches('Z');
-    let hhmm = if let Some((hours_minutes, _seconds)) = time.split_once(':') {
-        if hours_minutes.len() != 2 {
-            bail!("invalid local date-time");
-        }
-        format!("{hours_minutes}:{}", &time[3..5])
-    } else {
-        bail!("invalid local date-time");
-    };
-    Ok((date.to_string(), hhmm))
-}
-
-fn parse_local_datetime_value(value: &str) -> Result<String> {
-    let (date, time) = parse_local_datetime(value)?;
-    Ok(format!("{date}T{time}:00"))
-}
-
-fn select_from_addresses(
-    from: Option<Vec<EmailAddressInput>>,
-    sender: Option<Vec<EmailAddressInput>>,
-    account: &AuthenticatedAccount,
-    account_access: &MailboxAccountAccess,
-) -> Result<(EmailAddressInput, Option<EmailAddressInput>)> {
-    let from = match from {
-        None => EmailAddressInput {
-            email: account_access.email.clone(),
-            name: Some(account_access.display_name.clone()),
-        },
-        Some(mut addresses) => {
-            if addresses.len() != 1 {
-                bail!("exactly one from address is required");
-            }
-            let address = addresses.remove(0);
-            let normalized = address.email.trim().to_lowercase();
-            if normalized != account_access.email {
-                bail!("from email must match the selected mailbox account");
-            }
-            EmailAddressInput {
-                email: account_access.email.clone(),
-                name: address.name,
-            }
-        }
-    };
-
-    let sender = match sender {
-        None => None,
-        Some(mut addresses) => {
-            if addresses.len() != 1 {
-                bail!("exactly one sender address is required");
-            }
-            let address = addresses.remove(0);
-            let normalized = address.email.trim().to_lowercase();
-            if normalized != account.email {
-                bail!("sender email must match authenticated account");
-            }
-            Some(EmailAddressInput {
-                email: account.email.clone(),
-                name: address.name.or_else(|| Some(account.display_name.clone())),
-            })
-        }
-    };
-
-    Ok((from, sender))
-}
-
-fn map_recipients(input: Vec<EmailAddressInput>) -> Result<Vec<SubmittedRecipientInput>> {
-    input
-        .into_iter()
-        .map(|recipient| {
-            let address = recipient.email.trim().to_lowercase();
-            if address.is_empty() {
-                bail!("recipient email is required");
-            }
-            Ok(SubmittedRecipientInput {
-                address,
-                display_name: recipient.name.and_then(|name| {
-                    let trimmed = name.trim().to_string();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(trimmed)
-                    }
-                }),
-            })
-        })
-        .collect()
-}
-
-fn map_existing_recipients(recipients: &[JmapEmailAddress]) -> Vec<SubmittedRecipientInput> {
-    recipients
-        .iter()
-        .map(|recipient| SubmittedRecipientInput {
-            address: recipient.address.clone(),
-            display_name: recipient.display_name.clone(),
-        })
-        .collect()
-}
-
-fn map_parsed_recipients(
-    recipients: Vec<lpe_storage::mail::ParsedMailAddress>,
-) -> Vec<SubmittedRecipientInput> {
-    recipients
-        .into_iter()
-        .map(|recipient| SubmittedRecipientInput {
-            address: recipient.email,
-            display_name: recipient.display_name,
-        })
-        .collect()
 }
 
 #[cfg(test)]
