@@ -109,6 +109,7 @@ Web interfaces must support at least `en`, `fr`, `de`, `it`, and `es`, with Engl
 - if a change affects behavior, prerequisites, installation, release framing, or architecture, update the relevant documentation in the same work
 - if a new durable rule appears, update `AGENTS.md`
 - prefer explicit architectural documentation over leaving structural assumptions implicit in code
+- for Rust crates, `lib.rs` must act only as a central hub for module declarations, re-exports, and minimal crate wiring; do not add implementation code to `lib.rs` when that code can be placed in helper modules
 - keep demo data, mock content, placeholder marketing copy, and nonfunctional placeholder actions out of runtime UI, published API responses, published configuration, and bootstrap product state; confine them to tests or documentation previews only
 - for frontend work, converge on the shared Tailwind-based design system instead of one-off utility sprawl
 - for administration UI lists in `LPE` and `LPE-CT`, use the default management pattern: full-width list, primary `New` or `Create` action in the list header, and a right-side drawer for creation, details, and contextual actions
