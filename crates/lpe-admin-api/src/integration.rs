@@ -1,6 +1,6 @@
 use crate::{
     bad_request_error, ha_allows_active_work, ha_current_role, integration_shared_secret,
-    internal_error, observability, types::ApiResult,
+    http::internal_error, observability, types::ApiResult,
 };
 use axum::{
     extract::State,

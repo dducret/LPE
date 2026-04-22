@@ -1,5 +1,5 @@
 use crate::{
-    bad_request_error, internal_error, require_account,
+    http::internal_error, bad_request_error, require_account,
     types::{
         ApiResult, RenameSieveScriptRequest, SetActiveSieveScriptRequest, SieveOverviewResponse,
         UpsertSieveScriptRequest,

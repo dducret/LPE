@@ -1,6 +1,6 @@
 use crate::{
-    bad_request_error, internal_error, parse_collaboration_kind, parse_sender_delegation_right,
-    require_account,
+    http::internal_error, bad_request_error, parse_collaboration_kind,
+    parse_sender_delegation_right, require_account,
     types::{
         ApiResult, CollaborationOverviewResponse, MailboxDelegationResponse,
         UpsertCollaborationGrantRequest, UpsertMailboxDelegationGrantRequest,

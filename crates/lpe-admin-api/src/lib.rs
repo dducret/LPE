@@ -1,6 +1,5 @@
 use axum::{
     extract::DefaultBodyLimit,
-    http::HeaderMap,
     middleware,
     routing::{delete, get, post, put},
     Router,
@@ -37,7 +36,7 @@ pub use crate::bootstrap::{
 pub(crate) use crate::access::{require_account, require_admin};
 pub(crate) use crate::readiness::{
     build_readiness_response, check_optional_http_dependency, ha_activation_check, lpe_ct_base_url,
-    readiness_failed, readiness_ok, readiness_warn,
+    readiness_failed, readiness_ok,
 };
 pub use crate::readiness::{ha_allows_active_work, ha_current_role};
 use crate::{
