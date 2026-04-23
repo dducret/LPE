@@ -81,6 +81,7 @@ mod tests {
         imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
         saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
         submitted_drafts: Arc<Mutex<Vec<Uuid>>>,
+        submitted_draft_sources: Arc<Mutex<Vec<String>>>,
     }
 
     struct FakePushListener;
@@ -792,10 +793,14 @@ mod tests {
             &self,
             _account_id: Uuid,
             draft_message_id: Uuid,
-            _source: &str,
+            source: &str,
             _audit: AuditEntryInput,
         ) -> Result<SubmittedMessage> {
             self.submitted_drafts.lock().unwrap().push(draft_message_id);
+            self.submitted_draft_sources
+                .lock()
+                .unwrap()
+                .push(source.to_string());
             Ok(SubmittedMessage {
                 message_id: Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap(),
                 thread_id: FakeStore::draft_email().thread_id,
@@ -1616,6 +1621,11 @@ mod tests {
 
         let submitted = store.submitted_drafts.lock().unwrap();
         assert_eq!(submitted.as_slice(), &[FakeStore::draft_email().id]);
+        assert_eq!(
+            store.submitted_draft_sources.lock().unwrap().as_slice(),
+            ["jmap"]
+        );
+        assert!(store.saved_drafts.lock().unwrap().is_empty());
         let payload = &response.method_responses[0].1;
         assert_eq!(
             payload["created"]["send1"]["id"],

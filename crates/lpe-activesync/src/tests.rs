@@ -36,6 +36,7 @@ struct FakeStore {
     attachment_contents: Arc<Mutex<std::collections::HashMap<String, ActiveSyncAttachmentContent>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
+    deleted_drafts: Arc<Mutex<Vec<Uuid>>>,
     sync_states: Arc<Mutex<std::collections::HashMap<String, ActiveSyncSyncState>>>,
     full_email_fetches: Arc<Mutex<u32>>,
 }
@@ -474,9 +475,10 @@ impl ActiveSyncStore for FakeStore {
     fn delete_draft_message<'a>(
         &'a self,
         _account_id: Uuid,
-        _message_id: Uuid,
+        message_id: Uuid,
         _audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
+        self.deleted_drafts.lock().unwrap().push(message_id);
         Box::pin(async move { Ok(()) })
     }
 
@@ -1431,8 +1433,11 @@ async fn send_mail_uses_canonical_submission_model() {
     let submitted = store.submitted_messages.lock().unwrap();
     assert_eq!(submitted.len(), 1);
     assert_eq!(submitted[0].source, "activesync-sendmail");
+    assert_eq!(submitted[0].draft_message_id, None);
     assert_eq!(submitted[0].subject, "Hello");
     assert_eq!(submitted[0].to[0].address, "bob@example.test");
+    assert!(store.saved_drafts.lock().unwrap().is_empty());
+    assert!(store.deleted_drafts.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

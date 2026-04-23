@@ -4,10 +4,10 @@ use axum::{
     Json,
 };
 use lpe_storage::{
-    AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, ClientTask,
-    ClientTaskList, ClientWorkspace, HealthResponse, MailboxAccountAccess, SavedDraftMessage,
-    Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, ClientTask, ClientTaskList,
+    ClientWorkspace, HealthResponse, MailboxAccountAccess, SavedDraftMessage, Storage,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientTaskInput,
 };
 use tracing::info;
 use uuid::Uuid;
@@ -20,6 +20,47 @@ use crate::{
         UpsertClientEventRequest, UpsertClientTaskRequest,
     },
 };
+
+#[allow(async_fn_in_trait)]
+trait ClientSubmissionStore {
+    async fn fetch_account_session(
+        &self,
+        token: &str,
+    ) -> anyhow::Result<Option<AuthenticatedAccount>>;
+    async fn fetch_accessible_mailbox_accounts(
+        &self,
+        principal_account_id: Uuid,
+    ) -> anyhow::Result<Vec<MailboxAccountAccess>>;
+    async fn submit_message(
+        &self,
+        input: SubmitMessageInput,
+        audit: AuditEntryInput,
+    ) -> anyhow::Result<SubmittedMessage>;
+}
+
+impl ClientSubmissionStore for Storage {
+    async fn fetch_account_session(
+        &self,
+        token: &str,
+    ) -> anyhow::Result<Option<AuthenticatedAccount>> {
+        Storage::fetch_account_session(self, token).await
+    }
+
+    async fn fetch_accessible_mailbox_accounts(
+        &self,
+        principal_account_id: Uuid,
+    ) -> anyhow::Result<Vec<MailboxAccountAccess>> {
+        Storage::fetch_accessible_mailbox_accounts(self, principal_account_id).await
+    }
+
+    async fn submit_message(
+        &self,
+        input: SubmitMessageInput,
+        audit: AuditEntryInput,
+    ) -> anyhow::Result<SubmittedMessage> {
+        Storage::submit_message(self, input, audit).await
+    }
+}
 
 pub(crate) async fn client_workspace(
     State(storage): State<Storage>,
@@ -39,8 +80,19 @@ pub(crate) async fn submit_message(
     headers: HeaderMap,
     Json(request): Json<SubmitMessageRequest>,
 ) -> ApiResult<SubmittedMessage> {
-    let account = require_account(&storage, &headers).await?;
-    let mailbox_access = resolve_client_mailbox_access(&storage, &account, request.account_id).await?;
+    let submitted = submit_message_with_store(&storage, &headers, request).await?;
+
+    Ok(Json(submitted))
+}
+
+async fn submit_message_with_store<S: ClientSubmissionStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    request: SubmitMessageRequest,
+) -> std::result::Result<SubmittedMessage, (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    let mailbox_access =
+        resolve_client_mailbox_access(storage, &account, request.account_id).await?;
     let trace_id = observability::trace_id_from_headers(&headers);
     let subject_for_audit = request.subject.clone();
     let recipient_count = request.to.len()
@@ -76,7 +128,7 @@ pub(crate) async fn submit_message(
         "mail submission accepted"
     );
 
-    Ok(Json(submitted))
+    Ok(submitted)
 }
 
 pub(crate) async fn save_draft_message(
@@ -85,7 +137,8 @@ pub(crate) async fn save_draft_message(
     Json(request): Json<SubmitMessageRequest>,
 ) -> ApiResult<SavedDraftMessage> {
     let account = require_account(&storage, &headers).await?;
-    let mailbox_access = resolve_client_mailbox_access(&storage, &account, request.account_id).await?;
+    let mailbox_access =
+        resolve_client_mailbox_access(&storage, &account, request.account_id).await?;
     let subject_for_audit = request.subject.clone();
     ensure_client_mailbox_write_access(&mailbox_access)?;
     let draft = storage
@@ -296,8 +349,24 @@ pub(crate) async fn delete_client_task(
     }))
 }
 
-async fn resolve_client_mailbox_access(
-    storage: &Storage,
+async fn require_account_from_store<S: ClientSubmissionStore>(
+    storage: &S,
+    headers: &HeaderMap,
+) -> std::result::Result<AuthenticatedAccount, (StatusCode, String)> {
+    let token = crate::http::bearer_token(headers)
+        .ok_or((StatusCode::UNAUTHORIZED, "missing bearer token".to_string()))?;
+    storage
+        .fetch_account_session(&token)
+        .await
+        .map_err(internal_error)?
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            "invalid or expired session".to_string(),
+        ))
+}
+
+async fn resolve_client_mailbox_access<S: ClientSubmissionStore>(
+    storage: &S,
     account: &AuthenticatedAccount,
     requested_account_id: Uuid,
 ) -> std::result::Result<MailboxAccountAccess, (StatusCode, String)> {
@@ -395,10 +464,64 @@ fn map_recipients(input: Vec<SubmitRecipientRequest>) -> Vec<SubmittedRecipientI
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_client_sender_fields;
+    use super::{
+        map_submit_message_request, resolve_client_sender_fields, submit_message_with_store,
+    };
     use crate::types::SubmitMessageRequest;
-    use lpe_storage::{AuthenticatedAccount, MailboxAccountAccess};
+    use axum::http::{HeaderMap, HeaderValue};
+    use lpe_storage::{
+        AuditEntryInput, AuthenticatedAccount, MailboxAccountAccess, SubmitMessageInput,
+        SubmittedMessage,
+    };
+    use std::sync::{Arc, Mutex};
     use uuid::Uuid;
+
+    #[derive(Clone)]
+    struct FakeSubmissionStore {
+        session: Option<AuthenticatedAccount>,
+        accessible_mailbox_accounts: Vec<MailboxAccountAccess>,
+        submitted: Arc<Mutex<Vec<SubmitMessageInput>>>,
+        audits: Arc<Mutex<Vec<AuditEntryInput>>>,
+    }
+
+    #[allow(async_fn_in_trait)]
+    impl super::ClientSubmissionStore for FakeSubmissionStore {
+        async fn fetch_account_session(
+            &self,
+            token: &str,
+        ) -> anyhow::Result<Option<AuthenticatedAccount>> {
+            Ok(if token == "token" {
+                self.session.clone()
+            } else {
+                None
+            })
+        }
+
+        async fn fetch_accessible_mailbox_accounts(
+            &self,
+            _principal_account_id: Uuid,
+        ) -> anyhow::Result<Vec<MailboxAccountAccess>> {
+            Ok(self.accessible_mailbox_accounts.clone())
+        }
+
+        async fn submit_message(
+            &self,
+            input: SubmitMessageInput,
+            audit: AuditEntryInput,
+        ) -> anyhow::Result<SubmittedMessage> {
+            self.submitted.lock().unwrap().push(input.clone());
+            self.audits.lock().unwrap().push(audit);
+            Ok(SubmittedMessage {
+                message_id: Uuid::parse_str("aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb").unwrap(),
+                thread_id: Uuid::parse_str("cccccccc-1111-2222-3333-dddddddddddd").unwrap(),
+                account_id: input.account_id,
+                submitted_by_account_id: input.submitted_by_account_id,
+                sent_mailbox_id: Uuid::parse_str("eeeeeeee-1111-2222-3333-ffffffffffff").unwrap(),
+                outbound_queue_id: Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap(),
+                delivery_status: "queued".to_string(),
+            })
+        }
+    }
 
     fn account() -> AuthenticatedAccount {
         AuthenticatedAccount {
@@ -419,7 +542,10 @@ mod tests {
             from_address: "shared@example.test".to_string(),
             sender_display: None,
             sender_address: None,
-            to: Vec::new(),
+            to: vec![crate::types::SubmitRecipientRequest {
+                address: "to@example.test".to_string(),
+                display_name: Some("Primary".to_string()),
+            }],
             cc: None,
             bcc: None,
             subject: "Subject".to_string(),
@@ -429,6 +555,28 @@ mod tests {
             mime_blob_ref: None,
             size_octets: Some(32),
         }
+    }
+
+    fn owned_mailbox_access(authenticated: &AuthenticatedAccount) -> MailboxAccountAccess {
+        MailboxAccountAccess {
+            account_id: authenticated.account_id,
+            email: authenticated.email.clone(),
+            display_name: authenticated.display_name.clone(),
+            is_owned: true,
+            may_read: true,
+            may_write: true,
+            may_send_as: true,
+            may_send_on_behalf: true,
+        }
+    }
+
+    fn bearer_headers() -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer token"),
+        );
+        headers
     }
 
     #[test]
@@ -495,5 +643,44 @@ mod tests {
 
         assert_eq!(sender_display.as_deref(), Some("Delegate"));
         assert_eq!(sender_address.as_deref(), Some("delegate@example.test"));
+    }
+
+    #[test]
+    fn map_submit_message_request_preserves_web_submission_source() {
+        let authenticated = account();
+        let mailbox_access = owned_mailbox_access(&authenticated);
+
+        let mapped = map_submit_message_request(&authenticated, &mailbox_access, submit_request());
+
+        assert_eq!(mapped.source, "web-client");
+        assert_eq!(mapped.submitted_by_account_id, authenticated.account_id);
+        assert_eq!(mapped.draft_message_id, None);
+    }
+
+    #[tokio::test]
+    async fn submit_message_handler_uses_canonical_submission_store_path() {
+        let authenticated = account();
+        let mut request = submit_request();
+        request.account_id = authenticated.account_id;
+        let store = FakeSubmissionStore {
+            session: Some(authenticated.clone()),
+            accessible_mailbox_accounts: vec![owned_mailbox_access(&authenticated)],
+            submitted: Arc::new(Mutex::new(Vec::new())),
+            audits: Arc::new(Mutex::new(Vec::new())),
+        };
+
+        let submitted = submit_message_with_store(&store, &bearer_headers(), request)
+            .await
+            .unwrap();
+
+        assert_eq!(submitted.delivery_status, "queued");
+        let recorded = store.submitted.lock().unwrap();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].source, "web-client");
+        assert_eq!(recorded[0].draft_message_id, None);
+        assert_eq!(recorded[0].to[0].address, "to@example.test");
+        assert!(recorded[0].cc.is_empty());
+        assert!(recorded[0].bcc.is_empty());
+        assert_eq!(store.audits.lock().unwrap()[0].action, "submit-message");
     }
 }
