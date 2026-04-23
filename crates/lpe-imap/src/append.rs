@@ -7,7 +7,11 @@ use lpe_storage::{mail::parse_rfc822_message, AuditEntryInput, SubmitMessageInpu
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use uuid::Uuid;
 
-use crate::{parse::{parse_literal_size, tokenize}, render::mailbox_name_matches, Session, UID_VALIDITY};
+use crate::{
+    parse::{parse_literal_size, tokenize},
+    render::mailbox_name_matches,
+    Session, UID_VALIDITY,
+};
 
 impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     pub(crate) async fn handle_append<R, W>(

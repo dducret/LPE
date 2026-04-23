@@ -1,8 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use lpe_mail_auth::{
-    authenticate_bearer_access_token, authenticate_plain_credentials,
-};
+use lpe_mail_auth::{authenticate_bearer_access_token, authenticate_plain_credentials};
 use uuid::Uuid;
 
 use crate::{

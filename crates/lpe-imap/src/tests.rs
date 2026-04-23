@@ -1015,14 +1015,12 @@ async fn store_survives_concurrent_selected_mailbox_removal() {
     let fetch_after = send_command(&mut stream, "A4 UID FETCH 3 (FLAGS MODSEQ)\r\n", "A4").await;
     assert!(fetch_after.contains("* 1 FETCH (FLAGS (\\Flagged) MODSEQ (5))"));
     assert!(fetch_after.contains("A4 OK FETCH completed"));
-    assert!(
-        store
-            .emails
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|email| email.subject == "Follow-up" && email.flagged)
-    );
+    assert!(store
+        .emails
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|email| email.subject == "Follow-up" && email.flagged));
 
     task.abort();
 }

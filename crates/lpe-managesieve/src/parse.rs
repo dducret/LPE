@@ -1,7 +1,5 @@
 use anyhow::{bail, Result};
-use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt},
-};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 
 #[derive(Debug)]
 pub struct Request {

@@ -9,7 +9,7 @@ use crate::{
         first_unseen_sequence, mailbox_name_matches, parse_status_items, render_list_flags,
         render_status_response, sanitize_imap_quoted,
     },
-    Session, SelectedMailbox, UID_VALIDITY,
+    SelectedMailbox, Session, UID_VALIDITY,
 };
 
 impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
@@ -18,7 +18,10 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         W: AsyncWriteExt + Unpin,
     {
         let principal = self.require_auth()?;
-        let mailboxes = self.store.ensure_imap_mailboxes(principal.account_id).await?;
+        let mailboxes = self
+            .store
+            .ensure_imap_mailboxes(principal.account_id)
+            .await?;
         for mailbox in mailboxes {
             writer
                 .write_all(
@@ -202,7 +205,10 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .into_iter()
             .next()
             .ok_or_else(|| anyhow!("SELECT expects a mailbox name"))?;
-        let mailboxes = self.store.ensure_imap_mailboxes(principal.account_id).await?;
+        let mailboxes = self
+            .store
+            .ensure_imap_mailboxes(principal.account_id)
+            .await?;
         let mailbox = mailboxes
             .into_iter()
             .find(|candidate| mailbox_name_matches(&candidate.name, &candidate.role, &mailbox_name))
@@ -227,7 +233,9 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             emails,
         });
 
-        writer.write_all(b"* FLAGS (\\Seen \\Flagged \\Draft)\r\n").await?;
+        writer
+            .write_all(b"* FLAGS (\\Seen \\Flagged \\Draft)\r\n")
+            .await?;
         writer
             .write_all(format!("* {} EXISTS\r\n", exists).as_bytes())
             .await?;
@@ -268,7 +276,10 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     pub(crate) async fn resolve_mailbox_by_name(&self, arguments: &str) -> Result<JmapMailbox> {
         let mailbox_name = first_token(arguments, "mailbox name is required")?;
         let principal = self.require_auth()?;
-        let mailboxes = self.store.ensure_imap_mailboxes(principal.account_id).await?;
+        let mailboxes = self
+            .store
+            .ensure_imap_mailboxes(principal.account_id)
+            .await?;
         mailboxes
             .into_iter()
             .find(|candidate| mailbox_name_matches(&candidate.name, &candidate.role, &mailbox_name))

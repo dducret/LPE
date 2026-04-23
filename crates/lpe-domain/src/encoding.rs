@@ -3,7 +3,7 @@ use base64::Engine;
 use serde::{Deserialize, Deserializer, Serializer};
 
 pub(crate) mod base64_bytes {
-    use super::{BASE64, Deserialize, Deserializer, Engine, Serializer};
+    use super::{Deserialize, Deserializer, Engine, Serializer, BASE64};
 
     pub fn serialize<S>(value: &[u8], serializer: S) -> Result<S::Ok, S::Error>
     where

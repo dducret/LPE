@@ -1,18 +1,17 @@
-mod paths;
 mod parse;
+mod paths;
 mod preconditions;
 mod propfind;
 mod report;
 mod responses;
-mod service;
 mod serialize;
+mod service;
 mod store;
 
 pub use crate::service::router;
 
 #[cfg(test)]
 mod tests {
-    use anyhow::anyhow;
     use crate::paths::{
         contact_href, etag_for_event, event_href, task_href, ADDRESSBOOK_COLLECTION_PATH,
         CALENDAR_HOME_PATH, DEFAULT_COLLECTION_ID, TASK_COLLECTION_PREFIX,
@@ -20,15 +19,16 @@ mod tests {
     use crate::responses::error_response;
     use crate::service::DavService;
     use crate::store::DavStore;
+    use anyhow::anyhow;
     use axum::body::to_bytes;
     use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
     use axum::response::Response;
     use lpe_mail_auth::AccountAuthStore;
     use lpe_storage::{
-        AccessibleContact, AccessibleEvent, AccountLogin, AuthenticatedAccount,
-        CalendarOrganizerMetadata, CalendarParticipantMetadata, CalendarParticipantsMetadata,
-        CollaborationCollection, CollaborationRights, DavTask, UpsertClientContactInput,
-        UpsertClientEventInput, UpsertClientTaskInput, serialize_calendar_participants_metadata,
+        serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent, AccountLogin,
+        AuthenticatedAccount, CalendarOrganizerMetadata, CalendarParticipantMetadata,
+        CalendarParticipantsMetadata, CollaborationCollection, CollaborationRights, DavTask,
+        UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
     };
     use std::sync::{Arc, Mutex};
     use uuid::Uuid;
@@ -1262,7 +1262,10 @@ mod tests {
         let collection_id = Uuid::nil().to_string();
         let store = FakeStore {
             session: Some(FakeStore::account()),
-            tasks: Arc::new(Mutex::new(vec![FakeStore::task(task_id, "Retire old export")])),
+            tasks: Arc::new(Mutex::new(vec![FakeStore::task(
+                task_id,
+                "Retire old export",
+            )])),
             ..Default::default()
         };
         let service = DavService::new(store.clone());
@@ -1320,7 +1323,8 @@ mod tests {
         let response = service
             .handle(
                 &Method::from_bytes(b"PROPFIND").unwrap(),
-                &Uri::from_maybe_shared(format!("/dav/addressbooks/me/{}/", collection.id)).unwrap(),
+                &Uri::from_maybe_shared(format!("/dav/addressbooks/me/{}/", collection.id))
+                    .unwrap(),
                 &headers,
                 &[],
             )
@@ -1362,7 +1366,8 @@ mod tests {
         let response = service
             .handle(
                 &Method::from_bytes(b"REPORT").unwrap(),
-                &Uri::from_maybe_shared(format!("/dav/addressbooks/me/{}/", collection.id)).unwrap(),
+                &Uri::from_maybe_shared(format!("/dav/addressbooks/me/{}/", collection.id))
+                    .unwrap(),
                 &bearer_headers(),
                 body.as_bytes(),
             )

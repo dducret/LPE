@@ -1,6 +1,4 @@
-use crate::{
-    serialize::{serialize_ical, serialize_vcard, serialize_vtodo},
-};
+use crate::serialize::{serialize_ical, serialize_vcard, serialize_vtodo};
 use lpe_storage::{AccessibleContact, AccessibleEvent, DavTask};
 use std::{
     collections::hash_map::DefaultHasher,

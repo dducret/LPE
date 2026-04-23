@@ -1,5 +1,7 @@
 use anyhow::{anyhow, bail, Result};
-use lpe_storage::{AccessibleContact, AuthenticatedAccount, CollaborationCollection, UpsertClientContactInput};
+use lpe_storage::{
+    AccessibleContact, AuthenticatedAccount, CollaborationCollection, UpsertClientContactInput,
+};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -9,8 +11,9 @@ use crate::{
     error::set_error,
     parse::{parse_first_property_object_string, parse_uuid, parse_uuid_list},
     protocol::{
-        AddressBookGetArguments, AddressBookQueryArguments, ChangesArguments, ContactCardGetArguments,
-        ContactCardQueryArguments, ContactCardQueryFilter, ContactCardSetArguments,
+        AddressBookGetArguments, AddressBookQueryArguments, ChangesArguments,
+        ContactCardGetArguments, ContactCardQueryArguments, ContactCardQueryFilter,
+        ContactCardSetArguments,
     },
     state::{changes_response, StateEntry},
     validation::{validate_contact_filter, validate_entity_sort},

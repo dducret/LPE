@@ -64,8 +64,9 @@ impl SearchExpression {
                 let query = normalize_search_text(query);
                 search_email_text(email).contains(&query)
             }
-            Self::Subject(query) => normalize_search_text(&email.subject)
-                .contains(&normalize_search_text(query)),
+            Self::Subject(query) => {
+                normalize_search_text(&email.subject).contains(&normalize_search_text(query))
+            }
             Self::From(query) => searchable_sender(email).contains(&normalize_search_text(query)),
             Self::To(query) => {
                 searchable_recipients(&email.to).contains(&normalize_search_text(query))

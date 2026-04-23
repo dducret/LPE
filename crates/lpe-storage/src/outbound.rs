@@ -72,11 +72,14 @@ fn normalize_handoff_response(
 
     normalized.retry = match normalized.status {
         TransportDeliveryStatus::Deferred => {
-            let retry = normalized.retry.take().unwrap_or_else(|| TransportRetryAdvice {
-                retry_after_seconds: default_retry_after_seconds(attempts) as u32,
-                policy: synthesized_retry_policy(response).to_string(),
-                reason: normalized.detail.clone(),
-            });
+            let retry = normalized
+                .retry
+                .take()
+                .unwrap_or_else(|| TransportRetryAdvice {
+                    retry_after_seconds: default_retry_after_seconds(attempts) as u32,
+                    policy: synthesized_retry_policy(response).to_string(),
+                    reason: normalized.detail.clone(),
+                });
             Some(TransportRetryAdvice {
                 retry_after_seconds: retry.retry_after_seconds.max(1),
                 policy: retry.policy.trim().to_string(),

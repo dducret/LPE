@@ -25,16 +25,16 @@ use crate::{
     },
     propfind::{
         addressbook_collection_entry, calendar_collection_entry, collection_home_entry,
-        collection_resourcetype, contact_report_entry, contact_resource_entry,
-        event_report_entry, event_resource_entry, principal_propfind_entry, root_propfind_entry,
-        task_collection_entry, task_report_entry, task_resource_entry,
+        collection_resourcetype, contact_report_entry, contact_resource_entry, event_report_entry,
+        event_resource_entry, principal_propfind_entry, root_propfind_entry, task_collection_entry,
+        task_report_entry, task_resource_entry,
     },
     report::{
         contact_matches_report, event_matches_report, parse_report_filter, task_matches_report,
     },
     responses::{
-        error_response, multistatus_response, options_response, redirect_response,
-        status_only, status_with_etag, text_response,
+        error_response, multistatus_response, options_response, redirect_response, status_only,
+        status_with_etag, text_response,
     },
     serialize::{serialize_ical, serialize_vcard, serialize_vtodo},
     store::DavStore,

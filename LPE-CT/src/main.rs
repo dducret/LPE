@@ -1720,8 +1720,11 @@ async fn check_optional_tcp_dependency(
         return readiness_warn(name, "no relay target configured for connectivity probing");
     }
     let address = smtp_target_socket_address(normalized);
-    match tokio::time::timeout(Duration::from_millis(1_500), tokio::net::TcpStream::connect(&address))
-        .await
+    match tokio::time::timeout(
+        Duration::from_millis(1_500),
+        tokio::net::TcpStream::connect(&address),
+    )
+    .await
     {
         Ok(Ok(_)) => readiness_ok(name, false, ok_detail),
         Ok(Err(error)) => readiness_warn(

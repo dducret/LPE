@@ -13,14 +13,13 @@ use lpe_storage::{
 
 use crate::{
     http::{bad_request_error, bearer_token, internal_error, public_origin},
-    oidc,
+    oidc, require_admin,
     security::{admin_session_minutes, verify_password},
     totp,
     types::{
         AdminAuthFactorsResponse, ApiResult, EnrollTotpRequest, EnrollTotpResponse, LoginRequest,
         LoginResponse, OidcMetadataResponse, OidcStartResponse, VerifyTotpRequest,
     },
-    require_admin,
 };
 
 pub(crate) async fn login(

@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::{
     submission,
     submission::{AttachmentUploadInput, SubmittedRecipientInput},
-    ActiveSyncAttachmentRow, ActiveSyncSyncStateRow, AccountQuotaRow, AuditEntryInput,
+    AccountQuotaRow, ActiveSyncAttachmentRow, ActiveSyncSyncStateRow, AuditEntryInput,
     ImapEmailRow, JmapEmailRecipientRow, JmapEmailRow, JmapEmailSubmissionRow, JmapMailboxRow,
     JmapUploadBlobRow, MessageBccRecipientRecordRow, Storage,
 };
@@ -678,7 +678,11 @@ impl Storage {
         })
     }
 
-    pub async fn fetch_jmap_emails(&self, account_id: Uuid, ids: &[Uuid]) -> Result<Vec<JmapEmail>> {
+    pub async fn fetch_jmap_emails(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<JmapEmail>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -1623,7 +1627,8 @@ impl Storage {
         account_id: Uuid,
         file_reference: &str,
     ) -> Result<Option<ActiveSyncAttachmentContent>> {
-        let Some((message_id, attachment_id)) = crate::parse_activesync_file_reference(file_reference)
+        let Some((message_id, attachment_id)) =
+            crate::parse_activesync_file_reference(file_reference)
         else {
             return Ok(None);
         };

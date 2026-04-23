@@ -268,6 +268,9 @@ impl Storage {
             if !existing_task.rights.may_write {
                 bail!("write access is not granted on this task");
             }
+            if existing_task.owner_account_id != target_task_list.owner_account_id {
+                bail!("moving tasks across task-list owners is not supported");
+            }
         }
 
         let owner_account_id = target_task_list.owner_account_id;
@@ -355,8 +358,22 @@ impl Storage {
         .fetch_one(&mut *tx)
         .await?;
 
-        Self::emit_task_access_change(&mut tx, &tenant_id, owner_account_id, principal_account_id)
-            .await?;
+        let mut changed_task_list_ids = vec![task_list_id];
+        if let Some(existing_task) = existing_task.as_ref() {
+            if existing_task.task_list_id != task_list_id {
+                changed_task_list_ids.push(existing_task.task_list_id);
+            }
+        }
+        changed_task_list_ids.sort();
+        changed_task_list_ids.dedup();
+        Self::emit_task_access_change(
+            &mut tx,
+            &tenant_id,
+            owner_account_id,
+            &changed_task_list_ids,
+            &[],
+        )
+        .await?;
         tx.commit().await?;
 
         Ok(crate::map_task(row))
@@ -424,7 +441,14 @@ impl Storage {
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        Self::emit_task_access_change(&mut tx, &tenant_id, owner.id, grantee.id).await?;
+        Self::emit_task_access_change(
+            &mut tx,
+            &tenant_id,
+            owner.id,
+            &[task_list.id],
+            &[grantee.id],
+        )
+        .await?;
         tx.commit().await?;
 
         self.fetch_task_list_grant(owner.id, task_list.id, grantee.id)
@@ -462,8 +486,14 @@ impl Storage {
         }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        Self::emit_task_access_change(&mut tx, &tenant_id, owner_account_id, grantee_account_id)
-            .await?;
+        Self::emit_task_access_change(
+            &mut tx,
+            &tenant_id,
+            owner_account_id,
+            &[task_list_id],
+            &[grantee_account_id],
+        )
+        .await?;
         tx.commit().await?;
         Ok(())
     }
@@ -717,7 +747,7 @@ impl Storage {
         .bind(input.sort_order)
         .fetch_one(&mut *tx)
         .await?;
-        Self::emit_task_change(&mut tx, &tenant_id, input.account_id).await?;
+        Self::emit_task_access_change(&mut tx, &tenant_id, input.account_id, &[], &[]).await?;
         tx.commit().await?;
 
         Ok(crate::map_task_list(row))
@@ -769,7 +799,14 @@ impl Storage {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| anyhow!("task list not found"))?;
-        Self::emit_task_change(&mut tx, &tenant_id, input.account_id).await?;
+        Self::emit_task_access_change(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            &[input.task_list_id],
+            &[],
+        )
+        .await?;
         tx.commit().await?;
 
         Ok(crate::map_task_list(row))
@@ -809,7 +846,8 @@ impl Storage {
         .bind(task_list_id)
         .execute(&mut *tx)
         .await?;
-        Self::emit_task_change(&mut tx, &tenant_id, account_id).await?;
+        Self::emit_task_access_change(&mut tx, &tenant_id, account_id, &[task_list_id], &[])
+            .await?;
         tx.commit().await?;
 
         Ok(())
@@ -846,8 +884,14 @@ impl Storage {
             bail!("task not found");
         }
 
-        Self::emit_task_access_change(&mut tx, &tenant_id, existing.owner_account_id, account_id)
-            .await?;
+        Self::emit_task_access_change(
+            &mut tx,
+            &tenant_id,
+            existing.owner_account_id,
+            &[existing.task_list_id],
+            &[],
+        )
+        .await?;
         tx.commit().await?;
 
         Ok(())

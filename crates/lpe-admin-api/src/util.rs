@@ -4,9 +4,7 @@ use lpe_storage::{
 };
 use uuid::Uuid;
 
-pub(crate) fn parse_collaboration_kind(
-    value: &str,
-) -> Result<CollaborationResourceKind, String> {
+pub(crate) fn parse_collaboration_kind(value: &str) -> Result<CollaborationResourceKind, String> {
     match value.trim().to_lowercase().as_str() {
         "contacts" | "contact" => Ok(CollaborationResourceKind::Contacts),
         "calendar" | "calendars" => Ok(CollaborationResourceKind::Calendar),
@@ -14,9 +12,7 @@ pub(crate) fn parse_collaboration_kind(
     }
 }
 
-pub(crate) fn parse_sender_delegation_right(
-    value: &str,
-) -> Result<SenderDelegationRight, String> {
+pub(crate) fn parse_sender_delegation_right(value: &str) -> Result<SenderDelegationRight, String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "send_as" | "send-as" => Ok(SenderDelegationRight::SendAs),
         "send_on_behalf" | "send-on-behalf" => Ok(SenderDelegationRight::SendOnBehalf),

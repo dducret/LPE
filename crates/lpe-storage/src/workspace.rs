@@ -3,8 +3,8 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::{
-    attachments, normalize_email, CanonicalChangeCategory, ClientAttachment,
-    ClientAttachmentRow, ClientContactRow, ClientEventRow, ClientMessageRow, ClientTask, Storage,
+    attachments, normalize_email, CanonicalChangeCategory, ClientAttachment, ClientAttachmentRow,
+    ClientContactRow, ClientEventRow, ClientMessageRow, ClientTask, Storage,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -163,7 +163,10 @@ impl Storage {
                     .map(|attachment| ClientAttachment {
                         id: attachment.id,
                         name: attachment.name.clone(),
-                        kind: attachments::attachment_kind(&attachment.media_type, &attachment.name),
+                        kind: attachments::attachment_kind(
+                            &attachment.media_type,
+                            &attachment.name,
+                        ),
                         size: format_size(attachment.size_octets),
                     })
                     .collect();

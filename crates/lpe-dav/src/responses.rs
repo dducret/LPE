@@ -37,11 +37,7 @@ pub(crate) fn redirect_response(location: &str) -> Response {
         .unwrap()
 }
 
-pub(crate) fn text_response(
-    content_type: &str,
-    body: String,
-    etag: Option<String>,
-) -> Response {
+pub(crate) fn text_response(content_type: &str, body: String, etag: Option<String>) -> Response {
     let mut headers = vec![("dav", "1, addressbook, calendar-access")];
     if let Some(ref value) = etag {
         headers.push(("etag", value.as_str()));

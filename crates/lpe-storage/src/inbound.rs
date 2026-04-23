@@ -9,10 +9,8 @@ use sqlx::{Postgres, Row};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-use crate::{
-    submission, AttachmentUploadInput, AuditEntryInput, Storage, SubmittedRecipientInput,
-};
 use crate::mail::{parse_header_recipients, parse_headers_map, parse_message_attachments};
+use crate::{submission, AttachmentUploadInput, AuditEntryInput, Storage, SubmittedRecipientInput};
 
 const MAX_SIEVE_REDIRECTS_PER_MESSAGE: usize = 4;
 const DEFAULT_SIEVE_MAILBOX_RETENTION_DAYS: i32 = 365;
@@ -203,8 +201,16 @@ impl Storage {
         }
 
         let mut delivered_mailboxes = accepted;
-        delivered_mailboxes.extend(rejected.into_iter().map(|recipient| format!("rejected:{recipient}")));
-        delivered_mailboxes.extend(stored_message_ids.into_iter().map(|id| format!("message:{id}")));
+        delivered_mailboxes.extend(
+            rejected
+                .into_iter()
+                .map(|recipient| format!("rejected:{recipient}")),
+        );
+        delivered_mailboxes.extend(
+            stored_message_ids
+                .into_iter()
+                .map(|id| format!("message:{id}")),
+        );
 
         Ok(InboundDeliveryResponse {
             accepted: !delivered_mailboxes.is_empty(),

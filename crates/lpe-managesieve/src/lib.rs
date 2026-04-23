@@ -16,9 +16,7 @@ mod tests {
     };
     use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
     use lpe_mail_auth::{issue_oauth_access_token, AccountAuthStore};
-    use lpe_storage::{
-        AccountLogin, AuditEntryInput, SieveScriptDocument, SieveScriptSummary,
-    };
+    use lpe_storage::{AccountLogin, AuditEntryInput, SieveScriptDocument, SieveScriptSummary};
     use std::sync::{Arc, Mutex};
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},

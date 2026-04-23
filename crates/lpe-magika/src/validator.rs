@@ -3,11 +3,11 @@ use std::path::Path;
 
 use crate::{
     constants::UNKNOWN_LABELS,
+    system::SystemDetector,
     types::{
         DetectionSource, Detector, ExpectedKind, IngressContext, MagikaDetection, PolicyDecision,
         ValidationOutcome, ValidationRequest,
     },
-    system::SystemDetector,
 };
 
 #[derive(Debug, Clone)]

@@ -3,9 +3,7 @@ use crate::{
     types::{BootstrapAdminRequest, BootstrapAdminResponse},
     MIN_ADMIN_PASSWORD_LEN, MIN_INTEGRATION_SECRET_LEN,
 };
-use lpe_storage::{
-    AdminCredentialInput, AuditEntryInput, NewServerAdministrator, Storage,
-};
+use lpe_storage::{AdminCredentialInput, AuditEntryInput, NewServerAdministrator, Storage};
 use std::env;
 
 pub fn bootstrap_admin_request_from_env() -> anyhow::Result<BootstrapAdminRequest> {

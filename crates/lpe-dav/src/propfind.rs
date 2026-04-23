@@ -5,8 +5,8 @@ use lpe_storage::{
 use crate::{
     paths::{
         contact_collection_href, contact_href, etag, event_collection_href, event_href,
-        task_collection_href, task_href, ADDRESSBOOK_HOME_PATH, CALENDAR_HOME_PATH,
-        PRINCIPAL_PATH, ROOT_PATH,
+        task_collection_href, task_href, ADDRESSBOOK_HOME_PATH, CALENDAR_HOME_PATH, PRINCIPAL_PATH,
+        ROOT_PATH,
     },
     responses::response_entry,
     serialize::{serialize_ical, serialize_vcard, serialize_vtodo, xml_escape},

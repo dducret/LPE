@@ -82,7 +82,9 @@ pub(crate) fn parse_required_string(value: Option<&Value>, field_name: &str) -> 
         .ok_or_else(|| anyhow!("{field_name} is required"))
 }
 
-pub(crate) fn parse_optional_nullable_string(value: Option<&Value>) -> Result<Option<Option<String>>> {
+pub(crate) fn parse_optional_nullable_string(
+    value: Option<&Value>,
+) -> Result<Option<Option<String>>> {
     match value {
         None => Ok(None),
         Some(Value::Null) => Ok(Some(None)),

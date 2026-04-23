@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    normalize_email, AuditEntryInput, CollaborationCollectionRow, CollaborationGrantRow,
-    DEFAULT_COLLECTION_ID, Storage, UpsertClientContactInput, UpsertClientEventInput,
+    normalize_email, AuditEntryInput, CollaborationCollectionRow, CollaborationGrantRow, Storage,
+    UpsertClientContactInput, UpsertClientEventInput, DEFAULT_COLLECTION_ID,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -181,6 +181,10 @@ impl Storage {
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_collaboration_grant_change(
+            &mut tx, &tenant_id, input.kind, owner.id, grantee.id,
+        )
+        .await?;
         tx.commit().await?;
 
         self.fetch_collaboration_grant(input.kind, owner.id, grantee.id)

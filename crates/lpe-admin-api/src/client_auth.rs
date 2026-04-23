@@ -13,6 +13,7 @@ use lpe_storage::{AuditEntryInput, AuthenticatedAccount, HealthResponse, Storage
 use crate::{
     account_oidc,
     http::{bad_request_error, internal_error, public_origin},
+    require_account,
     security::{
         client_oauth_access_token_seconds, client_session_minutes, generate_app_password_secret,
         hash_password, verify_password,
@@ -25,7 +26,6 @@ use crate::{
         CreateClientOauthAccessTokenRequest, EnrollTotpRequest, EnrollTotpResponse, LoginRequest,
         VerifyTotpRequest,
     },
-    require_account,
 };
 
 pub(crate) async fn client_login(

@@ -106,7 +106,9 @@ pub(crate) fn select_from_addresses(
     Ok((from, sender))
 }
 
-pub(crate) fn map_recipients(input: Vec<EmailAddressInput>) -> Result<Vec<SubmittedRecipientInput>> {
+pub(crate) fn map_recipients(
+    input: Vec<EmailAddressInput>,
+) -> Result<Vec<SubmittedRecipientInput>> {
     input
         .into_iter()
         .map(|recipient| {

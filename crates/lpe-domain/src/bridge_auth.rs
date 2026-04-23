@@ -202,7 +202,9 @@ fn hex_bytes(bytes: impl AsRef<[u8]>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{current_unix_timestamp, BridgeAuthError, SignedIntegrationHeaders, DEFAULT_MAX_SKEW_SECONDS};
+    use super::{
+        current_unix_timestamp, BridgeAuthError, SignedIntegrationHeaders, DEFAULT_MAX_SKEW_SECONDS,
+    };
     use serde::Serialize;
 
     #[derive(Serialize)]

@@ -6,7 +6,7 @@ use crate::{
     normalize_admin_session_auth_method, normalize_email, permission_summary,
     permissions_from_storage, AccountAppPasswordRow, AccountAuthFactorRow, AccountLoginRow,
     AdminAuthFactorRow, AdminLoginRow, AuditEntryInput, AuthenticatedAccountRow,
-    AuthenticatedAdminRow, PLATFORM_TENANT_ID, Storage,
+    AuthenticatedAdminRow, Storage, PLATFORM_TENANT_ID,
 };
 
 #[derive(Debug, Clone, Serialize)]

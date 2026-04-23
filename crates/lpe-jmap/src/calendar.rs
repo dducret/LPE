@@ -14,7 +14,7 @@ use crate::{
     error::set_error,
     parse::{
         parse_first_property_object_string, parse_local_datetime, parse_local_datetime_value,
-        parse_optional_string, parse_uuid, parse_uuid_list, parse_required_string,
+        parse_optional_string, parse_required_string, parse_uuid, parse_uuid_list,
     },
     protocol::{
         CalendarEventGetArguments, CalendarEventQueryArguments, CalendarEventQueryFilter,
@@ -205,7 +205,9 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
         let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
-        let entries = self.object_state_entries(account_id, "CalendarEvent").await?;
+        let entries = self
+            .object_state_entries(account_id, "CalendarEvent")
+            .await?;
         Ok(changes_response(
             account_id,
             "CalendarEvent",

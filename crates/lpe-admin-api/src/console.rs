@@ -6,20 +6,18 @@ use axum::{
 use lpe_ai::{LocalModelProvider, StubLocalModelProvider};
 use lpe_core::CoreService;
 use lpe_storage::{
-    AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput,
-    DashboardUpdate, EmailTraceResult, EmailTraceSearchInput, LocalAiSettings, NewAccount,
-    NewAlias, NewDomain, NewFilterRule, NewMailbox, NewPstTransferJob,
-    NewServerAdministrator, PstJobExecutionSummary, SecuritySettings, ServerSettings, Storage,
-    UpdateAccount, UpdateDomain,
+    AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput, DashboardUpdate,
+    EmailTraceResult, EmailTraceSearchInput, LocalAiSettings, NewAccount, NewAlias, NewDomain,
+    NewFilterRule, NewMailbox, NewPstTransferJob, NewServerAdministrator, PstJobExecutionSummary,
+    SecuritySettings, ServerSettings, Storage, UpdateAccount, UpdateDomain,
 };
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 use crate::{
     http::{bad_request_error, internal_error},
-    pst::{
-        pst_import_dir, sanitize_upload_filename, validate_uploaded_pst_file,
-    },
+    pst::{pst_import_dir, sanitize_upload_filename, validate_uploaded_pst_file},
+    require_admin,
     security::hash_password,
     types::{
         ApiResult, AttachmentSupportResponse, CreateAccountRequest, CreateAliasRequest,
@@ -30,7 +28,6 @@ use crate::{
         UpdateSecuritySettingsRequest, UpdateServerSettingsRequest,
     },
     util::{ensure_admin_can_manage_email, mailbox_account_email},
-    require_admin,
 };
 
 pub(crate) async fn local_ai_health(

@@ -4,8 +4,9 @@ use std::time::Duration;
 
 use crate::{
     build_readiness_response, check_optional_http_dependency, ha_activation_check,
-    http::internal_error, integration_shared_secret, lpe_ct_base_url, readiness_failed,
-    readiness_ok, types::{ApiResult, ReadinessResponse},
+    http::internal_error,
+    integration_shared_secret, lpe_ct_base_url, readiness_failed, readiness_ok,
+    types::{ApiResult, ReadinessResponse},
 };
 
 pub(crate) async fn health(State(storage): State<Storage>) -> ApiResult<HealthResponse> {
