@@ -661,8 +661,27 @@ select:focus {
   gap: 18px;
 }
 
+.ops-grid-wide {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .ops-card {
   padding: 22px;
+}
+
+.ops-card-span-2 {
+  grid-column: span 2;
+}
+
+.search-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 180px 180px auto;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.compact-button {
+  margin-top: 0;
 }
 
 .pill-button {
@@ -729,9 +748,45 @@ select:focus {
   font-size: 0.95rem;
 }
 
+.trace-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.history-summary {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.reporting-summary {
+  margin-top: 12px;
+}
+
+.field-span-two {
+  grid-column: span 2;
+}
+
+.digest-content {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink);
+}
+
 @media (max-width: 920px) {
   .workspace-toolbar,
   .ops-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ops-card-span-2,
+  .field-span-two {
+    grid-column: span 1;
+  }
+
+  .trace-grid,
+  .search-toolbar {
     grid-template-columns: 1fr;
   }
 }

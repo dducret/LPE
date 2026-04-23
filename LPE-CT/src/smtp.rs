@@ -147,7 +147,7 @@ struct QuarantineMetadata {
     magika_decision: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct QuarantineSummary {
     pub trace_id: String,
     pub queue: String,
@@ -157,11 +157,21 @@ pub(crate) struct QuarantineSummary {
     pub mail_from: String,
     pub rcpt_to: Vec<String>,
     pub subject: String,
+    pub internet_message_id: Option<String>,
     pub reason: Option<String>,
     pub spam_score: f32,
     pub security_score: f32,
     pub reputation_score: i32,
     pub route_target: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub(crate) struct QuarantineQuery {
+    pub q: Option<String>,
+    pub direction: Option<String>,
+    pub status: Option<String>,
+    pub domain: Option<String>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -182,10 +192,16 @@ pub(crate) struct TraceDetails {
     pub spam_score: f32,
     pub security_score: f32,
     pub reputation_score: i32,
+    pub dnsbl_hits: Vec<String>,
+    pub auth_summary: Value,
+    pub magika_summary: Option<String>,
+    pub magika_decision: Option<String>,
     pub technical_status: Option<TransportTechnicalStatus>,
     pub dsn: Option<TransportDsnReport>,
     pub route: Option<TransportRouteDecision>,
     pub throttle: Option<TransportThrottleStatus>,
+    pub headers: Vec<(String, String)>,
+    pub body_excerpt: String,
     pub decision_trace: Vec<DecisionTraceEntry>,
 }
 
@@ -237,7 +253,7 @@ struct QueuedMessage {
     data: Vec<u8>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct TransportAuditEvent {
     timestamp: String,
     trace_id: String,
@@ -248,12 +264,21 @@ struct TransportAuditEvent {
     mail_from: String,
     rcpt_to: Vec<String>,
     subject: String,
+    internet_message_id: Option<String>,
     reason: Option<String>,
     route_target: Option<String>,
     remote_message_ref: Option<String>,
     spam_score: f32,
     security_score: f32,
     reputation_score: i32,
+    dnsbl_hits: Vec<String>,
+    auth_summary: Value,
+    magika_summary: Option<String>,
+    magika_decision: Option<String>,
+    technical_status: Option<Value>,
+    dsn: Option<Value>,
+    throttle: Option<Value>,
+    decision_trace: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -447,11 +472,13 @@ pub(crate) const SPOOL_QUEUES: [&str; 9] = [
     "greylist",
 ];
 
-pub(crate) const POLICY_ARTIFACTS: [&str; 4] = [
+pub(crate) const POLICY_ARTIFACTS: [&str; 6] = [
     "postgres: reputation_entries",
     "postgres: bayespam_corpora",
     "postgres: throttle_windows",
     "postgres: greylist_entries",
+    "spool: policy/transport-audit.jsonl",
+    "spool: policy/digest-reports/",
 ];
 
 static LOCAL_DB_POOL: OnceCell<PgPool> = OnceCell::const_new();
@@ -473,7 +500,9 @@ pub(crate) async fn prepare_local_store(spool_dir: &Path, config: &RuntimeConfig
     migrate_legacy_policy_artifacts(spool_dir, pool).await
 }
 
-async fn ensure_local_db_schema(config: &RuntimeConfig) -> Result<Option<&'static PgPool>> {
+pub(crate) async fn ensure_local_db_schema(
+    config: &RuntimeConfig,
+) -> Result<Option<&'static PgPool>> {
     let Some(pool) = local_db_pool(config).await? else {
         return Ok(None);
     };
@@ -557,6 +586,64 @@ async fn ensure_local_db_schema(config: &RuntimeConfig) -> Result<Option<&'stati
             )
             .execute(pool)
             .await?;
+            sqlx::query(
+                r#"
+                CREATE TABLE IF NOT EXISTS mail_flow_history (
+                    event_key TEXT PRIMARY KEY,
+                    event_unix BIGINT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    trace_id TEXT NOT NULL,
+                    direction TEXT NOT NULL,
+                    queue TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    peer TEXT NOT NULL,
+                    mail_from TEXT NOT NULL,
+                    rcpt_to JSONB NOT NULL,
+                    subject TEXT NOT NULL,
+                    internet_message_id TEXT,
+                    reason TEXT,
+                    route_target TEXT,
+                    remote_message_ref TEXT,
+                    spam_score REAL NOT NULL,
+                    security_score REAL NOT NULL,
+                    reputation_score INTEGER NOT NULL,
+                    dnsbl_hits JSONB NOT NULL,
+                    auth_summary JSONB NOT NULL,
+                    magika_summary TEXT,
+                    magika_decision TEXT,
+                    technical_status JSONB,
+                    dsn JSONB,
+                    throttle JSONB,
+                    decision_trace JSONB NOT NULL,
+                    search_text TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                "#,
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS mail_flow_history_trace_id_idx ON mail_flow_history (trace_id, event_unix DESC)"
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS mail_flow_history_event_unix_idx ON mail_flow_history (event_unix DESC)"
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS mail_flow_history_search_tsv_idx ON mail_flow_history USING GIN (to_tsvector('simple', search_text))"
+            )
+            .execute(pool)
+            .await?;
+            if ensure_pg_trgm_extension(pool).await {
+                sqlx::query(
+                    "CREATE INDEX IF NOT EXISTS mail_flow_history_search_trgm_idx ON mail_flow_history USING GIN (search_text gin_trgm_ops)"
+                )
+                .execute(pool)
+                .await?;
+            }
             Ok::<(), anyhow::Error>(())
         })
         .await?;
@@ -600,6 +687,42 @@ async fn migrate_legacy_policy_artifacts(spool_dir: &Path, pool: &PgPool) -> Res
     migrate_legacy_reputation_store(spool_dir, pool).await?;
     migrate_legacy_bayespam_corpus(spool_dir, pool).await?;
     migrate_legacy_greylist_entries(spool_dir, pool).await?;
+    migrate_legacy_transport_audit_history(spool_dir, pool).await?;
+    Ok(())
+}
+
+async fn ensure_pg_trgm_extension(pool: &PgPool) -> bool {
+    match sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+        .execute(pool)
+        .await
+    {
+        Ok(_) => true,
+        Err(error) => {
+            warn!(error = %error, "unable to enable pg_trgm extension; continuing with full-text history indexing only");
+            false
+        }
+    }
+}
+
+async fn migrate_legacy_transport_audit_history(spool_dir: &Path, pool: &PgPool) -> Result<()> {
+    let legacy_path = spool_dir.join("policy").join("transport-audit.jsonl");
+    if !legacy_path.exists() {
+        return Ok(());
+    }
+    let existing_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mail_flow_history")
+        .fetch_one(pool)
+        .await?;
+    if existing_count > 0 {
+        return Ok(());
+    }
+
+    for line in fs::read_to_string(legacy_path)?.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let event: TransportAuditEvent = serde_json::from_str(line)?;
+        persist_transport_audit_db_event(pool, &event).await?;
+    }
     Ok(())
 }
 
@@ -1020,7 +1143,7 @@ pub(crate) async fn process_outbound_handoff(
             detail: reason.clone(),
         });
         persist_message(spool_dir, "held", &message).await?;
-        let _ = append_transport_audit(spool_dir, "held", &message);
+        let _ = append_transport_audit(spool_dir, config, "held", &message).await;
         observability::record_security_event("outbound_failure");
         return Ok(OutboundMessageHandoffResponse {
             queue_id: payload.queue_id,
@@ -1063,7 +1186,7 @@ pub(crate) async fn process_outbound_handoff(
                 detail: reason.clone(),
             });
             persist_message(spool_dir, "held", &message).await?;
-            let _ = append_transport_audit(spool_dir, "held", &message);
+            let _ = append_transport_audit(spool_dir, config, "held", &message).await;
             observability::record_security_event("outbound_failure");
             return Ok(OutboundMessageHandoffResponse {
                 queue_id: payload.queue_id,
@@ -1141,7 +1264,7 @@ pub(crate) async fn process_outbound_handoff(
         });
         move_message(spool_dir, &message, "outbound", "quarantine").await?;
         persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
-        let _ = append_transport_audit(spool_dir, "quarantine", &message);
+        let _ = append_transport_audit(spool_dir, config, "quarantine", &message).await;
         observability::record_security_event("outbound_quarantine");
         return Ok(OutboundMessageHandoffResponse {
             queue_id: payload.queue_id,
@@ -1177,7 +1300,7 @@ pub(crate) async fn process_outbound_handoff(
         });
         move_message(spool_dir, &message, "outbound", "quarantine").await?;
         persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
-        let _ = append_transport_audit(spool_dir, "quarantine", &message);
+        let _ = append_transport_audit(spool_dir, config, "quarantine", &message).await;
         observability::record_security_event("outbound_quarantine");
         info!(
             trace_id = %message.id,
@@ -1213,7 +1336,7 @@ pub(crate) async fn process_outbound_handoff(
         });
         move_message(spool_dir, &message, "outbound", "quarantine").await?;
         persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
-        let _ = append_transport_audit(spool_dir, "quarantine", &message);
+        let _ = append_transport_audit(spool_dir, config, "quarantine", &message).await;
         observability::record_security_event("outbound_quarantine");
         return Ok(OutboundMessageHandoffResponse {
             queue_id: payload.queue_id,
@@ -1250,7 +1373,7 @@ pub(crate) async fn process_outbound_handoff(
             ),
         });
         move_message(spool_dir, &message, "outbound", "deferred").await?;
-        let _ = append_transport_audit(spool_dir, "deferred", &message);
+        let _ = append_transport_audit(spool_dir, config, "deferred", &message).await;
         info!(
             trace_id = %message.id,
             message_id = %message_id,
@@ -1319,7 +1442,7 @@ pub(crate) async fn process_outbound_handoff(
     if destination == "quarantine" {
         persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
     }
-    let _ = append_transport_audit(spool_dir, destination, &message);
+    let _ = append_transport_audit(spool_dir, config, destination, &message).await;
     if matches!(
         execution.status,
         TransportDeliveryStatus::Quarantined
@@ -1508,6 +1631,13 @@ fn domain_part(address: &str) -> Option<String> {
         .rsplit_once('@')
         .map(|(_, domain)| domain.trim().to_ascii_lowercase())
         .filter(|domain| !domain.is_empty())
+}
+
+fn normalized(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase())
 }
 
 fn matches_domain(expected: Option<&str>, actual: Option<&str>) -> bool {
@@ -1764,7 +1894,7 @@ async fn receive_message_with_validator<D: Detector>(
             detail: "drain mode is enabled on the sorting center".to_string(),
         });
         move_message(spool_dir, &message, "incoming", "held").await?;
-        let _ = append_transport_audit(spool_dir, "held", &message);
+        let _ = append_transport_audit(spool_dir, config, "held", &message).await;
         return Ok(message);
     }
 
@@ -1783,7 +1913,7 @@ async fn receive_message_with_validator<D: Detector>(
             });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
-            let _ = append_transport_audit(spool_dir, "quarantine", &message);
+            let _ = append_transport_audit(spool_dir, config, "quarantine", &message).await;
             info!(
                 trace_id = %message.id,
                 status = %message.status,
@@ -1804,7 +1934,7 @@ async fn receive_message_with_validator<D: Detector>(
             });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
-            let _ = append_transport_audit(spool_dir, "quarantine", &message);
+            let _ = append_transport_audit(spool_dir, config, "quarantine", &message).await;
             info!(
                 trace_id = %message.id,
                 status = %message.status,
@@ -1825,7 +1955,7 @@ async fn receive_message_with_validator<D: Detector>(
             });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
-            let _ = append_transport_audit(spool_dir, "quarantine", &message);
+            let _ = append_transport_audit(spool_dir, config, "quarantine", &message).await;
             info!(
                 trace_id = %message.id,
                 status = %message.status,
@@ -1853,7 +1983,7 @@ async fn receive_message_with_validator<D: Detector>(
             });
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
-            let _ = append_transport_audit(spool_dir, "quarantine", &message);
+            let _ = append_transport_audit(spool_dir, config, "quarantine", &message).await;
             return Ok(message);
         }
     }
@@ -1880,7 +2010,7 @@ async fn receive_message_with_validator<D: Detector>(
                     detail: "message delivered to the core LPE inbound-delivery API".to_string(),
                 });
                 move_message(spool_dir, &message, "incoming", "sent").await?;
-                let _ = append_transport_audit(spool_dir, "sent", &message);
+                let _ = append_transport_audit(spool_dir, config, "sent", &message).await;
                 update_reputation(spool_dir, config, &message, FilterAction::Accept).await?;
                 train_bayespam(spool_dir, config, &message, BayesLabel::Ham).await?;
                 observability::record_smtp_session("delivered");
@@ -1903,7 +2033,7 @@ async fn receive_message_with_validator<D: Detector>(
                     "deferred"
                 };
                 move_message(spool_dir, &message, "incoming", destination).await?;
-                let _ = append_transport_audit(spool_dir, destination, &message);
+                let _ = append_transport_audit(spool_dir, config, destination, &message).await;
                 update_reputation(spool_dir, config, &message, FilterAction::Defer).await?;
                 observability::record_security_event("inbound_delivery_deferred");
                 observability::record_smtp_session("deferred");
@@ -1914,7 +2044,7 @@ async fn receive_message_with_validator<D: Detector>(
             message.status = "quarantined".to_string();
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
-            let _ = append_transport_audit(spool_dir, "quarantine", &message);
+            let _ = append_transport_audit(spool_dir, config, "quarantine", &message).await;
             update_reputation(spool_dir, config, &message, FilterAction::Quarantine).await?;
             train_bayespam(spool_dir, config, &message, BayesLabel::Spam).await?;
             observability::record_smtp_session("quarantined");
@@ -1924,7 +2054,7 @@ async fn receive_message_with_validator<D: Detector>(
             message.status = "rejected".to_string();
             move_message(spool_dir, &message, "incoming", "quarantine").await?;
             persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
-            let _ = append_transport_audit(spool_dir, "quarantine", &message);
+            let _ = append_transport_audit(spool_dir, config, "quarantine", &message).await;
             update_reputation(spool_dir, config, &message, FilterAction::Reject).await?;
             train_bayespam(spool_dir, config, &message, BayesLabel::Spam).await?;
             observability::record_smtp_session("rejected");
@@ -1933,7 +2063,7 @@ async fn receive_message_with_validator<D: Detector>(
             observability::record_security_event("inbound_defer");
             message.status = "deferred".to_string();
             move_message(spool_dir, &message, "incoming", "deferred").await?;
-            let _ = append_transport_audit(spool_dir, "deferred", &message);
+            let _ = append_transport_audit(spool_dir, config, "deferred", &message).await;
             update_reputation(spool_dir, config, &message, FilterAction::Defer).await?;
             observability::record_smtp_session("deferred");
         }
@@ -3933,7 +4063,12 @@ async fn move_message(
     Ok(())
 }
 
-fn append_transport_audit(spool_dir: &Path, queue: &str, message: &QueuedMessage) -> Result<()> {
+async fn append_transport_audit(
+    spool_dir: &Path,
+    config: &RuntimeConfig,
+    queue: &str,
+    message: &QueuedMessage,
+) -> Result<()> {
     let event = TransportAuditEvent {
         timestamp: current_timestamp(),
         trace_id: message.id.clone(),
@@ -3944,6 +4079,7 @@ fn append_transport_audit(spool_dir: &Path, queue: &str, message: &QueuedMessage
         mail_from: message.mail_from.clone(),
         rcpt_to: message.rcpt_to.clone(),
         subject: parse_rfc822_header_value(&message.data, "subject").unwrap_or_default(),
+        internet_message_id: parse_rfc822_header_value(&message.data, "message-id"),
         reason: message.relay_error.clone(),
         route_target: message
             .route
@@ -3953,6 +4089,18 @@ fn append_transport_audit(spool_dir: &Path, queue: &str, message: &QueuedMessage
         spam_score: message.spam_score,
         security_score: message.security_score,
         reputation_score: message.reputation_score,
+        dnsbl_hits: message.dnsbl_hits.clone(),
+        auth_summary: serde_json::to_value(&message.auth_summary).unwrap_or(Value::Null),
+        magika_summary: message.magika_summary.clone(),
+        magika_decision: message.magika_decision.clone(),
+        technical_status: serde_json::to_value(&message.technical_status).ok(),
+        dsn: serde_json::to_value(&message.dsn).ok(),
+        throttle: serde_json::to_value(&message.throttle).ok(),
+        decision_trace: message
+            .decision_trace
+            .iter()
+            .filter_map(|entry| serde_json::to_value(entry).ok())
+            .collect(),
     };
     let line = format!("{}\n", serde_json::to_string(&event)?);
     let path = spool_dir.join("policy").join("transport-audit.jsonl");
@@ -3962,7 +4110,186 @@ fn append_transport_audit(spool_dir: &Path, queue: &str, message: &QueuedMessage
         .open(path)?;
     use std::io::Write;
     file.write_all(line.as_bytes())?;
+    if let Some(pool) = ensure_local_db_schema(config).await? {
+        persist_transport_audit_db_event(pool, &event).await?;
+    }
     Ok(())
+}
+
+async fn persist_transport_audit_db_event(pool: &PgPool, event: &TransportAuditEvent) -> Result<()> {
+    let event_unix = parse_unix_timestamp(&event.timestamp).unwrap_or(0) as i64;
+    let event_key = transport_audit_event_key(event);
+    sqlx::query(
+        r#"
+        INSERT INTO mail_flow_history (
+            event_key, event_unix, timestamp, trace_id, direction, queue, status, peer, mail_from,
+            rcpt_to, subject, internet_message_id, reason, route_target, remote_message_ref,
+            spam_score, security_score, reputation_score, dnsbl_hits, auth_summary, magika_summary,
+            magika_decision, technical_status, dsn, throttle, decision_trace, search_text
+        )
+        VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9,
+            $10, $11, $12, $13, $14, $15,
+            $16, $17, $18, $19, $20, $21,
+            $22, $23, $24, $25, $26, $27
+        )
+        ON CONFLICT (event_key) DO NOTHING
+        "#,
+    )
+    .bind(&event_key)
+    .bind(event_unix)
+    .bind(&event.timestamp)
+    .bind(&event.trace_id)
+    .bind(&event.direction)
+    .bind(&event.queue)
+    .bind(&event.status)
+    .bind(&event.peer)
+    .bind(&event.mail_from)
+    .bind(Json(event.rcpt_to.clone()))
+    .bind(&event.subject)
+    .bind(&event.internet_message_id)
+    .bind(&event.reason)
+    .bind(&event.route_target)
+    .bind(&event.remote_message_ref)
+    .bind(event.spam_score)
+    .bind(event.security_score)
+    .bind(event.reputation_score)
+    .bind(Json(event.dnsbl_hits.clone()))
+    .bind(Json(event.auth_summary.clone()))
+    .bind(&event.magika_summary)
+    .bind(&event.magika_decision)
+    .bind(&event.technical_status)
+    .bind(&event.dsn)
+    .bind(&event.throttle)
+    .bind(Json(event.decision_trace.clone()))
+    .bind(transport_audit_search_text(event))
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+fn transport_audit_event_key(event: &TransportAuditEvent) -> String {
+    let mut hasher = DefaultHasher::new();
+    event.timestamp.hash(&mut hasher);
+    event.trace_id.hash(&mut hasher);
+    event.queue.hash(&mut hasher);
+    event.status.hash(&mut hasher);
+    event.reason.hash(&mut hasher);
+    event.route_target.hash(&mut hasher);
+    event.remote_message_ref.hash(&mut hasher);
+    serde_json::to_string(&event.decision_trace)
+        .unwrap_or_default()
+        .hash(&mut hasher);
+    format!("{}-{:x}", event.trace_id, hasher.finish())
+}
+
+fn transport_audit_search_text(event: &TransportAuditEvent) -> String {
+    let mut parts = vec![
+        event.trace_id.to_ascii_lowercase(),
+        event.direction.to_ascii_lowercase(),
+        event.queue.to_ascii_lowercase(),
+        event.status.to_ascii_lowercase(),
+        event.mail_from.to_ascii_lowercase(),
+        event.subject.to_ascii_lowercase(),
+        event.peer.to_ascii_lowercase(),
+    ];
+    parts.extend(event.rcpt_to.iter().map(|value| value.to_ascii_lowercase()));
+    parts.extend(event.dnsbl_hits.iter().map(|value| value.to_ascii_lowercase()));
+    if let Some(value) = &event.internet_message_id {
+        parts.push(value.to_ascii_lowercase());
+    }
+    if let Some(value) = &event.reason {
+        parts.push(value.to_ascii_lowercase());
+    }
+    if let Some(value) = &event.route_target {
+        parts.push(value.to_ascii_lowercase());
+    }
+    if let Some(value) = &event.remote_message_ref {
+        parts.push(value.to_ascii_lowercase());
+    }
+    parts.join(" ")
+}
+
+fn quarantine_matches(item: &QuarantineSummary, query: &QuarantineQuery) -> bool {
+    if let Some(direction) = query.direction.as_deref() {
+        if item.direction != direction {
+            return false;
+        }
+    }
+    if let Some(status) = query.status.as_deref() {
+        if item.status != status {
+            return false;
+        }
+    }
+    if let Some(domain) = normalized(query.domain.as_deref()) {
+        let sender_matches = domain_part(&item.mail_from).is_some_and(|value| value == domain);
+        let recipient_matches = item
+            .rcpt_to
+            .iter()
+            .filter_map(|value| domain_part(value))
+            .any(|value| value == domain);
+        if !sender_matches && !recipient_matches {
+            return false;
+        }
+    }
+    if let Some(q) = normalized(query.q.as_deref()) {
+        let haystack = [
+            item.trace_id.as_str(),
+            item.subject.as_str(),
+            item.mail_from.as_str(),
+            item.reason.as_deref().unwrap_or(""),
+            item.internet_message_id.as_deref().unwrap_or(""),
+        ]
+        .into_iter()
+        .chain(item.rcpt_to.iter().map(String::as_str))
+        .map(|value| value.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+        if !haystack.iter().any(|value| value.contains(&q)) {
+            return false;
+        }
+    }
+    true
+}
+
+fn inspect_headers(data: &[u8]) -> Vec<(String, String)> {
+    let mut headers = Vec::new();
+    for line in String::from_utf8_lossy(data).lines() {
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = trimmed.split_once(':') {
+            let lower = name.trim().to_ascii_lowercase();
+            if matches!(
+                lower.as_str(),
+                "from" | "to" | "cc" | "subject" | "date" | "message-id" | "received"
+            ) {
+                headers.push((name.trim().to_string(), value.trim().to_string()));
+            }
+        }
+        if headers.len() >= 12 {
+            break;
+        }
+    }
+    headers
+}
+
+fn body_excerpt(data: &[u8]) -> String {
+    let raw = String::from_utf8_lossy(data);
+    let body = raw
+        .split_once("\r\n\r\n")
+        .map(|(_, value)| value)
+        .or_else(|| raw.split_once("\n\n").map(|(_, value)| value))
+        .unwrap_or("");
+    body.chars()
+        .filter(|value| !value.is_control() || matches!(value, '\n' | '\r' | '\t'))
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(280)
+        .collect()
 }
 
 fn spool_path(spool_dir: &Path, queue: &str, id: &str) -> PathBuf {
@@ -3979,7 +4306,10 @@ fn count_queue(spool_dir: &Path, queue: &str) -> Result<u32> {
         .count() as u32)
 }
 
-pub(crate) fn list_quarantine_items(spool_dir: &Path) -> Result<Vec<QuarantineSummary>> {
+pub(crate) fn list_quarantine_items(
+    spool_dir: &Path,
+    query: QuarantineQuery,
+) -> Result<Vec<QuarantineSummary>> {
     let mut items = Vec::new();
     for entry in fs::read_dir(spool_dir.join("quarantine"))? {
         let entry = entry?;
@@ -3996,6 +4326,7 @@ pub(crate) fn list_quarantine_items(spool_dir: &Path) -> Result<Vec<QuarantineSu
             mail_from: message.mail_from.clone(),
             rcpt_to: message.rcpt_to.clone(),
             subject: parse_rfc822_header_value(&message.data, "subject").unwrap_or_default(),
+            internet_message_id: parse_rfc822_header_value(&message.data, "message-id"),
             reason: message.relay_error.clone(),
             spam_score: message.spam_score,
             security_score: message.security_score,
@@ -4007,6 +4338,8 @@ pub(crate) fn list_quarantine_items(spool_dir: &Path) -> Result<Vec<QuarantineSu
         });
     }
     items.sort_by(|left, right| right.received_at.cmp(&left.received_at));
+    items.retain(|item| quarantine_matches(item, &query));
+    items.truncate(query.limit.unwrap_or(50).clamp(1, 200));
     Ok(items)
 }
 
@@ -4019,16 +4352,26 @@ pub(crate) fn load_trace_details(spool_dir: &Path, trace_id: &str) -> Result<Opt
 
 pub(crate) async fn retry_trace(
     spool_dir: &Path,
+    config: &RuntimeConfig,
     trace_id: &str,
 ) -> Result<Option<TraceActionResult>> {
-    transition_trace(spool_dir, trace_id, TraceAction::Retry).await
+    transition_trace(spool_dir, config, trace_id, TraceAction::Retry).await
 }
 
 pub(crate) async fn release_trace(
     spool_dir: &Path,
+    config: &RuntimeConfig,
     trace_id: &str,
 ) -> Result<Option<TraceActionResult>> {
-    transition_trace(spool_dir, trace_id, TraceAction::Release).await
+    transition_trace(spool_dir, config, trace_id, TraceAction::Release).await
+}
+
+pub(crate) async fn delete_trace(
+    spool_dir: &Path,
+    config: &RuntimeConfig,
+    trace_id: &str,
+) -> Result<Option<TraceActionResult>> {
+    transition_trace(spool_dir, config, trace_id, TraceAction::Delete).await
 }
 
 fn trace_details_from_message(queue: &str, message: &QueuedMessage) -> TraceDetails {
@@ -4049,10 +4392,16 @@ fn trace_details_from_message(queue: &str, message: &QueuedMessage) -> TraceDeta
         spam_score: message.spam_score,
         security_score: message.security_score,
         reputation_score: message.reputation_score,
+        dnsbl_hits: message.dnsbl_hits.clone(),
+        auth_summary: serde_json::to_value(&message.auth_summary).unwrap_or(Value::Null),
+        magika_summary: message.magika_summary.clone(),
+        magika_decision: message.magika_decision.clone(),
         technical_status: message.technical_status.clone(),
         dsn: message.dsn.clone(),
         route: message.route.clone(),
         throttle: message.throttle.clone(),
+        headers: inspect_headers(&message.data),
+        body_excerpt: body_excerpt(&message.data),
         decision_trace: message.decision_trace.clone(),
     }
 }
@@ -4075,16 +4424,27 @@ fn find_message(spool_dir: &Path, trace_id: &str) -> Result<Option<(String, Queu
 enum TraceAction {
     Retry,
     Release,
+    Delete,
 }
 
 async fn transition_trace(
     spool_dir: &Path,
+    config: &RuntimeConfig,
     trace_id: &str,
     action: TraceAction,
 ) -> Result<Option<TraceActionResult>> {
     let Some((queue, mut message)) = find_message(spool_dir, trace_id)? else {
         return Ok(None);
     };
+    if matches!(action, TraceAction::Delete) && queue != "quarantine" {
+        return Ok(Some(TraceActionResult {
+            trace_id: message.id.clone(),
+            from_queue: queue,
+            to_queue: String::new(),
+            status: message.status.clone(),
+            detail: "only quarantined traces can be deleted".to_string(),
+        }));
+    }
     let Some(target_queue) = transition_target(&queue, &message.direction, action) else {
         return Ok(Some(TraceActionResult {
             trace_id: message.id.clone(),
@@ -4101,10 +4461,24 @@ async fn transition_trace(
         outcome: match action {
             TraceAction::Retry => "retry".to_string(),
             TraceAction::Release => "release".to_string(),
+            TraceAction::Delete => "delete".to_string(),
         },
-        detail: format!("operator moved trace into {target_queue}"),
+        detail: if matches!(action, TraceAction::Delete) {
+            "operator deleted quarantined trace".to_string()
+        } else {
+            format!("operator moved trace into {target_queue}")
+        },
     });
-    move_message(spool_dir, &message, &queue, target_queue).await?;
+    if matches!(action, TraceAction::Delete) {
+        message.status = "deleted".to_string();
+        let _ = append_transport_audit(spool_dir, config, "deleted", &message).await;
+        tokio::fs::remove_file(spool_path(spool_dir, &queue, &message.id)).await?;
+    } else {
+        move_message(spool_dir, &message, &queue, target_queue).await?;
+    }
+    if queue == "quarantine" {
+        remove_quarantine_metadata_or_warn(config, &message.id).await;
+    }
     Ok(Some(TraceActionResult {
         trace_id: message.id.clone(),
         from_queue: queue,
@@ -4124,6 +4498,7 @@ fn transition_target(queue: &str, direction: &str, action: TraceAction) -> Optio
         ("quarantine", "inbound", TraceAction::Release) => Some("incoming"),
         ("held", "outbound", TraceAction::Release) => Some("outbound"),
         ("held", "inbound", TraceAction::Release) => Some("incoming"),
+        ("quarantine", _, TraceAction::Delete) => Some("deleted"),
         _ => None,
     }
 }
@@ -4317,6 +4692,23 @@ async fn persist_quarantine_metadata_or_warn(
             error = %error,
             "unable to persist quarantine metadata in local PostgreSQL"
         );
+    }
+}
+
+async fn remove_quarantine_metadata(config: &RuntimeConfig, trace_id: &str) -> Result<()> {
+    let Some(pool) = ensure_local_db_schema(config).await? else {
+        return Ok(());
+    };
+    sqlx::query("DELETE FROM quarantine_messages WHERE trace_id = $1")
+        .bind(trace_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+async fn remove_quarantine_metadata_or_warn(config: &RuntimeConfig, trace_id: &str) {
+    if let Err(error) = remove_quarantine_metadata(config, trace_id).await {
+        warn!(trace_id = trace_id, error = %error, "unable to remove quarantine metadata");
     }
 }
 
@@ -4598,6 +4990,10 @@ fn current_timestamp() -> String {
         Ok(duration) => format!("unix:{}", duration.as_secs()),
         Err(_) => "unix:0".to_string(),
     }
+}
+
+fn parse_unix_timestamp(value: &str) -> Option<u64> {
+    value.strip_prefix("unix:")?.parse::<u64>().ok()
 }
 
 #[cfg(test)]

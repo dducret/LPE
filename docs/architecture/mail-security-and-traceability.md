@@ -94,6 +94,8 @@ Quarantine is stored in `LPE-CT`.
 
 When `LPE-CT` enables its dedicated local `PostgreSQL` store, quarantined messages are also indexed in a technical `quarantine_messages` table for operational search and release workflows. Spool custody of the message payload remains with `LPE-CT`.
 
+`LPE-CT` may also retain perimeter mail-flow history and generated quarantine digest artifacts for operator search and reporting, provided that those artifacts remain technical sorting-center state and do not become canonical mailbox search or user-visible product data in the core `LPE` store.
+
 `LPE` may request the release of a message through a privileged action, but quarantine ownership remains in the sorting center.
 
 

@@ -5,6 +5,10 @@ const consoleShell = document.getElementById("console-shell");
 const configDrawer = document.getElementById("config-drawer");
 const drawerTitle = document.getElementById("drawer-title");
 const drawerSummary = document.getElementById("drawer-summary");
+const opsDrawer = document.getElementById("ops-drawer");
+const opsDrawerTitle = document.getElementById("ops-drawer-title");
+const opsDrawerSummary = document.getElementById("ops-drawer-summary");
+const opsDrawerContent = document.getElementById("ops-drawer-content");
 const drawerPanels = Array.from(document.querySelectorAll(".drawer-panel"));
 const panelTriggers = Array.from(document.querySelectorAll("[data-open-panel]"));
 const localePickers = Array.from(document.querySelectorAll("[data-locale-picker]"));
@@ -182,6 +186,48 @@ const messages = {
     noRelayTarget: "no relay target",
     traceActionCompleted: "Trace action completed for {traceId}.",
     heroSummaryTemplate: "{dmzZone} · MX {publishedMx} · primary relay {primaryUpstream}",
+    navReportingTitle: "Reporting",
+    drawerReportingTitle: "Reporting",
+    drawerReportingSummary: "Digest cadence, domain defaults, user overrides, and history retention.",
+    managementReportingTitle: "Reporting",
+    managementReportingCopy: "Digest cadence, domain defaults, user overrides, and history retention.",
+    managementReportingPill: "Reporting",
+    digestEnabled: "Digest reports enabled",
+    digestIntervalMinutes: "Digest interval (minutes)",
+    digestMaxItems: "Max items per digest",
+    historyRetentionDays: "History retention (days)",
+    digestDomainDefaults: "Domain defaults",
+    digestUserOverrides: "User overrides",
+    digestDomainDefaultsPlaceholder: "example.com: secops@example.com, admin@example.com",
+    digestUserOverridesPlaceholder: "alice@example.com: alice.alerts@example.com",
+    saveReporting: "Save reporting",
+    savedReporting: "Reporting settings saved.",
+    runDigests: "Run digests now",
+    historyTitle: "Mail history",
+    historyCopy: "Searchable inbound and outbound flow with status, trace, and policy context.",
+    digestReportsTitle: "Digest reports",
+    digestReportsCopy: "Recent scheduled quarantine digests generated inside LPE-CT.",
+    search: "Search",
+    allDirections: "All directions",
+    allQueues: "All queues",
+    searchQuarantinePlaceholder: "Search trace, sender, recipient, subject, or Message-Id",
+    searchHistoryPlaceholder: "Search trace, sender, recipient, subject, route, or policy",
+    filterDomainPlaceholder: "Filter domain",
+    traceActionDelete: "Delete",
+    traceActionRunDigest: "Open digest",
+    traceHeaderTitle: "Headers",
+    traceBodyTitle: "Body excerpt",
+    tracePolicyTitle: "Policy evidence",
+    traceHistoryTitle: "Flow history",
+    traceNoHistory: "No retained history for this trace.",
+    reportingNextRun: "Next digest run: {value}",
+    reportingLastRun: "Last digest run: {value}",
+    reportingDigestDisabled: "Digest generation is disabled.",
+    reportingNoReports: "No digest reports generated yet.",
+    reportingNoMatches: "No matching history entries.",
+    reportingNoQuarantineMatches: "No quarantined messages match the current filters.",
+    historyResultSummary: "{count} trace(s) matched",
+    digestGeneratedSummary: "{count} digest report(s) generated.",
   },
   fr: {
     pageTitle: "Console de management LPE-CT",
@@ -872,11 +918,15 @@ const i18n = createI18n({
 });
 let lastDashboard = null;
 let lastQuarantine = [];
+let lastHistory = [];
 let lastRouteDiagnostics = null;
 let lastTrace = null;
+let lastReporting = null;
+let lastDigestReports = [];
 const relayForm = document.getElementById("relay-form");
 const relayHaField = relayForm?.elements.namedItem("ha_enabled");
 const relayHaFields = Array.from(document.querySelectorAll("[data-ha-field]"));
+const reportingForm = document.getElementById("reporting-form");
 
 const loginEmailField = document.querySelector("#login-form input[name='email']");
 if (loginEmailField) {
@@ -895,9 +945,11 @@ function setLocale(locale) {
     render(lastDashboard);
   }
   renderQuarantine(lastQuarantine);
+  renderHistory(lastHistory);
   if (lastRouteDiagnostics) {
     renderRouteDiagnostics(lastRouteDiagnostics);
   }
+  renderReporting(lastReporting, lastDigestReports);
   renderTrace(lastTrace);
 }
 
@@ -995,6 +1047,18 @@ function closeDrawer() {
   configDrawer.classList.add("hidden");
 }
 
+function openOpsDrawer(title, summary, content) {
+  opsDrawerTitle.textContent = title;
+  opsDrawerSummary.textContent = summary;
+  opsDrawerContent.innerHTML = content;
+  opsDrawerContent.className = "trace-card";
+  opsDrawer.classList.remove("hidden");
+}
+
+function closeOpsDrawer() {
+  opsDrawer.classList.add("hidden");
+}
+
 function showFeedback(message, isError) {
   feedback.textContent = message;
   feedback.className = isError ? "feedback error" : "feedback";
@@ -1010,6 +1074,42 @@ function csvLines(text) {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function domainDefaultsToText(items) {
+  return (items ?? [])
+    .map((item) => `${item.domain}: ${(item.recipients ?? []).join(", ")}`)
+    .join("\n");
+}
+
+function userOverridesToText(items) {
+  return (items ?? [])
+    .map((item) => `${item.mailbox}: ${item.recipient}`)
+    .join("\n");
+}
+
+function parseDomainDefaults(text) {
+  return csvLines(text).map((line) => {
+    const [domain, recipients = ""] = line.split(":");
+    return {
+      domain: domain.trim(),
+      recipients: recipients
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    };
+  });
+}
+
+function parseUserOverrides(text) {
+  return csvLines(text).map((line) => {
+    const [mailbox, recipient = ""] = line.split(":");
+    return {
+      mailbox: mailbox.trim(),
+      recipient: recipient.trim(),
+      enabled: true,
+    };
+  });
 }
 
 function assignValues(form, values) {
@@ -1059,25 +1159,26 @@ function renderQuarantine(items) {
     return;
   }
   if (!items.length) {
-    container.innerHTML = `<div class="quarantine-item"><strong>${copy.queueClearTitle}</strong><span>${copy.queueClearCopy}</span></div>`;
+    container.innerHTML = `<div class="quarantine-item"><strong>${copy.queueClearTitle}</strong><span>${copy.reportingNoQuarantineMatches || copy.queueClearCopy}</span></div>`;
     return;
   }
   container.innerHTML = items
-    .slice(0, 6)
     .map(
       (item) => `
         <div class="quarantine-item">
           <strong>${item.subject || item.trace_id}</strong>
-          <span>${item.mail_from} -> ${item.rcpt_to.join(", ")}</span>
-          <span>${item.reason || item.status}</span>
+          <span>${item.received_at} · ${item.mail_from} -> ${item.rcpt_to.join(", ")}</span>
+          <span>${item.reason || item.status}${item.internet_message_id ? ` · ${item.internet_message_id}` : ""}</span>
           <div class="quarantine-tags">
             <span class="badge danger">${item.status}</span>
             <span class="pill">spam ${item.spam_score.toFixed(1)}</span>
             <span class="pill">security ${item.security_score.toFixed(1)}</span>
+            <span class="pill">${item.direction}</span>
           </div>
           <div class="trace-actions">
             <button class="secondary-button" type="button" data-trace-open="${item.trace_id}">${copy.traceActionOpen}</button>
             <button class="secondary-button" type="button" data-trace-release="${item.trace_id}">${copy.traceActionRelease}</button>
+            <button class="secondary-button" type="button" data-trace-delete="${item.trace_id}">${copy.traceActionDelete}</button>
           </div>
         </div>
       `,
@@ -1092,6 +1193,11 @@ function renderQuarantine(items) {
   container.querySelectorAll("[data-trace-release]").forEach((button) => {
     button.addEventListener("click", () => {
       void triggerTraceAction(button.dataset.traceRelease, "release");
+    });
+  });
+  container.querySelectorAll("[data-trace-delete]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void triggerTraceAction(button.dataset.traceDelete, "delete");
     });
   });
 }
@@ -1147,54 +1253,179 @@ function renderRouteDiagnostics(data) {
 function renderTrace(trace) {
   lastTrace = trace;
   const copy = getCopy();
-  const container = document.getElementById("trace-details");
+  if (!trace) {
+    opsDrawerContent.textContent = copy.traceEmptyState;
+    opsDrawerContent.className = "trace-card empty-state";
+    return;
+  }
+  const current = trace.current;
+  const headers = (current?.headers ?? [])
+    .map(([name, value]) => `<div class="trace-decision"><strong>${name}</strong><p>${value}</p></div>`)
+    .join("");
+  const history = (trace.history ?? [])
+    .map(
+      (entry) => `
+        <div class="trace-decision">
+          <strong>${entry.timestamp}</strong>
+          <span>${entry.queue} · ${entry.status}</span>
+          <p>${entry.reason || entry.route_target || entry.peer || ""}</p>
+        </div>
+      `,
+    )
+    .join("");
+  openOpsDrawer(
+    current?.subject || trace.trace_id,
+    `${current?.mail_from || ""} -> ${(current?.rcpt_to ?? []).join(", ")}`,
+    `
+    <div>
+      <strong>${current?.subject || trace.trace_id}</strong>
+      <p>${current?.mail_from || ""} -> ${(current?.rcpt_to ?? []).join(", ")}</p>
+    </div>
+    <div class="trace-meta">
+      <span class="badge">${current?.queue || "history"}</span>
+      <span class="pill">${current?.status || "retained"}</span>
+      <span class="pill">${current?.route?.relay_target || copy.noRelayTarget}</span>
+    </div>
+    <div class="trace-actions">
+      ${current ? `<button class="secondary-button" type="button" data-trace-retry="${trace.trace_id}">${copy.traceActionRetry}</button>` : ""}
+      ${current?.queue === "quarantine" || current?.queue === "held" ? `<button class="secondary-button" type="button" data-trace-release="${trace.trace_id}">${copy.traceActionRelease}</button>` : ""}
+      ${current?.queue === "quarantine" ? `<button class="secondary-button" type="button" data-trace-delete="${trace.trace_id}">${copy.traceActionDelete}</button>` : ""}
+    </div>
+    <div class="trace-grid">
+      <section>
+        <h4>${copy.tracePolicyTitle}</h4>
+        <div class="trace-decision-list">
+          ${(current?.decision_trace ?? [])
+            .map(
+              (entry) => `
+                <div class="trace-decision">
+                  <strong>${entry.stage}</strong>
+                  <span>${entry.outcome}</span>
+                  <p>${entry.detail}</p>
+                </div>
+              `,
+            )
+            .join("")}
+        </div>
+      </section>
+      <section>
+        <h4>${copy.traceHeaderTitle}</h4>
+        <div class="trace-decision-list">${headers || `<div class="trace-decision"><p>${copy.unset}</p></div>`}</div>
+      </section>
+    </div>
+    <section>
+      <h4>${copy.traceBodyTitle}</h4>
+      <div class="trace-decision"><p>${current?.body_excerpt || copy.unset}</p></div>
+    </section>
+    <section>
+      <h4>${copy.traceHistoryTitle}</h4>
+      <div class="trace-decision-list">${history || `<div class="trace-decision"><p>${copy.traceNoHistory}</p></div>`}</div>
+    </section>
+  `,
+  );
+  opsDrawerContent.querySelector("[data-trace-retry]")?.addEventListener("click", () => {
+    void triggerTraceAction(trace.trace_id, "retry");
+  });
+  opsDrawerContent.querySelector("[data-trace-release]")?.addEventListener("click", () => {
+    void triggerTraceAction(trace.trace_id, "release");
+  });
+  opsDrawerContent.querySelector("[data-trace-delete]")?.addEventListener("click", () => {
+    void triggerTraceAction(trace.trace_id, "delete");
+  });
+}
+
+function renderHistory(items) {
+  lastHistory = items;
+  const copy = getCopy();
+  const container = document.getElementById("history-list");
   if (!container) {
     return;
   }
-  if (!trace) {
-    container.textContent = copy.traceEmptyState;
-    container.className = "trace-card empty-state";
+  if (!items.length) {
+    container.innerHTML = `<div class="quarantine-item"><strong>${copy.historyTitle}</strong><span>${copy.reportingNoMatches}</span></div>`;
     return;
   }
-  container.className = "trace-card";
   container.innerHTML = `
-    <div>
-      <strong>${trace.subject || trace.trace_id}</strong>
-      <p>${trace.mail_from} -> ${trace.rcpt_to.join(", ")}</p>
-    </div>
-    <div class="trace-meta">
-      <span class="badge">${trace.queue}</span>
-      <span class="pill">${trace.status}</span>
-      <span class="pill">${trace.route?.relay_target || copy.noRelayTarget}</span>
-    </div>
-    <div class="trace-actions">
-      <button class="secondary-button" type="button" data-trace-retry="${trace.trace_id}">${copy.traceActionRetry}</button>
-      <button class="secondary-button" type="button" data-trace-release="${trace.trace_id}">${copy.traceActionRelease}</button>
-    </div>
-    <div class="trace-decision-list">
-      ${(trace.decision_trace ?? [])
-        .map(
-          (entry) => `
-            <div class="trace-decision">
-              <strong>${entry.stage}</strong>
-              <span>${entry.outcome}</span>
-              <p>${entry.detail}</p>
+    <div class="history-summary">${translate(copy.historyResultSummary, { count: items.length })}</div>
+    ${items
+      .map(
+        (item) => `
+          <div class="quarantine-item">
+            <strong>${item.subject || item.trace_id}</strong>
+            <span>${item.latest_event_at} · ${item.mail_from} -> ${item.rcpt_to.join(", ")}</span>
+            <span>${item.reason || item.status}${item.internet_message_id ? ` · ${item.internet_message_id}` : ""}</span>
+            <div class="quarantine-tags">
+              <span class="badge">${item.queue}</span>
+              <span class="pill">${item.status}</span>
+              <span class="pill">${item.direction}</span>
+              <span class="pill">events ${item.event_count}</span>
             </div>
-          `,
-        )
-        .join("")}
-    </div>
+            <div class="trace-actions">
+              <button class="secondary-button" type="button" data-history-open="${item.trace_id}">${copy.traceActionOpen}</button>
+            </div>
+          </div>
+        `,
+      )
+      .join("")}
   `;
-  container.querySelector("[data-trace-retry]")?.addEventListener("click", () => {
-    void triggerTraceAction(trace.trace_id, "retry");
+  container.querySelectorAll("[data-history-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void loadTrace(button.dataset.historyOpen);
+    });
   });
-  container.querySelector("[data-trace-release]")?.addEventListener("click", () => {
-    void triggerTraceAction(trace.trace_id, "release");
+}
+
+function renderReporting(reporting, digestReports) {
+  lastReporting = reporting;
+  lastDigestReports = digestReports;
+  const copy = getCopy();
+  const summary = document.getElementById("reporting-summary");
+  const list = document.getElementById("digest-report-list");
+  if (summary && reporting?.settings) {
+    const settings = reporting.settings;
+    summary.innerHTML = `
+      <div class="quarantine-item">
+        <strong>${settings.digest_enabled ? copy.digestEnabled : copy.reportingDigestDisabled}</strong>
+        <span>${translate(copy.reportingLastRun, { value: settings.last_digest_run_at || copy.unset })}</span>
+        <span>${translate(copy.reportingNextRun, { value: settings.next_digest_run_at || copy.unset })}</span>
+      </div>
+    `;
+  }
+  if (!list) {
+    return;
+  }
+  if (!digestReports.length) {
+    list.innerHTML = `<div class="quarantine-item"><strong>${copy.digestReportsTitle}</strong><span>${copy.reportingNoReports}</span></div>`;
+    return;
+  }
+  list.innerHTML = digestReports
+    .map(
+      (report) => `
+        <div class="quarantine-item">
+          <strong>${report.scope_label}</strong>
+          <span>${report.generated_at} · ${report.recipient}</span>
+          <span>${report.item_count} items${report.top_reason ? ` · ${report.top_reason}` : ""}</span>
+          <div class="trace-actions">
+            <button class="secondary-button" type="button" data-digest-open="${report.report_id}">${copy.traceActionRunDigest}</button>
+          </div>
+        </div>
+      `,
+    )
+    .join("");
+  list.querySelectorAll("[data-digest-open]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const report = await fetchJson(`/api/reporting/digests/${button.dataset.digestOpen}`);
+      openOpsDrawer(
+        report.summary.scope_label,
+        `${report.summary.generated_at} · ${report.summary.recipient}`,
+        `<div class="trace-decision"><pre class="digest-content">${report.content}</pre></div>`,
+      );
+    });
   });
 }
 
 async function loadTrace(traceId) {
-  const trace = await fetchJson(`/api/traces/${traceId}`);
+  const trace = await fetchJson(`/api/history/${traceId}`);
   renderTrace(trace);
 }
 
@@ -1202,16 +1433,25 @@ async function triggerTraceAction(traceId, action) {
   await fetchJson(`/api/traces/${traceId}/${action}`, { method: "POST" });
   showFeedback(translate(getCopy().traceActionCompleted, { traceId }), false);
   await loadOps();
-  await loadTrace(traceId).catch(() => renderTrace(null));
+  await loadTrace(traceId).catch(() => closeOpsDrawer());
 }
 
 async function loadOps() {
-  const [quarantine, routes] = await Promise.all([
-    fetchJson("/api/quarantine"),
+  const quarantineForm = document.getElementById("quarantine-search-form");
+  const historyForm = document.getElementById("history-search-form");
+  const quarantineParams = new URLSearchParams(new FormData(quarantineForm));
+  const historyParams = new URLSearchParams(new FormData(historyForm));
+  const [quarantine, history, routes, reporting, digestReports] = await Promise.all([
+    fetchJson(`/api/quarantine?${quarantineParams.toString()}`),
+    fetchJson(`/api/history?${historyParams.toString()}`),
     fetchJson("/api/routes/diagnostics"),
+    fetchJson("/api/reporting"),
+    fetchJson("/api/reporting/digests"),
   ]);
   renderQuarantine(quarantine);
+  renderHistory(history.items ?? []);
   renderRouteDiagnostics(routes);
+  renderReporting(reporting, digestReports);
 }
 
 function render(dashboard) {
@@ -1239,6 +1479,14 @@ function render(dashboard) {
   assignValues(document.getElementById("network-form"), dashboard.network);
   assignValues(document.getElementById("policies-form"), dashboard.policies);
   assignValues(document.getElementById("updates-form"), dashboard.updates);
+  if (reportingForm) {
+    reportingForm.elements.namedItem("digest_enabled").checked = Boolean(dashboard.reporting.digest_enabled);
+    reportingForm.elements.namedItem("digest_interval_minutes").value = String(dashboard.reporting.digest_interval_minutes);
+    reportingForm.elements.namedItem("digest_max_items").value = String(dashboard.reporting.digest_max_items);
+    reportingForm.elements.namedItem("history_retention_days").value = String(dashboard.reporting.history_retention_days);
+    reportingForm.elements.namedItem("domain_defaults_text").value = domainDefaultsToText(dashboard.reporting.domain_defaults);
+    reportingForm.elements.namedItem("user_overrides_text").value = userOverridesToText(dashboard.reporting.user_overrides);
+  }
   renderAudit(dashboard.audit);
 }
 
@@ -1293,6 +1541,17 @@ function formPayloads() {
         maintenance_window: form.elements.namedItem("maintenance_window").value,
         last_applied_release: form.elements.namedItem("last_applied_release").value,
         update_source: form.elements.namedItem("update_source").value,
+      };
+    },
+    reporting: () => {
+      const form = document.getElementById("reporting-form");
+      return {
+        digest_enabled: form.elements.namedItem("digest_enabled").checked,
+        digest_interval_minutes: Number(form.elements.namedItem("digest_interval_minutes").value),
+        digest_max_items: Number(form.elements.namedItem("digest_max_items").value),
+        history_retention_days: Number(form.elements.namedItem("history_retention_days").value),
+        domain_defaults: parseDomainDefaults(form.elements.namedItem("domain_defaults_text").value),
+        user_overrides: parseUserOverrides(form.elements.namedItem("user_overrides_text").value),
       };
     },
   };
@@ -1375,6 +1634,8 @@ configDrawer.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !configDrawer.classList.contains("hidden")) {
     closeDrawer();
+  } else if (event.key === "Escape" && opsDrawer && !opsDrawer.classList.contains("hidden")) {
+    closeOpsDrawer();
   }
 });
 
@@ -1405,11 +1666,51 @@ document.getElementById("updates-form").addEventListener("submit", (event) => {
   void submitForm("/api/updates", payloads.updates(), getCopy().savedUpdates);
 });
 
+document.getElementById("reporting-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void fetchJson("/api/reporting", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payloads.reporting()),
+  })
+    .then((reporting) => {
+      renderReporting(reporting, reporting.recent_reports ?? []);
+      closeDrawer();
+      showFeedback(getCopy().savedReporting, false);
+    })
+    .catch((error) => {
+      showFeedback(error instanceof Error ? error.message : getCopy().unknownError, true);
+    });
+});
+
+document.getElementById("quarantine-search-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void loadOps();
+});
+
+document.getElementById("history-search-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  void loadOps();
+});
+
 document.getElementById("login-form").addEventListener("submit", (event) => {
   event.preventDefault();
   void loginAdmin().catch((error) => {
     showLoginFeedback(error instanceof Error ? error.message : getCopy().unknownError, true);
   });
+});
+
+document.getElementById("run-digests")?.addEventListener("click", async () => {
+  const result = await fetchJson("/api/reporting/digests/run", { method: "POST" });
+  showFeedback(translate(getCopy().digestGeneratedSummary, { count: result.generated_reports?.length ?? 0 }), false);
+  await loadOps();
+});
+
+document.getElementById("ops-drawer-close")?.addEventListener("click", closeOpsDrawer);
+opsDrawer?.addEventListener("click", (event) => {
+  if (event.target === opsDrawer) {
+    closeOpsDrawer();
+  }
 });
 
 setLocale(i18n.getLocale());

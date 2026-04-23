@@ -72,6 +72,7 @@ The target storage model is therefore:
 The preferred first dedicated store is an `LPE-CT`-owned local `PostgreSQL` service used only for technical state.
 
 The current implementation now persists the default indexed perimeter state into private tables such as `greylist_entries`, `reputation_entries`, `bayespam_corpora`, `throttle_windows`, and `quarantine_messages` when `LPE_CT_LOCAL_DB_ENABLED=true` and `LPE_CT_LOCAL_DB_URL` is configured. Those tables are technical only; payload custody remains in the spool and quarantine directories.
+Retained mail-flow history and scheduled quarantine digest artifacts remain sorting-center-owned technical state as well; the current implementation stores retained history in the spool under `policy/transport-audit.jsonl` and digest artifacts under `policy/digest-reports/`, while optional private PostgreSQL remains available for quarantine metadata and future reporting indexes.
 
 Typical target domains for that local database are:
 
@@ -79,6 +80,7 @@ Typical target domains for that local database are:
 - sender, domain, and IP reputation history
 - greylisting indexes and cleanup-friendly timestamps
 - quarantine metadata and operational search indexes
+- retained perimeter mail-flow history indexes and reporting metadata
 - throttling counters and routing coordination metadata
 - cluster membership, failover coordination, and shared perimeter state across `LPE-CT` nodes
 

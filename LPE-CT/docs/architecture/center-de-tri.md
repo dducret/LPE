@@ -25,7 +25,8 @@ The perimeter pipeline now also executes:
 - anti-spam scoring and simple local reputation
 - detailed decision tracing persisted in the spool
 
-When dedicated local PostgreSQL is enabled, `LPE-CT` now also persists technical quarantine metadata into a private `quarantine_messages` table. Payload custody remains in the spool and quarantine directories.
+When dedicated local PostgreSQL is enabled, `LPE-CT` now also persists technical quarantine metadata into a private `quarantine_messages` table and retained flow-history events into a private `mail_flow_history` table. Payload custody remains in the spool and quarantine directories.
+The management surface now also uses sorting-center-owned retained artifacts plus that dedicated technical history index for quarantine search, retained mail-flow history, and scheduled quarantine digest reports generated entirely from `LPE-CT` state.
 
 `LPE-CT` may also use dedicated local technical data stores for perimeter-owned state such as Bayesian filtering, reputation, greylisting, quarantine indexes, or cluster coordination. Those stores must remain local to the sorting center and must not become canonical mailbox or collaboration storage.
 
@@ -87,6 +88,9 @@ The `LPE-CT` management interface covers:
 - primary and secondary relays toward the `LAN`
 - network surface policy and authorized CIDRs
 - drain mode, quarantine, and `SPF` / `DKIM` / `DMARC` controls
+- quarantine search, trace inspection, release, retry, and delete workflows
+- retained mail-flow history search by trace, sender, recipient, subject, route, and disposition
+- scheduled quarantine digest configuration with domain defaults and mailbox-specific overrides
 - Git-first update source and maintenance window
 
 ### Debian installation

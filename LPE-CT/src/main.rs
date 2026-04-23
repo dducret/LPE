@@ -4,7 +4,7 @@ use argon2::{
     Argon2,
 };
 use axum::{
-    extract::{Path as AxumPath, State},
+    extract::{Path as AxumPath, Query, State},
     http::{HeaderMap, StatusCode},
     middleware,
     routing::{get, post, put},
@@ -29,6 +29,7 @@ use uuid::Uuid;
 
 mod observability;
 mod dkim_signing;
+mod reporting;
 mod smtp;
 mod submission;
 mod transport_policy;
@@ -241,6 +242,8 @@ struct DashboardState {
     #[serde(default)]
     local_data_stores: LocalDataStoresSettings,
     policies: PolicySettings,
+    #[serde(default = "reporting::default_reporting_settings")]
+    reporting: reporting::ReportingSettings,
     updates: UpdateSettings,
     queues: QueueMetrics,
     #[serde(default)]
@@ -338,6 +341,7 @@ async fn main() -> Result<()> {
     ensure_management_bootstrap(&mut dashboard)?;
     normalize_policy_settings(&mut dashboard.policies);
     normalize_local_data_stores(&mut dashboard.local_data_stores);
+    reporting::normalize_reporting_settings(&mut dashboard.reporting);
     let runtime = smtp::runtime_config_from_dashboard(&dashboard);
     smtp::prepare_local_store(&spool_dir, &runtime).await?;
     dashboard.site.management_bind = bind_address.clone();
@@ -366,6 +370,11 @@ async fn main() -> Result<()> {
         axum::serve(listener, router(api_state)).await?;
         Result::<()>::Ok(())
     });
+    let reporting_state = state.clone();
+    let reporting_task = tokio::spawn(async move {
+        run_reporting_scheduler(reporting_state).await;
+        Result::<()>::Ok(())
+    });
     let smtp_task = tokio::spawn(async move {
         smtp::run_smtp_listener(smtp_bind_address, smtp_state_file, smtp_spool_dir).await
     });
@@ -380,6 +389,7 @@ async fn main() -> Result<()> {
 
     tokio::select! {
         result = api_task => result??,
+        result = reporting_task => result??,
         result = smtp_task => result??,
         result = submission_task => result??,
     }
@@ -403,10 +413,20 @@ fn router(state: AppState) -> Router {
         )
         .route("/api/v1/dashboard", get(dashboard))
         .route("/api/v1/quarantine", get(quarantine_items))
+        .route("/api/v1/history", get(mail_history))
+        .route("/api/v1/history/{trace_id}", get(trace_history))
         .route("/api/v1/traces/{trace_id}", get(trace_details))
         .route("/api/v1/traces/{trace_id}/retry", post(retry_trace))
         .route("/api/v1/traces/{trace_id}/release", post(release_trace))
+        .route("/api/v1/traces/{trace_id}/delete", post(delete_trace))
         .route("/api/v1/routes/diagnostics", get(route_diagnostics))
+        .route("/api/v1/reporting", get(reporting_snapshot).put(update_reporting))
+        .route("/api/v1/reporting/digests/run", post(run_digest_reports))
+        .route("/api/v1/reporting/digests", get(digest_reports))
+        .route(
+            "/api/v1/reporting/digests/{report_id}",
+            get(digest_report_details),
+        )
         .route("/api/v1/site", put(update_site))
         .route("/api/v1/relay", put(update_relay))
         .route("/api/v1/network", put(update_network))
@@ -610,10 +630,49 @@ async fn dashboard(
 async fn quarantine_items(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(query): Query<smtp::QuarantineQuery>,
 ) -> Result<Json<Vec<smtp::QuarantineSummary>>, ApiError> {
     let _admin = require_management_admin(&state, &headers)?;
-    let items = smtp::list_quarantine_items(&state.spool_dir).map_err(ApiError::from)?;
+    let items = smtp::list_quarantine_items(&state.spool_dir, query).map_err(ApiError::from)?;
     Ok(Json(items))
+}
+
+async fn mail_history(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    query: Query<reporting::HistoryQuery>,
+) -> Result<Json<reporting::MailHistoryResponse>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    let snapshot = read_state(&state)?;
+    let runtime = smtp::runtime_config_from_dashboard(&snapshot);
+    let history = reporting::search_mail_history(
+        &state.spool_dir,
+        &runtime,
+        query,
+        snapshot.reporting.history_retention_days,
+    )
+    .await
+    .map_err(ApiError::from)?;
+    Ok(Json(history))
+}
+
+async fn trace_history(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(trace_id): AxumPath<String>,
+) -> Result<Json<reporting::TraceHistoryDetails>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    let snapshot = read_state(&state)?;
+    let runtime = smtp::runtime_config_from_dashboard(&snapshot);
+    let details = reporting::load_trace_history(
+        &state.spool_dir,
+        &runtime,
+        &trace_id,
+        snapshot.reporting.history_retention_days,
+    )
+    .await
+    .map_err(ApiError::from)?;
+    Ok(Json(details))
 }
 
 async fn trace_details(
@@ -634,7 +693,11 @@ async fn retry_trace(
     AxumPath(trace_id): AxumPath<String>,
 ) -> Result<Json<smtp::TraceActionResult>, ApiError> {
     let admin = require_management_admin(&state, &headers)?;
-    let result = smtp::retry_trace(&state.spool_dir, &trace_id)
+    let runtime = {
+        let snapshot = read_state(&state)?;
+        smtp::runtime_config_from_dashboard(&snapshot)
+    };
+    let result = smtp::retry_trace(&state.spool_dir, &runtime, &trace_id)
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "trace not found"))?;
@@ -653,7 +716,11 @@ async fn release_trace(
     AxumPath(trace_id): AxumPath<String>,
 ) -> Result<Json<smtp::TraceActionResult>, ApiError> {
     let admin = require_management_admin(&state, &headers)?;
-    let result = smtp::release_trace(&state.spool_dir, &trace_id)
+    let runtime = {
+        let snapshot = read_state(&state)?;
+        smtp::runtime_config_from_dashboard(&snapshot)
+    };
+    let result = smtp::release_trace(&state.spool_dir, &runtime, &trace_id)
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "trace not found"))?;
@@ -662,6 +729,29 @@ async fn release_trace(
         &admin.email,
         "trace-release",
         &format!("requested release for {}", result.trace_id),
+    )?;
+    Ok(Json(result))
+}
+
+async fn delete_trace(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(trace_id): AxumPath<String>,
+) -> Result<Json<smtp::TraceActionResult>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let runtime = {
+        let snapshot = read_state(&state)?;
+        smtp::runtime_config_from_dashboard(&snapshot)
+    };
+    let result = smtp::delete_trace(&state.spool_dir, &runtime, &trace_id)
+        .await
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "trace not found"))?;
+    append_audit_event_with_actor(
+        &state,
+        &admin.email,
+        "trace-delete",
+        &format!("deleted quarantined trace {}", result.trace_id),
     )?;
     Ok(Json(result))
 }
@@ -736,6 +826,93 @@ async fn update_updates(
     })
 }
 
+async fn reporting_snapshot(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<reporting::ReportingSnapshot>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    let snapshot = read_state(&state)?;
+    let reporting = reporting::snapshot(&state.spool_dir, &snapshot.reporting).map_err(ApiError::from)?;
+    Ok(Json(reporting))
+}
+
+async fn update_reporting(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(mut payload): Json<reporting::ReportingSettings>,
+) -> Result<Json<reporting::ReportingSnapshot>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    reporting::normalize_reporting_settings(&mut payload);
+    {
+        let mut guard = state
+            .store
+            .lock()
+            .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))?;
+        guard.reporting = payload;
+        append_dashboard_audit_event(&mut guard, &admin.email, "update-reporting");
+        persist_state(&state.state_file, &guard)?;
+    }
+    let snapshot = read_state(&state)?;
+    let reporting = reporting::snapshot(&state.spool_dir, &snapshot.reporting).map_err(ApiError::from)?;
+    Ok(Json(reporting))
+}
+
+async fn run_digest_reports(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<reporting::DigestRunResponse>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let generated_at = current_timestamp();
+    let generated_reports = {
+        let mut guard = state
+            .store
+            .lock()
+            .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))?;
+        let generated_reports =
+            reporting::run_digest_generation(&state.spool_dir, &mut guard.reporting)
+                .map_err(ApiError::from)?;
+        guard.audit.insert(
+            0,
+            AuditEvent {
+                timestamp: generated_at.clone(),
+                actor: admin.email.clone(),
+                action: "run-quarantine-digests".to_string(),
+                details: format!("generated {} quarantine digest report(s)", generated_reports.len()),
+            },
+        );
+        guard.audit.truncate(12);
+        persist_state(&state.state_file, &guard)?;
+        generated_reports
+    };
+    let next_digest_run_at = read_state(&state)?.reporting.next_digest_run_at;
+    Ok(Json(reporting::DigestRunResponse {
+        generated_at,
+        generated_reports,
+        next_digest_run_at,
+    }))
+}
+
+async fn digest_reports(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<reporting::DigestReportSummary>>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    let reports = reporting::list_recent_digest_reports(&state.spool_dir, 20).map_err(ApiError::from)?;
+    Ok(Json(reports))
+}
+
+async fn digest_report_details(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(report_id): AxumPath<String>,
+) -> Result<Json<reporting::DigestReportDetails>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    let report = reporting::load_digest_report(&state.spool_dir, &report_id)
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "digest report not found"))?;
+    Ok(Json(report))
+}
+
 async fn outbound_handoff(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -787,6 +964,52 @@ where
     append_dashboard_audit_event(&mut guard, actor, action);
     persist_state(&state.state_file, &guard)?;
     Ok(Json(guard.clone()))
+}
+
+async fn run_reporting_scheduler(state: AppState) {
+    let mut interval = tokio::time::interval(Duration::from_secs(60));
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        interval.tick().await;
+        let generated_reports = {
+            let mut guard = match state.store.lock() {
+                Ok(guard) => guard,
+                Err(_) => continue,
+            };
+            let generated_reports =
+                match reporting::run_due_digest_generation(&state.spool_dir, &mut guard.reporting) {
+                    Ok(generated_reports) => generated_reports,
+                    Err(error) => {
+                        tracing::warn!(error = %error, "scheduled digest generation failed");
+                        continue;
+                    }
+                };
+            if generated_reports.is_empty() {
+                0
+            } else {
+                guard.audit.insert(
+                    0,
+                    AuditEvent {
+                        timestamp: current_timestamp(),
+                        actor: "system".to_string(),
+                        action: "scheduled-quarantine-digests".to_string(),
+                        details: format!(
+                            "generated {} scheduled quarantine digest report(s)",
+                            generated_reports.len()
+                        ),
+                    },
+                );
+                guard.audit.truncate(12);
+                if let Err(error) = persist_state(&state.state_file, &guard) {
+                    tracing::warn!(error = %error, "unable to persist scheduled reporting state");
+                }
+                generated_reports.len()
+            }
+        };
+        if generated_reports > 0 {
+            tracing::info!(generated_reports, "scheduled quarantine digests generated");
+        }
+    }
 }
 
 fn read_state(state: &AppState) -> Result<DashboardState, ApiError> {
@@ -1249,6 +1472,7 @@ fn default_state() -> DashboardState {
             attachment_text_scan_enabled: true,
             max_message_size_mb: 64,
         },
+        reporting: reporting::default_reporting_settings(),
         updates: UpdateSettings {
             channel: "stable".to_string(),
             auto_download: false,

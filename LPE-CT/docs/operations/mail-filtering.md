@@ -25,6 +25,8 @@ Inbound messages now go through these stages:
 The resulting decision trace is persisted with the queued message JSON in the local spool.
 When the optional local PostgreSQL store is enabled, quarantined messages are also indexed into `quarantine_messages` for operational search and release workflows while the spool remains the payload owner.
 
+`LPE-CT` now also retains perimeter mail-flow history in `policy/transport-audit.jsonl` and mirrors that retained stream into a dedicated private `mail_flow_history` database index for management-side history search, quarantine inspection, and retained reporting artifacts without creating a canonical mailbox search index.
+
 ## Main environment variables
 
 `LPE_CT_GREYLISTING_ENABLED`
@@ -242,6 +244,18 @@ Message trace files now also persist:
 - `auth_summary`
 - `decision_trace`
 
+The retained `policy/transport-audit.jsonl` stream now also captures:
+
+- `Message-Id`
+- queue and disposition transitions
+- `DNSBL` hits
+- structured auth summary (`SPF`, `DKIM`, `DMARC`)
+- `Magika` summary / decision when present
+- structured technical relay and `DSN` detail when present
+- operator release, retry, and quarantine deletion actions
+
+When the private local PostgreSQL store is enabled, those same retained events are also inserted into `mail_flow_history` with indexed trace, time, direction, queue, and retained technical metadata so history search does not depend on scanning the raw JSONL artifact. The current schema also adds `GIN` full-text indexing on `search_text` and, when `pg_trgm` can be enabled on the local PostgreSQL instance, a trigram index for substring-heavy operator lookups.
+
 When the optional local PostgreSQL store is active, `LPE-CT` also upserts one row per quarantined trace into `quarantine_messages` with:
 
 - `trace_id`, direction, status, sender, recipients, subject, and `Message-Id`
@@ -270,6 +284,28 @@ Outbound trace files now also persist:
 - `DSN` action and diagnostic for deferred/bounced deliveries
 
 Permanent outbound failures are copied to `bounces/` while the operational queue copy remains in `held/`.
+
+## Quarantine operations and reporting
+
+The management API and UI now use the retained perimeter artifacts for these operational workflows:
+
+- search quarantine by trace, sender, recipient, subject, `Message-Id`, direction, and domain
+- inspect a quarantined or retained trace with headers, body excerpt, decision trace, and retained flow history
+- release, retry, or delete a quarantined trace while keeping retained perimeter audit evidence
+- search inbound and outbound flow history by trace id, sender, recipient, subject, route, disposition, and policy evidence
+
+`LPE-CT` also now generates scheduled quarantine digest reports from sorting-center-owned data only.
+
+Current digest controls cover:
+
+- global enable or disable
+- global interval in minutes
+- maximum items per digest
+- retained history window in days
+- domain default recipients
+- mailbox-specific user overrides when a narrower digest target is needed
+
+Generated digest artifacts are stored under `policy/digest-reports/` as technical operational reports surfaced in the management UI. They are not canonical mailbox messages and do not require direct access to the core `LPE` database.
 
 ## SMTP outcomes
 

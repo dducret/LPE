@@ -70,6 +70,10 @@
                 <span class="page-icon">05</span>
                 <span data-i18n="navUpdatesTitle">Updates</span>
               </button>
+              <button class="page-button" type="button" data-open-panel="reporting-panel" data-panel-title-key="drawerReportingTitle" data-panel-summary-key="drawerReportingSummary">
+                <span class="page-icon">06</span>
+                <span data-i18n="navReportingTitle">Reporting</span>
+              </button>
             </nav>
           </div>
         </div>
@@ -181,28 +185,66 @@
               <span class="pill" data-i18n="managementUpdatesPill">Operations</span>
               <span class="management-actions" data-i18n="open">Open</span>
             </button>
+
+            <button class="management-list-item" type="button" data-open-panel="reporting-panel" data-panel-title-key="drawerReportingTitle" data-panel-summary-key="drawerReportingSummary">
+              <span class="management-main">
+                <strong data-i18n="managementReportingTitle">Reporting</strong>
+                <span data-i18n="managementReportingCopy">Digest cadence, domain defaults, user overrides, and history retention.</span>
+              </span>
+              <span class="pill" data-i18n="managementReportingPill">Reporting</span>
+              <span class="management-actions" data-i18n="open">Open</span>
+            </button>
           </div>
         </section>
 
-        <section class="ops-grid">
-          <article class="panel ops-card">
+        <section class="ops-grid ops-grid-wide">
+          <article class="panel ops-card ops-card-span-2">
             <div class="section-head">
-              <h3 data-i18n="quickActions">Quick actions</h3>
-              <p data-i18n="quickActionsCopy">Frequent operations for the DMZ node.</p>
+              <div>
+                <h3 data-i18n="quarantineQueueTitle">Quarantine queue</h3>
+                <p data-i18n="quarantineQueueCopy">Live perimeter backlog with trace and release controls.</p>
+              </div>
+              <button class="secondary-button" type="button" id="run-digests" data-i18n="runDigests">Run digests now</button>
             </div>
-            <div class="ops-pills">
-              <button class="pill-button" type="button" data-open-panel="site-panel" data-panel-title-key="drawerSiteTitle" data-panel-summary-key="drawerSiteSummary" data-i18n="reviewIdentity">Review identity</button>
-              <button class="pill-button" type="button" data-open-panel="network-panel" data-panel-title-key="drawerNetworkTitle" data-panel-summary-key="drawerNetworkSummary" data-i18n="reviewNetwork">Review network</button>
-              <button class="pill-button" type="button" data-open-panel="updates-panel" data-panel-title-key="drawerUpdatesTitle" data-panel-summary-key="drawerUpdatesSummary" data-i18n="planUpdate">Plan update</button>
-            </div>
+            <form id="quarantine-search-form" class="search-toolbar">
+              <input name="q" type="search" data-i18n-placeholder="searchQuarantinePlaceholder" placeholder="Search trace, sender, recipient, subject, or Message-Id" />
+              <select name="direction">
+                <option value="" data-i18n="allDirections">All directions</option>
+                <option value="inbound">Inbound</option>
+                <option value="outbound">Outbound</option>
+              </select>
+              <input name="domain" type="search" data-i18n-placeholder="filterDomainPlaceholder" placeholder="Filter domain" />
+              <button class="primary-button compact-button" type="submit" data-i18n="search">Search</button>
+            </form>
+            <div id="quarantine-list" class="quarantine-focus"></div>
           </article>
 
-          <article class="panel ops-card">
+          <article class="panel ops-card ops-card-span-2">
             <div class="section-head">
-              <h3 data-i18n="quarantineQueueTitle">Quarantine queue</h3>
-              <p data-i18n="quarantineQueueCopy">Live perimeter backlog with trace and release controls.</p>
+              <div>
+                <h3 data-i18n="historyTitle">Mail history</h3>
+                <p data-i18n="historyCopy">Searchable inbound and outbound flow with status, trace, and policy context.</p>
+              </div>
             </div>
-            <div id="quarantine-list" class="quarantine-focus"></div>
+            <form id="history-search-form" class="search-toolbar">
+              <input name="q" type="search" data-i18n-placeholder="searchHistoryPlaceholder" placeholder="Search trace, sender, recipient, subject, route, or policy" />
+              <select name="direction">
+                <option value="" data-i18n="allDirections">All directions</option>
+                <option value="inbound">Inbound</option>
+                <option value="outbound">Outbound</option>
+              </select>
+              <select name="queue">
+                <option value="" data-i18n="allQueues">All queues</option>
+                <option value="quarantine">quarantine</option>
+                <option value="deferred">deferred</option>
+                <option value="held">held</option>
+                <option value="sent">sent</option>
+                <option value="bounces">bounces</option>
+              </select>
+              <input name="domain" type="search" data-i18n-placeholder="filterDomainPlaceholder" placeholder="Filter domain" />
+              <button class="primary-button compact-button" type="submit" data-i18n="search">Search</button>
+            </form>
+            <div id="history-list" class="quarantine-focus"></div>
           </article>
 
           <article class="panel ops-card">
@@ -212,15 +254,29 @@
             </div>
             <div id="route-diagnostics" class="quarantine-focus"></div>
           </article>
+
+          <article class="panel ops-card">
+            <div class="section-head">
+              <h3 data-i18n="digestReportsTitle">Digest reports</h3>
+              <p data-i18n="digestReportsCopy">Recent scheduled quarantine digests generated inside LPE-CT.</p>
+            </div>
+            <div id="digest-report-list" class="quarantine-focus"></div>
+            <div id="reporting-summary" class="reporting-summary"></div>
+          </article>
         </section>
 
-        <section class="panel">
-          <div class="section-head">
-            <h3 data-i18n="traceDetailsTitle">Trace details</h3>
-            <p data-i18n="traceDetailsCopy">Decision trace, DSN, route, and operator actions for the selected transport item.</p>
-          </div>
-          <div id="trace-details" class="trace-card empty-state" data-i18n="traceEmptyState">Select a quarantined or deferred trace.</div>
-        </section>
+        <div id="ops-drawer" class="management-modal-backdrop hidden" role="presentation">
+          <aside class="management-modal panel" role="dialog" aria-modal="true" aria-labelledby="ops-drawer-title">
+            <div class="drawer-header">
+              <div>
+                <h3 id="ops-drawer-title">Trace details</h3>
+                <p id="ops-drawer-summary">Decision trace, headers, policy evidence, and digest content.</p>
+              </div>
+              <button id="ops-drawer-close" class="icon-button" type="button" data-i18n-aria-label="close" aria-label="Close">x</button>
+            </div>
+            <div id="ops-drawer-content" class="trace-card empty-state" data-i18n="traceEmptyState">Select a quarantined or deferred trace.</div>
+          </aside>
+        </div>
 
         <div id="config-drawer" class="management-modal-backdrop hidden" role="presentation">
           <aside class="management-modal panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
@@ -305,6 +361,20 @@
                   <label class="toggle"><span data-i18n="autoDownload">Auto download</span><input name="auto_download" type="checkbox" /></label>
                 </div>
                 <button class="primary-button" type="submit" data-i18n="saveUpdates">Save updates</button>
+              </form>
+            </div>
+
+            <div id="reporting-panel" class="drawer-panel hidden">
+              <form id="reporting-form" class="form-panel">
+                <div class="fields two">
+                  <label class="toggle"><span data-i18n="digestEnabled">Digest reports enabled</span><input name="digest_enabled" type="checkbox" /></label>
+                  <label><span data-i18n="historyRetentionDays">History retention (days)</span><input name="history_retention_days" type="number" min="1" required /></label>
+                  <label><span data-i18n="digestIntervalMinutes">Digest interval (minutes)</span><input name="digest_interval_minutes" type="number" min="1" required /></label>
+                  <label><span data-i18n="digestMaxItems">Max items per digest</span><input name="digest_max_items" type="number" min="1" required /></label>
+                  <label class="field-span-two"><span data-i18n="digestDomainDefaults">Domain defaults</span><textarea name="domain_defaults_text" rows="6" data-i18n-placeholder="digestDomainDefaultsPlaceholder" placeholder="example.com: secops@example.com, admin@example.com"></textarea></label>
+                  <label class="field-span-two"><span data-i18n="digestUserOverrides">User overrides</span><textarea name="user_overrides_text" rows="6" data-i18n-placeholder="digestUserOverridesPlaceholder" placeholder="alice@example.com: alice.alerts@example.com"></textarea></label>
+                </div>
+                <button class="primary-button" type="submit" data-i18n="saveReporting">Save reporting</button>
               </form>
             </div>
           </aside>
