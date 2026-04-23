@@ -296,16 +296,20 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         let old_snapshot = if requested_key == "0" || requested_key.is_empty() {
             None
         } else {
-            self.store
-                .fetch_activesync_sync_state(
+            let Some(state) = self
+                .load_requested_sync_state(
                     principal.account_id,
                     device_id,
                     FOLDER_SYNC_COLLECTION_ID,
                     &requested_key,
                 )
                 .await?
-                .map(|state| serde_json::from_str(&state.snapshot_json))
-                .transpose()?
+            else {
+                let mut response = WbxmlNode::new(7, "FolderSync");
+                response.push(WbxmlNode::with_text(7, "Status", "9"));
+                return wbxml_response(protocol_version, encode_wbxml(&response));
+            };
+            Some(serde_json::from_str(&state.snapshot_json)?)
         };
 
         if !requested_key.is_empty() && requested_key != "0" && old_snapshot.is_none() {
@@ -426,16 +430,15 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         let previous_state = if sync_key == "0" || sync_key.is_empty() {
             None
         } else {
-            self.store
-                .fetch_activesync_sync_state(
-                    principal.account_id,
-                    device_id,
-                    &collection.id,
-                    &sync_key,
-                )
-                .await?
-                .map(|state| decode_sync_state(&state.snapshot_json))
-                .transpose()?
+            self.load_requested_sync_state(
+                principal.account_id,
+                device_id,
+                &collection.id,
+                &sync_key,
+            )
+            .await?
+            .map(|state| decode_sync_state(&state.snapshot_json))
+            .transpose()?
         };
 
         if !sync_key.is_empty() && sync_key != "0" && previous_state.is_none() {
@@ -584,6 +587,37 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 serde_json::to_string(state)?,
             )
             .await
+    }
+
+    async fn load_requested_sync_state(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+        collection_id: &str,
+        requested_key: &str,
+    ) -> Result<Option<lpe_storage::ActiveSyncSyncState>> {
+        let requested_state = self
+            .store
+            .fetch_activesync_sync_state(account_id, device_id, collection_id, requested_key)
+            .await?;
+        let Some(requested_state) = requested_state else {
+            return Ok(None);
+        };
+
+        let latest_state = self
+            .store
+            .fetch_latest_activesync_sync_state(account_id, device_id, collection_id)
+            .await?;
+        let Some(latest_state) = latest_state else {
+            return Ok(None);
+        };
+
+        let latest_sync_state = decode_sync_state(&latest_state.snapshot_json)?;
+        if sync_state_is_complete(&latest_sync_state) && latest_state.sync_key != requested_key {
+            return Ok(None);
+        }
+
+        Ok(Some(requested_state))
     }
 
     async fn collection_state(
@@ -1333,29 +1367,26 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         }
 
         let collections = self.folder_collections(principal.account_id).await?;
+        let monitored = match self
+            .resolve_ping_collections(principal, device_id, &collections, &folders)
+            .await?
+        {
+            Some(monitored) => monitored,
+            None => {
+                let mut response = WbxmlNode::new(13, "Ping");
+                response.push(WbxmlNode::with_text(13, "Status", "3"));
+                return wbxml_response(protocol_version, encode_wbxml(&response));
+            }
+        };
+
         let mut changed = Vec::new();
-        for folder in folders {
-            let Some(collection_id) = folder.child("Id").map(|node| node.text_value().trim())
-            else {
-                continue;
-            };
-            let Some(collection) = collections.iter().find(|entry| entry.id == collection_id)
-            else {
-                continue;
-            };
+        for (collection, previous_state) in monitored {
             let current_state = self
-                .collection_state(principal.account_id, collection)
+                .collection_state(principal.account_id, &collection)
                 .await?;
-            let previous_state = self
-                .store
-                .fetch_latest_activesync_sync_state(principal.account_id, device_id, &collection.id)
-                .await?
-                .map(|state| decode_sync_state(&state.snapshot_json))
-                .transpose()?
-                .unwrap_or_default();
             if !diff_collection_states(&previous_state.collection_state, &current_state).is_empty()
             {
-                changed.push(collection.id.clone());
+                changed.push(collection.id);
             }
         }
 
@@ -1376,6 +1407,39 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         }
 
         wbxml_response(protocol_version, encode_wbxml(&response))
+    }
+
+    async fn resolve_ping_collections(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        device_id: &str,
+        collections: &[CollectionDefinition],
+        folders: &[&WbxmlNode],
+    ) -> Result<Option<Vec<(CollectionDefinition, StoredSyncState)>>> {
+        let mut monitored = Vec::new();
+        for folder in folders {
+            let Some(collection_id) = folder
+                .child("Id")
+                .map(|node| node.text_value().trim().to_string())
+                .filter(|value| !value.is_empty())
+            else {
+                return Ok(None);
+            };
+            let Some(collection) = collections.iter().find(|entry| entry.id == collection_id)
+            else {
+                return Ok(None);
+            };
+            let Some(state) = self
+                .store
+                .fetch_latest_activesync_sync_state(principal.account_id, device_id, &collection.id)
+                .await?
+            else {
+                return Ok(None);
+            };
+            monitored.push((collection.clone(), decode_sync_state(&state.snapshot_json)?));
+        }
+
+        Ok(Some(monitored))
     }
 
     async fn handle_search(
@@ -1739,6 +1803,10 @@ fn completed_sync_state(collection_state: Vec<CollectionStateEntry>) -> StoredSy
         pending_changes: Vec::new(),
         next_offset: 0,
     }
+}
+
+fn sync_state_is_complete(state: &StoredSyncState) -> bool {
+    state.next_offset >= state.pending_changes.len()
 }
 
 fn has_client_commands(collection_node: &WbxmlNode) -> bool {

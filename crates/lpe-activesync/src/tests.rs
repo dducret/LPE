@@ -38,6 +38,7 @@ struct FakeStore {
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
     deleted_drafts: Arc<Mutex<Vec<Uuid>>>,
     sync_states: Arc<Mutex<std::collections::HashMap<String, ActiveSyncSyncState>>>,
+    sync_state_order: Arc<Mutex<Vec<String>>>,
     full_email_fetches: Arc<Mutex<u32>>,
 }
 
@@ -284,14 +285,16 @@ impl ActiveSyncStore for FakeStore {
         collection_id: &'a str,
     ) -> StoreFuture<'a, Option<ActiveSyncSyncState>> {
         let prefix = format!("{account_id}:{device_id}:{collection_id}:");
+        let states = self.sync_states.lock().unwrap();
         let state = self
-            .sync_states
+            .sync_state_order
             .lock()
             .unwrap()
             .iter()
-            .filter(|(key, _)| key.starts_with(&prefix))
-            .max_by(|(left, _), (right, _)| left.cmp(right))
-            .map(|(_, value)| value.clone());
+            .rev()
+            .find(|key| key.starts_with(&prefix))
+            .and_then(|key| states.get(key))
+            .cloned();
         Box::pin(async move { Ok(state) })
     }
 
@@ -727,7 +730,12 @@ impl ActiveSyncStore for FakeStore {
         snapshot_json: String,
     ) -> StoreFuture<'a, ()> {
         let key = format!("{account_id}:{device_id}:{collection_id}:{sync_key}");
-        self.sync_states.lock().unwrap().insert(
+        let mut states = self.sync_states.lock().unwrap();
+        let mut order = self.sync_state_order.lock().unwrap();
+        if !states.contains_key(&key) {
+            order.push(key.clone());
+        }
+        states.insert(
             key,
             ActiveSyncSyncState {
                 sync_key: sync_key.to_string(),
@@ -1409,6 +1417,124 @@ async fn sync_key_stays_usable_for_new_changes_after_a_stable_round() {
 }
 
 #[tokio::test]
+async fn stale_sync_key_is_rejected_after_a_completed_round() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            inbox.id,
+            "inbox",
+            "One",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let priming_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", "0"));
+        collection.push(WbxmlNode::with_text(
+            0,
+            "CollectionId",
+            inbox.id.to_string(),
+        ));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+    let priming_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &priming_request,
+        )
+        .await
+        .unwrap();
+    let primed_key = collection_sync_key(
+        &decode_response_body(priming_response).await,
+        &inbox.id.to_string(),
+    );
+
+    let continuation_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", &primed_key));
+        collection.push(WbxmlNode::with_text(
+            0,
+            "CollectionId",
+            inbox.id.to_string(),
+        ));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+    let continuation_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &continuation_request,
+        )
+        .await
+        .unwrap();
+    let stable_key = collection_sync_key(
+        &decode_response_body(continuation_response).await,
+        &inbox.id.to_string(),
+    );
+    assert_ne!(primed_key, stable_key);
+
+    let stale_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", &primed_key));
+        collection.push(WbxmlNode::with_text(
+            0,
+            "CollectionId",
+            inbox.id.to_string(),
+        ));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+    let stale_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &stale_request,
+        )
+        .await
+        .unwrap();
+    let stale_sync = decode_response_body(stale_response).await;
+    let stale_collection = stale_sync
+        .child("Collections")
+        .unwrap()
+        .child("Collection")
+        .unwrap();
+    assert_eq!(stale_collection.child("Status").unwrap().text_value(), "9");
+    assert!(stale_collection.child("SyncKey").is_none());
+}
+
+#[tokio::test]
 async fn send_mail_uses_canonical_submission_model() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -1832,6 +1958,51 @@ async fn ping_reports_changed_collections_after_sync_state_exists() {
         .unwrap();
     let body = decode_response_body(response).await;
     assert_eq!(body.child("Status").unwrap().text_value(), "2");
+}
+
+#[tokio::test]
+async fn ping_rejects_unsynchronized_folders() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            inbox.id,
+            "inbox",
+            "One",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let ping_request = encode_wbxml(&{
+        let mut ping = WbxmlNode::new(13, "Ping");
+        ping.push(WbxmlNode::with_text(13, "HeartbeatInterval", "60"));
+        let mut folders = WbxmlNode::new(13, "Folders");
+        let mut folder = WbxmlNode::new(13, "Folder");
+        folder.push(WbxmlNode::with_text(13, "Id", inbox.id.to_string()));
+        folder.push(WbxmlNode::with_text(13, "Class", "Email"));
+        folders.push(folder);
+        ping.push(folders);
+        ping
+    });
+    let response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Ping".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &ping_request,
+        )
+        .await
+        .unwrap();
+    let body = decode_response_body(response).await;
+    assert_eq!(body.child("Status").unwrap().text_value(), "3");
+    assert!(body.child("Folders").is_none());
 }
 
 #[tokio::test]
