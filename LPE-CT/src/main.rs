@@ -27,10 +27,11 @@ use tokio::net::TcpListener;
 use tracing::info;
 use uuid::Uuid;
 
-mod observability;
 mod dkim_signing;
+mod observability;
 mod reporting;
 mod smtp;
+mod storage;
 mod submission;
 mod transport_policy;
 
@@ -153,6 +154,67 @@ struct LocalPostgresStore {
     notes: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct AddressPolicySettings {
+    #[serde(default)]
+    allow_senders: Vec<String>,
+    #[serde(default)]
+    block_senders: Vec<String>,
+    #[serde(default)]
+    allow_recipients: Vec<String>,
+    #[serde(default)]
+    block_recipients: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RecipientVerificationSettings {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default = "default_true")]
+    fail_closed: bool,
+    #[serde(default = "default_recipient_verification_cache_ttl_seconds")]
+    cache_ttl_seconds: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct AttachmentPolicySettings {
+    #[serde(default)]
+    allow_extensions: Vec<String>,
+    #[serde(default)]
+    block_extensions: Vec<String>,
+    #[serde(default)]
+    allow_mime_types: Vec<String>,
+    #[serde(default)]
+    block_mime_types: Vec<String>,
+    #[serde(default)]
+    allow_detected_types: Vec<String>,
+    #[serde(default)]
+    block_detected_types: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DkimDomainConfig {
+    domain: String,
+    selector: String,
+    private_key_path: String,
+    #[serde(default = "default_true")]
+    enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DkimSettings {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default = "default_dkim_headers")]
+    headers: Vec<String>,
+    #[serde(default = "default_true")]
+    over_sign: bool,
+    #[serde(default)]
+    expiration_seconds: Option<u32>,
+    #[serde(default)]
+    domains: Vec<DkimDomainConfig>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PolicySettings {
     drain_mode: bool,
@@ -195,6 +257,14 @@ struct PolicySettings {
     spam_reject_threshold: f32,
     attachment_text_scan_enabled: bool,
     max_message_size_mb: u32,
+    #[serde(default)]
+    address_policy: AddressPolicySettings,
+    #[serde(default = "default_recipient_verification_settings")]
+    recipient_verification: RecipientVerificationSettings,
+    #[serde(default)]
+    attachment_policy: AttachmentPolicySettings,
+    #[serde(default = "default_dkim_settings")]
+    dkim: DkimSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -349,6 +419,8 @@ async fn main() -> Result<()> {
     dashboard.network.submission_listener_enabled =
         submission_listener_is_configured(&submission_bind_address);
     persist_state(&state_file, &dashboard)?;
+    storage::sync_dashboard_configuration(&local_db_config_from_dashboard(&dashboard), &dashboard)
+        .await?;
 
     let state = AppState {
         store: Arc::new(Mutex::new(dashboard)),
@@ -360,6 +432,7 @@ async fn main() -> Result<()> {
     let api_state = state.clone();
     let smtp_state_file = state.state_file.as_ref().clone();
     let smtp_spool_dir = state.spool_dir.as_ref().clone();
+    let submission_state_file = state.state_file.as_ref().clone();
     let submission_core_base_url = {
         let snapshot = state.store.lock().unwrap().clone();
         snapshot.relay.core_delivery_base_url
@@ -380,7 +453,12 @@ async fn main() -> Result<()> {
     });
     let submission_task = tokio::spawn(async move {
         if let Some(bind_address) = submission_bind_address {
-            submission::run_submission_listener(bind_address, submission_core_base_url).await?;
+            submission::run_submission_listener(
+                bind_address,
+                submission_core_base_url,
+                submission_state_file,
+            )
+            .await?;
         } else {
             let _ = std::future::pending::<Result<()>>().await;
         }
@@ -420,7 +498,10 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/traces/{trace_id}/release", post(release_trace))
         .route("/api/v1/traces/{trace_id}/delete", post(delete_trace))
         .route("/api/v1/routes/diagnostics", get(route_diagnostics))
-        .route("/api/v1/reporting", get(reporting_snapshot).put(update_reporting))
+        .route(
+            "/api/v1/reporting",
+            get(reporting_snapshot).put(update_reporting),
+        )
         .route("/api/v1/reporting/digests/run", post(run_digest_reports))
         .route("/api/v1/reporting/digests", get(digest_reports))
         .route(
@@ -810,9 +891,11 @@ async fn update_policies(
 ) -> Result<Json<DashboardState>, ApiError> {
     let admin = require_management_admin(&state, &headers)?;
     normalize_policy_settings(&mut payload);
-    mutate_state(&state, &admin.email, "update-policies", move |dashboard| {
+    let response = mutate_state(&state, &admin.email, "update-policies", move |dashboard| {
         dashboard.policies = payload;
-    })
+    })?;
+    sync_technical_store(&state).await?;
+    Ok(response)
 }
 
 async fn update_updates(
@@ -832,7 +915,8 @@ async fn reporting_snapshot(
 ) -> Result<Json<reporting::ReportingSnapshot>, ApiError> {
     let _admin = require_management_admin(&state, &headers)?;
     let snapshot = read_state(&state)?;
-    let reporting = reporting::snapshot(&state.spool_dir, &snapshot.reporting).map_err(ApiError::from)?;
+    let reporting =
+        reporting::snapshot(&state.spool_dir, &snapshot.reporting).map_err(ApiError::from)?;
     Ok(Json(reporting))
 }
 
@@ -853,7 +937,9 @@ async fn update_reporting(
         persist_state(&state.state_file, &guard)?;
     }
     let snapshot = read_state(&state)?;
-    let reporting = reporting::snapshot(&state.spool_dir, &snapshot.reporting).map_err(ApiError::from)?;
+    sync_technical_store(&state).await?;
+    let reporting =
+        reporting::snapshot(&state.spool_dir, &snapshot.reporting).map_err(ApiError::from)?;
     Ok(Json(reporting))
 }
 
@@ -877,7 +963,10 @@ async fn run_digest_reports(
                 timestamp: generated_at.clone(),
                 actor: admin.email.clone(),
                 action: "run-quarantine-digests".to_string(),
-                details: format!("generated {} quarantine digest report(s)", generated_reports.len()),
+                details: format!(
+                    "generated {} quarantine digest report(s)",
+                    generated_reports.len()
+                ),
             },
         );
         guard.audit.truncate(12);
@@ -897,7 +986,8 @@ async fn digest_reports(
     headers: HeaderMap,
 ) -> Result<Json<Vec<reporting::DigestReportSummary>>, ApiError> {
     let _admin = require_management_admin(&state, &headers)?;
-    let reports = reporting::list_recent_digest_reports(&state.spool_dir, 20).map_err(ApiError::from)?;
+    let reports =
+        reporting::list_recent_digest_reports(&state.spool_dir, 20).map_err(ApiError::from)?;
     Ok(Json(reports))
 }
 
@@ -976,14 +1066,16 @@ async fn run_reporting_scheduler(state: AppState) {
                 Ok(guard) => guard,
                 Err(_) => continue,
             };
-            let generated_reports =
-                match reporting::run_due_digest_generation(&state.spool_dir, &mut guard.reporting) {
-                    Ok(generated_reports) => generated_reports,
-                    Err(error) => {
-                        tracing::warn!(error = %error, "scheduled digest generation failed");
-                        continue;
-                    }
-                };
+            let generated_reports = match reporting::run_due_digest_generation(
+                &state.spool_dir,
+                &mut guard.reporting,
+            ) {
+                Ok(generated_reports) => generated_reports,
+                Err(error) => {
+                    tracing::warn!(error = %error, "scheduled digest generation failed");
+                    continue;
+                }
+            };
             if generated_reports.is_empty() {
                 0
             } else {
@@ -1018,6 +1110,23 @@ fn read_state(state: &AppState) -> Result<DashboardState, ApiError> {
         .lock()
         .map(|guard| guard.clone())
         .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))
+}
+
+fn local_db_config_from_dashboard(dashboard: &DashboardState) -> storage::LocalDbConfig {
+    storage::LocalDbConfig {
+        enabled: dashboard.local_data_stores.dedicated_postgres.enabled,
+        database_url: env::var("LPE_CT_LOCAL_DB_URL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+    }
+}
+
+async fn sync_technical_store(state: &AppState) -> Result<(), ApiError> {
+    let snapshot = read_state(state)?;
+    storage::sync_dashboard_configuration(&local_db_config_from_dashboard(&snapshot), &snapshot)
+        .await
+        .map_err(ApiError::from)
 }
 
 fn append_dashboard_audit_event(state: &mut DashboardState, actor: &str, action: &str) {
@@ -1188,6 +1297,81 @@ fn apply_env_overrides(state: &mut DashboardState) {
             state.policies.max_message_size_mb = parsed.max(1);
         }
     }
+    if let Ok(value) = env::var("LPE_CT_POLICY_ALLOW_SENDERS") {
+        state.policies.address_policy.allow_senders = parse_csv(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_POLICY_BLOCK_SENDERS") {
+        state.policies.address_policy.block_senders = parse_csv(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_POLICY_ALLOW_RECIPIENTS") {
+        state.policies.address_policy.allow_recipients = parse_csv(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_POLICY_BLOCK_RECIPIENTS") {
+        state.policies.address_policy.block_recipients = parse_csv(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_RECIPIENT_VERIFICATION_ENABLED") {
+        state.policies.recipient_verification.enabled = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_RECIPIENT_VERIFICATION_FAIL_CLOSED") {
+        state.policies.recipient_verification.fail_closed = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_RECIPIENT_VERIFICATION_CACHE_TTL_SECONDS") {
+        if let Ok(parsed) = value.parse::<u32>() {
+            state.policies.recipient_verification.cache_ttl_seconds = parsed.max(1);
+        }
+    }
+    if let Ok(value) = env::var("LPE_CT_ATTACHMENT_ALLOW_EXTENSIONS") {
+        state.policies.attachment_policy.allow_extensions = parse_csv(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_ATTACHMENT_BLOCK_EXTENSIONS") {
+        state.policies.attachment_policy.block_extensions = parse_csv(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_ATTACHMENT_ALLOW_MIME_TYPES") {
+        state.policies.attachment_policy.allow_mime_types = parse_csv(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_ATTACHMENT_BLOCK_MIME_TYPES") {
+        state.policies.attachment_policy.block_mime_types = parse_csv(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_ATTACHMENT_ALLOW_DETECTED_TYPES") {
+        state.policies.attachment_policy.allow_detected_types = parse_csv(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_ATTACHMENT_BLOCK_DETECTED_TYPES") {
+        state.policies.attachment_policy.block_detected_types = parse_csv(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_OUTBOUND_DKIM_ENABLED") {
+        state.policies.dkim.enabled = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_OUTBOUND_DKIM_HEADERS") {
+        state.policies.dkim.headers = parse_csv(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_OUTBOUND_DKIM_OVER_SIGN") {
+        state.policies.dkim.over_sign = parse_bool(&value);
+    }
+    if let Ok(value) = env::var("LPE_CT_OUTBOUND_DKIM_EXPIRATION_SECONDS") {
+        state.policies.dkim.expiration_seconds =
+            value.parse::<u32>().ok().filter(|value| *value > 0);
+    }
+    if let Ok(value) = env::var("LPE_CT_OUTBOUND_DKIM_KEYS") {
+        let domains = value
+            .split(';')
+            .filter_map(|entry| {
+                let trimmed = entry.trim();
+                if trimmed.is_empty() {
+                    return None;
+                }
+                let mut parts = trimmed.split('|').map(str::trim);
+                Some(DkimDomainConfig {
+                    domain: parts.next()?.to_ascii_lowercase(),
+                    selector: parts.next()?.to_string(),
+                    private_key_path: parts.next()?.to_string(),
+                    enabled: true,
+                })
+            })
+            .collect::<Vec<_>>();
+        if !domains.is_empty() {
+            state.policies.dkim.domains = domains;
+        }
+    }
     state.local_data_stores.state_file_path = env::var("LPE_CT_STATE_FILE")
         .ok()
         .filter(|value| !value.trim().is_empty())
@@ -1249,6 +1433,32 @@ fn normalize_policy_settings(policies: &mut PolicySettings) {
     if policies.spam_reject_threshold < policies.spam_quarantine_threshold {
         policies.spam_reject_threshold = policies.spam_quarantine_threshold;
     }
+    normalize_csv_rules(&mut policies.address_policy.allow_senders);
+    normalize_csv_rules(&mut policies.address_policy.block_senders);
+    normalize_csv_rules(&mut policies.address_policy.allow_recipients);
+    normalize_csv_rules(&mut policies.address_policy.block_recipients);
+    policies.recipient_verification.cache_ttl_seconds =
+        policies.recipient_verification.cache_ttl_seconds.max(1);
+    normalize_csv_rules(&mut policies.attachment_policy.allow_extensions);
+    normalize_csv_rules(&mut policies.attachment_policy.block_extensions);
+    normalize_csv_rules(&mut policies.attachment_policy.allow_mime_types);
+    normalize_csv_rules(&mut policies.attachment_policy.block_mime_types);
+    normalize_csv_rules(&mut policies.attachment_policy.allow_detected_types);
+    normalize_csv_rules(&mut policies.attachment_policy.block_detected_types);
+    normalize_csv_rules(&mut policies.dkim.headers);
+    if policies.dkim.headers.is_empty() {
+        policies.dkim.headers = default_dkim_headers();
+    }
+    let mut seen_domains = std::collections::BTreeSet::new();
+    policies.dkim.domains.retain_mut(|domain| {
+        domain.domain = domain.domain.trim().to_ascii_lowercase();
+        domain.selector = domain.selector.trim().to_string();
+        domain.private_key_path = domain.private_key_path.trim().to_string();
+        !domain.domain.is_empty()
+            && !domain.selector.is_empty()
+            && !domain.private_key_path.is_empty()
+            && seen_domains.insert(domain.domain.clone())
+    });
 }
 
 fn normalize_local_data_stores(local_data_stores: &mut LocalDataStoresSettings) {
@@ -1291,6 +1501,16 @@ fn parse_bool(value: &str) -> bool {
         value.to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on"
     )
+}
+
+fn normalize_csv_rules(values: &mut Vec<String>) {
+    let mut seen = std::collections::BTreeSet::new();
+    *values = values
+        .iter()
+        .map(|value| value.trim().trim_start_matches('@').to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .filter(|value| seen.insert(value.clone()))
+        .collect();
 }
 
 fn env_value(name: &str) -> Option<String> {
@@ -1471,6 +1691,22 @@ fn default_state() -> DashboardState {
             spam_reject_threshold: default_spam_reject_threshold(),
             attachment_text_scan_enabled: true,
             max_message_size_mb: 64,
+            address_policy: AddressPolicySettings {
+                allow_senders: Vec::new(),
+                block_senders: Vec::new(),
+                allow_recipients: Vec::new(),
+                block_recipients: Vec::new(),
+            },
+            recipient_verification: default_recipient_verification_settings(),
+            attachment_policy: AttachmentPolicySettings {
+                allow_extensions: Vec::new(),
+                block_extensions: Vec::new(),
+                allow_mime_types: Vec::new(),
+                block_mime_types: Vec::new(),
+                allow_detected_types: Vec::new(),
+                block_detected_types: Vec::new(),
+            },
+            dkim: default_dkim_settings(),
         },
         reporting: reporting::default_reporting_settings(),
         updates: UpdateSettings {
@@ -1500,6 +1736,40 @@ fn default_state() -> DashboardState {
 fn default_core_delivery_base_url() -> String {
     env_value("LPE_CT_CORE_DELIVERY_BASE_URL")
         .unwrap_or_else(|| "http://127.0.0.1:8080".to_string())
+}
+
+fn default_recipient_verification_cache_ttl_seconds() -> u32 {
+    300
+}
+
+fn default_recipient_verification_settings() -> RecipientVerificationSettings {
+    RecipientVerificationSettings {
+        enabled: false,
+        fail_closed: true,
+        cache_ttl_seconds: default_recipient_verification_cache_ttl_seconds(),
+    }
+}
+
+fn default_dkim_headers() -> Vec<String> {
+    vec![
+        "from".to_string(),
+        "to".to_string(),
+        "cc".to_string(),
+        "subject".to_string(),
+        "mime-version".to_string(),
+        "content-type".to_string(),
+        "message-id".to_string(),
+    ]
+}
+
+fn default_dkim_settings() -> DkimSettings {
+    DkimSettings {
+        enabled: false,
+        headers: default_dkim_headers(),
+        over_sign: true,
+        expiration_seconds: Some(3600),
+        domains: Vec::new(),
+    }
 }
 
 fn submission_listener_is_configured(bind_address: &Option<String>) -> bool {

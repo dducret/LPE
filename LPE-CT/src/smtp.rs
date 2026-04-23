@@ -21,7 +21,7 @@ use lpe_magika::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{postgres::PgPoolOptions, types::Json, PgPool, Row};
+use sqlx::{types::Json, PgPool, Row};
 use std::{
     collections::{hash_map::DefaultHasher, HashMap, HashSet},
     convert::TryFrom,
@@ -29,23 +29,17 @@ use std::{
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        OnceLock,
-    },
+    sync::atomic::{AtomicU32, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::{tcp::OwnedReadHalf, tcp::OwnedWriteHalf, TcpListener, TcpStream},
     process::Command,
-    sync::OnceCell,
 };
 use tracing::{info, warn};
 
-use crate::{
-    dkim_signing, integration_shared_secret, observability, transport_policy,
-};
+use crate::{dkim_signing, integration_shared_secret, observability, storage, transport_policy};
 
 const INBOUND_DELIVERY_PATH: &str = "/internal/lpe-ct/inbound-deliveries";
 
@@ -53,45 +47,48 @@ static SMTP_ACTIVE_SESSIONS: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuntimeConfig {
-    primary_upstream: String,
-    secondary_upstream: String,
-    core_delivery_base_url: String,
-    mutual_tls_required: bool,
-    fallback_to_hold_queue: bool,
-    drain_mode: bool,
-    quarantine_enabled: bool,
-    greylisting_enabled: bool,
-    antivirus_enabled: bool,
-    antivirus_fail_closed: bool,
-    antivirus_provider_chain: Vec<String>,
-    antivirus_providers: Vec<AntivirusProviderConfig>,
-    bayespam_enabled: bool,
-    bayespam_auto_learn: bool,
-    bayespam_score_weight: f32,
-    bayespam_min_token_length: u32,
-    bayespam_max_tokens: u32,
-    require_spf: bool,
-    require_dkim_alignment: bool,
-    require_dmarc_enforcement: bool,
-    defer_on_auth_tempfail: bool,
-    dnsbl_enabled: bool,
-    dnsbl_zones: Vec<String>,
-    reputation_enabled: bool,
-    reputation_quarantine_threshold: i32,
-    reputation_reject_threshold: i32,
-    spam_quarantine_threshold: f32,
-    spam_reject_threshold: f32,
-    max_message_size_mb: u32,
-    max_concurrent_sessions: u32,
-    routing_rules: Vec<OutboundRoutingRule>,
-    throttle_enabled: bool,
-    throttle_rules: Vec<OutboundThrottleRule>,
-    local_db_enabled: bool,
-    local_db_url: Option<String>,
+    pub(crate) primary_upstream: String,
+    pub(crate) secondary_upstream: String,
+    pub(crate) core_delivery_base_url: String,
+    pub(crate) mutual_tls_required: bool,
+    pub(crate) fallback_to_hold_queue: bool,
+    pub(crate) drain_mode: bool,
+    pub(crate) quarantine_enabled: bool,
+    pub(crate) greylisting_enabled: bool,
+    pub(crate) antivirus_enabled: bool,
+    pub(crate) antivirus_fail_closed: bool,
+    pub(crate) antivirus_provider_chain: Vec<String>,
+    pub(crate) antivirus_providers: Vec<AntivirusProviderConfig>,
+    pub(crate) bayespam_enabled: bool,
+    pub(crate) bayespam_auto_learn: bool,
+    pub(crate) bayespam_score_weight: f32,
+    pub(crate) bayespam_min_token_length: u32,
+    pub(crate) bayespam_max_tokens: u32,
+    pub(crate) require_spf: bool,
+    pub(crate) require_dkim_alignment: bool,
+    pub(crate) require_dmarc_enforcement: bool,
+    pub(crate) defer_on_auth_tempfail: bool,
+    pub(crate) dnsbl_enabled: bool,
+    pub(crate) dnsbl_zones: Vec<String>,
+    pub(crate) reputation_enabled: bool,
+    pub(crate) reputation_quarantine_threshold: i32,
+    pub(crate) reputation_reject_threshold: i32,
+    pub(crate) spam_quarantine_threshold: f32,
+    pub(crate) spam_reject_threshold: f32,
+    pub(crate) max_message_size_mb: u32,
+    pub(crate) max_concurrent_sessions: u32,
+    pub(crate) routing_rules: Vec<OutboundRoutingRule>,
+    pub(crate) throttle_enabled: bool,
+    pub(crate) throttle_rules: Vec<OutboundThrottleRule>,
+    pub(crate) address_policy: transport_policy::AddressPolicyConfig,
+    pub(crate) recipient_verification: transport_policy::RecipientVerificationConfig,
+    pub(crate) attachment_policy: transport_policy::AttachmentPolicyConfig,
+    pub(crate) dkim: dkim_signing::DkimConfig,
+    pub(crate) local_db: storage::LocalDbConfig,
 }
 
 #[derive(Debug, Clone)]
-struct OutboundRoutingRule {
+pub(crate) struct OutboundRoutingRule {
     id: String,
     sender_domain: Option<String>,
     recipient_domain: Option<String>,
@@ -99,7 +96,7 @@ struct OutboundRoutingRule {
 }
 
 #[derive(Debug, Clone)]
-struct OutboundThrottleRule {
+pub(crate) struct OutboundThrottleRule {
     id: String,
     scope: String,
     recipient_domain: Option<String>,
@@ -287,7 +284,7 @@ struct ThrottleState {
 }
 
 #[derive(Debug, Clone)]
-struct AntivirusProviderConfig {
+pub(crate) struct AntivirusProviderConfig {
     id: String,
     display_name: String,
     command: String,
@@ -481,10 +478,6 @@ pub(crate) const POLICY_ARTIFACTS: [&str; 6] = [
     "spool: policy/digest-reports/",
 ];
 
-static LOCAL_DB_POOL: OnceCell<PgPool> = OnceCell::const_new();
-static LOCAL_DB_POOL_URL: OnceLock<String> = OnceLock::new();
-static LOCAL_DB_SCHEMA_READY: OnceCell<()> = OnceCell::const_new();
-
 pub(crate) fn initialize_spool(spool_dir: &Path) -> Result<()> {
     for queue in SPOOL_QUEUES {
         fs::create_dir_all(spool_dir.join(queue))
@@ -503,184 +496,7 @@ pub(crate) async fn prepare_local_store(spool_dir: &Path, config: &RuntimeConfig
 pub(crate) async fn ensure_local_db_schema(
     config: &RuntimeConfig,
 ) -> Result<Option<&'static PgPool>> {
-    let Some(pool) = local_db_pool(config).await? else {
-        return Ok(None);
-    };
-
-    LOCAL_DB_SCHEMA_READY
-        .get_or_try_init(|| async {
-            sqlx::query(
-                r#"
-                CREATE TABLE IF NOT EXISTS greylist_entries (
-                    entry_key TEXT PRIMARY KEY,
-                    state JSONB NOT NULL,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                "#,
-            )
-            .execute(pool)
-            .await?;
-            sqlx::query(
-                r#"
-                CREATE TABLE IF NOT EXISTS reputation_entries (
-                    entry_key TEXT PRIMARY KEY,
-                    state JSONB NOT NULL,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                "#,
-            )
-            .execute(pool)
-            .await?;
-            sqlx::query(
-                r#"
-                CREATE TABLE IF NOT EXISTS bayespam_corpora (
-                    corpus_key TEXT PRIMARY KEY,
-                    corpus JSONB NOT NULL,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                "#,
-            )
-            .execute(pool)
-            .await?;
-            sqlx::query(
-                r#"
-                CREATE TABLE IF NOT EXISTS throttle_windows (
-                    rule_id TEXT NOT NULL,
-                    bucket_key TEXT NOT NULL,
-                    scope TEXT NOT NULL,
-                    state JSONB NOT NULL,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    PRIMARY KEY (rule_id, bucket_key)
-                )
-                "#,
-            )
-            .execute(pool)
-            .await?;
-            sqlx::query(
-                r#"
-                CREATE TABLE IF NOT EXISTS quarantine_messages (
-                    trace_id TEXT PRIMARY KEY,
-                    direction TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    received_at TEXT NOT NULL,
-                    peer TEXT NOT NULL,
-                    helo TEXT NOT NULL,
-                    mail_from TEXT NOT NULL,
-                    rcpt_to JSONB NOT NULL,
-                    subject TEXT NOT NULL,
-                    internet_message_id TEXT,
-                    spool_path TEXT NOT NULL,
-                    reason TEXT,
-                    spam_score REAL NOT NULL,
-                    security_score REAL NOT NULL,
-                    reputation_score INTEGER NOT NULL,
-                    dnsbl_hits JSONB NOT NULL,
-                    auth_summary JSONB NOT NULL,
-                    decision_trace JSONB NOT NULL,
-                    magika_summary TEXT,
-                    magika_decision TEXT,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                "#,
-            )
-            .execute(pool)
-            .await?;
-            sqlx::query(
-                r#"
-                CREATE TABLE IF NOT EXISTS mail_flow_history (
-                    event_key TEXT PRIMARY KEY,
-                    event_unix BIGINT NOT NULL,
-                    timestamp TEXT NOT NULL,
-                    trace_id TEXT NOT NULL,
-                    direction TEXT NOT NULL,
-                    queue TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    peer TEXT NOT NULL,
-                    mail_from TEXT NOT NULL,
-                    rcpt_to JSONB NOT NULL,
-                    subject TEXT NOT NULL,
-                    internet_message_id TEXT,
-                    reason TEXT,
-                    route_target TEXT,
-                    remote_message_ref TEXT,
-                    spam_score REAL NOT NULL,
-                    security_score REAL NOT NULL,
-                    reputation_score INTEGER NOT NULL,
-                    dnsbl_hits JSONB NOT NULL,
-                    auth_summary JSONB NOT NULL,
-                    magika_summary TEXT,
-                    magika_decision TEXT,
-                    technical_status JSONB,
-                    dsn JSONB,
-                    throttle JSONB,
-                    decision_trace JSONB NOT NULL,
-                    search_text TEXT NOT NULL,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                "#,
-            )
-            .execute(pool)
-            .await?;
-            sqlx::query(
-                "CREATE INDEX IF NOT EXISTS mail_flow_history_trace_id_idx ON mail_flow_history (trace_id, event_unix DESC)"
-            )
-            .execute(pool)
-            .await?;
-            sqlx::query(
-                "CREATE INDEX IF NOT EXISTS mail_flow_history_event_unix_idx ON mail_flow_history (event_unix DESC)"
-            )
-            .execute(pool)
-            .await?;
-            sqlx::query(
-                "CREATE INDEX IF NOT EXISTS mail_flow_history_search_tsv_idx ON mail_flow_history USING GIN (to_tsvector('simple', search_text))"
-            )
-            .execute(pool)
-            .await?;
-            if ensure_pg_trgm_extension(pool).await {
-                sqlx::query(
-                    "CREATE INDEX IF NOT EXISTS mail_flow_history_search_trgm_idx ON mail_flow_history USING GIN (search_text gin_trgm_ops)"
-                )
-                .execute(pool)
-                .await?;
-            }
-            Ok::<(), anyhow::Error>(())
-        })
-        .await?;
-
-    Ok(Some(pool))
-}
-
-async fn local_db_pool(config: &RuntimeConfig) -> Result<Option<&'static PgPool>> {
-    if !config.local_db_enabled {
-        return Ok(None);
-    }
-
-    let database_url = config.local_db_url.as_deref().ok_or_else(|| {
-        anyhow!("LPE_CT_LOCAL_DB_URL must be set when LPE_CT_LOCAL_DB_ENABLED=true")
-    })?;
-
-    if let Some(initialized_url) = LOCAL_DB_POOL_URL.get() {
-        if initialized_url != database_url {
-            return Err(anyhow!(
-                "LPE_CT_LOCAL_DB_URL changed after pool initialization; restart LPE-CT to switch databases"
-            ));
-        }
-    }
-
-    let pool = LOCAL_DB_POOL
-        .get_or_try_init(|| async move {
-            let pool = PgPoolOptions::new()
-                .max_connections(8)
-                .connect(database_url)
-                .await
-                .with_context(|| "unable to connect to the dedicated LPE-CT PostgreSQL store")?;
-            let _ = LOCAL_DB_POOL_URL.set(database_url.to_string());
-            Ok::<PgPool, anyhow::Error>(pool)
-        })
-        .await?;
-
-    Ok(Some(pool))
+    storage::ensure_local_db_schema(&config.local_db).await
 }
 
 async fn migrate_legacy_policy_artifacts(spool_dir: &Path, pool: &PgPool) -> Result<()> {
@@ -689,19 +505,6 @@ async fn migrate_legacy_policy_artifacts(spool_dir: &Path, pool: &PgPool) -> Res
     migrate_legacy_greylist_entries(spool_dir, pool).await?;
     migrate_legacy_transport_audit_history(spool_dir, pool).await?;
     Ok(())
-}
-
-async fn ensure_pg_trgm_extension(pool: &PgPool) -> bool {
-    match sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-        .execute(pool)
-        .await
-    {
-        Ok(_) => true,
-        Err(error) => {
-            warn!(error = %error, "unable to enable pg_trgm extension; continuing with full-text history indexing only");
-            false
-        }
-    }
 }
 
 async fn migrate_legacy_transport_audit_history(spool_dir: &Path, pool: &PgPool) -> Result<()> {
@@ -949,11 +752,83 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
                 retry_after_seconds: rule.retry_after_seconds,
             })
             .collect(),
-        local_db_enabled: dashboard.local_data_stores.dedicated_postgres.enabled,
-        local_db_url: env::var("LPE_CT_LOCAL_DB_URL")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty()),
+        address_policy: transport_policy::AddressPolicyConfig {
+            allow_senders: dashboard.policies.address_policy.allow_senders.clone(),
+            block_senders: dashboard.policies.address_policy.block_senders.clone(),
+            allow_recipients: dashboard.policies.address_policy.allow_recipients.clone(),
+            block_recipients: dashboard.policies.address_policy.block_recipients.clone(),
+        },
+        recipient_verification: transport_policy::RecipientVerificationConfig {
+            enabled: dashboard.policies.recipient_verification.enabled,
+            fail_closed: dashboard.policies.recipient_verification.fail_closed,
+            cache_ttl_seconds: u64::from(
+                dashboard.policies.recipient_verification.cache_ttl_seconds,
+            ),
+            local_db: storage::LocalDbConfig {
+                enabled: dashboard.local_data_stores.dedicated_postgres.enabled,
+                database_url: env::var("LPE_CT_LOCAL_DB_URL")
+                    .ok()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty()),
+            },
+        },
+        attachment_policy: transport_policy::AttachmentPolicyConfig {
+            allow_extensions: dashboard
+                .policies
+                .attachment_policy
+                .allow_extensions
+                .clone(),
+            block_extensions: dashboard
+                .policies
+                .attachment_policy
+                .block_extensions
+                .clone(),
+            allow_mime_types: dashboard
+                .policies
+                .attachment_policy
+                .allow_mime_types
+                .clone(),
+            block_mime_types: dashboard
+                .policies
+                .attachment_policy
+                .block_mime_types
+                .clone(),
+            allow_detected_types: dashboard
+                .policies
+                .attachment_policy
+                .allow_detected_types
+                .clone(),
+            block_detected_types: dashboard
+                .policies
+                .attachment_policy
+                .block_detected_types
+                .clone(),
+        },
+        dkim: dkim_signing::DkimConfig {
+            enabled: dashboard.policies.dkim.enabled,
+            headers: dashboard.policies.dkim.headers.clone(),
+            over_sign: dashboard.policies.dkim.over_sign,
+            expiration_seconds: dashboard.policies.dkim.expiration_seconds.map(u64::from),
+            keys: dashboard
+                .policies
+                .dkim
+                .domains
+                .iter()
+                .filter(|entry| entry.enabled)
+                .map(|entry| dkim_signing::DkimKeyConfig {
+                    domain: entry.domain.clone(),
+                    selector: entry.selector.clone(),
+                    key_path: entry.private_key_path.clone(),
+                })
+                .collect(),
+        },
+        local_db: storage::LocalDbConfig {
+            enabled: dashboard.local_data_stores.dedicated_postgres.enabled,
+            database_url: env::var("LPE_CT_LOCAL_DB_URL")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+        },
     }
 }
 
@@ -1051,7 +926,11 @@ pub(crate) async fn process_outbound_handoff(
     let message_id = payload.message_id;
     let internet_message_id = payload.internet_message_id.clone();
     let route = resolve_outbound_route(config, &payload);
-    let dkim = dkim_signing::maybe_sign_outbound_message(&payload, &compose_rfc822_message(&payload))?;
+    let dkim = dkim_signing::maybe_sign_outbound_message(
+        &config.dkim,
+        &payload,
+        &compose_rfc822_message(&payload),
+    )?;
     let mut message = QueuedMessage {
         id: format!("lpe-ct-out-{}", payload.queue_id),
         direction: "outbound".to_string(),
@@ -1117,7 +996,8 @@ pub(crate) async fn process_outbound_handoff(
         detail: dkim.detail,
     });
     if let transport_policy::AddressPolicyVerdict::Reject(reason) =
-        transport_policy::evaluate_address_policy(
+        transport_policy::evaluate_address_policy_with_config(
+            &config.address_policy,
             transport_policy::AddressRole::Sender,
             &payload.from_address,
         )
@@ -1160,7 +1040,8 @@ pub(crate) async fn process_outbound_handoff(
     }
     for recipient in payload.envelope_recipients() {
         if let transport_policy::AddressPolicyVerdict::Reject(reason) =
-            transport_policy::evaluate_address_policy(
+            transport_policy::evaluate_address_policy_with_config(
+                &config.address_policy,
                 transport_policy::AddressRole::Recipient,
                 &recipient,
             )
@@ -1693,8 +1574,10 @@ async fn handle_smtp_session(
             write_smtp(&mut writer, "250 SIZE").await?;
         } else if upper.starts_with("MAIL FROM:") {
             let candidate = command[10..].trim().trim_matches(['<', '>']).to_string();
+            let config = runtime_config(&state_file)?;
             if let transport_policy::AddressPolicyVerdict::Reject(reason) =
-                transport_policy::evaluate_address_policy(
+                transport_policy::evaluate_address_policy_with_config(
+                    &config.address_policy,
                     transport_policy::AddressRole::Sender,
                     &candidate,
                 )
@@ -1711,8 +1594,10 @@ async fn handle_smtp_session(
                 continue;
             }
             let recipient = command[8..].trim().trim_matches(['<', '>']).to_string();
+            let config = runtime_config(&state_file)?;
             if let transport_policy::AddressPolicyVerdict::Reject(reason) =
-                transport_policy::evaluate_address_policy(
+                transport_policy::evaluate_address_policy_with_config(
+                    &config.address_policy,
                     transport_policy::AddressRole::Recipient,
                     &recipient,
                 )
@@ -1720,9 +1605,9 @@ async fn handle_smtp_session(
                 write_smtp(&mut writer, &format!("550 recipient rejected ({reason})")).await?;
                 continue;
             }
-            let config = runtime_config(&state_file)?;
             match transport_policy::verify_recipient_with_core(
                 &client,
+                &config.recipient_verification,
                 &config.core_delivery_base_url,
                 Some(&mail_from),
                 &recipient,
@@ -1964,7 +1849,8 @@ async fn receive_message_with_validator<D: Detector>(
             return Ok(message);
         }
     }
-    match transport_policy::evaluate_attachment_policy(
+    match transport_policy::evaluate_attachment_policy_with_config(
+        &config.attachment_policy,
         validator,
         IngressContext::LpeCtInboundSmtp,
         &message.data,
@@ -4116,7 +4002,10 @@ async fn append_transport_audit(
     Ok(())
 }
 
-async fn persist_transport_audit_db_event(pool: &PgPool, event: &TransportAuditEvent) -> Result<()> {
+async fn persist_transport_audit_db_event(
+    pool: &PgPool,
+    event: &TransportAuditEvent,
+) -> Result<()> {
     let event_unix = parse_unix_timestamp(&event.timestamp).unwrap_or(0) as i64;
     let event_key = transport_audit_event_key(event);
     sqlx::query(
@@ -4194,7 +4083,12 @@ fn transport_audit_search_text(event: &TransportAuditEvent) -> String {
         event.peer.to_ascii_lowercase(),
     ];
     parts.extend(event.rcpt_to.iter().map(|value| value.to_ascii_lowercase()));
-    parts.extend(event.dnsbl_hits.iter().map(|value| value.to_ascii_lowercase()));
+    parts.extend(
+        event
+            .dnsbl_hits
+            .iter()
+            .map(|value| value.to_ascii_lowercase()),
+    );
     if let Some(value) = &event.internet_message_id {
         parts.push(value.to_ascii_lowercase());
     }
@@ -4503,10 +4397,26 @@ fn transition_target(queue: &str, direction: &str, action: TraceAction) -> Optio
     }
 }
 
-fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
+pub(crate) fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
     let raw = fs::read_to_string(state_file)
         .with_context(|| format!("unable to read state file {}", state_file.display()))?;
     let value = serde_json::from_str::<Value>(&raw)?;
+    let antivirus_provider_chain = strings_at(
+        &value,
+        &["policies", "antivirus_provider_chain"],
+        &["takeri"],
+    );
+    let local_db = storage::LocalDbConfig {
+        enabled: bool_at(
+            &value,
+            &["local_data_stores", "dedicated_postgres", "enabled"],
+            true,
+        ),
+        database_url: env::var("LPE_CT_LOCAL_DB_URL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty()),
+    };
     Ok(RuntimeConfig {
         primary_upstream: string_at(&value, &["relay", "primary_upstream"]),
         secondary_upstream: string_at(&value, &["relay", "secondary_upstream"]),
@@ -4518,16 +4428,8 @@ fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
         greylisting_enabled: bool_at(&value, &["policies", "greylisting_enabled"], true),
         antivirus_enabled: bool_at(&value, &["policies", "antivirus_enabled"], false),
         antivirus_fail_closed: bool_at(&value, &["policies", "antivirus_fail_closed"], true),
-        antivirus_provider_chain: strings_at(
-            &value,
-            &["policies", "antivirus_provider_chain"],
-            &["takeri"],
-        ),
-        antivirus_providers: load_antivirus_providers(&strings_at(
-            &value,
-            &["policies", "antivirus_provider_chain"],
-            &["takeri"],
-        )),
+        antivirus_provider_chain: antivirus_provider_chain.clone(),
+        antivirus_providers: load_antivirus_providers(&antivirus_provider_chain),
         bayespam_enabled: bool_at(&value, &["policies", "bayespam_enabled"], true),
         bayespam_auto_learn: bool_at(&value, &["policies", "bayespam_auto_learn"], true),
         bayespam_score_weight: f32_at(&value, &["policies", "bayespam_score_weight"], 6.0),
@@ -4566,15 +4468,101 @@ fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
         routing_rules: routing_rules_at(&value),
         throttle_enabled: bool_at(&value, &["throttling", "enabled"], true),
         throttle_rules: throttle_rules_at(&value),
-        local_db_enabled: bool_at(
-            &value,
-            &["local_data_stores", "dedicated_postgres", "enabled"],
-            true,
-        ),
-        local_db_url: env::var("LPE_CT_LOCAL_DB_URL")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty()),
+        address_policy: transport_policy::AddressPolicyConfig {
+            allow_senders: strings_at(
+                &value,
+                &["policies", "address_policy", "allow_senders"],
+                &[],
+            ),
+            block_senders: strings_at(
+                &value,
+                &["policies", "address_policy", "block_senders"],
+                &[],
+            ),
+            allow_recipients: strings_at(
+                &value,
+                &["policies", "address_policy", "allow_recipients"],
+                &[],
+            ),
+            block_recipients: strings_at(
+                &value,
+                &["policies", "address_policy", "block_recipients"],
+                &[],
+            ),
+        },
+        recipient_verification: transport_policy::RecipientVerificationConfig {
+            enabled: bool_at(
+                &value,
+                &["policies", "recipient_verification", "enabled"],
+                false,
+            ),
+            fail_closed: bool_at(
+                &value,
+                &["policies", "recipient_verification", "fail_closed"],
+                true,
+            ),
+            cache_ttl_seconds: u64::from(u32_at(
+                &value,
+                &["policies", "recipient_verification", "cache_ttl_seconds"],
+                300,
+            )),
+            local_db: local_db.clone(),
+        },
+        attachment_policy: transport_policy::AttachmentPolicyConfig {
+            allow_extensions: strings_at(
+                &value,
+                &["policies", "attachment_policy", "allow_extensions"],
+                &[],
+            ),
+            block_extensions: strings_at(
+                &value,
+                &["policies", "attachment_policy", "block_extensions"],
+                &[],
+            ),
+            allow_mime_types: strings_at(
+                &value,
+                &["policies", "attachment_policy", "allow_mime_types"],
+                &[],
+            ),
+            block_mime_types: strings_at(
+                &value,
+                &["policies", "attachment_policy", "block_mime_types"],
+                &[],
+            ),
+            allow_detected_types: strings_at(
+                &value,
+                &["policies", "attachment_policy", "allow_detected_types"],
+                &[],
+            ),
+            block_detected_types: strings_at(
+                &value,
+                &["policies", "attachment_policy", "block_detected_types"],
+                &[],
+            ),
+        },
+        dkim: dkim_signing::DkimConfig {
+            enabled: bool_at(&value, &["policies", "dkim", "enabled"], false),
+            headers: strings_at(
+                &value,
+                &["policies", "dkim", "headers"],
+                &[
+                    "from",
+                    "to",
+                    "cc",
+                    "subject",
+                    "mime-version",
+                    "content-type",
+                    "message-id",
+                ],
+            ),
+            over_sign: bool_at(&value, &["policies", "dkim", "over_sign"], true),
+            expiration_seconds: {
+                let value = u32_at(&value, &["policies", "dkim", "expiration_seconds"], 0);
+                (value > 0).then_some(u64::from(value))
+            },
+            keys: dkim_domain_configs_at(&value),
+        },
+        local_db,
     })
 }
 
@@ -4823,13 +4811,42 @@ fn strings_at(value: &Value, path: &[&str], fallback: &[&str]) -> Vec<String> {
         .unwrap_or_else(|| fallback.iter().map(|value| value.to_string()).collect())
 }
 
+fn dkim_domain_configs_at(value: &Value) -> Vec<dkim_signing::DkimKeyConfig> {
+    value
+        .get("policies")
+        .and_then(|value| value.get("dkim"))
+        .and_then(|value| value.get("domains"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let enabled = item.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+                    if !enabled {
+                        return None;
+                    }
+                    Some(dkim_signing::DkimKeyConfig {
+                        domain: item.get("domain")?.as_str()?.trim().to_ascii_lowercase(),
+                        selector: item.get("selector")?.as_str()?.trim().to_string(),
+                        key_path: item.get("private_key_path")?.as_str()?.trim().to_string(),
+                    })
+                })
+                .filter(|item| {
+                    !item.domain.is_empty()
+                        && !item.selector.is_empty()
+                        && !item.key_path.is_empty()
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn should_quarantine(data: &[u8]) -> bool {
     String::from_utf8_lossy(data).lines().any(|line| {
         let lower = line.to_ascii_lowercase();
         lower.starts_with("x-lpe-ct-quarantine: yes") || lower.contains("[quarantine]")
     })
 }
-
 
 fn normalize_smtp_target(target: &str) -> String {
     target
@@ -5076,8 +5093,22 @@ mod tests {
             routing_rules: Vec::new(),
             throttle_enabled: false,
             throttle_rules: Vec::new(),
-            local_db_enabled: false,
-            local_db_url: None,
+            address_policy: crate::transport_policy::AddressPolicyConfig::default(),
+            recipient_verification: crate::transport_policy::RecipientVerificationConfig {
+                enabled: false,
+                fail_closed: true,
+                cache_ttl_seconds: 300,
+                local_db: crate::storage::LocalDbConfig::default(),
+            },
+            attachment_policy: crate::transport_policy::AttachmentPolicyConfig::default(),
+            dkim: crate::dkim_signing::DkimConfig {
+                enabled: false,
+                headers: vec!["from".to_string()],
+                over_sign: true,
+                expiration_seconds: None,
+                keys: Vec::new(),
+            },
+            local_db: crate::storage::LocalDbConfig::default(),
         }
     }
 

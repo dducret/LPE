@@ -1,13 +1,13 @@
 use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use lpe_magika::{IngressContext, Validator};
 use lpe_domain::{
     SignedIntegrationHeaders, SmtpSubmissionAuthRequest, SmtpSubmissionAuthResponse,
     SmtpSubmissionRequest, SmtpSubmissionResponse, INTEGRATION_KEY_HEADER,
     INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER, INTEGRATION_TIMESTAMP_HEADER,
 };
+use lpe_magika::{IngressContext, Validator};
 use reqwest::StatusCode;
-use std::{env, fs::File, io::BufReader, net::SocketAddr, sync::Arc};
+use std::{env, fs::File, io::BufReader, net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader as TokioBufReader},
     net::{TcpListener, TcpStream},
@@ -62,6 +62,7 @@ impl SubmissionTransaction {
 pub(crate) async fn run_submission_listener(
     bind_address: String,
     core_base_url: String,
+    state_file: PathBuf,
 ) -> Result<()> {
     let tls = load_tls_acceptor()?;
     let listener = TcpListener::bind(&bind_address)
@@ -75,9 +76,11 @@ pub(crate) async fn run_submission_listener(
         let tls = tls.clone();
         let client = client.clone();
         let core_base_url = core_base_url.clone();
+        let state_file = state_file.clone();
         tokio::spawn(async move {
             if let Err(error) =
-                handle_submission_session(stream, peer, tls, client, core_base_url).await
+                handle_submission_session(stream, peer, tls, client, core_base_url, state_file)
+                    .await
             {
                 warn!(peer = %peer, error = %error, "smtp submission session failed");
             }
@@ -91,6 +94,7 @@ async fn handle_submission_session(
     tls: TlsAcceptor,
     client: reqwest::Client,
     core_base_url: String,
+    state_file: PathBuf,
 ) -> Result<()> {
     if let Some(role) = crate::ha_non_active_role_for_traffic()? {
         let mut stream = stream;
@@ -178,8 +182,10 @@ async fn handle_submission_session(
 
         if upper.starts_with("MAIL FROM:") {
             let candidate = normalize_path_argument(&command[10..]);
+            let config = crate::smtp::runtime_config(&state_file)?;
             if let transport_policy::AddressPolicyVerdict::Reject(reason) =
-                transport_policy::evaluate_address_policy(
+                transport_policy::evaluate_address_policy_with_config(
+                    &config.address_policy,
                     transport_policy::AddressRole::Sender,
                     &candidate,
                 )
@@ -199,8 +205,10 @@ async fn handle_submission_session(
                 continue;
             }
             let recipient = normalize_path_argument(&command[8..]);
+            let config = crate::smtp::runtime_config(&state_file)?;
             if let transport_policy::AddressPolicyVerdict::Reject(reason) =
-                transport_policy::evaluate_address_policy(
+                transport_policy::evaluate_address_policy_with_config(
+                    &config.address_policy,
                     transport_policy::AddressRole::Recipient,
                     &recipient,
                 )
@@ -225,7 +233,9 @@ async fn handle_submission_session(
             write_line(&mut writer, "354 end with <CRLF>.<CRLF>").await?;
             let data = read_data(&mut reader).await?;
             let validator = Validator::from_env();
-            match transport_policy::evaluate_attachment_policy(
+            let config = crate::smtp::runtime_config(&state_file)?;
+            match transport_policy::evaluate_attachment_policy_with_config(
+                &config.attachment_policy,
                 &validator,
                 IngressContext::SmtpClientSubmission,
                 &data,

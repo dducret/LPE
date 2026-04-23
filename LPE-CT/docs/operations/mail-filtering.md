@@ -264,6 +264,16 @@ When the optional local PostgreSQL store is active, `LPE-CT` also upserts one ro
 - `DNSBL`, auth summary, and decision trace JSON
 - `Magika` summary / decision when applicable
 
+The same technical store now mirrors the current management-plane policy state into private tables:
+
+- `policy_address_rules` for sender and recipient allow/block entries
+- `attachment_policy_rules` for extension, MIME, and detected-type controls
+- `digest_settings` and `digest_recipients` for quarantine digest scheduling and targets
+- `recipient_verification_settings` and `recipient_verification_cache` for internal recipient-validation behavior plus short-lived cache rows
+- `dkim_domain_configs` for enabled sender-domain signing references and key-path metadata
+
+Those rows remain technical only. They exist to keep the sorting-center backend searchable and cluster-friendly; the durable admin source remains `state.json`, and queue ownership remains in the spool.
+
 `auth_summary` is now derived from structured SPF/DKIM/DMARC results rather than string matching on debug output. The decision trace also records:
 
 - SPF domain used for evaluation

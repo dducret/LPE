@@ -72,7 +72,16 @@ The target storage model is therefore:
 The preferred first dedicated store is an `LPE-CT`-owned local `PostgreSQL` service used only for technical state.
 
 The current implementation now persists the default indexed perimeter state into private tables such as `greylist_entries`, `reputation_entries`, `bayespam_corpora`, `throttle_windows`, and `quarantine_messages` when `LPE_CT_LOCAL_DB_ENABLED=true` and `LPE_CT_LOCAL_DB_URL` is configured. Those tables are technical only; payload custody remains in the spool and quarantine directories.
-Retained mail-flow history and scheduled quarantine digest artifacts remain sorting-center-owned technical state as well; the current implementation stores retained history in the spool under `policy/transport-audit.jsonl` and digest artifacts under `policy/digest-reports/`, while optional private PostgreSQL remains available for quarantine metadata and future reporting indexes.
+Retained mail-flow history and scheduled quarantine digest artifacts remain sorting-center-owned technical state as well; the current implementation stores retained history in the spool under `policy/transport-audit.jsonl` and digest artifacts under `policy/digest-reports/`, while the private PostgreSQL store now also persists dedicated technical indexes and configuration mirrors for:
+
+- `mail_flow_history`
+- `policy_address_rules`
+- `attachment_policy_rules`
+- `digest_settings`
+- `digest_recipients`
+- `recipient_verification_cache`
+- `recipient_verification_settings`
+- `dkim_domain_configs`
 
 Typical target domains for that local database are:
 
@@ -81,6 +90,8 @@ Typical target domains for that local database are:
 - greylisting indexes and cleanup-friendly timestamps
 - quarantine metadata and operational search indexes
 - retained perimeter mail-flow history indexes and reporting metadata
+- technical admin policy metadata for allow/block lists, attachment controls, digest schedules, and DKIM domain references
+- recipient-verification cache state and verification-policy materialization
 - throttling counters and routing coordination metadata
 - cluster membership, failover coordination, and shared perimeter state across `LPE-CT` nodes
 
@@ -132,6 +143,25 @@ Temporary possession is allowed only where the perimeter function requires it, f
 - bounded transport metadata required for `DSN`, bounce handling, replay, or incident review
 
 Even in those cases, `LPE-CT` remains non-canonical.
+
+### Rebuild and retention expectations
+
+The local PostgreSQL store must remain operationally discardable.
+
+That means the expected rebuild behavior is:
+
+- `greylist_entries`, `reputation_entries`, `bayespam_corpora`, and `throttle_windows` may be rebuilt or relearned from future traffic plus any retained spool artifacts
+- `quarantine_messages` may be rebuilt from the current quarantine spool because payload custody remains in `quarantine/`
+- `mail_flow_history` may be partially rebuilt from retained `policy/transport-audit.jsonl` within the configured retention window
+- `policy_address_rules`, `attachment_policy_rules`, `digest_settings`, `digest_recipients`, `recipient_verification_settings`, and `dkim_domain_configs` are mirrors of `state.json` management configuration and can be repopulated from that file at startup
+- `recipient_verification_cache` is disposable short-lived materialized state and may be dropped without changing canonical mailbox truth
+
+Retention remains bounded:
+
+- queue custody stays in the spool
+- digest artifacts remain technical reports under `policy/digest-reports/`
+- history indexes follow the retained history window configured for `LPE-CT`
+- recipient-verification cache rows expire automatically by TTL and must not become durable mailbox-directory truth
 
 ### Storage assignment by function
 

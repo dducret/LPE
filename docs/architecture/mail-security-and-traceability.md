@@ -96,6 +96,14 @@ When `LPE-CT` enables its dedicated local `PostgreSQL` store, quarantined messag
 
 `LPE-CT` may also retain perimeter mail-flow history and generated quarantine digest artifacts for operator search and reporting, provided that those artifacts remain technical sorting-center state and do not become canonical mailbox search or user-visible product data in the core `LPE` store.
 
+The current technical store also persists sorting-center-owned policy and coordination metadata needed by the management plane:
+
+- allow/block address rules in `policy_address_rules`
+- attachment controls in `attachment_policy_rules`
+- digest schedule and recipient targets in `digest_settings` and `digest_recipients`
+- short-lived recipient verification cache materialization in `recipient_verification_cache`
+- DKIM sender-domain technical references in `dkim_domain_configs`
+
 `LPE` may request the release of a message through a privileged action, but quarantine ownership remains in the sorting center.
 
 

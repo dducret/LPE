@@ -26,7 +26,8 @@ The perimeter pipeline now also executes:
 - detailed decision tracing persisted in the spool
 
 When dedicated local PostgreSQL is enabled, `LPE-CT` now also persists technical quarantine metadata into a private `quarantine_messages` table and retained flow-history events into a private `mail_flow_history` table. Payload custody remains in the spool and quarantine directories.
-The management surface now also uses sorting-center-owned retained artifacts plus that dedicated technical history index for quarantine search, retained mail-flow history, and scheduled quarantine digest reports generated entirely from `LPE-CT` state.
+The same private store now also holds technical management-plane metadata for `policy_address_rules`, `attachment_policy_rules`, `digest_settings`, `digest_recipients`, `recipient_verification_cache`, `recipient_verification_settings`, and `dkim_domain_configs`.
+The management surface now also uses sorting-center-owned retained artifacts plus those dedicated technical indexes for quarantine search, retained mail-flow history, address-policy administration, digest scheduling, recipient-verification cache inspection, and DKIM-domain configuration references generated entirely from `LPE-CT` state.
 
 `LPE-CT` may also use dedicated local technical data stores for perimeter-owned state such as Bayesian filtering, reputation, greylisting, quarantine indexes, or cluster coordination. Those stores must remain local to the sorting center and must not become canonical mailbox or collaboration storage.
 
@@ -59,6 +60,13 @@ Inbound `SMTP` recipient verification remains an `LPE`-backed internal decision.
 - the modern product axis remains `JMAP` on the core `LPE` side
 
 The dedicated local-store rules for `LPE-CT` are documented in `docs/architecture/lpe-ct-local-data-stores.md`.
+
+Technical rebuild expectations remain strict:
+
+- queue and quarantine payload custody stay in the spool
+- local PostgreSQL indexes may be repopulated from `state.json`, retained audit history, and current spool artifacts
+- recipient-verification cache rows are disposable and expire by TTL
+- no private table in `LPE-CT` becomes authoritative mailbox or tenant state
 
 ### Network flows
 

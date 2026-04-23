@@ -229,7 +229,9 @@ pub(crate) fn default_reporting_settings() -> ReportingSettings {
         domain_defaults: Vec::new(),
         user_overrides: Vec::new(),
         last_digest_run_at: None,
-        next_digest_run_at: Some(timestamp_from_now(default_digest_interval_minutes() as u64 * 60)),
+        next_digest_run_at: Some(timestamp_from_now(
+            default_digest_interval_minutes() as u64 * 60,
+        )),
     }
 }
 
@@ -260,8 +262,9 @@ pub(crate) fn normalize_reporting_settings(settings: &mut ReportingSettings) {
     settings.user_overrides = normalize_user_overrides(&settings.user_overrides);
 
     if settings.next_digest_run_at.is_none() {
-        settings.next_digest_run_at =
-            Some(timestamp_from_now(settings.digest_interval_minutes as u64 * 60));
+        settings.next_digest_run_at = Some(timestamp_from_now(
+            settings.digest_interval_minutes as u64 * 60,
+        ));
     }
 }
 
@@ -296,7 +299,8 @@ pub(crate) fn run_digest_generation(
     let mut reports = Vec::new();
 
     for digest in &settings.domain_defaults {
-        let items = filter_quarantine_for_domain(&quarantine, &digest.domain, settings.digest_max_items);
+        let items =
+            filter_quarantine_for_domain(&quarantine, &digest.domain, settings.digest_max_items);
         if items.is_empty() {
             continue;
         }
@@ -314,8 +318,11 @@ pub(crate) fn run_digest_generation(
     }
 
     for override_entry in settings.user_overrides.iter().filter(|entry| entry.enabled) {
-        let items =
-            filter_quarantine_for_mailbox(&quarantine, &override_entry.mailbox, settings.digest_max_items);
+        let items = filter_quarantine_for_mailbox(
+            &quarantine,
+            &override_entry.mailbox,
+            settings.digest_max_items,
+        );
         if items.is_empty() {
             continue;
         }
@@ -331,8 +338,9 @@ pub(crate) fn run_digest_generation(
     }
 
     settings.last_digest_run_at = Some(generated_at.clone());
-    settings.next_digest_run_at =
-        Some(timestamp_from_now(settings.digest_interval_minutes as u64 * 60));
+    settings.next_digest_run_at = Some(timestamp_from_now(
+        settings.digest_interval_minutes as u64 * 60,
+    ));
 
     Ok(reports)
 }
@@ -378,7 +386,9 @@ pub(crate) async fn search_mail_history(
     retention_days: u32,
 ) -> Result<MailHistoryResponse> {
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
-    if let Some(response) = search_mail_history_from_db(config, &query, retention_days, limit).await? {
+    if let Some(response) =
+        search_mail_history_from_db(config, &query, retention_days, limit).await?
+    {
         return Ok(response);
     }
     let events = read_mail_history_events(spool_dir, config, retention_days).await?;
@@ -663,7 +673,9 @@ fn mail_history_event_from_row(row: &sqlx::postgres::PgRow) -> Result<MailHistor
         status: row.try_get("status")?,
         peer: row.try_get("peer").unwrap_or_default(),
         mail_from: row.try_get("mail_from")?,
-        rcpt_to: row.try_get::<sqlx::types::Json<Vec<String>>, _>("rcpt_to")?.0,
+        rcpt_to: row
+            .try_get::<sqlx::types::Json<Vec<String>>, _>("rcpt_to")?
+            .0,
         subject: row.try_get("subject")?,
         internet_message_id: row.try_get("internet_message_id")?,
         reason: row.try_get("reason")?,
@@ -672,8 +684,12 @@ fn mail_history_event_from_row(row: &sqlx::postgres::PgRow) -> Result<MailHistor
         spam_score: row.try_get("spam_score")?,
         security_score: row.try_get("security_score")?,
         reputation_score: row.try_get("reputation_score")?,
-        dnsbl_hits: row.try_get::<sqlx::types::Json<Vec<String>>, _>("dnsbl_hits")?.0,
-        auth_summary: row.try_get::<sqlx::types::Json<Value>, _>("auth_summary")?.0,
+        dnsbl_hits: row
+            .try_get::<sqlx::types::Json<Vec<String>>, _>("dnsbl_hits")?
+            .0,
+        auth_summary: row
+            .try_get::<sqlx::types::Json<Value>, _>("auth_summary")?
+            .0,
         magika_summary: row.try_get("magika_summary")?,
         magika_decision: row.try_get("magika_decision")?,
         technical_status: row
@@ -685,7 +701,9 @@ fn mail_history_event_from_row(row: &sqlx::postgres::PgRow) -> Result<MailHistor
         throttle: row
             .try_get::<Option<sqlx::types::Json<Value>>, _>("throttle")?
             .map(|value| value.0),
-        decision_trace: row.try_get::<sqlx::types::Json<Vec<Value>>, _>("decision_trace")?.0,
+        decision_trace: row
+            .try_get::<sqlx::types::Json<Vec<Value>>, _>("decision_trace")?
+            .0,
     })
 }
 
@@ -696,7 +714,10 @@ fn history_cutoff(retention_days: u32) -> i64 {
 fn group_history(events: Vec<MailHistoryEvent>) -> BTreeMap<String, Vec<MailHistoryEvent>> {
     let mut grouped = BTreeMap::<String, Vec<MailHistoryEvent>>::new();
     for event in events {
-        grouped.entry(event.trace_id.clone()).or_default().push(event);
+        grouped
+            .entry(event.trace_id.clone())
+            .or_default()
+            .push(event);
     }
     for events in grouped.values_mut() {
         events.sort_by(|left, right| left.timestamp.cmp(&right.timestamp));
@@ -812,8 +833,14 @@ fn render_digest_content(
     recipient: &str,
     items: &[QuarantineSummary],
 ) -> String {
-    let inbound = items.iter().filter(|item| item.direction == "inbound").count();
-    let outbound = items.iter().filter(|item| item.direction == "outbound").count();
+    let inbound = items
+        .iter()
+        .filter(|item| item.direction == "inbound")
+        .count();
+    let outbound = items
+        .iter()
+        .filter(|item| item.direction == "outbound")
+        .count();
     let highest_spam = items
         .iter()
         .map(|item| item.spam_score)
@@ -858,7 +885,9 @@ fn filter_quarantine_for_domain(
         .filter(|item| {
             let sender_matches = expected
                 .as_deref()
-                .and_then(|value| domain_part(&item.mail_from).map(|item_domain| item_domain == value))
+                .and_then(|value| {
+                    domain_part(&item.mail_from).map(|item_domain| item_domain == value)
+                })
                 .unwrap_or(false);
             let recipient_matches = item
                 .rcpt_to

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use email_auth::dkim::{CanonicalizationMethod, DkimSigner};
 use lpe_domain::OutboundMessageHandoffRequest;
-use std::{env, fs};
+use std::fs;
 
 #[derive(Debug, Clone)]
 pub(crate) struct DkimSigningOutcome {
@@ -11,26 +11,26 @@ pub(crate) struct DkimSigningOutcome {
 }
 
 #[derive(Debug, Clone)]
-struct DkimKeyConfig {
-    domain: String,
-    selector: String,
-    key_path: String,
+pub(crate) struct DkimKeyConfig {
+    pub domain: String,
+    pub selector: String,
+    pub key_path: String,
 }
 
 #[derive(Debug, Clone)]
-struct DkimConfig {
-    enabled: bool,
-    headers: Vec<String>,
-    over_sign: bool,
-    expiration_seconds: Option<u64>,
-    keys: Vec<DkimKeyConfig>,
+pub(crate) struct DkimConfig {
+    pub enabled: bool,
+    pub headers: Vec<String>,
+    pub over_sign: bool,
+    pub expiration_seconds: Option<u64>,
+    pub keys: Vec<DkimKeyConfig>,
 }
 
 pub(crate) fn maybe_sign_outbound_message(
+    config: &DkimConfig,
     payload: &OutboundMessageHandoffRequest,
     raw_message: &[u8],
 ) -> Result<DkimSigningOutcome> {
-    let config = dkim_config_from_env();
     if !config.enabled {
         return Ok(DkimSigningOutcome {
             message: raw_message.to_vec(),
@@ -86,67 +86,6 @@ pub(crate) fn maybe_sign_outbound_message(
     })
 }
 
-fn dkim_config_from_env() -> DkimConfig {
-    DkimConfig {
-        enabled: parse_bool_env("LPE_CT_OUTBOUND_DKIM_ENABLED", false),
-        headers: env::var("LPE_CT_OUTBOUND_DKIM_HEADERS")
-            .ok()
-            .map(|value| {
-                value
-                    .split(',')
-                    .map(str::trim)
-                    .map(|value| value.to_ascii_lowercase())
-                    .filter(|value| !value.is_empty())
-                    .collect::<Vec<_>>()
-            })
-            .filter(|headers| !headers.is_empty())
-            .unwrap_or_else(|| {
-                vec![
-                    "from".to_string(),
-                    "to".to_string(),
-                    "cc".to_string(),
-                    "subject".to_string(),
-                    "mime-version".to_string(),
-                    "content-type".to_string(),
-                    "message-id".to_string(),
-                ]
-            }),
-        over_sign: parse_bool_env("LPE_CT_OUTBOUND_DKIM_OVER_SIGN", true),
-        expiration_seconds: env::var("LPE_CT_OUTBOUND_DKIM_EXPIRATION_SECONDS")
-            .ok()
-            .and_then(|value| value.trim().parse::<u64>().ok())
-            .filter(|value| *value > 0),
-        keys: env::var("LPE_CT_OUTBOUND_DKIM_KEYS")
-            .ok()
-            .map(|value| parse_key_entries(&value))
-            .unwrap_or_default(),
-    }
-}
-
-fn parse_key_entries(value: &str) -> Vec<DkimKeyConfig> {
-    value
-        .split(';')
-        .filter_map(|entry| {
-            let trimmed = entry.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-            let mut parts = trimmed.split('|').map(str::trim);
-            let domain = parts.next()?.to_ascii_lowercase();
-            let selector = parts.next()?.to_string();
-            let key_path = parts.next()?.to_string();
-            if domain.is_empty() || selector.is_empty() || key_path.is_empty() {
-                return None;
-            }
-            Some(DkimKeyConfig {
-                domain,
-                selector,
-                key_path,
-            })
-        })
-        .collect()
-}
-
 fn parse_headers(message: &[u8]) -> Vec<(String, String)> {
     let header_bytes = message
         .windows(4)
@@ -200,16 +139,9 @@ fn sender_domain(payload: &OutboundMessageHandoffRequest) -> String {
         .unwrap_or_else(|| "invalid".to_string())
 }
 
-fn parse_bool_env(name: &str, default: bool) -> bool {
-    env::var(name)
-        .ok()
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-        .unwrap_or(default)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::maybe_sign_outbound_message;
+    use super::{maybe_sign_outbound_message, DkimConfig, DkimKeyConfig};
     use crate::env_test_lock;
     use lpe_domain::{OutboundMessageHandoffRequest, TransportRecipient};
     use uuid::Uuid;
@@ -243,6 +175,25 @@ mod tests {
     #[ignore = "env-sensitive"]
     fn dkim_signer_adds_header_when_domain_key_exists() {
         let _guard = env_test_lock();
+        let config = DkimConfig {
+            enabled: true,
+            headers: vec![
+                "from".to_string(),
+                "to".to_string(),
+                "cc".to_string(),
+                "subject".to_string(),
+                "mime-version".to_string(),
+                "content-type".to_string(),
+                "message-id".to_string(),
+            ],
+            over_sign: true,
+            expiration_seconds: None,
+            keys: vec![DkimKeyConfig {
+                domain: "example.test".to_string(),
+                selector: "mta".to_string(),
+                key_path: "tests/fixtures/rsa2048.pem".to_string(),
+            }],
+        };
         let raw = concat!(
             "From: Sender <sender@example.test>\r\n",
             "To: Dest <dest@example.test>\r\n",
@@ -255,21 +206,13 @@ mod tests {
         )
         .as_bytes()
         .to_vec();
-        std::env::set_var("LPE_CT_OUTBOUND_DKIM_ENABLED", "true");
-        std::env::set_var(
-            "LPE_CT_OUTBOUND_DKIM_KEYS",
-            "example.test|mta|tests/fixtures/rsa2048.pem",
-        );
 
-        let outcome = maybe_sign_outbound_message(&payload(), &raw).unwrap();
+        let outcome = maybe_sign_outbound_message(&config, &payload(), &raw).unwrap();
 
         assert!(outcome.signed);
         let signed = String::from_utf8(outcome.message).unwrap();
         assert!(signed.starts_with("DKIM-Signature: "));
         assert!(signed.contains(" d=example.test;"));
         assert!(signed.contains(" s=mta;"));
-
-        std::env::remove_var("LPE_CT_OUTBOUND_DKIM_ENABLED");
-        std::env::remove_var("LPE_CT_OUTBOUND_DKIM_KEYS");
     }
 }

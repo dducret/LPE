@@ -8,15 +8,16 @@ use lpe_magika::{
     Validator,
 };
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::env;
 use std::{
     collections::BTreeMap,
-    env,
     sync::{Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 use uuid::Uuid;
 
-use crate::integration_shared_secret;
+use crate::{integration_shared_secret, storage};
 
 pub(crate) const RECIPIENT_VERIFICATION_PATH: &str = "/internal/lpe-ct/recipient-verification";
 
@@ -73,31 +74,33 @@ struct CachedRecipientVerdict {
 }
 
 #[derive(Debug, Clone, Default)]
-struct AddressPolicyConfig {
-    allow_senders: Vec<String>,
-    block_senders: Vec<String>,
-    allow_recipients: Vec<String>,
-    block_recipients: Vec<String>,
+pub(crate) struct AddressPolicyConfig {
+    pub allow_senders: Vec<String>,
+    pub block_senders: Vec<String>,
+    pub allow_recipients: Vec<String>,
+    pub block_recipients: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
-struct AttachmentPolicyConfig {
-    allow_extensions: Vec<String>,
-    block_extensions: Vec<String>,
-    allow_mime_types: Vec<String>,
-    block_mime_types: Vec<String>,
-    allow_detected_types: Vec<String>,
-    block_detected_types: Vec<String>,
+pub(crate) struct AttachmentPolicyConfig {
+    pub allow_extensions: Vec<String>,
+    pub block_extensions: Vec<String>,
+    pub allow_mime_types: Vec<String>,
+    pub block_mime_types: Vec<String>,
+    pub allow_detected_types: Vec<String>,
+    pub block_detected_types: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
-struct RecipientVerificationConfig {
-    enabled: bool,
-    fail_closed: bool,
-    cache_ttl_seconds: u64,
+pub(crate) struct RecipientVerificationConfig {
+    pub enabled: bool,
+    pub fail_closed: bool,
+    pub cache_ttl_seconds: u64,
+    pub local_db: storage::LocalDbConfig,
 }
 
-pub(crate) fn evaluate_address_policy(
+pub(crate) fn evaluate_address_policy_with_config(
+    config: &AddressPolicyConfig,
     role: AddressRole,
     address: &str,
 ) -> AddressPolicyVerdict {
@@ -106,10 +109,13 @@ pub(crate) fn evaluate_address_policy(
         return AddressPolicyVerdict::Reject("address is empty".to_string());
     }
 
-    let config = address_policy_config_from_env();
     let (allow_list, block_list, noun) = match role {
         AddressRole::Sender => (&config.allow_senders, &config.block_senders, "sender"),
-        AddressRole::Recipient => (&config.allow_recipients, &config.block_recipients, "recipient"),
+        AddressRole::Recipient => (
+            &config.allow_recipients,
+            &config.block_recipients,
+            "recipient",
+        ),
     };
 
     if let Some(entry) = match_address_rule(block_list, &normalized) {
@@ -126,8 +132,15 @@ pub(crate) fn evaluate_address_policy(
     AddressPolicyVerdict::Allow
 }
 
+#[cfg(test)]
+pub(crate) fn evaluate_address_policy(role: AddressRole, address: &str) -> AddressPolicyVerdict {
+    let config = address_policy_config_from_env();
+    evaluate_address_policy_with_config(&config, role, address)
+}
+
 pub(crate) async fn verify_recipient_with_core(
     client: &reqwest::Client,
+    config: &RecipientVerificationConfig,
     core_base_url: &str,
     sender: Option<&str>,
     recipient: &str,
@@ -135,7 +148,6 @@ pub(crate) async fn verify_recipient_with_core(
     peer: Option<&str>,
     account_id: Option<Uuid>,
 ) -> RecipientVerificationVerdict {
-    let config = recipient_verification_config_from_env();
     if !config.enabled {
         return RecipientVerificationVerdict::Accept;
     }
@@ -144,16 +156,32 @@ pub(crate) async fn verify_recipient_with_core(
     if normalized_recipient.is_empty() {
         return RecipientVerificationVerdict::Reject("recipient address is empty".to_string());
     }
-    let normalized_sender = sender.map(normalize_address).filter(|value| !value.is_empty());
+    let normalized_sender = sender
+        .map(normalize_address)
+        .filter(|value| !value.is_empty());
     let cache_key = format!(
         "{}|{}|{}",
         normalized_sender.as_deref().unwrap_or(""),
         normalized_recipient,
-        account_id.map(|value| value.to_string()).unwrap_or_default()
+        account_id
+            .map(|value| value.to_string())
+            .unwrap_or_default()
     );
 
     if let Some(cached) = cached_recipient_verdict(&cache_key) {
         return cached;
+    }
+    if let Ok(Some(cached)) =
+        storage::load_recipient_verification_cache_entry(&config.local_db, &cache_key, unix_now())
+            .await
+    {
+        let verdict = recipient_verdict_from_record(&cached.verdict, cached.detail.clone());
+        store_recipient_verdict(
+            &cache_key,
+            verdict.clone(),
+            cached.expires_at_unix.saturating_sub(unix_now()).max(1),
+        );
+        return verdict;
     }
 
     let request = RecipientVerificationRequest {
@@ -165,16 +193,21 @@ pub(crate) async fn verify_recipient_with_core(
         },
         sender: normalized_sender,
         recipient: normalized_recipient.clone(),
-        helo: helo.map(str::trim).map(str::to_string).filter(|value| !value.is_empty()),
-        peer: peer.map(str::trim).map(str::to_string).filter(|value| !value.is_empty()),
+        helo: helo
+            .map(str::trim)
+            .map(str::to_string)
+            .filter(|value| !value.is_empty()),
+        peer: peer
+            .map(str::trim)
+            .map(str::to_string)
+            .filter(|value| !value.is_empty()),
         account_id,
     };
 
-    let signed = match integration_shared_secret()
-        .and_then(|secret| {
-            SignedIntegrationHeaders::sign(&secret, "POST", RECIPIENT_VERIFICATION_PATH, &request)
-                .map_err(|error| anyhow::anyhow!(error.to_string()))
-        }) {
+    let signed = match integration_shared_secret().and_then(|secret| {
+        SignedIntegrationHeaders::sign(&secret, "POST", RECIPIENT_VERIFICATION_PATH, &request)
+            .map_err(|error| anyhow::anyhow!(error.to_string()))
+    }) {
         Ok(signed) => signed,
         Err(error) => {
             return if config.fail_closed {
@@ -222,11 +255,9 @@ pub(crate) async fn verify_recipient_with_core(
                 if body.verified {
                     RecipientVerificationVerdict::Accept
                 } else {
-                    RecipientVerificationVerdict::Reject(
-                        body.detail.unwrap_or_else(|| {
-                            "recipient is not authorized for final delivery".to_string()
-                        }),
-                    )
+                    RecipientVerificationVerdict::Reject(body.detail.unwrap_or_else(|| {
+                        "recipient is not authorized for final delivery".to_string()
+                    }))
                 }
             }
             Err(error) => {
@@ -256,15 +287,28 @@ pub(crate) async fn verify_recipient_with_core(
     };
 
     store_recipient_verdict(&cache_key, verdict.clone(), cache_ttl.max(1));
+    let _ = storage::persist_recipient_verification_cache_entry(
+        &config.local_db,
+        &storage::RecipientVerificationCacheEntry {
+            cache_key,
+            sender: request.sender.clone(),
+            recipient: request.recipient.clone(),
+            account_id: request.account_id.map(|value| value.to_string()),
+            verdict: recipient_verdict_label(&verdict).to_string(),
+            detail: recipient_verdict_detail(&verdict),
+            expires_at_unix: unix_now().saturating_add(cache_ttl.max(1)),
+        },
+    )
+    .await;
     verdict
 }
 
-pub(crate) fn evaluate_attachment_policy<D: Detector>(
+pub(crate) fn evaluate_attachment_policy_with_config<D: Detector>(
+    config: &AttachmentPolicyConfig,
     validator: &Validator<D>,
     ingress_context: IngressContext,
     raw_message: &[u8],
 ) -> Result<AttachmentPolicyVerdict> {
-    let config = attachment_policy_config_from_env();
     if config.allow_extensions.is_empty()
         && config.block_extensions.is_empty()
         && config.allow_mime_types.is_empty()
@@ -290,10 +334,11 @@ pub(crate) fn evaluate_attachment_policy<D: Detector>(
             .filename
             .clone()
             .unwrap_or_else(|| "unnamed attachment".to_string());
-        let extension = attachment
-            .filename
-            .as_deref()
-            .and_then(|value| value.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()));
+        let extension = attachment.filename.as_deref().and_then(|value| {
+            value
+                .rsplit_once('.')
+                .map(|(_, ext)| ext.to_ascii_lowercase())
+        });
         let declared_mime = attachment
             .declared_mime
             .clone()
@@ -363,6 +408,17 @@ pub(crate) fn evaluate_attachment_policy<D: Detector>(
     Ok(AttachmentPolicyVerdict::Accept)
 }
 
+#[cfg(test)]
+pub(crate) fn evaluate_attachment_policy<D: Detector>(
+    validator: &Validator<D>,
+    ingress_context: IngressContext,
+    raw_message: &[u8],
+) -> Result<AttachmentPolicyVerdict> {
+    let config = attachment_policy_config_from_env();
+    evaluate_attachment_policy_with_config(&config, validator, ingress_context, raw_message)
+}
+
+#[cfg(test)]
 fn address_policy_config_from_env() -> AddressPolicyConfig {
     AddressPolicyConfig {
         allow_senders: parse_csv_env("LPE_CT_POLICY_ALLOW_SENDERS"),
@@ -372,6 +428,7 @@ fn address_policy_config_from_env() -> AddressPolicyConfig {
     }
 }
 
+#[cfg(test)]
 fn attachment_policy_config_from_env() -> AttachmentPolicyConfig {
     AttachmentPolicyConfig {
         allow_extensions: parse_csv_env("LPE_CT_ATTACHMENT_ALLOW_EXTENSIONS"),
@@ -383,24 +440,7 @@ fn attachment_policy_config_from_env() -> AttachmentPolicyConfig {
     }
 }
 
-fn recipient_verification_config_from_env() -> RecipientVerificationConfig {
-    RecipientVerificationConfig {
-        enabled: parse_bool_env("LPE_CT_RECIPIENT_VERIFICATION_ENABLED", false),
-        fail_closed: parse_bool_env("LPE_CT_RECIPIENT_VERIFICATION_FAIL_CLOSED", true),
-        cache_ttl_seconds: env::var("LPE_CT_RECIPIENT_VERIFICATION_CACHE_TTL_SECONDS")
-            .ok()
-            .and_then(|value| value.trim().parse::<u64>().ok())
-            .unwrap_or(300),
-    }
-}
-
-fn parse_bool_env(name: &str, default: bool) -> bool {
-    env::var(name)
-        .ok()
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-        .unwrap_or(default)
-}
-
+#[cfg(test)]
 fn parse_csv_env(name: &str) -> Vec<String> {
     env::var(name)
         .ok()
@@ -416,14 +456,14 @@ fn parse_csv_env(name: &str) -> Vec<String> {
 }
 
 fn normalize_address(value: &str) -> String {
-    value
-        .trim()
-        .trim_matches(['<', '>'])
-        .to_ascii_lowercase()
+    value.trim().trim_matches(['<', '>']).to_ascii_lowercase()
 }
 
 fn match_address_rule<'a>(rules: &'a [String], address: &str) -> Option<&'a str> {
-    let domain = address.rsplit_once('@').map(|(_, domain)| domain).unwrap_or(address);
+    let domain = address
+        .rsplit_once('@')
+        .map(|(_, domain)| domain)
+        .unwrap_or(address);
     rules.iter().find_map(|rule| {
         if rule.contains('@') {
             (rule == address).then_some(rule.as_str())
@@ -434,14 +474,14 @@ fn match_address_rule<'a>(rules: &'a [String], address: &str) -> Option<&'a str>
 }
 
 fn match_exact_rule<'a>(rules: &'a [String], value: &str) -> Option<&'a str> {
-    rules.iter()
+    rules
+        .iter()
         .find(|rule| rule.as_str() == value)
         .map(|rule| rule.as_str())
 }
 
 fn cached_recipient_verdict(key: &str) -> Option<RecipientVerificationVerdict> {
-    let cache = RECIPIENT_VERIFICATION_CACHE
-        .get_or_init(|| Mutex::new(BTreeMap::new()));
+    let cache = RECIPIENT_VERIFICATION_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
     let now = unix_now();
     let mut guard = cache.lock().ok()?;
     guard.retain(|_, value| value.expires_at_unix > now);
@@ -449,8 +489,7 @@ fn cached_recipient_verdict(key: &str) -> Option<RecipientVerificationVerdict> {
 }
 
 fn store_recipient_verdict(key: &str, verdict: RecipientVerificationVerdict, ttl_seconds: u64) {
-    let cache = RECIPIENT_VERIFICATION_CACHE
-        .get_or_init(|| Mutex::new(BTreeMap::new()));
+    let cache = RECIPIENT_VERIFICATION_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
     if let Ok(mut guard) = cache.lock() {
         guard.insert(
             key.to_string(),
@@ -459,6 +498,38 @@ fn store_recipient_verdict(key: &str, verdict: RecipientVerificationVerdict, ttl
                 expires_at_unix: unix_now().saturating_add(ttl_seconds),
             },
         );
+    }
+}
+
+fn recipient_verdict_label(verdict: &RecipientVerificationVerdict) -> &'static str {
+    match verdict {
+        RecipientVerificationVerdict::Accept => "accept",
+        RecipientVerificationVerdict::Reject(_) => "reject",
+        RecipientVerificationVerdict::Defer(_) => "defer",
+    }
+}
+
+fn recipient_verdict_detail(verdict: &RecipientVerificationVerdict) -> Option<String> {
+    match verdict {
+        RecipientVerificationVerdict::Accept => None,
+        RecipientVerificationVerdict::Reject(detail)
+        | RecipientVerificationVerdict::Defer(detail) => Some(detail.clone()),
+    }
+}
+
+fn recipient_verdict_from_record(
+    verdict: &str,
+    detail: Option<String>,
+) -> RecipientVerificationVerdict {
+    match verdict {
+        "reject" => RecipientVerificationVerdict::Reject(
+            detail.unwrap_or_else(|| "recipient is not authorized for final delivery".to_string()),
+        ),
+        "defer" => RecipientVerificationVerdict::Defer(
+            detail
+                .unwrap_or_else(|| "recipient verification is temporarily unavailable".to_string()),
+        ),
+        _ => RecipientVerificationVerdict::Accept,
     }
 }
 
@@ -473,8 +544,8 @@ fn unix_now() -> u64 {
 mod tests {
     use super::{
         evaluate_address_policy, evaluate_attachment_policy, verify_recipient_with_core,
-        AddressPolicyVerdict, AddressRole, AttachmentPolicyVerdict, RecipientVerificationVerdict,
-        RECIPIENT_VERIFICATION_PATH,
+        AddressPolicyVerdict, AddressRole, AttachmentPolicyVerdict, RecipientVerificationConfig,
+        RecipientVerificationVerdict, RECIPIENT_VERIFICATION_PATH,
     };
     use crate::env_test_lock;
     use axum::{routing::post, Json, Router};
@@ -499,7 +570,10 @@ mod tests {
     #[ignore = "env-sensitive"]
     fn address_policy_supports_exact_and_domain_rules() {
         let _guard = env_test_lock();
-        std::env::set_var("LPE_CT_POLICY_BLOCK_SENDERS", "bad@example.test,blocked.test");
+        std::env::set_var(
+            "LPE_CT_POLICY_BLOCK_SENDERS",
+            "bad@example.test,blocked.test",
+        );
         std::env::set_var("LPE_CT_POLICY_ALLOW_RECIPIENTS", "allowed.test");
 
         assert_eq!(
@@ -575,10 +649,6 @@ mod tests {
             "LPE_INTEGRATION_SHARED_SECRET",
             "0123456789abcdef0123456789abcdef",
         );
-        std::env::set_var("LPE_CT_RECIPIENT_VERIFICATION_ENABLED", "true");
-        std::env::set_var("LPE_CT_RECIPIENT_VERIFICATION_FAIL_CLOSED", "true");
-        std::env::set_var("LPE_CT_RECIPIENT_VERIFICATION_CACHE_TTL_SECONDS", "60");
-
         let captured = Arc::new(Mutex::new(None::<Value>));
         let capture = captured.clone();
         let router = Router::new().route(
@@ -600,9 +670,16 @@ mod tests {
         tokio::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
+        let config = RecipientVerificationConfig {
+            enabled: true,
+            fail_closed: true,
+            cache_ttl_seconds: 60,
+            local_db: crate::storage::LocalDbConfig::default(),
+        };
 
         let verdict = verify_recipient_with_core(
             &reqwest::Client::new(),
+            &config,
             &format!("http://{address}"),
             Some("sender@example.test"),
             "missing@example.test",
@@ -617,11 +694,11 @@ mod tests {
             RecipientVerificationVerdict::Reject("unknown local recipient".to_string())
         );
         let payload = captured.lock().unwrap().clone().unwrap();
-        assert_eq!(payload.get("recipient").and_then(Value::as_str), Some("missing@example.test"));
+        assert_eq!(
+            payload.get("recipient").and_then(Value::as_str),
+            Some("missing@example.test")
+        );
 
         std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
-        std::env::remove_var("LPE_CT_RECIPIENT_VERIFICATION_ENABLED");
-        std::env::remove_var("LPE_CT_RECIPIENT_VERIFICATION_FAIL_CLOSED");
-        std::env::remove_var("LPE_CT_RECIPIENT_VERIFICATION_CACHE_TTL_SECONDS");
     }
 }
