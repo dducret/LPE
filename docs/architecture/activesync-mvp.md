@@ -6,6 +6,8 @@ This document describes the first `ActiveSync` adapter implemented in `LPE`.
 
 The `crates/lpe-activesync` crate exposes a pragmatic subset of `Exchange ActiveSync` for the most important Outlook and mobile scenarios, without introducing any parallel `Sent`, `Outbox`, or direct `SMTP` bypass logic.
 
+The concrete client interoperability matrix, prioritized defect risks, and automated test recommendations for this MVP are documented in `docs/architecture/activesync-interoperability-matrix.md`.
+
 ### Architectural principles
 
 - the `ActiveSync` adapter is separated from `lpe-jmap` and from the business core
