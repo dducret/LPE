@@ -25,6 +25,8 @@ pub(crate) struct ReportingSettings {
     pub digest_max_items: u32,
     #[serde(default = "default_history_retention_days")]
     pub history_retention_days: u32,
+    #[serde(default = "default_digest_report_retention_days")]
+    pub digest_report_retention_days: u32,
     #[serde(default)]
     pub domain_defaults: Vec<DigestDomainDefault>,
     #[serde(default)]
@@ -53,10 +55,19 @@ pub(crate) struct DigestUserOverride {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub(crate) struct HistoryQuery {
     pub q: Option<String>,
+    pub trace_id: Option<String>,
+    pub sender: Option<String>,
+    pub recipient: Option<String>,
+    pub internet_message_id: Option<String>,
+    pub peer: Option<String>,
+    pub route_target: Option<String>,
+    pub reason: Option<String>,
     pub direction: Option<String>,
     pub queue: Option<String>,
     pub disposition: Option<String>,
     pub domain: Option<String>,
+    pub min_spam_score: Option<f32>,
+    pub min_security_score: Option<f32>,
     pub limit: Option<usize>,
 }
 
@@ -67,6 +78,7 @@ pub(crate) struct MailHistorySummary {
     pub queue: String,
     pub status: String,
     pub latest_event_at: String,
+    pub peer: String,
     pub mail_from: String,
     pub rcpt_to: Vec<String>,
     pub subject: String,
@@ -77,6 +89,12 @@ pub(crate) struct MailHistorySummary {
     pub spam_score: f32,
     pub security_score: f32,
     pub reputation_score: i32,
+    pub dnsbl_hits: Vec<String>,
+    pub auth_summary: Value,
+    pub magika_decision: Option<String>,
+    pub technical_status: Option<Value>,
+    pub dsn: Option<Value>,
+    pub latest_decision: Option<String>,
     pub event_count: usize,
     pub policy_tags: Vec<String>,
 }
@@ -123,6 +141,12 @@ pub(crate) struct TraceHistoryDetails {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct DigestMetricCount {
+    pub key: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct DigestReportSummary {
     pub report_id: String,
     pub generated_at: String,
@@ -130,7 +154,14 @@ pub(crate) struct DigestReportSummary {
     pub scope_label: String,
     pub recipient: String,
     pub item_count: usize,
+    pub inbound_count: usize,
+    pub outbound_count: usize,
+    pub highest_spam_score: f32,
+    pub highest_security_score: f32,
+    pub oldest_item_at: Option<String>,
+    pub newest_item_at: Option<String>,
     pub top_reason: Option<String>,
+    pub top_reasons: Vec<DigestMetricCount>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,6 +169,8 @@ pub(crate) struct DigestReportDetails {
     pub summary: DigestReportSummary,
     pub content: String,
     pub items: Vec<QuarantineSummary>,
+    pub status_counts: Vec<DigestMetricCount>,
+    pub domain_counts: Vec<DigestMetricCount>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -153,7 +186,7 @@ pub(crate) struct DigestRunResponse {
     pub next_digest_run_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredMailHistoryEvent {
     timestamp: String,
     trace_id: String,
@@ -226,6 +259,7 @@ pub(crate) fn default_reporting_settings() -> ReportingSettings {
         digest_interval_minutes: default_digest_interval_minutes(),
         digest_max_items: default_digest_max_items(),
         history_retention_days: default_history_retention_days(),
+        digest_report_retention_days: default_digest_report_retention_days(),
         domain_defaults: Vec::new(),
         user_overrides: Vec::new(),
         last_digest_run_at: None,
@@ -247,6 +281,10 @@ pub(crate) fn default_history_retention_days() -> u32 {
     30
 }
 
+pub(crate) fn default_digest_report_retention_days() -> u32 {
+    14
+}
+
 pub(crate) fn normalize_reporting_settings(settings: &mut ReportingSettings) {
     if settings.digest_interval_minutes == 0 {
         settings.digest_interval_minutes = default_digest_interval_minutes();
@@ -256,6 +294,9 @@ pub(crate) fn normalize_reporting_settings(settings: &mut ReportingSettings) {
     }
     if settings.history_retention_days == 0 {
         settings.history_retention_days = default_history_retention_days();
+    }
+    if settings.digest_report_retention_days == 0 {
+        settings.digest_report_retention_days = default_digest_report_retention_days();
     }
 
     settings.domain_defaults = normalize_domain_defaults(&settings.domain_defaults);
@@ -283,6 +324,7 @@ pub(crate) fn run_due_digest_generation(
     settings: &mut ReportingSettings,
 ) -> Result<Vec<DigestReportSummary>> {
     normalize_reporting_settings(settings);
+    prune_digest_reports(spool_dir, settings.digest_report_retention_days)?;
     if !settings.digest_enabled || !digest_is_due(settings) {
         return Ok(Vec::new());
     }
@@ -294,7 +336,9 @@ pub(crate) fn run_digest_generation(
     settings: &mut ReportingSettings,
 ) -> Result<Vec<DigestReportSummary>> {
     normalize_reporting_settings(settings);
-    let quarantine = smtp::list_quarantine_items(spool_dir, smtp::QuarantineQuery::default())?;
+    prune_digest_reports(spool_dir, settings.digest_report_retention_days)?;
+    let quarantine =
+        smtp::list_quarantine_items_from_spool(spool_dir, smtp::QuarantineQuery::default())?;
     let generated_at = current_timestamp();
     let mut reports = Vec::new();
 
@@ -459,6 +503,17 @@ fn read_mail_history_events_from_jsonl(
     Ok(events)
 }
 
+pub(crate) async fn enforce_retention(
+    spool_dir: &Path,
+    config: &RuntimeConfig,
+    settings: &ReportingSettings,
+) -> Result<()> {
+    prune_transport_audit_jsonl(spool_dir, settings.history_retention_days)?;
+    prune_digest_reports(spool_dir, settings.digest_report_retention_days)?;
+    prune_retained_rows_from_db(config, settings).await?;
+    Ok(())
+}
+
 async fn search_mail_history_from_db(
     config: &RuntimeConfig,
     query: &HistoryQuery,
@@ -474,13 +529,21 @@ async fn search_mail_history_from_db(
     let queue = normalized(query.queue.as_deref());
     let disposition = normalized(query.disposition.as_deref());
     let domain = normalized(query.domain.as_deref());
+    let trace_id = normalized(query.trace_id.as_deref());
+    let sender = normalized(query.sender.as_deref());
+    let recipient = normalized(query.recipient.as_deref());
+    let internet_message_id = normalized(query.internet_message_id.as_deref());
+    let peer = normalized(query.peer.as_deref());
+    let route_target = normalized(query.route_target.as_deref());
+    let reason = normalized(query.reason.as_deref());
     let search_term = normalized(query.q.as_deref());
     let search_pattern = search_term.as_ref().map(|value| format!("%{value}%"));
     let total: i64 = sqlx::query_scalar(
         r#"
         WITH latest AS (
             SELECT DISTINCT ON (trace_id)
-                   trace_id, event_unix, direction, queue, status, mail_from, rcpt_to
+                   trace_id, event_unix, direction, queue, status, peer, mail_from, rcpt_to,
+                   internet_message_id, reason, route_target, spam_score, security_score
               FROM mail_flow_history
              WHERE event_unix >= $1
              ORDER BY trace_id, event_unix DESC
@@ -490,25 +553,41 @@ async fn search_mail_history_from_db(
          WHERE ($2::TEXT IS NULL OR LOWER(latest.direction) = $2)
            AND ($3::TEXT IS NULL OR LOWER(latest.queue) = $3)
            AND ($4::TEXT IS NULL OR LOWER(latest.status) = $4)
+           AND ($5::TEXT IS NULL OR LOWER(latest.trace_id) = $5)
            AND (
-                $5::TEXT IS NULL
-                OR SPLIT_PART(LOWER(latest.mail_from), '@', 2) = $5
+                $6::TEXT IS NULL
+                OR SPLIT_PART(LOWER(latest.mail_from), '@', 2) = $6
                 OR EXISTS (
                     SELECT 1
                       FROM jsonb_array_elements_text(latest.rcpt_to) AS recipient(value)
-                     WHERE SPLIT_PART(LOWER(recipient.value), '@', 2) = $5
+                     WHERE SPLIT_PART(LOWER(recipient.value), '@', 2) = $6
                 )
            )
+           AND ($7::TEXT IS NULL OR LOWER(latest.mail_from) LIKE $7)
            AND (
-                $6::TEXT IS NULL
+                $8::TEXT IS NULL
+                OR EXISTS (
+                    SELECT 1
+                      FROM jsonb_array_elements_text(latest.rcpt_to) AS recipient(value)
+                     WHERE LOWER(recipient.value) LIKE $8
+                )
+           )
+           AND ($9::TEXT IS NULL OR LOWER(COALESCE(latest.internet_message_id, '')) LIKE $9)
+           AND ($10::TEXT IS NULL OR LOWER(latest.peer) LIKE $10)
+           AND ($11::TEXT IS NULL OR LOWER(COALESCE(latest.route_target, '')) LIKE $11)
+           AND ($12::TEXT IS NULL OR LOWER(COALESCE(latest.reason, '')) LIKE $12)
+           AND ($13::REAL IS NULL OR latest.spam_score >= $13)
+           AND ($14::REAL IS NULL OR latest.security_score >= $14)
+           AND (
+                $15::TEXT IS NULL
                 OR EXISTS (
                     SELECT 1
                       FROM mail_flow_history matched
                      WHERE matched.trace_id = latest.trace_id
                        AND matched.event_unix >= $1
                        AND (
-                            matched.search_text LIKE $6
-                            OR to_tsvector('simple', matched.search_text) @@ websearch_to_tsquery('simple', $7)
+                            matched.search_text LIKE $15
+                            OR to_tsvector('simple', matched.search_text) @@ websearch_to_tsquery('simple', $16)
                        )
                 )
            )
@@ -518,7 +597,16 @@ async fn search_mail_history_from_db(
     .bind(direction.clone())
     .bind(queue.clone())
     .bind(disposition.clone())
+    .bind(trace_id.clone())
     .bind(domain.clone())
+    .bind(sender.as_ref().map(|value| format!("%{value}%")))
+    .bind(recipient.as_ref().map(|value| format!("%{value}%")))
+    .bind(internet_message_id.as_ref().map(|value| format!("%{value}%")))
+    .bind(peer.as_ref().map(|value| format!("%{value}%")))
+    .bind(route_target.as_ref().map(|value| format!("%{value}%")))
+    .bind(reason.as_ref().map(|value| format!("%{value}%")))
+    .bind(query.min_spam_score)
+    .bind(query.min_security_score)
     .bind(search_pattern.clone())
     .bind(search_term.clone())
     .fetch_one(pool)
@@ -544,7 +632,7 @@ async fn search_mail_history_from_db(
              GROUP BY trace_id
         )
         SELECT latest.trace_id, latest.timestamp, latest.direction, latest.queue, latest.status,
-               latest.mail_from, latest.rcpt_to, latest.subject, latest.internet_message_id,
+               latest.peer, latest.mail_from, latest.rcpt_to, latest.subject, latest.internet_message_id,
                latest.reason, latest.route_target, latest.remote_message_ref, latest.spam_score,
                latest.security_score, latest.reputation_score, latest.dnsbl_hits,
                latest.auth_summary, latest.magika_summary, latest.magika_decision,
@@ -555,37 +643,62 @@ async fn search_mail_history_from_db(
          WHERE ($2::TEXT IS NULL OR LOWER(latest.direction) = $2)
            AND ($3::TEXT IS NULL OR LOWER(latest.queue) = $3)
            AND ($4::TEXT IS NULL OR LOWER(latest.status) = $4)
+           AND ($5::TEXT IS NULL OR LOWER(latest.trace_id) = $5)
            AND (
-                $5::TEXT IS NULL
-                OR SPLIT_PART(LOWER(latest.mail_from), '@', 2) = $5
+                $6::TEXT IS NULL
+                OR SPLIT_PART(LOWER(latest.mail_from), '@', 2) = $6
                 OR EXISTS (
                     SELECT 1
                       FROM jsonb_array_elements_text(latest.rcpt_to) AS recipient(value)
-                     WHERE SPLIT_PART(LOWER(recipient.value), '@', 2) = $5
+                     WHERE SPLIT_PART(LOWER(recipient.value), '@', 2) = $6
                 )
            )
+           AND ($7::TEXT IS NULL OR LOWER(latest.mail_from) LIKE $7)
            AND (
-                $6::TEXT IS NULL
+                $8::TEXT IS NULL
+                OR EXISTS (
+                    SELECT 1
+                      FROM jsonb_array_elements_text(latest.rcpt_to) AS recipient(value)
+                     WHERE LOWER(recipient.value) LIKE $8
+                )
+           )
+           AND ($9::TEXT IS NULL OR LOWER(COALESCE(latest.internet_message_id, '')) LIKE $9)
+           AND ($10::TEXT IS NULL OR LOWER(latest.peer) LIKE $10)
+           AND ($11::TEXT IS NULL OR LOWER(COALESCE(latest.route_target, '')) LIKE $11)
+           AND ($12::TEXT IS NULL OR LOWER(COALESCE(latest.reason, '')) LIKE $12)
+           AND ($13::REAL IS NULL OR latest.spam_score >= $13)
+           AND ($14::REAL IS NULL OR latest.security_score >= $14)
+           AND (
+                $15::TEXT IS NULL
                 OR EXISTS (
                     SELECT 1
                       FROM mail_flow_history matched
                      WHERE matched.trace_id = latest.trace_id
                        AND matched.event_unix >= $1
                        AND (
-                            matched.search_text LIKE $6
-                            OR to_tsvector('simple', matched.search_text) @@ websearch_to_tsquery('simple', $7)
+                            matched.search_text LIKE $15
+                            OR to_tsvector('simple', matched.search_text) @@ websearch_to_tsquery('simple', $16)
                        )
                 )
            )
          ORDER BY latest.event_unix DESC
-         LIMIT $8
+         LIMIT $17
         "#,
     )
     .bind(cutoff)
     .bind(direction)
     .bind(queue)
     .bind(disposition)
+    .bind(trace_id)
     .bind(domain)
+    .bind(sender.as_ref().map(|value| format!("%{value}%")))
+    .bind(recipient.as_ref().map(|value| format!("%{value}%")))
+    .bind(internet_message_id.as_ref().map(|value| format!("%{value}%")))
+    .bind(peer.as_ref().map(|value| format!("%{value}%")))
+    .bind(route_target.as_ref().map(|value| format!("%{value}%")))
+    .bind(reason.as_ref().map(|value| format!("%{value}%")))
+    .bind(query.min_spam_score)
+    .bind(query.min_security_score)
     .bind(search_pattern)
     .bind(search_term)
     .bind(limit as i64)
@@ -603,6 +716,7 @@ async fn search_mail_history_from_db(
                 queue: event.queue.clone(),
                 status: event.status.clone(),
                 latest_event_at: event.timestamp.clone(),
+                peer: event.peer.clone(),
                 mail_from: event.mail_from.clone(),
                 rcpt_to: event.rcpt_to.clone(),
                 subject: event.subject.clone(),
@@ -613,6 +727,12 @@ async fn search_mail_history_from_db(
                 spam_score: event.spam_score,
                 security_score: event.security_score,
                 reputation_score: event.reputation_score,
+                dnsbl_hits: event.dnsbl_hits.clone(),
+                auth_summary: event.auth_summary.clone(),
+                magika_decision: event.magika_decision.clone(),
+                technical_status: event.technical_status.clone(),
+                dsn: event.dsn.clone(),
+                latest_decision: latest_decision(&event),
                 event_count,
                 policy_tags: policy_tags_from_event(&event),
             })
@@ -733,6 +853,7 @@ fn summarize_trace_history(events: Vec<MailHistoryEvent>) -> Option<MailHistoryS
         queue: latest.queue.clone(),
         status: latest.status.clone(),
         latest_event_at: latest.timestamp.clone(),
+        peer: latest.peer.clone(),
         mail_from: latest.mail_from.clone(),
         rcpt_to: latest.rcpt_to.clone(),
         subject: latest.subject.clone(),
@@ -743,12 +864,75 @@ fn summarize_trace_history(events: Vec<MailHistoryEvent>) -> Option<MailHistoryS
         spam_score: latest.spam_score,
         security_score: latest.security_score,
         reputation_score: latest.reputation_score,
+        dnsbl_hits: latest.dnsbl_hits.clone(),
+        auth_summary: latest.auth_summary.clone(),
+        magika_decision: latest.magika_decision.clone(),
+        technical_status: latest.technical_status.clone(),
+        dsn: latest.dsn.clone(),
+        latest_decision: latest_decision(latest),
         event_count: events.len(),
         policy_tags: policy_tags_from_event(latest),
     })
 }
 
 fn history_matches(item: &MailHistorySummary, query: &HistoryQuery) -> bool {
+    if let Some(trace_id) = normalized(query.trace_id.as_deref()) {
+        if item.trace_id != trace_id {
+            return false;
+        }
+    }
+    if let Some(sender) = normalized(query.sender.as_deref()) {
+        if !item.mail_from.to_ascii_lowercase().contains(&sender) {
+            return false;
+        }
+    }
+    if let Some(recipient) = normalized(query.recipient.as_deref()) {
+        if !item
+            .rcpt_to
+            .iter()
+            .any(|value| value.to_ascii_lowercase().contains(&recipient))
+        {
+            return false;
+        }
+    }
+    if let Some(internet_message_id) = normalized(query.internet_message_id.as_deref()) {
+        if !item
+            .internet_message_id
+            .as_deref()
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .contains(&internet_message_id)
+        {
+            return false;
+        }
+    }
+    if let Some(peer) = normalized(query.peer.as_deref()) {
+        if !item.peer.to_ascii_lowercase().contains(&peer) {
+            return false;
+        }
+    }
+    if let Some(route_target) = normalized(query.route_target.as_deref()) {
+        if !item
+            .route_target
+            .as_deref()
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .contains(&route_target)
+        {
+            return false;
+        }
+    }
+    if let Some(reason) = normalized(query.reason.as_deref()) {
+        if !item
+            .reason
+            .as_deref()
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .contains(&reason)
+        {
+            return false;
+        }
+    }
     if let Some(direction) = query.direction.as_deref() {
         if item.direction != direction {
             return false;
@@ -761,6 +945,16 @@ fn history_matches(item: &MailHistorySummary, query: &HistoryQuery) -> bool {
     }
     if let Some(disposition) = query.disposition.as_deref() {
         if item.status != disposition {
+            return false;
+        }
+    }
+    if let Some(min_spam_score) = query.min_spam_score {
+        if item.spam_score < min_spam_score {
+            return false;
+        }
+    }
+    if let Some(min_security_score) = query.min_security_score {
+        if item.security_score < min_security_score {
             return false;
         }
     }
@@ -807,6 +1001,13 @@ fn build_digest_report(
     ensure_digest_dir(spool_dir)?;
     let report_id = format!("digest-{}", Uuid::new_v4());
     let content = render_digest_content(generated_at, scope, scope_label, recipient, &items);
+    let top_reasons = summarize_digest_counts(
+        items
+            .iter()
+            .filter_map(|item| item.reason.clone())
+            .collect::<Vec<_>>(),
+        5,
+    );
     let summary = DigestReportSummary {
         report_id: report_id.clone(),
         generated_at: generated_at.to_string(),
@@ -814,13 +1015,32 @@ fn build_digest_report(
         scope_label: scope_label.to_string(),
         recipient: recipient.to_string(),
         item_count: items.len(),
+        inbound_count: items
+            .iter()
+            .filter(|item| item.direction == "inbound")
+            .count(),
+        outbound_count: items
+            .iter()
+            .filter(|item| item.direction == "outbound")
+            .count(),
+        highest_spam_score: items.iter().map(|item| item.spam_score).fold(0.0, f32::max),
+        highest_security_score: items
+            .iter()
+            .map(|item| item.security_score)
+            .fold(0.0, f32::max),
+        oldest_item_at: items.last().map(|item| item.received_at.clone()),
+        newest_item_at: items.first().map(|item| item.received_at.clone()),
         top_reason: items.iter().find_map(|item| item.reason.clone()),
+        top_reasons,
     };
     let detail = DigestReportDetails {
         summary,
         content,
         items,
+        status_counts: Vec::new(),
+        domain_counts: Vec::new(),
     };
+    let detail = enrich_digest_detail(detail);
     let path = digest_report_dir(spool_dir).join(format!("{report_id}.json"));
     fs::write(path, serde_json::to_vec_pretty(&detail)?)?;
     Ok(detail)
@@ -845,6 +1065,26 @@ fn render_digest_content(
         .iter()
         .map(|item| item.spam_score)
         .fold(0.0_f32, f32::max);
+    let highest_security = items
+        .iter()
+        .map(|item| item.security_score)
+        .fold(0.0_f32, f32::max);
+    let oldest_item_at = items.last().map(|item| item.received_at.clone());
+    let newest_item_at = items.first().map(|item| item.received_at.clone());
+    let reason_counts = summarize_digest_counts(
+        items
+            .iter()
+            .filter_map(|item| item.reason.clone())
+            .collect::<Vec<_>>(),
+        6,
+    );
+    let status_counts = summarize_digest_counts(
+        items
+            .iter()
+            .map(|item| item.status.clone())
+            .collect::<Vec<_>>(),
+        6,
+    );
 
     let mut lines = vec![
         format!("Quarantine digest generated {generated_at}"),
@@ -854,6 +1094,17 @@ fn render_digest_content(
         format!("Inbound: {inbound}"),
         format!("Outbound: {outbound}"),
         format!("Highest spam score: {highest_spam:.1}"),
+        format!("Highest security score: {highest_security:.1}"),
+        format!(
+            "Coverage: {} -> {}",
+            oldest_item_at.as_deref().unwrap_or("n/a"),
+            newest_item_at.as_deref().unwrap_or("n/a")
+        ),
+        format!(
+            "Top reasons: {}",
+            render_metric_counts(&reason_counts, "none")
+        ),
+        format!("Statuses: {}", render_metric_counts(&status_counts, "none")),
         String::new(),
         "Quarantined items:".to_string(),
     ];
@@ -935,6 +1186,20 @@ fn policy_tags_from_event(item: &MailHistoryEvent) -> Vec<String> {
     }
     if let Some(route_target) = item.route_target.as_deref() {
         tags.insert(format!("route:{route_target}"));
+    }
+    if let Some(value) = item.magika_decision.as_deref() {
+        tags.insert(format!("magika:{value}"));
+    }
+    if !item.dnsbl_hits.is_empty() {
+        tags.insert(format!("dnsbl:{}hit", item.dnsbl_hits.len()));
+    }
+    if let Some(action) = item
+        .dsn
+        .as_ref()
+        .and_then(|dsn| dsn.get("action"))
+        .and_then(Value::as_str)
+    {
+        tags.insert(format!("dsn:{action}"));
     }
     if item.spam_score > 0.0 {
         tags.insert(format!("spam:{:.1}", item.spam_score));
@@ -1041,6 +1306,130 @@ fn timestamp_from_now(seconds: u64) -> String {
     format!("unix:{}", current_unix_timestamp().saturating_add(seconds))
 }
 
+fn latest_decision(event: &MailHistoryEvent) -> Option<String> {
+    event.decision_trace.last().and_then(|value| {
+        let stage = value.get("stage")?.as_str()?;
+        let outcome = value.get("outcome")?.as_str()?;
+        Some(format!("{stage}:{outcome}"))
+    })
+}
+
+fn summarize_digest_counts(values: Vec<String>, limit: usize) -> Vec<DigestMetricCount> {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for value in values.into_iter().filter(|value| !value.trim().is_empty()) {
+        *counts.entry(value).or_default() += 1;
+    }
+    let mut items = counts
+        .into_iter()
+        .map(|(key, count)| DigestMetricCount { key, count })
+        .collect::<Vec<_>>();
+    items.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.key.cmp(&right.key))
+    });
+    items.truncate(limit);
+    items
+}
+
+fn render_metric_counts(values: &[DigestMetricCount], empty: &str) -> String {
+    if values.is_empty() {
+        return empty.to_string();
+    }
+    values
+        .iter()
+        .map(|value| format!("{} ({})", value.key, value.count))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn enrich_digest_detail(mut detail: DigestReportDetails) -> DigestReportDetails {
+    detail.status_counts = summarize_digest_counts(
+        detail
+            .items
+            .iter()
+            .map(|item| item.status.clone())
+            .collect::<Vec<_>>(),
+        6,
+    );
+    detail.domain_counts = summarize_digest_counts(
+        detail
+            .items
+            .iter()
+            .flat_map(|item| {
+                let mut values = Vec::new();
+                if let Some(domain) = domain_part(&item.mail_from) {
+                    values.push(domain);
+                }
+                values.extend(item.rcpt_to.iter().filter_map(|value| domain_part(value)));
+                values
+            })
+            .collect::<Vec<_>>(),
+        8,
+    );
+    detail
+}
+
+fn prune_transport_audit_jsonl(spool_dir: &Path, retention_days: u32) -> Result<()> {
+    let path = spool_dir.join("policy").join("transport-audit.jsonl");
+    if !path.exists() {
+        return Ok(());
+    }
+    let cutoff = history_cutoff(retention_days) as u64;
+    let retained = fs::read_to_string(&path)?
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| {
+            let event: StoredMailHistoryEvent = serde_json::from_str(line).ok()?;
+            (parse_unix_timestamp(&event.timestamp).unwrap_or(0) >= cutoff)
+                .then(|| serde_json::to_string(&event).ok())
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    let output = if retained.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", retained.join("\n"))
+    };
+    fs::write(path, output)?;
+    Ok(())
+}
+
+fn prune_digest_reports(spool_dir: &Path, retention_days: u32) -> Result<()> {
+    let dir = digest_report_dir(spool_dir);
+    if !dir.exists() {
+        return Ok(());
+    }
+    let cutoff = current_unix_timestamp().saturating_sub(retention_days.max(1) as u64 * 86_400);
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let detail: DigestReportDetails = serde_json::from_str(&fs::read_to_string(&path)?)?;
+        if parse_unix_timestamp(&detail.summary.generated_at).unwrap_or(0) < cutoff {
+            fs::remove_file(path)?;
+        }
+    }
+    Ok(())
+}
+
+async fn prune_retained_rows_from_db(
+    config: &RuntimeConfig,
+    settings: &ReportingSettings,
+) -> Result<()> {
+    let Some(pool) = smtp::ensure_local_db_schema(config).await? else {
+        return Ok(());
+    };
+    sqlx::query("DELETE FROM mail_flow_history WHERE event_unix < $1")
+        .bind(history_cutoff(settings.history_retention_days))
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1048,6 +1437,7 @@ mod tests {
         normalize_reporting_settings,
     };
     use crate::smtp::QuarantineSummary;
+    use serde_json::Value;
 
     fn sample_item(trace_id: &str, mail_from: &str, rcpt_to: &[&str]) -> QuarantineSummary {
         QuarantineSummary {
@@ -1056,6 +1446,8 @@ mod tests {
             direction: "inbound".to_string(),
             status: "quarantined".to_string(),
             received_at: "unix:10".to_string(),
+            peer: "203.0.113.10".to_string(),
+            helo: "mx.example.test".to_string(),
             mail_from: mail_from.to_string(),
             rcpt_to: rcpt_to.iter().map(|value| (*value).to_string()).collect(),
             subject: "Subject".to_string(),
@@ -1064,7 +1456,13 @@ mod tests {
             spam_score: 5.5,
             security_score: 3.0,
             reputation_score: -2,
+            dnsbl_hits: Vec::new(),
+            auth_summary: Value::Null,
+            magika_summary: None,
+            magika_decision: None,
+            remote_message_ref: None,
             route_target: None,
+            decision_summary: None,
         }
     }
 

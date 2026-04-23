@@ -94,10 +94,13 @@ pub(crate) async fn ensure_local_db_schema(
                     direction TEXT NOT NULL,
                     status TEXT NOT NULL,
                     received_at TEXT NOT NULL,
+                    received_unix BIGINT NOT NULL DEFAULT 0,
                     peer TEXT NOT NULL,
                     helo TEXT NOT NULL,
                     mail_from TEXT NOT NULL,
+                    sender_domain TEXT,
                     rcpt_to JSONB NOT NULL,
+                    recipient_domains JSONB NOT NULL DEFAULT '[]'::JSONB,
                     subject TEXT NOT NULL,
                     internet_message_id TEXT,
                     spool_path TEXT NOT NULL,
@@ -110,6 +113,9 @@ pub(crate) async fn ensure_local_db_schema(
                     decision_trace JSONB NOT NULL,
                     magika_summary TEXT,
                     magika_decision TEXT,
+                    remote_message_ref TEXT,
+                    route_target TEXT,
+                    search_text TEXT NOT NULL DEFAULT '',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
@@ -191,9 +197,45 @@ pub(crate) async fn ensure_local_db_schema(
                     digest_interval_minutes INTEGER NOT NULL,
                     digest_max_items INTEGER NOT NULL,
                     history_retention_days INTEGER NOT NULL,
+                    digest_report_retention_days INTEGER NOT NULL DEFAULT 14,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
                 "#,
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "ALTER TABLE quarantine_messages ADD COLUMN IF NOT EXISTS received_unix BIGINT NOT NULL DEFAULT 0"
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "ALTER TABLE quarantine_messages ADD COLUMN IF NOT EXISTS sender_domain TEXT"
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "ALTER TABLE quarantine_messages ADD COLUMN IF NOT EXISTS recipient_domains JSONB NOT NULL DEFAULT '[]'::JSONB"
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "ALTER TABLE quarantine_messages ADD COLUMN IF NOT EXISTS remote_message_ref TEXT"
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "ALTER TABLE quarantine_messages ADD COLUMN IF NOT EXISTS route_target TEXT"
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "ALTER TABLE quarantine_messages ADD COLUMN IF NOT EXISTS search_text TEXT NOT NULL DEFAULT ''"
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "ALTER TABLE digest_settings ADD COLUMN IF NOT EXISTS digest_report_retention_days INTEGER NOT NULL DEFAULT 14"
             )
             .execute(pool)
             .await?;
@@ -280,6 +322,21 @@ pub(crate) async fn ensure_local_db_schema(
             .execute(pool)
             .await?;
             sqlx::query(
+                "CREATE INDEX IF NOT EXISTS quarantine_messages_received_unix_idx ON quarantine_messages (received_unix DESC)"
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS quarantine_messages_sender_domain_idx ON quarantine_messages (sender_domain)"
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS quarantine_messages_search_tsv_idx ON quarantine_messages USING GIN (to_tsvector('simple', search_text))"
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
                 "CREATE INDEX IF NOT EXISTS policy_address_rules_role_action_idx ON policy_address_rules (address_role, action)"
             )
             .execute(pool)
@@ -302,6 +359,11 @@ pub(crate) async fn ensure_local_db_schema(
             if ensure_pg_trgm_extension(pool).await {
                 sqlx::query(
                     "CREATE INDEX IF NOT EXISTS mail_flow_history_search_trgm_idx ON mail_flow_history USING GIN (search_text gin_trgm_ops)"
+                )
+                .execute(pool)
+                .await?;
+                sqlx::query(
+                    "CREATE INDEX IF NOT EXISTS quarantine_messages_search_trgm_idx ON quarantine_messages USING GIN (search_text gin_trgm_ops)"
                 )
                 .execute(pool)
                 .await?;
@@ -558,14 +620,15 @@ pub(crate) async fn sync_dashboard_configuration(
         r#"
         INSERT INTO digest_settings (
             settings_key, digest_enabled, digest_interval_minutes, digest_max_items,
-            history_retention_days, updated_at
+            history_retention_days, digest_report_retention_days, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
         ON CONFLICT (settings_key) DO UPDATE SET
             digest_enabled = EXCLUDED.digest_enabled,
             digest_interval_minutes = EXCLUDED.digest_interval_minutes,
             digest_max_items = EXCLUDED.digest_max_items,
             history_retention_days = EXCLUDED.history_retention_days,
+            digest_report_retention_days = EXCLUDED.digest_report_retention_days,
             updated_at = NOW()
         "#,
     )
@@ -574,6 +637,7 @@ pub(crate) async fn sync_dashboard_configuration(
     .bind(i32::try_from(dashboard.reporting.digest_interval_minutes).unwrap_or(i32::MAX))
     .bind(i32::try_from(dashboard.reporting.digest_max_items).unwrap_or(i32::MAX))
     .bind(i32::try_from(dashboard.reporting.history_retention_days).unwrap_or(i32::MAX))
+    .bind(i32::try_from(dashboard.reporting.digest_report_retention_days).unwrap_or(i32::MAX))
     .execute(&mut *tx)
     .await?;
 

@@ -96,6 +96,23 @@ When `LPE-CT` enables its dedicated local `PostgreSQL` store, quarantined messag
 
 `LPE-CT` may also retain perimeter mail-flow history and generated quarantine digest artifacts for operator search and reporting, provided that those artifacts remain technical sorting-center state and do not become canonical mailbox search or user-visible product data in the core `LPE` store.
 
+That retained technical evidence is now intentionally richer for operator use. The current reporting path preserves and exposes:
+
+- `Message-Id`, sender, recipient, and domain correlation
+- peer IP, `HELO`, and route-target correlation
+- structured `DNSBL`, `SPF`, `DKIM`, and `DMARC` evidence
+- `Magika` summary and final decision when attachment validation influenced the outcome
+- latest retained technical status and `DSN` detail for outbound failures or retries
+- operator actions such as quarantine release, retry, and deletion in the retained history stream
+
+Retention is also explicit:
+
+- retained transport-audit history is bounded by the configured history-retention window
+- mirrored `mail_flow_history` rows follow the same retention boundary
+- generated digest artifacts under `policy/digest-reports/` use a separate digest-retention window
+
+These retained artifacts remain non-canonical technical evidence owned by the sorting center.
+
 The current technical store also persists sorting-center-owned policy and coordination metadata needed by the management plane:
 
 - allow/block address rules in `policy_address_rules`

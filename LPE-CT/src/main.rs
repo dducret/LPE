@@ -448,6 +448,7 @@ async fn main() -> Result<()> {
     reporting::normalize_reporting_settings(&mut dashboard.reporting);
     let runtime = smtp::runtime_config_from_dashboard(&dashboard);
     smtp::prepare_local_store(&spool_dir, &runtime).await?;
+    reporting::enforce_retention(&spool_dir, &runtime, &dashboard.reporting).await?;
     dashboard.site.management_bind = bind_address.clone();
     dashboard.site.public_smtp_bind = smtp_bind_address.clone();
     dashboard.network.submission_listener_enabled =
@@ -749,7 +750,13 @@ async fn quarantine_items(
     Query(query): Query<smtp::QuarantineQuery>,
 ) -> Result<Json<Vec<smtp::QuarantineSummary>>, ApiError> {
     let _admin = require_management_admin(&state, &headers)?;
-    let items = smtp::list_quarantine_items(&state.spool_dir, query).map_err(ApiError::from)?;
+    let runtime = {
+        let snapshot = read_state(&state)?;
+        smtp::runtime_config_from_dashboard(&snapshot)
+    };
+    let items = smtp::list_quarantine_items(&state.spool_dir, &runtime, query)
+        .await
+        .map_err(ApiError::from)?;
     Ok(Json(items))
 }
 
@@ -1184,6 +1191,18 @@ async fn run_reporting_scheduler(state: AppState) {
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         interval.tick().await;
+        {
+            let snapshot = match state.store.lock() {
+                Ok(guard) => guard.clone(),
+                Err(_) => continue,
+            };
+            let runtime = smtp::runtime_config_from_dashboard(&snapshot);
+            if let Err(error) =
+                reporting::enforce_retention(&state.spool_dir, &runtime, &snapshot.reporting).await
+            {
+                tracing::warn!(error = %error, "reporting retention enforcement failed");
+            }
+        }
         let generated_reports = {
             let mut guard = match state.store.lock() {
                 Ok(guard) => guard,

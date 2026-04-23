@@ -310,6 +310,32 @@ The management API and UI now use the retained perimeter artifacts for these ope
 - review DKIM signing posture, per-domain selectors, and key-path status in the same operator-facing policy workspace
 - manage digest schedule, domain defaults, mailbox overrides, and retained digest artifacts from one reporting section
 
+The current backend search surface is intentionally operator-oriented rather than dashboard-oriented.
+
+Quarantine search now supports explicit filtering on:
+
+- free text across trace id, sender, recipients, subject, `Message-Id`, route target, remote references, and retained policy evidence
+- exact trace id, sender, recipient, `Message-Id`, route target, and retained reason
+- direction, status, and domain
+- minimum `spam_score` and minimum `security_score`
+
+Retained mail-flow history search now supports explicit filtering on:
+
+- free text across trace id, sender, recipients, subject, route target, peer, `Message-Id`, and retained evidence
+- exact trace id, sender, recipient, `Message-Id`, peer, route target, and retained reason
+- direction, queue, disposition, and domain
+- minimum `spam_score` and minimum `security_score`
+
+Returned quarantine and history detail payloads now expose additional technical evidence useful during incident handling and operator triage:
+
+- peer IP and `HELO`
+- `DNSBL` hit set
+- structured auth summary
+- `Magika` summary and final `Magika` decision when present
+- latest retained decision summary
+- route target and remote message reference when relay work already happened
+- structured technical status and `DSN` detail for retained outbound outcomes
+
 Policy-status views are now operational rather than purely declarative:
 
 - recipient verification reports `disabled`, `misconfigured`, `degraded`, `bridge-misconfigured`, or `active` based on bridge and cache-store readiness
@@ -324,10 +350,36 @@ Current digest controls cover:
 - global interval in minutes
 - maximum items per digest
 - retained history window in days
+- retained digest-artifact window in days
 - domain default recipients
 - mailbox-specific user overrides when a narrower digest target is needed
 
 Generated digest artifacts are stored under `policy/digest-reports/` as technical operational reports surfaced in the management UI. They are not canonical mailbox messages and do not require direct access to the core `LPE` database.
+
+Each generated digest now carries a bounded and explainable technical summary derived only from retained sorting-center data, including:
+
+- inbound and outbound item counts
+- highest retained `spam_score` and `security_score`
+- oldest and newest retained event in the covered window
+- top retained reasons
+- per-status counts
+- per-domain counts in the retained details payload
+
+Digest generation remains predictable:
+
+- the generator reads only the retained history window
+- digest files are written to the sorting-center spool
+- digest configuration is mirrored into the private local database for management use
+- stored digest artifacts are pruned independently from retained history according to the dedicated digest retention setting
+
+Retention is explicit and bounded:
+
+- `policy/transport-audit.jsonl` is pruned to the configured history-retention window
+- mirrored `mail_flow_history` rows are pruned to the same history-retention window
+- retained digest artifacts under `policy/digest-reports/` are pruned to their own configured digest-retention window
+- current quarantine search indexes are rebuilt from the live `quarantine/` spool at startup when the private local database is enabled
+
+Those retention rules apply only to sorting-center-owned technical evidence and reporting artifacts. They do not change queue custody or make the private database canonical.
 
 ## SMTP outcomes
 

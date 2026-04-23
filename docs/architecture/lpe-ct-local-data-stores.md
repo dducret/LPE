@@ -160,8 +160,16 @@ Retention remains bounded:
 
 - queue custody stays in the spool
 - digest artifacts remain technical reports under `policy/digest-reports/`
-- history indexes follow the retained history window configured for `LPE-CT`
+- retained `policy/transport-audit.jsonl` follows the configured history window
+- `mail_flow_history` rows follow the same retained history window
+- digest artifacts under `policy/digest-reports/` follow a dedicated digest-report retention window
 - recipient-verification cache rows expire automatically by TTL and must not become durable mailbox-directory truth
+
+The current reporting and quarantine implementation also makes the rebuild boundary explicit:
+
+- `quarantine_messages` is treated as an operational index over the live quarantine spool and is reindexed from current `quarantine/` artifacts at startup when the private local database is enabled
+- retained history pruning removes only bounded technical evidence, never canonical mailbox data
+- digest artifacts are derived from retained sorting-center history and may be deleted or regenerated without affecting queue ownership or user-visible state
 
 ### Storage assignment by function
 
@@ -266,6 +274,14 @@ That current default profile covers:
 - quarantine metadata
 - cluster coordination
 - outbound throttling state
+
+For reporting and operator search, the private store now also carries dedicated technical indexing fields so perimeter workflows do not depend on full spool scans:
+
+- retained quarantine receipt time
+- sender and recipient domains
+- route target and remote message reference
+- combined operator search text with full-text indexing and optional trigram acceleration
+- retained mail-flow event timestamps and correlation metadata
 
 The spool remains authoritative for queue ownership, raw message traces, quarantine payload custody, and replay-oriented artifacts.
 

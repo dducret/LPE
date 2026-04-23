@@ -29,6 +29,14 @@ When dedicated local PostgreSQL is enabled, `LPE-CT` now also persists technical
 The same private store now also holds technical management-plane metadata for `policy_address_rules`, `attachment_policy_rules`, `digest_settings`, `digest_recipients`, `recipient_verification_cache`, `recipient_verification_settings`, and `dkim_domain_configs`.
 The management surface now also uses sorting-center-owned retained artifacts plus those dedicated technical indexes for quarantine search, retained mail-flow history, address-policy administration, digest scheduling, recipient-verification cache inspection, and DKIM-domain configuration references generated entirely from `LPE-CT` state.
 
+Operational indexing is now deliberately evidence-oriented:
+
+- `quarantine_messages` indexes the current quarantine set by retained receipt time, sender domain, recipient domains, route target, remote message reference, and combined search text
+- `mail_flow_history` indexes retained perimeter events by trace, time, direction, queue, disposition, and bounded technical evidence
+- full-text search is enabled for retained operator text lookups, with optional trigram acceleration when `pg_trgm` is available on the private local PostgreSQL instance
+
+Those indexes exist only to improve sorting-center operations. They must stay rebuildable from current spool artifacts, retained audit history, and `state.json` mirrors.
+
 For the P1 management interface, those operator workflows are exposed as one coherent web surface instead of separate technical screens:
 
 - full-width quarantine and retained-history lists with search and trace drawers
@@ -110,6 +118,15 @@ The `LPE-CT` management interface covers:
 - retained mail-flow history search by trace, sender, recipient, subject, route, and disposition
 - scheduled quarantine digest configuration with domain defaults and mailbox-specific overrides
 - Git-first update source and maintenance window
+
+Operator-facing retained payloads now also include the technical evidence needed to explain a decision without re-reading raw spool files:
+
+- peer IP and `HELO`
+- `DNSBL` hits
+- structured auth summary
+- `Magika` outcome when applicable
+- latest retained decision summary
+- route target, remote message reference, technical status, and `DSN` detail for outbound traces
 
 ### Debian installation
 
