@@ -1,3 +1,4 @@
+use serde_json::Value;
 use sqlx::FromRow;
 use uuid::Uuid;
 
@@ -196,8 +197,12 @@ pub(crate) struct OutboundQueueStateRow {
     pub(crate) tenant_id: String,
     pub(crate) message_id: Uuid,
     pub(crate) status: String,
+    pub(crate) attempts: i32,
     pub(crate) last_trace_id: Option<String>,
     pub(crate) remote_message_ref: Option<String>,
+    pub(crate) retry_after_seconds: Option<i32>,
+    pub(crate) retry_policy: Option<String>,
+    pub(crate) last_result_json: Value,
 }
 
 #[derive(Debug, FromRow)]

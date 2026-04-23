@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use lpe_domain::{
     OutboundMessageHandoffRequest, OutboundMessageHandoffResponse, TransportDeliveryStatus,
-    TransportRecipient,
+    TransportRecipient, TransportRetryAdvice,
 };
 use serde_json::Value;
 use sqlx::Row;
@@ -16,25 +16,20 @@ fn queue_status_is_terminal(status: &str) -> bool {
     matches!(status, "relayed" | "quarantined" | "bounced" | "failed")
 }
 
-fn is_duplicate_handoff(
+fn same_trace_id(current_trace_id: Option<&str>, response_trace_id: &str) -> bool {
+    current_trace_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        == Some(response_trace_id.trim())
+}
+
+fn is_duplicate_terminal_handoff(
     current_status: &str,
-    current_trace_id: Option<&str>,
     current_remote_message_ref: Option<&str>,
     response: &OutboundMessageHandoffResponse,
 ) -> bool {
-    if current_status != response.status.as_str() {
-        return false;
-    }
-
-    let same_trace_id = current_trace_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        == Some(response.trace_id.trim());
-    if same_trace_id {
-        return true;
-    }
-
-    queue_status_is_terminal(current_status)
+    current_status == response.status.as_str()
+        && queue_status_is_terminal(current_status)
         && current_remote_message_ref
             .map(str::trim)
             .filter(|value| !value.is_empty())
@@ -43,6 +38,60 @@ fn is_duplicate_handoff(
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
+}
+
+fn would_regress_queue_status(current_status: &str, next_status: &str) -> bool {
+    matches!((current_status, next_status), ("deferred", "queued"))
+}
+
+fn synthesized_retry_policy(response: &OutboundMessageHandoffResponse) -> &'static str {
+    if response.trace_id.trim().starts_with("lpe-dispatch-") {
+        "dispatch-backoff"
+    } else {
+        "deferred-backoff"
+    }
+}
+
+fn default_retry_after_seconds(attempts: i32) -> i32 {
+    let next_attempt = attempts.saturating_add(1).max(1);
+    next_attempt.saturating_mul(300).min(3600)
+}
+
+fn normalize_handoff_response(
+    attempts: i32,
+    response: &OutboundMessageHandoffResponse,
+) -> OutboundMessageHandoffResponse {
+    let mut normalized = response.clone();
+    normalized.trace_id = normalized.trace_id.trim().to_string();
+    normalized.remote_message_ref = normalized
+        .remote_message_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string);
+
+    normalized.retry = match normalized.status {
+        TransportDeliveryStatus::Deferred => {
+            let retry = normalized.retry.take().unwrap_or_else(|| TransportRetryAdvice {
+                retry_after_seconds: default_retry_after_seconds(attempts) as u32,
+                policy: synthesized_retry_policy(response).to_string(),
+                reason: normalized.detail.clone(),
+            });
+            Some(TransportRetryAdvice {
+                retry_after_seconds: retry.retry_after_seconds.max(1),
+                policy: retry.policy.trim().to_string(),
+                reason: retry
+                    .reason
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string),
+            })
+        }
+        _ => None,
+    };
+
+    normalized
 }
 
 impl Storage {
@@ -169,7 +218,16 @@ impl Storage {
     ) -> Result<OutboundQueueStatusUpdate> {
         let current = sqlx::query_as::<_, OutboundQueueStateRow>(
             r#"
-            SELECT tenant_id, message_id, status, last_trace_id, remote_message_ref
+            SELECT
+                tenant_id,
+                message_id,
+                status,
+                attempts,
+                last_trace_id,
+                remote_message_ref,
+                retry_after_seconds,
+                retry_policy,
+                last_result_json
             FROM outbound_message_queue
             WHERE id = $1
             LIMIT 1
@@ -179,45 +237,36 @@ impl Storage {
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| anyhow!("outbound queue item not found"))?;
-        if is_duplicate_handoff(
-            &current.status,
-            current.last_trace_id.as_deref(),
-            current.remote_message_ref.as_deref(),
-            response,
-        ) || queue_status_is_terminal(&current.status)
-        {
-            let technical_status = sqlx::query_scalar::<_, Value>(
-                r#"
-                SELECT last_result_json
-                FROM outbound_message_queue
-                WHERE tenant_id = $1 AND id = $2
-                LIMIT 1
-                "#,
-            )
-            .bind(&current.tenant_id)
-            .bind(response.queue_id)
-            .fetch_one(&self.pool)
-            .await?;
 
+        if same_trace_id(current.last_trace_id.as_deref(), &response.trace_id)
+            || is_duplicate_terminal_handoff(
+                &current.status,
+                current.remote_message_ref.as_deref(),
+                response,
+            )
+            || queue_status_is_terminal(&current.status)
+            || would_regress_queue_status(&current.status, response.status.as_str())
+        {
             return Ok(OutboundQueueStatusUpdate {
                 queue_id: response.queue_id,
                 message_id: current.message_id,
                 status: current.status,
                 trace_id: current.last_trace_id,
                 remote_message_ref: current.remote_message_ref,
-                retry_after_seconds: None,
-                retry_policy: None,
-                technical_status,
+                retry_after_seconds: current.retry_after_seconds,
+                retry_policy: current.retry_policy,
+                technical_status: current.last_result_json,
             });
         }
 
-        let status_value = response.status.as_str().to_string();
-        let retry_after_seconds = response
+        let normalized = normalize_handoff_response(current.attempts, response);
+        let status_value = normalized.status.as_str().to_string();
+        let retry_after_seconds = normalized
             .retry
             .as_ref()
             .map(|retry| retry.retry_after_seconds.min(i32::MAX as u32) as i32);
-        let retry_policy = response.retry.as_ref().map(|retry| retry.policy.clone());
-        let technical_status = serde_json::to_value(response)?;
+        let retry_policy = normalized.retry.as_ref().map(|retry| retry.policy.clone());
+        let technical_status = serde_json::to_value(&normalized)?;
         let row = sqlx::query(
             r#"
             UPDATE outbound_message_queue
@@ -254,30 +303,30 @@ impl Storage {
         .bind(response.queue_id)
         .bind(&status_value)
         .bind(retry_after_seconds)
-        .bind(response.detail.as_deref())
-        .bind(response.remote_message_ref.as_deref())
+        .bind(normalized.detail.as_deref())
+        .bind(normalized.remote_message_ref.as_deref())
         .bind(&technical_status)
         .bind(retry_policy.as_deref())
-        .bind(response.dsn.as_ref().map(|dsn| dsn.action.as_str()))
-        .bind(response.dsn.as_ref().map(|dsn| dsn.status.as_str()))
-        .bind(response.technical.as_ref().and_then(|status| status.smtp_code.map(i32::from)))
+        .bind(normalized.dsn.as_ref().map(|dsn| dsn.action.as_str()))
+        .bind(normalized.dsn.as_ref().map(|dsn| dsn.status.as_str()))
+        .bind(normalized.technical.as_ref().and_then(|status| status.smtp_code.map(i32::from)))
         .bind(
-            response
+            normalized
                 .technical
                 .as_ref()
                 .and_then(|status| status.enhanced_code.as_deref()),
         )
-        .bind(response.route.as_ref().and_then(|route| route.rule_id.as_deref()))
+        .bind(normalized.route.as_ref().and_then(|route| route.rule_id.as_deref()))
         .bind(
-            response
+            normalized
                 .throttle
                 .as_ref()
                 .map(|throttle| throttle.scope.as_str()),
         )
-        .bind(response.throttle.as_ref().map(|throttle| {
+        .bind(normalized.throttle.as_ref().map(|throttle| {
             throttle.retry_after_seconds.min(i32::MAX as u32) as i32
         }))
-        .bind(response.trace_id.trim())
+        .bind(&normalized.trace_id)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| anyhow!("outbound queue item not found"))?;
@@ -368,15 +417,12 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_handoff_is_recognized_by_trace_id() {
+    fn duplicate_handoff_is_recognized_by_trace_id_even_when_status_differs() {
         let response = response(TransportDeliveryStatus::Deferred, "trace-1", None);
 
-        assert!(is_duplicate_handoff(
-            "deferred",
-            Some("trace-1"),
-            None,
-            &response,
-        ));
+        assert!(same_trace_id(Some("trace-1"), &response.trace_id));
+        assert!(same_trace_id(Some(" trace-1 "), "trace-1"));
+        assert!(same_trace_id(Some("trace-1"), " trace-1 "));
     }
 
     #[test]
@@ -387,9 +433,8 @@ mod tests {
             Some("remote-123"),
         );
 
-        assert!(is_duplicate_handoff(
+        assert!(is_duplicate_terminal_handoff(
             "relayed",
-            Some("other-trace"),
             Some("remote-123"),
             &response,
         ));
@@ -401,5 +446,67 @@ mod tests {
         assert!(queue_status_is_terminal("failed"));
         assert!(!queue_status_is_terminal("queued"));
         assert!(!queue_status_is_terminal("deferred"));
+    }
+
+    #[test]
+    fn deferred_queue_state_does_not_regress_to_queued() {
+        assert!(would_regress_queue_status("deferred", "queued"));
+        assert!(!would_regress_queue_status("queued", "deferred"));
+        assert!(!would_regress_queue_status("queued", "relayed"));
+    }
+
+    #[test]
+    fn deferred_responses_without_retry_get_default_guidance() {
+        let normalized = normalize_handoff_response(
+            0,
+            &OutboundMessageHandoffResponse {
+                queue_id: Uuid::nil(),
+                status: TransportDeliveryStatus::Deferred,
+                trace_id: " lpe-dispatch-test ".to_string(),
+                detail: Some("connection lost".to_string()),
+                remote_message_ref: Some("  ".to_string()),
+                retry: None,
+                dsn: None,
+                technical: None,
+                route: None,
+                throttle: None,
+            },
+        );
+
+        assert_eq!(normalized.trace_id, "lpe-dispatch-test");
+        assert_eq!(normalized.remote_message_ref, None);
+        assert_eq!(
+            normalized.retry,
+            Some(TransportRetryAdvice {
+                retry_after_seconds: 300,
+                policy: "dispatch-backoff".to_string(),
+                reason: Some("connection lost".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn terminal_responses_clear_retry_guidance() {
+        let normalized = normalize_handoff_response(
+            2,
+            &OutboundMessageHandoffResponse {
+                queue_id: Uuid::nil(),
+                status: TransportDeliveryStatus::Failed,
+                trace_id: "trace-9".to_string(),
+                detail: Some("permanent failure".to_string()),
+                remote_message_ref: None,
+                retry: Some(TransportRetryAdvice {
+                    retry_after_seconds: 120,
+                    policy: "unexpected".to_string(),
+                    reason: Some("should be cleared".to_string()),
+                }),
+                dsn: None,
+                technical: None,
+                route: None,
+                throttle: None,
+            },
+        );
+
+        assert_eq!(normalized.retry, None);
     }
 }
