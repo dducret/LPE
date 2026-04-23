@@ -22,8 +22,52 @@ type DashboardState = {
   audit_log: { id: string; timestamp: string; actor: string; action: string; subject: string }[];
 };
 
-type TraceResult = { message_id: string; internet_message_id: string | null; subject: string; sender: string; account_email: string; mailbox: string; received_at: string };
-type MailFlowEntry = { queue_id: string; tenant_name: string | null; sender: string; recipient: string; next_attempt_at: string | null; last_attempt_at: string | null; status: string; failure_reason: string | null };
+type TraceResult = {
+  message_id: string;
+  internet_message_id: string | null;
+  subject: string;
+  sender: string;
+  account_email: string;
+  mailbox: string;
+  delivery_status: string;
+  was_submitted: boolean;
+  in_sent_mailbox: boolean;
+  sent_at: string | null;
+  queue_status: string | null;
+  latest_trace_id: string | null;
+  remote_message_ref: string | null;
+  last_attempt_at: string | null;
+  next_attempt_at: string | null;
+  last_error: string | null;
+  last_dsn_status: string | null;
+  last_smtp_code: number | null;
+  last_enhanced_status: string | null;
+  received_at: string;
+};
+type MailFlowEntry = {
+  queue_id: string;
+  message_id: string;
+  account_email: string;
+  subject: string;
+  internet_message_id: string | null;
+  status: string;
+  delivery_status: string;
+  was_submitted: boolean;
+  in_sent_mailbox: boolean;
+  attempts: number;
+  submitted_at: string;
+  sent_at: string | null;
+  last_attempt_at: string | null;
+  next_attempt_at: string | null;
+  trace_id: string | null;
+  remote_message_ref: string | null;
+  last_error: string | null;
+  retry_after_seconds: number | null;
+  retry_policy: string | null;
+  last_dsn_status: string | null;
+  last_smtp_code: number | null;
+  last_enhanced_status: string | null;
+};
 type PstFormState = { direction: "import" | "export"; server_path: string; requested_by: string };
 type AccountRecord = DashboardState["accounts"][number];
 type MailboxRecord = AccountRecord["mailboxes"][number];
@@ -44,6 +88,8 @@ async function sendFormData<T>(path: string, payload: FormData, token: string | 
 function Field(props: { label: string; value: string; onChange: (value: string) => void; type?: "text" | "number" | "password"; placeholder?: string }) { return <label className="field"><span>{props.label}</span><Input type={props.type ?? "text"} value={props.value} placeholder={props.placeholder} onChange={(event) => props.onChange(event.target.value)} /></label>; }
 function ToggleField(props: { label: string; checked: boolean; onChange: (checked: boolean) => void }) { return <label className="toggle-field"><span>{props.label}</span><input type="checkbox" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} /></label>; }
 function TabButton(props: { active: boolean; onClick: () => void; label: string }) { return <PrimitiveTabButton active={props.active} onClick={props.onClick}>{props.label}</PrimitiveTabButton>; }
+function yesNo(value: boolean) { return value ? "yes" : "no"; }
+function compactMeta(parts: Array<string | null | undefined>) { return parts.filter((part): part is string => Boolean(part && part.trim())).join(" · "); }
 
 function App() {
   const [locale, setLocale] = React.useState<Locale>(getInitialLocale);
@@ -395,10 +441,10 @@ function App() {
         {page === "audit" ? <section className="page-card">
           <div className="tabs">{(["journal","trace"] as AuditTab[]).map((tab)=><TabButton key={tab} active={auditTab===tab} onClick={()=>setAuditTab(tab)} label={copy.auditTabs[tab]} />)}</div>
           {auditTab === "journal" ? <article className="card"><h3>{copy.auditJournal}</h3><div className="list">{state.audit_log.map((event)=><div className="row multi" key={event.id}><strong>{event.action}</strong><span>{event.subject}</span><span>{event.actor}</span><span>{event.timestamp}</span></div>)}</div></article> : null}
-          {auditTab === "trace" ? <div className="card form-stack"><h3>{copy.emailTrace}</h3><div className="inline-form"><Field label={copy.searchQuery} value={traceQuery} onChange={setTraceQuery} placeholder="message-id, sender, subject, account" /><button className="primary-button" type="button" disabled={busy==="trace"} onClick={() => void searchTrace()}>{copy.search}</button></div><div className="list">{traceResults.map((result)=><div className="row multi" key={result.message_id}><strong>{result.subject}</strong><span>{result.sender}</span><span>{result.account_email}</span><span>{result.mailbox}</span><span>{result.received_at}</span></div>)}</div></div> : null}
+          {auditTab === "trace" ? <div className="card form-stack"><h3>{copy.emailTrace}</h3><div className="inline-form"><Field label={copy.searchQuery} value={traceQuery} onChange={setTraceQuery} placeholder="message-id, trace-id, sender, subject, account" /><button className="primary-button" type="button" disabled={busy==="trace"} onClick={() => void searchTrace()}>{copy.search}</button></div><div className="list">{traceResults.map((result)=><div className="row multi" key={result.message_id}><strong>{result.subject}</strong><span>{compactMeta([result.sender, result.account_email, result.mailbox])}</span><span>{compactMeta([`submitted ${yesNo(result.was_submitted)}`, `sent ${yesNo(result.in_sent_mailbox)}`, `delivery ${result.delivery_status}`, result.queue_status ? `queue ${result.queue_status}` : null])}</span><span>{compactMeta([result.latest_trace_id ? `trace ${result.latest_trace_id}` : null, result.remote_message_ref ? `ref ${result.remote_message_ref}` : null, result.last_smtp_code !== null ? `smtp ${result.last_smtp_code}` : null, result.last_dsn_status ? `dsn ${result.last_dsn_status}` : null])}</span><span>{compactMeta([result.sent_at ? `sent ${result.sent_at}` : null, result.last_attempt_at ? `last ${result.last_attempt_at}` : null, result.next_attempt_at ? `next ${result.next_attempt_at}` : null, `seen ${result.received_at}`])}</span><span>{result.last_error ?? ""}</span></div>)}</div></div> : null}
         </section> : null}
 
-        {page === "operations" ? <section className="page-card"><div className="tabs">{(["protocols","storage","mailflow"] as OperationsTab[]).map((tab)=><TabButton key={tab} active={operationsTab===tab} onClick={()=>setOperationsTab(tab)} label={copy.operationsTabs[tab]} />)}</div>{operationsTab === "protocols" ? <article className="card"><h3>{copy.protocolStatus}</h3><div className="list">{state.protocols.map((protocol)=><div className="row" key={protocol.name}><strong>{protocol.name}</strong><span>{protocol.bind_address}</span><span className={protocol.enabled ? "pill ok" : "pill warn"}>{protocol.state}</span></div>)}</div></article> : null}{operationsTab === "storage" ? <article className="card"><h3>{copy.storageOverview}</h3><div className="list"><div className="row"><strong>{copy.primaryStore}</strong><span>{state.storage.primary_store}</span></div><div className="row"><strong>{copy.searchEngine}</strong><span>{state.storage.search_engine}</span></div><div className="row"><strong>{copy.replication}</strong><span>{state.storage.replication_mode}</span></div></div><div className="sublist">{state.storage.attachment_formats.map((format)=><span className="pill" key={format}>{format}</span>)}</div></article> : null}{operationsTab === "mailflow" ? <article className="card"><h3>{copy.mailFlowMonitor}</h3><div className="list">{mailFlow.map((item)=><div className="row multi" key={item.queue_id}><strong>{item.sender}</strong><span>{item.recipient}</span><span>{item.tenant_name ?? copy.queueOwner}</span><span>{item.status}</span><span>{item.last_attempt_at ?? "-"}</span><span>{item.next_attempt_at ?? "-"}</span><span>{item.failure_reason ?? ""}</span></div>)}</div></article> : null}</section> : null}
+        {page === "operations" ? <section className="page-card"><div className="tabs">{(["protocols","storage","mailflow"] as OperationsTab[]).map((tab)=><TabButton key={tab} active={operationsTab===tab} onClick={()=>setOperationsTab(tab)} label={copy.operationsTabs[tab]} />)}</div>{operationsTab === "protocols" ? <article className="card"><h3>{copy.protocolStatus}</h3><div className="list">{state.protocols.map((protocol)=><div className="row" key={protocol.name}><strong>{protocol.name}</strong><span>{protocol.bind_address}</span><span className={protocol.enabled ? "pill ok" : "pill warn"}>{protocol.state}</span></div>)}</div></article> : null}{operationsTab === "storage" ? <article className="card"><h3>{copy.storageOverview}</h3><div className="list"><div className="row"><strong>{copy.primaryStore}</strong><span>{state.storage.primary_store}</span></div><div className="row"><strong>{copy.searchEngine}</strong><span>{state.storage.search_engine}</span></div><div className="row"><strong>{copy.replication}</strong><span>{state.storage.replication_mode}</span></div></div><div className="sublist">{state.storage.attachment_formats.map((format)=><span className="pill" key={format}>{format}</span>)}</div></article> : null}{operationsTab === "mailflow" ? <article className="card"><h3>{copy.mailFlowMonitor}</h3><div className="list">{mailFlow.map((item)=><div className="row multi" key={item.queue_id}><strong>{item.subject}</strong><span>{compactMeta([item.account_email, item.internet_message_id])}</span><span>{compactMeta([`submitted ${yesNo(item.was_submitted)}`, `sent ${yesNo(item.in_sent_mailbox)}`, `queue ${item.status}`, `delivery ${item.delivery_status}`, `attempts ${item.attempts}`])}</span><span>{compactMeta([item.trace_id ? `trace ${item.trace_id}` : null, item.remote_message_ref ? `ref ${item.remote_message_ref}` : null, item.last_smtp_code !== null ? `smtp ${item.last_smtp_code}` : null, item.last_dsn_status ? `dsn ${item.last_dsn_status}` : null])}</span><span>{compactMeta([`submitted ${item.submitted_at}`, item.sent_at ? `sent ${item.sent_at}` : null, item.last_attempt_at ? `last ${item.last_attempt_at}` : null, item.next_attempt_at ? `next ${item.next_attempt_at}` : null])}</span><span>{compactMeta([item.last_error, item.retry_policy ? `retry ${item.retry_policy}` : null, item.retry_after_seconds !== null ? `${item.retry_after_seconds}s` : null, item.last_enhanced_status])}</span></div>)}</div></article> : null}</section> : null}
       </> : null}
     </section>
   </main>;

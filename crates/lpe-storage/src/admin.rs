@@ -1288,10 +1288,17 @@ impl Storage {
                 q.message_id,
                 a.primary_email AS account_email,
                 m.subject_normalized AS subject,
+                m.internet_message_id,
                 q.status,
                 m.delivery_status,
+                TRUE AS was_submitted,
+                (mb.role = 'sent' AND m.sent_at IS NOT NULL) AS in_sent_mailbox,
                 q.attempts,
                 to_char(q.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS submitted_at,
+                CASE
+                    WHEN m.sent_at IS NULL THEN NULL
+                    ELSE to_char(m.sent_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS sent_at,
                 CASE
                     WHEN q.last_attempt_at IS NULL THEN NULL
                     ELSE to_char(q.last_attempt_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
@@ -1310,6 +1317,7 @@ impl Storage {
                 q.last_enhanced_status
             FROM outbound_message_queue q
             JOIN messages m ON m.id = q.message_id
+            JOIN mailboxes mb ON mb.id = m.mailbox_id
             JOIN accounts a ON a.id = m.account_id
             WHERE q.tenant_id = $1
             ORDER BY q.created_at DESC
@@ -1320,29 +1328,7 @@ impl Storage {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| MailFlowEntry {
-                queue_id: row.queue_id,
-                message_id: row.message_id,
-                account_email: row.account_email,
-                subject: row.subject,
-                status: row.status,
-                delivery_status: row.delivery_status,
-                attempts: row.attempts.max(0) as u32,
-                submitted_at: row.submitted_at,
-                last_attempt_at: row.last_attempt_at,
-                next_attempt_at: row.next_attempt_at,
-                trace_id: row.trace_id,
-                remote_message_ref: row.remote_message_ref,
-                last_error: row.last_error,
-                retry_after_seconds: row.retry_after_seconds,
-                retry_policy: row.retry_policy,
-                last_dsn_status: row.last_dsn_status,
-                last_smtp_code: row.last_smtp_code,
-                last_enhanced_status: row.last_enhanced_status,
-            })
-            .collect())
+        Ok(rows.into_iter().map(map_mail_flow_row).collect())
     }
 
     pub async fn search_email_trace(
@@ -1359,16 +1345,57 @@ impl Storage {
                 m.from_address AS sender,
                 a.primary_email AS account_email,
                 mb.display_name AS mailbox,
+                m.delivery_status,
+                (m.submitted_by_account_id IS NOT NULL OR q.queue_status IS NOT NULL) AS was_submitted,
+                (mb.role = 'sent' AND m.sent_at IS NOT NULL) AS in_sent_mailbox,
+                CASE
+                    WHEN m.sent_at IS NULL THEN NULL
+                    ELSE to_char(m.sent_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS sent_at,
+                q.queue_status,
+                q.latest_trace_id,
+                q.remote_message_ref,
+                q.last_attempt_at,
+                q.next_attempt_at,
+                q.last_error,
+                q.last_dsn_status,
+                q.last_smtp_code,
+                q.last_enhanced_status,
                 to_char(m.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at
             FROM messages m
             JOIN accounts a ON a.id = m.account_id
             JOIN mailboxes mb ON mb.id = m.mailbox_id
+            LEFT JOIN LATERAL (
+                SELECT
+                    q.status AS queue_status,
+                    q.last_trace_id AS latest_trace_id,
+                    q.remote_message_ref,
+                    CASE
+                        WHEN q.last_attempt_at IS NULL THEN NULL
+                        ELSE to_char(q.last_attempt_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                    END AS last_attempt_at,
+                    CASE
+                        WHEN q.next_attempt_at IS NULL THEN NULL
+                        ELSE to_char(q.next_attempt_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                    END AS next_attempt_at,
+                    q.last_error,
+                    q.last_dsn_status,
+                    q.last_smtp_code,
+                    q.last_enhanced_status
+                FROM outbound_message_queue q
+                WHERE q.tenant_id = m.tenant_id
+                  AND q.message_id = m.id
+                ORDER BY q.created_at DESC
+                LIMIT 1
+            ) q ON TRUE
             WHERE m.tenant_id = $1
               AND (
                 lower(m.from_address) LIKE $2
                 OR lower(m.subject_normalized) LIKE $2
                 OR lower(COALESCE(m.internet_message_id, '')) LIKE $2
                 OR lower(a.primary_email) LIKE $2
+                OR lower(COALESCE(q.latest_trace_id, '')) LIKE $2
+                OR lower(COALESCE(q.remote_message_ref, '')) LIKE $2
                 OR EXISTS (
                     SELECT 1
                     FROM attachments at
@@ -1386,18 +1413,7 @@ impl Storage {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| EmailTraceResult {
-                message_id: row.message_id,
-                internet_message_id: row.internet_message_id,
-                subject: row.subject,
-                sender: row.sender,
-                account_email: row.account_email,
-                mailbox: row.mailbox,
-                received_at: row.received_at,
-            })
-            .collect())
+        Ok(rows.into_iter().map(map_email_trace_row).collect())
     }
 
     async fn fetch_server_settings(&self) -> Result<ServerSettings> {
@@ -1758,5 +1774,127 @@ impl Storage {
                 created_at: row.created_at,
             })
             .collect())
+    }
+}
+
+fn map_mail_flow_row(row: MailFlowRow) -> MailFlowEntry {
+    MailFlowEntry {
+        queue_id: row.queue_id,
+        message_id: row.message_id,
+        account_email: row.account_email,
+        subject: row.subject,
+        internet_message_id: row.internet_message_id,
+        status: row.status,
+        delivery_status: row.delivery_status,
+        was_submitted: row.was_submitted,
+        in_sent_mailbox: row.in_sent_mailbox,
+        attempts: row.attempts.max(0) as u32,
+        submitted_at: row.submitted_at,
+        sent_at: row.sent_at,
+        last_attempt_at: row.last_attempt_at,
+        next_attempt_at: row.next_attempt_at,
+        trace_id: row.trace_id,
+        remote_message_ref: row.remote_message_ref,
+        last_error: row.last_error,
+        retry_after_seconds: row.retry_after_seconds,
+        retry_policy: row.retry_policy,
+        last_dsn_status: row.last_dsn_status,
+        last_smtp_code: row.last_smtp_code,
+        last_enhanced_status: row.last_enhanced_status,
+    }
+}
+
+fn map_email_trace_row(row: EmailTraceRow) -> EmailTraceResult {
+    EmailTraceResult {
+        message_id: row.message_id,
+        internet_message_id: row.internet_message_id,
+        subject: row.subject,
+        sender: row.sender,
+        account_email: row.account_email,
+        mailbox: row.mailbox,
+        delivery_status: row.delivery_status,
+        was_submitted: row.was_submitted,
+        in_sent_mailbox: row.in_sent_mailbox,
+        sent_at: row.sent_at,
+        queue_status: row.queue_status,
+        latest_trace_id: row.latest_trace_id,
+        remote_message_ref: row.remote_message_ref,
+        last_attempt_at: row.last_attempt_at,
+        next_attempt_at: row.next_attempt_at,
+        last_error: row.last_error,
+        last_dsn_status: row.last_dsn_status,
+        last_smtp_code: row.last_smtp_code,
+        last_enhanced_status: row.last_enhanced_status,
+        received_at: row.received_at,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{map_email_trace_row, map_mail_flow_row};
+    use crate::{EmailTraceRow, MailFlowRow};
+    use uuid::Uuid;
+
+    #[test]
+    fn mail_flow_mapping_keeps_explicit_submission_and_sent_signals() {
+        let entry = map_mail_flow_row(MailFlowRow {
+            queue_id: Uuid::nil(),
+            message_id: Uuid::nil(),
+            account_email: "alice@example.test".to_string(),
+            subject: "Queued message".to_string(),
+            internet_message_id: Some("<msg@example.test>".to_string()),
+            status: "deferred".to_string(),
+            delivery_status: "deferred".to_string(),
+            was_submitted: true,
+            in_sent_mailbox: true,
+            attempts: -2,
+            submitted_at: "2026-04-23T08:00:00Z".to_string(),
+            sent_at: Some("2026-04-23T08:00:00Z".to_string()),
+            last_attempt_at: Some("2026-04-23T08:05:00Z".to_string()),
+            next_attempt_at: Some("2026-04-23T08:10:00Z".to_string()),
+            trace_id: Some("trace-1".to_string()),
+            remote_message_ref: Some("remote-1".to_string()),
+            last_error: Some("temporary failure".to_string()),
+            retry_after_seconds: Some(300),
+            retry_policy: Some("deferred-backoff".to_string()),
+            last_dsn_status: Some("4.4.1".to_string()),
+            last_smtp_code: Some(451),
+            last_enhanced_status: Some("4.4.1".to_string()),
+        });
+
+        assert!(entry.was_submitted);
+        assert!(entry.in_sent_mailbox);
+        assert_eq!(entry.attempts, 0);
+        assert_eq!(entry.trace_id.as_deref(), Some("trace-1"));
+    }
+
+    #[test]
+    fn email_trace_mapping_surfaces_latest_queue_state() {
+        let entry = map_email_trace_row(EmailTraceRow {
+            message_id: Uuid::nil(),
+            internet_message_id: Some("<msg@example.test>".to_string()),
+            subject: "Relay result".to_string(),
+            sender: "alice@example.test".to_string(),
+            account_email: "alice@example.test".to_string(),
+            mailbox: "Sent".to_string(),
+            delivery_status: "relayed".to_string(),
+            was_submitted: true,
+            in_sent_mailbox: true,
+            sent_at: Some("2026-04-23T08:00:00Z".to_string()),
+            queue_status: Some("relayed".to_string()),
+            latest_trace_id: Some("trace-2".to_string()),
+            remote_message_ref: Some("remote-2".to_string()),
+            last_attempt_at: Some("2026-04-23T08:01:00Z".to_string()),
+            next_attempt_at: None,
+            last_error: None,
+            last_dsn_status: None,
+            last_smtp_code: Some(250),
+            last_enhanced_status: Some("2.0.0".to_string()),
+            received_at: "2026-04-23T08:00:00Z".to_string(),
+        });
+
+        assert_eq!(entry.queue_status.as_deref(), Some("relayed"));
+        assert_eq!(entry.latest_trace_id.as_deref(), Some("trace-2"));
+        assert!(entry.in_sent_mailbox);
     }
 }
