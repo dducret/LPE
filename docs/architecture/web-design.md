@@ -25,9 +25,16 @@ This document must be treated as the reference architecture for any task that ch
 
 ### Technology and normalization base
 
-`Tailwind CSS` is the normalization base for all `LPE` web interfaces.
+The current normalization base for `LPE` web interfaces is a shared `Tailwind CSS` preset and primitive layer under `web/ui`, anchored on the shared theme tokens in `web/shared`.
 
-This does not mean screens should be built as uncontrolled one-off utility strings. The intended model is:
+Today that means:
+
+- shared CSS design tokens and base interaction rules in `web/shared/src/theme.css`
+- shared `Tailwind CSS` preset and utility layer in `web/ui/tailwind`
+- shared primitive React components in `web/ui/src/components/primitives`
+- app-local CSS and feature markup that may still layer product-specific aliases and layouts on top of those shared primitives and tokens
+
+The convergence model remains:
 
 - one shared theme
 - reusable primitives
@@ -52,6 +59,8 @@ The shared design system must provide:
 - shared component primitives for `Button`, `Input`, `Textarea`, `Select`, `Badge`, `Card`, `Drawer`, `Dialog`, `Tabs`, `Table`, `Toolbar`, `Sidebar`, `EmptyState`, `Avatar`, `Dropdown`, and `Toast`
 - reusable variants instead of repeated long utility strings
 - a `cn()`-style composition helper and reusable variant logic
+
+The current codebase still only partially implements that target. New web work must converge on the shared token layer, `Tailwind` preset, and primitive components instead of duplicating root token sets or inventing one-off control styling inside each app.
 
 The shared theme should cover at least:
 
@@ -94,7 +103,7 @@ Recommended normalized variants include:
 
 ### Repository structure target
 
-The recommended long-term structure is:
+The recommended structure is:
 
 ```text
 web/
@@ -142,7 +151,13 @@ web/
       components/
       main.tsx
       styles.css
+  shared/
+    src/
+      theme.css
+      i18n.ts
 ```
+
+This structure is now the implemented baseline for shared web normalization, even though some feature views still carry legacy app-local CSS during the migration.
 
 ### Shared shell rules
 
@@ -292,6 +307,7 @@ On narrow screens:
 - keep business components focused on behavior and orchestration
 - prefer reusable premium effects inside primitives: `glass panel`, `focus ring`, `hover lift`, `status badge`, `collapsed tooltip`
 - keep `web/admin` and `web/client` visually aligned, even when density differs
+- when migrating legacy views, prefer moving repeated controls first (`Button`, `Input`, `Select`, `Textarea`, `Badge`, `Card`, `Drawer`, `Tabs`) before attempting a full feature rewrite
 
 ### Reference demos
 

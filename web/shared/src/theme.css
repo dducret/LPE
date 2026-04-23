@@ -1,0 +1,72 @@
+:root {
+  color-scheme: light;
+  --lpe-bg: #f3f6f9;
+  --lpe-bg-soft: #edf3f8;
+  --lpe-bg-deep: #eaf1f7;
+  --lpe-surface: rgba(255, 255, 255, 0.72);
+  --lpe-surface-strong: rgba(255, 255, 255, 0.9);
+  --lpe-surface-soft: rgba(248, 251, 253, 0.88);
+  --lpe-surface-premium: rgba(255, 255, 255, 0.8);
+  --lpe-border: #d8e2ea;
+  --lpe-border-strong: #c4d0dc;
+  --lpe-text: #16212b;
+  --lpe-text-soft: #62707d;
+  --lpe-primary: #2e6ff2;
+  --lpe-primary-strong: #2157c8;
+  --lpe-primary-soft: rgba(46, 111, 242, 0.12);
+  --lpe-success: #1d9d62;
+  --lpe-success-soft: rgba(29, 157, 98, 0.14);
+  --lpe-warning: #c6871b;
+  --lpe-warning-soft: rgba(198, 135, 27, 0.14);
+  --lpe-danger: #ce4242;
+  --lpe-danger-soft: rgba(206, 66, 66, 0.14);
+  --lpe-nav: #0f1822;
+  --lpe-nav-soft: #172333;
+  --lpe-nav-line: rgba(255, 255, 255, 0.08);
+  --lpe-nav-text: rgba(241, 245, 249, 0.95);
+  --lpe-nav-muted: rgba(203, 213, 225, 0.72);
+  --lpe-shadow-soft: 0 18px 44px rgba(17, 28, 39, 0.08);
+  --lpe-shadow-panel: 0 10px 26px rgba(17, 28, 39, 0.06);
+  --lpe-radius-sm: 14px;
+  --lpe-radius-md: 18px;
+  --lpe-radius-lg: 26px;
+  --lpe-focus-ring: 0 0 0 4px rgba(30, 111, 216, 0.14);
+  --lpe-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
+  font-family: Inter, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  color: var(--lpe-text);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  transition:
+    border-color 180ms var(--lpe-spring),
+    background-color 180ms var(--lpe-spring),
+    box-shadow 180ms var(--lpe-spring),
+    transform 180ms var(--lpe-spring);
+}
+
+button {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--lpe-focus-ring);
+}

@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-bg text-text antialiased;
+  }
+}
+
+@layer components {
+  .lpe-surface-card {
+    @apply rounded-lg border border-border bg-surface-strong shadow-panel backdrop-blur-premium;
+  }
+
+  .lpe-surface-soft {
+    @apply rounded-lg border border-border bg-surface-soft shadow-panel;
+  }
+
+  .lpe-kicker {
+    @apply text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-muted;
+  }
+}

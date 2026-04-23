@@ -1,81 +1,45 @@
+@import "../../shared/src/theme.css";
+@import "../../ui/tailwind/utilities.css";
+
 :root {
-  color-scheme: light;
-  --bg: #f3f6f9;
-  --bg-accent: #edf3f8;
-  --panel: rgba(255, 255, 255, 0.7);
-  --panel-strong: rgba(255, 255, 255, 0.9);
+  --bg: var(--lpe-bg);
+  --bg-accent: var(--lpe-bg-soft);
+  --panel: var(--lpe-surface);
+  --panel-strong: var(--lpe-surface-strong);
   --panel-soft: #f8fbfd;
-  --border: #d8e2ea;
+  --border: var(--lpe-border);
   --border-strong: #cdd9e3;
-  --text: #16212b;
-  --text-soft: #62707d;
-  --primary: #2e6ff2;
-  --primary-strong: #2157c8;
-  --primary-soft: rgba(46, 111, 242, 0.12);
-  --success: #1d9d62;
-  --success-soft: rgba(29, 157, 98, 0.14);
-  --warning: #c6871b;
-  --warning-soft: rgba(198, 135, 27, 0.14);
-  --danger: #ce4242;
-  --danger-soft: rgba(206, 66, 66, 0.14);
-  --nav: #0f1822;
-  --nav-soft: #172333;
-  --nav-line: rgba(255, 255, 255, 0.08);
-  --nav-text: rgba(241, 245, 249, 0.95);
-  --nav-muted: rgba(203, 213, 225, 0.72);
-  --shadow-soft: 0 18px 44px rgba(17, 28, 39, 0.08);
-  --shadow-panel: 0 10px 26px rgba(17, 28, 39, 0.06);
-  --radius-sm: 14px;
+  --text: var(--lpe-text);
+  --text-soft: var(--lpe-text-soft);
+  --primary: var(--lpe-primary);
+  --primary-strong: var(--lpe-primary-strong);
+  --primary-soft: var(--lpe-primary-soft);
+  --success: var(--lpe-success);
+  --success-soft: var(--lpe-success-soft);
+  --warning: var(--lpe-warning);
+  --warning-soft: var(--lpe-warning-soft);
+  --danger: var(--lpe-danger);
+  --danger-soft: var(--lpe-danger-soft);
+  --nav: var(--lpe-nav);
+  --nav-soft: var(--lpe-nav-soft);
+  --nav-line: var(--lpe-nav-line);
+  --nav-text: var(--lpe-nav-text);
+  --nav-muted: var(--lpe-nav-muted);
+  --shadow-soft: var(--lpe-shadow-soft);
+  --shadow-panel: var(--lpe-shadow-panel);
+  --radius-sm: var(--lpe-radius-sm);
   --radius-md: 20px;
   --radius-lg: 28px;
-  --focus-ring: 0 0 0 4px rgba(30, 111, 216, 0.14);
-  --spring: cubic-bezier(0.2, 0.8, 0.2, 1);
-  font-family: Inter, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html,
-body,
-#root {
-  min-height: 100%;
+  --focus-ring: var(--lpe-focus-ring);
+  --spring: var(--lpe-spring);
 }
 
 body {
-  margin: 0;
   color: var(--text);
   background:
     radial-gradient(circle at top right, rgba(46, 111, 242, 0.08), transparent 26%),
     radial-gradient(circle at bottom left, rgba(29, 157, 98, 0.06), transparent 22%),
     linear-gradient(180deg, #f8fafc 0%, var(--bg) 52%, var(--bg-accent) 100%);
-}
-
-button,
-input,
-select {
-  font: inherit;
-}
-
-button {
-  cursor: pointer;
-}
-
-:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
-}
-
-button,
-input,
-select,
-textarea {
-  transition:
-    border-color 180ms var(--spring),
-    background-color 180ms var(--spring),
-    box-shadow 180ms var(--spring),
-    transform 180ms var(--spring);
 }
 
 input,

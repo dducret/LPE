@@ -23,6 +23,8 @@ These exceptions are currently accepted because they are common in the Rust ecos
 - `tracing-serde` (transitive dependency enabled by structured JSON `tracing` output)
 - `docx-lite`
 - `tonic` for internal `LPE-CT <-> LPE` `gRPC` contracts only
+- `tailwindcss` for the shared web design-system normalization layer and primitive-component styling baseline
+- `postcss` and `autoprefixer` because the current `Tailwind CSS` integration depends on the standard build pipeline and no `Apache-2.0` alternative is selected in the current web toolchain
 
 `argon2` is used for password hashing. The RustCrypto crate is available under `Apache-2.0 OR MIT`, which is compatible with the `Apache-2.0` preference.
 

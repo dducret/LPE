@@ -8,6 +8,7 @@ import { ContactEditor } from "./components/ContactEditor";
 import { SettingsWorkspace } from "./components/SettingsWorkspace";
 import { useClientWorkspace } from "./useClientWorkspace";
 import type { ClientIdentity } from "./client-types";
+import { Button, Card, Input, Select } from "../../ui/src/components/primitives";
 import "./styles.css";
 
 type ClientLoginResponse = {
@@ -154,7 +155,7 @@ export function App() {
   if (!identity) {
     return (
       <main className="client-login-shell">
-        <section className="client-login-card">
+        <Card as="section" className="client-login-card">
           <div className="brand-lockup">
             <div className="brand-mark">LPE</div>
             <div>
@@ -170,34 +171,34 @@ export function App() {
           <form className="client-login-form" onSubmit={loginClient}>
             <label className="field">
               <span>{copy.loginEmail}</span>
-              <input type="email" value={loginForm.email} autoComplete="username" required onChange={(event) => setLoginForm((current) => ({ ...current, email: event.target.value }))} />
+              <Input type="email" value={loginForm.email} autoComplete="username" required onChange={(event) => setLoginForm((current) => ({ ...current, email: event.target.value }))} />
             </label>
             <label className="field">
               <span>{copy.loginPassword}</span>
-              <input type="password" value={loginForm.password} autoComplete="current-password" required onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))} />
+              <Input type="password" value={loginForm.password} autoComplete="current-password" required onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))} />
             </label>
             <label className="field">
               <span>{copy.loginTotp}</span>
-              <input type="text" value={loginForm.totp_code} inputMode="numeric" autoComplete="one-time-code" onChange={(event) => setLoginForm((current) => ({ ...current, totp_code: event.target.value }))} />
+              <Input type="text" value={loginForm.totp_code} inputMode="numeric" autoComplete="one-time-code" onChange={(event) => setLoginForm((current) => ({ ...current, totp_code: event.target.value }))} />
             </label>
             {loginError ? <p className="login-error">{loginError}</p> : null}
-            <button className="primary-button" type="submit" disabled={loginBusy}>{copy.loginSubmit}</button>
+            <Button variant="primary" type="submit" disabled={loginBusy}>{copy.loginSubmit}</Button>
             {oidcMetadata?.enabled ? (
               <>
                 <p className="feedback muted">{copy.loginOrDivider}</p>
-                <button className="ghost-button" type="button" disabled={loginBusy} onClick={() => void loginWithOidc()}>
+                <Button variant="ghost" type="button" disabled={loginBusy} onClick={() => void loginWithOidc()}>
                   {copy.loginOidc}{oidcMetadata.provider_label ? ` · ${oidcMetadata.provider_label}` : ""}
-                </button>
+                </Button>
               </>
             ) : null}
           </form>
           <label className="locale-picker">
             <span>{copy.languageLabel}</span>
-            <select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>
+            <Select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>
               {supportedLocales.map((value) => <option key={value} value={value}>{localeLabels[value]}</option>)}
-            </select>
+            </Select>
           </label>
-        </section>
+        </Card>
       </main>
     );
   }
@@ -256,7 +257,7 @@ export function App() {
               <div className="account-menu-popover" role="menu">
                 <strong>{copy.accountMenuTitle}</strong>
                 <span>{identity.email}</span>
-                <button className="ghost-button" type="button" onClick={() => void logoutClient()}>{copy.logout}</button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => void logoutClient()}>{copy.logout}</Button>
               </div>
             ) : null}
           </div>
@@ -287,17 +288,17 @@ export function App() {
         <section className="workspace">
           <div className="workspace-toolbar">
             <div className="workspace-toolbar-actions">
-              <button className="primary-button workspace-compose-button" type="button" onClick={() => workspace.openComposer("new")}>{copy.compose}</button>
+              <Button className="workspace-compose-button" variant="primary" type="button" onClick={() => workspace.openComposer("new")}>{copy.compose}</Button>
             </div>
             <div className="workspace-toolbar-summary">
               {isMailWorkspace ? <span className="workspace-chip">{`Unread ${unreadCount}`}</span> : null}
               {isMailWorkspace ? <span className="workspace-chip">{`Attachments ${attachmentCount}`}</span> : null}
-              <button className="ghost-button" type="button" onClick={() => void workspace.refreshWorkspace()}>{copy.topActions.sync}</button>
+              <Button variant="ghost" type="button" onClick={() => void workspace.refreshWorkspace()}>{copy.topActions.sync}</Button>
               <label className="locale-picker compact">
                 <span>{copy.languageLabel}</span>
-                <select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>
+                <Select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>
                   {supportedLocales.map((value) => <option key={value} value={value}>{localeLabels[value]}</option>)}
-                </select>
+                </Select>
               </label>
             </div>
           </div>

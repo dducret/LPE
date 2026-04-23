@@ -6,6 +6,7 @@ import type {
   MailboxDelegationOverview,
   SieveOverview,
 } from "../client-types";
+import { Button, Card, Input, Select, Textarea } from "../../../ui/src/components/primitives";
 
 type Props = {
   copy: ClientCopy;
@@ -60,41 +61,41 @@ export function SettingsWorkspace(props: Props) {
 
   return (
     <section className="settings-shell">
-      <article className="settings-card">
+      <Card as="article" className="settings-card">
         <div className="detail-header">
           <div>
             <p className="detail-label">{props.copy.settings.delegationLabel}</p>
             <h3>{props.copy.settings.delegationTitle}</h3>
           </div>
           <div className="detail-actions">
-            <button className="primary-button" type="button" onClick={props.onSaveShare}>{props.copy.settings.actions.saveShare}</button>
-            <button className="secondary-button" type="button" onClick={props.onSaveMailboxDelegation}>{props.copy.settings.actions.shareInbox}</button>
-            <button className="secondary-button" type="button" onClick={props.onSaveSenderDelegation}>{props.copy.settings.actions.grantSenderRight}</button>
+            <Button variant="primary" type="button" onClick={props.onSaveShare}>{props.copy.settings.actions.saveShare}</Button>
+            <Button variant="secondary" type="button" onClick={props.onSaveMailboxDelegation}>{props.copy.settings.actions.shareInbox}</Button>
+            <Button variant="secondary" type="button" onClick={props.onSaveSenderDelegation}>{props.copy.settings.actions.grantSenderRight}</Button>
           </div>
         </div>
 
         <div className="form-grid">
           <label className="field">
             <span>{props.copy.settings.collectionField}</span>
-            <select value={props.shareForm.kind} onChange={(event) => props.setShareForm((value) => ({ ...value, kind: event.target.value as "contacts" | "calendar" | "tasks" }))}>
+            <Select value={props.shareForm.kind} onChange={(event) => props.setShareForm((value) => ({ ...value, kind: event.target.value as "contacts" | "calendar" | "tasks" }))}>
               <option value="contacts">{props.copy.settings.collectionKinds.contacts}</option>
               <option value="calendar">{props.copy.settings.collectionKinds.calendar}</option>
               <option value="tasks">{props.copy.settings.collectionKinds.tasks}</option>
-            </select>
+            </Select>
           </label>
           {props.shareForm.kind === "tasks" ? (
             <label className="field">
               <span>{props.copy.settings.taskListField}</span>
-              <select value={props.shareForm.taskListId} onChange={(event) => props.setShareForm((value) => ({ ...value, taskListId: event.target.value }))}>
+              <Select value={props.shareForm.taskListId} onChange={(event) => props.setShareForm((value) => ({ ...value, taskListId: event.target.value }))}>
                 {props.taskLists.map((taskList) => (
                   <option key={taskList.id} value={taskList.id}>{taskList.name}</option>
                 ))}
-              </select>
+              </Select>
             </label>
           ) : null}
           <label className="field">
             <span>{props.copy.settings.granteeEmailField}</span>
-            <input value={props.shareForm.granteeEmail} onChange={(event) => props.setShareForm((value) => ({ ...value, granteeEmail: event.target.value }))} />
+            <Input value={props.shareForm.granteeEmail} onChange={(event) => props.setShareForm((value) => ({ ...value, granteeEmail: event.target.value }))} />
           </label>
           <label className="toggle-field"><span>{props.copy.settings.rights.read}</span><input type="checkbox" checked={props.shareForm.mayRead} onChange={(event) => props.setShareForm((value) => ({ ...value, mayRead: event.target.checked }))} /></label>
           <label className="toggle-field"><span>{props.copy.settings.rights.write}</span><input type="checkbox" checked={props.shareForm.mayWrite} onChange={(event) => props.setShareForm((value) => ({ ...value, mayWrite: event.target.checked, mayRead: event.target.checked || value.mayRead }))} /></label>
@@ -117,7 +118,7 @@ export function SettingsWorkspace(props: Props) {
                     {rightsLabel(entry.grant.rights, props.copy)}
                   </p>
                 </div>
-                <button className="ghost-button" type="button" onClick={() => props.onDeleteShare(entry.kind, entry.grant.granteeAccountId, entry.type === "task-list" ? entry.grant.taskListId : undefined)}>{props.copy.settings.remove}</button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => props.onDeleteShare(entry.kind, entry.grant.granteeAccountId, entry.type === "task-list" ? entry.grant.taskListId : undefined)}>{props.copy.settings.remove}</Button>
               </div>
             ))}
           </div>
@@ -139,14 +140,14 @@ export function SettingsWorkspace(props: Props) {
             <div className="form-grid">
               <label className="field">
                 <span>{props.copy.settings.mailboxGranteeField}</span>
-                <input value={props.mailboxForm.granteeEmail} onChange={(event) => props.setMailboxForm((value) => ({ ...value, granteeEmail: event.target.value }))} />
+                <Input value={props.mailboxForm.granteeEmail} onChange={(event) => props.setMailboxForm((value) => ({ ...value, granteeEmail: event.target.value }))} />
               </label>
               <label className="field">
                 <span>{props.copy.settings.senderRightField}</span>
-                <select value={props.mailboxForm.senderRight} onChange={(event) => props.setMailboxForm((value) => ({ ...value, senderRight: event.target.value as "send_as" | "send_on_behalf" }))}>
+                <Select value={props.mailboxForm.senderRight} onChange={(event) => props.setMailboxForm((value) => ({ ...value, senderRight: event.target.value as "send_as" | "send_on_behalf" }))}>
                   <option value="send_as">{props.copy.settings.senderRights.sendAs}</option>
                   <option value="send_on_behalf">{props.copy.settings.senderRights.sendOnBehalf}</option>
-                </select>
+                </Select>
               </label>
             </div>
             {(props.mailboxDelegation?.outgoingMailboxes ?? []).map((grant) => (
@@ -155,7 +156,7 @@ export function SettingsWorkspace(props: Props) {
                   <strong>{grant.granteeEmail}</strong>
                   <p>{props.copy.settings.inboxAccess}</p>
                 </div>
-                <button className="ghost-button" type="button" onClick={() => props.onDeleteMailboxDelegation(grant.granteeAccountId)}>{props.copy.settings.remove}</button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => props.onDeleteMailboxDelegation(grant.granteeAccountId)}>{props.copy.settings.remove}</Button>
               </div>
             ))}
             {(props.mailboxDelegation?.outgoingSenderRights ?? []).map((grant) => (
@@ -164,29 +165,29 @@ export function SettingsWorkspace(props: Props) {
                   <strong>{grant.granteeEmail}</strong>
                   <p>{grant.senderRight === "send_as" ? props.copy.settings.senderRights.sendAs : props.copy.settings.senderRights.sendOnBehalf}</p>
                 </div>
-                <button className="ghost-button" type="button" onClick={() => props.onDeleteSenderDelegation(grant.senderRight, grant.granteeAccountId)}>{props.copy.settings.remove}</button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => props.onDeleteSenderDelegation(grant.senderRight, grant.granteeAccountId)}>{props.copy.settings.remove}</Button>
               </div>
             ))}
           </div>
         </div>
-      </article>
+      </Card>
 
-      <article className="settings-card">
+      <Card as="article" className="settings-card">
         <div className="detail-header">
           <div>
             <p className="detail-label">{props.copy.settings.sieveLabel}</p>
             <h3>{props.copy.settings.sieveTitle}</h3>
           </div>
           <div className="detail-actions">
-            <button className="primary-button" type="button" onClick={props.onSaveSieve}>{props.copy.settings.sieveActions.saveScript}</button>
-            <button className="ghost-button" type="button" onClick={() => props.onSetActiveSieve(null)}>{props.copy.settings.sieveActions.disableActive}</button>
+            <Button variant="primary" type="button" onClick={props.onSaveSieve}>{props.copy.settings.sieveActions.saveScript}</Button>
+            <Button variant="ghost" type="button" onClick={() => props.onSetActiveSieve(null)}>{props.copy.settings.sieveActions.disableActive}</Button>
           </div>
         </div>
 
         <div className="form-grid">
           <label className="field">
             <span>{props.copy.settings.scriptNameField}</span>
-            <input value={props.sieveForm.name} onChange={(event) => props.setSieveForm((value) => ({ ...value, name: event.target.value }))} />
+            <Input value={props.sieveForm.name} onChange={(event) => props.setSieveForm((value) => ({ ...value, name: event.target.value }))} />
           </label>
           <label className="toggle-field">
             <span>{props.copy.settings.activateAfterSaveField}</span>
@@ -194,7 +195,7 @@ export function SettingsWorkspace(props: Props) {
           </label>
           <label className="field field-wide">
             <span>{props.copy.settings.sieveScriptField}</span>
-            <textarea rows={16} value={props.sieveForm.content} onChange={(event) => props.setSieveForm((value) => ({ ...value, content: event.target.value }))} />
+            <Textarea rows={16} value={props.sieveForm.content} onChange={(event) => props.setSieveForm((value) => ({ ...value, content: event.target.value }))} />
           </label>
         </div>
 
@@ -207,14 +208,14 @@ export function SettingsWorkspace(props: Props) {
                 <p>{script.isActive ? props.copy.settings.scriptState.active : props.copy.settings.scriptState.inactive} · {script.sizeOctets} {props.copy.settings.bytesLabel}</p>
               </div>
               <div className="detail-actions">
-                <button className="ghost-button" type="button" onClick={() => props.onLoadSieve(script.name)}>{props.copy.settings.sieveActions.load}</button>
-                <button className="ghost-button" type="button" onClick={() => props.onSetActiveSieve(script.name)}>{props.copy.settings.sieveActions.activate}</button>
-                <button className="danger-button" type="button" onClick={() => props.onDeleteSieve(script.name)}>{props.copy.settings.sieveActions.delete}</button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => props.onLoadSieve(script.name)}>{props.copy.settings.sieveActions.load}</Button>
+                <Button variant="ghost" size="sm" type="button" onClick={() => props.onSetActiveSieve(script.name)}>{props.copy.settings.sieveActions.activate}</Button>
+                <Button variant="danger" size="sm" type="button" onClick={() => props.onDeleteSieve(script.name)}>{props.copy.settings.sieveActions.delete}</Button>
               </div>
             </div>
           ))}
         </div>
-      </article>
+      </Card>
     </section>
   );
 }

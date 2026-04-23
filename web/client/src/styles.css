@@ -1,73 +1,44 @@
+@import "../../shared/src/theme.css";
+@import "../../ui/tailwind/utilities.css";
+
 :root {
-  color-scheme: light;
-  --bg: #f3f6f9;
-  --bg-deep: #eaf1f7;
-  --surface: rgba(255, 255, 255, 0.72);
-  --surface-strong: rgba(255, 255, 255, 0.9);
-  --surface-soft: rgba(248, 251, 253, 0.88);
-  --surface-premium: rgba(255, 255, 255, 0.8);
+  --bg: var(--lpe-bg);
+  --bg-deep: var(--lpe-bg-deep);
+  --surface: var(--lpe-surface);
+  --surface-strong: var(--lpe-surface-strong);
+  --surface-soft: var(--lpe-surface-soft);
+  --surface-premium: var(--lpe-surface-premium);
+  --surface-elevated: rgba(255, 255, 255, 0.86);
   --line: rgba(216, 226, 234, 0.92);
   --line-strong: rgba(196, 208, 220, 0.96);
-  --text: #16212b;
-  --muted: #62707d;
-  --accent: #2e6ff2;
+  --line-soft: rgba(15, 23, 42, 0.12);
+  --text: var(--lpe-text);
+  --muted: var(--lpe-text-soft);
+  --text-muted: rgba(15, 23, 42, 0.68);
+  --accent: var(--lpe-primary);
   --accent-strong: #1d54c9;
-  --accent-soft: rgba(46, 111, 242, 0.12);
-  --nav: #0f1822;
-  --nav-soft: #172333;
-  --nav-line: rgba(255, 255, 255, 0.08);
-  --nav-text: rgba(241, 245, 249, 0.95);
-  --nav-muted: rgba(203, 213, 225, 0.72);
+  --accent-soft: var(--lpe-primary-soft);
+  --nav: var(--lpe-nav);
+  --nav-soft: var(--lpe-nav-soft);
+  --nav-line: var(--lpe-nav-line);
+  --nav-text: var(--lpe-nav-text);
+  --nav-muted: var(--lpe-nav-muted);
   --success-soft: rgba(41, 132, 86, 0.14);
   --warning-soft: rgba(194, 123, 45, 0.16);
-  --shadow-soft: 0 18px 44px rgba(17, 28, 39, 0.08);
-  --shadow-panel: 0 10px 26px rgba(17, 28, 39, 0.06);
-  --radius-sm: 14px;
-  --radius-md: 18px;
-  --radius-lg: 26px;
-  --focus-ring: 0 0 0 4px rgba(29, 114, 216, 0.14);
-  --spring: cubic-bezier(0.2, 0.8, 0.2, 1);
-  font-family: Inter, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-  color: var(--text);
+  --shadow-soft: var(--lpe-shadow-soft);
+  --shadow-panel: var(--lpe-shadow-panel);
+  --radius-sm: var(--lpe-radius-sm);
+  --radius-md: var(--lpe-radius-md);
+  --radius-lg: var(--lpe-radius-lg);
+  --focus-ring: var(--lpe-focus-ring);
+  --spring: var(--lpe-spring);
+}
+
+body {
   background:
     radial-gradient(circle at top right, rgba(46, 111, 242, 0.08), transparent 24%),
     radial-gradient(circle at bottom left, rgba(29, 157, 98, 0.05), transparent 20%),
     linear-gradient(180deg, #f8fafc 0%, var(--bg) 58%, var(--bg-deep) 100%);
-}
-
-* {
-  box-sizing: border-box;
-}
-
-html,
-body,
-#root {
-  min-height: 100%;
-}
-
-body {
-  margin: 0;
-}
-
-button,
-input,
-select,
-textarea {
-  font: inherit;
-  transition:
-    border-color 180ms var(--spring),
-    background-color 180ms var(--spring),
-    box-shadow 180ms var(--spring),
-    transform 180ms var(--spring);
-}
-
-button {
-  cursor: pointer;
-}
-
-:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
 }
 
 input,

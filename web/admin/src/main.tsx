@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { getInitialLocale, localeLabels, messages, supportedLocales, type Locale } from "./i18n";
+import { getInitialLocale, localeLabels, messages, setStoredLocale, supportedLocales, type Locale } from "./i18n";
+import { Input, TabButton as PrimitiveTabButton } from "../../ui/src/components/primitives";
 import "./styles.css";
 
 type DashboardState = {
@@ -40,9 +41,9 @@ function authHeaders(token: string | null): Record<string, string> { return toke
 async function fetchJson<T>(path: string, token: string | null): Promise<T> { const response = await fetch(`/api/${path}`, { headers: authHeaders(token), credentials: "same-origin" }); if (!response.ok) throw new Error(`Request failed for ${path}: ${response.status}`); return (await response.json()) as T; }
 async function sendJson<T>(path: string, method: "POST" | "PUT", payload: unknown, token: string | null): Promise<T> { const response = await fetch(`/api/${path}`, { method, headers: { "Content-Type": "application/json", ...authHeaders(token) }, body: JSON.stringify(payload), credentials: "same-origin" }); if (!response.ok) throw new Error(`Request failed for ${path}: ${response.status}`); return (await response.json()) as T; }
 async function sendFormData<T>(path: string, payload: FormData, token: string | null): Promise<T> { const response = await fetch(`/api/${path}`, { method: "POST", headers: authHeaders(token), body: payload, credentials: "same-origin" }); if (!response.ok) throw new Error(`Request failed for ${path}: ${response.status}`); return (await response.json()) as T; }
-function Field(props: { label: string; value: string; onChange: (value: string) => void; type?: "text" | "number" | "password"; placeholder?: string }) { return <label className="field"><span>{props.label}</span><input type={props.type ?? "text"} value={props.value} placeholder={props.placeholder} onChange={(event) => props.onChange(event.target.value)} /></label>; }
+function Field(props: { label: string; value: string; onChange: (value: string) => void; type?: "text" | "number" | "password"; placeholder?: string }) { return <label className="field"><span>{props.label}</span><Input type={props.type ?? "text"} value={props.value} placeholder={props.placeholder} onChange={(event) => props.onChange(event.target.value)} /></label>; }
 function ToggleField(props: { label: string; checked: boolean; onChange: (checked: boolean) => void }) { return <label className="toggle-field"><span>{props.label}</span><input type="checkbox" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} /></label>; }
-function TabButton(props: { active: boolean; onClick: () => void; label: string }) { return <button className={props.active ? "tab-button is-active" : "tab-button"} type="button" onClick={props.onClick}>{props.label}</button>; }
+function TabButton(props: { active: boolean; onClick: () => void; label: string }) { return <PrimitiveTabButton active={props.active} onClick={props.onClick}>{props.label}</PrimitiveTabButton>; }
 
 function App() {
   const [locale, setLocale] = React.useState<Locale>(getInitialLocale);
@@ -90,7 +91,7 @@ function App() {
   const [antispamForm, setAntispamForm] = React.useState<DashboardState["antispam_settings"] | null>(null);
   const copy = messages[locale];
 
-  React.useEffect(() => { document.documentElement.lang = locale; window.localStorage.setItem("lpe.locale", locale); }, [locale]);
+  React.useEffect(() => { document.documentElement.lang = locale; setStoredLocale(locale); }, [locale]);
   React.useEffect(() => { token ? window.localStorage.setItem("lpe.admin.token", token) : window.localStorage.removeItem("lpe.admin.token"); }, [token]);
   React.useEffect(() => {
     const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
