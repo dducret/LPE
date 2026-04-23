@@ -37,6 +37,13 @@ enum SmtpAuthFailureKind {
     Permanent,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SubmissionFailureKind {
+    Temporary,
+    Authorization,
+    Invalid,
+}
+
 #[derive(Debug, Default)]
 struct SubmissionTransaction {
     helo: String,
@@ -296,7 +303,11 @@ where
     })?;
 
     let response = client
-        .post(format!("{}{}", core_base_url.trim_end_matches('/'), SUBMISSION_AUTH_PATH))
+        .post(format!(
+            "{}{}",
+            core_base_url.trim_end_matches('/'),
+            SUBMISSION_AUTH_PATH
+        ))
         .header(INTEGRATION_KEY_HEADER, &signed.integration_key)
         .header(INTEGRATION_TIMESTAMP_HEADER, &signed.timestamp)
         .header(INTEGRATION_NONCE_HEADER, &signed.nonce)
@@ -318,19 +329,32 @@ where
                 sanitize_smtp_text(&error.to_string()),
             )
         })?;
+        if !body.accepted {
+            return Err((
+                SmtpAuthFailureKind::InvalidCredentials,
+                "smtp authentication rejected".to_string(),
+            ));
+        }
+        let email = body
+            .account_email
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_lowercase();
+        if email.is_empty() {
+            return Err((
+                SmtpAuthFailureKind::Temporary,
+                "smtp auth response omitted account email".to_string(),
+            ));
+        }
         return Ok(SubmissionPrincipal {
             account_id: body.account_id.ok_or_else(|| {
                 (
-                    SmtpAuthFailureKind::Permanent,
+                    SmtpAuthFailureKind::Temporary,
                     "smtp auth response omitted account_id".to_string(),
                 )
             })?,
-            email: body
-                .account_email
-                .as_deref()
-                .unwrap_or_default()
-                .trim()
-                .to_lowercase(),
+            email,
             display_name: body.account_display_name.unwrap_or_default(),
         });
     }
@@ -381,7 +405,20 @@ async fn submit_message(
             .unwrap_or_else(|_| "submission failed".to_string());
         return Err((status, sanitize_smtp_text(&detail)));
     }
-    response.json().await.map_err(internal_submission_error)
+    let body: SmtpSubmissionResponse = response.json().await.map_err(internal_submission_error)?;
+    if !body.accepted {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "canonical submission did not complete before SMTP final reply".to_string(),
+        ));
+    }
+    if body.trace_id.trim().is_empty() {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "submission response omitted trace_id".to_string(),
+        ));
+    }
+    Ok(body)
 }
 
 async fn parse_auth_plain<R, W>(
@@ -613,6 +650,18 @@ fn smtp_auth_failure_reply(kind: SmtpAuthFailureKind) -> &'static str {
 }
 
 fn smtp_submission_failure_reply(status: StatusCode, detail: &str) -> String {
+    match classify_submission_failure_status(status) {
+        SubmissionFailureKind::Temporary => {
+            format!("451 submission temporarily unavailable ({detail})")
+        }
+        SubmissionFailureKind::Authorization => {
+            format!("550 submission rejected ({detail})")
+        }
+        SubmissionFailureKind::Invalid => format!("554 submission rejected ({detail})"),
+    }
+}
+
+fn classify_submission_failure_status(status: StatusCode) -> SubmissionFailureKind {
     if status.is_server_error()
         || matches!(
             status,
@@ -623,22 +672,20 @@ fn smtp_submission_failure_reply(status: StatusCode, detail: &str) -> String {
                 | StatusCode::GATEWAY_TIMEOUT
         )
     {
-        return format!("451 submission temporarily unavailable ({detail})");
+        SubmissionFailureKind::Temporary
+    } else if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+        SubmissionFailureKind::Authorization
+    } else {
+        SubmissionFailureKind::Invalid
     }
-
-    if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
-        return format!("550 submission rejected ({detail})");
-    }
-
-    format!("554 submission rejected ({detail})")
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_auth_failure_status, decode_auth_login_token, decode_auth_plain,
-        sanitize_smtp_text, smtp_auth_failure_reply, smtp_submission_failure_reply, submit_message,
-        SmtpAuthFailureKind,
+        classify_auth_failure_status, classify_submission_failure_status, decode_auth_login_token,
+        decode_auth_plain, sanitize_smtp_text, smtp_auth_failure_reply,
+        smtp_submission_failure_reply, submit_message, SmtpAuthFailureKind, SubmissionFailureKind,
     };
     use crate::env_test_lock;
     use axum::{extract::State, http::HeaderMap, routing::post, Json, Router};
@@ -692,6 +739,18 @@ mod tests {
     }
 
     #[test]
+    fn malformed_submission_failures_map_to_554() {
+        assert_eq!(
+            classify_submission_failure_status(StatusCode::BAD_REQUEST),
+            SubmissionFailureKind::Invalid
+        );
+        assert_eq!(
+            smtp_submission_failure_reply(StatusCode::BAD_REQUEST, "invalid sender"),
+            "554 submission rejected (invalid sender)"
+        );
+    }
+
+    #[test]
     fn auth_failures_distinguish_temporary_and_invalid_credentials() {
         assert_eq!(
             classify_auth_failure_status(StatusCode::SERVICE_UNAVAILABLE),
@@ -704,6 +763,10 @@ mod tests {
         assert_eq!(
             smtp_auth_failure_reply(SmtpAuthFailureKind::Temporary),
             "454 temporary authentication failure"
+        );
+        assert_eq!(
+            smtp_auth_failure_reply(SmtpAuthFailureKind::Permanent),
+            "535 authentication mechanism rejected"
         );
     }
 
@@ -761,6 +824,55 @@ mod tests {
         assert!(response.accepted);
         assert_eq!(response.trace_id, "trace-1");
         assert_eq!(capture.trace_id.lock().unwrap().as_deref(), Some("trace-1"));
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
+    }
+
+    #[tokio::test]
+    #[ignore = "env-sensitive"]
+    async fn submit_message_rejects_non_accepted_success_body_before_smtp_final_reply() {
+        let _guard = env_test_lock();
+
+        async fn reject() -> Json<SmtpSubmissionResponse> {
+            Json(SmtpSubmissionResponse {
+                accepted: false,
+                trace_id: "trace-2".to_string(),
+                detail: Some("canonical submission failed".to_string()),
+            })
+        }
+
+        let router = Router::new().route("/internal/lpe-ct/submissions", post(reject));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
+        let request = SmtpSubmissionRequest {
+            trace_id: "trace-2".to_string(),
+            helo: "client.example.test".to_string(),
+            peer: "203.0.113.10:12345".to_string(),
+            account_id: Uuid::new_v4(),
+            account_email: "alice@example.test".to_string(),
+            account_display_name: "Alice".to_string(),
+            mail_from: "alice@example.test".to_string(),
+            rcpt_to: vec!["bob@example.test".to_string()],
+            raw_message: b"From: Alice <alice@example.test>\r\nTo: Bob <bob@example.test>\r\nSubject: Hi\r\n\r\nBody\r\n".to_vec(),
+        };
+        let client = reqwest::Client::builder().build().unwrap();
+
+        let error = submit_message(&client, &format!("http://{address}"), &request)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.0, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            error.1,
+            "canonical submission did not complete before SMTP final reply"
+        );
         std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 }

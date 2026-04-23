@@ -1,6 +1,6 @@
 use crate::{
-    bad_request_error, ha_allows_active_work, ha_current_role, integration_shared_secret,
-    http::internal_error, observability, types::ApiResult,
+    bad_request_error, ha_allows_active_work, ha_current_role, http::internal_error,
+    integration_shared_secret, observability, types::ApiResult,
 };
 use axum::{
     extract::State,
@@ -63,11 +63,7 @@ pub(crate) async fn deliver_inbound_message(
     headers: HeaderMap,
     Json(request): Json<InboundDeliveryRequest>,
 ) -> ApiResult<InboundDeliveryResponse> {
-    require_integration(
-        &headers,
-        "/internal/lpe-ct/inbound-deliveries",
-        &request,
-    )?;
+    require_integration(&headers, "/internal/lpe-ct/inbound-deliveries", &request)?;
     if !ha_allows_active_work().map_err(internal_error)? {
         let role = ha_current_role()
             .map_err(internal_error)?
@@ -105,11 +101,7 @@ pub(crate) async fn authenticate_smtp_submission(
     headers: HeaderMap,
     Json(request): Json<SmtpSubmissionAuthRequest>,
 ) -> ApiResult<SmtpSubmissionAuthResponse> {
-    require_integration(
-        &headers,
-        "/internal/lpe-ct/submission-auth",
-        &request,
-    )?;
+    require_integration(&headers, "/internal/lpe-ct/submission-auth", &request)?;
     let principal =
         authenticate_plain_credentials(&storage, None, &request.login, &request.password, "smtp")
             .await
@@ -273,7 +265,7 @@ async fn load_authenticated_submission_principal(
     let identity = storage
         .fetch_account_identity(request.account_id)
         .await
-        .map_err(|error| SmtpSubmissionError::forbidden(error.to_string()))?;
+        .map_err(classify_submission_account_identity_error)?;
     let requested_email = request.account_email.trim().to_lowercase();
     if !requested_email.is_empty() && requested_email != identity.email {
         return Err(SmtpSubmissionError::forbidden(
@@ -287,6 +279,15 @@ async fn load_authenticated_submission_principal(
         email: identity.email,
         display_name: identity.display_name,
     })
+}
+
+fn classify_submission_account_identity_error(error: anyhow::Error) -> SmtpSubmissionError {
+    let message = error.to_string();
+    if message.to_ascii_lowercase().contains("account not found") {
+        SmtpSubmissionError::forbidden(message)
+    } else {
+        SmtpSubmissionError::temporary(message)
+    }
 }
 
 fn parse_required_submission_from(
@@ -555,8 +556,8 @@ fn integration_auth_error(error: BridgeAuthError) -> (StatusCode, String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_required_submission_from, parse_smtp_submission_sender, require_integration,
-        SmtpSubmissionError,
+        classify_submission_account_identity_error, parse_required_submission_from,
+        parse_smtp_submission_sender, require_integration, SmtpSubmissionError,
     };
     use axum::http::HeaderMap;
     use lpe_domain::{
@@ -642,8 +643,22 @@ mod tests {
     }
 
     #[test]
+    fn submission_account_identity_errors_distinguish_missing_account_from_temporary_failures() {
+        assert_eq!(
+            classify_submission_account_identity_error(anyhow::anyhow!("account not found")),
+            SmtpSubmissionError::Forbidden("account not found".to_string())
+        );
+        assert_eq!(
+            classify_submission_account_identity_error(anyhow::anyhow!("database pool timed out")),
+            SmtpSubmissionError::Temporary("database pool timed out".to_string())
+        );
+    }
+
+    #[test]
     fn integration_requests_require_signed_headers_and_reject_replay() {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         std::env::set_var(
             "LPE_INTEGRATION_SHARED_SECRET",
             "0123456789abcdef0123456789abcdef",
