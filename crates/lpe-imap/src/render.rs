@@ -380,12 +380,18 @@ pub(crate) fn render_selected_updates(
     current: &SelectedMailbox,
 ) -> Result<String> {
     let mut output = String::new();
+    let previous_ids = previous
+        .emails
+        .iter()
+        .map(|email| email.id)
+        .collect::<HashSet<_>>();
 
     let current_ids = current
         .emails
         .iter()
         .map(|email| email.id)
         .collect::<HashSet<_>>();
+    let membership_changed = previous_ids != current_ids;
     let mut removed_sequences = previous
         .emails
         .iter()
@@ -397,11 +403,20 @@ pub(crate) fn render_selected_updates(
         output.push_str(&format!("* {} EXPUNGE\r\n", sequence));
     }
 
-    if previous.emails.len() != current.emails.len() {
+    if previous.emails.len() != current.emails.len() || membership_changed {
         output.push_str(&format!("* {} EXISTS\r\n", current.emails.len()));
     }
 
     for (index, email) in current.emails.iter().enumerate() {
+        if !previous_ids.contains(&email.id) {
+            output.push_str(&format!(
+                "* {} FETCH (UID {} FLAGS ({}))\r\n",
+                index + 1,
+                email.uid,
+                render_flags(email, &current.mailbox_name)
+            ));
+            continue;
+        }
         let Some(previous_email) = previous
             .emails
             .iter()

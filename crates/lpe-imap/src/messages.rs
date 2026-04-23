@@ -76,7 +76,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         let (set_token, condstore, mode_token, flags_token) = parse_store_arguments(arguments)?;
         let mode = parse_store_mode(&mode_token)?;
         let flags = parse_flag_list(&flags_token)?;
-        let selected = self.require_selected()?;
+        let selected = self.require_selected()?.clone();
         let indices = resolve_message_indexes(&selected.emails, &set_token, ref_kind)?;
         let ids = indices
             .iter()
@@ -111,8 +111,15 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
 
         if !mode.silent {
             let selected = self.require_selected()?;
-            for index in indices {
-                let email = &selected.emails[index];
+            for message_id in &ids {
+                let Some((index, email)) = selected
+                    .emails
+                    .iter()
+                    .enumerate()
+                    .find(|(_, email)| email.id == *message_id)
+                else {
+                    continue;
+                };
                 if modified_ids.contains(&email.id) {
                     continue;
                 }
@@ -135,7 +142,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                 .write_all(format!("{tag} OK STORE completed\r\n").as_bytes())
                 .await?;
         } else {
-            let modified_set = render_modified_set(selected, &modified_ids, ref_kind);
+            let modified_set = render_modified_set(&selected, &modified_ids, ref_kind);
             writer
                 .write_all(
                     format!(

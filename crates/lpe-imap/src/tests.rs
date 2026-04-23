@@ -49,6 +49,7 @@ struct FakeStore {
     highest_modseq: Arc<Mutex<u64>>,
     mailbox_grants: Arc<Mutex<Vec<MailboxDelegationGrant>>>,
     sender_grants: Arc<Mutex<Vec<SenderDelegationGrant>>>,
+    post_flag_update_action: Arc<Mutex<Option<PostFlagUpdateAction>>>,
 }
 
 impl FakeStore {
@@ -101,6 +102,7 @@ impl FakeStore {
             highest_modseq: Arc::new(Mutex::new(3)),
             mailbox_grants: Arc::new(Mutex::new(Vec::new())),
             sender_grants: Arc::new(Mutex::new(Vec::new())),
+            post_flag_update_action: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -109,6 +111,24 @@ impl FakeStore {
         *highest_modseq += 1;
         *highest_modseq
     }
+
+    fn enqueue_post_flag_update_action(&self, action: PostFlagUpdateAction) {
+        *self.post_flag_update_action.lock().unwrap() = Some(action);
+    }
+
+    fn apply_post_flag_update_action(&self, action: PostFlagUpdateAction) {
+        let mut emails = self.emails.lock().unwrap();
+        match action {
+            PostFlagUpdateAction::RemoveMessage { message_id } => {
+                emails.retain(|email| email.id != message_id);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PostFlagUpdateAction {
+    RemoveMessage { message_id: Uuid },
 }
 
 impl AccountAuthStore for FakeStore {
@@ -173,7 +193,7 @@ impl ImapStore for FakeStore {
         _account_id: Uuid,
         mailbox_id: Uuid,
     ) -> StoreFuture<'a, Vec<ImapEmail>> {
-        let emails = self
+        let mut emails = self
             .emails
             .lock()
             .unwrap()
@@ -181,6 +201,7 @@ impl ImapStore for FakeStore {
             .filter(|email| email.mailbox_id == mailbox_id)
             .cloned()
             .collect::<Vec<_>>();
+        emails.sort_by_key(|email| email.uid);
         Box::pin(async move { Ok(emails) })
     }
 
@@ -224,6 +245,10 @@ impl ImapStore for FakeStore {
             if let Some(modseq) = next_modseq {
                 email.modseq = modseq;
             }
+        }
+        if let Some(action) = self.post_flag_update_action.lock().unwrap().take() {
+            drop(emails);
+            self.apply_post_flag_update_action(action);
         }
         Box::pin(async move { Ok(modified_ids) })
     }
@@ -332,13 +357,7 @@ impl ImapStore for FakeStore {
             .find(|email| email.id == message_id)
             .unwrap()
             .clone();
-        let next_uid = emails
-            .iter()
-            .filter(|email| email.mailbox_id == target_mailbox_id)
-            .map(|email| email.uid)
-            .max()
-            .unwrap_or(0)
-            + 1;
+        let next_uid = emails.iter().map(|email| email.uid).max().unwrap_or(0) + 1;
         let copied = ImapEmail {
             id: Uuid::new_v4(),
             uid: next_uid,
@@ -386,13 +405,7 @@ impl ImapStore for FakeStore {
 
         let mut emails = self.emails.lock().unwrap();
         let modseq = self.next_modseq();
-        let next_uid = emails
-            .iter()
-            .filter(|email| email.mailbox_id == target_mailbox_id)
-            .map(|email| email.uid)
-            .max()
-            .unwrap_or(0)
-            + 1;
+        let next_uid = emails.iter().map(|email| email.uid).max().unwrap_or(0) + 1;
         let moved = emails
             .iter_mut()
             .find(|email| email.id == message_id)
@@ -713,7 +726,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     assert!(rename_projects.contains("A10 OK RENAME completed"));
 
     let copy = send_command(&mut stream, "A11 COPY 1 Archive\r\n", "A11").await;
-    assert!(copy.contains("A11 OK [COPYUID 1 1 1] COPY completed"));
+    assert!(copy.contains("A11 OK [COPYUID 1 1 3] COPY completed"));
 
     let select_archive = send_command(&mut stream, "A12 SELECT Archive\r\n", "A12").await;
     assert!(select_archive.contains("* 1 EXISTS"));
@@ -726,10 +739,10 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     .await;
     assert!(richer_search.contains("* SEARCH 1"));
 
-    let move_response = send_command(&mut stream, "A14 UID MOVE 1 Inbox\r\n", "A14").await;
+    let move_response = send_command(&mut stream, "A14 UID MOVE 3 Inbox\r\n", "A14").await;
     assert!(move_response.contains("* 1 EXPUNGE"));
     assert!(move_response.contains("* 0 EXISTS"));
-    assert!(move_response.contains("A14 OK [COPYUID 1 1 2] MOVE completed"));
+    assert!(move_response.contains("A14 OK [COPYUID 1 3 4] MOVE completed"));
 
     let select_archive_after_move =
         send_command(&mut stream, "A15 SELECT Archive\r\n", "A15").await;
@@ -753,10 +766,10 @@ async fn login_list_select_fetch_store_search_and_append_work() {
         "A17",
     )
     .await;
-    assert!(append.contains("A17 OK [APPENDUID 1 3] APPEND completed"));
+    assert!(append.contains("A17 OK [APPENDUID 1 5] APPEND completed"));
 
     let drafts = send_command(&mut stream, "A18 UID SEARCH TEXT Draft\r\n", "A18").await;
-    assert!(drafts.contains("* SEARCH 3"));
+    assert!(drafts.contains("* SEARCH 5"));
 
     let delete_archive = send_command(&mut stream, "A19 DELETE Archive\r\n", "A19").await;
     assert!(delete_archive.contains("A19 OK DELETE completed"));
@@ -915,6 +928,136 @@ async fn idle_reports_selected_mailbox_flag_changes() {
 
     let update = read_response_with_timeout(&mut stream, None, 2_500).await;
     assert!(update.contains("* 1 FETCH (FLAGS (\\Seen \\Flagged))"));
+
+    let done = send_command(&mut stream, "DONE\r\n", "A3").await;
+    assert!(done.contains("A3 OK IDLE completed"));
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn store_survives_concurrent_selected_mailbox_removal() {
+    let store = FakeStore::new();
+    let archive_id = Uuid::new_v4();
+    {
+        let mut mailboxes = store.mailboxes.lock().unwrap();
+        mailboxes.push(JmapMailbox {
+            id: archive_id,
+            role: String::new(),
+            name: "Archive".to_string(),
+            sort_order: 30,
+            total_emails: 0,
+            unread_emails: 0,
+        });
+    }
+    {
+        let mut emails = store.emails.lock().unwrap();
+        emails.push(email(
+            "33333333-3333-3333-3333-333333333333",
+            3,
+            4,
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "inbox",
+            "Inbox",
+            "Follow-up",
+            true,
+            false,
+        ));
+    }
+    *store.highest_modseq.lock().unwrap() = 4;
+    store.enqueue_post_flag_update_action(PostFlagUpdateAction::RemoveMessage {
+        message_id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+    });
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    let _ = send_command(&mut stream, "A2 SELECT Inbox\r\n", "A2").await;
+
+    let store_response =
+        send_command(&mut stream, "A3 UID STORE 3 +FLAGS (\\Flagged)\r\n", "A3").await;
+    assert!(store_response.contains("* 1 FETCH (FLAGS (\\Flagged))"));
+    assert!(store_response.contains("A3 OK STORE completed"));
+
+    let fetch_after = send_command(&mut stream, "A4 UID FETCH 3 (FLAGS MODSEQ)\r\n", "A4").await;
+    assert!(fetch_after.contains("* 1 FETCH (FLAGS (\\Flagged) MODSEQ (5))"));
+    assert!(fetch_after.contains("A4 OK FETCH completed"));
+    assert!(
+        store
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|email| email.subject == "Follow-up" && email.flagged)
+    );
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn idle_reports_replacement_when_selected_mailbox_membership_changes_without_count_change() {
+    let store = FakeStore::new();
+    let archive_id = Uuid::new_v4();
+    {
+        let mut mailboxes = store.mailboxes.lock().unwrap();
+        mailboxes.push(JmapMailbox {
+            id: archive_id,
+            role: String::new(),
+            name: "Archive".to_string(),
+            sort_order: 30,
+            total_emails: 0,
+            unread_emails: 0,
+        });
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    let _ = send_command(&mut stream, "A2 SELECT Inbox\r\n", "A2").await;
+
+    let idle = send_partial_command(&mut stream, "A3 IDLE\r\n").await;
+    assert!(idle.contains("+ idling"));
+
+    {
+        let moved_modseq = store.next_modseq();
+        let replacement_modseq = store.next_modseq();
+        let mut emails = store.emails.lock().unwrap();
+        let moved = emails
+            .iter_mut()
+            .find(|email| email.mailbox_name == "Inbox")
+            .unwrap();
+        moved.mailbox_id = archive_id;
+        moved.mailbox_role.clear();
+        moved.mailbox_name = "Archive".to_string();
+        moved.uid = 3;
+        moved.modseq = moved_modseq;
+        emails.push(email(
+            "44444444-4444-4444-4444-444444444444",
+            4,
+            replacement_modseq,
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "inbox",
+            "Inbox",
+            "Replacement",
+            true,
+            false,
+        ));
+    }
+
+    let update = read_response_with_timeout(&mut stream, None, 2_500).await;
+    assert!(update.contains("* 1 EXPUNGE"));
+    assert!(update.contains("* 1 EXISTS"));
+    assert!(update.contains("* 1 FETCH (UID 4 FLAGS ())"));
 
     let done = send_command(&mut stream, "DONE\r\n", "A3").await;
     assert!(done.contains("A3 OK IDLE completed"));
