@@ -3,8 +3,9 @@ set -euo pipefail
 
 SMTP_HOST="${SMTP_HOST:-127.0.0.1}"
 SMTP_PORT="${SMTP_PORT:-25}"
-SENDER="${SENDER:?Set SENDER to a real sender address}"
-RECIPIENT="${RECIPIENT:?Set RECIPIENT to a real mailbox hosted behind LPE-CT}"
+SPOOL_DIR="${SPOOL_DIR:-/var/spool/lpe-ct}"
+SENDER="${SENDER:-}"
+RECIPIENT="${RECIPIENT:-}"
 
 fail() {
   echo "[FAIL] $*" >&2
@@ -13,6 +14,32 @@ fail() {
 
 pass() {
   echo "[OK] $*"
+}
+
+usage() {
+  cat <<EOF
+Usage:
+  SENDER=sender@example.net RECIPIENT=user@example.com ./test-antivirus-lpe-ct.sh
+
+Optional overrides:
+  SMTP_HOST=${SMTP_HOST}
+  SMTP_PORT=${SMTP_PORT}
+  SPOOL_DIR=${SPOOL_DIR}
+
+Required environment variables:
+  SENDER     Real sender address accepted by the test path
+  RECIPIENT  Real mailbox hosted behind LPE-CT
+EOF
+}
+
+require_env() {
+  local name="$1"
+  local description="$2"
+  local value="${!name:-}"
+  if [[ -z "$value" ]]; then
+    usage >&2
+    fail "$name is required. $description"
+  fi
 }
 
 smtp_expect_line() {
@@ -41,6 +68,9 @@ smtp_cmd() {
   smtp_expect_code "$expected" >/dev/null
 }
 
+require_env SENDER "Set it to a real sender address before running the antivirus test."
+require_env RECIPIENT "Set it to a real mailbox hosted behind LPE-CT before running the antivirus test."
+
 exec 3<>"/dev/tcp/${SMTP_HOST}/${SMTP_PORT}" || fail "Unable to open SMTP connection to ${SMTP_HOST}:${SMTP_PORT}"
 smtp_expect_code 220 >/dev/null
 smtp_cmd "EHLO antivirus-test.lpe-ct" 250
@@ -66,11 +96,32 @@ printf 'WDVPIVAlQEFQWzRcUFpYNTQoUF4pN0NDKTd9JEVJQ0FSLVNUQU5EQVJELUFOVElWSVJVUy1U
 printf 'LUZJTEUhJEgrSCo=\r\n' >&3
 printf -- '--avtest--\r\n.\r\n' >&3
 
-data_reply="$(smtp_expect_code 250)"
+data_reply="$(smtp_expect_line)"
 printf 'QUIT\r\n' >&3
 smtp_expect_code 221 >/dev/null
 exec 3>&-
 exec 3<&-
 
-[[ "$data_reply" == *"quarantined as"* ]] || fail "Expected antivirus quarantine response, got: $data_reply"
-pass "SMTP antivirus scenario quarantined the EICAR attachment"
+trace_id=""
+if [[ "$data_reply" == 250*"quarantined as "* ]]; then
+  trace_id="${data_reply##*quarantined as }"
+elif [[ "$data_reply" == 554*"perimeter policy (trace "*")" ]]; then
+  trace_id="${data_reply##*perimeter policy (trace }"
+  trace_id="${trace_id%)}"
+else
+  fail "Expected antivirus quarantine or perimeter reject response, got: $data_reply"
+fi
+
+[[ -n "$trace_id" ]] || fail "Unable to extract trace id from SMTP response: $data_reply"
+
+trace_file="${SPOOL_DIR}/quarantine/${trace_id}.json"
+for _ in 1 2 3 4 5; do
+  [[ -f "$trace_file" ]] && break
+  sleep 1
+done
+
+[[ -f "$trace_file" ]] || fail "Trace ${trace_id} was not written to ${trace_file}"
+grep -qi 'antivirus' "$trace_file" || fail "Trace ${trace_id} does not show an antivirus decision in ${trace_file}"
+grep -qi '"status":"\(quarantined\|rejected\)"' "$trace_file" || fail "Trace ${trace_id} is not marked as quarantined or rejected in ${trace_file}"
+
+pass "SMTP antivirus scenario retained the EICAR attachment in quarantine as trace ${trace_id}"

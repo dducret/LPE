@@ -60,6 +60,17 @@ The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_D
 - `test-from-internet.sh` from an external machine
 - `test-antivirus-lpe-ct.sh` from the `LPE-CT` server to validate quarantine on an `EICAR` attachment
 
+The `LPE-CT` test scripts that inject mail require real mailbox addresses through environment variables. For example, run the antivirus check as:
+
+```bash
+cd /opt/lpe/src/LPE-CT/installation/debian-trixie
+SENDER=postmaster@example.net \
+RECIPIENT=user@example.com \
+./test-antivirus-lpe-ct.sh
+```
+
+For `test-antivirus-lpe-ct.sh`, the SMTP final reply can be either a quarantine `250` or a perimeter-policy `554` depending on the other edge checks that apply to the chosen sender. The validation target is the quarantined trace written under `/var/spool/lpe-ct/quarantine`, and the script now verifies that retained trace instead of assuming one specific SMTP reply text.
+
 ### Initial preparation on a bare Debian server
 
 Update the APT index and install the minimal tools required to fetch the repository:
