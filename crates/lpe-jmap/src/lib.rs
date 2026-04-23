@@ -1752,6 +1752,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn email_get_hides_bcc_for_delegated_shared_mailbox_projection() {
+        let shared = FakeStore::shared_account();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/get".to_string(),
+                        json!({
+                            "accountId": shared.account_id.to_string(),
+                            "ids": [FakeStore::draft_email().id.to_string()],
+                            "properties": ["id", "bcc"]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let list = response.method_responses[0].1["list"].as_array().unwrap();
+        assert_eq!(list[0]["bcc"], Value::Null);
+    }
+
+    #[tokio::test]
     async fn mailbox_and_email_changes_return_existing_ids_from_initial_state() {
         let store = FakeStore {
             session: Some(FakeStore::account()),

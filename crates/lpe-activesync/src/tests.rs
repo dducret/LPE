@@ -1815,16 +1815,21 @@ async fn item_operations_fetch_returns_attachment_bytes() {
 #[tokio::test]
 async fn search_queries_canonical_mail_projection() {
     let inbox = FakeStore::inbox_mailbox();
+    let mut first = FakeStore::inbox_email(
+        "11111111-1111-1111-1111-111111111111",
+        inbox.id,
+        "inbox",
+        "Quarterly budget",
+    );
+    first.bcc = vec![JmapEmailAddress {
+        address: "hidden@example.test".to_string(),
+        display_name: Some("Hidden".to_string()),
+    }];
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: vec![inbox.clone()],
         emails: Arc::new(Mutex::new(vec![
-            FakeStore::inbox_email(
-                "11111111-1111-1111-1111-111111111111",
-                inbox.id,
-                "inbox",
-                "Quarterly budget",
-            ),
+            first,
             FakeStore::inbox_email(
                 "22222222-2222-2222-2222-222222222222",
                 inbox.id,
@@ -1877,6 +1882,15 @@ async fn search_queries_canonical_mail_projection() {
             .unwrap()
             .text_value(),
         "Quarterly budget"
+    );
+    assert!(
+        result
+            .child("Properties")
+            .unwrap()
+            .child("ApplicationData")
+            .unwrap()
+            .child("Bcc")
+            .is_none()
     );
 }
 

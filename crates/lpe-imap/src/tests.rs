@@ -899,6 +899,34 @@ async fn inbox_fetch_and_search_do_not_leak_bcc() {
 }
 
 #[tokio::test]
+async fn sent_fetch_reconstructs_owner_bcc_header() {
+    let store = FakeStore::new();
+    {
+        let mut emails = store.emails.lock().unwrap();
+        emails[1].bcc = vec![JmapEmailAddress {
+            address: "hidden@example.test".to_string(),
+            display_name: Some("Hidden".to_string()),
+        }];
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store, Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _greeting = read_response(&mut stream, None).await;
+    let login = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    assert!(login.contains("A1 OK LOGIN completed"));
+    let select = send_command(&mut stream, "A2 SELECT Sent\r\n", "A2").await;
+    assert!(select.contains("A2 OK [READ-WRITE] SELECT completed"));
+
+    let fetch = send_command(&mut stream, "A3 FETCH 1 (BODY.PEEK[HEADER])\r\n", "A3").await;
+    assert!(fetch.contains("\r\nBcc: Hidden <hidden@example.test>"));
+
+    task.abort();
+}
+
+#[tokio::test]
 async fn idle_reports_selected_mailbox_flag_changes() {
     let store = FakeStore::new();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

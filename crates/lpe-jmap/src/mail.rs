@@ -179,7 +179,17 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         Ok(json!({
             "accountId": account_id.to_string(),
             "state": state,
-            "list": emails.iter().map(|email| email_to_value(email, &properties)).collect::<Vec<_>>(),
+            "list": emails
+                .iter()
+                .map(|email| {
+                    email_to_value(
+                        email,
+                        &properties,
+                        account_access.is_owned
+                            && matches!(email.mailbox_role.as_str(), "drafts" | "sent"),
+                    )
+                })
+                .collect::<Vec<_>>(),
             "notFound": not_found,
         }))
     }
@@ -1128,7 +1138,11 @@ pub(crate) fn thread_properties(properties: Option<Vec<String>>) -> HashSet<Stri
         .collect()
 }
 
-pub(crate) fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) -> Value {
+pub(crate) fn email_to_value(
+    email: &JmapEmail,
+    properties: &HashSet<String>,
+    include_owner_bcc: bool,
+) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", email.id.to_string());
     insert_if(
@@ -1220,7 +1234,7 @@ pub(crate) fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) ->
             ),
         );
     }
-    if properties.contains("bcc") && !email.bcc.is_empty() {
+    if include_owner_bcc && properties.contains("bcc") && !email.bcc.is_empty() {
         object.insert(
             "bcc".to_string(),
             Value::Array(

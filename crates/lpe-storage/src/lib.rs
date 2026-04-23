@@ -425,6 +425,16 @@ mod tests {
     }
 
     #[test]
+    fn participants_normalized_remains_visible_only_even_with_bcc_display_name() {
+        let input = submit_input();
+        let visible = normalize_visible_recipients(&input);
+        let participants = participants_normalized("sender@example.test", &visible);
+
+        assert!(!participants.contains("Hidden Person"));
+        assert!(!participants.contains("bcc@example.test"));
+    }
+
+    #[test]
     fn pst_processing_requires_prior_validation_record() {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
