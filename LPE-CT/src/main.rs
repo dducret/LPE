@@ -382,6 +382,39 @@ struct RouteDiagnosticsResponse {
     throttling: ThrottlingSettings,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct PolicyStatusResponse {
+    recipient_verification: RecipientVerificationStatusView,
+    dkim: DkimStatusView,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RecipientVerificationStatusView {
+    enabled: bool,
+    fail_closed: bool,
+    cache_ttl_seconds: u32,
+    operational_state: String,
+    cache_backend: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DkimStatusView {
+    enabled: bool,
+    headers: Vec<String>,
+    over_sign: bool,
+    expiration_seconds: Option<u32>,
+    domains: Vec<DkimDomainStatusView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DkimDomainStatusView {
+    domain: String,
+    selector: String,
+    private_key_path: String,
+    enabled: bool,
+    key_status: String,
+}
+
 #[derive(Debug, Clone)]
 struct ManagementSession {
     email: String,
@@ -498,6 +531,7 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/traces/{trace_id}/release", post(release_trace))
         .route("/api/v1/traces/{trace_id}/delete", post(delete_trace))
         .route("/api/v1/routes/diagnostics", get(route_diagnostics))
+        .route("/api/v1/policies/status", get(policy_status))
         .route(
             "/api/v1/reporting",
             get(reporting_snapshot).put(update_reporting),
@@ -848,6 +882,50 @@ async fn route_diagnostics(
         secondary_upstream: snapshot.relay.secondary_upstream,
         routing: snapshot.routing,
         throttling: snapshot.throttling,
+    }))
+}
+
+async fn policy_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<PolicyStatusResponse>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    let snapshot = read_state(&state)?;
+    Ok(Json(PolicyStatusResponse {
+        recipient_verification: RecipientVerificationStatusView {
+            enabled: snapshot.policies.recipient_verification.enabled,
+            fail_closed: snapshot.policies.recipient_verification.fail_closed,
+            cache_ttl_seconds: snapshot.policies.recipient_verification.cache_ttl_seconds,
+            operational_state: if snapshot.policies.recipient_verification.enabled {
+                "active".to_string()
+            } else {
+                "disabled".to_string()
+            },
+            cache_backend: if snapshot.local_data_stores.dedicated_postgres.enabled {
+                "private-postgres".to_string()
+            } else {
+                "memory-only".to_string()
+            },
+        },
+        dkim: DkimStatusView {
+            enabled: snapshot.policies.dkim.enabled,
+            headers: snapshot.policies.dkim.headers.clone(),
+            over_sign: snapshot.policies.dkim.over_sign,
+            expiration_seconds: snapshot.policies.dkim.expiration_seconds,
+            domains: snapshot
+                .policies
+                .dkim
+                .domains
+                .iter()
+                .map(|domain| DkimDomainStatusView {
+                    domain: domain.domain.clone(),
+                    selector: domain.selector.clone(),
+                    private_key_path: domain.private_key_path.clone(),
+                    enabled: domain.enabled,
+                    key_status: dkim_key_status(&domain.private_key_path),
+                })
+                .collect(),
+        },
     }))
 }
 
@@ -2301,6 +2379,22 @@ fn smtp_target_socket_address(target: &str) -> String {
         normalized.to_string()
     } else {
         format!("{normalized}:25")
+    }
+}
+
+fn dkim_key_status(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return "not-configured".to_string();
+    }
+    let key_path = Path::new(trimmed);
+    if !key_path.exists() {
+        return "missing".to_string();
+    }
+    match fs::metadata(key_path) {
+        Ok(metadata) if metadata.is_file() => "present".to_string(),
+        Ok(_) => "invalid-path".to_string(),
+        Err(_) => "unreadable".to_string(),
     }
 }
 

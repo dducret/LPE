@@ -303,6 +303,11 @@ The management API and UI now use the retained perimeter artifacts for these ope
 - inspect a quarantined or retained trace with headers, body excerpt, decision trace, and retained flow history
 - release, retry, or delete a quarantined trace while keeping retained perimeter audit evidence
 - search inbound and outbound flow history by trace id, sender, recipient, subject, route, disposition, and policy evidence
+- operate sender and recipient allow/block rules from full-width policy lists with drawer-based create, edit, and delete flows
+- operate attachment-policy rules by extension, MIME type, and detected file type from the same policy workspace
+- review recipient-verification mode, fail-open or fail-closed posture, cache backend, and cache TTL without leaving the management shell
+- review DKIM signing posture, per-domain selectors, and key-path status in the same operator-facing policy workspace
+- manage digest schedule, domain defaults, mailbox overrides, and retained digest artifacts from one reporting section
 
 `LPE-CT` also now generates scheduled quarantine digest reports from sorting-center-owned data only.
 

@@ -18,13 +18,18 @@
         <p class="eyebrow" data-i18n="brand">La Poste Electronique</p>
         <h1 data-i18n="loginTitle">LPE-CT Management Login</h1>
         <p class="sidebar-copy" data-i18n="loginCopy">
-          First access uses the bootstrap administrator. Change the bootstrap secret in deployment
-          configuration after initial validation.
+          Authenticate with the management administrator configured for this sorting center.
         </p>
         <form id="login-form" class="form-panel">
           <div class="fields">
-            <label><span data-i18n="adminEmail">Admin email</span><input name="email" autocomplete="username" required /></label>
-            <label><span data-i18n="password">Password</span><input name="password" type="password" required /></label>
+            <label>
+              <span data-i18n="adminEmail">Admin email</span>
+              <input name="email" autocomplete="username" required />
+            </label>
+            <label>
+              <span data-i18n="password">Password</span>
+              <input name="password" type="password" autocomplete="current-password" required />
+            </label>
           </div>
           <button class="primary-button" type="submit" data-i18n="signIn">Sign in</button>
         </form>
@@ -39,44 +44,69 @@
             <p class="eyebrow" data-i18n="brand">La Poste Electronique</p>
             <h1 data-i18n="consoleTitle">Sorting Center</h1>
             <p class="sidebar-copy" data-i18n="consoleIntro">
-              Management interface for a DMZ node distinct from the LAN, focused on routing, quarantine, inbound policies, and updates.
+              Unified control plane for quarantine, transport history, perimeter policy, recipient verification, DKIM, and digest reporting.
             </p>
           </div>
+
           <div class="sidebar-group">
-            <p class="sidebar-heading" data-i18n="workspace">Workspace</p>
+            <p class="sidebar-heading" data-i18n="navOperationsHeading">Operations</p>
             <nav class="page-list">
-              <button class="page-button" type="button" data-open-panel="site-panel" data-panel-title-key="drawerSiteTitle" data-panel-summary-key="drawerSiteSummary">
+              <button class="page-button" type="button" data-scroll-target="overview-section">
                 <span class="page-icon">01</span>
-                <span data-i18n="navSiteTitle">Node identity</span>
+                <span data-i18n="navOverview">Overview</span>
               </button>
-              <button class="page-button" type="button" data-open-panel="relay-panel" data-panel-title-key="drawerRelayTitle" data-panel-summary-key="drawerRelaySummary">
+              <button class="page-button" type="button" data-scroll-target="quarantine-section">
                 <span class="page-icon">02</span>
-                <span data-i18n="navRelayTitle">Relay toward LAN</span>
+                <span data-i18n="navQuarantine">Quarantine</span>
               </button>
-              <button class="page-button" type="button" data-open-panel="network-panel" data-panel-title-key="drawerNetworkTitle" data-panel-summary-key="drawerNetworkSummary">
+              <button class="page-button" type="button" data-scroll-target="history-section">
                 <span class="page-icon">03</span>
-                <span data-i18n="navNetworkTitle">Network surface</span>
+                <span data-i18n="navHistory">Mail history</span>
               </button>
             </nav>
           </div>
+
           <div class="sidebar-group">
-            <p class="sidebar-heading" data-i18n="governance">Governance</p>
+            <p class="sidebar-heading" data-i18n="navPolicyHeading">Policy</p>
             <nav class="page-list">
-              <button class="page-button" type="button" data-open-panel="policies-panel" data-panel-title-key="drawerPoliciesTitle" data-panel-summary-key="drawerPoliciesSummary">
+              <button class="page-button" type="button" data-scroll-target="address-policy-section">
                 <span class="page-icon">04</span>
-                <span data-i18n="navPoliciesTitle">Sorting policies</span>
+                <span data-i18n="navAddressRules">Allow / block lists</span>
               </button>
-              <button class="page-button" type="button" data-open-panel="updates-panel" data-panel-title-key="drawerUpdatesTitle" data-panel-summary-key="drawerUpdatesSummary">
+              <button class="page-button" type="button" data-scroll-target="attachment-policy-section">
                 <span class="page-icon">05</span>
-                <span data-i18n="navUpdatesTitle">Updates</span>
+                <span data-i18n="navAttachmentRules">Attachment rules</span>
               </button>
-              <button class="page-button" type="button" data-open-panel="reporting-panel" data-panel-title-key="drawerReportingTitle" data-panel-summary-key="drawerReportingSummary">
+              <button class="page-button" type="button" data-scroll-target="verification-section">
                 <span class="page-icon">06</span>
-                <span data-i18n="navReportingTitle">Reporting</span>
+                <span data-i18n="navVerification">Recipient verification</span>
+              </button>
+              <button class="page-button" type="button" data-scroll-target="dkim-section">
+                <span class="page-icon">07</span>
+                <span data-i18n="navDkim">DKIM domains</span>
+              </button>
+            </nav>
+          </div>
+
+          <div class="sidebar-group">
+            <p class="sidebar-heading" data-i18n="navReportingHeading">Reporting</p>
+            <nav class="page-list">
+              <button class="page-button" type="button" data-scroll-target="digest-section">
+                <span class="page-icon">08</span>
+                <span data-i18n="navDigest">Digest reports</span>
+              </button>
+              <button class="page-button" type="button" data-scroll-target="platform-section">
+                <span class="page-icon">09</span>
+                <span data-i18n="navPlatform">Node and transport</span>
+              </button>
+              <button class="page-button" type="button" data-scroll-target="audit-section">
+                <span class="page-icon">10</span>
+                <span data-i18n="navAudit">Audit journal</span>
               </button>
             </nav>
           </div>
         </div>
+
         <div class="sidebar-footer">
           <label class="locale-picker sidebar-locale">
             <span data-i18n="languageLabel">Language</span>
@@ -87,11 +117,11 @@
       </aside>
 
       <section class="workspace">
-        <header class="hero">
+        <header id="overview-section" class="hero">
           <div>
             <p class="kicker" data-i18n="heroKicker">DMZ sorting center</p>
             <h2 id="node-name">Loading...</h2>
-            <p id="hero-summary" class="hero-copy">Reading sorting-center state.</p>
+            <p id="hero-summary" class="hero-copy" data-i18n="heroLoadingSummary">Reading sorting-center state.</p>
           </div>
           <div class="hero-badges">
             <span id="status-badge" class="badge">Status</span>
@@ -102,293 +132,200 @@
         <section class="panel workspace-toolbar">
           <div class="toolbar-actions">
             <button id="refresh-toolbar" class="primary-button" type="button" data-i18n="refreshState">Refresh state</button>
-            <button class="secondary-button" type="button" data-open-panel="policies-panel" data-panel-title-key="drawerPoliciesTitle" data-panel-summary-key="drawerPoliciesSummary" data-i18n="policiesShort">Policies</button>
-            <button class="secondary-button" type="button" data-open-panel="relay-panel" data-panel-title-key="drawerRelayTitle" data-panel-summary-key="drawerRelaySummary" data-i18n="relayShort">Relay</button>
+            <button id="run-digests" class="secondary-button" type="button" data-i18n="runDigests">Run digests now</button>
           </div>
           <div class="toolbar-chips">
             <span class="pill" data-i18n="pillBoundary">DMZ boundary</span>
-            <span class="pill" data-i18n="pillMagika">Magika aware</span>
-            <span class="pill" data-i18n="pillQueue">Queue discipline</span>
+            <span class="pill" data-i18n="pillTrace">Traceable flow</span>
+            <span class="pill" data-i18n="pillPolicy">Operator policy</span>
           </div>
         </section>
 
         <section class="panel metrics">
           <article>
-            <span data-i18n="inbound">Inbound</span>
+            <span data-i18n="metricInbound">Inbound</span>
             <strong id="metric-inbound">-</strong>
           </article>
           <article>
-            <span data-i18n="deferred">Deferred</span>
+            <span data-i18n="metricDeferred">Deferred</span>
             <strong id="metric-deferred">-</strong>
           </article>
           <article>
-            <span data-i18n="quarantine">Quarantine</span>
+            <span data-i18n="metricQuarantine">Quarantine</span>
             <strong id="metric-quarantine">-</strong>
           </article>
           <article>
-            <span data-i18n="attemptsPerHour">Attempts / h</span>
+            <span data-i18n="metricAttempts">Attempts / h</span>
             <strong id="metric-attempts">-</strong>
           </article>
         </section>
 
         <p id="feedback" class="feedback hidden"></p>
 
-        <section class="panel management-list-card">
-          <div class="section-title-row">
-            <div>
-              <h3 data-i18n="configTitle">Sorting-center configuration</h3>
-              <p data-i18n="configSummary">Select a section to open its management drawer.</p>
-            </div>
-          </div>
-          <div class="management-list full-width">
-            <button class="management-list-item" type="button" data-open-panel="site-panel" data-panel-title-key="drawerSiteTitle" data-panel-summary-key="drawerSiteSummary">
-              <span class="management-main">
-                <strong data-i18n="managementSiteTitle">Node identity</strong>
-                <span data-i18n="managementSiteCopy">Name, role, region, FQDN, and published interfaces.</span>
-              </span>
-              <span class="pill" data-i18n="managementSitePill">DMZ profile</span>
-              <span class="management-actions" data-i18n="open">Open</span>
-            </button>
-
-            <button class="management-list-item" type="button" data-open-panel="relay-panel" data-panel-title-key="drawerRelayTitle" data-panel-summary-key="drawerRelaySummary">
-              <span class="management-main">
-                <strong data-i18n="managementRelayTitle">Relay toward LAN</strong>
-                <span data-i18n="managementRelayCopy">Upstreams, mTLS, hold queue, and LAN dependencies.</span>
-              </span>
-              <span class="pill" data-i18n="managementRelayPill">Transport</span>
-              <span class="management-actions" data-i18n="open">Open</span>
-            </button>
-
-            <button class="management-list-item" type="button" data-open-panel="network-panel" data-panel-title-key="drawerNetworkTitle" data-panel-summary-key="drawerNetworkSummary">
-              <span class="management-main">
-                <strong data-i18n="managementNetworkTitle">Network surface</strong>
-                <span data-i18n="managementNetworkCopy">Allowed CIDRs, smart hosts, listeners, and proxy protocol.</span>
-              </span>
-              <span class="pill" data-i18n="managementNetworkPill">DMZ</span>
-              <span class="management-actions" data-i18n="open">Open</span>
-            </button>
-
-            <button class="management-list-item" type="button" data-open-panel="policies-panel" data-panel-title-key="drawerPoliciesTitle" data-panel-summary-key="drawerPoliciesSummary">
-              <span class="management-main">
-                <strong data-i18n="managementPoliciesTitle">Sorting policies</strong>
-                <span data-i18n="managementPoliciesCopy">SPF, DKIM, DMARC, greylisting, quarantine, and message size.</span>
-              </span>
-              <span class="pill" data-i18n="managementPoliciesPill">Security</span>
-              <span class="management-actions" data-i18n="open">Open</span>
-            </button>
-
-            <button class="management-list-item" type="button" data-open-panel="updates-panel" data-panel-title-key="drawerUpdatesTitle" data-panel-summary-key="drawerUpdatesSummary">
-              <span class="management-main">
-                <strong data-i18n="managementUpdatesTitle">Updates</strong>
-                <span data-i18n="managementUpdatesCopy">Channel, maintenance window, Git source, and download policy.</span>
-              </span>
-              <span class="pill" data-i18n="managementUpdatesPill">Operations</span>
-              <span class="management-actions" data-i18n="open">Open</span>
-            </button>
-
-            <button class="management-list-item" type="button" data-open-panel="reporting-panel" data-panel-title-key="drawerReportingTitle" data-panel-summary-key="drawerReportingSummary">
-              <span class="management-main">
-                <strong data-i18n="managementReportingTitle">Reporting</strong>
-                <span data-i18n="managementReportingCopy">Digest cadence, domain defaults, user overrides, and history retention.</span>
-              </span>
-              <span class="pill" data-i18n="managementReportingPill">Reporting</span>
-              <span class="management-actions" data-i18n="open">Open</span>
-            </button>
-          </div>
-        </section>
-
-        <section class="ops-grid ops-grid-wide">
-          <article class="panel ops-card ops-card-span-2">
-            <div class="section-head">
-              <div>
-                <h3 data-i18n="quarantineQueueTitle">Quarantine queue</h3>
-                <p data-i18n="quarantineQueueCopy">Live perimeter backlog with trace and release controls.</p>
-              </div>
-              <button class="secondary-button" type="button" id="run-digests" data-i18n="runDigests">Run digests now</button>
-            </div>
-            <form id="quarantine-search-form" class="search-toolbar">
-              <input name="q" type="search" data-i18n-placeholder="searchQuarantinePlaceholder" placeholder="Search trace, sender, recipient, subject, or Message-Id" />
-              <select name="direction">
-                <option value="" data-i18n="allDirections">All directions</option>
-                <option value="inbound">Inbound</option>
-                <option value="outbound">Outbound</option>
-              </select>
-              <input name="domain" type="search" data-i18n-placeholder="filterDomainPlaceholder" placeholder="Filter domain" />
-              <button class="primary-button compact-button" type="submit" data-i18n="search">Search</button>
-            </form>
-            <div id="quarantine-list" class="quarantine-focus"></div>
-          </article>
-
-          <article class="panel ops-card ops-card-span-2">
-            <div class="section-head">
-              <div>
-                <h3 data-i18n="historyTitle">Mail history</h3>
-                <p data-i18n="historyCopy">Searchable inbound and outbound flow with status, trace, and policy context.</p>
-              </div>
-            </div>
-            <form id="history-search-form" class="search-toolbar">
-              <input name="q" type="search" data-i18n-placeholder="searchHistoryPlaceholder" placeholder="Search trace, sender, recipient, subject, route, or policy" />
-              <select name="direction">
-                <option value="" data-i18n="allDirections">All directions</option>
-                <option value="inbound">Inbound</option>
-                <option value="outbound">Outbound</option>
-              </select>
-              <select name="queue">
-                <option value="" data-i18n="allQueues">All queues</option>
-                <option value="quarantine">quarantine</option>
-                <option value="deferred">deferred</option>
-                <option value="held">held</option>
-                <option value="sent">sent</option>
-                <option value="bounces">bounces</option>
-              </select>
-              <input name="domain" type="search" data-i18n-placeholder="filterDomainPlaceholder" placeholder="Filter domain" />
-              <button class="primary-button compact-button" type="submit" data-i18n="search">Search</button>
-            </form>
-            <div id="history-list" class="quarantine-focus"></div>
-          </article>
-
-          <article class="panel ops-card">
-            <div class="section-head">
-              <h3 data-i18n="routeDiagnosticsTitle">Route diagnostics</h3>
-              <p data-i18n="routeDiagnosticsCopy">Relay targets, routing rules, and throttle windows currently in force.</p>
-            </div>
-            <div id="route-diagnostics" class="quarantine-focus"></div>
-          </article>
-
-          <article class="panel ops-card">
-            <div class="section-head">
-              <h3 data-i18n="digestReportsTitle">Digest reports</h3>
-              <p data-i18n="digestReportsCopy">Recent scheduled quarantine digests generated inside LPE-CT.</p>
-            </div>
-            <div id="digest-report-list" class="quarantine-focus"></div>
-            <div id="reporting-summary" class="reporting-summary"></div>
-          </article>
-        </section>
-
-        <div id="ops-drawer" class="management-modal-backdrop hidden" role="presentation">
-          <aside class="management-modal panel" role="dialog" aria-modal="true" aria-labelledby="ops-drawer-title">
-            <div class="drawer-header">
-              <div>
-                <h3 id="ops-drawer-title">Trace details</h3>
-                <p id="ops-drawer-summary">Decision trace, headers, policy evidence, and digest content.</p>
-              </div>
-              <button id="ops-drawer-close" class="icon-button" type="button" data-i18n-aria-label="close" aria-label="Close">x</button>
-            </div>
-            <div id="ops-drawer-content" class="trace-card empty-state" data-i18n="traceEmptyState">Select a quarantined or deferred trace.</div>
-          </aside>
-        </div>
-
-        <div id="config-drawer" class="management-modal-backdrop hidden" role="presentation">
-          <aside class="management-modal panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
-            <div class="drawer-header">
-              <div>
-                <h3 id="drawer-title" data-i18n="drawerConfig">Configuration</h3>
-                <p id="drawer-summary" data-i18n="drawerSummaryDefault">Edit the selected section.</p>
-              </div>
-              <button id="drawer-close" class="icon-button" type="button" data-i18n-aria-label="close" aria-label="Close">x</button>
-            </div>
-
-            <div id="site-panel" class="drawer-panel hidden">
-              <form id="site-form" class="form-panel">
-                <div class="fields two">
-                  <label><span data-i18n="nodeName">Node name</span><input name="node_name" required /></label>
-                  <label><span data-i18n="role">Role</span><input name="role" required /></label>
-                  <label><span data-i18n="region">Region</span><input name="region" required /></label>
-                  <label><span data-i18n="dmzZone">DMZ zone</span><input name="dmz_zone" required /></label>
-                  <label><span data-i18n="publishedMx">Published MX</span><input name="published_mx" required /></label>
-                  <label><span data-i18n="managementFqdn">Management FQDN</span><input name="management_fqdn" required /></label>
-                  <label><span data-i18n="publicSmtpBind">Public SMTP bind</span><input name="public_smtp_bind" required /></label>
-                  <label><span data-i18n="managementBind">Management bind</span><input name="management_bind" required /></label>
-                </div>
-                <button class="primary-button" type="submit" data-i18n="saveSite">Save profile</button>
-              </form>
-            </div>
-
-            <div id="relay-panel" class="drawer-panel hidden">
-              <form id="relay-form" class="form-panel">
-                <div class="fields two">
-                  <label class="toggle"><span data-i18n="haEnabled">HA enabled</span><input name="ha_enabled" type="checkbox" /></label>
-                  <div class="field-spacer"></div>
-                  <label data-ha-field><span data-i18n="primaryUpstream">Primary upstream</span><input name="primary_upstream" required /></label>
-                  <label data-ha-field><span data-i18n="secondaryUpstream">Secondary upstream</span><input name="secondary_upstream" required /></label>
-                  <label><span data-i18n="syncInterval">Sync interval (s)</span><input name="sync_interval_seconds" type="number" min="1" required /></label>
-                  <label><span data-i18n="lanDependencyNote">LAN dependency note</span><input name="lan_dependency_note" required /></label>
-                  <label class="toggle"><span data-i18n="mutualTlsRequired">Mutual TLS required</span><input name="mutual_tls_required" type="checkbox" /></label>
-                  <label class="toggle"><span data-i18n="fallbackToHoldQueue">Fallback to hold queue</span><input name="fallback_to_hold_queue" type="checkbox" /></label>
-                </div>
-                <button class="primary-button" type="submit" data-i18n="saveRelay">Save relay</button>
-              </form>
-            </div>
-
-            <div id="network-panel" class="drawer-panel hidden">
-              <form id="network-form" class="form-panel">
-                <div class="fields two">
-                  <label><span data-i18n="allowedManagementCidrs">Allowed management CIDRs</span><textarea name="allowed_management_cidrs" rows="3"></textarea></label>
-                  <label><span data-i18n="allowedUpstreamCidrs">Allowed upstream CIDRs</span><textarea name="allowed_upstream_cidrs" rows="3"></textarea></label>
-                  <label><span data-i18n="outboundSmartHosts">Outbound smart hosts</span><textarea name="outbound_smart_hosts" rows="3"></textarea></label>
-                  <label><span data-i18n="maxConcurrentSessions">Max concurrent sessions</span><input name="max_concurrent_sessions" type="number" min="1" required /></label>
-                  <label class="toggle"><span data-i18n="publicListenerEnabled">Public listener enabled</span><input name="public_listener_enabled" type="checkbox" /></label>
-                  <label class="toggle"><span data-i18n="submissionListenerEnabled">Submission listener enabled</span><input name="submission_listener_enabled" type="checkbox" /></label>
-                  <label class="toggle"><span data-i18n="proxyProtocolEnabled">Proxy protocol enabled</span><input name="proxy_protocol_enabled" type="checkbox" /></label>
-                </div>
-                <button class="primary-button" type="submit" data-i18n="saveNetwork">Save network</button>
-              </form>
-            </div>
-
-            <div id="policies-panel" class="drawer-panel hidden">
-              <form id="policies-form" class="form-panel">
-                <div class="fields two">
-                  <label><span data-i18n="maxMessageSizeMb">Max message size (MB)</span><input name="max_message_size_mb" type="number" min="1" required /></label>
-                  <label class="toggle"><span data-i18n="drainMode">Drain mode</span><input name="drain_mode" type="checkbox" /></label>
-                  <label class="toggle"><span data-i18n="quarantineEnabled">Quarantine enabled</span><input name="quarantine_enabled" type="checkbox" /></label>
-                  <label class="toggle"><span data-i18n="greylistingEnabled">Greylisting enabled</span><input name="greylisting_enabled" type="checkbox" /></label>
-                  <label class="toggle"><span data-i18n="requireSpf">Require SPF</span><input name="require_spf" type="checkbox" /></label>
-                  <label class="toggle"><span data-i18n="requireDkimAlignment">Require DKIM alignment</span><input name="require_dkim_alignment" type="checkbox" /></label>
-                  <label class="toggle"><span data-i18n="requireDmarcEnforcement">Require DMARC enforcement</span><input name="require_dmarc_enforcement" type="checkbox" /></label>
-                  <label class="toggle"><span data-i18n="attachmentTextScanEnabled">Attachment text scan enabled</span><input name="attachment_text_scan_enabled" type="checkbox" /></label>
-                </div>
-                <button class="primary-button" type="submit" data-i18n="savePolicies">Save policies</button>
-              </form>
-            </div>
-
-            <div id="updates-panel" class="drawer-panel hidden">
-              <form id="updates-form" class="form-panel">
-                <div class="fields two">
-                  <label><span data-i18n="channel">Channel</span><input name="channel" required /></label>
-                  <label><span data-i18n="maintenanceWindow">Maintenance window</span><input name="maintenance_window" required /></label>
-                  <label><span data-i18n="lastAppliedRelease">Last applied release</span><input name="last_applied_release" required /></label>
-                  <label><span data-i18n="updateSource">Update source</span><input name="update_source" required /></label>
-                  <label class="toggle"><span data-i18n="autoDownload">Auto download</span><input name="auto_download" type="checkbox" /></label>
-                </div>
-                <button class="primary-button" type="submit" data-i18n="saveUpdates">Save updates</button>
-              </form>
-            </div>
-
-            <div id="reporting-panel" class="drawer-panel hidden">
-              <form id="reporting-form" class="form-panel">
-                <div class="fields two">
-                  <label class="toggle"><span data-i18n="digestEnabled">Digest reports enabled</span><input name="digest_enabled" type="checkbox" /></label>
-                  <label><span data-i18n="historyRetentionDays">History retention (days)</span><input name="history_retention_days" type="number" min="1" required /></label>
-                  <label><span data-i18n="digestIntervalMinutes">Digest interval (minutes)</span><input name="digest_interval_minutes" type="number" min="1" required /></label>
-                  <label><span data-i18n="digestMaxItems">Max items per digest</span><input name="digest_max_items" type="number" min="1" required /></label>
-                  <label class="field-span-two"><span data-i18n="digestDomainDefaults">Domain defaults</span><textarea name="domain_defaults_text" rows="6" data-i18n-placeholder="digestDomainDefaultsPlaceholder" placeholder="example.com: secops@example.com, admin@example.com"></textarea></label>
-                  <label class="field-span-two"><span data-i18n="digestUserOverrides">User overrides</span><textarea name="user_overrides_text" rows="6" data-i18n-placeholder="digestUserOverridesPlaceholder" placeholder="alice@example.com: alice.alerts@example.com"></textarea></label>
-                </div>
-                <button class="primary-button" type="submit" data-i18n="saveReporting">Save reporting</button>
-              </form>
-            </div>
-          </aside>
-        </div>
-
-        <section class="panel">
+        <section id="quarantine-section" class="panel section-panel">
           <div class="section-head">
-            <h3 data-i18n="auditTitle">Recent journal</h3>
-            <p data-i18n="auditCopy">Short trace of sorting-center configuration changes.</p>
+            <div>
+              <h3 data-i18n="quarantineTitle">Quarantine management</h3>
+              <p data-i18n="quarantineSummary">
+                Search retained messages, inspect trace evidence, and release or delete from the same operator surface.
+              </p>
+            </div>
+          </div>
+          <form id="quarantine-search-form" class="search-toolbar">
+            <input name="q" type="search" data-i18n-placeholder="quarantineSearchPlaceholder" placeholder="Search trace, sender, recipient, subject, or Message-Id" />
+            <select name="direction">
+              <option value="" data-i18n="allDirections">All directions</option>
+              <option value="inbound">Inbound</option>
+              <option value="outbound">Outbound</option>
+            </select>
+            <input name="domain" type="search" data-i18n-placeholder="domainFilterPlaceholder" placeholder="Filter domain" />
+            <button class="primary-button compact-button" type="submit" data-i18n="search">Search</button>
+          </form>
+          <div id="quarantine-list" class="management-list-stack"></div>
+        </section>
+
+        <section id="history-section" class="panel section-panel">
+          <div class="section-head">
+            <div>
+              <h3 data-i18n="historyTitle">Mail history and reporting</h3>
+              <p data-i18n="historySummary">
+                Search retained inbound and outbound flow with disposition, route, trace, and policy context.
+              </p>
+            </div>
+          </div>
+          <form id="history-search-form" class="search-toolbar history-toolbar">
+            <input name="q" type="search" data-i18n-placeholder="historySearchPlaceholder" placeholder="Search trace, sender, recipient, subject, route, or policy" />
+            <select name="direction">
+              <option value="" data-i18n="allDirections">All directions</option>
+              <option value="inbound">Inbound</option>
+              <option value="outbound">Outbound</option>
+            </select>
+            <select name="queue">
+              <option value="" data-i18n="allQueues">All queues</option>
+              <option value="quarantine">quarantine</option>
+              <option value="deferred">deferred</option>
+              <option value="held">held</option>
+              <option value="sent">sent</option>
+              <option value="bounces">bounces</option>
+            </select>
+            <input name="disposition" type="search" data-i18n-placeholder="dispositionFilterPlaceholder" placeholder="Disposition or policy tag" />
+            <input name="domain" type="search" data-i18n-placeholder="domainFilterPlaceholder" placeholder="Filter domain" />
+            <button class="primary-button compact-button" type="submit" data-i18n="search">Search</button>
+          </form>
+          <div id="history-list" class="management-list-stack"></div>
+        </section>
+
+        <section id="address-policy-section" class="panel section-panel">
+          <div class="section-head">
+            <div>
+              <h3 data-i18n="addressRulesTitle">Allow and block lists</h3>
+              <p data-i18n="addressRulesSummary">
+                Maintain sender and recipient policy entries with explicit scope and effective action.
+              </p>
+            </div>
+            <button id="create-address-rule" class="primary-button compact-button" type="button" data-i18n="createRule">Create rule</button>
+          </div>
+          <div id="address-rules-list" class="management-list-stack"></div>
+        </section>
+
+        <section id="attachment-policy-section" class="panel section-panel">
+          <div class="section-head">
+            <div>
+              <h3 data-i18n="attachmentRulesTitle">Attachment filtering rules</h3>
+              <p data-i18n="attachmentRulesSummary">
+                Distinguish filename extension, MIME type, and Magika detected-type controls without leaving the policy workspace.
+              </p>
+            </div>
+            <button id="create-attachment-rule" class="primary-button compact-button" type="button" data-i18n="createRule">Create rule</button>
+          </div>
+          <div id="attachment-rules-list" class="management-list-stack"></div>
+        </section>
+
+        <section id="verification-section" class="panel section-panel">
+          <div class="section-head">
+            <div>
+              <h3 data-i18n="verificationTitle">Recipient verification</h3>
+              <p data-i18n="verificationSummary">
+                Show verification mode, failure posture, cache behavior, and the current operational backend clearly.
+              </p>
+            </div>
+            <button id="edit-recipient-verification" class="primary-button compact-button" type="button" data-i18n="editSettings">Edit settings</button>
+          </div>
+          <div id="recipient-verification-status" class="management-list-stack"></div>
+        </section>
+
+        <section id="dkim-section" class="panel section-panel">
+          <div class="section-head">
+            <div>
+              <h3 data-i18n="dkimTitle">DKIM domain configuration</h3>
+              <p data-i18n="dkimSummary">
+                Manage per-domain selectors and key references, and inspect signing readiness from the management interface.
+              </p>
+            </div>
+            <div class="inline-actions">
+              <button id="edit-dkim-settings" class="secondary-button compact-button" type="button" data-i18n="editSigningProfile">Edit signing profile</button>
+              <button id="create-dkim-domain" class="primary-button compact-button" type="button" data-i18n="createDomain">Create domain</button>
+            </div>
+          </div>
+          <div id="dkim-domain-list" class="management-list-stack"></div>
+        </section>
+
+        <section id="digest-section" class="panel section-panel">
+          <div class="section-head">
+            <div>
+              <h3 data-i18n="digestTitle">Digest reports</h3>
+              <p data-i18n="digestSummary">
+                Operate domain defaults, mailbox overrides, retained report artifacts, and the scheduling controls used by the sorting center.
+              </p>
+            </div>
+            <div class="inline-actions">
+              <button id="edit-digest-settings" class="secondary-button compact-button" type="button" data-i18n="editSettings">Edit settings</button>
+              <button id="create-digest-default" class="secondary-button compact-button" type="button" data-i18n="createDomainDefault">Create domain default</button>
+              <button id="create-digest-override" class="primary-button compact-button" type="button" data-i18n="createOverride">Create override</button>
+            </div>
+          </div>
+          <div id="digest-settings-list" class="management-list-stack"></div>
+          <div id="digest-defaults-list" class="management-list-stack split-list"></div>
+          <div id="digest-overrides-list" class="management-list-stack split-list"></div>
+          <div id="digest-report-list" class="management-list-stack"></div>
+        </section>
+
+        <section id="platform-section" class="panel section-panel">
+          <div class="section-head">
+            <div>
+              <h3 data-i18n="platformTitle">Node and transport profile</h3>
+              <p data-i18n="platformSummary">
+                Keep node identity, relay, network, and update settings available without breaking the primary mail-flow workspace.
+              </p>
+            </div>
+          </div>
+          <div id="platform-list" class="management-list-stack"></div>
+        </section>
+
+        <section id="audit-section" class="panel section-panel">
+          <div class="section-head">
+            <div>
+              <h3 data-i18n="auditTitle">Recent journal</h3>
+              <p data-i18n="auditSummary">Recent management changes recorded by the sorting center.</p>
+            </div>
           </div>
           <div id="audit-log" class="audit-log"></div>
         </section>
       </section>
     </main>
+
+    <div id="drawer-backdrop" class="drawer-backdrop hidden" role="presentation">
+      <aside id="drawer" class="drawer panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+        <div class="drawer-header">
+          <div>
+            <h3 id="drawer-title" data-i18n="drawerDefaultTitle">Details</h3>
+            <p id="drawer-summary" data-i18n="drawerDefaultSummary">Inspect details or edit the selected record.</p>
+          </div>
+          <button id="drawer-close" class="icon-button" type="button" data-i18n-aria-label="close" aria-label="Close">x</button>
+        </div>
+        <div id="drawer-content" class="drawer-content"></div>
+      </aside>
+    </div>
 
     <script src="./i18n.js" defer></script>
     <script src="./app.js" defer></script>
