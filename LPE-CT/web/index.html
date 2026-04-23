@@ -7,8 +7,9 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <a class="skip-link" href="#main-workspace" data-i18n="skipToContent">Skip to content</a>
     <section id="login-shell" class="shell login-shell">
-      <section class="panel login-card">
+      <section class="panel login-card" aria-labelledby="login-title">
         <div class="locale-row">
           <label class="locale-picker">
             <span data-i18n="languageLabel">Language</span>
@@ -16,15 +17,15 @@
           </label>
         </div>
         <p class="eyebrow" data-i18n="brand">La Poste Electronique</p>
-        <h1 data-i18n="loginTitle">LPE-CT Management Login</h1>
+        <h1 id="login-title" data-i18n="loginTitle">LPE-CT Management Login</h1>
         <p class="sidebar-copy" data-i18n="loginCopy">
           Authenticate with the management administrator configured for this sorting center.
         </p>
-        <form id="login-form" class="form-panel">
+        <form id="login-form" class="form-panel" novalidate>
           <div class="fields">
             <label>
               <span data-i18n="adminEmail">Admin email</span>
-              <input name="email" autocomplete="username" required />
+              <input name="email" type="email" autocomplete="username" required />
             </label>
             <label>
               <span data-i18n="password">Password</span>
@@ -33,12 +34,13 @@
           </div>
           <button class="primary-button" type="submit" data-i18n="signIn">Sign in</button>
         </form>
-        <p id="login-feedback" class="feedback hidden"></p>
+        <p id="login-feedback" class="feedback hidden" role="alert" aria-live="assertive"></p>
       </section>
     </section>
 
     <main id="console-shell" class="shell hidden">
-      <aside class="sidebar">
+      <div id="sidebar-backdrop" class="sidebar-backdrop hidden" aria-hidden="true"></div>
+      <aside id="sidebar" class="sidebar" aria-label="Management navigation">
         <div class="sidebar-stack">
           <div>
             <p class="eyebrow" data-i18n="brand">La Poste Electronique</p>
@@ -51,15 +53,15 @@
           <div class="sidebar-group">
             <p class="sidebar-heading" data-i18n="navOperationsHeading">Operations</p>
             <nav class="page-list">
-              <button class="page-button" type="button" data-scroll-target="overview-section">
+              <button class="page-button" type="button" data-nav-button data-scroll-target="overview-section">
                 <span class="page-icon">01</span>
                 <span data-i18n="navOverview">Overview</span>
               </button>
-              <button class="page-button" type="button" data-scroll-target="quarantine-section">
+              <button class="page-button" type="button" data-nav-button data-scroll-target="quarantine-section">
                 <span class="page-icon">02</span>
                 <span data-i18n="navQuarantine">Quarantine</span>
               </button>
-              <button class="page-button" type="button" data-scroll-target="history-section">
+              <button class="page-button" type="button" data-nav-button data-scroll-target="history-section">
                 <span class="page-icon">03</span>
                 <span data-i18n="navHistory">Mail history</span>
               </button>
@@ -69,19 +71,19 @@
           <div class="sidebar-group">
             <p class="sidebar-heading" data-i18n="navPolicyHeading">Policy</p>
             <nav class="page-list">
-              <button class="page-button" type="button" data-scroll-target="address-policy-section">
+              <button class="page-button" type="button" data-nav-button data-scroll-target="address-policy-section">
                 <span class="page-icon">04</span>
                 <span data-i18n="navAddressRules">Allow / block lists</span>
               </button>
-              <button class="page-button" type="button" data-scroll-target="attachment-policy-section">
+              <button class="page-button" type="button" data-nav-button data-scroll-target="attachment-policy-section">
                 <span class="page-icon">05</span>
                 <span data-i18n="navAttachmentRules">Attachment rules</span>
               </button>
-              <button class="page-button" type="button" data-scroll-target="verification-section">
+              <button class="page-button" type="button" data-nav-button data-scroll-target="verification-section">
                 <span class="page-icon">06</span>
                 <span data-i18n="navVerification">Recipient verification</span>
               </button>
-              <button class="page-button" type="button" data-scroll-target="dkim-section">
+              <button class="page-button" type="button" data-nav-button data-scroll-target="dkim-section">
                 <span class="page-icon">07</span>
                 <span data-i18n="navDkim">DKIM domains</span>
               </button>
@@ -91,15 +93,15 @@
           <div class="sidebar-group">
             <p class="sidebar-heading" data-i18n="navReportingHeading">Reporting</p>
             <nav class="page-list">
-              <button class="page-button" type="button" data-scroll-target="digest-section">
+              <button class="page-button" type="button" data-nav-button data-scroll-target="digest-section">
                 <span class="page-icon">08</span>
                 <span data-i18n="navDigest">Digest reports</span>
               </button>
-              <button class="page-button" type="button" data-scroll-target="platform-section">
+              <button class="page-button" type="button" data-nav-button data-scroll-target="platform-section">
                 <span class="page-icon">09</span>
                 <span data-i18n="navPlatform">Node and transport</span>
               </button>
-              <button class="page-button" type="button" data-scroll-target="audit-section">
+              <button class="page-button" type="button" data-nav-button data-scroll-target="audit-section">
                 <span class="page-icon">10</span>
                 <span data-i18n="navAudit">Audit journal</span>
               </button>
@@ -116,7 +118,24 @@
         </div>
       </aside>
 
-      <section class="workspace">
+      <section id="main-workspace" class="workspace" tabindex="-1">
+        <header class="mobile-toolbar">
+          <button
+            id="sidebar-toggle"
+            class="secondary-button mobile-nav-button"
+            type="button"
+            aria-expanded="false"
+            aria-controls="sidebar"
+            data-i18n="openNavigation"
+          >
+            Open navigation
+          </button>
+          <label class="locale-picker mobile-locale">
+            <span class="sr-only" data-i18n="languageLabel">Language</span>
+            <select data-locale-picker></select>
+          </label>
+        </header>
+
         <header id="overview-section" class="hero">
           <div>
             <p class="kicker" data-i18n="heroKicker">DMZ sorting center</p>
@@ -160,7 +179,7 @@
           </article>
         </section>
 
-        <p id="feedback" class="feedback hidden"></p>
+        <p id="feedback" class="feedback hidden" role="status" aria-live="polite"></p>
 
         <section id="quarantine-section" class="panel section-panel">
           <div class="section-head">
@@ -172,13 +191,19 @@
             </div>
           </div>
           <form id="quarantine-search-form" class="search-toolbar">
-            <input name="q" type="search" data-i18n-placeholder="quarantineSearchPlaceholder" placeholder="Search trace, sender, recipient, subject, or Message-Id" />
+            <label>
+              <span class="sr-only" data-i18n="quarantineSearchLabel">Quarantine search</span>
+              <input name="q" type="search" data-i18n-placeholder="quarantineSearchPlaceholder" placeholder="Search trace, sender, recipient, subject, or Message-Id" />
+            </label>
             <select name="direction">
               <option value="" data-i18n="allDirections">All directions</option>
-              <option value="inbound">Inbound</option>
-              <option value="outbound">Outbound</option>
+              <option value="inbound" data-i18n="directionInbound">Inbound</option>
+              <option value="outbound" data-i18n="directionOutbound">Outbound</option>
             </select>
-            <input name="domain" type="search" data-i18n-placeholder="domainFilterPlaceholder" placeholder="Filter domain" />
+            <label>
+              <span class="sr-only" data-i18n="domainFilterLabel">Domain filter</span>
+              <input name="domain" type="search" data-i18n-placeholder="domainFilterPlaceholder" placeholder="Filter domain" />
+            </label>
             <button class="primary-button compact-button" type="submit" data-i18n="search">Search</button>
           </form>
           <div id="quarantine-list" class="management-list-stack"></div>
@@ -194,22 +219,31 @@
             </div>
           </div>
           <form id="history-search-form" class="search-toolbar history-toolbar">
-            <input name="q" type="search" data-i18n-placeholder="historySearchPlaceholder" placeholder="Search trace, sender, recipient, subject, route, or policy" />
+            <label>
+              <span class="sr-only" data-i18n="historySearchLabel">History search</span>
+              <input name="q" type="search" data-i18n-placeholder="historySearchPlaceholder" placeholder="Search trace, sender, recipient, subject, route, or policy" />
+            </label>
             <select name="direction">
               <option value="" data-i18n="allDirections">All directions</option>
-              <option value="inbound">Inbound</option>
-              <option value="outbound">Outbound</option>
+              <option value="inbound" data-i18n="directionInbound">Inbound</option>
+              <option value="outbound" data-i18n="directionOutbound">Outbound</option>
             </select>
             <select name="queue">
               <option value="" data-i18n="allQueues">All queues</option>
-              <option value="quarantine">quarantine</option>
-              <option value="deferred">deferred</option>
-              <option value="held">held</option>
-              <option value="sent">sent</option>
-              <option value="bounces">bounces</option>
+              <option value="quarantine" data-i18n="queueQuarantine">Quarantine</option>
+              <option value="deferred" data-i18n="queueDeferred">Deferred</option>
+              <option value="held" data-i18n="queueHeld">Held</option>
+              <option value="sent" data-i18n="queueSent">Sent</option>
+              <option value="bounces" data-i18n="queueBounces">Bounces</option>
             </select>
-            <input name="disposition" type="search" data-i18n-placeholder="dispositionFilterPlaceholder" placeholder="Disposition or policy tag" />
-            <input name="domain" type="search" data-i18n-placeholder="domainFilterPlaceholder" placeholder="Filter domain" />
+            <label>
+              <span class="sr-only" data-i18n="dispositionFilterLabel">Disposition filter</span>
+              <input name="disposition" type="search" data-i18n-placeholder="dispositionFilterPlaceholder" placeholder="Disposition or policy tag" />
+            </label>
+            <label>
+              <span class="sr-only" data-i18n="domainFilterLabel">Domain filter</span>
+              <input name="domain" type="search" data-i18n-placeholder="domainFilterPlaceholder" placeholder="Filter domain" />
+            </label>
             <button class="primary-button compact-button" type="submit" data-i18n="search">Search</button>
           </form>
           <div id="history-list" class="management-list-stack"></div>
@@ -315,7 +349,15 @@
     </main>
 
     <div id="drawer-backdrop" class="drawer-backdrop hidden" role="presentation">
-      <aside id="drawer" class="drawer panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+      <aside
+        id="drawer"
+        class="drawer panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="drawer-title"
+        aria-describedby="drawer-summary"
+        tabindex="-1"
+      >
         <div class="drawer-header">
           <div>
             <h3 id="drawer-title" data-i18n="drawerDefaultTitle">Details</h3>
