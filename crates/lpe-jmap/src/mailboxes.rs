@@ -33,6 +33,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let account_id = account_access.account_id;
         let properties = mailbox_properties(arguments.properties);
         let mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
+        let mailbox_ids = mailboxes.iter().map(|mailbox| mailbox.id).collect::<HashSet<_>>();
 
         let requested_ids = parse_uuid_list(arguments.ids)?;
         let requested_set = requested_ids
@@ -49,7 +50,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let not_found = requested_ids
             .unwrap_or_default()
             .into_iter()
-            .filter(|id| !mailboxes.iter().any(|mailbox| mailbox.id == *id))
+            .filter(|id| !mailbox_ids.contains(id))
             .map(|id| Value::String(id.to_string()))
             .collect::<Vec<_>>();
         let state = self.object_state(account_id, "Mailbox").await?;

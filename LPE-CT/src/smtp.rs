@@ -29,7 +29,10 @@ use std::{
     hash::{Hash, Hasher},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
-    sync::{atomic::{AtomicU32, Ordering}, OnceLock},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        OnceLock,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::{
@@ -3788,7 +3791,10 @@ fn append_transport_audit(spool_dir: &Path, queue: &str, message: &QueuedMessage
     };
     let line = format!("{}\n", serde_json::to_string(&event)?);
     let path = spool_dir.join("policy").join("transport-audit.jsonl");
-    let mut file = fs::OpenOptions::new().create(true).append(true).open(path)?;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
     use std::io::Write;
     file.write_all(line.as_bytes())?;
     Ok(())
@@ -4455,7 +4461,7 @@ mod tests {
         net::SocketAddr,
         path::PathBuf,
         sync::{Arc, Mutex},
-        time::{SystemTime, UNIX_EPOCH},
+        time::{Instant, SystemTime, UNIX_EPOCH},
     };
     use tokio::{
         io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -5447,6 +5453,38 @@ mod tests {
             axum::serve(listener, router).await.unwrap();
         });
         format!("http://{}", address)
+    }
+
+    #[tokio::test]
+    #[ignore = "benchmark"]
+    async fn benchmark_relay_hot_path() {
+        let spool = temp_dir("relay-bench");
+        initialize_spool(&spool).unwrap();
+        let start = Instant::now();
+        for index in 0..25 {
+            let smtp_address = spawn_dummy_smtp(Arc::new(Mutex::new(String::new()))).await;
+            let mut config = runtime_config(smtp_address, "http://127.0.0.1:9".to_string());
+            config.bayespam_enabled = false;
+            config.reputation_enabled = false;
+            config.require_spf = false;
+            config.require_dmarc_enforcement = false;
+            config.defer_on_auth_tempfail = false;
+            let response = process_outbound_handoff(
+                &spool,
+                &config,
+                outbound_request(&format!("Relay benchmark {index}")),
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status, TransportDeliveryStatus::Relayed);
+        }
+        let elapsed = start.elapsed();
+
+        println!(
+            "BENCH lpe-ct outbound_relay total={:?} avg_per_iter_us={} iterations=25",
+            elapsed,
+            elapsed.as_micros() / 25
+        );
     }
 }
 

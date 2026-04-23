@@ -65,6 +65,7 @@ mod tests {
     use std::{
         collections::{HashMap, HashSet},
         sync::{Arc, Mutex},
+        time::Instant,
     };
 
     #[derive(Clone, Default)]
@@ -3955,5 +3956,163 @@ mod tests {
             .unwrap_err();
 
         assert!(error.to_string().contains("Magika command failed"));
+    }
+
+    #[tokio::test]
+    #[ignore = "benchmark"]
+    async fn benchmark_mailbox_listing_and_push_paths() {
+        fn generated_mailbox(index: usize) -> JmapMailbox {
+            JmapMailbox {
+                id: Uuid::from_u128(0x1000_0000_0000_0000_0000_0000_0000_0000 + index as u128),
+                role: String::new(),
+                name: format!("Mailbox {index:04}"),
+                sort_order: index as i32,
+                total_emails: (index % 17) as u32,
+                unread_emails: (index % 5) as u32,
+            }
+        }
+
+        fn legacy_not_found(mailboxes: &[JmapMailbox], requested_ids: &[Uuid]) -> usize {
+            requested_ids
+                .iter()
+                .filter(|id| !mailboxes.iter().any(|mailbox| mailbox.id == **id))
+                .count()
+        }
+
+        fn optimized_not_found(mailbox_ids: &HashSet<Uuid>, requested_ids: &[Uuid]) -> usize {
+            requested_ids
+                .iter()
+                .filter(|id| !mailbox_ids.contains(id))
+                .count()
+        }
+
+        let account = FakeStore::account();
+        let mailbox_count = 2_000usize;
+        let mailboxes = (0..mailbox_count)
+            .map(generated_mailbox)
+            .collect::<Vec<_>>();
+        let requested_ids = mailboxes
+            .iter()
+            .map(|mailbox| mailbox.id)
+            .chain((0..mailbox_count).map(|index| {
+                Uuid::from_u128(0x2000_0000_0000_0000_0000_0000_0000_0000 + index as u128)
+            }))
+            .collect::<Vec<_>>();
+        let mailbox_id_set = mailboxes.iter().map(|mailbox| mailbox.id).collect::<HashSet<_>>();
+
+        let legacy_start = Instant::now();
+        let mut legacy_missing = 0usize;
+        for _ in 0..200 {
+            legacy_missing = legacy_not_found(&mailboxes, &requested_ids);
+        }
+        let legacy_elapsed = legacy_start.elapsed();
+
+        let optimized_start = Instant::now();
+        let mut optimized_missing = 0usize;
+        for _ in 0..200 {
+            optimized_missing = optimized_not_found(&mailbox_id_set, &requested_ids);
+        }
+        let optimized_elapsed = optimized_start.elapsed();
+
+        assert_eq!(legacy_missing, mailbox_count);
+        assert_eq!(optimized_missing, mailbox_count);
+
+        let store = FakeStore {
+            session: Some(account.clone()),
+            mailboxes: mailboxes.clone(),
+            accessible_mailbox_accounts: std::iter::once(FakeStore::mailbox_access())
+                .chain((0..32).map(|index| MailboxAccountAccess {
+                    account_id: Uuid::from_u128(
+                        0x3000_0000_0000_0000_0000_0000_0000_0000 + index as u128,
+                    ),
+                    email: format!("shared-{index}@example.test"),
+                    display_name: format!("Shared {index}"),
+                    is_owned: false,
+                    may_read: true,
+                    may_write: true,
+                    may_send_as: true,
+                    may_send_on_behalf: true,
+                }))
+                .collect(),
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+        let query_arguments = json!({
+            "accountId": account.account_id.to_string(),
+            "position": 0,
+            "limit": 256,
+        });
+        let get_arguments = json!({
+            "accountId": account.account_id.to_string(),
+            "ids": requested_ids.iter().map(Uuid::to_string).collect::<Vec<_>>(),
+            "properties": ["id"],
+        });
+
+        let mailbox_query_start = Instant::now();
+        for _ in 0..200 {
+            service
+                .handle_mailbox_query(&account, query_arguments.clone())
+                .await
+                .unwrap();
+        }
+        let mailbox_query_elapsed = mailbox_query_start.elapsed();
+
+        let mailbox_get_start = Instant::now();
+        for _ in 0..60 {
+            service
+                .handle_mailbox_get(&account, get_arguments.clone())
+                .await
+                .unwrap();
+        }
+        let mailbox_get_elapsed = mailbox_get_start.elapsed();
+
+        let enabled_types = HashSet::from([
+            "Mailbox".to_string(),
+            "Email".to_string(),
+            "Thread".to_string(),
+        ]);
+        let last_type_states = service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+        let subscription = push_subscription(enabled_types, last_type_states);
+        let mut change_set = CanonicalPushChangeSet::default();
+        change_set.insert_accounts(CanonicalChangeCategory::Mail, [account.account_id]);
+
+        let push_start = Instant::now();
+        for _ in 0..100 {
+            service
+                .compute_push_changes(account.account_id, &subscription, &change_set)
+                .await
+                .unwrap();
+        }
+        let push_elapsed = push_start.elapsed();
+
+        println!(
+            "BENCH lpe-jmap mailbox_get_not_found_reconciliation legacy={:?} optimized={:?} requested_ids={} mailboxes={}",
+            legacy_elapsed,
+            optimized_elapsed,
+            requested_ids.len(),
+            mailboxes.len()
+        );
+        println!(
+            "BENCH lpe-jmap mailbox_query total={:?} avg_per_iter_us={} mailboxes={} limit={}",
+            mailbox_query_elapsed,
+            mailbox_query_elapsed.as_micros() / 200,
+            mailboxes.len(),
+            256
+        );
+        println!(
+            "BENCH lpe-jmap mailbox_get total={:?} avg_per_iter_us={} requested_ids={}",
+            mailbox_get_elapsed,
+            mailbox_get_elapsed.as_micros() / 60,
+            requested_ids.len()
+        );
+        println!(
+            "BENCH lpe-jmap push_recompute total={:?} avg_per_iter_us={} visible_accounts={} types=3",
+            push_elapsed,
+            push_elapsed.as_micros() / 100,
+            32
+        );
     }
 }

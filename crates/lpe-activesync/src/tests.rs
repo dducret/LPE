@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
 use argon2::{
     password_hash::{rand_core::OsRng, SaltString},
@@ -1883,15 +1886,13 @@ async fn search_queries_canonical_mail_projection() {
             .text_value(),
         "Quarterly budget"
     );
-    assert!(
-        result
-            .child("Properties")
-            .unwrap()
-            .child("ApplicationData")
-            .unwrap()
-            .child("Bcc")
-            .is_none()
-    );
+    assert!(result
+        .child("Properties")
+        .unwrap()
+        .child("ApplicationData")
+        .unwrap()
+        .child("Bcc")
+        .is_none());
 }
 
 #[tokio::test]
@@ -2184,4 +2185,142 @@ async fn sync_contact_and_calendar_mutations_update_canonical_models() {
 
     assert_eq!(store.contacts.lock().unwrap()[0].email, "bob@example.test");
     assert_eq!(store.events.lock().unwrap()[0].duration_minutes, 30);
+}
+
+#[tokio::test]
+#[ignore = "benchmark"]
+async fn benchmark_sync_refresh_and_submission_paths() {
+    fn query(cmd: &str) -> ActiveSyncQuery {
+        ActiveSyncQuery {
+            cmd: Some(cmd.to_string()),
+            user: Some("alice@example.test".to_string()),
+            device_id: Some("bench-device".to_string()),
+            _device_type: Some("phone".to_string()),
+        }
+    }
+
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        login: Some(FakeStore::login()),
+        mailboxes: vec![
+            FakeStore::inbox_mailbox(),
+            FakeStore::draft_mailbox(),
+            FakeStore::sent_mailbox(),
+        ],
+        emails: Arc::new(Mutex::new(
+            (0..512)
+                .map(|index| {
+                    FakeStore::inbox_email(
+                        &format!("00000000-0000-0000-0000-{:012x}", index + 1),
+                        FakeStore::inbox_mailbox().id,
+                        "inbox",
+                        &format!("Message {index:04}"),
+                    )
+                })
+                .collect(),
+        )),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+
+    let folder_sync_request = encode_wbxml(&{
+        let mut node = WbxmlNode::new(7, "FolderSync");
+        node.push(WbxmlNode::with_text(7, "SyncKey", "0"));
+        node
+    });
+
+    let folder_sync_start = Instant::now();
+    for _ in 0..100 {
+        service
+            .handle_request(query("FolderSync"), &basic_headers(), &folder_sync_request)
+            .await
+            .unwrap();
+    }
+    let folder_sync_elapsed = folder_sync_start.elapsed();
+
+    let sync_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", "0"));
+        collection.push(WbxmlNode::with_text(
+            0,
+            "CollectionId",
+            &FakeStore::inbox_mailbox().id.to_string(),
+        ));
+        collection.push(WbxmlNode::with_text(0, "WindowSize", "128"));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+    let sync_start = Instant::now();
+    for _ in 0..40 {
+        service
+            .handle_request(query("Sync"), &basic_headers(), &sync_request)
+            .await
+            .unwrap();
+    }
+    let sync_elapsed = sync_start.elapsed();
+
+    let ping_request = encode_wbxml(&{
+        let mut ping = WbxmlNode::new(13, "Ping");
+        ping.push(WbxmlNode::with_text(13, "HeartbeatInterval", "60"));
+        let mut folders = WbxmlNode::new(13, "Folders");
+        let mut folder = WbxmlNode::new(13, "Folder");
+        folder.push(WbxmlNode::with_text(13, "Id", &FakeStore::inbox_mailbox().id.to_string()));
+        folders.push(folder);
+        ping.push(folders);
+        ping
+    });
+    let ping_start = Instant::now();
+    for _ in 0..80 {
+        service
+            .handle_request(query("Ping"), &basic_headers(), &ping_request)
+            .await
+            .unwrap();
+    }
+    let ping_elapsed = ping_start.elapsed();
+
+    let send_mail_request = concat!(
+        "From: Alice <alice@example.test>\r\n",
+        "To: Bob <bob@example.test>\r\n",
+        "Subject: Benchmark\r\n",
+        "\r\n",
+        "Benchmark body\r\n"
+    )
+    .as_bytes()
+    .to_vec();
+    let send_mail_start = Instant::now();
+    for _ in 0..60 {
+        service
+            .handle_request(query("SendMail"), &mime_headers(), &send_mail_request)
+            .await
+            .unwrap();
+    }
+    let send_mail_elapsed = send_mail_start.elapsed();
+
+    println!(
+        "BENCH lpe-activesync foldersync total={:?} avg_per_iter_us={} mailboxes={}",
+        folder_sync_elapsed,
+        folder_sync_elapsed.as_micros() / 100,
+        3
+    );
+    println!(
+        "BENCH lpe-activesync sync_refresh total={:?} avg_per_iter_us={} emails={} window_size=128 full_email_fetches={}",
+        sync_elapsed,
+        sync_elapsed.as_micros() / 40,
+        512,
+        *store.full_email_fetches.lock().unwrap()
+    );
+    println!(
+        "BENCH lpe-activesync ping total={:?} avg_per_iter_us={} monitored_folders=1",
+        ping_elapsed,
+        ping_elapsed.as_micros() / 80
+    );
+    println!(
+        "BENCH lpe-activesync sendmail total={:?} avg_per_iter_us={} submissions={}",
+        send_mail_elapsed,
+        send_mail_elapsed.as_micros() / 60,
+        store.submitted_messages.lock().unwrap().len()
+    );
 }
