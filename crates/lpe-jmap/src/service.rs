@@ -1,10 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use axum::{
     body::Bytes,
-    extract::{
-        ws::WebSocketUpgrade,
-        State,
-    },
+    extract::{ws::WebSocketUpgrade, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
@@ -23,7 +20,9 @@ use crate::{
     convert::format_addresses,
     error::{http_error, method_error},
     parse::parse_uuid,
-    protocol::{JmapApiRequest, JmapApiResponse, JmapMethodCall, JmapMethodResponse, SessionDocument},
+    protocol::{
+        JmapApiRequest, JmapApiResponse, JmapMethodCall, JmapMethodResponse, SessionDocument,
+    },
     session,
     state::{encode_state, StateEntry},
     store::JmapStore,
@@ -38,8 +37,9 @@ pub(crate) const JMAP_CALENDARS_CAPABILITY: &str = "urn:ietf:params:jmap:calenda
 pub(crate) const JMAP_TASKS_CAPABILITY: &str = "urn:ietf:params:jmap:tasks";
 pub(crate) const JMAP_WEBSOCKET_CAPABILITY: &str = "urn:ietf:params:jmap:websocket";
 pub(crate) const SESSION_STATE: &str = "mvp-3";
-pub(crate) const QUERY_STATE_VERSION: &str = "mvp-2";
-pub(crate) const STATE_TOKEN_VERSION: &str = "mvp-1";
+pub(crate) const QUERY_STATE_VERSION: &str = "mvp-3";
+pub(crate) const STATE_TOKEN_VERSION: &str = "mvp-2";
+pub(crate) const PUSH_STATE_VERSION: &str = "mvp-push-1";
 pub(crate) const MAX_QUERY_LIMIT: u64 = 250;
 pub(crate) const DEFAULT_GET_LIMIT: u64 = 100;
 
@@ -207,19 +207,34 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             let response = match method_name.as_str() {
                 "Mailbox/get" => self.handle_mailbox_get(account, arguments).await,
                 "Mailbox/query" => self.handle_mailbox_query(account, arguments).await,
-                "Mailbox/queryChanges" => self.handle_mailbox_query_changes(account, arguments).await,
+                "Mailbox/queryChanges" => {
+                    self.handle_mailbox_query_changes(account, arguments).await
+                }
                 "Mailbox/changes" => self.handle_mailbox_changes(account, arguments).await,
-                "Mailbox/set" => self.handle_mailbox_set(account, arguments, &mut created_ids).await,
+                "Mailbox/set" => {
+                    self.handle_mailbox_set(account, arguments, &mut created_ids)
+                        .await
+                }
                 "Email/query" => self.handle_email_query(account, arguments).await,
                 "Email/queryChanges" => self.handle_email_query_changes(account, arguments).await,
                 "Email/get" => self.handle_email_get(account, arguments).await,
                 "Email/changes" => self.handle_email_changes(account, arguments).await,
-                "Email/set" => self.handle_email_set(account, arguments, &mut created_ids).await,
-                "Email/copy" => self.handle_email_copy(account, arguments, &mut created_ids).await,
-                "Email/import" => self.handle_email_import(account, arguments, &mut created_ids).await,
+                "Email/set" => {
+                    self.handle_email_set(account, arguments, &mut created_ids)
+                        .await
+                }
+                "Email/copy" => {
+                    self.handle_email_copy(account, arguments, &mut created_ids)
+                        .await
+                }
+                "Email/import" => {
+                    self.handle_email_import(account, arguments, &mut created_ids)
+                        .await
+                }
                 "EmailSubmission/get" => self.handle_email_submission_get(account, arguments).await,
                 "EmailSubmission/set" => {
-                    self.handle_email_submission_set(account, arguments, &mut created_ids).await
+                    self.handle_email_submission_set(account, arguments, &mut created_ids)
+                        .await
                 }
                 "AddressBook/get" => self.handle_address_book_get(account, arguments).await,
                 "AddressBook/query" => self.handle_address_book_query(account, arguments).await,
@@ -227,15 +242,21 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 "ContactCard/get" => self.handle_contact_get(account, arguments).await,
                 "ContactCard/query" => self.handle_contact_query(account, arguments).await,
                 "ContactCard/changes" => self.handle_contact_changes(account, arguments).await,
-                "ContactCard/set" => self.handle_contact_set(account, arguments, &mut created_ids).await,
+                "ContactCard/set" => {
+                    self.handle_contact_set(account, arguments, &mut created_ids)
+                        .await
+                }
                 "Calendar/get" => self.handle_calendar_get(account, arguments).await,
                 "Calendar/query" => self.handle_calendar_query(account, arguments).await,
                 "Calendar/changes" => self.handle_calendar_changes(account, arguments).await,
                 "CalendarEvent/get" => self.handle_calendar_event_get(account, arguments).await,
                 "CalendarEvent/query" => self.handle_calendar_event_query(account, arguments).await,
-                "CalendarEvent/changes" => self.handle_calendar_event_changes(account, arguments).await,
+                "CalendarEvent/changes" => {
+                    self.handle_calendar_event_changes(account, arguments).await
+                }
                 "CalendarEvent/set" => {
-                    self.handle_calendar_event_set(account, arguments, &mut created_ids).await
+                    self.handle_calendar_event_set(account, arguments, &mut created_ids)
+                        .await
                 }
                 "TaskList/get" => self.handle_task_list_get(account, arguments).await,
                 "TaskList/changes" => self.handle_task_list_changes(account, arguments).await,
@@ -244,7 +265,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 "Task/query" => self.handle_task_query(account, arguments).await,
                 "Task/queryChanges" => self.handle_task_query_changes(account, arguments).await,
                 "Task/changes" => self.handle_task_changes(account, arguments).await,
-                "Task/set" => self.handle_task_set(account, arguments, &mut created_ids).await,
+                "Task/set" => {
+                    self.handle_task_set(account, arguments, &mut created_ids)
+                        .await
+                }
                 "Identity/get" => self.handle_identity_get(account, arguments).await,
                 "Thread/query" => self.handle_thread_query(account, arguments).await,
                 "Thread/get" => self.handle_thread_get(account, arguments).await,
@@ -270,7 +294,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
     pub(crate) async fn object_state(&self, account_id: Uuid, data_type: &str) -> Result<String> {
         let entries = self.object_state_entries(account_id, data_type).await?;
-        encode_state(data_type, entries)
+        encode_state(account_id, data_type, entries)
     }
 
     pub(crate) async fn object_state_entries(

@@ -1,12 +1,13 @@
 use anyhow::Result;
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount,
-    CanonicalChangeCategory, CanonicalChangeListener, CanonicalPushChangeSet, ClientTask,
-    ClientTaskList, CollaborationCollection, CreateTaskListInput, JmapEmail, JmapEmailQuery,
-    JmapEmailSubmission, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JmapQuota, JmapThreadQuery, JmapUploadBlob, MailboxAccountAccess,
-    SavedDraftMessage, SenderIdentity, Storage, SubmitMessageInput, SubmittedMessage,
-    UpdateTaskListInput, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    CanonicalChangeCategory, CanonicalChangeListener, CanonicalChangeReplay,
+    CanonicalPushChangeSet, ClientTask, ClientTaskList, CollaborationCollection,
+    CreateTaskListInput, JmapEmail, JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput,
+    JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapThreadQuery,
+    JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, SenderIdentity, Storage,
+    SubmitMessageInput, SubmittedMessage, UpdateTaskListInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientTaskInput,
 };
 use uuid::Uuid;
 
@@ -24,6 +25,17 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
 
     async fn fetch_account_session(&self, token: &str) -> Result<Option<AuthenticatedAccount>>;
     async fn create_push_listener(&self, principal_account_id: Uuid) -> Result<Self::PushListener>;
+    async fn fetch_canonical_change_cursor(
+        &self,
+        principal_account_id: Uuid,
+    ) -> Result<Option<i64>>;
+    async fn replay_canonical_changes(
+        &self,
+        principal_account_id: Uuid,
+        after_cursor: i64,
+        categories: &[CanonicalChangeCategory],
+        max_rows: u64,
+    ) -> Result<CanonicalChangeReplay>;
     async fn fetch_jmap_mailboxes(&self, account_id: Uuid) -> Result<Vec<JmapMailbox>>;
     async fn fetch_accessible_mailbox_accounts(
         &self,
@@ -215,6 +227,25 @@ impl JmapStore for Storage {
 
     async fn create_push_listener(&self, principal_account_id: Uuid) -> Result<Self::PushListener> {
         self.create_canonical_change_listener(principal_account_id)
+            .await
+    }
+
+    async fn fetch_canonical_change_cursor(
+        &self,
+        principal_account_id: Uuid,
+    ) -> Result<Option<i64>> {
+        self.fetch_canonical_change_cursor(principal_account_id)
+            .await
+    }
+
+    async fn replay_canonical_changes(
+        &self,
+        principal_account_id: Uuid,
+        after_cursor: i64,
+        categories: &[CanonicalChangeCategory],
+        max_rows: u64,
+    ) -> Result<CanonicalChangeReplay> {
+        self.replay_canonical_changes(principal_account_id, after_cursor, categories, max_rows)
             .await
     }
 

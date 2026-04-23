@@ -24,7 +24,7 @@ pub(crate) use crate::service::{
     collection_state_fingerprint, trim_snippet, DEFAULT_GET_LIMIT, JMAP_CALENDARS_CAPABILITY,
     JMAP_CONTACTS_CAPABILITY, JMAP_CORE_CAPABILITY, JMAP_MAIL_CAPABILITY,
     JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY, JMAP_WEBSOCKET_CAPABILITY, MAX_QUERY_LIMIT,
-    QUERY_STATE_VERSION, SESSION_STATE, STATE_TOKEN_VERSION,
+    PUSH_STATE_VERSION, QUERY_STATE_VERSION, SESSION_STATE, STATE_TOKEN_VERSION,
 };
 pub(crate) use crate::session::requested_account_id;
 pub(crate) use crate::state::encode_query_state;
@@ -54,12 +54,13 @@ mod tests {
     use lpe_storage::{
         serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent,
         AuditEntryInput, CalendarOrganizerMetadata, CalendarParticipantMetadata,
-        CalendarParticipantsMetadata, CanonicalChangeCategory, CanonicalPushChangeSet,
-        ClientContact, ClientEvent, ClientTaskList, CollaborationCollection, CollaborationRights,
-        CreateTaskListInput, JmapEmailAddress, JmapEmailSubmission, JmapImportedEmailInput,
-        JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, MailboxAccountAccess,
-        SavedDraftMessage, SenderIdentity, UpdateTaskListInput, UpsertClientContactInput,
-        UpsertClientEventInput, UpsertClientTaskInput,
+        CalendarParticipantsMetadata, CanonicalChangeCategory, CanonicalChangeReplay,
+        CanonicalPushChangeSet, ClientContact, ClientEvent, ClientTaskList,
+        CollaborationCollection, CollaborationRights, CreateTaskListInput, JmapEmailAddress,
+        JmapEmailSubmission, JmapImportedEmailInput, JmapMailboxCreateInput,
+        JmapMailboxUpdateInput, JmapQuota, MailboxAccountAccess, SavedDraftMessage, SenderIdentity,
+        UpdateTaskListInput, UpsertClientContactInput, UpsertClientEventInput,
+        UpsertClientTaskInput,
     };
     use std::{
         collections::{HashMap, HashSet},
@@ -82,6 +83,8 @@ mod tests {
         saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
         submitted_drafts: Arc<Mutex<Vec<Uuid>>>,
         submitted_draft_sources: Arc<Mutex<Vec<String>>>,
+        canonical_change_cursor: Option<i64>,
+        canonical_change_replay: CanonicalChangeReplay,
     }
 
     struct FakePushListener;
@@ -522,8 +525,9 @@ mod tests {
     ) -> crate::websocket::PushSubscription {
         crate::websocket::PushSubscription {
             enabled_types,
-            last_push_state: Some(encode_push_state(&last_type_states).unwrap()),
+            last_push_state: Some(encode_push_state(&last_type_states, None).unwrap()),
             last_type_states,
+            last_journal_cursor: None,
         }
     }
 
@@ -543,6 +547,23 @@ mod tests {
             _principal_account_id: Uuid,
         ) -> Result<Self::PushListener> {
             Ok(FakePushListener)
+        }
+
+        async fn fetch_canonical_change_cursor(
+            &self,
+            _principal_account_id: Uuid,
+        ) -> Result<Option<i64>> {
+            Ok(self.canonical_change_cursor)
+        }
+
+        async fn replay_canonical_changes(
+            &self,
+            _principal_account_id: Uuid,
+            _after_cursor: i64,
+            _categories: &[CanonicalChangeCategory],
+            _max_rows: u64,
+        ) -> Result<CanonicalChangeReplay> {
+            Ok(self.canonical_change_replay.clone())
         }
 
         async fn fetch_jmap_mailboxes(&self, _account_id: Uuid) -> Result<Vec<JmapMailbox>> {
@@ -1840,7 +1861,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response.method_responses[0].1["removed"], json!([]));
+        assert!(response.method_responses[0].1["removed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == &Value::String(FakeStore::draft_mailbox().id.to_string())));
         assert_eq!(
             response.method_responses[0].1["added"][0]["id"],
             Value::String(FakeStore::inbox_mailbox().id.to_string())
@@ -1987,6 +2012,255 @@ mod tests {
             response.method_responses[1].1["removed"][0],
             Value::String(FakeStore::draft_email().id.to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn email_query_changes_exact_limit_does_not_report_more_changes() {
+        let initial = JmapService::new_with_validator(
+            FakeStore {
+                session: Some(FakeStore::account()),
+                emails: vec![FakeStore::draft_email()],
+                ..Default::default()
+            },
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
+        let initial_response = initial
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/query".to_string(),
+                        json!({}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        let email_query_state = initial_response.method_responses[0].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let updated = JmapService::new_with_validator(
+            FakeStore {
+                session: Some(FakeStore::account()),
+                emails: vec![FakeStore::draft_email(), FakeStore::inbox_email()],
+                ..Default::default()
+            },
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
+        let response = updated
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/queryChanges".to_string(),
+                        json!({"sinceQueryState": email_query_state, "maxChanges": 1}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["hasMoreChanges"],
+            Value::Bool(false)
+        );
+        assert_eq!(
+            response.method_responses[0].1["added"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn mailbox_query_states_are_bound_to_the_requested_account() {
+        let shared = FakeStore::shared_account();
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::inbox_mailbox(), FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        });
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![
+                        JmapMethodCall("Mailbox/query".to_string(), json!({}), "c1".to_string()),
+                        JmapMethodCall(
+                            "Mailbox/query".to_string(),
+                            json!({"accountId": shared.account_id.to_string()}),
+                            "c2".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_ne!(
+            response.method_responses[0].1["queryState"],
+            response.method_responses[1].1["queryState"]
+        );
+    }
+
+    #[tokio::test]
+    async fn mailbox_query_changes_reject_cross_account_query_state_replay() {
+        let shared = FakeStore::shared_account();
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::inbox_mailbox(), FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        });
+        let initial = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Mailbox/query".to_string(),
+                        json!({}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        let query_state = initial.method_responses[0].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let replay = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Mailbox/queryChanges".to_string(),
+                        json!({
+                            "accountId": shared.account_id.to_string(),
+                            "sinceQueryState": query_state
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            replay.method_responses[0].1["type"],
+            Value::String("invalidArguments".to_string())
+        );
+        assert!(replay.method_responses[0].1["description"]
+            .as_str()
+            .unwrap()
+            .contains("requested account"));
+    }
+
+    #[tokio::test]
+    async fn mailbox_query_changes_report_mailbox_reorders() {
+        let first_mailbox = JmapMailbox {
+            id: Uuid::parse_str("61616161-6161-6161-6161-616161616161").unwrap(),
+            role: "".to_string(),
+            name: "Alpha".to_string(),
+            sort_order: 10,
+            total_emails: 0,
+            unread_emails: 0,
+        };
+        let second_mailbox = JmapMailbox {
+            id: Uuid::parse_str("62626262-6262-6262-6262-626262626262").unwrap(),
+            role: "".to_string(),
+            name: "Bravo".to_string(),
+            sort_order: 20,
+            total_emails: 0,
+            unread_emails: 0,
+        };
+        let initial = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![first_mailbox.clone(), second_mailbox.clone()],
+            ..Default::default()
+        });
+        let initial_response = initial
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Mailbox/query".to_string(),
+                        json!({}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        let query_state = initial_response.method_responses[0].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let updated = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![
+                JmapMailbox {
+                    sort_order: 30,
+                    ..first_mailbox.clone()
+                },
+                second_mailbox.clone(),
+            ],
+            ..Default::default()
+        });
+        let response = updated
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Mailbox/queryChanges".to_string(),
+                        json!({"sinceQueryState": query_state}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let removed = response.method_responses[0].1["removed"]
+            .as_array()
+            .unwrap();
+        let added = response.method_responses[0].1["added"].as_array().unwrap();
+        assert!(removed
+            .iter()
+            .any(|value| value == &Value::String(first_mailbox.id.to_string())));
+        assert!(removed
+            .iter()
+            .any(|value| value == &Value::String(second_mailbox.id.to_string())));
+        assert!(added.iter().any(|value| {
+            value["id"] == Value::String(second_mailbox.id.to_string())
+                && value["index"] == Value::from(0)
+        }));
+        assert!(added.iter().any(|value| {
+            value["id"] == Value::String(first_mailbox.id.to_string())
+                && value["index"] == Value::from(1)
+        }));
     }
 
     #[tokio::test]
@@ -2454,6 +2728,173 @@ mod tests {
         assert!(states[&shared.account_id.to_string()].contains_key("Mailbox"));
         assert!(!states[&shared.account_id.to_string()].contains_key("AddressBook"));
         assert!(!states[&shared.account_id.to_string()].contains_key("Task"));
+    }
+
+    #[tokio::test]
+    async fn websocket_push_enable_sends_full_state_for_missing_or_stale_push_state() {
+        let shared = FakeStore::shared_account();
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::inbox_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                MailboxAccountAccess {
+                    account_id: shared.account_id,
+                    email: shared.email,
+                    display_name: shared.display_name,
+                    is_owned: false,
+                    may_read: true,
+                    may_write: true,
+                    may_send_as: false,
+                    may_send_on_behalf: false,
+                },
+            ],
+            ..Default::default()
+        });
+        let states = service
+            .current_push_states(
+                FakeStore::account().account_id,
+                &HashSet::from(["Mailbox".to_string()]),
+            )
+            .await
+            .unwrap();
+        let push_state = encode_push_state(&states, None).unwrap();
+        let missing = service
+            .recover_push_enable_change(
+                FakeStore::account().account_id,
+                &HashSet::from(["Mailbox".to_string()]),
+                None,
+                None,
+                &states,
+            )
+            .await
+            .unwrap();
+        let stale = service
+            .recover_push_enable_change(
+                FakeStore::account().account_id,
+                &HashSet::from(["Mailbox".to_string()]),
+                Some("stale"),
+                None,
+                &states,
+            )
+            .await
+            .unwrap();
+        let current = service
+            .recover_push_enable_change(
+                FakeStore::account().account_id,
+                &HashSet::from(["Mailbox".to_string()]),
+                Some(push_state.as_str()),
+                None,
+                &states,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(missing, Some(states.clone()));
+        assert_eq!(stale, Some(states.clone()));
+        assert_eq!(current, None);
+    }
+
+    #[tokio::test]
+    async fn websocket_reconnect_recovers_task_changes_from_canonical_journal() {
+        let account = FakeStore::account();
+        let enabled_types = HashSet::from(["Task".to_string()]);
+        let initial_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            tasks: Arc::new(Mutex::new(vec![FakeStore::task()])),
+            canonical_change_cursor: Some(10),
+            ..Default::default()
+        });
+        let previous_states = initial_service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+        let previous_push_state = encode_push_state(&previous_states, Some(10)).unwrap();
+
+        let mut updated_task = FakeStore::task();
+        updated_task.updated_at = "2026-04-22T08:00:00Z".to_string();
+        let mut change_set = CanonicalPushChangeSet::default();
+        change_set.insert_accounts(CanonicalChangeCategory::Tasks, [account.account_id]);
+        change_set.set_journal_cursor(11);
+        let updated_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            tasks: Arc::new(Mutex::new(vec![updated_task])),
+            canonical_change_cursor: Some(11),
+            canonical_change_replay: CanonicalChangeReplay {
+                change_set,
+                current_cursor: Some(11),
+                truncated: false,
+            },
+            ..Default::default()
+        });
+        let current_states = updated_service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+
+        let changed = updated_service
+            .recover_push_enable_change(
+                account.account_id,
+                &enabled_types,
+                Some(previous_push_state.as_str()),
+                Some(11),
+                &current_states,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(changed.len(), 1);
+        assert!(changed[&account.account_id.to_string()].contains_key("Task"));
+    }
+
+    #[tokio::test]
+    async fn websocket_reconnect_falls_back_to_full_snapshot_when_journal_replay_is_truncated() {
+        let account = FakeStore::account();
+        let enabled_types = HashSet::from(["Task".to_string()]);
+        let initial_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            tasks: Arc::new(Mutex::new(vec![FakeStore::task()])),
+            canonical_change_cursor: Some(10),
+            ..Default::default()
+        });
+        let previous_states = initial_service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+        let previous_push_state = encode_push_state(&previous_states, Some(10)).unwrap();
+
+        let mut updated_task = FakeStore::task();
+        updated_task.updated_at = "2026-04-22T09:00:00Z".to_string();
+        let updated_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            tasks: Arc::new(Mutex::new(vec![updated_task])),
+            canonical_change_cursor: Some(20),
+            canonical_change_replay: CanonicalChangeReplay {
+                change_set: CanonicalPushChangeSet::default(),
+                current_cursor: Some(20),
+                truncated: true,
+            },
+            ..Default::default()
+        });
+        let current_states = updated_service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+
+        let changed = updated_service
+            .recover_push_enable_change(
+                account.account_id,
+                &enabled_types,
+                Some(previous_push_state.as_str()),
+                Some(20),
+                &current_states,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(changed, current_states);
     }
 
     #[tokio::test]

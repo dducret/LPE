@@ -21,9 +21,27 @@ CREATE SEQUENCE message_modseq_seq START WITH 2;
 
 CREATE TABLE schema_metadata (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
-    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.7'),
+    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.8'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE canonical_change_journal (
+    sequence BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    tenant_id TEXT NOT NULL CHECK (btrim(tenant_id) <> ''),
+    category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks')),
+    principal_account_ids UUID[] NOT NULL,
+    account_ids UUID[] NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX canonical_change_journal_tenant_sequence_idx
+    ON canonical_change_journal (tenant_id, sequence ASC);
+
+CREATE INDEX canonical_change_journal_tenant_category_sequence_idx
+    ON canonical_change_journal (tenant_id, category, sequence ASC);
+
+CREATE INDEX canonical_change_journal_principals_gin_idx
+    ON canonical_change_journal USING GIN (principal_account_ids);
 
 CREATE TABLE accounts (
     id UUID PRIMARY KEY,
@@ -968,7 +986,7 @@ LEFT JOIN attachments a
 GROUP BY m.id, m.account_id, m.mailbox_id, m.received_at, m.subject_normalized, mb.search_vector;
 
 INSERT INTO schema_metadata (singleton, schema_version)
-VALUES (TRUE, '0.1.7');
+VALUES (TRUE, '0.1.8');
 
 INSERT INTO security_settings (
     tenant_id,

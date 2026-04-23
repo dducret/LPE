@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use lpe_storage::{
-    AuthenticatedAccount, ClientTask, ClientTaskList, CreateTaskListInput, UpsertClientTaskInput,
-    UpdateTaskListInput,
+    AuthenticatedAccount, ClientTask, ClientTaskList, CreateTaskListInput, UpdateTaskListInput,
+    UpsertClientTaskInput,
 };
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -13,8 +13,7 @@ use crate::{
     parse::{parse_optional_string, parse_required_string, parse_uuid, parse_uuid_list},
     protocol::{
         ChangesArguments, QueryChangesArguments, TaskGetArguments, TaskListGetArguments,
-        TaskListSetArguments, TaskQueryArguments, TaskQueryFilter, TaskQuerySort,
-        TaskSetArguments,
+        TaskListSetArguments, TaskQueryArguments, TaskQueryFilter, TaskQuerySort, TaskSetArguments,
     },
     state::{changes_response, query_changes_response},
     validation::{validate_task_filter, validate_task_sort},
@@ -32,7 +31,9 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let properties = task_list_properties(arguments.properties);
         let requested_ids = parse_uuid_list(arguments.ids)?;
         let task_lists = if let Some(ids) = requested_ids.as_ref() {
-            self.store.fetch_jmap_task_lists_by_ids(account_id, ids).await?
+            self.store
+                .fetch_jmap_task_lists_by_ids(account_id, ids)
+                .await?
         } else {
             self.store.fetch_jmap_task_lists(account_id).await?
         };
@@ -100,7 +101,8 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 match parse_task_list_create(account_id, value) {
                     Ok(input) => match self.store.create_jmap_task_list(input).await {
                         Ok(task_list) => {
-                            created.insert(creation_id, task_list_to_value(&task_list, &properties));
+                            created
+                                .insert(creation_id, task_list_to_value(&task_list, &properties));
                         }
                         Err(error) => {
                             not_created.insert(creation_id, set_error(&error.to_string()));
@@ -240,6 +242,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         Ok(json!({
             "accountId": account_id.to_string(),
             "queryState": crate::encode_query_state(
+                account_id,
                 "Task",
                 arguments.filter.map(|filter| serde_json::to_value(filter)).transpose()?,
                 arguments

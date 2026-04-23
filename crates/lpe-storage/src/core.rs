@@ -35,12 +35,12 @@ impl Storage {
         .fetch_one(&self.pool)
         .await
         .context(
-                "database schema is not initialized for LPE 0.1.7; recreate the database and apply crates/lpe-storage/sql/schema.sql",
+                "database schema is not initialized for LPE 0.1.8; recreate the database and apply crates/lpe-storage/sql/schema.sql",
         )?;
 
         if schema_version != EXPECTED_SCHEMA_VERSION {
             bail!(
-                "unsupported database schema version {schema_version}; expected {EXPECTED_SCHEMA_VERSION}. Release 0.1.7 requires a fresh database initialized from crates/lpe-storage/sql/schema.sql"
+                "unsupported database schema version {schema_version}; expected {EXPECTED_SCHEMA_VERSION}. Release 0.1.8 requires a fresh database initialized from crates/lpe-storage/sql/schema.sql"
             );
         }
 

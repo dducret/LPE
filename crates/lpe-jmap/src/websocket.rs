@@ -14,16 +14,19 @@ use crate::{
         JmapApiRequest, WebSocketPushDisable, WebSocketPushEnable, WebSocketRequestEnvelope,
         WebSocketRequestError, WebSocketResponse, WebSocketStateChange,
     },
-    state::encode_push_state,
+    state::{decode_push_state, encode_push_state, push_state_entries_to_types},
     store::JmapPushListener,
     JmapService,
 };
+
+const MAX_PUSH_REPLAY_ROWS: u64 = 512;
 
 #[derive(Debug, Default)]
 pub(crate) struct PushSubscription {
     pub(crate) enabled_types: HashSet<String>,
     pub(crate) last_type_states: HashMap<String, HashMap<String, String>>,
     pub(crate) last_push_state: Option<String>,
+    pub(crate) last_journal_cursor: Option<i64>,
 }
 
 impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
@@ -131,6 +134,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                             .collect();
                         subscription.last_type_states.clear();
                         subscription.last_push_state = None;
+                        subscription.last_journal_cursor = None;
                         self.enable_push(
                             socket,
                             account.account_id,
@@ -144,6 +148,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         subscription.enabled_types.clear();
                         subscription.last_type_states.clear();
                         subscription.last_push_state = None;
+                        subscription.last_journal_cursor = None;
                     }
                     _ => {
                         self.send_request_error(
@@ -178,17 +183,25 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         subscription: &mut PushSubscription,
         client_push_state: Option<String>,
     ) -> Result<()> {
+        let current_cursor = self.store.fetch_canonical_change_cursor(account_id).await?;
         let type_states = self
             .current_push_states(account_id, &subscription.enabled_types)
             .await?;
-        let current_push_state = encode_push_state(&type_states)?;
-        let should_send = client_push_state
-            .as_deref()
-            .is_some_and(|push_state| push_state != current_push_state);
+        let current_push_state = encode_push_state(&type_states, current_cursor)?;
+        let changed = self
+            .recover_push_enable_change(
+                account_id,
+                &subscription.enabled_types,
+                client_push_state.as_deref(),
+                current_cursor,
+                &type_states,
+            )
+            .await?;
         subscription.last_type_states = type_states.clone();
         subscription.last_push_state = Some(current_push_state.clone());
-        if should_send {
-            self.send_state_change(socket, type_states, current_push_state)
+        subscription.last_journal_cursor = current_cursor;
+        if let Some(changed) = changed {
+            self.send_state_change(socket, changed, current_push_state)
                 .await?;
         }
         Ok(())
@@ -207,13 +220,87 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if changed.is_empty() {
             subscription.last_type_states = current_type_states;
+            subscription.last_journal_cursor = merge_journal_cursor(
+                subscription.last_journal_cursor,
+                change_set.journal_cursor(),
+            );
             return Ok(());
         }
 
-        let push_state = encode_push_state(&current_type_states)?;
+        let journal_cursor = merge_journal_cursor(
+            subscription.last_journal_cursor,
+            change_set.journal_cursor(),
+        );
+        let push_state = encode_push_state(&current_type_states, journal_cursor)?;
         subscription.last_type_states = current_type_states;
         subscription.last_push_state = Some(push_state.clone());
+        subscription.last_journal_cursor = journal_cursor;
         self.send_state_change(socket, changed, push_state).await
+    }
+
+    pub(crate) async fn recover_push_enable_change(
+        &self,
+        principal_account_id: Uuid,
+        enabled_types: &HashSet<String>,
+        client_push_state: Option<&str>,
+        current_cursor: Option<i64>,
+        current_type_states: &HashMap<String, HashMap<String, String>>,
+    ) -> Result<Option<HashMap<String, HashMap<String, String>>>> {
+        let Some(client_push_state) = client_push_state else {
+            return Ok(Some(current_type_states.clone()));
+        };
+
+        let Ok(previous_push_state) = decode_push_state(client_push_state) else {
+            return Ok(Some(current_type_states.clone()));
+        };
+        let previous_type_states = filter_push_state_types(
+            push_state_entries_to_types(&previous_push_state.entries),
+            enabled_types,
+        );
+        if previous_type_states == *current_type_states {
+            return Ok(None);
+        }
+
+        let Some(previous_cursor) = previous_push_state.cursor else {
+            return Ok(Some(current_type_states.clone()));
+        };
+
+        let replay = self
+            .store
+            .replay_canonical_changes(
+                principal_account_id,
+                previous_cursor,
+                &self.push_categories(enabled_types),
+                MAX_PUSH_REPLAY_ROWS,
+            )
+            .await?;
+        if replay.truncated {
+            return Ok(Some(current_type_states.clone()));
+        }
+
+        let replay_subscription = PushSubscription {
+            enabled_types: enabled_types.clone(),
+            last_type_states: previous_type_states,
+            last_push_state: Some(client_push_state.to_string()),
+            last_journal_cursor: previous_push_state.cursor,
+        };
+        let (changed, replay_type_states) = self
+            .compute_push_changes(
+                principal_account_id,
+                &replay_subscription,
+                &replay.change_set,
+            )
+            .await?;
+
+        if replay_type_states != *current_type_states {
+            return Ok(Some(current_type_states.clone()));
+        }
+
+        if changed.is_empty() && replay.current_cursor != current_cursor {
+            return Ok(None);
+        }
+
+        Ok(Some(changed))
     }
 
     pub(crate) async fn compute_push_changes(
@@ -458,7 +545,9 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             let mut account_states = HashMap::new();
             for data_type in data_types {
                 if self.is_mail_push_type(data_type) {
-                    let state = self.object_state(mailbox_account.account_id, data_type).await?;
+                    let state = self
+                        .object_state(mailbox_account.account_id, data_type)
+                        .await?;
                     account_states.insert(data_type.clone(), state);
                 }
             }
@@ -478,5 +567,34 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 .insert(data_type.clone(), state);
         }
         Ok(states)
+    }
+}
+
+fn filter_push_state_types(
+    type_states: HashMap<String, HashMap<String, String>>,
+    enabled_types: &HashSet<String>,
+) -> HashMap<String, HashMap<String, String>> {
+    type_states
+        .into_iter()
+        .filter_map(|(account_id, states)| {
+            let filtered = states
+                .into_iter()
+                .filter(|(data_type, _)| enabled_types.contains(data_type))
+                .collect::<HashMap<_, _>>();
+            if filtered.is_empty() {
+                None
+            } else {
+                Some((account_id, filtered))
+            }
+        })
+        .collect()
+}
+
+fn merge_journal_cursor(left: Option<i64>, right: Option<i64>) -> Option<i64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
     }
 }

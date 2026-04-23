@@ -89,7 +89,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .take(limit)
             .cloned()
             .collect::<Vec<_>>();
-        let query_state = encode_query_state("Mailbox/query", None, None, all_ids)?;
+        let query_state = encode_query_state(account_id, "Mailbox/query", None, None, all_ids)?;
 
         Ok(json!({
             "accountId": account_id.to_string(),
@@ -358,10 +358,7 @@ fn parse_mailbox_create(value: Value) -> Result<MailboxCreateInput> {
         .filter(|value| !value.is_empty())
         .ok_or_else(|| anyhow!("mailbox name is required"))?
         .to_string();
-    let sort_order = object
-        .get("sortOrder")
-        .and_then(Value::as_i64)
-        .unwrap_or(0) as i32;
+    let sort_order = object.get("sortOrder").and_then(Value::as_i64).unwrap_or(0) as i32;
     Ok(MailboxCreateInput {
         name,
         sort_order: Some(sort_order),
@@ -383,7 +380,9 @@ fn parse_mailbox_update(value: Value) -> Result<MailboxUpdateInput> {
         .and_then(Value::as_i64)
         .map(|value| value as i32);
     if name.is_none() && sort_order.is_none() {
-        return Err(anyhow!("mailbox update must include at least one mutable property"));
+        return Err(anyhow!(
+            "mailbox update must include at least one mutable property"
+        ));
     }
     Ok(MailboxUpdateInput { name, sort_order })
 }

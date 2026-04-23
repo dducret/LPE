@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use crate::{
     convert::{
-        address_value, insert_if, map_existing_recipients, map_parsed_recipients,
-        map_recipients, select_from_addresses,
+        address_value, insert_if, map_existing_recipients, map_parsed_recipients, map_recipients,
+        select_from_addresses,
     },
     drafts::{parse_draft_mutation, parse_email_copy},
     error::{method_error, set_error},
@@ -71,6 +71,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .map(|id| id.to_string())
             .collect::<Vec<_>>();
         let query_state = crate::encode_query_state(
+            account_id,
             "Email/query",
             arguments
                 .filter
@@ -374,7 +375,10 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if let Some(update) = arguments.update {
             for (id, value) in update {
-                match self.update_draft(account, &account_access, &id, value).await {
+                match self
+                    .update_draft(account, &account_access, &id, value)
+                    .await
+                {
                     Ok(_) => {
                         updated.insert(id, Value::Object(Map::new()));
                     }
@@ -611,6 +615,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .map(|id| id.to_string())
             .collect::<Vec<_>>();
         let query_state = crate::encode_query_state(
+            account_id,
             "Thread/query",
             arguments
                 .filter
@@ -647,7 +652,10 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let account_id = account_access.account_id;
         let properties = thread_properties(arguments.properties);
         let all_email_ids = self.store.fetch_all_jmap_email_ids(account_id).await?;
-        let emails = self.store.fetch_jmap_emails(account_id, &all_email_ids).await?;
+        let emails = self
+            .store
+            .fetch_jmap_emails(account_id, &all_email_ids)
+            .await?;
         let ids = arguments.ids.unwrap_or_else(|| {
             emails
                 .iter()
@@ -1123,8 +1131,18 @@ pub(crate) fn thread_properties(properties: Option<Vec<String>>) -> HashSet<Stri
 pub(crate) fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", email.id.to_string());
-    insert_if(properties, &mut object, "blobId", crate::blob_id_for_message(email));
-    insert_if(properties, &mut object, "threadId", email.thread_id.to_string());
+    insert_if(
+        properties,
+        &mut object,
+        "blobId",
+        crate::blob_id_for_message(email),
+    );
+    insert_if(
+        properties,
+        &mut object,
+        "threadId",
+        email.thread_id.to_string(),
+    );
     if properties.contains("mailboxIds") {
         let mut mailbox_ids = Map::new();
         mailbox_ids.insert(email.mailbox_id.to_string(), Value::Bool(true));
@@ -1134,7 +1152,12 @@ pub(crate) fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) ->
         object.insert("keywords".to_string(), email_keywords(email));
     }
     insert_if(properties, &mut object, "size", email.size_octets);
-    insert_if(properties, &mut object, "receivedAt", email.received_at.clone());
+    insert_if(
+        properties,
+        &mut object,
+        "receivedAt",
+        email.received_at.clone(),
+    );
     if let Some(sent_at) = &email.sent_at {
         insert_if(properties, &mut object, "sentAt", sent_at.clone());
     }
@@ -1212,7 +1235,12 @@ pub(crate) fn email_to_value(email: &JmapEmail, properties: &HashSet<String>) ->
         );
     }
     insert_if(properties, &mut object, "preview", email.preview.clone());
-    insert_if(properties, &mut object, "hasAttachment", email.has_attachments);
+    insert_if(
+        properties,
+        &mut object,
+        "hasAttachment",
+        email.has_attachments,
+    );
 
     let mut body_values = Map::new();
     if !email.body_text.is_empty() {
@@ -1260,9 +1288,24 @@ pub(crate) fn email_submission_to_value(
 ) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", submission.id.to_string());
-    insert_if(properties, &mut object, "emailId", submission.email_id.to_string());
-    insert_if(properties, &mut object, "threadId", submission.thread_id.to_string());
-    insert_if(properties, &mut object, "identityId", submission.identity_id.clone());
+    insert_if(
+        properties,
+        &mut object,
+        "emailId",
+        submission.email_id.to_string(),
+    );
+    insert_if(
+        properties,
+        &mut object,
+        "threadId",
+        submission.thread_id.to_string(),
+    );
+    insert_if(
+        properties,
+        &mut object,
+        "identityId",
+        submission.identity_id.clone(),
+    );
     if properties.contains("envelope") {
         object.insert(
             "envelope".to_string(),
@@ -1272,7 +1315,12 @@ pub(crate) fn email_submission_to_value(
             }),
         );
     }
-    insert_if(properties, &mut object, "sendAt", submission.send_at.clone());
+    insert_if(
+        properties,
+        &mut object,
+        "sendAt",
+        submission.send_at.clone(),
+    );
     insert_if(
         properties,
         &mut object,
@@ -1291,7 +1339,12 @@ pub(crate) fn email_submission_to_value(
 pub(crate) fn identity_to_value(identity: &SenderIdentity, properties: &HashSet<String>) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", identity.id.clone());
-    insert_if(properties, &mut object, "name", identity.display_name.clone());
+    insert_if(
+        properties,
+        &mut object,
+        "name",
+        identity.display_name.clone(),
+    );
     insert_if(properties, &mut object, "email", identity.email.clone());
     if properties.contains("replyTo") {
         object.insert("replyTo".to_string(), Value::Null);

@@ -8,6 +8,7 @@ use uuid::Uuid;
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct QueryStateToken {
     pub(crate) version: String,
+    pub(crate) account_id: String,
     pub(crate) kind: String,
     pub(crate) filter: Option<Value>,
     pub(crate) sort: Option<Vec<Value>>,
@@ -18,12 +19,21 @@ pub(crate) struct QueryStateToken {
 pub(crate) struct QueryDiff {
     pub(crate) removed: Vec<String>,
     pub(crate) added: Vec<Value>,
+    pub(crate) has_more_changes: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct StateToken {
     pub(crate) version: String,
+    pub(crate) account_id: String,
     pub(crate) kind: String,
+    pub(crate) entries: Vec<StateEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct PushStateToken {
+    pub(crate) version: String,
+    pub(crate) cursor: Option<i64>,
     pub(crate) entries: Vec<StateEntry>,
 }
 
@@ -41,8 +51,8 @@ pub(crate) fn changes_response(
     current_entries: Vec<StateEntry>,
 ) -> Value {
     let max_changes = max_changes.unwrap_or(u64::MAX) as usize;
-    let new_state =
-        encode_state(kind, current_entries.clone()).unwrap_or_else(|_| crate::SESSION_STATE.to_string());
+    let new_state = encode_state(account_id, kind, current_entries.clone())
+        .unwrap_or_else(|_| crate::SESSION_STATE.to_string());
     let Ok(previous) = decode_state(since_state) else {
         let created = current_entries
             .into_iter()
@@ -60,7 +70,7 @@ pub(crate) fn changes_response(
         });
     };
 
-    if previous.kind != kind {
+    if previous.account_id != account_id.to_string() || previous.kind != kind {
         let created = current_entries
             .into_iter()
             .take(max_changes)
@@ -133,11 +143,16 @@ pub(crate) fn changes_response(
     })
 }
 
-pub(crate) fn encode_state(kind: &str, entries: Vec<StateEntry>) -> Result<String> {
+pub(crate) fn encode_state(
+    account_id: Uuid,
+    kind: &str,
+    entries: Vec<StateEntry>,
+) -> Result<String> {
     let mut entries = entries;
     entries.sort_by(|left, right| left.id.cmp(&right.id));
     let token = StateToken {
         version: crate::STATE_TOKEN_VERSION.to_string(),
+        account_id: account_id.to_string(),
         kind: kind.to_string(),
         entries,
     };
@@ -157,6 +172,7 @@ pub(crate) fn decode_state(value: &str) -> Result<StateToken> {
 
 pub(crate) fn encode_push_state(
     type_states: &HashMap<String, HashMap<String, String>>,
+    cursor: Option<i64>,
 ) -> Result<String> {
     let mut entries = type_states
         .iter()
@@ -168,10 +184,56 @@ pub(crate) fn encode_push_state(
         })
         .collect::<Vec<_>>();
     entries.sort_by(|left, right| left.id.cmp(&right.id));
-    encode_state("Push", entries)
+    let token = PushStateToken {
+        version: crate::PUSH_STATE_VERSION.to_string(),
+        cursor,
+        entries,
+    };
+    Ok(URL_SAFE_NO_PAD.encode(serde_json::to_vec(&token)?))
+}
+
+pub(crate) fn decode_push_state(value: &str) -> Result<PushStateToken> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(value)
+        .map_err(|_| anyhow!("invalid pushState"))?;
+    if let Ok(token) = serde_json::from_slice::<PushStateToken>(&bytes) {
+        if token.version != crate::PUSH_STATE_VERSION {
+            bail!("unsupported pushState version");
+        }
+        return Ok(token);
+    }
+
+    let token: StateToken =
+        serde_json::from_slice(&bytes).map_err(|_| anyhow!("invalid pushState"))?;
+    if token.version != crate::STATE_TOKEN_VERSION || token.kind != "Push" {
+        bail!("invalid pushState");
+    }
+
+    Ok(PushStateToken {
+        version: crate::PUSH_STATE_VERSION.to_string(),
+        cursor: None,
+        entries: token.entries,
+    })
+}
+
+pub(crate) fn push_state_entries_to_types(
+    entries: &[StateEntry],
+) -> HashMap<String, HashMap<String, String>> {
+    let mut type_states = HashMap::new();
+    for entry in entries {
+        let Some((account_id, data_type)) = entry.id.split_once(':') else {
+            continue;
+        };
+        type_states
+            .entry(account_id.to_string())
+            .or_insert_with(HashMap::new)
+            .insert(data_type.to_string(), entry.fingerprint.clone());
+    }
+    type_states
 }
 
 pub(crate) fn encode_query_state(
+    account_id: Uuid,
     kind: &str,
     filter: Option<Value>,
     sort: Option<Vec<Value>>,
@@ -179,6 +241,7 @@ pub(crate) fn encode_query_state(
 ) -> Result<String> {
     let token = QueryStateToken {
         version: crate::QUERY_STATE_VERSION.to_string(),
+        account_id: account_id.to_string(),
         kind: kind.to_string(),
         filter,
         sort,
@@ -210,6 +273,9 @@ pub(crate) fn query_changes_response(
     max_changes: Option<u64>,
 ) -> Result<Value> {
     let previous = decode_query_state(&since_query_state)?;
+    if previous.account_id != account_id.to_string() {
+        bail!("queryState does not match requested account");
+    }
     if previous.kind != kind {
         bail!("queryState does not match requested method");
     }
@@ -217,14 +283,12 @@ pub(crate) fn query_changes_response(
         bail!("queryState does not match requested filter or sort");
     }
 
-    let next_query_state = encode_query_state(kind, filter, sort, current_ids.clone())?;
-    let diff = if kind == "Task" {
+    let next_query_state = encode_query_state(account_id, kind, filter, sort, current_ids.clone())?;
+    let diff = if matches!(kind, "Task" | "Mailbox/query") {
         compute_query_diff_with_reorders(&previous.ids, &current_ids, max_changes)
     } else {
         compute_query_diff(&previous.ids, &current_ids, max_changes)
     };
-    let change_count = diff.removed.len() + diff.added.len();
-    let change_limit = max_changes.unwrap_or(u64::MAX) as usize;
 
     Ok(json!({
         "accountId": account_id.to_string(),
@@ -233,7 +297,7 @@ pub(crate) fn query_changes_response(
         "removed": diff.removed,
         "added": diff.added,
         "total": total,
-        "hasMoreChanges": change_count >= change_limit && change_limit != usize::MAX,
+        "hasMoreChanges": diff.has_more_changes,
     }))
 }
 
@@ -242,32 +306,44 @@ pub(crate) fn compute_query_diff(
     current_ids: &[String],
     max_changes: Option<u64>,
 ) -> QueryDiff {
-    let mut removed = Vec::new();
-    let mut added = Vec::new();
-    let max_changes = max_changes.unwrap_or(u64::MAX) as usize;
-
-    for id in previous_ids {
-        if !current_ids.contains(id) {
-            removed.push(id.clone());
-            if removed.len() + added.len() >= max_changes {
-                return QueryDiff { removed, added };
-            }
-        }
-    }
-
-    for (index, id) in current_ids.iter().enumerate() {
-        if !previous_ids.contains(id) {
-            added.push(json!({
+    let mut removed = previous_ids
+        .iter()
+        .filter(|id| !current_ids.contains(id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut added = current_ids
+        .iter()
+        .enumerate()
+        .filter(|(_, id)| !previous_ids.contains(id))
+        .map(|(index, id)| {
+            json!({
                 "id": id,
                 "index": index,
-            }));
-            if removed.len() + added.len() >= max_changes {
-                break;
-            }
-        }
-    }
+            })
+        })
+        .collect::<Vec<_>>();
+    truncate_query_diff(&mut removed, &mut added, max_changes)
+}
 
-    QueryDiff { removed, added }
+fn truncate_query_diff(
+    removed: &mut Vec<String>,
+    added: &mut Vec<Value>,
+    max_changes: Option<u64>,
+) -> QueryDiff {
+    let change_limit = max_changes.unwrap_or(u64::MAX) as usize;
+    let total_changes = removed.len() + added.len();
+    let has_more_changes = total_changes > change_limit;
+    if total_changes > change_limit {
+        let mut remaining = change_limit;
+        removed.truncate(remaining.min(removed.len()));
+        remaining = remaining.saturating_sub(removed.len());
+        added.truncate(remaining.min(added.len()));
+    }
+    QueryDiff {
+        removed: std::mem::take(removed),
+        added: std::mem::take(added),
+        has_more_changes,
+    }
 }
 
 pub(crate) fn compute_query_diff_with_reorders(
@@ -277,7 +353,6 @@ pub(crate) fn compute_query_diff_with_reorders(
 ) -> QueryDiff {
     let mut removed = Vec::new();
     let mut added = Vec::new();
-    let max_changes = max_changes.unwrap_or(u64::MAX) as usize;
     let previous_positions = previous_ids
         .iter()
         .enumerate()
@@ -295,9 +370,6 @@ pub(crate) fn compute_query_diff_with_reorders(
             .is_some_and(|current_index| *current_index != index);
         if !current_positions.contains_key(id.as_str()) || moved {
             removed.push(id.clone());
-            if removed.len() + added.len() >= max_changes {
-                return QueryDiff { removed, added };
-            }
         }
     }
 
@@ -310,11 +382,8 @@ pub(crate) fn compute_query_diff_with_reorders(
                 "id": id,
                 "index": index,
             }));
-            if removed.len() + added.len() >= max_changes {
-                break;
-            }
         }
     }
 
-    QueryDiff { removed, added }
+    truncate_query_diff(&mut removed, &mut added, max_changes)
 }
