@@ -198,17 +198,18 @@ Additional command-style providers can be chained after `takeri` with:
 
 - default: empty
 - semicolon-separated `domain|selector|private-key-path` entries
-- only sender domains with a configured key are signed
+- outbound signing prefers the RFC 5322 `From` domain and falls back to a distinct `Sender` domain when delegated sending is used
 
 `LPE_CT_OUTBOUND_DKIM_HEADERS`
 
-- default: `from,to,cc,subject,mime-version,content-type,message-id`
+- default: `from,sender,to,cc,subject,mime-version,content-type,message-id`
 - signed header list passed into the DKIM signer
 
 `LPE_CT_ATTACHMENT_ALLOW_EXTENSIONS` / `LPE_CT_ATTACHMENT_BLOCK_EXTENSIONS`
 
 - default: empty
 - comma-separated attachment filename extensions enforced after MIME parsing
+- extension matching is normalized case-insensitively and treats `exe` and `.exe` as equivalent rules
 
 `LPE_CT_ATTACHMENT_ALLOW_MIME_TYPES` / `LPE_CT_ATTACHMENT_BLOCK_MIME_TYPES`
 
@@ -309,6 +310,12 @@ The management API and UI now use the retained perimeter artifacts for these ope
 - review DKIM signing posture, per-domain selectors, and key-path status in the same operator-facing policy workspace
 - manage digest schedule, domain defaults, mailbox overrides, and retained digest artifacts from one reporting section
 
+Policy-status views are now operational rather than purely declarative:
+
+- recipient verification reports `disabled`, `misconfigured`, `degraded`, `bridge-misconfigured`, or `active` based on bridge and cache-store readiness
+- DKIM reports `disabled`, `misconfigured`, or `active` based on enabled domains with readable key material
+- update failures that cannot be mirrored into the private technical store roll back to the previous durable dashboard state instead of leaving split-brain state between `state.json` and the technical store
+
 `LPE-CT` also now generates scheduled quarantine digest reports from sorting-center-owned data only.
 
 Current digest controls cover:
@@ -343,12 +350,19 @@ The decision matrix is now intentionally stricter:
 - antivirus detections or suspicious provider outcomes force quarantine in `LPE-CT`
 - when `LPE_CT_ANTIVIRUS_FAIL_CLOSED=true`, provider execution failures also force quarantine
 - explicit sender or recipient block-list hits reject the transaction before final acceptance
+- outbound delegated senders are checked against sender allow/block policy in addition to the RFC 5321 / RFC 5322 author address
 - when recipient verification is enabled, invalid local recipients are rejected during inbound `RCPT TO`
 - attachment policies can quarantine inbound messages or reject authenticated client submissions based on extension, MIME type, or detected file type
 - quarantined or rejected spam sessions can be terminated immediately after the final `SMTP` reply so the edge stops the transaction cleanly
 - outbound handoff now also runs through `bayespam`; high-scoring outbound content is quarantined before relay
 - outbound handoff now also runs through the same antivirus provider chain before relay
 - outbound relay can add a DKIM signature for sender domains that have an explicit configured key
+
+Operator trace actions now behave defensively:
+
+- retry, release, or delete returns a conflict instead of a false success when the trace is not eligible for that action
+- retry and release clear stale relay-specific fields such as prior remote references, technical status, DSN, route, and throttle state before the message re-enters a live queue
+- retry, release, and delete each append retained transport-audit history so reporting and trace inspection stay consistent
 
 ## Operational recommendations
 

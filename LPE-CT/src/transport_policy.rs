@@ -337,7 +337,7 @@ pub(crate) fn evaluate_attachment_policy_with_config<D: Detector>(
         let extension = attachment.filename.as_deref().and_then(|value| {
             value
                 .rsplit_once('.')
-                .map(|(_, ext)| ext.to_ascii_lowercase())
+                .and_then(|(_, ext)| normalize_extension_token(ext))
         });
         let declared_mime = attachment
             .declared_mime
@@ -455,6 +455,11 @@ fn parse_csv_env(name: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn normalize_extension_token(value: &str) -> Option<String> {
+    let normalized = value.trim().trim_start_matches('.').to_ascii_lowercase();
+    (!normalized.is_empty()).then_some(normalized)
+}
+
 fn normalize_address(value: &str) -> String {
     value.trim().trim_matches(['<', '>']).to_ascii_lowercase()
 }
@@ -543,9 +548,10 @@ fn unix_now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        evaluate_address_policy, evaluate_attachment_policy, verify_recipient_with_core,
-        AddressPolicyVerdict, AddressRole, AttachmentPolicyVerdict, RecipientVerificationConfig,
-        RecipientVerificationVerdict, RECIPIENT_VERIFICATION_PATH,
+        evaluate_address_policy, evaluate_attachment_policy, evaluate_attachment_policy_with_config,
+        verify_recipient_with_core, AddressPolicyVerdict, AddressRole, AttachmentPolicyConfig,
+        AttachmentPolicyVerdict, RecipientVerificationConfig, RecipientVerificationVerdict,
+        RECIPIENT_VERIFICATION_PATH,
     };
     use crate::env_test_lock;
     use axum::{routing::post, Json, Router};
@@ -639,6 +645,55 @@ mod tests {
         ));
 
         std::env::remove_var("LPE_CT_ATTACHMENT_BLOCK_EXTENSIONS");
+    }
+
+    #[test]
+    #[ignore = "env-sensitive"]
+    fn attachment_policy_normalizes_leading_dot_extensions() {
+        let _guard = env_test_lock();
+        let validator = Validator::new(
+            FakeDetector {
+                detection: MagikaDetection {
+                    label: "pebin".to_string(),
+                    mime_type: "application/x-msdownload".to_string(),
+                    description: "Windows executable".to_string(),
+                    group: "binary".to_string(),
+                    extensions: vec!["exe".to_string()],
+                    score: Some(0.99),
+                },
+            },
+            0.80,
+        );
+        let config = AttachmentPolicyConfig {
+            allow_extensions: Vec::new(),
+            block_extensions: vec![".exe".to_string()],
+            allow_mime_types: Vec::new(),
+            block_mime_types: Vec::new(),
+            allow_detected_types: Vec::new(),
+            block_detected_types: Vec::new(),
+        };
+        let message = concat!(
+            "Content-Type: multipart/mixed; boundary=\"b1\"\r\n",
+            "\r\n",
+            "--b1\r\n",
+            "Content-Type: application/octet-stream; name=\"payload.exe\"\r\n",
+            "Content-Disposition: attachment; filename=\"payload.exe\"\r\n",
+            "\r\n",
+            "MZ\r\n",
+            "--b1--\r\n"
+        );
+
+        assert!(matches!(
+            evaluate_attachment_policy_with_config(
+                &config,
+                &validator,
+                IngressContext::SmtpClientSubmission,
+                message.as_bytes()
+            )
+            .unwrap(),
+            AttachmentPolicyVerdict::Restrict(detail)
+                if detail.contains("blocked extension .exe")
+        ));
     }
 
     #[tokio::test]

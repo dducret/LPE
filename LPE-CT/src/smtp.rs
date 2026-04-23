@@ -995,13 +995,7 @@ pub(crate) async fn process_outbound_handoff(
         outcome: if dkim.signed { "signed" } else { "skipped" }.to_string(),
         detail: dkim.detail,
     });
-    if let transport_policy::AddressPolicyVerdict::Reject(reason) =
-        transport_policy::evaluate_address_policy_with_config(
-            &config.address_policy,
-            transport_policy::AddressRole::Sender,
-            &payload.from_address,
-        )
-    {
+    if let Some(reason) = evaluate_outbound_sender_policy(config, &payload) {
         message.status = "held".to_string();
         message.relay_error = Some(reason.clone());
         message.technical_status = Some(TransportTechnicalStatus {
@@ -4350,6 +4344,13 @@ async fn transition_trace(
     };
     message.status = target_queue.to_string();
     message.relay_error = None;
+    if !matches!(action, TraceAction::Delete) {
+        message.remote_message_ref = None;
+        message.technical_status = None;
+        message.dsn = None;
+        message.route = None;
+        message.throttle = None;
+    }
     message.decision_trace.push(DecisionTraceEntry {
         stage: "operator-action".to_string(),
         outcome: match action {
@@ -4369,6 +4370,7 @@ async fn transition_trace(
         tokio::fs::remove_file(spool_path(spool_dir, &queue, &message.id)).await?;
     } else {
         move_message(spool_dir, &message, &queue, target_queue).await?;
+        let _ = append_transport_audit(spool_dir, config, target_queue, &message).await;
     }
     if queue == "quarantine" {
         remove_quarantine_metadata_or_warn(config, &message.id).await;
@@ -4395,6 +4397,39 @@ fn transition_target(queue: &str, direction: &str, action: TraceAction) -> Optio
         ("quarantine", _, TraceAction::Delete) => Some("deleted"),
         _ => None,
     }
+}
+
+fn evaluate_outbound_sender_policy(
+    config: &RuntimeConfig,
+    payload: &OutboundMessageHandoffRequest,
+) -> Option<String> {
+    for address in outbound_sender_policy_addresses(payload) {
+        if let transport_policy::AddressPolicyVerdict::Reject(reason) =
+            transport_policy::evaluate_address_policy_with_config(
+                &config.address_policy,
+                transport_policy::AddressRole::Sender,
+                address,
+            )
+        {
+            return Some(reason);
+        }
+    }
+    None
+}
+
+fn outbound_sender_policy_addresses<'a>(
+    payload: &'a OutboundMessageHandoffRequest,
+) -> Vec<&'a str> {
+    let mut addresses = vec![payload.from_address.as_str()];
+    if let Some(sender) = payload
+        .sender_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case(&payload.from_address))
+    {
+        addresses.push(sender);
+    }
+    addresses
 }
 
 pub(crate) fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
@@ -4862,6 +4897,17 @@ fn compose_rfc822_message(payload: &OutboundMessageHandoffRequest) -> Vec<u8> {
         "From: {}",
         format_address(&payload.from_address, payload.from_display.as_deref())
     ));
+    if let Some(sender_address) = payload
+        .sender_address
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case(&payload.from_address))
+    {
+        lines.push(format!(
+            "Sender: {}",
+            format_address(sender_address, payload.sender_display.as_deref())
+        ));
+    }
     if !payload.to.is_empty() {
         lines.push(format!(
             "To: {}",
@@ -5019,13 +5065,15 @@ mod tests {
         apply_authentication_scores, classify_inbound_message, compose_rfc822_message,
         dkim_disposition, dnsbl_query_name, encode_quoted_printable, evaluate_greylisting,
         handle_smtp_session, initialize_spool, load_antivirus_providers, load_bayespam_corpus,
-        load_reputation_score, parse_antivirus_output, parse_peer_ip, process_outbound_handoff,
-        receive_message, receive_message_with_validator, retry_after_seconds, score_bayespam,
-        spf_disposition, stable_key_id, summarize_dkim, summarize_dmarc, summarize_spf,
-        train_bayespam, unix_now, update_reputation, AntivirusProviderConfig,
-        AntivirusProviderDecision, AuthSummary, AuthenticationAssessment, BayesLabel,
-        DkimDisposition, FilterAction, GreylistEntry, OutboundRoutingRule, OutboundThrottleRule,
-        QueuedMessage, RuntimeConfig, SpfDisposition,
+        load_reputation_score, load_trace_details, parse_antivirus_output, parse_peer_ip,
+        persist_message, process_outbound_handoff, receive_message, receive_message_with_validator,
+        retry_after_seconds, retry_trace, score_bayespam, spf_disposition, stable_key_id,
+        summarize_dkim, summarize_dmarc, summarize_spf, train_bayespam, unix_now,
+        update_reputation, AntivirusProviderConfig, AntivirusProviderDecision, AuthSummary,
+        AuthenticationAssessment, BayesLabel, DkimDisposition, FilterAction, GreylistEntry,
+        OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig,
+        TransportDsnReport, TransportRouteDecision, TransportTechnicalStatus,
+        TransportThrottleStatus, SpfDisposition,
     };
     use crate::env_test_lock;
     use axum::{routing::post, Json, Router};
@@ -5552,6 +5600,18 @@ mod tests {
     }
 
     #[test]
+    fn outbound_handoff_emits_sender_header_for_delegated_sender() {
+        let mut request = outbound_request("Delegated");
+        request.sender_address = Some("delegate@other.test".to_string());
+        request.sender_display = Some("Delegate".to_string());
+
+        let raw = String::from_utf8(compose_rfc822_message(&request)).unwrap();
+
+        assert!(raw.contains("From: Sender <sender@example.test>"));
+        assert!(raw.contains("Sender: Delegate <delegate@other.test>"));
+    }
+
+    #[test]
     fn quoted_printable_encoder_handles_utf8_and_line_breaks() {
         let encoded = encode_quoted_printable("Bonjour équipe\nHTML");
         assert!(encoded.contains("=C3=A9"));
@@ -5771,6 +5831,106 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("bayespam score"));
+    }
+
+    #[tokio::test]
+    async fn outbound_handoff_rejects_blocked_delegated_sender() {
+        let spool = temp_dir("outbound-blocked-delegate");
+        initialize_spool(&spool).unwrap();
+        let mut config =
+            runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+        config.address_policy.block_senders = vec!["other.test".to_string()];
+        let mut request = outbound_request("Delegated block");
+        request.sender_address = Some("delegate@other.test".to_string());
+        request.sender_display = Some("Delegate".to_string());
+
+        let response = process_outbound_handoff(&spool, &config, request)
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, TransportDeliveryStatus::Failed);
+        assert!(response
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("sender delegate@other.test matched block list entry other.test"));
+    }
+
+    #[tokio::test]
+    async fn retry_trace_clears_stale_execution_state_and_appends_audit() {
+        let spool = temp_dir("trace-retry");
+        initialize_spool(&spool).unwrap();
+        let config = runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+        let message = QueuedMessage {
+            id: "trace-retry-1".to_string(),
+            direction: "outbound".to_string(),
+            received_at: "unix:1".to_string(),
+            peer: "lpe-core".to_string(),
+            helo: "lpe-core".to_string(),
+            mail_from: "sender@example.test".to_string(),
+            rcpt_to: vec!["dest@example.test".to_string()],
+            status: "held".to_string(),
+            relay_error: Some("remote relay failed".to_string()),
+            magika_summary: None,
+            magika_decision: None,
+            spam_score: 0.0,
+            security_score: 0.0,
+            reputation_score: 0,
+            dnsbl_hits: Vec::new(),
+            auth_summary: AuthSummary::default(),
+            decision_trace: Vec::new(),
+            remote_message_ref: Some("remote-ref".to_string()),
+            technical_status: Some(TransportTechnicalStatus {
+                phase: "data".to_string(),
+                smtp_code: Some(451),
+                enhanced_code: Some("4.4.1".to_string()),
+                remote_host: Some("mx.example.test:25".to_string()),
+                detail: Some("temporary relay failure".to_string()),
+            }),
+            dsn: Some(TransportDsnReport {
+                action: "delayed".to_string(),
+                status: "4.4.1".to_string(),
+                diagnostic_code: Some("smtp; temporary relay failure".to_string()),
+                remote_mta: Some("mx.example.test".to_string()),
+            }),
+            route: Some(TransportRouteDecision {
+                rule_id: Some("primary".to_string()),
+                relay_target: Some("mx.example.test:25".to_string()),
+                queue: "outbound".to_string(),
+            }),
+            throttle: Some(TransportThrottleStatus {
+                scope: "sender".to_string(),
+                key: "sender@example.test".to_string(),
+                limit: 1,
+                window_seconds: 60,
+                retry_after_seconds: 45,
+            }),
+            data: b"Subject: Retry\r\n\r\nbody".to_vec(),
+        };
+        persist_message(&spool, "held", &message).await.unwrap();
+
+        let result = retry_trace(&spool, &config, &message.id).await.unwrap().unwrap();
+        let details = load_trace_details(&spool, &message.id).unwrap().unwrap();
+        let audit =
+            std::fs::read_to_string(spool.join("policy").join("transport-audit.jsonl")).unwrap();
+
+        assert_eq!(result.from_queue, "held");
+        assert_eq!(result.to_queue, "outbound");
+        assert_eq!(details.queue, "outbound");
+        assert_eq!(details.status, "outbound");
+        assert!(details.reason.is_none());
+        assert!(details.remote_message_ref.is_none());
+        assert!(details.technical_status.is_none());
+        assert!(details.dsn.is_none());
+        assert!(details.route.is_none());
+        assert!(details.throttle.is_none());
+        assert!(details
+            .decision_trace
+            .iter()
+            .any(|entry| entry.stage == "operator-action" && entry.outcome == "retry"));
+        assert!(audit.contains("\"trace_id\":\"trace-retry-1\""));
+        assert!(audit.contains("\"queue\":\"outbound\""));
+        assert!(audit.contains("\"status\":\"outbound\""));
     }
 
     #[test]

@@ -39,15 +39,13 @@ pub(crate) fn maybe_sign_outbound_message(
         });
     }
 
-    let sender_domain = sender_domain(payload);
-    let Some(key) = config
-        .keys
-        .iter()
-        .find(|entry| entry.domain.eq_ignore_ascii_case(&sender_domain))
-    else {
+    let Some(key) = select_signing_key(config, payload) else {
         return Ok(DkimSigningOutcome {
             message: raw_message.to_vec(),
-            detail: format!("no DKIM key configured for sender domain {sender_domain}"),
+            detail: format!(
+                "no DKIM key configured for RFC 5322 author or sender domains ({})",
+                signing_domain_candidates(payload).join(", ")
+            ),
             signed: false,
         });
     };
@@ -127,16 +125,45 @@ fn split_body(message: &[u8]) -> Vec<u8> {
         .unwrap_or_default()
 }
 
-fn sender_domain(payload: &OutboundMessageHandoffRequest) -> String {
-    payload
-        .sender_address
-        .as_deref()
-        .unwrap_or(&payload.from_address)
+fn select_signing_key<'a>(
+    config: &'a DkimConfig,
+    payload: &OutboundMessageHandoffRequest,
+) -> Option<&'a DkimKeyConfig> {
+    for domain in signing_domain_candidates(payload) {
+        if let Some(key) = config
+            .keys
+            .iter()
+            .find(|entry| entry.domain.eq_ignore_ascii_case(&domain))
+        {
+            return Some(key);
+        }
+    }
+    None
+}
+
+fn signing_domain_candidates(payload: &OutboundMessageHandoffRequest) -> Vec<String> {
+    let mut domains = Vec::new();
+    if let Some(domain) = address_domain(&payload.from_address) {
+        domains.push(domain);
+    }
+    if let Some(domain) = payload.sender_address.as_deref().and_then(address_domain) {
+        if !domains.iter().any(|value| value.eq_ignore_ascii_case(&domain)) {
+            domains.push(domain);
+        }
+    }
+    if domains.is_empty() {
+        domains.push("invalid".to_string());
+    }
+    domains
+}
+
+fn address_domain(value: &str) -> Option<String> {
+    value
         .trim()
         .trim_matches(['<', '>'])
         .rsplit_once('@')
         .map(|(_, domain)| domain.to_ascii_lowercase())
-        .unwrap_or_else(|| "invalid".to_string())
+        .filter(|domain| !domain.is_empty())
 }
 
 #[cfg(test)]
@@ -214,5 +241,60 @@ mod tests {
         assert!(signed.starts_with("DKIM-Signature: "));
         assert!(signed.contains(" d=example.test;"));
         assert!(signed.contains(" s=mta;"));
+    }
+
+    #[test]
+    #[ignore = "env-sensitive"]
+    fn dkim_signer_prefers_from_domain_before_sender_domain() {
+        let _guard = env_test_lock();
+        let mut payload = payload();
+        payload.sender_address = Some("delegate@other.test".to_string());
+        let config = DkimConfig {
+            enabled: true,
+            headers: vec![
+                "from".to_string(),
+                "sender".to_string(),
+                "to".to_string(),
+                "subject".to_string(),
+                "mime-version".to_string(),
+                "content-type".to_string(),
+                "message-id".to_string(),
+            ],
+            over_sign: true,
+            expiration_seconds: None,
+            keys: vec![
+                DkimKeyConfig {
+                    domain: "example.test".to_string(),
+                    selector: "mta".to_string(),
+                    key_path: "tests/fixtures/rsa2048.pem".to_string(),
+                },
+                DkimKeyConfig {
+                    domain: "other.test".to_string(),
+                    selector: "delegate".to_string(),
+                    key_path: "tests/fixtures/rsa2048.pem".to_string(),
+                },
+            ],
+        };
+        let raw = concat!(
+            "From: Sender <sender@example.test>\r\n",
+            "Sender: Delegate <delegate@other.test>\r\n",
+            "To: Dest <dest@example.test>\r\n",
+            "Subject: Signed\r\n",
+            "Message-Id: <signed@example.test>\r\n",
+            "MIME-Version: 1.0\r\n",
+            "Content-Type: text/plain; charset=utf-8\r\n",
+            "\r\n",
+            "Body\r\n"
+        )
+        .as_bytes()
+        .to_vec();
+
+        let outcome = maybe_sign_outbound_message(&config, &payload, &raw).unwrap();
+
+        assert!(outcome.signed);
+        let signed = String::from_utf8(outcome.message).unwrap();
+        assert!(signed.contains(" d=example.test;"));
+        assert!(signed.contains(" s=mta;"));
+        assert!(!signed.contains(" s=delegate;"));
     }
 }

@@ -400,6 +400,7 @@ struct RecipientVerificationStatusView {
 #[derive(Debug, Clone, Serialize)]
 struct DkimStatusView {
     enabled: bool,
+    operational_state: String,
     headers: Vec<String>,
     over_sign: bool,
     expiration_seconds: Option<u32>,
@@ -816,6 +817,9 @@ async fn retry_trace(
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "trace not found"))?;
+    if result.to_queue.is_empty() {
+        return Err(ApiError::new(StatusCode::CONFLICT, result.detail));
+    }
     append_audit_event_with_actor(
         &state,
         &admin.email,
@@ -839,6 +843,9 @@ async fn release_trace(
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "trace not found"))?;
+    if result.to_queue.is_empty() {
+        return Err(ApiError::new(StatusCode::CONFLICT, result.detail));
+    }
     append_audit_event_with_actor(
         &state,
         &admin.email,
@@ -862,6 +869,9 @@ async fn delete_trace(
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "trace not found"))?;
+    if result.to_queue.is_empty() {
+        return Err(ApiError::new(StatusCode::CONFLICT, result.detail));
+    }
     append_audit_event_with_actor(
         &state,
         &admin.email,
@@ -891,40 +901,67 @@ async fn policy_status(
 ) -> Result<Json<PolicyStatusResponse>, ApiError> {
     let _admin = require_management_admin(&state, &headers)?;
     let snapshot = read_state(&state)?;
+    let runtime = smtp::runtime_config_from_dashboard(&snapshot);
+    let recipient_verification_operational_state =
+        if !snapshot.policies.recipient_verification.enabled {
+            "disabled".to_string()
+        } else if runtime.core_delivery_base_url.trim().is_empty() {
+            "misconfigured".to_string()
+        } else if snapshot.local_data_stores.dedicated_postgres.enabled
+            && runtime.local_db.database_url.is_none()
+        {
+            "degraded".to_string()
+        } else if integration_shared_secret().is_err() {
+            "bridge-misconfigured".to_string()
+        } else {
+            "active".to_string()
+        };
+    let dkim_domains = snapshot
+        .policies
+        .dkim
+        .domains
+        .iter()
+        .map(|domain| DkimDomainStatusView {
+            domain: domain.domain.clone(),
+            selector: domain.selector.clone(),
+            private_key_path: domain.private_key_path.clone(),
+            enabled: domain.enabled,
+            key_status: dkim_key_status(&domain.private_key_path),
+        })
+        .collect::<Vec<_>>();
+    let active_dkim_domains = dkim_domains
+        .iter()
+        .filter(|domain| domain.enabled && domain.key_status == "present")
+        .count();
     Ok(Json(PolicyStatusResponse {
         recipient_verification: RecipientVerificationStatusView {
             enabled: snapshot.policies.recipient_verification.enabled,
             fail_closed: snapshot.policies.recipient_verification.fail_closed,
             cache_ttl_seconds: snapshot.policies.recipient_verification.cache_ttl_seconds,
-            operational_state: if snapshot.policies.recipient_verification.enabled {
-                "active".to_string()
-            } else {
-                "disabled".to_string()
-            },
-            cache_backend: if snapshot.local_data_stores.dedicated_postgres.enabled {
+            operational_state: recipient_verification_operational_state,
+            cache_backend: if snapshot.local_data_stores.dedicated_postgres.enabled
+                && runtime.local_db.database_url.is_some()
+            {
                 "private-postgres".to_string()
+            } else if snapshot.local_data_stores.dedicated_postgres.enabled {
+                "misconfigured-private-postgres".to_string()
             } else {
                 "memory-only".to_string()
             },
         },
         dkim: DkimStatusView {
             enabled: snapshot.policies.dkim.enabled,
+            operational_state: if !snapshot.policies.dkim.enabled {
+                "disabled".to_string()
+            } else if active_dkim_domains == 0 {
+                "misconfigured".to_string()
+            } else {
+                "active".to_string()
+            },
             headers: snapshot.policies.dkim.headers.clone(),
             over_sign: snapshot.policies.dkim.over_sign,
             expiration_seconds: snapshot.policies.dkim.expiration_seconds,
-            domains: snapshot
-                .policies
-                .dkim
-                .domains
-                .iter()
-                .map(|domain| DkimDomainStatusView {
-                    domain: domain.domain.clone(),
-                    selector: domain.selector.clone(),
-                    private_key_path: domain.private_key_path.clone(),
-                    enabled: domain.enabled,
-                    key_status: dkim_key_status(&domain.private_key_path),
-                })
-                .collect(),
+            domains: dkim_domains,
         },
     }))
 }
@@ -969,10 +1006,14 @@ async fn update_policies(
 ) -> Result<Json<DashboardState>, ApiError> {
     let admin = require_management_admin(&state, &headers)?;
     normalize_policy_settings(&mut payload);
+    let previous = read_state(&state)?;
     let response = mutate_state(&state, &admin.email, "update-policies", move |dashboard| {
         dashboard.policies = payload;
     })?;
-    sync_technical_store(&state).await?;
+    if let Err(error) = sync_technical_store(&state).await {
+        restore_dashboard_state(&state, &previous)?;
+        return Err(error);
+    }
     Ok(response)
 }
 
@@ -1005,6 +1046,7 @@ async fn update_reporting(
 ) -> Result<Json<reporting::ReportingSnapshot>, ApiError> {
     let admin = require_management_admin(&state, &headers)?;
     reporting::normalize_reporting_settings(&mut payload);
+    let previous = read_state(&state)?;
     {
         let mut guard = state
             .store
@@ -1014,8 +1056,11 @@ async fn update_reporting(
         append_dashboard_audit_event(&mut guard, &admin.email, "update-reporting");
         persist_state(&state.state_file, &guard)?;
     }
+    if let Err(error) = sync_technical_store(&state).await {
+        restore_dashboard_state(&state, &previous)?;
+        return Err(error);
+    }
     let snapshot = read_state(&state)?;
-    sync_technical_store(&state).await?;
     let reporting =
         reporting::snapshot(&state.spool_dir, &snapshot.reporting).map_err(ApiError::from)?;
     Ok(Json(reporting))
@@ -1205,6 +1250,17 @@ async fn sync_technical_store(state: &AppState) -> Result<(), ApiError> {
     storage::sync_dashboard_configuration(&local_db_config_from_dashboard(&snapshot), &snapshot)
         .await
         .map_err(ApiError::from)
+}
+
+fn restore_dashboard_state(state: &AppState, snapshot: &DashboardState) -> Result<(), ApiError> {
+    {
+        let mut guard = state
+            .store
+            .lock()
+            .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))?;
+        *guard = snapshot.clone();
+    }
+    persist_state(&state.state_file, snapshot).map_err(ApiError::from)
 }
 
 fn append_dashboard_audit_event(state: &mut DashboardState, actor: &str, action: &str) {
@@ -1517,8 +1573,8 @@ fn normalize_policy_settings(policies: &mut PolicySettings) {
     normalize_csv_rules(&mut policies.address_policy.block_recipients);
     policies.recipient_verification.cache_ttl_seconds =
         policies.recipient_verification.cache_ttl_seconds.max(1);
-    normalize_csv_rules(&mut policies.attachment_policy.allow_extensions);
-    normalize_csv_rules(&mut policies.attachment_policy.block_extensions);
+    normalize_attachment_extension_rules(&mut policies.attachment_policy.allow_extensions);
+    normalize_attachment_extension_rules(&mut policies.attachment_policy.block_extensions);
     normalize_csv_rules(&mut policies.attachment_policy.allow_mime_types);
     normalize_csv_rules(&mut policies.attachment_policy.block_mime_types);
     normalize_csv_rules(&mut policies.attachment_policy.allow_detected_types);
@@ -1526,6 +1582,9 @@ fn normalize_policy_settings(policies: &mut PolicySettings) {
     normalize_csv_rules(&mut policies.dkim.headers);
     if policies.dkim.headers.is_empty() {
         policies.dkim.headers = default_dkim_headers();
+    }
+    if policies.dkim.headers.iter().all(|value| value != "sender") {
+        policies.dkim.headers.push("sender".to_string());
     }
     let mut seen_domains = std::collections::BTreeSet::new();
     policies.dkim.domains.retain_mut(|domain| {
@@ -1586,6 +1645,16 @@ fn normalize_csv_rules(values: &mut Vec<String>) {
     *values = values
         .iter()
         .map(|value| value.trim().trim_start_matches('@').to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .filter(|value| seen.insert(value.clone()))
+        .collect();
+}
+
+fn normalize_attachment_extension_rules(values: &mut Vec<String>) {
+    let mut seen = std::collections::BTreeSet::new();
+    *values = values
+        .iter()
+        .map(|value| value.trim().trim_start_matches('.').to_ascii_lowercase())
         .filter(|value| !value.is_empty())
         .filter(|value| seen.insert(value.clone()))
         .collect();
@@ -1831,6 +1900,7 @@ fn default_recipient_verification_settings() -> RecipientVerificationSettings {
 fn default_dkim_headers() -> Vec<String> {
     vec![
         "from".to_string(),
+        "sender".to_string(),
         "to".to_string(),
         "cc".to_string(),
         "subject".to_string(),
