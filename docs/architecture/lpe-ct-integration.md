@@ -40,6 +40,8 @@ The outbound handoff result is now structured. In addition to the status and `tr
 - `route`: applied routing rule and chosen relay
 - `throttle`: throttling scope, key, window, limit, and suggested delay
 
+When outbound DKIM signing is enabled in `LPE-CT`, the signature is added inside this relay flow before the external `SMTP` transaction. DKIM key custody remains a sorting-center concern because the signature belongs to the outbound transport edge, not to canonical mailbox state in `LPE`.
+
 `LPE` persists that detailed result on `outbound_message_queue` so queue state remains operationally useful without moving MTA logic into the core platform.
 
 Queue-state handling is replay-safe:
@@ -57,6 +59,8 @@ Queue-state handling is replay-safe:
 6. `LPE-CT` updates its local spool into `sent`, `deferred`, or `held`
 
 The raw `SMTP` body is carried into `LPE` to keep delivery context, but mailbox persistence remains controlled by the internal `LPE` model.
+
+Before `DATA` acceptance is finalized, `LPE-CT` may also call `POST /internal/lpe-ct/recipient-verification` on `LPE` for inbound `RCPT TO` validation. That check is authoritative for local-recipient existence and may be cached briefly by `LPE-CT`, but it must not create a second mailbox directory or rely on public callback verification.
 
 ### Authenticated client submission flow `Client -> LPE-CT -> LPE`
 
@@ -91,6 +95,7 @@ The authenticated client-submission bridge uses the same header for:
 
 - `POST /internal/lpe-ct/submission-auth`
 - `POST /internal/lpe-ct/submissions`
+- `POST /internal/lpe-ct/recipient-verification`
 
 The integration bridge is now fail-closed and replay-aware:
 
@@ -166,8 +171,11 @@ The detailed metric families and logging behavior are documented in `docs/archit
 - `LPE-CT` now records the full inbound edge pipeline in the decision trace, including protocol capture, `RBL` / DNS checks, active `bayespam`, the configured antivirus provider chain, and final score calculation
 - the default dedicated local PostgreSQL store now persists private `LPE-CT` technical state such as greylisting, reputation, `bayespam`, throttling, and quarantined-message metadata while keeping payload custody in the spool
 - `LPE-CT` composes outbound relay as RFC 822 with either plain `text/plain` or `multipart/alternative` `text/plain` + `text/html` when `body_html_sanitized` is available, without reinjecting `Bcc` into visible headers
+- `LPE-CT` can now add outbound DKIM signatures for sender domains that have an explicit configured key
+- `LPE-CT` can now reject or constrain sender and recipient addresses through local allow/block policy before relay or submission acceptance
 - `LPE-CT` applies outbound routing rules and throttling before the actual SMTP relay
 - `LPE-CT` classifies outbound failures into `deferred`, `bounced`, or `failed` from SMTP replies and produces structured technical and `DSN` feedback with retry backoff derived from the upstream attempt count
+- inbound `RCPT TO` can now call an internal `LPE` recipient-verification API with short-lived local caching on the `LPE-CT` side
 - inbound final delivery creates per-mailbox `Inbox` copies in `LPE`
 - standard search and visible projections do not reinject `Bcc`
 

@@ -28,8 +28,10 @@ use tracing::info;
 use uuid::Uuid;
 
 mod observability;
+mod dkim_signing;
 mod smtp;
 mod submission;
+mod transport_policy;
 
 const MIN_INTEGRATION_SECRET_LEN: usize = 32;
 const OUTBOUND_HANDOFF_PATH: &str = "/api/v1/integration/outbound-messages";

@@ -43,7 +43,9 @@ use tokio::{
 };
 use tracing::{info, warn};
 
-use crate::{integration_shared_secret, observability};
+use crate::{
+    dkim_signing, integration_shared_secret, observability, transport_policy,
+};
 
 const INBOUND_DELIVERY_PATH: &str = "/internal/lpe-ct/inbound-deliveries";
 
@@ -926,6 +928,7 @@ pub(crate) async fn process_outbound_handoff(
     let message_id = payload.message_id;
     let internet_message_id = payload.internet_message_id.clone();
     let route = resolve_outbound_route(config, &payload);
+    let dkim = dkim_signing::maybe_sign_outbound_message(&payload, &compose_rfc822_message(&payload))?;
     let mut message = QueuedMessage {
         id: format!("lpe-ct-out-{}", payload.queue_id),
         direction: "outbound".to_string(),
@@ -953,7 +956,7 @@ pub(crate) async fn process_outbound_handoff(
         dsn: None,
         route: Some(route.clone()),
         throttle: None,
-        data: compose_rfc822_message(&payload),
+        data: dkim.message,
     };
     message.decision_trace.push(DecisionTraceEntry {
         stage: "protocol".to_string(),
@@ -985,6 +988,97 @@ pub(crate) async fn process_outbound_handoff(
             route.rule_id.as_deref().unwrap_or("default")
         ),
     });
+    message.decision_trace.push(DecisionTraceEntry {
+        stage: "outbound-dkim".to_string(),
+        outcome: if dkim.signed { "signed" } else { "skipped" }.to_string(),
+        detail: dkim.detail,
+    });
+    if let transport_policy::AddressPolicyVerdict::Reject(reason) =
+        transport_policy::evaluate_address_policy(
+            transport_policy::AddressRole::Sender,
+            &payload.from_address,
+        )
+    {
+        message.status = "held".to_string();
+        message.relay_error = Some(reason.clone());
+        message.technical_status = Some(TransportTechnicalStatus {
+            phase: "mail-from".to_string(),
+            smtp_code: Some(550),
+            enhanced_code: Some("5.7.1".to_string()),
+            remote_host: route.relay_target.clone(),
+            detail: Some(reason.clone()),
+        });
+        message.dsn = Some(TransportDsnReport {
+            action: "failed".to_string(),
+            status: "5.7.1".to_string(),
+            diagnostic_code: Some(format!("smtp; {reason}")),
+            remote_mta: route.relay_target.clone(),
+        });
+        message.decision_trace.push(DecisionTraceEntry {
+            stage: "address-policy".to_string(),
+            outcome: "reject".to_string(),
+            detail: reason.clone(),
+        });
+        persist_message(spool_dir, "held", &message).await?;
+        let _ = append_transport_audit(spool_dir, "held", &message);
+        observability::record_security_event("outbound_failure");
+        return Ok(OutboundMessageHandoffResponse {
+            queue_id: payload.queue_id,
+            status: TransportDeliveryStatus::Failed,
+            trace_id: message.id,
+            detail: Some(reason),
+            remote_message_ref: None,
+            retry: None,
+            dsn: message.dsn,
+            technical: message.technical_status,
+            route: Some(route),
+            throttle: None,
+        });
+    }
+    for recipient in payload.envelope_recipients() {
+        if let transport_policy::AddressPolicyVerdict::Reject(reason) =
+            transport_policy::evaluate_address_policy(
+                transport_policy::AddressRole::Recipient,
+                &recipient,
+            )
+        {
+            message.status = "held".to_string();
+            message.relay_error = Some(reason.clone());
+            message.technical_status = Some(TransportTechnicalStatus {
+                phase: "rcpt-to".to_string(),
+                smtp_code: Some(550),
+                enhanced_code: Some("5.7.1".to_string()),
+                remote_host: route.relay_target.clone(),
+                detail: Some(reason.clone()),
+            });
+            message.dsn = Some(TransportDsnReport {
+                action: "failed".to_string(),
+                status: "5.7.1".to_string(),
+                diagnostic_code: Some(format!("smtp; {reason}")),
+                remote_mta: route.relay_target.clone(),
+            });
+            message.decision_trace.push(DecisionTraceEntry {
+                stage: "address-policy".to_string(),
+                outcome: "reject".to_string(),
+                detail: reason.clone(),
+            });
+            persist_message(spool_dir, "held", &message).await?;
+            let _ = append_transport_audit(spool_dir, "held", &message);
+            observability::record_security_event("outbound_failure");
+            return Ok(OutboundMessageHandoffResponse {
+                queue_id: payload.queue_id,
+                status: TransportDeliveryStatus::Failed,
+                trace_id: message.id,
+                detail: Some(reason),
+                remote_message_ref: None,
+                retry: None,
+                dsn: message.dsn,
+                technical: message.technical_status,
+                route: Some(route),
+                throttle: None,
+            });
+        }
+    }
     match score_bayespam(
         spool_dir,
         config,
@@ -1436,6 +1530,7 @@ async fn handle_smtp_session(
     state_file: PathBuf,
     spool_dir: PathBuf,
 ) -> Result<()> {
+    let client = reqwest::Client::new();
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let mut line = String::new();
@@ -1467,7 +1562,17 @@ async fn handle_smtp_session(
             write_smtp(&mut writer, "250-LPE-CT").await?;
             write_smtp(&mut writer, "250 SIZE").await?;
         } else if upper.starts_with("MAIL FROM:") {
-            mail_from = command[10..].trim().trim_matches(['<', '>']).to_string();
+            let candidate = command[10..].trim().trim_matches(['<', '>']).to_string();
+            if let transport_policy::AddressPolicyVerdict::Reject(reason) =
+                transport_policy::evaluate_address_policy(
+                    transport_policy::AddressRole::Sender,
+                    &candidate,
+                )
+            {
+                write_smtp(&mut writer, &format!("550 sender rejected ({reason})")).await?;
+                continue;
+            }
+            mail_from = candidate;
             rcpt_to.clear();
             write_smtp(&mut writer, "250 sender accepted").await?;
         } else if upper.starts_with("RCPT TO:") {
@@ -1475,7 +1580,44 @@ async fn handle_smtp_session(
                 write_smtp(&mut writer, "503 send MAIL FROM first").await?;
                 continue;
             }
-            rcpt_to.push(command[8..].trim().trim_matches(['<', '>']).to_string());
+            let recipient = command[8..].trim().trim_matches(['<', '>']).to_string();
+            if let transport_policy::AddressPolicyVerdict::Reject(reason) =
+                transport_policy::evaluate_address_policy(
+                    transport_policy::AddressRole::Recipient,
+                    &recipient,
+                )
+            {
+                write_smtp(&mut writer, &format!("550 recipient rejected ({reason})")).await?;
+                continue;
+            }
+            let config = runtime_config(&state_file)?;
+            match transport_policy::verify_recipient_with_core(
+                &client,
+                &config.core_delivery_base_url,
+                Some(&mail_from),
+                &recipient,
+                Some(&helo),
+                Some(&peer.to_string()),
+                None,
+            )
+            .await
+            {
+                transport_policy::RecipientVerificationVerdict::Accept => {
+                    rcpt_to.push(recipient);
+                }
+                transport_policy::RecipientVerificationVerdict::Reject(reason) => {
+                    write_smtp(&mut writer, &format!("550 recipient rejected ({reason})")).await?;
+                    continue;
+                }
+                transport_policy::RecipientVerificationVerdict::Defer(reason) => {
+                    write_smtp(
+                        &mut writer,
+                        &format!("451 recipient verification unavailable ({reason})"),
+                    )
+                    .await?;
+                    continue;
+                }
+            }
             write_smtp(&mut writer, "250 recipient accepted").await?;
         } else if upper == "DATA" {
             if mail_from.is_empty() || rcpt_to.is_empty() {
@@ -1689,6 +1831,29 @@ async fn receive_message_with_validator<D: Detector>(
                 status = %message.status,
                 "inbound message quarantined after Magika failure"
             );
+            return Ok(message);
+        }
+    }
+    match transport_policy::evaluate_attachment_policy(
+        validator,
+        IngressContext::LpeCtInboundSmtp,
+        &message.data,
+    )? {
+        transport_policy::AttachmentPolicyVerdict::Accept => {}
+        transport_policy::AttachmentPolicyVerdict::Restrict(reason) => {
+            observability::record_security_event("attachment_policy_quarantine");
+            message.status = "quarantined".to_string();
+            message.magika_decision = Some("quarantine".to_string());
+            message.magika_summary = Some(reason.clone());
+            message.security_score += 4.0;
+            message.decision_trace.push(DecisionTraceEntry {
+                stage: "attachment-policy".to_string(),
+                outcome: "quarantine".to_string(),
+                detail: reason,
+            });
+            move_message(spool_dir, &message, "incoming", "quarantine").await?;
+            persist_quarantine_metadata_or_warn(spool_dir, config, &message).await;
+            let _ = append_transport_audit(spool_dir, "quarantine", &message);
             return Ok(message);
         }
     }
@@ -4272,6 +4437,7 @@ fn should_quarantine(data: &[u8]) -> bool {
         lower.starts_with("x-lpe-ct-quarantine: yes") || lower.contains("[quarantine]")
     })
 }
+
 
 fn normalize_smtp_target(target: &str) -> String {
     target

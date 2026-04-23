@@ -40,9 +40,13 @@ For outbound `LPE -> LPE-CT` handoff, the sorting center now also covers:
 
 - local outbound routing rules
 - local outbound throttling
+- outbound DKIM signing for configured sender domains
+- sender and recipient allow/block policy enforcement
 - retry backoff informed by the upstream attempt count supplied by `LPE`
 - classification of `SMTP` replies into `relayed`, `deferred`, `bounced`, or `failed`
 - structured technical and `DSN` detail for the latest attempt
+
+Inbound `SMTP` recipient verification remains an `LPE`-backed internal decision. `LPE-CT` may cache the result locally, but it must not replace that contract with public callback-verification tricks or invent canonical mailbox state in the `DMZ`.
 
 ### Architecture position
 

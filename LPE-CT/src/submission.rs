@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use lpe_magika::{IngressContext, Validator};
 use lpe_domain::{
     SignedIntegrationHeaders, SmtpSubmissionAuthRequest, SmtpSubmissionAuthResponse,
     SmtpSubmissionRequest, SmtpSubmissionResponse, INTEGRATION_KEY_HEADER,
@@ -18,7 +19,7 @@ use tokio_rustls::{
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::integration_shared_secret;
+use crate::{integration_shared_secret, transport_policy};
 
 const SUBMISSION_AUTH_PATH: &str = "/internal/lpe-ct/submission-auth";
 const SUBMISSION_ACCEPT_PATH: &str = "/internal/lpe-ct/submissions";
@@ -176,7 +177,17 @@ async fn handle_submission_session(
         }
 
         if upper.starts_with("MAIL FROM:") {
-            transaction.mail_from = normalize_path_argument(&command[10..]);
+            let candidate = normalize_path_argument(&command[10..]);
+            if let transport_policy::AddressPolicyVerdict::Reject(reason) =
+                transport_policy::evaluate_address_policy(
+                    transport_policy::AddressRole::Sender,
+                    &candidate,
+                )
+            {
+                write_line(&mut writer, &format!("550 sender rejected ({reason})")).await?;
+                continue;
+            }
+            transaction.mail_from = candidate;
             transaction.rcpt_to.clear();
             write_line(&mut writer, "250 sender accepted").await?;
             continue;
@@ -187,9 +198,17 @@ async fn handle_submission_session(
                 write_line(&mut writer, "503 send MAIL FROM first").await?;
                 continue;
             }
-            transaction
-                .rcpt_to
-                .push(normalize_path_argument(&command[8..]));
+            let recipient = normalize_path_argument(&command[8..]);
+            if let transport_policy::AddressPolicyVerdict::Reject(reason) =
+                transport_policy::evaluate_address_policy(
+                    transport_policy::AddressRole::Recipient,
+                    &recipient,
+                )
+            {
+                write_line(&mut writer, &format!("550 recipient rejected ({reason})")).await?;
+                continue;
+            }
+            transaction.rcpt_to.push(recipient);
             write_line(&mut writer, "250 recipient accepted").await?;
             continue;
         }
@@ -205,6 +224,19 @@ async fn handle_submission_session(
             }
             write_line(&mut writer, "354 end with <CRLF>.<CRLF>").await?;
             let data = read_data(&mut reader).await?;
+            let validator = Validator::from_env();
+            match transport_policy::evaluate_attachment_policy(
+                &validator,
+                IngressContext::SmtpClientSubmission,
+                &data,
+            )? {
+                transport_policy::AttachmentPolicyVerdict::Accept => {}
+                transport_policy::AttachmentPolicyVerdict::Restrict(reason) => {
+                    write_line(&mut writer, &format!("554 submission rejected ({reason})")).await?;
+                    transaction.reset_message();
+                    continue;
+                }
+            }
             let request = SmtpSubmissionRequest {
                 trace_id: format!("lpe-ct-sub-{}", Uuid::new_v4()),
                 helo: transaction.helo.clone(),

@@ -11,6 +11,7 @@ This document describes mail flow, edge security, traceability, and quarantine b
 `LPE` persists mailboxes and remains the system of record.
 
 The current `LPE-CT` implementation already executes real `SPF`, `DKIM`, and `DMARC` validation, greylisting, `DNSBL/RBL` lookups, simple local reputation, and a detailed decision trace persisted in the spool.
+Outbound transport policy now also covers configured DKIM signing, sender and recipient allow/block rules, internal `LPE`-backed inbound recipient verification with short-lived local caching, and attachment filtering rules keyed by extension, MIME type, and detected file type.
 
 The inbound perimeter pipeline is now explicitly staged as:
 

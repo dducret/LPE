@@ -160,6 +160,64 @@ Additional command-style providers can be chained after `takeri` with:
 - default: `9.0`
 - messages at or above this score are rejected
 
+`LPE_CT_POLICY_ALLOW_SENDERS` / `LPE_CT_POLICY_BLOCK_SENDERS`
+
+- default: empty
+- comma-separated exact sender addresses or bare domains
+- applied on inbound `MAIL FROM`, authenticated submission `MAIL FROM`, and outbound relay handoff
+
+`LPE_CT_POLICY_ALLOW_RECIPIENTS` / `LPE_CT_POLICY_BLOCK_RECIPIENTS`
+
+- default: empty
+- comma-separated exact recipient addresses or bare domains
+- applied on inbound `RCPT TO`, authenticated submission `RCPT TO`, and outbound relay handoff
+
+`LPE_CT_RECIPIENT_VERIFICATION_ENABLED`
+
+- default: `false`
+- when enabled, inbound `SMTP` recipient acceptance is checked against an internal `LPE` verification API and cached locally
+
+`LPE_CT_RECIPIENT_VERIFICATION_FAIL_CLOSED`
+
+- default: `true`
+- when enabled, internal verification bridge failures return temporary `451` instead of silently accepting unverifiable recipients
+
+`LPE_CT_RECIPIENT_VERIFICATION_CACHE_TTL_SECONDS`
+
+- default: `300`
+- local cache TTL for positive and negative recipient-verification results
+
+`LPE_CT_OUTBOUND_DKIM_ENABLED`
+
+- default: `false`
+- enables DKIM signing in the outbound relay flow before `SMTP` delivery
+
+`LPE_CT_OUTBOUND_DKIM_KEYS`
+
+- default: empty
+- semicolon-separated `domain|selector|private-key-path` entries
+- only sender domains with a configured key are signed
+
+`LPE_CT_OUTBOUND_DKIM_HEADERS`
+
+- default: `from,to,cc,subject,mime-version,content-type,message-id`
+- signed header list passed into the DKIM signer
+
+`LPE_CT_ATTACHMENT_ALLOW_EXTENSIONS` / `LPE_CT_ATTACHMENT_BLOCK_EXTENSIONS`
+
+- default: empty
+- comma-separated attachment filename extensions enforced after MIME parsing
+
+`LPE_CT_ATTACHMENT_ALLOW_MIME_TYPES` / `LPE_CT_ATTACHMENT_BLOCK_MIME_TYPES`
+
+- default: empty
+- comma-separated declared or detected MIME types enforced by policy
+
+`LPE_CT_ATTACHMENT_ALLOW_DETECTED_TYPES` / `LPE_CT_ATTACHMENT_BLOCK_DETECTED_TYPES`
+
+- default: empty
+- comma-separated Magika detected-type labels enforced after file-type detection
+
 `LPE_CT_LOCAL_DB_URL`
 
 - default: none
@@ -233,9 +291,13 @@ The decision matrix is now intentionally stricter:
 - multiple triggered causes are accumulated in the final decision trace instead of keeping only the first matching rule
 - antivirus detections or suspicious provider outcomes force quarantine in `LPE-CT`
 - when `LPE_CT_ANTIVIRUS_FAIL_CLOSED=true`, provider execution failures also force quarantine
+- explicit sender or recipient block-list hits reject the transaction before final acceptance
+- when recipient verification is enabled, invalid local recipients are rejected during inbound `RCPT TO`
+- attachment policies can quarantine inbound messages or reject authenticated client submissions based on extension, MIME type, or detected file type
 - quarantined or rejected spam sessions can be terminated immediately after the final `SMTP` reply so the edge stops the transaction cleanly
 - outbound handoff now also runs through `bayespam`; high-scoring outbound content is quarantined before relay
 - outbound handoff now also runs through the same antivirus provider chain before relay
+- outbound relay can add a DKIM signature for sender domains that have an explicit configured key
 
 ## Operational recommendations
 
@@ -257,7 +319,6 @@ If those policy artifacts outgrow flat files, they may move into a dedicated pri
 
 It does not yet add:
 
-- outbound DKIM signing
 - inbound or outbound `ARC`
 - `MTA-STS` policy fetch and TLS-policy enforcement
 - `TLS-RPT` report generation and sending
