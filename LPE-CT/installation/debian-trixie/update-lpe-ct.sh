@@ -109,9 +109,13 @@ if [[ "${LPE_CT_RESET_STATE_ON_UPDATE}" == "true" ]]; then
   rm -f "${LPE_CT_STATE_FILE:-/var/lib/lpe-ct/state.json}"
   rm -rf \
     "${SPOOL_DIR}/incoming" \
+    "${SPOOL_DIR}/outbound" \
     "${SPOOL_DIR}/deferred" \
     "${SPOOL_DIR}/quarantine" \
     "${SPOOL_DIR}/held" \
+    "${SPOOL_DIR}/bounces" \
+    "${SPOOL_DIR}/policy" \
+    "${SPOOL_DIR}/greylist" \
     "${SPOOL_DIR}/sent"
 fi
 
@@ -127,7 +131,18 @@ CARGO_BIN="${CARGO_BIN}" \
 bash "${SRC_DIR}/LPE-CT/installation/debian-trixie/sync-takeri.sh"
 install_magika "${MAGIKA_VERSION}" "${MAGIKA_LINUX_X86_64_SHA256}"
 install -d -o root -g root "${WEB_ROOT}"
-install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${VENDOR_DIR}" "${SPOOL_DIR}" "${SPOOL_DIR}/incoming" "${SPOOL_DIR}/deferred" "${SPOOL_DIR}/quarantine" "${SPOOL_DIR}/held" "${SPOOL_DIR}/sent"
+install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" \
+  "${VENDOR_DIR}" \
+  "${SPOOL_DIR}" \
+  "${SPOOL_DIR}/incoming" \
+  "${SPOOL_DIR}/outbound" \
+  "${SPOOL_DIR}/deferred" \
+  "${SPOOL_DIR}/quarantine" \
+  "${SPOOL_DIR}/held" \
+  "${SPOOL_DIR}/bounces" \
+  "${SPOOL_DIR}/sent" \
+  "${SPOOL_DIR}/policy" \
+  "${SPOOL_DIR}/greylist"
 cp -a "${SRC_DIR}/LPE-CT/web/." "${WEB_ROOT}/"
 render_template \
   "${SRC_DIR}/LPE-CT/installation/debian-trixie/lpe-ct.service" \

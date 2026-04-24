@@ -48,7 +48,7 @@ Path conventions:
 
 For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI, without exposing the core back office on the DMZ server, also provisions a pinned `Magika` CLI binary in `/opt/lpe-ct/bin/magika` for inbound SMTP validation, performs a Git-based sparse synchronization of `takeri` from `https://github.com/AnimeForLife191/Shuhari-CyberForge.git` before building `/opt/lpe-ct/bin/Shuhari-CyberForge-CLI` as the default antivirus provider, and now provisions the default private `LPE-CT` PostgreSQL store for greylisting, reputation, `bayespam`, throttling, and quarantine metadata.
 
-The `LPE-CT` scripts also install an SMTP listener, a local spool in `/var/spool/lpe-ct`, and three test suites:
+The `LPE-CT` scripts also install the SMTP ingress listener, optionally support authenticated implicit-TLS client submission when `LPE_CT_SUBMISSION_BIND_ADDRESS` plus TLS material are configured, create the full runtime spool layout in `/var/spool/lpe-ct`, and provide these validation scripts:
 
 For the first `active/passive` `DMZ` deployment step, `LPE-CT/installation/debian-trixie` also provides `check-lpe-ct-ready.sh`, `lpe-ct-ha-set-role.sh`, and `keepalived-lpe-ct.conf.example`.
 It now also provides `test-ha-lpe-ct-active-passive.sh`, `lpe-ct-spool-recover.sh`, and `test-lpe-ct-spool-recovery.sh` for traffic gating and spool return-to-service validation.
@@ -227,6 +227,13 @@ The `LPE-CT` installer prompts for:
 
 Selected runtime values are written back to `/etc/lpe/lpe.env` or `/etc/lpe-ct/lpe-ct.env`. Selected install-layout values such as `INSTALL_ROOT`, `SRC_DIR`, `BIN_DIR`, `WEB_ROOT`, and service directories are written to `/etc/lpe/install.env` or `/etc/lpe-ct/install.env` so later `update` runs stay non-interactive and reuse the installed paths.
 
+The optional authenticated submission listener is not auto-enabled by the installer. To expose it intentionally, set:
+
+- `LPE_CT_SUBMISSION_BIND_ADDRESS`, typically `0.0.0.0:465`
+- `LPE_CT_SUBMISSION_TLS_CERT_PATH`
+- `LPE_CT_SUBMISSION_TLS_KEY_PATH`
+- optionally `LPE_CT_SUBMISSION_MAX_MESSAGE_SIZE_MB`
+
 ### Unattended installs
 
 Both first-install scripts remain unattended-friendly. In non-interactive mode, by `--non-interactive` or when no interactive `TTY` is available, they:
@@ -345,7 +352,7 @@ For public client auto-configuration, the exposed front end must remain `LPE-CT`
 
 - `Thunderbird` receives an `IMAP` profile
 - `Outlook` receives an `ActiveSync` profile
-- no client `SMTP` endpoint is advertised by default because the repository does not yet expose authenticated `465/587` client submission
+- no client `SMTP` endpoint is advertised by default unless the optional authenticated `LPE-CT` submission listener is explicitly configured and exposed
 - the internal `LPE -> LPE-CT` relay must never be advertised as a client-submission endpoint
 
 The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, and `LPE_AUTODISCOVER_ACTIVESYNC_URL` variables let you align the published HTTP/XML settings with the real public hostname. The detailed behavior is documented in `docs/architecture/client-autoconfiguration.md`.
@@ -358,6 +365,8 @@ For later resets:
 2. run `update-lpe.sh`
 
 `update-lpe.sh` now performs a destructive `0.1.3` reset by dropping and recreating the PostgreSQL `public` schema before applying `crates/lpe-storage/sql/schema.sql`. Do not run it on an instance that contains data you need to keep.
+
+`LPE-CT/installation/debian-trixie/update-lpe-ct.sh` is not destructive by default. It rebuilds and redeploys the service while preserving `state.json`, the full spool, retained history, and the private local PostgreSQL state unless `LPE_CT_RESET_STATE_ON_UPDATE=true` is set explicitly for a disposable environment.
 
 If you want to fetch the latest scripts first before an update:
 

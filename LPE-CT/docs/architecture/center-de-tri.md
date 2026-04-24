@@ -20,7 +20,7 @@ The perimeter pipeline now also executes:
 - greylisting
 - `DNSBL/RBL` lookups
 - `SPF`, `DKIM`, and `DMARC` verification
-- local `bayespam` scoring with spool-first corpus learning
+- local `bayespam` scoring with the dedicated private PostgreSQL store as the default indexed backend, plus migration from legacy spool artifacts when present
 - a configurable antivirus provider chain, with `takeri` as the default Git-synchronized Debian profile
 - anti-spam scoring and simple local reputation
 - detailed decision tracing persisted in the spool
@@ -49,12 +49,13 @@ That web surface stays bounded to sorting-center-owned state. It must not imply 
 
 `LPE-CT` may also use dedicated local technical data stores for perimeter-owned state such as Bayesian filtering, reputation, greylisting, quarantine indexes, or cluster coordination. Those stores must remain local to the sorting center and must not become canonical mailbox or collaboration storage.
 
-In the current repository state, the runtime still uses:
+In the current repository state, the runtime now uses:
 
-- `state.json` for management configuration
-- the local spool for inbound, outbound, quarantine, greylisting, reputation, and throttling artifacts
+- `state.json` for management configuration and bootstrap mirrors
+- the local spool for inbound and outbound queue ownership, quarantine payload custody, retained transport audit artifacts, and generated digest reports
+- the private dedicated PostgreSQL store as the default backend for indexed technical state such as greylisting, reputation, `bayespam`, throttling, quarantine metadata, retained history indexes, recipient-verification cache rows, and DKIM-domain references
 
-The target evolution is to keep spool custody for message payloads while allowing a private local database, including private `5432`, for higher-churn technical indexes and cluster metadata.
+Legacy flat-file policy artifacts in the spool are still migrated forward when present so older state can be retained during rollout, but the default indexed backend is no longer spool-only for greylisting, reputation, throttling, or `bayespam`.
 
 For outbound `LPE -> LPE-CT` handoff, the sorting center now also covers:
 

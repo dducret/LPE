@@ -5394,17 +5394,17 @@ fn parse_unix_timestamp(value: &str) -> Option<u64> {
 mod tests {
     use super::{
         apply_authentication_scores, classify_inbound_message, compose_rfc822_message,
-        dkim_disposition, dnsbl_query_name, encode_quoted_printable, evaluate_greylisting,
-        handle_smtp_session, initialize_spool, load_antivirus_providers, load_bayespam_corpus,
-        load_reputation_score, load_trace_details, parse_antivirus_output, parse_peer_ip,
-        persist_message, process_outbound_handoff, receive_message, receive_message_with_validator,
-        retry_after_seconds, retry_trace, score_bayespam, spf_disposition, stable_key_id,
-        summarize_dkim, summarize_dmarc, summarize_spf, train_bayespam, unix_now,
-        update_reputation, AntivirusProviderConfig, AntivirusProviderDecision, AuthSummary,
-        AuthenticationAssessment, BayesLabel, DkimDisposition, FilterAction, GreylistEntry,
-        OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig, SpfDisposition,
-        TransportDsnReport, TransportRouteDecision, TransportTechnicalStatus,
-        TransportThrottleStatus,
+        delete_trace, dkim_disposition, dnsbl_query_name, encode_quoted_printable,
+        evaluate_greylisting, handle_smtp_session, initialize_spool, load_antivirus_providers,
+        load_bayespam_corpus, load_reputation_score, load_trace_details, parse_antivirus_output,
+        parse_peer_ip, persist_message, process_outbound_handoff, receive_message,
+        receive_message_with_validator, release_trace, retry_after_seconds, retry_trace,
+        score_bayespam, spf_disposition, stable_key_id, summarize_dkim, summarize_dmarc,
+        summarize_spf, train_bayespam, unix_now, update_reputation, AntivirusProviderConfig,
+        AntivirusProviderDecision, AuthSummary, AuthenticationAssessment, BayesLabel,
+        DkimDisposition, FilterAction, GreylistEntry, OutboundRoutingRule, OutboundThrottleRule,
+        QueuedMessage, RuntimeConfig, SpfDisposition, TransportDsnReport, TransportRouteDecision,
+        TransportTechnicalStatus, TransportThrottleStatus,
     };
     use crate::env_test_lock;
     use axum::{routing::post, Json, Router};
@@ -6265,6 +6265,132 @@ mod tests {
         assert!(audit.contains("\"trace_id\":\"trace-retry-1\""));
         assert!(audit.contains("\"queue\":\"outbound\""));
         assert!(audit.contains("\"status\":\"outbound\""));
+    }
+
+    #[tokio::test]
+    async fn release_trace_moves_quarantined_inbound_back_to_incoming_and_appends_audit() {
+        let spool = temp_dir("trace-release");
+        initialize_spool(&spool).unwrap();
+        let config = runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+        let message = QueuedMessage {
+            id: "trace-release-1".to_string(),
+            direction: "inbound".to_string(),
+            received_at: "unix:1".to_string(),
+            peer: "203.0.113.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "sender@example.test".to_string(),
+            rcpt_to: vec!["dest@example.test".to_string()],
+            status: "quarantined".to_string(),
+            relay_error: Some("policy quarantine".to_string()),
+            magika_summary: None,
+            magika_decision: None,
+            spam_score: 7.0,
+            security_score: 4.0,
+            reputation_score: -3,
+            dnsbl_hits: vec!["zen.spamhaus.org".to_string()],
+            auth_summary: AuthSummary::default(),
+            decision_trace: Vec::new(),
+            remote_message_ref: Some("remote-ref".to_string()),
+            technical_status: Some(TransportTechnicalStatus {
+                phase: "data".to_string(),
+                smtp_code: Some(554),
+                enhanced_code: Some("5.7.1".to_string()),
+                remote_host: Some("mx.example.test:25".to_string()),
+                detail: Some("quarantined by policy".to_string()),
+            }),
+            dsn: Some(TransportDsnReport {
+                action: "failed".to_string(),
+                status: "5.7.1".to_string(),
+                diagnostic_code: Some("smtp; quarantined by policy".to_string()),
+                remote_mta: Some("mx.example.test".to_string()),
+            }),
+            route: Some(TransportRouteDecision {
+                rule_id: Some("primary".to_string()),
+                relay_target: Some("mx.example.test:25".to_string()),
+                queue: "incoming".to_string(),
+            }),
+            throttle: Some(TransportThrottleStatus {
+                scope: "recipient-domain".to_string(),
+                key: "example.test".to_string(),
+                limit: 10,
+                window_seconds: 60,
+                retry_after_seconds: 30,
+            }),
+            data: b"Subject: Release\r\n\r\nbody".to_vec(),
+        };
+        persist_message(&spool, "quarantine", &message)
+            .await
+            .unwrap();
+
+        let result = release_trace(&spool, &config, &message.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let details = load_trace_details(&spool, &message.id).unwrap().unwrap();
+        let audit =
+            std::fs::read_to_string(spool.join("policy").join("transport-audit.jsonl")).unwrap();
+
+        assert_eq!(result.from_queue, "quarantine");
+        assert_eq!(result.to_queue, "incoming");
+        assert_eq!(details.queue, "incoming");
+        assert_eq!(details.status, "incoming");
+        assert!(details.reason.is_none());
+        assert!(details.remote_message_ref.is_none());
+        assert!(details.technical_status.is_none());
+        assert!(details.dsn.is_none());
+        assert!(details.route.is_none());
+        assert!(details.throttle.is_none());
+        assert!(details
+            .decision_trace
+            .iter()
+            .any(|entry| entry.stage == "operator-action" && entry.outcome == "release"));
+        assert!(audit.contains("\"trace_id\":\"trace-release-1\""));
+        assert!(audit.contains("\"queue\":\"incoming\""));
+        assert!(audit.contains("\"status\":\"incoming\""));
+    }
+
+    #[tokio::test]
+    async fn delete_trace_rejects_non_quarantine_items() {
+        let spool = temp_dir("trace-delete-conflict");
+        initialize_spool(&spool).unwrap();
+        let config = runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+        let message = QueuedMessage {
+            id: "trace-delete-1".to_string(),
+            direction: "outbound".to_string(),
+            received_at: "unix:1".to_string(),
+            peer: "lpe-core".to_string(),
+            helo: "lpe-core".to_string(),
+            mail_from: "sender@example.test".to_string(),
+            rcpt_to: vec!["dest@example.test".to_string()],
+            status: "held".to_string(),
+            relay_error: Some("awaiting review".to_string()),
+            magika_summary: None,
+            magika_decision: None,
+            spam_score: 0.0,
+            security_score: 0.0,
+            reputation_score: 0,
+            dnsbl_hits: Vec::new(),
+            auth_summary: AuthSummary::default(),
+            decision_trace: Vec::new(),
+            remote_message_ref: None,
+            technical_status: None,
+            dsn: None,
+            route: None,
+            throttle: None,
+            data: b"Subject: Delete\r\n\r\nbody".to_vec(),
+        };
+        persist_message(&spool, "held", &message).await.unwrap();
+
+        let result = delete_trace(&spool, &config, &message.id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.from_queue, "held");
+        assert!(result.to_queue.is_empty());
+        assert_eq!(result.status, "held");
+        assert_eq!(result.detail, "only quarantined traces can be deleted");
+        assert!(spool.join("held").join("trace-delete-1.json").exists());
     }
 
     #[test]

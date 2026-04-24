@@ -204,6 +204,7 @@ Additional command-style providers can be chained after `takeri` with:
 
 - default: `from,sender,to,cc,subject,mime-version,content-type,message-id`
 - signed header list passed into the DKIM signer
+- the runtime normalizes this list to keep `sender` present so delegated send-on-behalf flows remain covered
 
 `LPE_CT_ATTACHMENT_ALLOW_EXTENSIONS` / `LPE_CT_ATTACHMENT_BLOCK_EXTENSIONS`
 
@@ -225,16 +226,23 @@ Additional command-style providers can be chained after `takeri` with:
 
 - default: none
 - required only when `LPE_CT_LOCAL_DB_ENABLED=true`
-- PostgreSQL connection string used to persist technical quarantine metadata
+- PostgreSQL connection string used to persist the default indexed technical `LPE-CT` state, including quarantine metadata, retained history indexes, `bayespam`, greylisting, reputation, throttling, digest settings, recipient-verification cache rows, and DKIM-domain references
 
 ## Spool and policy state
 
-`LPE_CT_SPOOL_DIR` now contains additional policy data:
+`LPE_CT_SPOOL_DIR` now contains these durable operational artifacts:
 
-- `greylist/`: first-seen triplets and release timestamps
-- `policy/reputation.json`: simple accumulated reputation counters
-- `policy/bayespam.json`: local Bayesian corpus (`ham_messages`, `spam_messages`, token counts)
-- `policy/<rule>.json`: local throttling windows keyed by routing/throttle rule
+- `greylist/`: legacy first-seen triplets that can still be migrated into the private PostgreSQL store
+- `policy/transport-audit.jsonl`: retained perimeter audit stream used for reporting and rebuild
+- `policy/digest-reports/`: generated digest artifacts
+- queue files under `incoming/`, `outbound/`, `deferred/`, `held/`, `quarantine/`, `bounces/`, and `sent/`
+
+When `LPE_CT_LOCAL_DB_ENABLED=true`, the active indexed policy state no longer lives primarily in flat spool JSON files:
+
+- greylisting uses `greylist_entries`
+- reputation uses `reputation_entries`
+- `bayespam` uses `bayespam_corpora`
+- throttling uses `throttle_windows`
 
 Message trace files now also persist:
 
@@ -284,7 +292,7 @@ Those rows remain technical only. They exist to keep the sorting-center backend 
 
 This trace is the primary operational artifact for explaining why a message was deferred, quarantined, rejected, or accepted.
 
-`bayespam` is spool-first in `v1.2.0`: the corpus lives in `policy/bayespam.json`, while optional private PostgreSQL remains available for quarantine metadata and later corpus indexing work.
+The current default profile stores `bayespam` in the private PostgreSQL `bayespam_corpora` table. Legacy `policy/bayespam.json` content is still migrated when present so older technical state can be carried forward during rollout.
 
 Outbound trace files now also persist:
 
@@ -419,8 +427,8 @@ Operator trace actions now behave defensively:
 ## Operational recommendations
 
 - keep recursive DNS resolvers reachable and low-latency, because SPF, DKIM, DMARC, and DNSBL now depend on them
-- monitor the size of `greylist/` and `policy/reputation.json` during the first production weeks
-- monitor `policy/bayespam.json` growth and back it up with the rest of the technical edge state
+- monitor private PostgreSQL growth for `greylist_entries`, `reputation_entries`, `bayespam_corpora`, `throttle_windows`, `quarantine_messages`, and `mail_flow_history` during the first production weeks
+- keep the private local database backup policy aligned with the retained spool artifacts, because the runtime now splits technical evidence between PostgreSQL indexes and spool-owned payload/report files
 - tune `LPE_CT_SPAM_QUARANTINE_THRESHOLD` and `LPE_CT_SPAM_REJECT_THRESHOLD` conservatively before tightening
 - keep `LPE_CT_BAYESPAM_AUTO_LEARN=true` only if quarantine/reject decisions are already reasonably clean
 - review quarantined trace files before enabling `LPE_CT_REQUIRE_DKIM_ALIGNMENT=true`
@@ -428,7 +436,7 @@ Operator trace actions now behave defensively:
 
 ## Current scope
 
-This implementation executes inbound SPF, DKIM, and DMARC verification, DNSBL checks, greylisting, Bayesian spam scoring with spool-first auto-learning, a configurable antivirus provider chain, reputation weighting, and detailed trace persistence.
+This implementation executes inbound SPF, DKIM, and DMARC verification, DNSBL checks, greylisting, Bayesian spam scoring with private-PostgreSQL-backed corpus state by default, a configurable antivirus provider chain, reputation weighting, and detailed trace persistence.
 
 It also now executes outbound routing selection, local throttling, retry backoff aware of the previous attempt count, and SMTP-result classification into `relayed`, `deferred`, `bounced`, or `failed`, with structured `DSN`/technical trace feedback for the `LPE` worker.
 

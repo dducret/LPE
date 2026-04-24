@@ -297,7 +297,16 @@ ensure_service_user() {
 
 prepare_directories() {
   install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${INSTALL_ROOT}" "${SRC_DIR}" "${BIN_DIR}" "${VENDOR_DIR}" "${STATE_DIR}" "${SPOOL_DIR}"
-  install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${SPOOL_DIR}/incoming" "${SPOOL_DIR}/deferred" "${SPOOL_DIR}/quarantine" "${SPOOL_DIR}/held" "${SPOOL_DIR}/sent"
+  install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" \
+    "${SPOOL_DIR}/incoming" \
+    "${SPOOL_DIR}/outbound" \
+    "${SPOOL_DIR}/deferred" \
+    "${SPOOL_DIR}/quarantine" \
+    "${SPOOL_DIR}/held" \
+    "${SPOOL_DIR}/bounces" \
+    "${SPOOL_DIR}/sent" \
+    "${SPOOL_DIR}/policy" \
+    "${SPOOL_DIR}/greylist"
   install -d -o root -g root "${WEB_ROOT}" "${ENV_DIR}"
 }
 
