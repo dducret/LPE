@@ -227,6 +227,7 @@ Additional command-style providers can be chained after `takeri` with:
 - default: none
 - required only when `LPE_CT_LOCAL_DB_ENABLED=true`
 - PostgreSQL connection string used to persist the default indexed technical `LPE-CT` state, including quarantine metadata, retained history indexes, `bayespam`, greylisting, reputation, throttling, digest settings, recipient-verification cache rows, and DKIM-domain references
+- when this is missing or the private PostgreSQL store is temporarily unreachable, `LPE-CT` now keeps the management API online in a degraded mode instead of making the `nginx` front end return `502`
 
 ## Spool and policy state
 

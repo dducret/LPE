@@ -53,7 +53,7 @@ The `LPE-CT` scripts also install the SMTP ingress listener, optionally support 
 For the first `active/passive` `DMZ` deployment step, `LPE-CT/installation/debian-trixie` also provides `check-lpe-ct-ready.sh`, `lpe-ct-ha-set-role.sh`, and `keepalived-lpe-ct.conf.example`.
 It now also provides `test-ha-lpe-ct-active-passive.sh`, `lpe-ct-spool-recover.sh`, and `test-lpe-ct-spool-recovery.sh` for traffic gating and spool return-to-service validation.
 
-The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL`, and `LPE_INTEGRATION_SHARED_SECRET` values across the two nodes. `LPE_INTEGRATION_SHARED_SECRET` is now mandatory on both sides at startup, must stay out of public interfaces, and must be set to a strong non-trivial value of at least `32` characters. The contract is documented in `docs/architecture/lpe-ct-integration.md`.
+The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL`, and `LPE_INTEGRATION_SHARED_SECRET` values across the two nodes. `LPE_INTEGRATION_SHARED_SECRET` is mandatory for `LPE <-> LPE-CT` bridge traffic, must stay out of public interfaces, and must be set to a strong non-trivial value of at least `32` characters. On `LPE-CT`, a missing or weak value now leaves the management UI reachable but reports the bridge as degraded until the secret is fixed. The contract is documented in `docs/architecture/lpe-ct-integration.md`.
 
 - `test-local-lpe-ct.sh` from the `LPE-CT` server
 - `test-from-lpe.sh` from the LAN or core server
@@ -367,6 +367,8 @@ For later resets:
 `update-lpe.sh` now performs a destructive `0.1.3` reset by dropping and recreating the PostgreSQL `public` schema before applying `crates/lpe-storage/sql/schema.sql`. Do not run it on an instance that contains data you need to keep.
 
 `LPE-CT/installation/debian-trixie/update-lpe-ct.sh` is not destructive by default. It rebuilds and redeploys the service while preserving `state.json`, the full spool, retained history, and the private local PostgreSQL state unless `LPE_CT_RESET_STATE_ON_UPDATE=true` is set explicitly for a disposable environment.
+
+When `LPE_CT_LOCAL_DB_ENABLED=true` but `LPE_CT_LOCAL_DB_URL` is missing or the private PostgreSQL store is unavailable, the `LPE-CT` management UI now still starts and reports a degraded state instead of failing closed behind `nginx`. Mail-flow indexing, recipient-verification cache persistence, and related management mirrors remain degraded until the database is reachable again.
 
 If you want to fetch the latest scripts first before an update:
 

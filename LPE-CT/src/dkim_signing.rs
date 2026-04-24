@@ -147,7 +147,10 @@ fn signing_domain_candidates(payload: &OutboundMessageHandoffRequest) -> Vec<Str
         domains.push(domain);
     }
     if let Some(domain) = payload.sender_address.as_deref().and_then(address_domain) {
-        if !domains.iter().any(|value| value.eq_ignore_ascii_case(&domain)) {
+        if !domains
+            .iter()
+            .any(|value| value.eq_ignore_ascii_case(&domain))
+        {
             domains.push(domain);
         }
     }

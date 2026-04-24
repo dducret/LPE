@@ -548,10 +548,10 @@ fn unix_now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        evaluate_address_policy, evaluate_attachment_policy, evaluate_attachment_policy_with_config,
-        verify_recipient_with_core, AddressPolicyVerdict, AddressRole, AttachmentPolicyConfig,
-        AttachmentPolicyVerdict, RecipientVerificationConfig, RecipientVerificationVerdict,
-        RECIPIENT_VERIFICATION_PATH,
+        evaluate_address_policy, evaluate_attachment_policy,
+        evaluate_attachment_policy_with_config, verify_recipient_with_core, AddressPolicyVerdict,
+        AddressRole, AttachmentPolicyConfig, AttachmentPolicyVerdict, RecipientVerificationConfig,
+        RecipientVerificationVerdict, RECIPIENT_VERIFICATION_PATH,
     };
     use crate::env_test_lock;
     use axum::{routing::post, Json, Router};

@@ -24,7 +24,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::net::TcpListener;
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 mod dkim_signing;
@@ -437,7 +437,6 @@ async fn main() -> Result<()> {
     let spool_dir = PathBuf::from(
         env::var("LPE_CT_SPOOL_DIR").unwrap_or_else(|_| "/var/spool/lpe-ct".to_string()),
     );
-    integration_shared_secret()?;
     smtp::initialize_spool(&spool_dir)?;
 
     let mut dashboard = load_or_initialize_state(&state_file)?;
@@ -447,15 +446,35 @@ async fn main() -> Result<()> {
     normalize_local_data_stores(&mut dashboard.local_data_stores);
     reporting::normalize_reporting_settings(&mut dashboard.reporting);
     let runtime = smtp::runtime_config_from_dashboard(&dashboard);
-    smtp::prepare_local_store(&spool_dir, &runtime).await?;
+    if let Err(error) = smtp::prepare_local_store(&spool_dir, &runtime).await {
+        if dashboard.local_data_stores.dedicated_postgres.enabled {
+            warn!(
+                error = %error,
+                "unable to prepare the private LPE-CT PostgreSQL store; continuing with degraded management state"
+            );
+        } else {
+            return Err(error);
+        }
+    }
     reporting::enforce_retention(&spool_dir, &runtime, &dashboard.reporting).await?;
     dashboard.site.management_bind = bind_address.clone();
     dashboard.site.public_smtp_bind = smtp_bind_address.clone();
     dashboard.network.submission_listener_enabled =
         submission_listener_is_configured(&submission_bind_address);
     persist_state(&state_file, &dashboard)?;
-    storage::sync_dashboard_configuration(&local_db_config_from_dashboard(&dashboard), &dashboard)
-        .await?;
+    if let Err(error) =
+        storage::sync_dashboard_configuration(&local_db_config_from_dashboard(&dashboard), &dashboard)
+            .await
+    {
+        if dashboard.local_data_stores.dedicated_postgres.enabled {
+            warn!(
+                error = %error,
+                "unable to mirror dashboard configuration into the private LPE-CT PostgreSQL store; continuing with degraded management state"
+            );
+        } else {
+            return Err(error);
+        }
+    }
 
     let state = AppState {
         store: Arc::new(Mutex::new(dashboard)),
