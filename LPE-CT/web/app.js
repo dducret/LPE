@@ -8,6 +8,7 @@ const elements = {
   sidebar: document.getElementById("sidebar"),
   sidebarBackdrop: document.getElementById("sidebar-backdrop"),
   sidebarToggle: document.getElementById("sidebar-toggle"),
+  mobileSidebarToggle: document.getElementById("mobile-sidebar-toggle"),
   drawerBackdrop: document.getElementById("drawer-backdrop"),
   drawer: document.getElementById("drawer"),
   drawerTitle: document.getElementById("drawer-title"),
@@ -32,12 +33,39 @@ const elements = {
   createDigestOverride: document.getElementById("create-digest-override"),
   nodeName: document.getElementById("node-name"),
   heroSummary: document.getElementById("hero-summary"),
+  sidebarNodeName: document.getElementById("sidebar-node-name"),
+  sidebarNodeCopy: document.getElementById("sidebar-node-copy"),
   statusBadge: document.getElementById("status-badge"),
   upstreamBadge: document.getElementById("upstream-badge"),
+  heroPrimaryRelay: document.getElementById("hero-primary-relay"),
+  heroRouteSummary: document.getElementById("hero-route-summary"),
+  heroReportingSummary: document.getElementById("hero-reporting-summary"),
+  heroReportingCopy: document.getElementById("hero-reporting-copy"),
+  operatorEmail: document.getElementById("operator-email"),
+  operatorRole: document.getElementById("operator-role"),
+  contextOperator: document.getElementById("context-operator"),
+  contextRole: document.getElementById("context-role"),
+  contextVersion: document.getElementById("context-version"),
+  contextLicense: document.getElementById("context-license"),
+  contextBuild: document.getElementById("context-build"),
+  contextTime: document.getElementById("context-time"),
   metricInbound: document.getElementById("metric-inbound"),
   metricDeferred: document.getElementById("metric-deferred"),
   metricQuarantine: document.getElementById("metric-quarantine"),
   metricAttempts: document.getElementById("metric-attempts"),
+  metricHeld: document.getElementById("metric-held"),
+  metricRoutingRules: document.getElementById("metric-routing-rules"),
+  metricDkimDomains: document.getElementById("metric-dkim-domains"),
+  metricRecipientVerification: document.getElementById("metric-recipient-verification"),
+  queueStatusList: document.getElementById("queue-status-list"),
+  scannerStatusList: document.getElementById("scanner-status-list"),
+  relayHealthList: document.getElementById("relay-health-list"),
+  topSpamRelaysList: document.getElementById("top-spam-relays-list"),
+  topVirusRelaysList: document.getElementById("top-virus-relays-list"),
+  topVirusesList: document.getElementById("top-viruses-list"),
+  scanSummaryList: document.getElementById("scan-summary-list"),
+  trafficChart: document.getElementById("traffic-chart"),
+  trafficTable: document.getElementById("traffic-table"),
 };
 
 const containers = {
@@ -76,6 +104,7 @@ const baseMessages = {
   skipToContent: "Skip to content",
   openNavigation: "Open navigation",
   closeNavigation: "Close navigation",
+  toggleSidebar: "Toggle sidebar",
   brand: "La Poste Electronique",
   loginTitle: "LPE-CT Management Login",
   loginCopy: "Authenticate with the management administrator configured for this sorting center.",
@@ -86,32 +115,110 @@ const baseMessages = {
   consoleTitle: "Sorting Center",
   consoleIntro:
     "Unified control plane for quarantine, transport history, perimeter policy, recipient verification, DKIM, and digest reporting.",
+  consoleSearchLabel: "Search console",
+  consoleSearchPlaceholder: "Search trace, domain, relay, or policy",
+  operatorRole: "Management administrator",
   refresh: "Refresh",
   refreshState: "Refresh state",
   refreshing: "Refreshing...",
   heroKicker: "DMZ sorting center",
   heroLoadingTitle: "Loading...",
   heroLoadingSummary: "Reading sorting-center state.",
+  heroActionPrimary: "Primary relay",
+  heroActionSecondary: "Retention and reporting",
   pillBoundary: "DMZ boundary",
   pillTrace: "Traceable flow",
   pillPolicy: "Operator policy",
   metricInbound: "Inbound",
+  metricInboundCopy: "Messages accepted into the perimeter queues.",
   metricDeferred: "Deferred",
+  metricDeferredCopy: "Transport items waiting for another delivery attempt.",
   metricQuarantine: "Quarantine",
+  metricQuarantineCopy: "Retained messages held for operator review.",
   metricAttempts: "Attempts / h",
+  metricAttemptsCopy: "Recent outbound activity across the relay boundary.",
+  metricHeld: "Held queue",
+  metricHeldCopy: "Messages retained outside the delivery path.",
+  metricRoutingRules: "Route diagnostics",
+  metricRoutingRulesCopy: "Configured routing rules and upstream paths.",
+  metricDkimDomains: "DKIM domains",
+  metricDkimDomainsCopy: "Signing profiles currently exposed by LPE-CT.",
+  metricVerification: "Recipient verification",
+  metricVerificationCopy: "Current bridge posture and validation mode.",
   navOperationsHeading: "Operations",
   navPolicyHeading: "Policy",
   navReportingHeading: "Reporting",
   navOverview: "Overview",
+  navOverviewCaption: "Health, queues, relay posture",
   navQuarantine: "Quarantine",
+  navQuarantineCaption: "Retained messages and release actions",
   navHistory: "Mail history",
+  navHistoryCaption: "Trace history, routes, outcomes",
   navAddressRules: "Allow / block lists",
+  navAddressRulesCaption: "Sender and recipient enforcement",
   navAttachmentRules: "Attachment rules",
+  navAttachmentRulesCaption: "Extension, MIME, detected type",
   navVerification: "Recipient verification",
+  navVerificationCaption: "Bridge mode, cache, fail posture",
   navDkim: "DKIM domains",
+  navDkimCaption: "Selectors, readiness, key status",
   navDigest: "Digest reports",
+  navDigestCaption: "Schedules, defaults, retained artifacts",
   navPlatform: "Node and transport",
+  navPlatformCaption: "Node identity, relay, network",
   navAudit: "Audit journal",
+  navAuditCaption: "Administrative changes and evidence",
+  sidebarStatusTitle: "Sorting-center posture",
+  sessionContextTitle: "Operator session",
+  sessionContextHeading: "Current console context",
+  sessionOperatorLabel: "Operator",
+  sessionRoleLabel: "Role",
+  sessionVersionLabel: "Version",
+  sessionLicenseLabel: "License",
+  sessionBuildLabel: "Build source",
+  sessionTimeLabel: "Current time",
+  queueStatusTitle: "Mail queue status",
+  queueStatusHeading: "Live queue posture",
+  scannerStatusTitle: "Scanner and policy status",
+  scannerStatusHeading: "Validation chain",
+  relayHealthTitle: "Node and relay health",
+  relayHealthHeading: "Connectivity posture",
+  topSpamRelaysTitle: "Top spam relays",
+  topSpamRelaysHeading: "Recent retained sources",
+  topVirusRelaysTitle: "Top suspicious relays",
+  topVirusRelaysHeading: "Security-focused relay view",
+  topVirusesTitle: "Top detections",
+  topVirusesHeading: "Recent security reasons",
+  scanSummaryTitle: "Scan summary",
+  scanSummaryHeading: "Retained flow summary",
+  trafficHistoryTitle: "Recent traffic history",
+  trafficHistoryHeading: "Last 7 days",
+  queueIncoming: "Incoming queue",
+  queueActive: "Active queue",
+  queueDeferredLabel: "Deferred queue",
+  queueHold: "Hold queue",
+  queueQuarantineLabel: "Quarantine queue",
+  queueAttemptsLabel: "Delivery attempts / hour",
+  queueReachabilityLabel: "Upstream reachability",
+  scannerRelayLink: "Relay handoff",
+  scannerDkimReadiness: "DKIM readiness",
+  scannerVerification: "Recipient verification",
+  scannerDigestSchedule: "Digest schedule",
+  relayHealthMx: "Published MX",
+  relayHealthPrimary: "Primary upstream",
+  relayHealthSecondary: "Secondary upstream",
+  relayHealthManagement: "Management endpoint",
+  relayHealthNodeRole: "Node role",
+  relayHealthSync: "Sync interval",
+  scanSummaryRetained: "Retained traces",
+  scanSummaryQuarantine: "Quarantined now",
+  scanSummarySuspicious: "Security-flagged traces",
+  scanSummarySpam: "Spam-flagged traces",
+  scanSummaryDigest: "Digest artifacts",
+  scanSummaryAudit: "Recent audit entries",
+  noOverviewData: "No retained data available yet.",
+  noTrafficHistory: "No retained 7-day activity is available.",
+  listNoData: "No data",
   quarantineTitle: "Quarantine management",
   quarantineSummary:
     "Search retained messages, inspect trace evidence, and release or delete from the same operator surface.",
@@ -372,9 +479,13 @@ const localizedMessages = {
     skipToContent: "Aller au contenu",
     openNavigation: "Ouvrir la navigation",
     closeNavigation: "Fermer la navigation",
+    toggleSidebar: "Basculer la barre laterale",
     loginTitle: "Connexion LPE-CT",
     signIn: "Se connecter",
     signingIn: "Connexion...",
+    consoleSearchLabel: "Rechercher dans la console",
+    consoleSearchPlaceholder: "Rechercher trace, domaine, relais ou politique",
+    operatorRole: "Administrateur de gestion",
     refresh: "Actualiser",
     refreshState: "Actualiser l'etat",
     refreshing: "Actualisation...",
@@ -389,8 +500,37 @@ const localizedMessages = {
     cancel: "Annuler",
     retry: "Reessayer",
     consoleTitle: "Centre de tri",
+    navOverviewCaption: "Sante, files, posture relais",
+    navQuarantineCaption: "Messages retenus et actions",
+    navHistoryCaption: "Historique des traces et routes",
+    navAddressRulesCaption: "Regles expediteur et destinataire",
+    navAttachmentRulesCaption: "Extension, MIME, type detecte",
+    navVerificationCaption: "Mode pont, cache, posture",
+    navDkimCaption: "Selecteurs, etat, cles",
+    navDigestCaption: "Horaires, valeurs par defaut, artefacts",
+    navPlatformCaption: "Noeud, relais, reseau",
+    navAuditCaption: "Changements administratifs",
     navHistory: "Historique mail",
     navDigest: "Rapports digest",
+    sidebarStatusTitle: "Posture du centre de tri",
+    sessionContextTitle: "Session operateur",
+    sessionContextHeading: "Contexte courant",
+    sessionOperatorLabel: "Operateur",
+    sessionRoleLabel: "Role",
+    sessionVersionLabel: "Version",
+    sessionLicenseLabel: "Licence",
+    sessionBuildLabel: "Source build",
+    sessionTimeLabel: "Heure actuelle",
+    queueStatusTitle: "Etat des files",
+    scannerStatusTitle: "Statut validation et politique",
+    relayHealthTitle: "Sante noeud et relais",
+    topSpamRelaysTitle: "Principaux relais spam",
+    topVirusRelaysTitle: "Principaux relais suspects",
+    topVirusesTitle: "Principales detections",
+    scanSummaryTitle: "Resume d'analyse",
+    trafficHistoryTitle: "Historique recent",
+    trafficHistoryHeading: "7 derniers jours",
+    listNoData: "Aucune donnee",
     statusDrain: "Mode drain",
     statusProduction: "Production",
     relayReachable: "Relais LAN joignable",
@@ -404,9 +544,13 @@ const localizedMessages = {
     skipToContent: "Zum Inhalt springen",
     openNavigation: "Navigation oeffnen",
     closeNavigation: "Navigation schliessen",
+    toggleSidebar: "Seitenleiste umschalten",
     loginTitle: "LPE-CT Anmeldung",
     signIn: "Anmelden",
     signingIn: "Anmeldung...",
+    consoleSearchLabel: "Konsole durchsuchen",
+    consoleSearchPlaceholder: "Trace, Domain, Relay oder Richtlinie suchen",
+    operatorRole: "Verwaltungsadministrator",
     refresh: "Aktualisieren",
     refreshState: "Status aktualisieren",
     refreshing: "Aktualisierung...",
@@ -421,8 +565,37 @@ const localizedMessages = {
     cancel: "Abbrechen",
     retry: "Erneut versuchen",
     consoleTitle: "Sortierzentrum",
+    navOverviewCaption: "Gesundheit, Queues, Relay-Status",
+    navQuarantineCaption: "Zurueckgehaltene Nachrichten",
+    navHistoryCaption: "Trace-Verlauf und Routen",
+    navAddressRulesCaption: "Absender- und Empfaengerregeln",
+    navAttachmentRulesCaption: "Erweiterung, MIME, erkannter Typ",
+    navVerificationCaption: "Bridge-Modus und Cache",
+    navDkimCaption: "Selektoren, Bereitschaft, Schluessel",
+    navDigestCaption: "Plaene, Voreinstellungen, Artefakte",
+    navPlatformCaption: "Knoten, Relay, Netzwerk",
+    navAuditCaption: "Administrative Aenderungen",
     navHistory: "Mail-Verlauf",
     navDigest: "Digest-Berichte",
+    sidebarStatusTitle: "Status des Sortierzentrums",
+    sessionContextTitle: "Operator-Sitzung",
+    sessionContextHeading: "Aktueller Kontext",
+    sessionOperatorLabel: "Operator",
+    sessionRoleLabel: "Rolle",
+    sessionVersionLabel: "Version",
+    sessionLicenseLabel: "Lizenz",
+    sessionBuildLabel: "Build-Quelle",
+    sessionTimeLabel: "Aktuelle Zeit",
+    queueStatusTitle: "Queue-Status",
+    scannerStatusTitle: "Validierungs- und Policy-Status",
+    relayHealthTitle: "Knoten- und Relay-Gesundheit",
+    topSpamRelaysTitle: "Top-Spam-Relays",
+    topVirusRelaysTitle: "Top-verdaechtige Relays",
+    topVirusesTitle: "Top-Erkennungen",
+    scanSummaryTitle: "Scan-Zusammenfassung",
+    trafficHistoryTitle: "Letzte Aktivitaet",
+    trafficHistoryHeading: "Letzte 7 Tage",
+    listNoData: "Keine Daten",
     statusDrain: "Drain-Modus",
     statusProduction: "Produktion",
     relayReachable: "LAN-Relay erreichbar",
@@ -436,9 +609,13 @@ const localizedMessages = {
     skipToContent: "Vai al contenuto",
     openNavigation: "Apri navigazione",
     closeNavigation: "Chiudi navigazione",
+    toggleSidebar: "Attiva barra laterale",
     loginTitle: "Accesso LPE-CT",
     signIn: "Accedi",
     signingIn: "Accesso in corso...",
+    consoleSearchLabel: "Cerca nella console",
+    consoleSearchPlaceholder: "Cerca trace, dominio, relay o policy",
+    operatorRole: "Amministratore di gestione",
     refresh: "Aggiorna",
     refreshState: "Aggiorna stato",
     refreshing: "Aggiornamento...",
@@ -453,8 +630,37 @@ const localizedMessages = {
     cancel: "Annulla",
     retry: "Riprova",
     consoleTitle: "Centro di smistamento",
+    navOverviewCaption: "Salute, code, stato relay",
+    navQuarantineCaption: "Messaggi trattenuti e azioni",
+    navHistoryCaption: "Storico trace e percorsi",
+    navAddressRulesCaption: "Regole mittente e destinatario",
+    navAttachmentRulesCaption: "Estensione, MIME, tipo rilevato",
+    navVerificationCaption: "Modalita bridge e cache",
+    navDkimCaption: "Selettori, stato, chiavi",
+    navDigestCaption: "Pianificazioni, default, artefatti",
+    navPlatformCaption: "Nodo, relay, rete",
+    navAuditCaption: "Modifiche amministrative",
     navHistory: "Storico mail",
     navDigest: "Report digest",
+    sidebarStatusTitle: "Postura del centro",
+    sessionContextTitle: "Sessione operatore",
+    sessionContextHeading: "Contesto corrente",
+    sessionOperatorLabel: "Operatore",
+    sessionRoleLabel: "Ruolo",
+    sessionVersionLabel: "Versione",
+    sessionLicenseLabel: "Licenza",
+    sessionBuildLabel: "Origine build",
+    sessionTimeLabel: "Ora corrente",
+    queueStatusTitle: "Stato code",
+    scannerStatusTitle: "Stato validazione e policy",
+    relayHealthTitle: "Salute nodo e relay",
+    topSpamRelaysTitle: "Top relay spam",
+    topVirusRelaysTitle: "Top relay sospetti",
+    topVirusesTitle: "Top rilevazioni",
+    scanSummaryTitle: "Riepilogo scansione",
+    trafficHistoryTitle: "Storico recente",
+    trafficHistoryHeading: "Ultimi 7 giorni",
+    listNoData: "Nessun dato",
     statusDrain: "Modalita drain",
     statusProduction: "Produzione",
     relayReachable: "Relay LAN raggiungibile",
@@ -468,9 +674,13 @@ const localizedMessages = {
     skipToContent: "Ir al contenido",
     openNavigation: "Abrir navegacion",
     closeNavigation: "Cerrar navegacion",
+    toggleSidebar: "Alternar barra lateral",
     loginTitle: "Acceso LPE-CT",
     signIn: "Iniciar sesion",
     signingIn: "Iniciando sesion...",
+    consoleSearchLabel: "Buscar en la consola",
+    consoleSearchPlaceholder: "Buscar trace, dominio, relay o politica",
+    operatorRole: "Administrador de gestion",
     refresh: "Actualizar",
     refreshState: "Actualizar estado",
     refreshing: "Actualizando...",
@@ -485,8 +695,37 @@ const localizedMessages = {
     cancel: "Cancelar",
     retry: "Reintentar",
     consoleTitle: "Centro de clasificacion",
+    navOverviewCaption: "Salud, colas y postura relay",
+    navQuarantineCaption: "Mensajes retenidos y acciones",
+    navHistoryCaption: "Historial de traces y rutas",
+    navAddressRulesCaption: "Reglas de remitente y destinatario",
+    navAttachmentRulesCaption: "Extension, MIME, tipo detectado",
+    navVerificationCaption: "Modo puente y cache",
+    navDkimCaption: "Selectores, estado y claves",
+    navDigestCaption: "Programaciones, valores y artefactos",
+    navPlatformCaption: "Nodo, relay y red",
+    navAuditCaption: "Cambios administrativos",
     navHistory: "Historial de correo",
     navDigest: "Informes digest",
+    sidebarStatusTitle: "Postura del centro",
+    sessionContextTitle: "Sesion del operador",
+    sessionContextHeading: "Contexto actual",
+    sessionOperatorLabel: "Operador",
+    sessionRoleLabel: "Rol",
+    sessionVersionLabel: "Version",
+    sessionLicenseLabel: "Licencia",
+    sessionBuildLabel: "Origen build",
+    sessionTimeLabel: "Hora actual",
+    queueStatusTitle: "Estado de colas",
+    scannerStatusTitle: "Estado de validacion y politica",
+    relayHealthTitle: "Salud de nodo y relay",
+    topSpamRelaysTitle: "Principales relays spam",
+    topVirusRelaysTitle: "Principales relays sospechosos",
+    topVirusesTitle: "Principales detecciones",
+    scanSummaryTitle: "Resumen de analisis",
+    trafficHistoryTitle: "Historial reciente",
+    trafficHistoryHeading: "Ultimos 7 dias",
+    listNoData: "Sin datos",
     statusDrain: "Modo drain",
     statusProduction: "Produccion",
     relayReachable: "Relay LAN disponible",
@@ -572,6 +811,71 @@ function formatScore(value) {
   return Number(value).toFixed(1);
 }
 
+function formatDateTime(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) {
+    return getCopy().unset;
+  }
+  return new Intl.DateTimeFormat(i18n.getLocale(), {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function formatShortDate(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    return getCopy().unset;
+  }
+  return new Intl.DateTimeFormat(i18n.getLocale(), {
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
+function formatMetric(value) {
+  if (value === undefined || value === null || Number.isNaN(Number(value))) {
+    return "-";
+  }
+  return new Intl.NumberFormat(i18n.getLocale(), { notation: value >= 10000 ? "compact" : "standard" }).format(Number(value));
+}
+
+function formatDurationMinutes(seconds) {
+  if (seconds === undefined || seconds === null || Number.isNaN(Number(seconds))) {
+    return getCopy().unset;
+  }
+  const minutes = Math.max(1, Math.round(Number(seconds) / 60));
+  return `${formatNumber(minutes)} min`;
+}
+
+function formatBooleanLabel(value) {
+  return value ? getCopy().enabled : getCopy().disabled;
+}
+
+function getOperatorEmail() {
+  return window.localStorage.getItem(LAST_ADMIN_EMAIL_KEY) || getCopy().unset;
+}
+
+function getDigestSettings() {
+  return state.reporting?.settings ?? state.dashboard?.reporting ?? null;
+}
+
+function getTrafficRecords() {
+  return [...(state.history ?? []), ...(state.quarantine ?? [])];
+}
+
+function getRelayOrPeer(item) {
+  return item?.peer || item?.route_target || item?.current?.peer || item?.current?.route?.relay_target || getCopy().unset;
+}
+
+function getPolicySignals() {
+  return {
+    verification: state.policyStatus?.recipient_verification ?? null,
+    dkim: state.policyStatus?.dkim ?? null,
+    reporting: getDigestSettings(),
+  };
+}
+
 function showFeedback(message, type = "success") {
   elements.feedback.textContent = message;
   elements.feedback.className = type === "error" ? "feedback error" : type === "warning" ? "feedback warning" : "feedback";
@@ -599,10 +903,25 @@ function setButtonBusy(button, busy, busyLabel, idleLabel) {
 function setSidebarOpen(open) {
   document.body.classList.toggle("sidebar-open", open);
   elements.sidebarBackdrop.classList.toggle("hidden", !open);
-  elements.sidebarToggle?.setAttribute("aria-expanded", String(open));
-  if (elements.sidebarToggle) {
-    elements.sidebarToggle.textContent = open ? getCopy().closeNavigation : getCopy().openNavigation;
+  elements.mobileSidebarToggle?.setAttribute("aria-expanded", String(open));
+  if (elements.mobileSidebarToggle) {
+    elements.mobileSidebarToggle.textContent = open ? getCopy().closeNavigation : getCopy().openNavigation;
   }
+}
+
+function setSidebarCollapsed(collapsed) {
+  document.body.classList.toggle("sidebar-collapsed", collapsed);
+  try {
+    window.localStorage.setItem("lpeCtSidebarCollapsed", collapsed ? "true" : "false");
+  } catch {}
+}
+
+function toggleSidebarState() {
+  if (window.innerWidth <= 1024) {
+    setSidebarOpen(!document.body.classList.contains("sidebar-open"));
+    return;
+  }
+  setSidebarCollapsed(!document.body.classList.contains("sidebar-collapsed"));
 }
 
 // API Helpers
@@ -786,7 +1105,7 @@ function closeDrawer() {
 }
 
 function renderMetric(element, value) {
-  element.textContent = value === undefined || value === null ? "-" : String(value);
+  element.textContent = formatMetric(value);
 }
 
 function setAuthenticated(authenticated) {
@@ -799,6 +1118,19 @@ function syncLoadingState() {
   if (!state.dashboard) {
     elements.nodeName.textContent = copy.heroLoadingTitle;
     elements.heroSummary.textContent = copy.heroLoadingSummary;
+    elements.sidebarNodeName.textContent = copy.heroLoadingTitle;
+    elements.sidebarNodeCopy.textContent = copy.heroLoadingSummary;
+    elements.contextOperator.textContent = copy.unset;
+    elements.contextRole.textContent = copy.operatorRole;
+    elements.contextVersion.textContent = copy.unset;
+    elements.contextLicense.textContent = "Apache-2.0";
+    elements.contextBuild.textContent = copy.unset;
+    elements.contextTime.textContent = formatDateTime();
+    elements.heroPrimaryRelay.textContent = copy.unset;
+    elements.heroRouteSummary.textContent = copy.unset;
+    elements.heroReportingSummary.textContent = copy.unset;
+    elements.heroReportingCopy.textContent = copy.unset;
+    renderOverview();
     Object.values(containers).forEach((container) => setListLoading(container));
     return;
   }
@@ -1401,6 +1733,270 @@ function renderAudit() {
     .join("");
 }
 
+function buildMiniStat(label, value, detail = "") {
+  return `
+    <article class="mini-stat">
+      <div>
+        <span>${escapeHtml(label)}</span>
+        ${detail ? `<small>${escapeHtml(detail)}</small>` : ""}
+      </div>
+      <strong>${escapeHtml(value)}</strong>
+    </article>
+  `;
+}
+
+function buildStatusTile(title, stateLabel, tone = "muted", detail = "") {
+  return `
+    <article class="status-tile">
+      <p>${escapeHtml(title)}</p>
+      <span class="${statusChipClass(tone === "custom" ? stateLabel : tone)}">${escapeHtml(stateLabel)}</span>
+      ${detail ? `<small>${escapeHtml(detail)}</small>` : ""}
+    </article>
+  `;
+}
+
+function buildRankedRows(items) {
+  const copy = getCopy();
+  if (!items.length) {
+    return `<article class="ranked-row"><div class="ranked-index">-</div><div><strong>${escapeHtml(copy.listNoData)}</strong></div><span class="pill muted">${escapeHtml(copy.noOverviewData)}</span></article>`;
+  }
+  return items
+    .map(
+      (item, index) => `
+        <article class="ranked-row">
+          <div class="ranked-index">${index + 1}</div>
+          <div>
+            <strong>${escapeHtml(item.label)}</strong>
+            ${item.detail ? `<p>${escapeHtml(item.detail)}</p>` : ""}
+          </div>
+          <span class="pill">${escapeHtml(formatNumber(item.count))}</span>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function countRankedItems(items, resolveLabel, predicate = () => true, limit = 5) {
+  const counts = new Map();
+  items.forEach((item) => {
+    if (!predicate(item)) {
+      return;
+    }
+    const label = String(resolveLabel(item) ?? "").trim();
+    if (!label || label === getCopy().unset) {
+      return;
+    }
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  });
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, limit)
+    .map(([label, count]) => ({ label, count }));
+}
+
+function itemIsSecurityFlagged(item) {
+  const reason = String(item?.reason ?? item?.current?.reason ?? "").toLowerCase();
+  return Number(item?.security_score ?? item?.current?.security_score ?? 0) > 0 || /(virus|malware|payload|phish|suspicious|infect)/.test(reason);
+}
+
+function extractThreatLabel(item) {
+  const reason = String(item?.reason ?? item?.current?.reason ?? "").trim();
+  if (reason) {
+    return reason;
+  }
+  const tag = (item?.policy_tags ?? item?.current?.policy_tags ?? []).find(Boolean);
+  return tag || "";
+}
+
+function buildTrafficSeries(records) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() - (6 - index));
+    return {
+      key: date.toISOString().slice(0, 10),
+      label: formatShortDate(date),
+      total: 0,
+      quarantine: 0,
+      security: 0,
+    };
+  });
+  const dayMap = new Map(days.map((day) => [day.key, day]));
+  records.forEach((item) => {
+    const rawDate = item.latest_event_at || item.received_at || item.generated_at || item.timestamp;
+    if (!rawDate) {
+      return;
+    }
+    const date = new Date(rawDate);
+    if (Number.isNaN(date.getTime())) {
+      return;
+    }
+    const key = date.toISOString().slice(0, 10);
+    const bucket = dayMap.get(key);
+    if (!bucket) {
+      return;
+    }
+    bucket.total += 1;
+    if (item.queue === "quarantine" || item.status === "quarantined") {
+      bucket.quarantine += 1;
+    }
+    if (itemIsSecurityFlagged(item)) {
+      bucket.security += 1;
+    }
+  });
+  return days;
+}
+
+function renderOverview() {
+  const copy = getCopy();
+  const dashboard = state.dashboard;
+  if (!dashboard) {
+    elements.queueStatusList.innerHTML = buildLoadingRows(2);
+    elements.scannerStatusList.innerHTML = buildLoadingRows(2);
+    elements.relayHealthList.innerHTML = buildLoadingRows(2);
+    elements.topSpamRelaysList.innerHTML = buildLoadingRows(1);
+    elements.topVirusRelaysList.innerHTML = buildLoadingRows(1);
+    elements.topVirusesList.innerHTML = buildLoadingRows(1);
+    elements.scanSummaryList.innerHTML = buildLoadingRows(2);
+    elements.trafficChart.innerHTML = "";
+    elements.trafficTable.innerHTML = `<article class="traffic-row"><strong>${escapeHtml(copy.noTrafficHistory)}</strong></article>`;
+    return;
+  }
+
+  const operatorEmail = getOperatorEmail();
+  const verification = state.policyStatus?.recipient_verification;
+  const dkim = state.policyStatus?.dkim;
+  const reporting = getDigestSettings();
+  const routeRules = state.routeDiagnostics?.routing?.rules ?? dashboard.routing?.rules ?? [];
+  const trafficRecords = getTrafficRecords();
+  const topSpamRelays = countRankedItems(trafficRecords, getRelayOrPeer, (item) => Number(item.spam_score ?? item.current?.spam_score ?? 0) > 0, 5);
+  const topVirusRelays = countRankedItems(trafficRecords, getRelayOrPeer, itemIsSecurityFlagged, 5);
+  const topViruses = countRankedItems(
+    trafficRecords,
+    (item) => extractThreatLabel(item),
+    (item) => itemIsSecurityFlagged(item),
+    5,
+  );
+  const trafficSeries = buildTrafficSeries(trafficRecords);
+  const trafficMax = Math.max(...trafficSeries.map((entry) => entry.total), 1);
+
+  elements.sidebarNodeName.textContent = dashboard.site.node_name || copy.heroLoadingTitle;
+  elements.sidebarNodeCopy.textContent = translate(copy.heroSummaryTemplate, {
+    dmzZone: dashboard.site.dmz_zone || copy.unset,
+    publishedMx: dashboard.site.published_mx || copy.unset,
+    primaryUpstream: dashboard.relay.primary_upstream || copy.unset,
+  });
+  elements.operatorEmail.textContent = operatorEmail;
+  elements.operatorRole.textContent = copy.operatorRole;
+  elements.contextOperator.textContent = operatorEmail;
+  elements.contextRole.textContent = copy.operatorRole;
+  elements.contextVersion.textContent = dashboard.updates?.last_applied_release || dashboard.updates?.channel || copy.unset;
+  elements.contextLicense.textContent = "Apache-2.0";
+  elements.contextBuild.textContent = dashboard.updates?.update_source || copy.unset;
+  elements.contextTime.textContent = formatDateTime();
+  elements.heroPrimaryRelay.textContent = dashboard.relay.primary_upstream || copy.unset;
+  elements.heroRouteSummary.textContent = `${formatNumber(routeRules.length)} ${copy.metricRoutingRules.toLowerCase()}`;
+  elements.heroReportingSummary.textContent = reporting
+    ? `${formatBooleanLabel(reporting.digest_enabled)} · ${formatNumber(reporting.digest_interval_minutes)} min`
+    : copy.unset;
+  elements.heroReportingCopy.textContent = reporting?.next_digest_run_at
+    ? `${formatNumber(state.digestReports.length)} · ${formatDateTime(reporting.next_digest_run_at)}`
+    : `${formatNumber(state.digestReports.length)} · ${copy.unset}`;
+
+  renderMetric(elements.metricInbound, dashboard.queues.inbound_messages);
+  renderMetric(elements.metricDeferred, dashboard.queues.deferred_messages);
+  renderMetric(elements.metricQuarantine, dashboard.queues.quarantined_messages);
+  renderMetric(elements.metricAttempts, dashboard.queues.delivery_attempts_last_hour);
+  renderMetric(elements.metricHeld, dashboard.queues.held_messages);
+  renderMetric(elements.metricRoutingRules, routeRules.length);
+  renderMetric(elements.metricDkimDomains, dkim?.domains?.length ?? dashboard.policies?.dkim?.domains?.length ?? 0);
+  elements.metricRecipientVerification.textContent = verification ? verification.operational_state || copy.unset : "-";
+
+  elements.queueStatusList.innerHTML = [
+    buildMiniStat(copy.metricInbound, formatMetric(dashboard.queues.inbound_messages), copy.queueIncoming),
+    buildMiniStat(copy.metricDeferred, formatMetric(dashboard.queues.deferred_messages), copy.queueDeferredLabel),
+    buildMiniStat(copy.metricHeld, formatMetric(dashboard.queues.held_messages), copy.queueHold),
+    buildMiniStat(copy.metricQuarantine, formatMetric(dashboard.queues.quarantined_messages), copy.queueQuarantineLabel),
+    buildMiniStat(copy.metricAttempts, formatMetric(dashboard.queues.delivery_attempts_last_hour), copy.queueAttemptsLabel),
+    buildMiniStat(
+      copy.queueReachabilityLabel,
+      dashboard.queues.upstream_reachable ? copy.relayReachable : copy.relayUnreachable,
+      dashboard.relay.primary_upstream || copy.unset,
+    ),
+  ].join("");
+
+  elements.scannerStatusList.innerHTML = [
+    buildStatusTile(copy.scannerRelayLink, dashboard.queues.upstream_reachable ? copy.active : copy.inactive, dashboard.queues.upstream_reachable ? "active" : "disabled", dashboard.relay.primary_upstream || copy.unset),
+    buildStatusTile(copy.scannerVerification, verification?.operational_state || copy.unset, "custom", verification ? `${formatNumber(verification.cache_ttl_seconds)}s` : copy.unset),
+    buildStatusTile(copy.scannerDkimReadiness, dkim?.operational_state || copy.unset, "custom", `${formatNumber(dkim?.domains?.length ?? 0)} ${copy.metricDkimDomains.toLowerCase()}`),
+    buildStatusTile(copy.scannerDigestSchedule, reporting?.digest_enabled ? copy.enabled : copy.disabled, reporting?.digest_enabled ? "enabled" : "disabled", reporting ? `${formatNumber(reporting.digest_interval_minutes)} min` : copy.unset),
+  ].join("");
+
+  elements.relayHealthList.innerHTML = [
+    buildMiniStat(copy.relayHealthNodeRole, dashboard.site.role || copy.unset, dashboard.site.region || copy.unset),
+    buildMiniStat(copy.relayHealthMx, dashboard.site.published_mx || copy.unset, dashboard.site.dmz_zone || copy.unset),
+    buildMiniStat(copy.relayHealthPrimary, dashboard.relay.primary_upstream || copy.unset, copy.relayReachable),
+    buildMiniStat(copy.relayHealthSecondary, dashboard.relay.secondary_upstream || copy.unset, dashboard.relay.ha_enabled ? copy.enabled : copy.disabled),
+    buildMiniStat(copy.relayHealthManagement, dashboard.site.management_fqdn || copy.unset, dashboard.site.management_bind || copy.unset),
+    buildMiniStat(copy.relayHealthSync, formatDurationMinutes(dashboard.relay.sync_interval_seconds), dashboard.relay.core_delivery_base_url || copy.unset),
+  ].join("");
+
+  elements.topSpamRelaysList.innerHTML = buildRankedRows(
+    topSpamRelays.map((entry) => ({ ...entry, detail: copy.topSpamRelaysHeading })),
+  );
+  elements.topVirusRelaysList.innerHTML = buildRankedRows(
+    topVirusRelays.map((entry) => ({ ...entry, detail: copy.topVirusRelaysHeading })),
+  );
+  elements.topVirusesList.innerHTML = buildRankedRows(
+    topViruses.map((entry) => ({ ...entry, detail: copy.topVirusesHeading })),
+  );
+
+  elements.scanSummaryList.innerHTML = [
+    buildMiniStat(copy.scanSummaryRetained, formatMetric(state.history.length)),
+    buildMiniStat(copy.scanSummaryQuarantine, formatMetric(dashboard.queues.quarantined_messages)),
+    buildMiniStat(copy.scanSummarySuspicious, formatMetric(trafficRecords.filter(itemIsSecurityFlagged).length)),
+    buildMiniStat(copy.scanSummarySpam, formatMetric(trafficRecords.filter((item) => Number(item.spam_score ?? item.current?.spam_score ?? 0) > 0).length)),
+    buildMiniStat(copy.scanSummaryDigest, formatMetric(state.digestReports.length)),
+    buildMiniStat(copy.scanSummaryAudit, formatMetric(dashboard.audit?.length ?? 0)),
+  ].join("");
+
+  elements.trafficChart.innerHTML = trafficSeries
+    .map((entry) => {
+      const totalHeight = Math.max(8, Math.round((entry.total / trafficMax) * 164));
+      const quarantineHeight = entry.total ? Math.max(8, Math.round((entry.quarantine / trafficMax) * 164)) : 8;
+      const securityHeight = entry.total ? Math.max(8, Math.round((entry.security / trafficMax) * 164)) : 8;
+      return `
+        <article class="traffic-bar">
+          <div class="traffic-bar-total">${escapeHtml(formatNumber(entry.total))}</div>
+          <div class="traffic-bar-stack">
+            <span class="traffic-bar-segment total" style="height:${totalHeight}px"></span>
+            <span class="traffic-bar-segment quarantine" style="height:${entry.quarantine ? quarantineHeight : 8}px;opacity:${entry.quarantine ? "1" : "0.22"}"></span>
+            <span class="traffic-bar-segment security" style="height:${entry.security ? securityHeight : 8}px;opacity:${entry.security ? "1" : "0.22"}"></span>
+          </div>
+          <div class="traffic-bar-label">${escapeHtml(entry.label)}</div>
+        </article>
+      `;
+    })
+    .join("");
+  elements.trafficTable.innerHTML = trafficSeries.some((entry) => entry.total > 0)
+    ? trafficSeries
+        .slice()
+        .reverse()
+        .map(
+          (entry) => `
+            <article class="traffic-row">
+              <strong>${escapeHtml(entry.label)}</strong>
+              <small>${escapeHtml(`${copy.metricInbound}: ${formatNumber(entry.total)}`)}</small>
+              <small>${escapeHtml(`${copy.metricQuarantine}: ${formatNumber(entry.quarantine)}`)}</small>
+              <small>${escapeHtml(`${copy.scanSummarySuspicious}: ${formatNumber(entry.security)}`)}</small>
+            </article>
+          `,
+        )
+        .join("")
+    : `<article class="traffic-row"><strong>${escapeHtml(copy.noTrafficHistory)}</strong></article>`;
+}
+
 function renderDashboard() {
   const copy = getCopy();
   const dashboard = state.dashboard;
@@ -1424,6 +2020,7 @@ function renderDashboard() {
   renderMetric(elements.metricDeferred, dashboard.queues.deferred_messages);
   renderMetric(elements.metricQuarantine, dashboard.queues.quarantined_messages);
   renderMetric(elements.metricAttempts, dashboard.queues.delivery_attempts_last_hour);
+  renderOverview();
 
   renderQuarantine();
   renderHistory();
@@ -2521,10 +3118,14 @@ function setLocale(locale) {
 }
 
 function hydrateLocaleSpecificState() {
-  if (elements.sidebarToggle) {
-    elements.sidebarToggle.textContent = document.body.classList.contains("sidebar-open")
+  if (elements.mobileSidebarToggle) {
+    elements.mobileSidebarToggle.textContent = document.body.classList.contains("sidebar-open")
       ? getCopy().closeNavigation
       : getCopy().openNavigation;
+  }
+  elements.operatorRole.textContent = getCopy().operatorRole;
+  if (state.dashboard) {
+    renderOverview();
   }
 }
 
@@ -2585,7 +3186,8 @@ elements.drawerBackdrop.addEventListener("click", (event) => {
 });
 
 elements.sidebarBackdrop.addEventListener("click", () => setSidebarOpen(false));
-elements.sidebarToggle?.addEventListener("click", () => setSidebarOpen(!document.body.classList.contains("sidebar-open")));
+elements.sidebarToggle?.addEventListener("click", toggleSidebarState);
+elements.mobileSidebarToggle?.addEventListener("click", toggleSidebarState);
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
@@ -2604,6 +3206,20 @@ i18n.bindLocalePickers(elements.localePickers, setLocale);
 hydrateLoginForm();
 registerSectionObserver();
 updateNavState("overview-section");
+try {
+  setSidebarCollapsed(window.localStorage.getItem("lpeCtSidebarCollapsed") === "true");
+} catch {}
 setLocale(i18n.getLocale());
 syncLoadingState();
+window.setInterval(() => {
+  if (!elements.contextTime) {
+    return;
+  }
+  elements.contextTime.textContent = formatDateTime();
+}, 60000);
+window.addEventListener("resize", () => {
+  if (window.innerWidth > 1024) {
+    setSidebarOpen(false);
+  }
+});
 void load();

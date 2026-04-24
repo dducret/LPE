@@ -8,6 +8,7 @@
   </head>
   <body>
     <a class="skip-link" href="#main-workspace" data-i18n="skipToContent">Skip to content</a>
+
     <section id="login-shell" class="shell login-shell">
       <section class="panel login-card" aria-labelledby="login-title">
         <div class="locale-row">
@@ -38,32 +39,58 @@
       </section>
     </section>
 
-    <main id="console-shell" class="shell hidden">
+    <main id="console-shell" class="shell console-shell hidden">
       <div id="sidebar-backdrop" class="sidebar-backdrop hidden" aria-hidden="true"></div>
+
       <aside id="sidebar" class="sidebar" aria-label="Management navigation">
         <div class="sidebar-stack">
-          <div>
-            <p class="eyebrow" data-i18n="brand">La Poste Electronique</p>
-            <h1 data-i18n="consoleTitle">Sorting Center</h1>
-            <p class="sidebar-copy" data-i18n="consoleIntro">
-              Unified control plane for quarantine, transport history, perimeter policy, recipient verification, DKIM, and digest reporting.
-            </p>
-          </div>
+          <section class="sidebar-brand">
+            <div class="brand-mark" aria-hidden="true">CT</div>
+            <div class="brand-copy">
+              <p class="eyebrow" data-i18n="brand">La Poste Electronique</p>
+              <h1 data-i18n="consoleTitle">Sorting Center</h1>
+              <p class="sidebar-copy" data-i18n="consoleIntro">
+                Unified control plane for quarantine, transport history, perimeter policy, recipient verification, DKIM, and digest reporting.
+              </p>
+            </div>
+          </section>
 
           <div class="sidebar-group">
-            <p class="sidebar-heading" data-i18n="navOperationsHeading">Operations</p>
+            <div class="sidebar-group-header">
+              <p class="sidebar-heading" data-i18n="navOperationsHeading">Operations</p>
+              <button
+                id="sidebar-toggle"
+                class="icon-button sidebar-collapse-button"
+                type="button"
+                aria-expanded="false"
+                aria-controls="sidebar"
+                data-i18n-aria-label="toggleSidebar"
+                aria-label="Toggle sidebar"
+              >
+                <span aria-hidden="true">=</span>
+              </button>
+            </div>
             <nav class="page-list">
               <button class="page-button" type="button" data-nav-button data-scroll-target="overview-section">
-                <span class="page-icon">01</span>
-                <span data-i18n="navOverview">Overview</span>
+                <span class="page-icon" aria-hidden="true">01</span>
+                <span class="page-copy">
+                  <span class="page-label" data-i18n="navOverview">Overview</span>
+                  <span class="page-caption" data-i18n="navOverviewCaption">Health, queues, relay posture</span>
+                </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-scroll-target="quarantine-section">
-                <span class="page-icon">02</span>
-                <span data-i18n="navQuarantine">Quarantine</span>
+                <span class="page-icon" aria-hidden="true">02</span>
+                <span class="page-copy">
+                  <span class="page-label" data-i18n="navQuarantine">Quarantine</span>
+                  <span class="page-caption" data-i18n="navQuarantineCaption">Retained messages and release actions</span>
+                </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-scroll-target="history-section">
-                <span class="page-icon">03</span>
-                <span data-i18n="navHistory">Mail history</span>
+                <span class="page-icon" aria-hidden="true">03</span>
+                <span class="page-copy">
+                  <span class="page-label" data-i18n="navHistory">Mail history</span>
+                  <span class="page-caption" data-i18n="navHistoryCaption">Trace history, routes, outcomes</span>
+                </span>
               </button>
             </nav>
           </div>
@@ -72,20 +99,32 @@
             <p class="sidebar-heading" data-i18n="navPolicyHeading">Policy</p>
             <nav class="page-list">
               <button class="page-button" type="button" data-nav-button data-scroll-target="address-policy-section">
-                <span class="page-icon">04</span>
-                <span data-i18n="navAddressRules">Allow / block lists</span>
+                <span class="page-icon" aria-hidden="true">04</span>
+                <span class="page-copy">
+                  <span class="page-label" data-i18n="navAddressRules">Allow / block lists</span>
+                  <span class="page-caption" data-i18n="navAddressRulesCaption">Sender and recipient enforcement</span>
+                </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-scroll-target="attachment-policy-section">
-                <span class="page-icon">05</span>
-                <span data-i18n="navAttachmentRules">Attachment rules</span>
+                <span class="page-icon" aria-hidden="true">05</span>
+                <span class="page-copy">
+                  <span class="page-label" data-i18n="navAttachmentRules">Attachment rules</span>
+                  <span class="page-caption" data-i18n="navAttachmentRulesCaption">Extension, MIME, detected type</span>
+                </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-scroll-target="verification-section">
-                <span class="page-icon">06</span>
-                <span data-i18n="navVerification">Recipient verification</span>
+                <span class="page-icon" aria-hidden="true">06</span>
+                <span class="page-copy">
+                  <span class="page-label" data-i18n="navVerification">Recipient verification</span>
+                  <span class="page-caption" data-i18n="navVerificationCaption">Bridge mode, cache, fail posture</span>
+                </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-scroll-target="dkim-section">
-                <span class="page-icon">07</span>
-                <span data-i18n="navDkim">DKIM domains</span>
+                <span class="page-icon" aria-hidden="true">07</span>
+                <span class="page-copy">
+                  <span class="page-label" data-i18n="navDkim">DKIM domains</span>
+                  <span class="page-caption" data-i18n="navDkimCaption">Selectors, readiness, key status</span>
+                </span>
               </button>
             </nav>
           </div>
@@ -94,22 +133,36 @@
             <p class="sidebar-heading" data-i18n="navReportingHeading">Reporting</p>
             <nav class="page-list">
               <button class="page-button" type="button" data-nav-button data-scroll-target="digest-section">
-                <span class="page-icon">08</span>
-                <span data-i18n="navDigest">Digest reports</span>
+                <span class="page-icon" aria-hidden="true">08</span>
+                <span class="page-copy">
+                  <span class="page-label" data-i18n="navDigest">Digest reports</span>
+                  <span class="page-caption" data-i18n="navDigestCaption">Schedules, defaults, retained artifacts</span>
+                </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-scroll-target="platform-section">
-                <span class="page-icon">09</span>
-                <span data-i18n="navPlatform">Node and transport</span>
+                <span class="page-icon" aria-hidden="true">09</span>
+                <span class="page-copy">
+                  <span class="page-label" data-i18n="navPlatform">Node and transport</span>
+                  <span class="page-caption" data-i18n="navPlatformCaption">Node identity, relay, network</span>
+                </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-scroll-target="audit-section">
-                <span class="page-icon">10</span>
-                <span data-i18n="navAudit">Audit journal</span>
+                <span class="page-icon" aria-hidden="true">10</span>
+                <span class="page-copy">
+                  <span class="page-label" data-i18n="navAudit">Audit journal</span>
+                  <span class="page-caption" data-i18n="navAuditCaption">Administrative changes and evidence</span>
+                </span>
               </button>
             </nav>
           </div>
         </div>
 
         <div class="sidebar-footer">
+          <section class="sidebar-status-card">
+            <span class="sidebar-status-label" data-i18n="sidebarStatusTitle">Sorting-center posture</span>
+            <strong id="sidebar-node-name">LPE-CT</strong>
+            <p id="sidebar-node-copy" data-i18n="heroLoadingSummary">Reading sorting-center state.</p>
+          </section>
           <label class="locale-picker sidebar-locale">
             <span data-i18n="languageLabel">Language</span>
             <select data-locale-picker></select>
@@ -119,64 +172,235 @@
       </aside>
 
       <section id="main-workspace" class="workspace" tabindex="-1">
-        <header class="mobile-toolbar">
-          <button
-            id="sidebar-toggle"
-            class="secondary-button mobile-nav-button"
-            type="button"
-            aria-expanded="false"
-            aria-controls="sidebar"
-            data-i18n="openNavigation"
-          >
-            Open navigation
-          </button>
-          <label class="locale-picker mobile-locale">
-            <span class="sr-only" data-i18n="languageLabel">Language</span>
-            <select data-locale-picker></select>
-          </label>
+        <header class="topbar panel">
+          <div class="topbar-primary">
+            <button
+              id="mobile-sidebar-toggle"
+              class="secondary-button mobile-nav-button"
+              type="button"
+              aria-expanded="false"
+              aria-controls="sidebar"
+              data-i18n="openNavigation"
+            >
+              Open navigation
+            </button>
+            <div class="search-shell">
+              <span class="search-icon" aria-hidden="true">?</span>
+              <label class="sr-only" for="console-search" data-i18n="consoleSearchLabel">Search console</label>
+              <input
+                id="console-search"
+                type="search"
+                data-i18n-placeholder="consoleSearchPlaceholder"
+                placeholder="Search trace, domain, relay, or policy"
+              />
+              <span class="search-shortcut" aria-hidden="true">/</span>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <button id="refresh-toolbar" class="secondary-button" type="button" data-i18n="refreshState">Refresh state</button>
+            <button id="run-digests" class="primary-button" type="button" data-i18n="runDigests">Run digests now</button>
+            <div class="operator-chip">
+              <div class="operator-avatar" aria-hidden="true">AD</div>
+              <div class="operator-copy">
+                <strong id="operator-email">admin</strong>
+                <span id="operator-role" data-i18n="operatorRole">Management administrator</span>
+              </div>
+            </div>
+          </div>
         </header>
 
-        <header id="overview-section" class="hero">
-          <div>
-            <p class="kicker" data-i18n="heroKicker">DMZ sorting center</p>
-            <h2 id="node-name">Loading...</h2>
-            <p id="hero-summary" class="hero-copy" data-i18n="heroLoadingSummary">Reading sorting-center state.</p>
-          </div>
-          <div class="hero-badges">
-            <span id="status-badge" class="badge">Status</span>
-            <span id="upstream-badge" class="badge muted">Relay</span>
-          </div>
-        </header>
+        <section id="overview-section" class="overview-stack">
+          <div class="overview-grid">
+            <section class="hero-card panel">
+              <div class="hero-copy-block">
+                <p class="kicker" data-i18n="heroKicker">DMZ sorting center</p>
+                <h2 id="node-name">Loading...</h2>
+                <p id="hero-summary" class="hero-copy" data-i18n="heroLoadingSummary">Reading sorting-center state.</p>
+                <div class="hero-badges">
+                  <span id="status-badge" class="badge">Status</span>
+                  <span id="upstream-badge" class="badge muted">Relay</span>
+                  <span class="pill" data-i18n="pillBoundary">DMZ boundary</span>
+                  <span class="pill" data-i18n="pillTrace">Traceable flow</span>
+                  <span class="pill" data-i18n="pillPolicy">Operator policy</span>
+                </div>
+              </div>
+              <div class="hero-actions">
+                <div class="hero-action-card">
+                  <span class="hero-action-label" data-i18n="heroActionPrimary">Primary relay</span>
+                  <strong id="hero-primary-relay">-</strong>
+                  <span id="hero-route-summary" class="hero-action-copy">-</span>
+                </div>
+                <div class="hero-action-card">
+                  <span class="hero-action-label" data-i18n="heroActionSecondary">Retention and reporting</span>
+                  <strong id="hero-reporting-summary">-</strong>
+                  <span id="hero-reporting-copy" class="hero-action-copy">-</span>
+                </div>
+              </div>
+            </section>
 
-        <section class="panel workspace-toolbar">
-          <div class="toolbar-actions">
-            <button id="refresh-toolbar" class="primary-button" type="button" data-i18n="refreshState">Refresh state</button>
-            <button id="run-digests" class="secondary-button" type="button" data-i18n="runDigests">Run digests now</button>
+            <section class="context-card panel">
+              <div class="section-head compact-head">
+                <div>
+                  <p class="section-kicker" data-i18n="sessionContextTitle">Operator session</p>
+                  <h3 data-i18n="sessionContextHeading">Current console context</h3>
+                </div>
+              </div>
+              <dl class="context-list">
+                <div>
+                  <dt data-i18n="sessionOperatorLabel">Operator</dt>
+                  <dd id="context-operator">-</dd>
+                </div>
+                <div>
+                  <dt data-i18n="sessionRoleLabel">Role</dt>
+                  <dd id="context-role">-</dd>
+                </div>
+                <div>
+                  <dt data-i18n="sessionVersionLabel">Version</dt>
+                  <dd id="context-version">-</dd>
+                </div>
+                <div>
+                  <dt data-i18n="sessionLicenseLabel">License</dt>
+                  <dd id="context-license">-</dd>
+                </div>
+                <div>
+                  <dt data-i18n="sessionBuildLabel">Build source</dt>
+                  <dd id="context-build">-</dd>
+                </div>
+                <div>
+                  <dt data-i18n="sessionTimeLabel">Current time</dt>
+                  <dd id="context-time">-</dd>
+                </div>
+              </dl>
+            </section>
           </div>
-          <div class="toolbar-chips">
-            <span class="pill" data-i18n="pillBoundary">DMZ boundary</span>
-            <span class="pill" data-i18n="pillTrace">Traceable flow</span>
-            <span class="pill" data-i18n="pillPolicy">Operator policy</span>
-          </div>
-        </section>
 
-        <section class="panel metrics">
-          <article>
-            <span data-i18n="metricInbound">Inbound</span>
-            <strong id="metric-inbound">-</strong>
-          </article>
-          <article>
-            <span data-i18n="metricDeferred">Deferred</span>
-            <strong id="metric-deferred">-</strong>
-          </article>
-          <article>
-            <span data-i18n="metricQuarantine">Quarantine</span>
-            <strong id="metric-quarantine">-</strong>
-          </article>
-          <article>
-            <span data-i18n="metricAttempts">Attempts / h</span>
-            <strong id="metric-attempts">-</strong>
-          </article>
+          <section class="kpi-grid">
+            <article class="kpi-card panel accent-ok">
+              <span data-i18n="metricInbound">Inbound</span>
+              <strong id="metric-inbound">-</strong>
+              <p data-i18n="metricInboundCopy">Messages accepted into the perimeter queues.</p>
+            </article>
+            <article class="kpi-card panel accent-primary">
+              <span data-i18n="metricDeferred">Deferred</span>
+              <strong id="metric-deferred">-</strong>
+              <p data-i18n="metricDeferredCopy">Transport items waiting for another delivery attempt.</p>
+            </article>
+            <article class="kpi-card panel accent-warn">
+              <span data-i18n="metricQuarantine">Quarantine</span>
+              <strong id="metric-quarantine">-</strong>
+              <p data-i18n="metricQuarantineCopy">Retained messages held for operator review.</p>
+            </article>
+            <article class="kpi-card panel accent-danger">
+              <span data-i18n="metricAttempts">Attempts / h</span>
+              <strong id="metric-attempts">-</strong>
+              <p data-i18n="metricAttemptsCopy">Recent outbound activity across the relay boundary.</p>
+            </article>
+            <article class="kpi-card panel accent-neutral">
+              <span data-i18n="metricHeld">Held queue</span>
+              <strong id="metric-held">-</strong>
+              <p data-i18n="metricHeldCopy">Messages retained outside the delivery path.</p>
+            </article>
+            <article class="kpi-card panel accent-neutral">
+              <span data-i18n="metricRoutingRules">Route diagnostics</span>
+              <strong id="metric-routing-rules">-</strong>
+              <p data-i18n="metricRoutingRulesCopy">Configured routing rules and upstream paths.</p>
+            </article>
+            <article class="kpi-card panel accent-neutral">
+              <span data-i18n="metricDkimDomains">DKIM domains</span>
+              <strong id="metric-dkim-domains">-</strong>
+              <p data-i18n="metricDkimDomainsCopy">Signing profiles currently exposed by LPE-CT.</p>
+            </article>
+            <article class="kpi-card panel accent-neutral">
+              <span data-i18n="metricVerification">Recipient verification</span>
+              <strong id="metric-recipient-verification">-</strong>
+              <p data-i18n="metricVerificationCopy">Current bridge posture and validation mode.</p>
+            </article>
+          </section>
+
+          <section class="dashboard-grid">
+            <article class="panel dashboard-module">
+              <div class="section-head compact-head">
+                <div>
+                  <p class="section-kicker" data-i18n="queueStatusTitle">Mail queue status</p>
+                  <h3 data-i18n="queueStatusHeading">Live queue posture</h3>
+                </div>
+              </div>
+              <div id="queue-status-list" class="mini-stat-list"></div>
+            </article>
+
+            <article class="panel dashboard-module">
+              <div class="section-head compact-head">
+                <div>
+                  <p class="section-kicker" data-i18n="scannerStatusTitle">Scanner and policy status</p>
+                  <h3 data-i18n="scannerStatusHeading">Validation chain</h3>
+                </div>
+              </div>
+              <div id="scanner-status-list" class="status-tile-grid"></div>
+            </article>
+
+            <article class="panel dashboard-module">
+              <div class="section-head compact-head">
+                <div>
+                  <p class="section-kicker" data-i18n="relayHealthTitle">Node and relay health</p>
+                  <h3 data-i18n="relayHealthHeading">Connectivity posture</h3>
+                </div>
+              </div>
+              <div id="relay-health-list" class="mini-stat-list"></div>
+            </article>
+
+            <article class="panel dashboard-module">
+              <div class="section-head compact-head">
+                <div>
+                  <p class="section-kicker" data-i18n="topSpamRelaysTitle">Top spam relays</p>
+                  <h3 data-i18n="topSpamRelaysHeading">Recent retained sources</h3>
+                </div>
+              </div>
+              <div id="top-spam-relays-list" class="ranked-list"></div>
+            </article>
+
+            <article class="panel dashboard-module">
+              <div class="section-head compact-head">
+                <div>
+                  <p class="section-kicker" data-i18n="topVirusRelaysTitle">Top suspicious relays</p>
+                  <h3 data-i18n="topVirusRelaysHeading">Security-focused relay view</h3>
+                </div>
+              </div>
+              <div id="top-virus-relays-list" class="ranked-list"></div>
+            </article>
+
+            <article class="panel dashboard-module">
+              <div class="section-head compact-head">
+                <div>
+                  <p class="section-kicker" data-i18n="topVirusesTitle">Top detections</p>
+                  <h3 data-i18n="topVirusesHeading">Recent security reasons</h3>
+                </div>
+              </div>
+              <div id="top-viruses-list" class="ranked-list"></div>
+            </article>
+
+            <article class="panel dashboard-module">
+              <div class="section-head compact-head">
+                <div>
+                  <p class="section-kicker" data-i18n="scanSummaryTitle">Scan summary</p>
+                  <h3 data-i18n="scanSummaryHeading">Retained flow summary</h3>
+                </div>
+              </div>
+              <div id="scan-summary-list" class="mini-stat-list two-columns"></div>
+            </article>
+
+            <article class="panel dashboard-module traffic-module">
+              <div class="section-head compact-head">
+                <div>
+                  <p class="section-kicker" data-i18n="trafficHistoryTitle">Recent traffic history</p>
+                  <h3 data-i18n="trafficHistoryHeading">Last 7 days</h3>
+                </div>
+              </div>
+              <div class="traffic-layout">
+                <div id="traffic-chart" class="traffic-chart" aria-hidden="true"></div>
+                <div id="traffic-table" class="traffic-table"></div>
+              </div>
+            </article>
+          </section>
         </section>
 
         <p id="feedback" class="feedback hidden" role="status" aria-live="polite"></p>
@@ -184,6 +408,7 @@
         <section id="quarantine-section" class="panel section-panel">
           <div class="section-head">
             <div>
+              <p class="section-kicker" data-i18n="navQuarantine">Quarantine</p>
               <h3 data-i18n="quarantineTitle">Quarantine management</h3>
               <p data-i18n="quarantineSummary">
                 Search retained messages, inspect trace evidence, and release or delete from the same operator surface.
@@ -212,6 +437,7 @@
         <section id="history-section" class="panel section-panel">
           <div class="section-head">
             <div>
+              <p class="section-kicker" data-i18n="navHistory">Mail history</p>
               <h3 data-i18n="historyTitle">Mail history and reporting</h3>
               <p data-i18n="historySummary">
                 Search retained inbound and outbound flow with disposition, route, trace, and policy context.
@@ -252,6 +478,7 @@
         <section id="address-policy-section" class="panel section-panel">
           <div class="section-head">
             <div>
+              <p class="section-kicker" data-i18n="navAddressRules">Allow / block lists</p>
               <h3 data-i18n="addressRulesTitle">Allow and block lists</h3>
               <p data-i18n="addressRulesSummary">
                 Maintain sender and recipient policy entries with explicit scope and effective action.
@@ -265,6 +492,7 @@
         <section id="attachment-policy-section" class="panel section-panel">
           <div class="section-head">
             <div>
+              <p class="section-kicker" data-i18n="navAttachmentRules">Attachment rules</p>
               <h3 data-i18n="attachmentRulesTitle">Attachment filtering rules</h3>
               <p data-i18n="attachmentRulesSummary">
                 Distinguish filename extension, MIME type, and Magika detected-type controls without leaving the policy workspace.
@@ -278,6 +506,7 @@
         <section id="verification-section" class="panel section-panel">
           <div class="section-head">
             <div>
+              <p class="section-kicker" data-i18n="navVerification">Recipient verification</p>
               <h3 data-i18n="verificationTitle">Recipient verification</h3>
               <p data-i18n="verificationSummary">
                 Show verification mode, failure posture, cache behavior, and the current operational backend clearly.
@@ -291,6 +520,7 @@
         <section id="dkim-section" class="panel section-panel">
           <div class="section-head">
             <div>
+              <p class="section-kicker" data-i18n="navDkim">DKIM domains</p>
               <h3 data-i18n="dkimTitle">DKIM domain configuration</h3>
               <p data-i18n="dkimSummary">
                 Manage per-domain selectors and key references, and inspect signing readiness from the management interface.
@@ -307,6 +537,7 @@
         <section id="digest-section" class="panel section-panel">
           <div class="section-head">
             <div>
+              <p class="section-kicker" data-i18n="navDigest">Digest reports</p>
               <h3 data-i18n="digestTitle">Digest reports</h3>
               <p data-i18n="digestSummary">
                 Operate domain defaults, mailbox overrides, retained report artifacts, and the scheduling controls used by the sorting center.
@@ -327,6 +558,7 @@
         <section id="platform-section" class="panel section-panel">
           <div class="section-head">
             <div>
+              <p class="section-kicker" data-i18n="navPlatform">Node and transport</p>
               <h3 data-i18n="platformTitle">Node and transport profile</h3>
               <p data-i18n="platformSummary">
                 Keep node identity, relay, network, and update settings available without breaking the primary mail-flow workspace.
@@ -339,6 +571,7 @@
         <section id="audit-section" class="panel section-panel">
           <div class="section-head">
             <div>
+              <p class="section-kicker" data-i18n="navAudit">Audit journal</p>
               <h3 data-i18n="auditTitle">Recent journal</h3>
               <p data-i18n="auditSummary">Recent management changes recorded by the sorting center.</p>
             </div>
@@ -363,7 +596,9 @@
             <h3 id="drawer-title" data-i18n="drawerDefaultTitle">Details</h3>
             <p id="drawer-summary" data-i18n="drawerDefaultSummary">Inspect details or edit the selected record.</p>
           </div>
-          <button id="drawer-close" class="icon-button" type="button" data-i18n-aria-label="close" aria-label="Close">x</button>
+          <button id="drawer-close" class="icon-button" type="button" data-i18n-aria-label="close" aria-label="Close">
+            <span aria-hidden="true">x</span>
+          </button>
         </div>
         <div id="drawer-content" class="drawer-content"></div>
       </aside>
