@@ -616,7 +616,7 @@ async fn search_mail_history_from_db(
         r#"
         WITH latest AS (
             SELECT DISTINCT ON (trace_id)
-                   trace_id, event_unix, timestamp, direction, queue, status, mail_from, rcpt_to,
+                   trace_id, event_unix, timestamp, direction, queue, status, peer, mail_from, rcpt_to,
                    subject, internet_message_id, reason, route_target, remote_message_ref,
                    spam_score, security_score, reputation_score, dnsbl_hits, auth_summary,
                    magika_summary, magika_decision, technical_status, dsn, throttle,
