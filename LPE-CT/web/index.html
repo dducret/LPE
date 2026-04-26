@@ -49,9 +49,6 @@
             <div class="brand-copy">
               <p class="eyebrow" data-i18n="brand">La Poste Electronique</p>
               <h1 data-i18n="consoleTitle">Sorting Center</h1>
-              <p class="sidebar-copy" data-i18n="consoleIntro">
-                Unified control plane for quarantine, transport history, perimeter policy, recipient verification, DKIM, and digest reporting.
-              </p>
             </div>
           </section>
 
@@ -177,118 +174,6 @@
         </header>
 
         <section id="overview-section" class="overview-stack page-view" data-page-view="dashboard">
-          <div class="overview-grid">
-            <section class="hero-card panel">
-              <div class="hero-copy-block">
-                <p class="kicker" data-i18n="heroKicker">DMZ sorting center</p>
-                <h2 id="node-name">Loading...</h2>
-                <p id="hero-summary" class="hero-copy" data-i18n="heroLoadingSummary">Reading sorting-center state.</p>
-                <div class="hero-badges">
-                  <span id="status-badge" class="badge">Status</span>
-                  <span id="upstream-badge" class="badge muted">Relay</span>
-                  <span class="pill" data-i18n="pillBoundary">DMZ boundary</span>
-                  <span class="pill" data-i18n="pillTrace">Traceable flow</span>
-                  <span class="pill" data-i18n="pillPolicy">Operator policy</span>
-                </div>
-              </div>
-              <div class="hero-actions">
-                <div class="hero-action-card">
-                  <span class="hero-action-label" data-i18n="heroActionPrimary">Primary relay</span>
-                  <strong id="hero-primary-relay">-</strong>
-                  <span id="hero-route-summary" class="hero-action-copy">-</span>
-                </div>
-                <div class="hero-action-card">
-                  <span class="hero-action-label" data-i18n="heroActionSecondary">Retention and reporting</span>
-                  <strong id="hero-reporting-summary">-</strong>
-                  <span id="hero-reporting-copy" class="hero-action-copy">-</span>
-                </div>
-              </div>
-            </section>
-
-            <section class="context-card panel">
-              <div class="section-head compact-head">
-                <div>
-                  <p class="section-kicker" data-i18n="sessionContextTitle">Operator session</p>
-                  <h3 data-i18n="sessionContextHeading">Current console context</h3>
-                </div>
-              </div>
-              <dl class="context-list">
-                <div>
-                  <dt data-i18n="sessionOperatorLabel">Operator</dt>
-                  <dd id="context-operator">-</dd>
-                </div>
-                <div>
-                  <dt data-i18n="sessionRoleLabel">Role</dt>
-                  <dd id="context-role">-</dd>
-                </div>
-                <div>
-                  <dt data-i18n="sessionVersionLabel">Version</dt>
-                  <dd id="context-version">-</dd>
-                </div>
-                <div>
-                  <dt data-i18n="sessionLicenseLabel">License</dt>
-                  <dd id="context-license">-</dd>
-                </div>
-                <div>
-                  <dt data-i18n="sessionBuildLabel">Build source</dt>
-                  <dd id="context-build">-</dd>
-                </div>
-                <div>
-                  <dt data-i18n="sessionTimeLabel">LPE-CT host date/time</dt>
-                  <dd id="context-time">-</dd>
-                </div>
-              </dl>
-            </section>
-          </div>
-
-          <section class="kpi-grid">
-            <article class="kpi-card panel accent-ok">
-              <span data-i18n="metricSystemHealth">System health</span>
-              <strong id="metric-system-health">-</strong>
-              <p data-i18n="metricSystemHealthCopy">Derived from drain mode, relay reachability, and perimeter policy state.</p>
-            </article>
-            <article class="kpi-card panel accent-ok">
-              <span data-i18n="metricInbound">Inbound</span>
-              <strong id="metric-inbound">-</strong>
-              <p data-i18n="metricInboundCopy">Messages accepted into the perimeter queues.</p>
-            </article>
-            <article class="kpi-card panel accent-primary">
-              <span data-i18n="metricDeferred">Deferred</span>
-              <strong id="metric-deferred">-</strong>
-              <p data-i18n="metricDeferredCopy">Transport items waiting for another delivery attempt.</p>
-            </article>
-            <article class="kpi-card panel accent-warn">
-              <span data-i18n="metricQuarantine">Quarantine</span>
-              <strong id="metric-quarantine">-</strong>
-              <p data-i18n="metricQuarantineCopy">Retained messages held for operator review.</p>
-            </article>
-            <article class="kpi-card panel accent-danger">
-              <span data-i18n="metricAttempts">Attempts / h</span>
-              <strong id="metric-attempts">-</strong>
-              <p data-i18n="metricAttemptsCopy">Recent outbound activity across the relay boundary.</p>
-            </article>
-            <article class="kpi-card panel accent-neutral">
-              <span data-i18n="metricHeld">Held queue</span>
-              <strong id="metric-held">-</strong>
-              <p data-i18n="metricHeldCopy">Messages retained outside the delivery path.</p>
-            </article>
-            <article class="kpi-card panel accent-neutral">
-              <span data-i18n="metricRoutingRules">Route diagnostics</span>
-              <strong id="metric-routing-rules">-</strong>
-              <p data-i18n="metricRoutingRulesCopy">Configured routing rules and upstream paths.</p>
-            </article>
-            <article class="kpi-card panel accent-neutral">
-              <span data-i18n="metricDkimDomains">DKIM domains</span>
-              <strong id="metric-dkim-domains">-</strong>
-              <p data-i18n="metricDkimDomainsCopy">Signing profiles currently exposed by LPE-CT.</p>
-            </article>
-            <article class="kpi-card panel accent-neutral">
-              <span data-i18n="metricVerification">Recipient verification</span>
-              <strong id="metric-recipient-verification">-</strong>
-              <p data-i18n="metricVerificationCopy">Current bridge posture and validation mode.</p>
-            </article>
-          </section>
-
           <section class="dashboard-grid dashboard-core-grid">
             <article class="panel dashboard-module">
               <div class="section-head compact-head">

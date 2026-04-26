@@ -354,34 +354,10 @@ function createContext() {
     "edit-digest-settings",
     "create-digest-default",
     "create-digest-override",
-    "node-name",
-    "hero-summary",
     "sidebar-node-name",
     "sidebar-node-copy",
-    "hero-primary-relay",
-    "hero-route-summary",
-    "hero-reporting-summary",
-    "hero-reporting-copy",
     "operator-email",
     "operator-role",
-    "context-operator",
-    "context-role",
-    "context-version",
-    "context-license",
-    "context-build",
-    "context-time",
-    "hero-summary",
-    "status-badge",
-    "upstream-badge",
-    "metric-system-health",
-    "metric-inbound",
-    "metric-deferred",
-    "metric-quarantine",
-    "metric-attempts",
-    "metric-held",
-    "metric-routing-rules",
-    "metric-dkim-domains",
-    "metric-recipient-verification",
     "system-overview-list",
     "queue-status-list",
     "scanner-status-list",
@@ -541,9 +517,7 @@ async function main() {
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(document.title, "LPE-CT Management Console");
-  assert.equal(elements["node-name"].textContent, "ct-node-1");
-  assert.equal(elements["metric-system-health"].textContent, "Production");
-  assert.match(elements["hero-summary"].textContent, /mx1\.example\.test/i);
+  assert.equal(elements["sidebar-node-name"].textContent, "ct-node-1");
   assert.match(elements["quarantine-list"].innerHTML, /trace-1/);
   assert.match(elements["history-list"].innerHTML, /trace-2/);
   assert.match(elements["platform-list"].innerHTML, /Node identity/);

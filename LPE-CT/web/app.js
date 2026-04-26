@@ -501,7 +501,21 @@ function closeDrawer() {
 }
 
 function renderMetric(element, value) {
-  element.textContent = formatMetric(value);
+  if (element) {
+    element.textContent = formatMetric(value);
+  }
+}
+
+function setText(element, value) {
+  if (element) {
+    element.textContent = value;
+  }
+}
+
+function setClassName(element, value) {
+  if (element) {
+    element.className = value;
+  }
 }
 
 function setAuthenticated(authenticated) {
@@ -512,21 +526,21 @@ function setAuthenticated(authenticated) {
 function syncLoadingState() {
   const copy = getCopy();
   if (!state.dashboard) {
-    elements.nodeName.textContent = copy.heroLoadingTitle;
-    elements.heroSummary.textContent = copy.heroLoadingSummary;
-    elements.sidebarNodeName.textContent = copy.heroLoadingTitle;
-    elements.sidebarNodeCopy.textContent = copy.heroLoadingSummary;
-    elements.contextOperator.textContent = copy.unset;
-    elements.contextRole.textContent = copy.operatorRole;
-    elements.contextVersion.textContent = copy.unset;
-    elements.contextLicense.textContent = "Apache-2.0";
-    elements.contextBuild.textContent = copy.unset;
+    setText(elements.nodeName, copy.heroLoadingTitle);
+    setText(elements.heroSummary, copy.heroLoadingSummary);
+    setText(elements.sidebarNodeName, copy.heroLoadingTitle);
+    setText(elements.sidebarNodeCopy, copy.heroLoadingSummary);
+    setText(elements.contextOperator, copy.unset);
+    setText(elements.contextRole, copy.operatorRole);
+    setText(elements.contextVersion, copy.unset);
+    setText(elements.contextLicense, "Apache-2.0");
+    setText(elements.contextBuild, copy.unset);
     renderHostClock();
-    elements.heroPrimaryRelay.textContent = copy.unset;
-    elements.heroRouteSummary.textContent = copy.unset;
-    elements.heroReportingSummary.textContent = copy.unset;
-    elements.heroReportingCopy.textContent = copy.unset;
-    elements.metricSystemHealth.textContent = "-";
+    setText(elements.heroPrimaryRelay, copy.unset);
+    setText(elements.heroRouteSummary, copy.unset);
+    setText(elements.heroReportingSummary, copy.unset);
+    setText(elements.heroReportingCopy, copy.unset);
+    setText(elements.metricSystemHealth, "-");
     renderOverview();
     Object.values(containers).forEach((container) => setListLoading(container));
     return;
@@ -1351,9 +1365,9 @@ function getHostClockDate() {
 }
 
 function renderHostClock() {
-  if (elements.contextTime) {
-    elements.contextTime.textContent = formatDateTime(getHostClockDate());
-  }
+  const value = formatDateTime(getHostClockDate());
+  setText(elements.contextTime, value);
+  setText(document.getElementById("host-clock"), value);
 }
 
 function formatResourceUsage(usedPercent, total) {
@@ -1377,6 +1391,12 @@ function renderSystemOverview(dashboard, copy) {
     system.os_architecture ||
     [system.os_name || system.operating_system, system.architecture || system.arch].filter(Boolean).join(" / ");
   elements.systemOverviewList.innerHTML = [
+    `
+      <article class="mini-stat">
+        <div><span>${escapeHtml(copy.sessionTimeLabel)}</span></div>
+        <strong id="host-clock">${escapeHtml(formatDateTime(getHostClockDate()))}</strong>
+      </article>
+    `,
     buildMiniStat(copy.systemHostname, system.hostname || dashboard.site?.node_name || copy.unset),
     buildMiniStat(copy.systemUptime, formatUptime(system.uptime_seconds)),
     buildMiniStat(copy.systemCpuUtilization, formatPercent(system.cpu_utilization_percent ?? system.cpu_percent)),
@@ -1483,30 +1503,30 @@ function renderOverview() {
   const scanSummary = buildScanSummary(trafficRecords);
   const trafficMax = Math.max(...trafficSeries.map((entry) => entry.total), 1);
 
-  elements.sidebarNodeName.textContent = site.node_name || copy.heroLoadingTitle;
-  elements.sidebarNodeCopy.textContent = translate(copy.heroSummaryTemplate, {
+  setText(elements.sidebarNodeName, site.node_name || copy.heroLoadingTitle);
+  setText(elements.sidebarNodeCopy, translate(copy.heroSummaryTemplate, {
     dmzZone: site.dmz_zone || copy.unset,
     publishedMx: site.published_mx || copy.unset,
     primaryUpstream: relay.primary_upstream || copy.unset,
-  });
-  elements.operatorEmail.textContent = operatorEmail;
-  elements.operatorRole.textContent = copy.operatorRole;
-  elements.contextOperator.textContent = operatorEmail;
-  elements.contextRole.textContent = copy.operatorRole;
-  elements.contextVersion.textContent = dashboard.updates?.last_applied_release || dashboard.updates?.channel || copy.unset;
-  elements.contextLicense.textContent = "Apache-2.0";
-  elements.contextBuild.textContent = dashboard.updates?.update_source || copy.unset;
+  }));
+  setText(elements.operatorEmail, operatorEmail);
+  setText(elements.operatorRole, copy.operatorRole);
+  setText(elements.contextOperator, operatorEmail);
+  setText(elements.contextRole, copy.operatorRole);
+  setText(elements.contextVersion, dashboard.updates?.last_applied_release || dashboard.updates?.channel || copy.unset);
+  setText(elements.contextLicense, "Apache-2.0");
+  setText(elements.contextBuild, dashboard.updates?.update_source || copy.unset);
   renderHostClock();
-  elements.heroPrimaryRelay.textContent = relay.primary_upstream || copy.unset;
-  elements.heroRouteSummary.textContent = `${formatNumber(routeRules.length)} ${copy.metricRoutingRules.toLowerCase()}`;
-  elements.heroReportingSummary.textContent = reporting
+  setText(elements.heroPrimaryRelay, relay.primary_upstream || copy.unset);
+  setText(elements.heroRouteSummary, `${formatNumber(routeRules.length)} ${copy.metricRoutingRules.toLowerCase()}`);
+  setText(elements.heroReportingSummary, reporting
     ? `${formatBooleanLabel(reporting.digest_enabled)} · ${formatNumber(reporting.digest_interval_minutes)} min`
-    : copy.unset;
-  elements.heroReportingCopy.textContent = reporting?.next_digest_run_at
+    : copy.unset);
+  setText(elements.heroReportingCopy, reporting?.next_digest_run_at
     ? `${formatNumber(state.digestReports.length)} · ${formatDateTime(reporting.next_digest_run_at)}`
-    : `${formatNumber(state.digestReports.length)} · ${copy.unset}`;
+    : `${formatNumber(state.digestReports.length)} · ${copy.unset}`);
 
-  elements.metricSystemHealth.textContent = posture.label;
+  setText(elements.metricSystemHealth, posture.label);
   renderMetric(elements.metricInbound, queues.inbound_messages);
   renderMetric(elements.metricDeferred, queues.deferred_messages);
   renderMetric(elements.metricQuarantine, queues.quarantined_messages);
@@ -1514,7 +1534,7 @@ function renderOverview() {
   renderMetric(elements.metricHeld, queues.held_messages);
   renderMetric(elements.metricRoutingRules, routeRules.length);
   renderMetric(elements.metricDkimDomains, dkim?.domains?.length ?? dashboard.policies?.dkim?.domains?.length ?? 0);
-  elements.metricRecipientVerification.textContent = verification ? verification.operational_state || copy.unset : "-";
+  setText(elements.metricRecipientVerification, verification ? verification.operational_state || copy.unset : "-");
 
   renderSystemOverview(dashboard, copy);
 
@@ -1609,18 +1629,18 @@ function renderDashboard() {
   }
   const posture = healthPosture(dashboard);
 
-  elements.nodeName.textContent = dashboard.site?.node_name || copy.heroLoadingTitle;
-  elements.heroSummary.textContent = translate(copy.heroSummaryTemplate, {
+  setText(elements.nodeName, dashboard.site?.node_name || copy.heroLoadingTitle);
+  setText(elements.heroSummary, translate(copy.heroSummaryTemplate, {
     dmzZone: dashboard.site?.dmz_zone || copy.unset,
     publishedMx: dashboard.site?.published_mx || copy.unset,
     primaryUpstream: dashboard.relay?.primary_upstream || copy.unset,
-  });
-  elements.statusBadge.textContent = posture.label;
-  elements.statusBadge.className = `badge ${posture.tone}`;
-  elements.upstreamBadge.textContent = dashboard.queues?.upstream_reachable ? copy.relayReachable : copy.relayUnreachable;
-  elements.upstreamBadge.className = dashboard.queues?.upstream_reachable ? "badge ok" : "badge danger";
+  }));
+  setText(elements.statusBadge, posture.label);
+  setClassName(elements.statusBadge, `badge ${posture.tone}`);
+  setText(elements.upstreamBadge, dashboard.queues?.upstream_reachable ? copy.relayReachable : copy.relayUnreachable);
+  setClassName(elements.upstreamBadge, dashboard.queues?.upstream_reachable ? "badge ok" : "badge danger");
 
-  elements.metricSystemHealth.textContent = posture.label;
+  setText(elements.metricSystemHealth, posture.label);
   renderMetric(elements.metricInbound, dashboard.queues?.inbound_messages);
   renderMetric(elements.metricDeferred, dashboard.queues?.deferred_messages);
   renderMetric(elements.metricQuarantine, dashboard.queues?.quarantined_messages);
