@@ -62,6 +62,7 @@ const elements = {
   metricRoutingRules: document.getElementById("metric-routing-rules"),
   metricDkimDomains: document.getElementById("metric-dkim-domains"),
   metricRecipientVerification: document.getElementById("metric-recipient-verification"),
+  systemOverviewList: document.getElementById("system-overview-list"),
   queueStatusList: document.getElementById("queue-status-list"),
   scannerStatusList: document.getElementById("scanner-status-list"),
   relayHealthList: document.getElementById("relay-health-list"),
@@ -101,6 +102,7 @@ const state = {
   digestReports: [],
   policyStatus: null,
   selectedTrace: null,
+  hostClockLoadedAt: null,
   loading: {
     dashboard: false,
     ops: false,
@@ -173,12 +175,50 @@ function formatMetric(value) {
   return new Intl.NumberFormat(i18n.getLocale(), { notation: value >= 10000 ? "compact" : "standard" }).format(Number(value));
 }
 
+function formatPercent(value) {
+  if (value === undefined || value === null || Number.isNaN(Number(value))) {
+    return getCopy().unset;
+  }
+  return `${new Intl.NumberFormat(i18n.getLocale(), { maximumFractionDigits: 1 }).format(Number(value))}%`;
+}
+
+function formatBytes(value) {
+  if (value === undefined || value === null || Number.isNaN(Number(value))) {
+    return getCopy().unset;
+  }
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let size = Math.max(0, Number(value));
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${new Intl.NumberFormat(i18n.getLocale(), { maximumFractionDigits: size >= 10 ? 0 : 1 }).format(size)} ${units[unitIndex]}`;
+}
+
 function formatDurationMinutes(seconds) {
   if (seconds === undefined || seconds === null || Number.isNaN(Number(seconds))) {
     return getCopy().unset;
   }
   const minutes = Math.max(1, Math.round(Number(seconds) / 60));
   return `${formatNumber(minutes)} min`;
+}
+
+function formatUptime(seconds) {
+  if (seconds === undefined || seconds === null || Number.isNaN(Number(seconds))) {
+    return getCopy().unset;
+  }
+  const totalSeconds = Math.max(0, Math.floor(Number(seconds)));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  if (days > 0) {
+    return `${formatNumber(days)}d ${formatNumber(hours)}h`;
+  }
+  if (hours > 0) {
+    return `${formatNumber(hours)}h ${formatNumber(minutes)}m`;
+  }
+  return `${formatNumber(Math.max(1, minutes))}m`;
 }
 
 function formatBooleanLabel(value) {
@@ -208,7 +248,16 @@ function getDigestSettings() {
 }
 
 function getTrafficRecords() {
-  return [...(state.history ?? []), ...(state.quarantine ?? [])];
+  const records = [...(state.history ?? []), ...(state.quarantine ?? [])];
+  const seen = new Set();
+  return records.filter((item, index) => {
+    const key = item?.trace_id || item?.current?.trace_id || `record-${index}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function getRelayOrPeer(item) {
@@ -472,7 +521,7 @@ function syncLoadingState() {
     elements.contextVersion.textContent = copy.unset;
     elements.contextLicense.textContent = "Apache-2.0";
     elements.contextBuild.textContent = copy.unset;
-    elements.contextTime.textContent = formatDateTime();
+    renderHostClock();
     elements.heroPrimaryRelay.textContent = copy.unset;
     elements.heroRouteSummary.textContent = copy.unset;
     elements.heroReportingSummary.textContent = copy.unset;
@@ -1158,6 +1207,89 @@ function extractThreatLabel(item) {
   return tag || "";
 }
 
+function getItemText(item) {
+  return [
+    item?.status,
+    item?.queue,
+    item?.reason,
+    item?.latest_decision,
+    item?.magika_decision,
+    item?.magika_summary,
+    item?.current?.status,
+    item?.current?.queue,
+    item?.current?.reason,
+    ...(item?.policy_tags ?? item?.current?.policy_tags ?? []),
+    ...(item?.dnsbl_hits ?? item?.current?.dnsbl_hits ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function itemIsSpam(item) {
+  return Number(item?.spam_score ?? item?.current?.spam_score ?? 0) > 0 || /\b(spam|bayes|reputation)\b/.test(getItemText(item));
+}
+
+function itemIsVirus(item) {
+  return Number(item?.security_score ?? item?.current?.security_score ?? 0) > 0 || /\b(virus|malware|infect|payload|phish)\b/.test(getItemText(item));
+}
+
+function itemHasBannedAttachment(item) {
+  return /\b(banned|blocked)\b.*\b(attachment|extension|mime|magika|file)\b|\b(attachment|extension|mime|magika|file)\b.*\b(banned|blocked)\b/.test(
+    getItemText(item),
+  );
+}
+
+function itemHasInvalidRecipient(item) {
+  return /\b(invalid|unknown|rejected|no such|recipient verification|rcpt)\b.*\b(recipient|rcpt|user|mailbox)\b|\b550\b/.test(getItemText(item));
+}
+
+function itemHasRelayDenied(item) {
+  return /\b(relay denied|relay access denied|not allowed to relay)\b/.test(getItemText(item));
+}
+
+function itemHasRblHit(item) {
+  return (item?.dnsbl_hits ?? item?.current?.dnsbl_hits ?? []).length > 0 || /\b(rbl|dnsbl|blocklist)\b/.test(getItemText(item));
+}
+
+function itemIsRejected(item) {
+  return /\b(reject|rejected|denied|blocked|quarantined|deferred)\b/.test(getItemText(item));
+}
+
+function classifyTrafficItem(item) {
+  if (itemIsSpam(item)) return "spam";
+  if (itemIsVirus(item)) return "viruses";
+  if (itemHasBannedAttachment(item)) return "banned";
+  if (itemHasInvalidRecipient(item)) return "invalidRecipients";
+  if (itemHasRelayDenied(item)) return "relayDenied";
+  if (itemHasRblHit(item)) return "rblHits";
+  if (itemIsRejected(item)) return "otherRejects";
+  return "clean";
+}
+
+function buildScanSummary(records) {
+  const summary = {
+    clean: 0,
+    spam: 0,
+    viruses: 0,
+    banned: 0,
+    invalidRecipients: 0,
+    relayDenied: 0,
+    rblHits: 0,
+    other: 0,
+    total: records.length,
+  };
+  records.forEach((item) => {
+    const category = classifyTrafficItem(item);
+    if (category === "otherRejects") {
+      summary.other += 1;
+      return;
+    }
+    summary[category] += 1;
+  });
+  return summary;
+}
+
 function buildTrafficSeries(records) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -1168,8 +1300,14 @@ function buildTrafficSeries(records) {
       key: date.toISOString().slice(0, 10),
       label: formatShortDate(date),
       total: 0,
-      quarantine: 0,
-      security: 0,
+      spam: 0,
+      clean: 0,
+      invalidRecipients: 0,
+      viruses: 0,
+      relayDenied: 0,
+      rblHits: 0,
+      banned: 0,
+      otherRejects: 0,
     };
   });
   const dayMap = new Map(days.map((day) => [day.key, day]));
@@ -1187,21 +1325,130 @@ function buildTrafficSeries(records) {
     if (!bucket) {
       return;
     }
+    const category = classifyTrafficItem(item);
     bucket.total += 1;
-    if (item.queue === "quarantine" || item.status === "quarantined") {
-      bucket.quarantine += 1;
-    }
-    if (itemIsSecurityFlagged(item)) {
-      bucket.security += 1;
-    }
+    bucket[category] += 1;
   });
   return days;
+}
+
+function getRuntimeSystem(dashboard) {
+  return dashboard?.system ?? dashboard?.host ?? dashboard?.runtime ?? {};
+}
+
+function getHostClockDate() {
+  const system = getRuntimeSystem(state.dashboard);
+  const rawHostTime = system.host_time || system.host_datetime || system.current_time || state.dashboard?.generated_at;
+  if (!rawHostTime) {
+    return new Date();
+  }
+  const hostDate = new Date(rawHostTime);
+  if (Number.isNaN(hostDate.getTime())) {
+    return new Date();
+  }
+  const loadedAt = state.hostClockLoadedAt ?? Date.now();
+  return new Date(hostDate.getTime() + (Date.now() - loadedAt));
+}
+
+function renderHostClock() {
+  if (elements.contextTime) {
+    elements.contextTime.textContent = formatDateTime(getHostClockDate());
+  }
+}
+
+function formatResourceUsage(usedPercent, total) {
+  const percent = formatPercent(usedPercent);
+  const totalLabel = formatBytes(total);
+  if (percent === getCopy().unset && totalLabel === getCopy().unset) {
+    return getCopy().unset;
+  }
+  if (percent === getCopy().unset) {
+    return totalLabel;
+  }
+  if (totalLabel === getCopy().unset) {
+    return percent;
+  }
+  return `${percent} / ${totalLabel}`;
+}
+
+function renderSystemOverview(dashboard, copy) {
+  const system = getRuntimeSystem(dashboard);
+  const osArchitecture =
+    system.os_architecture ||
+    [system.os_name || system.operating_system, system.architecture || system.arch].filter(Boolean).join(" / ");
+  elements.systemOverviewList.innerHTML = [
+    buildMiniStat(copy.systemHostname, system.hostname || dashboard.site?.node_name || copy.unset),
+    buildMiniStat(copy.systemUptime, formatUptime(system.uptime_seconds)),
+    buildMiniStat(copy.systemCpuUtilization, formatPercent(system.cpu_utilization_percent ?? system.cpu_percent)),
+    buildMiniStat(copy.systemProcessorType, system.processor_type || system.processor_model || copy.unset),
+    buildMiniStat(copy.systemProcessorSpeed, system.processor_speed || (system.processor_speed_mhz ? `${formatNumber(system.processor_speed_mhz)} MHz` : copy.unset)),
+    buildMiniStat(copy.systemOsArchitecture, osArchitecture || copy.unset),
+    buildMiniStat(
+      copy.systemMemory,
+      formatResourceUsage(
+        system.memory_used_percent ?? system.memory?.used_percent,
+        system.memory_total_bytes ?? system.memory?.total_bytes,
+      ),
+    ),
+    buildMiniStat(
+      copy.systemDisk,
+      formatResourceUsage(
+        system.disk_used_percent ?? system.disk?.used_percent,
+        system.disk_total_bytes ?? system.disk?.total_bytes,
+      ),
+    ),
+  ].join("");
+}
+
+function renderSevenDayTable(series, copy) {
+  const headers = [
+    copy.historyTableDate,
+    copy.historyTableTotal,
+    copy.historyTableSpam,
+    copy.historyTableClean,
+    copy.historyTableInvalidRcpts,
+    copy.historyTableViruses,
+    copy.historyTableRelayDenied,
+    copy.historyTableRblHits,
+    copy.historyTableBanned,
+    copy.historyTableOtherRejects,
+  ];
+  return `
+    <table class="data-table">
+      <thead>
+        <tr>${headers.map((header) => `<th scope="col">${escapeHtml(header)}</th>`).join("")}</tr>
+      </thead>
+      <tbody>
+        ${series
+          .slice()
+          .reverse()
+          .map(
+            (entry) => `
+              <tr>
+                <th scope="row">${escapeHtml(entry.label)}</th>
+                <td>${escapeHtml(formatNumber(entry.total))}</td>
+                <td>${escapeHtml(formatNumber(entry.spam))}</td>
+                <td>${escapeHtml(formatNumber(entry.clean))}</td>
+                <td>${escapeHtml(formatNumber(entry.invalidRecipients))}</td>
+                <td>${escapeHtml(formatNumber(entry.viruses))}</td>
+                <td>${escapeHtml(formatNumber(entry.relayDenied))}</td>
+                <td>${escapeHtml(formatNumber(entry.rblHits))}</td>
+                <td>${escapeHtml(formatNumber(entry.banned))}</td>
+                <td>${escapeHtml(formatNumber(entry.otherRejects))}</td>
+              </tr>
+            `,
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `;
 }
 
 function renderOverview() {
   const copy = getCopy();
   const dashboard = state.dashboard;
   if (!dashboard) {
+    elements.systemOverviewList.innerHTML = buildLoadingRows(2);
     elements.queueStatusList.innerHTML = buildLoadingRows(2);
     elements.scannerStatusList.innerHTML = buildLoadingRows(2);
     elements.relayHealthList.innerHTML = buildLoadingRows(2);
@@ -1233,6 +1480,7 @@ function renderOverview() {
     5,
   );
   const trafficSeries = buildTrafficSeries(trafficRecords);
+  const scanSummary = buildScanSummary(trafficRecords);
   const trafficMax = Math.max(...trafficSeries.map((entry) => entry.total), 1);
 
   elements.sidebarNodeName.textContent = site.node_name || copy.heroLoadingTitle;
@@ -1248,7 +1496,7 @@ function renderOverview() {
   elements.contextVersion.textContent = dashboard.updates?.last_applied_release || dashboard.updates?.channel || copy.unset;
   elements.contextLicense.textContent = "Apache-2.0";
   elements.contextBuild.textContent = dashboard.updates?.update_source || copy.unset;
-  elements.contextTime.textContent = formatDateTime();
+  renderHostClock();
   elements.heroPrimaryRelay.textContent = relay.primary_upstream || copy.unset;
   elements.heroRouteSummary.textContent = `${formatNumber(routeRules.length)} ${copy.metricRoutingRules.toLowerCase()}`;
   elements.heroReportingSummary.textContent = reporting
@@ -1268,17 +1516,14 @@ function renderOverview() {
   renderMetric(elements.metricDkimDomains, dkim?.domains?.length ?? dashboard.policies?.dkim?.domains?.length ?? 0);
   elements.metricRecipientVerification.textContent = verification ? verification.operational_state || copy.unset : "-";
 
+  renderSystemOverview(dashboard, copy);
+
   elements.queueStatusList.innerHTML = [
-    buildMiniStat(copy.metricInbound, formatMetric(queues.inbound_messages), copy.queueIncoming),
-    buildMiniStat(copy.metricDeferred, formatMetric(queues.deferred_messages), copy.queueDeferredLabel),
-    buildMiniStat(copy.metricHeld, formatMetric(queues.held_messages), copy.queueHold),
-    buildMiniStat(copy.metricQuarantine, formatMetric(queues.quarantined_messages), copy.queueQuarantineLabel),
-    buildMiniStat(copy.metricAttempts, formatMetric(queues.delivery_attempts_last_hour), copy.queueAttemptsLabel),
-    buildMiniStat(
-      copy.queueReachabilityLabel,
-      queues.upstream_reachable ? copy.relayReachable : copy.relayUnreachable,
-      relay.primary_upstream || copy.unset,
-    ),
+    buildMiniStat(copy.queueIncomingQueue, formatMetric(queues.incoming_messages ?? queues.inbound_messages)),
+    buildMiniStat(copy.queueActiveQueue, formatMetric(queues.active_messages)),
+    buildMiniStat(copy.queueDeferredQueue, formatMetric(queues.deferred_messages)),
+    buildMiniStat(copy.queueHoldQueue, formatMetric(queues.held_messages)),
+    buildMiniStat(copy.queueCorruptQueue, formatMetric(queues.corrupt_messages)),
   ].join("");
 
   elements.scannerStatusList.innerHTML = [
@@ -1308,26 +1553,29 @@ function renderOverview() {
   );
 
   elements.scanSummaryList.innerHTML = [
-    buildMiniStat(copy.scanSummaryRetained, formatMetric(state.history.length)),
-    buildMiniStat(copy.scanSummaryQuarantine, formatMetric(queues.quarantined_messages)),
-    buildMiniStat(copy.scanSummarySuspicious, formatMetric(trafficRecords.filter(itemIsSecurityFlagged).length)),
-    buildMiniStat(copy.scanSummarySpam, formatMetric(trafficRecords.filter((item) => Number(item.spam_score ?? item.current?.spam_score ?? 0) > 0).length)),
-    buildMiniStat(copy.scanSummaryDigest, formatMetric(state.digestReports.length)),
-    buildMiniStat(copy.scanSummaryAudit, formatMetric(dashboard.audit?.length ?? 0)),
+    buildMiniStat(copy.scanSummaryClean, formatMetric(scanSummary.clean)),
+    buildMiniStat(copy.scanSummarySpamMessages, formatMetric(scanSummary.spam)),
+    buildMiniStat(copy.scanSummaryVirusMessages, formatMetric(scanSummary.viruses)),
+    buildMiniStat(copy.scanSummaryBannedAttachments, formatMetric(scanSummary.banned)),
+    buildMiniStat(copy.scanSummaryInvalidRecipients, formatMetric(scanSummary.invalidRecipients)),
+    buildMiniStat(copy.scanSummaryRelayDenied, formatMetric(scanSummary.relayDenied)),
+    buildMiniStat(copy.scanSummaryRblReject, formatMetric(scanSummary.rblHits)),
+    buildMiniStat(copy.scanSummaryOther, formatMetric(scanSummary.other)),
+    buildMiniStat(copy.scanSummaryTotalProcessed, formatMetric(scanSummary.total)),
   ].join("");
 
   elements.trafficChart.innerHTML = trafficSeries
     .map((entry) => {
       const totalHeight = Math.max(8, Math.round((entry.total / trafficMax) * 164));
-      const quarantineHeight = entry.total ? Math.max(8, Math.round((entry.quarantine / trafficMax) * 164)) : 8;
-      const securityHeight = entry.total ? Math.max(8, Math.round((entry.security / trafficMax) * 164)) : 8;
+      const spamHeight = entry.total ? Math.max(8, Math.round((entry.spam / trafficMax) * 164)) : 8;
+      const securityHeight = entry.total ? Math.max(8, Math.round((entry.viruses / trafficMax) * 164)) : 8;
       return `
         <article class="traffic-bar">
           <div class="traffic-bar-total">${escapeHtml(formatNumber(entry.total))}</div>
           <div class="traffic-bar-stack">
             <span class="traffic-bar-segment total" style="height:${totalHeight}px"></span>
-            <span class="traffic-bar-segment quarantine" style="height:${entry.quarantine ? quarantineHeight : 8}px;opacity:${entry.quarantine ? "1" : "0.22"}"></span>
-            <span class="traffic-bar-segment security" style="height:${entry.security ? securityHeight : 8}px;opacity:${entry.security ? "1" : "0.22"}"></span>
+            <span class="traffic-bar-segment quarantine" style="height:${entry.spam ? spamHeight : 8}px;opacity:${entry.spam ? "1" : "0.22"}"></span>
+            <span class="traffic-bar-segment security" style="height:${entry.viruses ? securityHeight : 8}px;opacity:${entry.viruses ? "1" : "0.22"}"></span>
           </div>
           <div class="traffic-bar-label">${escapeHtml(entry.label)}</div>
         </article>
@@ -1335,20 +1583,7 @@ function renderOverview() {
     })
     .join("");
   elements.trafficTable.innerHTML = trafficSeries.some((entry) => entry.total > 0)
-    ? trafficSeries
-        .slice()
-        .reverse()
-        .map(
-          (entry) => `
-            <article class="traffic-row">
-              <strong>${escapeHtml(entry.label)}</strong>
-              <small>${escapeHtml(`${copy.metricInbound}: ${formatNumber(entry.total)}`)}</small>
-              <small>${escapeHtml(`${copy.metricQuarantine}: ${formatNumber(entry.quarantine)}`)}</small>
-              <small>${escapeHtml(`${copy.scanSummarySuspicious}: ${formatNumber(entry.security)}`)}</small>
-            </article>
-          `,
-        )
-        .join("")
+    ? renderSevenDayTable(trafficSeries, copy)
     : `<article class="traffic-row"><strong>${escapeHtml(copy.noTrafficHistory)}</strong></article>`;
 }
 
@@ -2325,6 +2560,7 @@ async function load() {
   syncLoadingState();
   try {
     state.dashboard = await fetchDashboard();
+    state.hostClockLoadedAt = Date.now();
     await loadOps({ silent: true });
     setAuthenticated(true);
     hideFeedback();
@@ -2570,11 +2806,8 @@ try {
 setLocale(i18n.getLocale());
 syncLoadingState();
 window.setInterval(() => {
-  if (!elements.contextTime) {
-    return;
-  }
-  elements.contextTime.textContent = formatDateTime();
-}, 60000);
+  renderHostClock();
+}, 1000);
 window.addEventListener("resize", () => {
   if (window.innerWidth > 1024) {
     setSidebarOpen(false);

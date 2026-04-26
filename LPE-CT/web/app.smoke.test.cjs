@@ -208,9 +208,26 @@ function createFetchStub() {
     queues: {
       upstream_reachable: true,
       inbound_messages: 4,
+      incoming_messages: 3,
+      active_messages: 1,
       deferred_messages: 2,
       quarantined_messages: 1,
+      corrupt_messages: 0,
       delivery_attempts_last_hour: 12,
+    },
+    system: {
+      host_time: "2026-04-23T10:06:00Z",
+      hostname: "ct-node-1",
+      uptime_seconds: 172800,
+      cpu_utilization_percent: 18.5,
+      processor_type: "x86_64",
+      processor_speed_mhz: 2600,
+      os_name: "Debian",
+      architecture: "x86_64",
+      memory_used_percent: 45,
+      memory_total_bytes: 17179869184,
+      disk_used_percent: 62,
+      disk_total_bytes: 274877906944,
     },
     audit: [{ action: "policy.updated", actor: "admin@example.test", timestamp: "2026-04-23T10:05:00Z", details: "Updated policy." }],
   };
@@ -263,6 +280,23 @@ function createFetchStub() {
         route_target: "relay.example.test",
         event_count: 3,
         policy_tags: ["dkim", "relay"],
+      },
+      {
+        trace_id: "trace-3",
+        subject: "Spam inbound",
+        latest_event_at: "2026-04-22T09:50:00Z",
+        mail_from: "spam@example.test",
+        rcpt_to: ["dest@example.org"],
+        queue: "quarantine",
+        status: "quarantined",
+        direction: "inbound",
+        reason: "spam threshold",
+        route_target: "relay.example.test",
+        event_count: 2,
+        spam_score: 7.2,
+        security_score: 0,
+        dnsbl_hits: [],
+        policy_tags: ["spam"],
       },
     ],
   };
@@ -348,6 +382,7 @@ function createContext() {
     "metric-routing-rules",
     "metric-dkim-domains",
     "metric-recipient-verification",
+    "system-overview-list",
     "queue-status-list",
     "scanner-status-list",
     "relay-health-list",
@@ -512,6 +547,10 @@ async function main() {
   assert.match(elements["quarantine-list"].innerHTML, /trace-1/);
   assert.match(elements["history-list"].innerHTML, /trace-2/);
   assert.match(elements["platform-list"].innerHTML, /Node identity/);
+  assert.match(elements["system-overview-list"].innerHTML, /CPU utilization/);
+  assert.match(elements["queue-status-list"].innerHTML, /Corrupt queue/);
+  assert.match(elements["scan-summary-list"].innerHTML, /Spam messages/);
+  assert.match(elements["traffic-table"].innerHTML, /Invalid rcpts/);
   assert.equal(navButtons[0].getAttribute("aria-current"), "true");
   assert.equal(pageViews[0].classList.contains("page-view-active"), true);
   assert.equal(pageViews[1].classList.contains("hidden"), true);

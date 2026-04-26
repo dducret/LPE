@@ -234,7 +234,7 @@
                   <dd id="context-build">-</dd>
                 </div>
                 <div>
-                  <dt data-i18n="sessionTimeLabel">Current time</dt>
+                  <dt data-i18n="sessionTimeLabel">LPE-CT host date/time</dt>
                   <dd id="context-time">-</dd>
                 </div>
               </dl>
@@ -293,6 +293,16 @@
             <article class="panel dashboard-module">
               <div class="section-head compact-head">
                 <div>
+                  <p class="section-kicker" data-i18n="systemOverviewTitle">System overview</p>
+                  <h3 data-i18n="systemOverviewHeading">Host resources</h3>
+                </div>
+              </div>
+              <div id="system-overview-list" class="mini-stat-list two-columns"></div>
+            </article>
+
+            <article class="panel dashboard-module">
+              <div class="section-head compact-head">
+                <div>
                   <p class="section-kicker" data-i18n="queueStatusTitle">Mail queue status</p>
                   <h3 data-i18n="queueStatusHeading">Live queue posture</h3>
                 </div>
@@ -308,6 +318,29 @@
                 </div>
               </div>
               <div id="relay-health-list" class="mini-stat-list"></div>
+            </article>
+
+            <article class="panel dashboard-module">
+              <div class="section-head compact-head">
+                <div>
+                  <p class="section-kicker" data-i18n="scanSummaryTitle">Scan summary</p>
+                  <h3 data-i18n="scanSummaryHeading">Retained flow summary</h3>
+                </div>
+              </div>
+              <div id="scan-summary-list" class="mini-stat-list two-columns"></div>
+            </article>
+
+            <article class="panel dashboard-module traffic-module">
+              <div class="section-head compact-head">
+                <div>
+                  <p class="section-kicker" data-i18n="trafficHistoryTitle">Recent traffic history</p>
+                  <h3 data-i18n="trafficHistoryHeading">Last 7 days</h3>
+                </div>
+              </div>
+              <div class="traffic-layout">
+                <div id="traffic-chart" class="traffic-chart" aria-hidden="true"></div>
+                <div id="traffic-table" class="traffic-table data-table-wrap"></div>
+              </div>
             </article>
 
           </section>
@@ -363,28 +396,6 @@
               <div id="top-viruses-list" class="ranked-list"></div>
             </article>
 
-            <article class="panel dashboard-module">
-              <div class="section-head compact-head">
-                <div>
-                  <p class="section-kicker" data-i18n="scanSummaryTitle">Scan summary</p>
-                  <h3 data-i18n="scanSummaryHeading">Retained flow summary</h3>
-                </div>
-              </div>
-              <div id="scan-summary-list" class="mini-stat-list two-columns"></div>
-            </article>
-
-            <article class="panel dashboard-module traffic-module">
-              <div class="section-head compact-head">
-                <div>
-                  <p class="section-kicker" data-i18n="trafficHistoryTitle">Recent traffic history</p>
-                  <h3 data-i18n="trafficHistoryHeading">Last 7 days</h3>
-                </div>
-              </div>
-              <div class="traffic-layout">
-                <div id="traffic-chart" class="traffic-chart" aria-hidden="true"></div>
-                <div id="traffic-table" class="traffic-table"></div>
-              </div>
-            </article>
           </section>
         </section>
 
