@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 const vm = require("node:vm");
 
 class MockClassList {
@@ -301,6 +302,7 @@ function createContext() {
     "sidebar",
     "sidebar-backdrop",
     "sidebar-toggle",
+    "mobile-sidebar-toggle",
     "drawer-backdrop",
     "drawer",
     "drawer-title",
@@ -320,12 +322,41 @@ function createContext() {
     "create-digest-override",
     "node-name",
     "hero-summary",
+    "sidebar-node-name",
+    "sidebar-node-copy",
+    "hero-primary-relay",
+    "hero-route-summary",
+    "hero-reporting-summary",
+    "hero-reporting-copy",
+    "operator-email",
+    "operator-role",
+    "context-operator",
+    "context-role",
+    "context-version",
+    "context-license",
+    "context-build",
+    "context-time",
+    "hero-summary",
     "status-badge",
     "upstream-badge",
+    "metric-system-health",
     "metric-inbound",
     "metric-deferred",
     "metric-quarantine",
     "metric-attempts",
+    "metric-held",
+    "metric-routing-rules",
+    "metric-dkim-domains",
+    "metric-recipient-verification",
+    "queue-status-list",
+    "scanner-status-list",
+    "relay-health-list",
+    "top-spam-relays-list",
+    "top-virus-relays-list",
+    "top-viruses-list",
+    "scan-summary-list",
+    "traffic-chart",
+    "traffic-table",
     "quarantine-list",
     "history-list",
     "address-rules-list",
@@ -413,7 +444,14 @@ function createContext() {
     requestAnimationFrame(callback) {
       callback();
     },
+    setInterval(callback, delay) {
+      const handle = setInterval(callback, delay);
+      handle.unref?.();
+      return handle;
+    },
+    clearInterval,
     IntersectionObserver: MockIntersectionObserver,
+    addEventListener() {},
     console,
   };
 
@@ -439,16 +477,32 @@ function createContext() {
 async function main() {
   const { context, elements, document } = createContext();
   const i18nSource = fs.readFileSync(path.join(__dirname, "i18n.js"), "utf8");
-  const appSource = fs.readFileSync(path.join(__dirname, "app.js"), "utf8");
-
-  vm.runInNewContext(i18nSource, context, { filename: "i18n.js" });
-  vm.runInNewContext(appSource, context, { filename: "app.js" });
+  globalThis.window = context.window;
+  globalThis.document = context.document;
+  globalThis.localStorage = context.localStorage;
+  Object.defineProperty(globalThis, "navigator", {
+    value: context.navigator,
+    configurable: true,
+    writable: true,
+  });
+  globalThis.fetch = context.fetch;
+  globalThis.requestAnimationFrame = context.requestAnimationFrame;
+  globalThis.IntersectionObserver = context.IntersectionObserver;
+  globalThis.URLSearchParams = context.URLSearchParams;
+  globalThis.FormData = context.FormData;
+  globalThis.setTimeout = context.setTimeout;
+  globalThis.clearTimeout = context.clearTimeout;
+  globalThis.setInterval = setInterval;
+  globalThis.clearInterval = clearInterval;
+  vm.runInThisContext(i18nSource, { filename: "i18n.js" });
+  await import(pathToFileURL(path.join(__dirname, "app.js")).href);
 
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(document.title, "LPE-CT Management Console");
   assert.equal(elements["node-name"].textContent, "ct-node-1");
+  assert.equal(elements["metric-system-health"].textContent, "Production");
   assert.match(elements["hero-summary"].textContent, /mx1\.example\.test/i);
   assert.match(elements["quarantine-list"].innerHTML, /trace-1/);
   assert.match(elements["history-list"].innerHTML, /trace-2/);

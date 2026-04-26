@@ -67,26 +67,26 @@
                 data-i18n-aria-label="toggleSidebar"
                 aria-label="Toggle sidebar"
               >
-                <span aria-hidden="true">=</span>
+                <span class="menu-icon" aria-hidden="true"></span>
               </button>
             </div>
             <nav class="page-list">
               <button class="page-button" type="button" data-nav-button data-scroll-target="overview-section">
-                <span class="page-icon" aria-hidden="true">01</span>
+                <span class="page-icon page-icon-overview" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navOverview">Overview</span>
                   <span class="page-caption" data-i18n="navOverviewCaption">Health, queues, relay posture</span>
                 </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-scroll-target="quarantine-section">
-                <span class="page-icon" aria-hidden="true">02</span>
+                <span class="page-icon page-icon-quarantine" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navQuarantine">Quarantine</span>
                   <span class="page-caption" data-i18n="navQuarantineCaption">Retained messages and release actions</span>
                 </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-scroll-target="history-section">
-                <span class="page-icon" aria-hidden="true">03</span>
+                <span class="page-icon page-icon-history" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navHistory">Mail history</span>
                   <span class="page-caption" data-i18n="navHistoryCaption">Trace history, routes, outcomes</span>
@@ -99,28 +99,28 @@
             <p class="sidebar-heading" data-i18n="navPolicyHeading">Policy</p>
             <nav class="page-list">
               <button class="page-button" type="button" data-nav-button data-scroll-target="address-policy-section">
-                <span class="page-icon" aria-hidden="true">04</span>
+                <span class="page-icon page-icon-address" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navAddressRules">Allow / block lists</span>
                   <span class="page-caption" data-i18n="navAddressRulesCaption">Sender and recipient enforcement</span>
                 </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-scroll-target="attachment-policy-section">
-                <span class="page-icon" aria-hidden="true">05</span>
+                <span class="page-icon page-icon-attachment" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navAttachmentRules">Attachment rules</span>
                   <span class="page-caption" data-i18n="navAttachmentRulesCaption">Extension, MIME, detected type</span>
                 </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-scroll-target="verification-section">
-                <span class="page-icon" aria-hidden="true">06</span>
+                <span class="page-icon page-icon-verification" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navVerification">Recipient verification</span>
                   <span class="page-caption" data-i18n="navVerificationCaption">Bridge mode, cache, fail posture</span>
                 </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-scroll-target="dkim-section">
-                <span class="page-icon" aria-hidden="true">07</span>
+                <span class="page-icon page-icon-dkim" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navDkim">DKIM domains</span>
                   <span class="page-caption" data-i18n="navDkimCaption">Selectors, readiness, key status</span>
@@ -133,21 +133,21 @@
             <p class="sidebar-heading" data-i18n="navReportingHeading">Reporting</p>
             <nav class="page-list">
               <button class="page-button" type="button" data-nav-button data-scroll-target="digest-section">
-                <span class="page-icon" aria-hidden="true">08</span>
+                <span class="page-icon page-icon-digest" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navDigest">Digest reports</span>
                   <span class="page-caption" data-i18n="navDigestCaption">Schedules, defaults, retained artifacts</span>
                 </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-scroll-target="platform-section">
-                <span class="page-icon" aria-hidden="true">09</span>
+                <span class="page-icon page-icon-platform" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navPlatform">Node and transport</span>
                   <span class="page-caption" data-i18n="navPlatformCaption">Node identity, relay, network</span>
                 </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-scroll-target="audit-section">
-                <span class="page-icon" aria-hidden="true">10</span>
+                <span class="page-icon page-icon-audit" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navAudit">Audit journal</span>
                   <span class="page-caption" data-i18n="navAuditCaption">Administrative changes and evidence</span>
@@ -185,7 +185,7 @@
               Open navigation
             </button>
             <div class="search-shell">
-              <span class="search-icon" aria-hidden="true">?</span>
+              <span class="search-icon" aria-hidden="true"></span>
               <label class="sr-only" for="console-search" data-i18n="consoleSearchLabel">Search console</label>
               <input
                 id="console-search"
@@ -275,6 +275,11 @@
           </div>
 
           <section class="kpi-grid">
+            <article class="kpi-card panel accent-ok">
+              <span data-i18n="metricSystemHealth">System health</span>
+              <strong id="metric-system-health">-</strong>
+              <p data-i18n="metricSystemHealthCopy">Derived from drain mode, relay reachability, and perimeter policy state.</p>
+            </article>
             <article class="kpi-card panel accent-ok">
               <span data-i18n="metricInbound">Inbound</span>
               <strong id="metric-inbound">-</strong>
@@ -597,7 +602,7 @@
             <p id="drawer-summary" data-i18n="drawerDefaultSummary">Inspect details or edit the selected record.</p>
           </div>
           <button id="drawer-close" class="icon-button" type="button" data-i18n-aria-label="close" aria-label="Close">
-            <span aria-hidden="true">x</span>
+            <span class="close-icon" aria-hidden="true"></span>
           </button>
         </div>
         <div id="drawer-content" class="drawer-content"></div>
@@ -605,6 +610,6 @@
     </div>
 
     <script src="./i18n.js" defer></script>
-    <script src="./app.js" defer></script>
+    <script type="module" src="./app.js"></script>
   </body>
 </html>

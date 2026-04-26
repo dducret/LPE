@@ -1,3 +1,5 @@
+import { i18n, getCopy, translate } from './modules/i18n/index.js';
+
 // DOM References
 const elements = {
   feedback: document.getElementById("feedback"),
@@ -49,6 +51,7 @@ const elements = {
   contextLicense: document.getElementById("context-license"),
   contextBuild: document.getElementById("context-build"),
   contextTime: document.getElementById("context-time"),
+  metricSystemHealth: document.getElementById("metric-system-health"),
   metricInbound: document.getElementById("metric-inbound"),
   metricDeferred: document.getElementById("metric-deferred"),
   metricQuarantine: document.getElementById("metric-quarantine"),
@@ -83,672 +86,8 @@ const containers = {
   audit: document.getElementById("audit-log"),
 };
 
-const { createI18n, defineLocaleCatalog } = window.LpeCtI18n;
-
-// Storage and Locale Configuration
-const AUTH_TOKEN_KEY = "lpeCtAdminToken";
-const LAST_ADMIN_EMAIL_KEY = "lpeCtAdminLastEmail";
-const LOCALE_KEY = "lpe.locale";
-const supportedLocales = ["en", "fr", "de", "it", "es"];
-const localeLabels = {
-  en: "English",
-  fr: "Francais",
-  de: "Deutsch",
-  it: "Italiano",
-  es: "Espanol",
-};
-
-const baseMessages = {
-  pageTitle: "LPE-CT Management Console",
-  languageLabel: "Language",
-  skipToContent: "Skip to content",
-  openNavigation: "Open navigation",
-  closeNavigation: "Close navigation",
-  toggleSidebar: "Toggle sidebar",
-  brand: "La Poste Electronique",
-  loginTitle: "LPE-CT Management Login",
-  loginCopy: "Authenticate with the management administrator configured for this sorting center.",
-  adminEmail: "Admin email",
-  password: "Password",
-  signIn: "Sign in",
-  signingIn: "Signing in...",
-  consoleTitle: "Sorting Center",
-  consoleIntro:
-    "Unified control plane for quarantine, transport history, perimeter policy, recipient verification, DKIM, and digest reporting.",
-  consoleSearchLabel: "Search console",
-  consoleSearchPlaceholder: "Search trace, domain, relay, or policy",
-  operatorRole: "Management administrator",
-  refresh: "Refresh",
-  refreshState: "Refresh state",
-  refreshing: "Refreshing...",
-  heroKicker: "DMZ sorting center",
-  heroLoadingTitle: "Loading...",
-  heroLoadingSummary: "Reading sorting-center state.",
-  heroActionPrimary: "Primary relay",
-  heroActionSecondary: "Retention and reporting",
-  pillBoundary: "DMZ boundary",
-  pillTrace: "Traceable flow",
-  pillPolicy: "Operator policy",
-  metricInbound: "Inbound",
-  metricInboundCopy: "Messages accepted into the perimeter queues.",
-  metricDeferred: "Deferred",
-  metricDeferredCopy: "Transport items waiting for another delivery attempt.",
-  metricQuarantine: "Quarantine",
-  metricQuarantineCopy: "Retained messages held for operator review.",
-  metricAttempts: "Attempts / h",
-  metricAttemptsCopy: "Recent outbound activity across the relay boundary.",
-  metricHeld: "Held queue",
-  metricHeldCopy: "Messages retained outside the delivery path.",
-  metricRoutingRules: "Route diagnostics",
-  metricRoutingRulesCopy: "Configured routing rules and upstream paths.",
-  metricDkimDomains: "DKIM domains",
-  metricDkimDomainsCopy: "Signing profiles currently exposed by LPE-CT.",
-  metricVerification: "Recipient verification",
-  metricVerificationCopy: "Current bridge posture and validation mode.",
-  navOperationsHeading: "Operations",
-  navPolicyHeading: "Policy",
-  navReportingHeading: "Reporting",
-  navOverview: "Overview",
-  navOverviewCaption: "Health, queues, relay posture",
-  navQuarantine: "Quarantine",
-  navQuarantineCaption: "Retained messages and release actions",
-  navHistory: "Mail history",
-  navHistoryCaption: "Trace history, routes, outcomes",
-  navAddressRules: "Allow / block lists",
-  navAddressRulesCaption: "Sender and recipient enforcement",
-  navAttachmentRules: "Attachment rules",
-  navAttachmentRulesCaption: "Extension, MIME, detected type",
-  navVerification: "Recipient verification",
-  navVerificationCaption: "Bridge mode, cache, fail posture",
-  navDkim: "DKIM domains",
-  navDkimCaption: "Selectors, readiness, key status",
-  navDigest: "Digest reports",
-  navDigestCaption: "Schedules, defaults, retained artifacts",
-  navPlatform: "Node and transport",
-  navPlatformCaption: "Node identity, relay, network",
-  navAudit: "Audit journal",
-  navAuditCaption: "Administrative changes and evidence",
-  sidebarStatusTitle: "Sorting-center posture",
-  sessionContextTitle: "Operator session",
-  sessionContextHeading: "Current console context",
-  sessionOperatorLabel: "Operator",
-  sessionRoleLabel: "Role",
-  sessionVersionLabel: "Version",
-  sessionLicenseLabel: "License",
-  sessionBuildLabel: "Build source",
-  sessionTimeLabel: "Current time",
-  queueStatusTitle: "Mail queue status",
-  queueStatusHeading: "Live queue posture",
-  scannerStatusTitle: "Scanner and policy status",
-  scannerStatusHeading: "Validation chain",
-  relayHealthTitle: "Node and relay health",
-  relayHealthHeading: "Connectivity posture",
-  topSpamRelaysTitle: "Top spam relays",
-  topSpamRelaysHeading: "Recent retained sources",
-  topVirusRelaysTitle: "Top suspicious relays",
-  topVirusRelaysHeading: "Security-focused relay view",
-  topVirusesTitle: "Top detections",
-  topVirusesHeading: "Recent security reasons",
-  scanSummaryTitle: "Scan summary",
-  scanSummaryHeading: "Retained flow summary",
-  trafficHistoryTitle: "Recent traffic history",
-  trafficHistoryHeading: "Last 7 days",
-  queueIncoming: "Incoming queue",
-  queueActive: "Active queue",
-  queueDeferredLabel: "Deferred queue",
-  queueHold: "Hold queue",
-  queueQuarantineLabel: "Quarantine queue",
-  queueAttemptsLabel: "Delivery attempts / hour",
-  queueReachabilityLabel: "Upstream reachability",
-  scannerRelayLink: "Relay handoff",
-  scannerDkimReadiness: "DKIM readiness",
-  scannerVerification: "Recipient verification",
-  scannerDigestSchedule: "Digest schedule",
-  relayHealthMx: "Published MX",
-  relayHealthPrimary: "Primary upstream",
-  relayHealthSecondary: "Secondary upstream",
-  relayHealthManagement: "Management endpoint",
-  relayHealthNodeRole: "Node role",
-  relayHealthSync: "Sync interval",
-  scanSummaryRetained: "Retained traces",
-  scanSummaryQuarantine: "Quarantined now",
-  scanSummarySuspicious: "Security-flagged traces",
-  scanSummarySpam: "Spam-flagged traces",
-  scanSummaryDigest: "Digest artifacts",
-  scanSummaryAudit: "Recent audit entries",
-  noOverviewData: "No retained data available yet.",
-  noTrafficHistory: "No retained 7-day activity is available.",
-  listNoData: "No data",
-  quarantineTitle: "Quarantine management",
-  quarantineSummary:
-    "Search retained messages, inspect trace evidence, and release or delete from the same operator surface.",
-  historyTitle: "Mail history and reporting",
-  historySummary:
-    "Search retained inbound and outbound flow with disposition, route, trace, and policy context.",
-  addressRulesTitle: "Allow and block lists",
-  addressRulesSummary:
-    "Maintain sender and recipient policy entries with explicit scope and effective action.",
-  attachmentRulesTitle: "Attachment filtering rules",
-  attachmentRulesSummary:
-    "Distinguish filename extension, MIME type, and Magika detected-type controls without leaving the policy workspace.",
-  verificationTitle: "Recipient verification",
-  verificationSummary:
-    "Show verification mode, failure posture, cache behavior, and the current operational backend clearly.",
-  dkimTitle: "DKIM domain configuration",
-  dkimSummary:
-    "Manage per-domain selectors and key references, and inspect signing readiness from the management interface.",
-  digestTitle: "Digest reports",
-  digestSummary:
-    "Operate domain defaults, mailbox overrides, retained report artifacts, and the scheduling controls used by the sorting center.",
-  platformTitle: "Node and transport profile",
-  platformSummary:
-    "Keep node identity, relay, network, and update settings available without breaking the primary mail-flow workspace.",
-  auditTitle: "Recent journal",
-  auditSummary: "Recent management changes recorded by the sorting center.",
-  createRule: "Create rule",
-  createDomain: "Create domain",
-  createDomainDefault: "Create domain default",
-  createOverride: "Create override",
-  editSettings: "Edit settings",
-  editSigningProfile: "Edit signing profile",
-  runDigests: "Run digests now",
-  runningDigests: "Running digests...",
-  search: "Search",
-  searching: "Searching...",
-  searchResults: "{count} result(s)",
-  allDirections: "All directions",
-  allQueues: "All queues",
-  directionInbound: "Inbound",
-  directionOutbound: "Outbound",
-  queueQuarantine: "Quarantine",
-  queueDeferred: "Deferred",
-  queueHeld: "Held",
-  queueSent: "Sent",
-  queueBounces: "Bounces",
-  quarantineSearchLabel: "Quarantine search",
-  quarantineSearchPlaceholder: "Search trace, sender, recipient, subject, or Message-Id",
-  historySearchLabel: "History search",
-  historySearchPlaceholder: "Search trace, sender, recipient, subject, route, or policy",
-  domainFilterLabel: "Domain filter",
-  domainFilterPlaceholder: "Filter domain",
-  dispositionFilterLabel: "Disposition filter",
-  dispositionFilterPlaceholder: "Disposition or policy tag",
-  drawerDefaultTitle: "Details",
-  drawerDefaultSummary: "Inspect details or edit the selected record.",
-  close: "Close",
-  authRequired: "Management authentication required.",
-  authenticated: "Authenticated.",
-  loginFailed: "Authentication failed.",
-  loginValidation: "Enter a valid administrator email and password.",
-  login502: "Management API unreachable (502). Check lpe-ct.service and nginx.",
-  unknownError: "Unknown error.",
-  statusDrain: "Drain mode",
-  statusProduction: "Production",
-  relayReachable: "LAN relay reachable",
-  relayUnreachable: "LAN relay unreachable",
-  unset: "Unset",
-  noResults: "No records matched the current filters.",
-  noAddressRules: "No allow or block rules are configured.",
-  noAttachmentRules: "No attachment policy rules are configured.",
-  noDkimDomains: "No DKIM domains are configured.",
-  noDigestDefaults: "No domain digest defaults are configured.",
-  noDigestOverrides: "No mailbox digest overrides are configured.",
-  noDigestReports: "No digest reports generated yet.",
-  noAuditEntries: "No retained management changes were found.",
-  traceOpen: "Open",
-  traceRelease: "Release",
-  traceDelete: "Delete",
-  traceRetry: "Retry",
-  edit: "Edit",
-  remove: "Delete",
-  enabled: "Enabled",
-  disabled: "Disabled",
-  active: "Active",
-  inactive: "Inactive",
-  create: "Create",
-  save: "Save",
-  saving: "Saving...",
-  cancel: "Cancel",
-  retry: "Retry",
-  recordSaved: "Changes saved.",
-  recordDeleted: "Record deleted.",
-  recordCreated: "Record created.",
-  drawerValidationHeading: "Review the highlighted fields:",
-  loadingRecords: "Loading records...",
-  loadingDashboard: "Loading sorting-center state...",
-  loadingTrace: "Loading trace...",
-  actionInProgress: "Action in progress...",
-  traceActionCompleted: "Trace action completed for {traceId}.",
-  traceActionRunning: "{action} in progress for {traceId}.",
-  digestGeneratedSummary: "{count} digest report(s) generated.",
-  historyResultSummary: "{count} trace(s) matched",
-  heroSummaryTemplate: "{dmzZone} · MX {publishedMx} · primary relay {primaryUpstream}",
-  policyRoleSender: "Sender",
-  policyRoleRecipient: "Recipient",
-  policyActionAllow: "Allow",
-  policyActionBlock: "Block",
-  attachmentScopeExtension: "Extension",
-  attachmentScopeMime: "MIME type",
-  attachmentScopeDetected: "Detected file type",
-  verificationModeFailClosed: "Fail closed",
-  verificationModeFailOpen: "Fail open",
-  cacheBackendMemory: "Memory-only cache",
-  cacheBackendPostgres: "Private PostgreSQL cache",
-  dkimKeyStatusPresent: "Key file present",
-  dkimKeyStatusMissing: "Key file missing",
-  dkimKeyStatusUnreadable: "Key file unreadable",
-  dkimKeyStatusInvalid: "Invalid key path",
-  dkimKeyStatusNotConfigured: "No key path",
-  platformNode: "Node identity",
-  platformRelay: "Relay toward LAN",
-  platformNetwork: "Network surface",
-  platformUpdates: "Updates",
-  platformNodeCopy: "Name, role, region, DMZ zone, MX, and management endpoints.",
-  platformRelayCopy: "Primary and secondary upstreams, hold queue behavior, and core delivery path.",
-  platformNetworkCopy: "Allowed CIDRs, listeners, smart hosts, and concurrent session limits.",
-  platformUpdatesCopy: "Git-first update channel, maintenance window, and download behavior.",
-  verificationCardTitle: "Recipient verification mode",
-  verificationCacheTtl: "Cache TTL",
-  verificationCacheBackend: "Cache backend",
-  verificationState: "Operational state",
-  dkimProfileTitle: "Signing profile",
-  dkimHeaders: "Headers",
-  dkimExpiration: "Expiration",
-  digestSettingsTitle: "Digest schedule",
-  digestDefaultsTitle: "Domain defaults",
-  digestOverridesTitle: "Mailbox overrides",
-  digestReportsTitle: "Recent digest artifacts",
-  digestEnabledLabel: "Digest generation",
-  digestIntervalLabel: "Interval (minutes)",
-  digestMaxItemsLabel: "Max items per digest",
-  digestRetentionLabel: "History retention (days)",
-  digestLastRun: "Last run",
-  digestNextRun: "Next run",
-  domainDefaultsLabel: "Recipients",
-  overrideRecipientLabel: "Digest recipient",
-  overrideMailboxLabel: "Mailbox",
-  addressRuleValueLabel: "Address or domain",
-  addressRuleRoleLabel: "Rule scope",
-  addressRuleActionLabel: "Effective action",
-  attachmentRuleValueLabel: "Rule value",
-  attachmentRuleScopeLabel: "Rule type",
-  attachmentRuleActionLabel: "Effective action",
-  recipientVerificationEnabledLabel: "Recipient verification enabled",
-  recipientVerificationFailClosedLabel: "Fail closed on bridge errors",
-  recipientVerificationTtlLabel: "Cache TTL (seconds)",
-  dkimSigningEnabledLabel: "DKIM signing enabled",
-  dkimOverSignLabel: "Over-sign headers",
-  dkimHeadersLabel: "Signed headers",
-  dkimExpirationLabel: "Expiration (seconds, optional)",
-  dkimDomainLabel: "Domain",
-  dkimSelectorLabel: "Selector",
-  dkimKeyPathLabel: "Private key path",
-  reportingEnabledLabel: "Digest reports enabled",
-  reportingSettingsNote:
-    "Language and content-format options are not exposed by the current backend contract; this UI manages the available scheduling and recipient controls.",
-  siteNodeNameLabel: "Node name",
-  siteRoleLabel: "Role",
-  siteRegionLabel: "Region",
-  siteDmzZoneLabel: "DMZ zone",
-  sitePublishedMxLabel: "Published MX",
-  siteManagementFqdnLabel: "Management FQDN",
-  sitePublicSmtpLabel: "Public SMTP bind",
-  siteManagementBindLabel: "Management bind",
-  relayHaLabel: "HA enabled",
-  relayPrimaryLabel: "Primary upstream",
-  relaySecondaryLabel: "Secondary upstream",
-  relayCoreDeliveryLabel: "Core delivery base URL",
-  relayMutualTlsLabel: "Mutual TLS required",
-  relayFallbackLabel: "Fallback to hold queue",
-  relaySyncLabel: "Sync interval (seconds)",
-  relayDependencyLabel: "LAN dependency note",
-  networkManagementCidrsLabel: "Allowed management CIDRs",
-  networkUpstreamCidrsLabel: "Allowed upstream CIDRs",
-  networkSmartHostsLabel: "Outbound smart hosts",
-  networkPublicListenerLabel: "Public listener enabled",
-  networkSubmissionListenerLabel: "Submission listener enabled",
-  networkProxyProtocolLabel: "Proxy protocol enabled",
-  networkConcurrentLabel: "Max concurrent sessions",
-  updatesChannelLabel: "Channel",
-  updatesAutoDownloadLabel: "Auto download",
-  updatesWindowLabel: "Maintenance window",
-  updatesLastReleaseLabel: "Last applied release",
-  updatesSourceLabel: "Update source",
-  traceSummaryTitle: "Trace summary",
-  tracePolicyTitle: "Policy evidence",
-  traceTechnicalTitle: "Transport details",
-  traceHeadersTitle: "Headers",
-  traceBodyTitle: "Body excerpt",
-  traceHistoryTitle: "Flow history",
-  traceNoHistory: "No retained history for this trace.",
-  traceLabel: "Trace",
-  statusLabel: "Status",
-  queueLabel: "Queue",
-  routeLabel: "Route",
-  spamLabel: "Spam",
-  securityLabel: "Security",
-  reasonLabel: "Reason",
-  senderLabel: "Sender",
-  recipientsLabel: "Recipients",
-  messageIdLabel: "Message-Id",
-  routeTargetLabel: "Route target",
-  peerLabel: "Peer",
-  authLabel: "Auth",
-  technicalLabel: "Technical",
-  dsnLabel: "DSN",
-  eventCountLabel: "Events",
-  latestEventLabel: "Latest event",
-  generatedAtLabel: "Generated",
-  recipientLabel: "Recipient",
-  countLabel: "Count",
-  topReasonLabel: "Top reason",
-  digestOpen: "Open digest",
-  noTraceLoaded: "No trace selected.",
-  emptyQuarantineTitle: "No quarantined items matched",
-  emptyHistoryTitle: "No retained history matched",
-  emptyAddressRulesTitle: "No sender or recipient rules",
-  emptyAttachmentRulesTitle: "No attachment rules",
-  emptyDigestDefaultsTitle: "No digest domain defaults",
-  emptyDigestOverridesTitle: "No digest mailbox overrides",
-  emptyDigestReportsTitle: "No retained digest artifacts",
-  emptyActionCreateRule: "Create a rule",
-  emptyActionCreateDomain: "Create a domain",
-  emptyActionCreateOverride: "Create an override",
-  validationAddressRule: "Enter a sender address, recipient address, or bare domain.",
-  validationDuplicateAddressRule: "This address rule already exists.",
-  validationAttachmentRule: "Enter a non-empty rule value.",
-  validationAttachmentExtension: "Use a file extension such as pdf or .pdf.",
-  validationAttachmentMime: "Use a MIME type such as application/pdf.",
-  validationDetectedType: "Use a detected file type label such as pdf.",
-  validationPositiveInteger: "Enter a value greater than zero.",
-  validationEmail: "Enter a valid email address.",
-  validationDomain: "Enter a valid domain name.",
-  validationMailbox: "Enter a mailbox address.",
-  validationSelector: "Enter a valid selector token.",
-  validationKeyPath: "Enter a private key path.",
-  validationHeaders: "At least one signed header is required when DKIM is enabled.",
-  validationRecipients: "Add at least one digest recipient.",
-  validationUniqueRecipient: "Digest recipients must be unique.",
-  validationGeneric: "Review the form values and try again.",
-  backendErrorPrefix: "Request failed",
-};
-
-const localizedMessages = {
-  fr: {
-    pageTitle: "Console de gestion LPE-CT",
-    skipToContent: "Aller au contenu",
-    openNavigation: "Ouvrir la navigation",
-    closeNavigation: "Fermer la navigation",
-    toggleSidebar: "Basculer la barre laterale",
-    loginTitle: "Connexion LPE-CT",
-    signIn: "Se connecter",
-    signingIn: "Connexion...",
-    consoleSearchLabel: "Rechercher dans la console",
-    consoleSearchPlaceholder: "Rechercher trace, domaine, relais ou politique",
-    operatorRole: "Administrateur de gestion",
-    refresh: "Actualiser",
-    refreshState: "Actualiser l'etat",
-    refreshing: "Actualisation...",
-    runDigests: "Lancer les digests",
-    runningDigests: "Generation en cours...",
-    search: "Rechercher",
-    searching: "Recherche...",
-    close: "Fermer",
-    create: "Creer",
-    save: "Enregistrer",
-    saving: "Enregistrement...",
-    cancel: "Annuler",
-    retry: "Reessayer",
-    consoleTitle: "Centre de tri",
-    navOverviewCaption: "Sante, files, posture relais",
-    navQuarantineCaption: "Messages retenus et actions",
-    navHistoryCaption: "Historique des traces et routes",
-    navAddressRulesCaption: "Regles expediteur et destinataire",
-    navAttachmentRulesCaption: "Extension, MIME, type detecte",
-    navVerificationCaption: "Mode pont, cache, posture",
-    navDkimCaption: "Selecteurs, etat, cles",
-    navDigestCaption: "Horaires, valeurs par defaut, artefacts",
-    navPlatformCaption: "Noeud, relais, reseau",
-    navAuditCaption: "Changements administratifs",
-    navHistory: "Historique mail",
-    navDigest: "Rapports digest",
-    sidebarStatusTitle: "Posture du centre de tri",
-    sessionContextTitle: "Session operateur",
-    sessionContextHeading: "Contexte courant",
-    sessionOperatorLabel: "Operateur",
-    sessionRoleLabel: "Role",
-    sessionVersionLabel: "Version",
-    sessionLicenseLabel: "Licence",
-    sessionBuildLabel: "Source build",
-    sessionTimeLabel: "Heure actuelle",
-    queueStatusTitle: "Etat des files",
-    scannerStatusTitle: "Statut validation et politique",
-    relayHealthTitle: "Sante noeud et relais",
-    topSpamRelaysTitle: "Principaux relais spam",
-    topVirusRelaysTitle: "Principaux relais suspects",
-    topVirusesTitle: "Principales detections",
-    scanSummaryTitle: "Resume d'analyse",
-    trafficHistoryTitle: "Historique recent",
-    trafficHistoryHeading: "7 derniers jours",
-    listNoData: "Aucune donnee",
-    statusDrain: "Mode drain",
-    statusProduction: "Production",
-    relayReachable: "Relais LAN joignable",
-    relayUnreachable: "Relais LAN indisponible",
-    emptyActionCreateRule: "Creer une regle",
-    emptyActionCreateDomain: "Creer un domaine",
-    emptyActionCreateOverride: "Creer une exception",
-  },
-  de: {
-    pageTitle: "LPE-CT Verwaltungskonsole",
-    skipToContent: "Zum Inhalt springen",
-    openNavigation: "Navigation oeffnen",
-    closeNavigation: "Navigation schliessen",
-    toggleSidebar: "Seitenleiste umschalten",
-    loginTitle: "LPE-CT Anmeldung",
-    signIn: "Anmelden",
-    signingIn: "Anmeldung...",
-    consoleSearchLabel: "Konsole durchsuchen",
-    consoleSearchPlaceholder: "Trace, Domain, Relay oder Richtlinie suchen",
-    operatorRole: "Verwaltungsadministrator",
-    refresh: "Aktualisieren",
-    refreshState: "Status aktualisieren",
-    refreshing: "Aktualisierung...",
-    runDigests: "Digests jetzt ausfuehren",
-    runningDigests: "Digests laufen...",
-    search: "Suchen",
-    searching: "Suche...",
-    close: "Schliessen",
-    create: "Erstellen",
-    save: "Speichern",
-    saving: "Speichern...",
-    cancel: "Abbrechen",
-    retry: "Erneut versuchen",
-    consoleTitle: "Sortierzentrum",
-    navOverviewCaption: "Gesundheit, Queues, Relay-Status",
-    navQuarantineCaption: "Zurueckgehaltene Nachrichten",
-    navHistoryCaption: "Trace-Verlauf und Routen",
-    navAddressRulesCaption: "Absender- und Empfaengerregeln",
-    navAttachmentRulesCaption: "Erweiterung, MIME, erkannter Typ",
-    navVerificationCaption: "Bridge-Modus und Cache",
-    navDkimCaption: "Selektoren, Bereitschaft, Schluessel",
-    navDigestCaption: "Plaene, Voreinstellungen, Artefakte",
-    navPlatformCaption: "Knoten, Relay, Netzwerk",
-    navAuditCaption: "Administrative Aenderungen",
-    navHistory: "Mail-Verlauf",
-    navDigest: "Digest-Berichte",
-    sidebarStatusTitle: "Status des Sortierzentrums",
-    sessionContextTitle: "Operator-Sitzung",
-    sessionContextHeading: "Aktueller Kontext",
-    sessionOperatorLabel: "Operator",
-    sessionRoleLabel: "Rolle",
-    sessionVersionLabel: "Version",
-    sessionLicenseLabel: "Lizenz",
-    sessionBuildLabel: "Build-Quelle",
-    sessionTimeLabel: "Aktuelle Zeit",
-    queueStatusTitle: "Queue-Status",
-    scannerStatusTitle: "Validierungs- und Policy-Status",
-    relayHealthTitle: "Knoten- und Relay-Gesundheit",
-    topSpamRelaysTitle: "Top-Spam-Relays",
-    topVirusRelaysTitle: "Top-verdaechtige Relays",
-    topVirusesTitle: "Top-Erkennungen",
-    scanSummaryTitle: "Scan-Zusammenfassung",
-    trafficHistoryTitle: "Letzte Aktivitaet",
-    trafficHistoryHeading: "Letzte 7 Tage",
-    listNoData: "Keine Daten",
-    statusDrain: "Drain-Modus",
-    statusProduction: "Produktion",
-    relayReachable: "LAN-Relay erreichbar",
-    relayUnreachable: "LAN-Relay nicht erreichbar",
-    emptyActionCreateRule: "Regel erstellen",
-    emptyActionCreateDomain: "Domain erstellen",
-    emptyActionCreateOverride: "Ausnahme erstellen",
-  },
-  it: {
-    pageTitle: "Console di gestione LPE-CT",
-    skipToContent: "Vai al contenuto",
-    openNavigation: "Apri navigazione",
-    closeNavigation: "Chiudi navigazione",
-    toggleSidebar: "Attiva barra laterale",
-    loginTitle: "Accesso LPE-CT",
-    signIn: "Accedi",
-    signingIn: "Accesso in corso...",
-    consoleSearchLabel: "Cerca nella console",
-    consoleSearchPlaceholder: "Cerca trace, dominio, relay o policy",
-    operatorRole: "Amministratore di gestione",
-    refresh: "Aggiorna",
-    refreshState: "Aggiorna stato",
-    refreshing: "Aggiornamento...",
-    runDigests: "Esegui digest",
-    runningDigests: "Digest in esecuzione...",
-    search: "Cerca",
-    searching: "Ricerca in corso...",
-    close: "Chiudi",
-    create: "Crea",
-    save: "Salva",
-    saving: "Salvataggio...",
-    cancel: "Annulla",
-    retry: "Riprova",
-    consoleTitle: "Centro di smistamento",
-    navOverviewCaption: "Salute, code, stato relay",
-    navQuarantineCaption: "Messaggi trattenuti e azioni",
-    navHistoryCaption: "Storico trace e percorsi",
-    navAddressRulesCaption: "Regole mittente e destinatario",
-    navAttachmentRulesCaption: "Estensione, MIME, tipo rilevato",
-    navVerificationCaption: "Modalita bridge e cache",
-    navDkimCaption: "Selettori, stato, chiavi",
-    navDigestCaption: "Pianificazioni, default, artefatti",
-    navPlatformCaption: "Nodo, relay, rete",
-    navAuditCaption: "Modifiche amministrative",
-    navHistory: "Storico mail",
-    navDigest: "Report digest",
-    sidebarStatusTitle: "Postura del centro",
-    sessionContextTitle: "Sessione operatore",
-    sessionContextHeading: "Contesto corrente",
-    sessionOperatorLabel: "Operatore",
-    sessionRoleLabel: "Ruolo",
-    sessionVersionLabel: "Versione",
-    sessionLicenseLabel: "Licenza",
-    sessionBuildLabel: "Origine build",
-    sessionTimeLabel: "Ora corrente",
-    queueStatusTitle: "Stato code",
-    scannerStatusTitle: "Stato validazione e policy",
-    relayHealthTitle: "Salute nodo e relay",
-    topSpamRelaysTitle: "Top relay spam",
-    topVirusRelaysTitle: "Top relay sospetti",
-    topVirusesTitle: "Top rilevazioni",
-    scanSummaryTitle: "Riepilogo scansione",
-    trafficHistoryTitle: "Storico recente",
-    trafficHistoryHeading: "Ultimi 7 giorni",
-    listNoData: "Nessun dato",
-    statusDrain: "Modalita drain",
-    statusProduction: "Produzione",
-    relayReachable: "Relay LAN raggiungibile",
-    relayUnreachable: "Relay LAN non raggiungibile",
-    emptyActionCreateRule: "Crea regola",
-    emptyActionCreateDomain: "Crea dominio",
-    emptyActionCreateOverride: "Crea override",
-  },
-  es: {
-    pageTitle: "Consola de gestion LPE-CT",
-    skipToContent: "Ir al contenido",
-    openNavigation: "Abrir navegacion",
-    closeNavigation: "Cerrar navegacion",
-    toggleSidebar: "Alternar barra lateral",
-    loginTitle: "Acceso LPE-CT",
-    signIn: "Iniciar sesion",
-    signingIn: "Iniciando sesion...",
-    consoleSearchLabel: "Buscar en la consola",
-    consoleSearchPlaceholder: "Buscar trace, dominio, relay o politica",
-    operatorRole: "Administrador de gestion",
-    refresh: "Actualizar",
-    refreshState: "Actualizar estado",
-    refreshing: "Actualizando...",
-    runDigests: "Ejecutar digests",
-    runningDigests: "Ejecutando digests...",
-    search: "Buscar",
-    searching: "Buscando...",
-    close: "Cerrar",
-    create: "Crear",
-    save: "Guardar",
-    saving: "Guardando...",
-    cancel: "Cancelar",
-    retry: "Reintentar",
-    consoleTitle: "Centro de clasificacion",
-    navOverviewCaption: "Salud, colas y postura relay",
-    navQuarantineCaption: "Mensajes retenidos y acciones",
-    navHistoryCaption: "Historial de traces y rutas",
-    navAddressRulesCaption: "Reglas de remitente y destinatario",
-    navAttachmentRulesCaption: "Extension, MIME, tipo detectado",
-    navVerificationCaption: "Modo puente y cache",
-    navDkimCaption: "Selectores, estado y claves",
-    navDigestCaption: "Programaciones, valores y artefactos",
-    navPlatformCaption: "Nodo, relay y red",
-    navAuditCaption: "Cambios administrativos",
-    navHistory: "Historial de correo",
-    navDigest: "Informes digest",
-    sidebarStatusTitle: "Postura del centro",
-    sessionContextTitle: "Sesion del operador",
-    sessionContextHeading: "Contexto actual",
-    sessionOperatorLabel: "Operador",
-    sessionRoleLabel: "Rol",
-    sessionVersionLabel: "Version",
-    sessionLicenseLabel: "Licencia",
-    sessionBuildLabel: "Origen build",
-    sessionTimeLabel: "Hora actual",
-    queueStatusTitle: "Estado de colas",
-    scannerStatusTitle: "Estado de validacion y politica",
-    relayHealthTitle: "Salud de nodo y relay",
-    topSpamRelaysTitle: "Principales relays spam",
-    topVirusRelaysTitle: "Principales relays sospechosos",
-    topVirusesTitle: "Principales detecciones",
-    scanSummaryTitle: "Resumen de analisis",
-    trafficHistoryTitle: "Historial reciente",
-    trafficHistoryHeading: "Ultimos 7 dias",
-    listNoData: "Sin datos",
-    statusDrain: "Modo drain",
-    statusProduction: "Produccion",
-    relayReachable: "Relay LAN disponible",
-    relayUnreachable: "Relay LAN no disponible",
-    emptyActionCreateRule: "Crear regla",
-    emptyActionCreateDomain: "Crear dominio",
-    emptyActionCreateOverride: "Crear excepcion",
-  },
-};
-
-const messages = defineLocaleCatalog({
-  supportedLocales,
-  defaultLocale: "en",
-  base: baseMessages,
-  localized: localizedMessages,
-});
-
-const i18n = createI18n({
-  storageKey: LOCALE_KEY,
-  supportedLocales,
-  localeLabels,
-  messages,
-});
+const AUTH_TOKEN_KEY = 'lpeCtAdminToken';
+const LAST_ADMIN_EMAIL_KEY = 'lpeCtAdminLastEmail';
 
 // Application State
 const state = {
@@ -776,14 +115,6 @@ const state = {
 };
 
 // Copy and Formatting Helpers
-function getCopy() {
-  return i18n.getCopy();
-}
-
-function translate(template, values = {}) {
-  return i18n.translate(template, values);
-}
-
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -850,6 +181,20 @@ function formatDurationMinutes(seconds) {
 
 function formatBooleanLabel(value) {
   return value ? getCopy().enabled : getCopy().disabled;
+}
+
+function healthPosture(dashboard) {
+  const copy = getCopy();
+  if (!dashboard) {
+    return { label: "-", tone: "muted" };
+  }
+  if (dashboard.policies?.drain_mode) {
+    return { label: copy.statusDrain, tone: "warn" };
+  }
+  if (dashboard.queues?.upstream_reachable === false) {
+    return { label: copy.relayUnreachable, tone: "danger" };
+  }
+  return { label: copy.statusProduction, tone: "ok" };
 }
 
 function getOperatorEmail() {
@@ -1130,6 +475,7 @@ function syncLoadingState() {
     elements.heroRouteSummary.textContent = copy.unset;
     elements.heroReportingSummary.textContent = copy.unset;
     elements.heroReportingCopy.textContent = copy.unset;
+    elements.metricSystemHealth.textContent = "-";
     renderOverview();
     Object.values(containers).forEach((container) => setListLoading(container));
     return;
@@ -1870,6 +1216,10 @@ function renderOverview() {
   const reporting = getDigestSettings();
   const routeRules = state.routeDiagnostics?.routing?.rules ?? dashboard.routing?.rules ?? [];
   const trafficRecords = getTrafficRecords();
+  const posture = healthPosture(dashboard);
+  const site = dashboard.site ?? {};
+  const relay = dashboard.relay ?? {};
+  const queues = dashboard.queues ?? {};
   const topSpamRelays = countRankedItems(trafficRecords, getRelayOrPeer, (item) => Number(item.spam_score ?? item.current?.spam_score ?? 0) > 0, 5);
   const topVirusRelays = countRankedItems(trafficRecords, getRelayOrPeer, itemIsSecurityFlagged, 5);
   const topViruses = countRankedItems(
@@ -1881,11 +1231,11 @@ function renderOverview() {
   const trafficSeries = buildTrafficSeries(trafficRecords);
   const trafficMax = Math.max(...trafficSeries.map((entry) => entry.total), 1);
 
-  elements.sidebarNodeName.textContent = dashboard.site.node_name || copy.heroLoadingTitle;
+  elements.sidebarNodeName.textContent = site.node_name || copy.heroLoadingTitle;
   elements.sidebarNodeCopy.textContent = translate(copy.heroSummaryTemplate, {
-    dmzZone: dashboard.site.dmz_zone || copy.unset,
-    publishedMx: dashboard.site.published_mx || copy.unset,
-    primaryUpstream: dashboard.relay.primary_upstream || copy.unset,
+    dmzZone: site.dmz_zone || copy.unset,
+    publishedMx: site.published_mx || copy.unset,
+    primaryUpstream: relay.primary_upstream || copy.unset,
   });
   elements.operatorEmail.textContent = operatorEmail;
   elements.operatorRole.textContent = copy.operatorRole;
@@ -1895,7 +1245,7 @@ function renderOverview() {
   elements.contextLicense.textContent = "Apache-2.0";
   elements.contextBuild.textContent = dashboard.updates?.update_source || copy.unset;
   elements.contextTime.textContent = formatDateTime();
-  elements.heroPrimaryRelay.textContent = dashboard.relay.primary_upstream || copy.unset;
+  elements.heroPrimaryRelay.textContent = relay.primary_upstream || copy.unset;
   elements.heroRouteSummary.textContent = `${formatNumber(routeRules.length)} ${copy.metricRoutingRules.toLowerCase()}`;
   elements.heroReportingSummary.textContent = reporting
     ? `${formatBooleanLabel(reporting.digest_enabled)} · ${formatNumber(reporting.digest_interval_minutes)} min`
@@ -1904,42 +1254,43 @@ function renderOverview() {
     ? `${formatNumber(state.digestReports.length)} · ${formatDateTime(reporting.next_digest_run_at)}`
     : `${formatNumber(state.digestReports.length)} · ${copy.unset}`;
 
-  renderMetric(elements.metricInbound, dashboard.queues.inbound_messages);
-  renderMetric(elements.metricDeferred, dashboard.queues.deferred_messages);
-  renderMetric(elements.metricQuarantine, dashboard.queues.quarantined_messages);
-  renderMetric(elements.metricAttempts, dashboard.queues.delivery_attempts_last_hour);
-  renderMetric(elements.metricHeld, dashboard.queues.held_messages);
+  elements.metricSystemHealth.textContent = posture.label;
+  renderMetric(elements.metricInbound, queues.inbound_messages);
+  renderMetric(elements.metricDeferred, queues.deferred_messages);
+  renderMetric(elements.metricQuarantine, queues.quarantined_messages);
+  renderMetric(elements.metricAttempts, queues.delivery_attempts_last_hour);
+  renderMetric(elements.metricHeld, queues.held_messages);
   renderMetric(elements.metricRoutingRules, routeRules.length);
   renderMetric(elements.metricDkimDomains, dkim?.domains?.length ?? dashboard.policies?.dkim?.domains?.length ?? 0);
   elements.metricRecipientVerification.textContent = verification ? verification.operational_state || copy.unset : "-";
 
   elements.queueStatusList.innerHTML = [
-    buildMiniStat(copy.metricInbound, formatMetric(dashboard.queues.inbound_messages), copy.queueIncoming),
-    buildMiniStat(copy.metricDeferred, formatMetric(dashboard.queues.deferred_messages), copy.queueDeferredLabel),
-    buildMiniStat(copy.metricHeld, formatMetric(dashboard.queues.held_messages), copy.queueHold),
-    buildMiniStat(copy.metricQuarantine, formatMetric(dashboard.queues.quarantined_messages), copy.queueQuarantineLabel),
-    buildMiniStat(copy.metricAttempts, formatMetric(dashboard.queues.delivery_attempts_last_hour), copy.queueAttemptsLabel),
+    buildMiniStat(copy.metricInbound, formatMetric(queues.inbound_messages), copy.queueIncoming),
+    buildMiniStat(copy.metricDeferred, formatMetric(queues.deferred_messages), copy.queueDeferredLabel),
+    buildMiniStat(copy.metricHeld, formatMetric(queues.held_messages), copy.queueHold),
+    buildMiniStat(copy.metricQuarantine, formatMetric(queues.quarantined_messages), copy.queueQuarantineLabel),
+    buildMiniStat(copy.metricAttempts, formatMetric(queues.delivery_attempts_last_hour), copy.queueAttemptsLabel),
     buildMiniStat(
       copy.queueReachabilityLabel,
-      dashboard.queues.upstream_reachable ? copy.relayReachable : copy.relayUnreachable,
-      dashboard.relay.primary_upstream || copy.unset,
+      queues.upstream_reachable ? copy.relayReachable : copy.relayUnreachable,
+      relay.primary_upstream || copy.unset,
     ),
   ].join("");
 
   elements.scannerStatusList.innerHTML = [
-    buildStatusTile(copy.scannerRelayLink, dashboard.queues.upstream_reachable ? copy.active : copy.inactive, dashboard.queues.upstream_reachable ? "active" : "disabled", dashboard.relay.primary_upstream || copy.unset),
+    buildStatusTile(copy.scannerRelayLink, queues.upstream_reachable ? copy.active : copy.inactive, queues.upstream_reachable ? "active" : "disabled", relay.primary_upstream || copy.unset),
     buildStatusTile(copy.scannerVerification, verification?.operational_state || copy.unset, "custom", verification ? `${formatNumber(verification.cache_ttl_seconds)}s` : copy.unset),
     buildStatusTile(copy.scannerDkimReadiness, dkim?.operational_state || copy.unset, "custom", `${formatNumber(dkim?.domains?.length ?? 0)} ${copy.metricDkimDomains.toLowerCase()}`),
     buildStatusTile(copy.scannerDigestSchedule, reporting?.digest_enabled ? copy.enabled : copy.disabled, reporting?.digest_enabled ? "enabled" : "disabled", reporting ? `${formatNumber(reporting.digest_interval_minutes)} min` : copy.unset),
   ].join("");
 
   elements.relayHealthList.innerHTML = [
-    buildMiniStat(copy.relayHealthNodeRole, dashboard.site.role || copy.unset, dashboard.site.region || copy.unset),
-    buildMiniStat(copy.relayHealthMx, dashboard.site.published_mx || copy.unset, dashboard.site.dmz_zone || copy.unset),
-    buildMiniStat(copy.relayHealthPrimary, dashboard.relay.primary_upstream || copy.unset, copy.relayReachable),
-    buildMiniStat(copy.relayHealthSecondary, dashboard.relay.secondary_upstream || copy.unset, dashboard.relay.ha_enabled ? copy.enabled : copy.disabled),
-    buildMiniStat(copy.relayHealthManagement, dashboard.site.management_fqdn || copy.unset, dashboard.site.management_bind || copy.unset),
-    buildMiniStat(copy.relayHealthSync, formatDurationMinutes(dashboard.relay.sync_interval_seconds), dashboard.relay.core_delivery_base_url || copy.unset),
+    buildMiniStat(copy.relayHealthNodeRole, site.role || copy.unset, site.region || copy.unset),
+    buildMiniStat(copy.relayHealthMx, site.published_mx || copy.unset, site.dmz_zone || copy.unset),
+    buildMiniStat(copy.relayHealthPrimary, relay.primary_upstream || copy.unset, queues.upstream_reachable ? copy.relayReachable : copy.relayUnreachable),
+    buildMiniStat(copy.relayHealthSecondary, relay.secondary_upstream || copy.unset, relay.ha_enabled ? copy.enabled : copy.disabled),
+    buildMiniStat(copy.relayHealthManagement, site.management_fqdn || copy.unset, site.management_bind || copy.unset),
+    buildMiniStat(copy.relayHealthSync, formatDurationMinutes(relay.sync_interval_seconds), relay.core_delivery_base_url || copy.unset),
   ].join("");
 
   elements.topSpamRelaysList.innerHTML = buildRankedRows(
@@ -1954,7 +1305,7 @@ function renderOverview() {
 
   elements.scanSummaryList.innerHTML = [
     buildMiniStat(copy.scanSummaryRetained, formatMetric(state.history.length)),
-    buildMiniStat(copy.scanSummaryQuarantine, formatMetric(dashboard.queues.quarantined_messages)),
+    buildMiniStat(copy.scanSummaryQuarantine, formatMetric(queues.quarantined_messages)),
     buildMiniStat(copy.scanSummarySuspicious, formatMetric(trafficRecords.filter(itemIsSecurityFlagged).length)),
     buildMiniStat(copy.scanSummarySpam, formatMetric(trafficRecords.filter((item) => Number(item.spam_score ?? item.current?.spam_score ?? 0) > 0).length)),
     buildMiniStat(copy.scanSummaryDigest, formatMetric(state.digestReports.length)),
@@ -2004,22 +1355,24 @@ function renderDashboard() {
     syncLoadingState();
     return;
   }
+  const posture = healthPosture(dashboard);
 
-  elements.nodeName.textContent = dashboard.site.node_name || copy.heroLoadingTitle;
+  elements.nodeName.textContent = dashboard.site?.node_name || copy.heroLoadingTitle;
   elements.heroSummary.textContent = translate(copy.heroSummaryTemplate, {
-    dmzZone: dashboard.site.dmz_zone || copy.unset,
-    publishedMx: dashboard.site.published_mx || copy.unset,
-    primaryUpstream: dashboard.relay.primary_upstream || copy.unset,
+    dmzZone: dashboard.site?.dmz_zone || copy.unset,
+    publishedMx: dashboard.site?.published_mx || copy.unset,
+    primaryUpstream: dashboard.relay?.primary_upstream || copy.unset,
   });
-  elements.statusBadge.textContent = dashboard.policies.drain_mode ? copy.statusDrain : copy.statusProduction;
-  elements.statusBadge.className = dashboard.policies.drain_mode ? "badge warn" : "badge ok";
-  elements.upstreamBadge.textContent = dashboard.queues.upstream_reachable ? copy.relayReachable : copy.relayUnreachable;
-  elements.upstreamBadge.className = dashboard.queues.upstream_reachable ? "badge ok" : "badge danger";
+  elements.statusBadge.textContent = posture.label;
+  elements.statusBadge.className = `badge ${posture.tone}`;
+  elements.upstreamBadge.textContent = dashboard.queues?.upstream_reachable ? copy.relayReachable : copy.relayUnreachable;
+  elements.upstreamBadge.className = dashboard.queues?.upstream_reachable ? "badge ok" : "badge danger";
 
-  renderMetric(elements.metricInbound, dashboard.queues.inbound_messages);
-  renderMetric(elements.metricDeferred, dashboard.queues.deferred_messages);
-  renderMetric(elements.metricQuarantine, dashboard.queues.quarantined_messages);
-  renderMetric(elements.metricAttempts, dashboard.queues.delivery_attempts_last_hour);
+  elements.metricSystemHealth.textContent = posture.label;
+  renderMetric(elements.metricInbound, dashboard.queues?.inbound_messages);
+  renderMetric(elements.metricDeferred, dashboard.queues?.deferred_messages);
+  renderMetric(elements.metricQuarantine, dashboard.queues?.quarantined_messages);
+  renderMetric(elements.metricAttempts, dashboard.queues?.delivery_attempts_last_hour);
   renderOverview();
 
   renderQuarantine();
@@ -3223,3 +2576,5 @@ window.addEventListener("resize", () => {
   }
 });
 void load();
+
+
