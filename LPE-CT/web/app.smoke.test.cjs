@@ -390,25 +390,28 @@ function createContext() {
   });
 
   const localePickers = [new MockElement("", "select"), new MockElement("", "select"), new MockElement("", "select")];
-  const navButtons = ["overview-section", "quarantine-section", "history-section"].map((target) => {
+  const navButtons = ["dashboard", "system-setup", "filtering", "anti-spam", "quarantine", "reporting", "logs"].map((target) => {
     const button = new MockElement("", "button");
-    button.dataset.scrollTarget = target;
+    button.dataset.pageTarget = target;
     return button;
   });
-  const sections = Object.fromEntries(
-    ["overview-section", "quarantine-section", "history-section"].map((id) => [id, new MockElement(id)]),
-  );
+  const pageViews = ["dashboard", "anti-spam", "quarantine", "reporting", "filtering", "filtering", "filtering", "filtering", "reporting", "system-setup", "logs"].map((page) => {
+    const view = new MockElement("", "section");
+    view.dataset.pageView = page;
+    return view;
+  });
 
   const document = {
     title: "",
     body: new MockElement("body", "body"),
     documentElement: new MockElement("html", "html"),
     getElementById(id) {
-      return elements[id] ?? sections[id] ?? null;
+      return elements[id] ?? null;
     },
     querySelectorAll(selector) {
       if (selector === "[data-locale-picker]") return localePickers;
       if (selector === "[data-nav-button]") return navButtons;
+      if (selector === "[data-page-view]") return pageViews;
       return [];
     },
     createElement(tagName) {
@@ -440,6 +443,8 @@ function createContext() {
     document,
     localStorage,
     navigator: { languages: ["en-US"], language: "en-US" },
+    location: { hash: "" },
+    history: { replaceState() {} },
     fetch: createFetchStub(),
     requestAnimationFrame(callback) {
       callback();
@@ -471,11 +476,11 @@ function createContext() {
   };
 
   window.window = window;
-  return { context, elements, document };
+  return { context, elements, document, navButtons, pageViews };
 }
 
 async function main() {
-  const { context, elements, document } = createContext();
+  const { context, elements, document, navButtons, pageViews } = createContext();
   const i18nSource = fs.readFileSync(path.join(__dirname, "i18n.js"), "utf8");
   globalThis.window = context.window;
   globalThis.document = context.document;
@@ -507,6 +512,10 @@ async function main() {
   assert.match(elements["quarantine-list"].innerHTML, /trace-1/);
   assert.match(elements["history-list"].innerHTML, /trace-2/);
   assert.match(elements["platform-list"].innerHTML, /Node identity/);
+  assert.equal(navButtons[0].getAttribute("aria-current"), "true");
+  assert.equal(pageViews[0].classList.contains("page-view-active"), true);
+  assert.equal(pageViews[1].classList.contains("hidden"), true);
+  assert.equal(pageViews[1].getAttribute("aria-hidden"), "true");
 }
 
 main().catch((error) => {

@@ -1,4 +1,5 @@
 import { i18n, getCopy, translate } from './modules/i18n/index.js';
+import { DEFAULT_PAGE_ID, activatePageView, pageIdFromHash, renderPageModules } from "./modules/pages/index.js";
 
 // DOM References
 const elements = {
@@ -19,6 +20,7 @@ const elements = {
   drawerClose: document.getElementById("drawer-close"),
   localePickers: Array.from(document.querySelectorAll("[data-locale-picker]")),
   navButtons: Array.from(document.querySelectorAll("[data-nav-button]")),
+  pageViews: Array.from(document.querySelectorAll("[data-page-view]")),
   refresh: document.getElementById("refresh"),
   refreshToolbar: document.getElementById("refresh-toolbar"),
   runDigests: document.getElementById("run-digests"),
@@ -106,7 +108,7 @@ const state = {
     trace: false,
     runDigests: false,
   },
-  activeSection: "overview-section",
+  activePage: DEFAULT_PAGE_ID,
   drawer: {
     open: false,
     previousFocus: null,
@@ -483,30 +485,32 @@ function syncLoadingState() {
   renderDashboard();
 }
 
-function updateNavState(activeSectionId = state.activeSection) {
-  state.activeSection = activeSectionId;
-  elements.navButtons.forEach((button) => {
-    const isActive = button.dataset.scrollTarget === activeSectionId;
-    button.setAttribute("aria-current", isActive ? "true" : "false");
+function pageFromHash() {
+  return pageIdFromHash(window.location?.hash);
+}
+
+function setActivePage(page = state.activePage, options = {}) {
+  const targetPage = activatePageView(page, {
+    pageViews: elements.pageViews,
+    navButtons: elements.navButtons,
   });
+  state.activePage = targetPage;
+  if (options.updateHash) {
+    try {
+      window.history?.replaceState(null, "", `#${targetPage}`);
+    } catch {}
+  }
+  if (options.focus) {
+    elements.mainWorkspace?.focus();
+  }
+}
+
+function updateNavState(activePage = state.activePage) {
+  setActivePage(activePage);
 }
 
 function registerSectionObserver() {
-  const sections = elements.navButtons
-    .map((button) => document.getElementById(button.dataset.scrollTarget))
-    .filter(Boolean);
-  const observer = new IntersectionObserver(
-    (entries) => {
-      const visible = entries
-        .filter((entry) => entry.isIntersecting)
-        .sort((left, right) => right.intersectionRatio - left.intersectionRatio)[0];
-      if (visible?.target?.id) {
-        updateNavState(visible.target.id);
-      }
-    },
-    { rootMargin: "-20% 0px -60% 0px", threshold: [0.15, 0.4, 0.7] },
-  );
-  sections.forEach((section) => observer.observe(section));
+  setActivePage(pageFromHash());
 }
 
 function routeToPolicies(role, action) {
@@ -1348,6 +1352,19 @@ function renderOverview() {
     : `<article class="traffic-row"><strong>${escapeHtml(copy.noTrafficHistory)}</strong></article>`;
 }
 
+const PAGE_RENDERERS = {
+  overview: renderOverview,
+  quarantine: renderQuarantine,
+  history: renderHistory,
+  addressRules: renderAddressRules,
+  attachmentRules: renderAttachmentRules,
+  recipientVerification: renderRecipientVerification,
+  dkim: renderDkim,
+  digestReporting: renderDigestReporting,
+  platform: renderPlatform,
+  audit: renderAudit,
+};
+
 function renderDashboard() {
   const copy = getCopy();
   const dashboard = state.dashboard;
@@ -1375,15 +1392,7 @@ function renderDashboard() {
   renderMetric(elements.metricAttempts, dashboard.queues?.delivery_attempts_last_hour);
   renderOverview();
 
-  renderQuarantine();
-  renderHistory();
-  renderAddressRules();
-  renderAttachmentRules();
-  renderRecipientVerification();
-  renderDkim();
-  renderDigestReporting();
-  renderPlatform();
-  renderAudit();
+  renderPageModules(PAGE_RENDERERS);
 }
 
 // Persistence, Validation, and Drawer Workflows
@@ -2427,14 +2436,10 @@ function handleBodyClick(event) {
     return;
   }
 
-  const scrollTarget = event.target.closest("[data-scroll-target]");
-  if (scrollTarget) {
-    const section = document.getElementById(scrollTarget.dataset.scrollTarget);
-    if (section) {
-      section.scrollIntoView({ behavior: "smooth", block: "start" });
-      updateNavState(section.id);
-      setSidebarOpen(false);
-    }
+  const pageTarget = event.target.closest("[data-page-target]");
+  if (pageTarget) {
+    setActivePage(pageTarget.dataset.pageTarget, { focus: true, updateHash: true });
+    setSidebarOpen(false);
   }
 }
 
@@ -2558,7 +2563,7 @@ document.addEventListener("keydown", (event) => {
 i18n.bindLocalePickers(elements.localePickers, setLocale);
 hydrateLoginForm();
 registerSectionObserver();
-updateNavState("overview-section");
+updateNavState(pageFromHash());
 try {
   setSidebarCollapsed(window.localStorage.getItem("lpeCtSidebarCollapsed") === "true");
 } catch {}
@@ -2574,6 +2579,9 @@ window.addEventListener("resize", () => {
   if (window.innerWidth > 1024) {
     setSidebarOpen(false);
   }
+});
+window.addEventListener("hashchange", () => {
+  setActivePage(pageFromHash(), { focus: true });
 });
 void load();
 

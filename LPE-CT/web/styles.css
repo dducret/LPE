@@ -741,6 +741,35 @@ select:disabled {
   gap: 16px;
 }
 
+.page-view {
+  display: none;
+}
+
+.page-view.page-view-active,
+.page-header {
+  display: grid;
+}
+
+.section-stack {
+  gap: 16px;
+}
+
+.page-header {
+  gap: 8px;
+}
+
+.page-header h2 {
+  margin: 0;
+  font-size: 1.55rem;
+  letter-spacing: 0;
+}
+
+.page-header p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.55;
+}
+
 .overview-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(18rem, 0.95fr);
@@ -1046,6 +1075,10 @@ select:disabled {
 .dashboard-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
+}
+
+.dashboard-core-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .dashboard-module {

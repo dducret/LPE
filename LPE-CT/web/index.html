@@ -57,7 +57,7 @@
 
           <div class="sidebar-group">
             <div class="sidebar-group-header">
-              <p class="sidebar-heading" data-i18n="navOperationsHeading">Operations</p>
+              <p class="sidebar-heading" data-i18n="navConsoleHeading">Console</p>
               <button
                 id="sidebar-toggle"
                 class="icon-button sidebar-collapse-button"
@@ -71,86 +71,53 @@
               </button>
             </div>
             <nav class="page-list">
-              <button class="page-button" type="button" data-nav-button data-scroll-target="overview-section">
+              <button class="page-button" type="button" data-nav-button data-page-target="dashboard">
                 <span class="page-icon page-icon-overview" aria-hidden="true"></span>
                 <span class="page-copy">
-                  <span class="page-label" data-i18n="navOverview">Overview</span>
-                  <span class="page-caption" data-i18n="navOverviewCaption">Health, queues, relay posture</span>
+                  <span class="page-label" data-i18n="navDashboard">Dashboard</span>
+                  <span class="page-caption" data-i18n="navDashboardCaption">Health, queues, relay posture</span>
                 </span>
               </button>
-              <button class="page-button" type="button" data-nav-button data-scroll-target="quarantine-section">
+              <button class="page-button" type="button" data-nav-button data-page-target="system-setup">
+                <span class="page-icon page-icon-platform" aria-hidden="true"></span>
+                <span class="page-copy">
+                  <span class="page-label" data-i18n="navSystemSetup">System Setup</span>
+                  <span class="page-caption" data-i18n="navSystemSetupCaption">Node identity, relay, network</span>
+                </span>
+              </button>
+              <button class="page-button" type="button" data-nav-button data-page-target="filtering">
+                <span class="page-icon page-icon-attachment" aria-hidden="true"></span>
+                <span class="page-copy">
+                  <span class="page-label" data-i18n="navFiltering">Filtering</span>
+                  <span class="page-caption" data-i18n="navFilteringCaption">Policy, recipients, DKIM readiness</span>
+                </span>
+              </button>
+              <button class="page-button" type="button" data-nav-button data-page-target="anti-spam">
+                <span class="page-icon page-icon-verification" aria-hidden="true"></span>
+                <span class="page-copy">
+                  <span class="page-label" data-i18n="navAntiSpam">Anti-Spam</span>
+                  <span class="page-caption" data-i18n="navAntiSpamCaption">Scanners, retained sources, detections</span>
+                </span>
+              </button>
+              <button class="page-button" type="button" data-nav-button data-page-target="quarantine">
                 <span class="page-icon page-icon-quarantine" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navQuarantine">Quarantine</span>
                   <span class="page-caption" data-i18n="navQuarantineCaption">Retained messages and release actions</span>
                 </span>
               </button>
-              <button class="page-button" type="button" data-nav-button data-scroll-target="history-section">
-                <span class="page-icon page-icon-history" aria-hidden="true"></span>
-                <span class="page-copy">
-                  <span class="page-label" data-i18n="navHistory">Mail history</span>
-                  <span class="page-caption" data-i18n="navHistoryCaption">Trace history, routes, outcomes</span>
-                </span>
-              </button>
-            </nav>
-          </div>
-
-          <div class="sidebar-group">
-            <p class="sidebar-heading" data-i18n="navPolicyHeading">Policy</p>
-            <nav class="page-list">
-              <button class="page-button" type="button" data-nav-button data-scroll-target="address-policy-section">
-                <span class="page-icon page-icon-address" aria-hidden="true"></span>
-                <span class="page-copy">
-                  <span class="page-label" data-i18n="navAddressRules">Allow / block lists</span>
-                  <span class="page-caption" data-i18n="navAddressRulesCaption">Sender and recipient enforcement</span>
-                </span>
-              </button>
-              <button class="page-button" type="button" data-nav-button data-scroll-target="attachment-policy-section">
-                <span class="page-icon page-icon-attachment" aria-hidden="true"></span>
-                <span class="page-copy">
-                  <span class="page-label" data-i18n="navAttachmentRules">Attachment rules</span>
-                  <span class="page-caption" data-i18n="navAttachmentRulesCaption">Extension, MIME, detected type</span>
-                </span>
-              </button>
-              <button class="page-button" type="button" data-nav-button data-scroll-target="verification-section">
-                <span class="page-icon page-icon-verification" aria-hidden="true"></span>
-                <span class="page-copy">
-                  <span class="page-label" data-i18n="navVerification">Recipient verification</span>
-                  <span class="page-caption" data-i18n="navVerificationCaption">Bridge mode, cache, fail posture</span>
-                </span>
-              </button>
-              <button class="page-button" type="button" data-nav-button data-scroll-target="dkim-section">
-                <span class="page-icon page-icon-dkim" aria-hidden="true"></span>
-                <span class="page-copy">
-                  <span class="page-label" data-i18n="navDkim">DKIM domains</span>
-                  <span class="page-caption" data-i18n="navDkimCaption">Selectors, readiness, key status</span>
-                </span>
-              </button>
-            </nav>
-          </div>
-
-          <div class="sidebar-group">
-            <p class="sidebar-heading" data-i18n="navReportingHeading">Reporting</p>
-            <nav class="page-list">
-              <button class="page-button" type="button" data-nav-button data-scroll-target="digest-section">
+              <button class="page-button" type="button" data-nav-button data-page-target="reporting">
                 <span class="page-icon page-icon-digest" aria-hidden="true"></span>
                 <span class="page-copy">
-                  <span class="page-label" data-i18n="navDigest">Digest reports</span>
-                  <span class="page-caption" data-i18n="navDigestCaption">Schedules, defaults, retained artifacts</span>
+                  <span class="page-label" data-i18n="navReporting">Reporting</span>
+                  <span class="page-caption" data-i18n="navReportingCaption">History, digests, retained artifacts</span>
                 </span>
               </button>
-              <button class="page-button" type="button" data-nav-button data-scroll-target="platform-section">
-                <span class="page-icon page-icon-platform" aria-hidden="true"></span>
-                <span class="page-copy">
-                  <span class="page-label" data-i18n="navPlatform">Node and transport</span>
-                  <span class="page-caption" data-i18n="navPlatformCaption">Node identity, relay, network</span>
-                </span>
-              </button>
-              <button class="page-button" type="button" data-nav-button data-scroll-target="audit-section">
+              <button class="page-button" type="button" data-nav-button data-page-target="logs">
                 <span class="page-icon page-icon-audit" aria-hidden="true"></span>
                 <span class="page-copy">
-                  <span class="page-label" data-i18n="navAudit">Audit journal</span>
-                  <span class="page-caption" data-i18n="navAuditCaption">Administrative changes and evidence</span>
+                  <span class="page-label" data-i18n="navLogs">Logs</span>
+                  <span class="page-caption" data-i18n="navLogsCaption">Audit journal and evidence</span>
                 </span>
               </button>
             </nav>
@@ -209,7 +176,7 @@
           </div>
         </header>
 
-        <section id="overview-section" class="overview-stack">
+        <section id="overview-section" class="overview-stack page-view" data-page-view="dashboard">
           <div class="overview-grid">
             <section class="hero-card panel">
               <div class="hero-copy-block">
@@ -322,7 +289,7 @@
             </article>
           </section>
 
-          <section class="dashboard-grid">
+          <section class="dashboard-grid dashboard-core-grid">
             <article class="panel dashboard-module">
               <div class="section-head compact-head">
                 <div>
@@ -336,21 +303,34 @@
             <article class="panel dashboard-module">
               <div class="section-head compact-head">
                 <div>
-                  <p class="section-kicker" data-i18n="scannerStatusTitle">Scanner and policy status</p>
-                  <h3 data-i18n="scannerStatusHeading">Validation chain</h3>
-                </div>
-              </div>
-              <div id="scanner-status-list" class="status-tile-grid"></div>
-            </article>
-
-            <article class="panel dashboard-module">
-              <div class="section-head compact-head">
-                <div>
                   <p class="section-kicker" data-i18n="relayHealthTitle">Node and relay health</p>
                   <h3 data-i18n="relayHealthHeading">Connectivity posture</h3>
                 </div>
               </div>
               <div id="relay-health-list" class="mini-stat-list"></div>
+            </article>
+
+          </section>
+        </section>
+
+        <section id="anti-spam-section" class="page-view section-stack" data-page-view="anti-spam">
+          <section class="page-header panel">
+            <p class="section-kicker" data-i18n="navAntiSpam">Anti-Spam</p>
+            <h2 data-i18n="antiSpamTitle">Anti-spam and scanner posture</h2>
+            <p data-i18n="antiSpamSummary">
+              Inspect scanner chain state, retained source patterns, suspicious relay posture, and recent detection reasons.
+            </p>
+          </section>
+
+          <section class="dashboard-grid">
+            <article class="panel dashboard-module">
+              <div class="section-head compact-head">
+                <div>
+                  <p class="section-kicker" data-i18n="scannerStatusTitle">Scanner and policy status</p>
+                  <h3 data-i18n="scannerStatusHeading">Validation chain</h3>
+                </div>
+              </div>
+              <div id="scanner-status-list" class="status-tile-grid"></div>
             </article>
 
             <article class="panel dashboard-module">
@@ -410,7 +390,7 @@
 
         <p id="feedback" class="feedback hidden" role="status" aria-live="polite"></p>
 
-        <section id="quarantine-section" class="panel section-panel">
+        <section id="quarantine-section" class="panel section-panel page-view" data-page-view="quarantine">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navQuarantine">Quarantine</p>
@@ -439,7 +419,7 @@
           <div id="quarantine-list" class="management-list-stack"></div>
         </section>
 
-        <section id="history-section" class="panel section-panel">
+        <section id="history-section" class="panel section-panel page-view" data-page-view="reporting">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navHistory">Mail history</p>
@@ -480,7 +460,7 @@
           <div id="history-list" class="management-list-stack"></div>
         </section>
 
-        <section id="address-policy-section" class="panel section-panel">
+        <section id="address-policy-section" class="panel section-panel page-view" data-page-view="filtering">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navAddressRules">Allow / block lists</p>
@@ -494,7 +474,7 @@
           <div id="address-rules-list" class="management-list-stack"></div>
         </section>
 
-        <section id="attachment-policy-section" class="panel section-panel">
+        <section id="attachment-policy-section" class="panel section-panel page-view" data-page-view="filtering">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navAttachmentRules">Attachment rules</p>
@@ -508,7 +488,7 @@
           <div id="attachment-rules-list" class="management-list-stack"></div>
         </section>
 
-        <section id="verification-section" class="panel section-panel">
+        <section id="verification-section" class="panel section-panel page-view" data-page-view="filtering">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navVerification">Recipient verification</p>
@@ -522,7 +502,7 @@
           <div id="recipient-verification-status" class="management-list-stack"></div>
         </section>
 
-        <section id="dkim-section" class="panel section-panel">
+        <section id="dkim-section" class="panel section-panel page-view" data-page-view="filtering">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navDkim">DKIM domains</p>
@@ -539,7 +519,7 @@
           <div id="dkim-domain-list" class="management-list-stack"></div>
         </section>
 
-        <section id="digest-section" class="panel section-panel">
+        <section id="digest-section" class="panel section-panel page-view" data-page-view="reporting">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navDigest">Digest reports</p>
@@ -560,7 +540,7 @@
           <div id="digest-report-list" class="management-list-stack"></div>
         </section>
 
-        <section id="platform-section" class="panel section-panel">
+        <section id="platform-section" class="panel section-panel page-view" data-page-view="system-setup">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navPlatform">Node and transport</p>
@@ -573,7 +553,7 @@
           <div id="platform-list" class="management-list-stack"></div>
         </section>
 
-        <section id="audit-section" class="panel section-panel">
+        <section id="audit-section" class="panel section-panel page-view" data-page-view="logs">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navAudit">Audit journal</p>
