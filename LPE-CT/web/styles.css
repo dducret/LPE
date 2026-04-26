@@ -214,8 +214,12 @@ select:disabled {
   z-index: 30;
   width: 20rem;
   height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 16px;
   padding: 16px;
+  overflow: hidden;
   color: var(--nav-text);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 26%),
@@ -229,8 +233,13 @@ select:disabled {
 }
 
 .sidebar-stack {
+  min-height: 0;
   gap: 18px;
   align-content: start;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 
 .sidebar-brand {
@@ -535,6 +544,7 @@ select:disabled {
 }
 
 .sidebar-footer {
+  min-height: 0;
   align-content: end;
 }
 
