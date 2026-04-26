@@ -680,13 +680,28 @@ pub(crate) fn queue_metrics(
     spool_dir: &Path,
     upstream_reachable: bool,
 ) -> Result<super::QueueMetrics> {
+    let incoming = inspect_queue(spool_dir, "incoming")?;
+    let outbound = inspect_queue(spool_dir, "outbound")?;
+    let deferred = inspect_queue(spool_dir, "deferred")?;
+    let quarantine = inspect_queue(spool_dir, "quarantine")?;
+    let held = inspect_queue(spool_dir, "held")?;
+    let sent = inspect_queue(spool_dir, "sent")?;
+    let bounces = inspect_queue(spool_dir, "bounces")?;
     Ok(super::QueueMetrics {
-        inbound_messages: count_queue(spool_dir, "incoming")? + count_queue(spool_dir, "sent")?,
-        deferred_messages: count_queue(spool_dir, "deferred")?,
-        quarantined_messages: count_queue(spool_dir, "quarantine")?,
-        held_messages: count_queue(spool_dir, "held")?,
-        delivery_attempts_last_hour: count_queue(spool_dir, "sent")?
-            + count_queue(spool_dir, "deferred")?,
+        inbound_messages: incoming.messages + sent.messages,
+        incoming_messages: incoming.messages,
+        active_messages: outbound.messages,
+        deferred_messages: deferred.messages,
+        quarantined_messages: quarantine.messages,
+        held_messages: held.messages,
+        corrupt_messages: incoming.corrupt
+            + outbound.corrupt
+            + deferred.corrupt
+            + quarantine.corrupt
+            + held.corrupt
+            + sent.corrupt
+            + bounces.corrupt,
+        delivery_attempts_last_hour: sent.messages + deferred.messages,
         upstream_reachable,
     })
 }
@@ -4371,14 +4386,41 @@ fn spool_path(spool_dir: &Path, queue: &str, id: &str) -> PathBuf {
     spool_dir.join(queue).join(format!("{id}.json"))
 }
 
-fn count_queue(spool_dir: &Path, queue: &str) -> Result<u32> {
+struct QueueInspection {
+    messages: u32,
+    corrupt: u32,
+}
+
+fn inspect_queue(spool_dir: &Path, queue: &str) -> Result<QueueInspection> {
     let path = spool_dir.join(queue);
     if !path.exists() {
-        return Ok(0);
+        return Ok(QueueInspection {
+            messages: 0,
+            corrupt: 0,
+        });
     }
-    Ok(fs::read_dir(path)?
-        .filter_map(std::result::Result::ok)
-        .count() as u32)
+
+    let mut inspection = QueueInspection {
+        messages: 0,
+        corrupt: 0,
+    };
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        inspection.messages += 1;
+        if fs::read_to_string(&path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            .is_none()
+        {
+            inspection.corrupt += 1;
+        }
+    }
+
+    Ok(inspection)
 }
 
 pub(crate) async fn list_quarantine_items(

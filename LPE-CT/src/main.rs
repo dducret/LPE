@@ -33,6 +33,7 @@ mod reporting;
 mod smtp;
 mod storage;
 mod submission;
+mod system_metrics;
 mod transport_policy;
 
 const MIN_INTEGRATION_SECRET_LEN: usize = 32;
@@ -279,9 +280,15 @@ struct UpdateSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct QueueMetrics {
     inbound_messages: u32,
+    #[serde(default)]
+    incoming_messages: u32,
+    #[serde(default)]
+    active_messages: u32,
     deferred_messages: u32,
     quarantined_messages: u32,
     held_messages: u32,
+    #[serde(default)]
+    corrupt_messages: u32,
     delivery_attempts_last_hour: u32,
     upstream_reachable: bool,
 }
@@ -320,6 +327,13 @@ struct DashboardState {
     management_auth: ManagementAuthState,
     #[serde(default)]
     audit: Vec<AuditEvent>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DashboardResponse {
+    #[serde(flatten)]
+    state: DashboardState,
+    system: system_metrics::SystemMetrics,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -462,9 +476,11 @@ async fn main() -> Result<()> {
     dashboard.network.submission_listener_enabled =
         submission_listener_is_configured(&submission_bind_address);
     persist_state(&state_file, &dashboard)?;
-    if let Err(error) =
-        storage::sync_dashboard_configuration(&local_db_config_from_dashboard(&dashboard), &dashboard)
-            .await
+    if let Err(error) = storage::sync_dashboard_configuration(
+        &local_db_config_from_dashboard(&dashboard),
+        &dashboard,
+    )
+    .await
     {
         if dashboard.local_data_stores.dedicated_postgres.enabled {
             warn!(
@@ -755,12 +771,15 @@ async fn me(
 async fn dashboard(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<DashboardState>, ApiError> {
+) -> Result<Json<DashboardResponse>, ApiError> {
     let _admin = require_management_admin(&state, &headers)?;
     let mut snapshot = read_state(&state)?;
     snapshot.queues = smtp::queue_metrics(&state.spool_dir, snapshot.queues.upstream_reachable)
         .map_err(ApiError::from)?;
-    Ok(Json(snapshot))
+    Ok(Json(DashboardResponse {
+        system: system_metrics::collect(&state.spool_dir),
+        state: snapshot,
+    }))
 }
 
 async fn quarantine_items(
@@ -1904,9 +1923,12 @@ fn default_state() -> DashboardState {
         },
         queues: QueueMetrics {
             inbound_messages: 0,
+            incoming_messages: 0,
+            active_messages: 0,
             deferred_messages: 0,
             quarantined_messages: 0,
             held_messages: 0,
+            corrupt_messages: 0,
             delivery_attempts_last_hour: 0,
             upstream_reachable: true,
         },
@@ -2695,8 +2717,8 @@ mod tests {
     use super::{
         address_binds_publicly, apply_env_overrides, default_state, env_test_lock,
         ha_activation_check, ha_non_active_role_for_traffic, integration_shared_secret,
-        normalize_local_data_stores, require_integration_request,
-        submission_listener_is_configured, OUTBOUND_HANDOFF_PATH,
+        normalize_local_data_stores, persist_state, require_integration_request,
+        submission_listener_is_configured, DashboardResponse, OUTBOUND_HANDOFF_PATH,
     };
     use axum::http::HeaderMap;
     use lpe_domain::{
@@ -2719,6 +2741,66 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("lpe-ct-ha-role-{suffix}"));
         fs::create_dir_all(&dir).unwrap();
         dir.join(name)
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("lpe-ct-{name}-{suffix}"));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn dashboard_response_serializes_runtime_system_without_persisting_it() {
+        let state = default_state();
+        let spool = temp_dir("dashboard-system");
+        let response = DashboardResponse {
+            state: state.clone(),
+            system: crate::system_metrics::collect(&spool),
+        };
+
+        let response_json = serde_json::to_value(&response).unwrap();
+        assert!(response_json.get("system").is_some());
+        assert!(response_json["system"].get("host_time").is_some());
+        assert!(response_json["system"].get("hostname").is_some());
+        assert!(response_json["system"].get("architecture").is_some());
+
+        let persisted_state_json = serde_json::to_value(&state).unwrap();
+        assert!(persisted_state_json.get("system").is_none());
+
+        let state_file = spool.join("state.json");
+        persist_state(&state_file, &state).unwrap();
+        let raw = fs::read_to_string(state_file).unwrap();
+        assert!(!raw.contains("\"system\""));
+    }
+
+    #[test]
+    fn queue_metrics_count_runtime_spool_messages_by_state() {
+        let spool = temp_dir("queue-metrics");
+        crate::smtp::initialize_spool(&spool).unwrap();
+        fs::write(spool.join("incoming").join("incoming-1.json"), "{}").unwrap();
+        fs::write(spool.join("outbound").join("outbound-1.json"), "{}").unwrap();
+        fs::write(spool.join("outbound").join("outbound-2.json"), "{").unwrap();
+        fs::write(spool.join("outbound").join("outbound.tmp"), "{").unwrap();
+        fs::write(spool.join("deferred").join("deferred-1.json"), "{}").unwrap();
+        fs::write(spool.join("held").join("held-1.json"), "{}").unwrap();
+        fs::write(spool.join("quarantine").join("quarantine-1.json"), "{}").unwrap();
+        fs::write(spool.join("sent").join("sent-1.json"), "{}").unwrap();
+        fs::write(spool.join("bounces").join("bounce-1.json"), "{").unwrap();
+
+        let metrics = crate::smtp::queue_metrics(&spool, false).unwrap();
+        assert_eq!(metrics.incoming_messages, 1);
+        assert_eq!(metrics.active_messages, 2);
+        assert_eq!(metrics.deferred_messages, 1);
+        assert_eq!(metrics.held_messages, 1);
+        assert_eq!(metrics.quarantined_messages, 1);
+        assert_eq!(metrics.corrupt_messages, 2);
+        assert_eq!(metrics.inbound_messages, 2);
+        assert_eq!(metrics.delivery_attempts_last_hour, 2);
+        assert!(!metrics.upstream_reachable);
     }
 
     #[test]
