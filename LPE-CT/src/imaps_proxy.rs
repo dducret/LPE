@@ -43,9 +43,10 @@ async fn handle_imaps_session(
     tls: TlsAcceptor,
     upstream_address: String,
 ) -> Result<()> {
+    let mut client = tls.accept(stream).await?;
+
     if let Some(role) = crate::ha_non_active_role_for_traffic()? {
-        let mut stream = stream;
-        stream
+        client
             .write_all(
                 format!("* BYE node role {role} is not accepting IMAPS traffic\r\n").as_bytes(),
             )
@@ -53,7 +54,6 @@ async fn handle_imaps_session(
         return Ok(());
     }
 
-    let mut client = tls.accept(stream).await?;
     let mut upstream = TcpStream::connect(&upstream_address)
         .await
         .with_context(|| format!("unable to connect to LPE IMAP upstream {upstream_address}"))?;

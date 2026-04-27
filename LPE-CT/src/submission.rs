@@ -96,17 +96,18 @@ async fn handle_submission_session(
     core_base_url: String,
     state_file: PathBuf,
 ) -> Result<()> {
+    let tls_stream = tls.accept(stream).await?;
+
     if let Some(role) = crate::ha_non_active_role_for_traffic()? {
-        let mut stream = stream;
+        let (_reader, mut writer) = tokio::io::split(tls_stream);
         write_line(
-            &mut stream,
+            &mut writer,
             &format!("421 node role {role} is not accepting SMTP submission traffic"),
         )
         .await?;
         return Ok(());
     }
 
-    let tls_stream = tls.accept(stream).await?;
     let (reader, mut writer) = tokio::io::split(tls_stream);
     let mut reader = TokioBufReader::new(reader);
     let mut line = String::new();

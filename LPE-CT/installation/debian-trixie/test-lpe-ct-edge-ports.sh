@@ -114,13 +114,27 @@ tls_probe_if_possible() {
   local host="$1"
   local port="$2"
   local name="$3"
+  local output_file
   if ! command -v openssl >/dev/null 2>&1; then
     echo "[SKIP] openssl is not available; TCP reachability for ${name} was checked, TLS handshake was not."
     return
   fi
-  timeout 10 openssl s_client -connect "${host}:${port}" -servername "${LPE_CT_PUBLIC_HOSTNAME:-localhost}" </dev/null 2>/dev/null \
-    | grep -q "BEGIN CERTIFICATE" \
-    || fail "${name} on ${host}:${port} did not present a TLS certificate"
+  output_file="$(mktemp)"
+  if ! timeout 10 openssl s_client -showcerts -connect "${host}:${port}" -servername "${LPE_CT_PUBLIC_HOSTNAME:-localhost}" </dev/null >"${output_file}" 2>&1; then
+    echo "[DIAG] openssl s_client failed for ${name} on ${host}:${port}:"
+    sed -n '1,80p' "${output_file}" || true
+    recent_logs
+    rm -f "${output_file}"
+    fail "${name} on ${host}:${port} failed TLS handshake"
+  fi
+  if ! grep -q "BEGIN CERTIFICATE" "${output_file}"; then
+    echo "[DIAG] openssl s_client did not report a certificate for ${name} on ${host}:${port}:"
+    sed -n '1,120p' "${output_file}" || true
+    recent_logs
+    rm -f "${output_file}"
+    fail "${name} on ${host}:${port} did not present a TLS certificate"
+  fi
+  rm -f "${output_file}"
   pass "${name} on ${host}:${port} presented a TLS certificate"
 }
 
