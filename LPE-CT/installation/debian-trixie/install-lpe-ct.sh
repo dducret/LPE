@@ -138,7 +138,7 @@ collect_runtime_values() {
   LPE_CT_SMTP_HOST="$(ask_with_default "SMTP ingress host" "${LPE_CT_SMTP_HOST_DEFAULT}" validate_host_token "Enter a valid host token.")"
   LPE_CT_SMTP_PORT="$(ask_with_default "SMTP ingress port" "${LPE_CT_SMTP_PORT_DEFAULT}" validate_port "Enter a valid TCP port.")"
   LPE_CT_SMTP_BIND_ADDRESS="${LPE_CT_SMTP_HOST}:${LPE_CT_SMTP_PORT}"
-  LPE_CT_NGINX_LISTEN_PORT="$(ask_with_default "HTTPS port" "${LPE_CT_NGINX_LISTEN_PORT_DEFAULT}" validate_port "Enter a valid TCP port.")"
+  LPE_CT_NGINX_LISTEN_PORT="$(ask_with_default "HTTPS port" "${LPE_CT_NGINX_LISTEN_PORT_DEFAULT}" validate_https_port "Enter a valid HTTPS TCP port other than 80; port 80 is reserved for HTTP redirect.")"
   LPE_CT_PUBLIC_TLS_CERT_PATH="$(ask_with_default "Public TLS certificate path" "${LPE_CT_PUBLIC_TLS_CERT_PATH_DEFAULT}" validate_absolute_file_path "Enter an absolute certificate path.")"
   LPE_CT_PUBLIC_TLS_KEY_PATH="$(ask_with_default "Public TLS private key path" "${LPE_CT_PUBLIC_TLS_KEY_PATH_DEFAULT}" validate_absolute_file_path "Enter an absolute private key path.")"
   LPE_CT_IMAPS_BIND_ADDRESS="$(ask_with_default "IMAPS bind address" "${LPE_CT_IMAPS_BIND_ADDRESS_DEFAULT}" validate_host_port "Enter a valid host:port bind address.")"

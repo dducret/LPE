@@ -17,7 +17,8 @@ The core `LPE` server must not be directly reachable from the public Internet an
 - inbound `SMTP` on port `25`
 - authenticated client `SMTP` submission on implicit `TLS` port `465` when configured
 - the `LPE` web client and `LPE-CT` management publication over `HTTPS` on `443`
-- plain `HTTP` on port `80` only as a redirect to the `HTTPS` edge
+- plain `HTTP` on port `80` only as a redirect to the `HTTPS` edge; port `80`
+  must not be configured as the `HTTPS` listener
 - `ActiveSync` over `HTTPS` under `/activesync`
 - exposed `JMAP` endpoints over `TLS` toward `LPE` under `/api/jmap/*`
 - secure `JMAP` WebSockets over `TLS` under the same published `JMAP` origin when the `JMAP` WebSocket endpoint is enabled

@@ -107,7 +107,8 @@ condition into a permanent redirect instead of exposing the default
 `400 Bad Request: The plain HTTP request was sent to HTTPS port` page. If a
 browser redirects and then reports `connection refused`, verify that nginx is
 actually listening on `LPE_CT_NGINX_LISTEN_PORT`, default `443`, and that the
-local firewall allows that port.
+local firewall allows that port. `LPE_CT_NGINX_LISTEN_PORT=80` is invalid for
+`LPE-CT` because port `80` is reserved for the redirect-only cleartext listener.
 
 ### Initial preparation on a bare Debian server
 
@@ -247,7 +248,8 @@ The `LPE-CT` installer prompts for:
 - local management port, default `8380`
 - SMTP ingress host, default `0.0.0.0`
 - SMTP ingress port, default `25`
-- HTTPS port, default `443`
+- HTTPS port, default `443`; do not set this to `80`, which is reserved for
+  the HTTP-to-HTTPS redirect
 - public TLS certificate path, default `/etc/lpe-ct/tls/fullchain.pem`
 - public TLS private key path, default `/etc/lpe-ct/tls/privkey.pem`
 - IMAPS bind address, default `0.0.0.0:993`

@@ -108,6 +108,9 @@ LPE_CT_RESET_STATE_ON_UPDATE="${LPE_CT_RESET_STATE_ON_UPDATE:-false}"
 LPE_CT_BIND_ADDRESS="${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}"
 LPE_CT_SERVER_NAME="${LPE_CT_SERVER_NAME:-_}"
 LPE_CT_NGINX_LISTEN_PORT="${LPE_CT_NGINX_LISTEN_PORT:-443}"
+if ! validate_https_port "${LPE_CT_NGINX_LISTEN_PORT}"; then
+  fail_install "LPE_CT_NGINX_LISTEN_PORT must be a valid HTTPS port other than 80. Port 80 is reserved for the HTTP-to-HTTPS redirect; use 443 for the public HTTPS edge."
+fi
 LPE_CT_PUBLIC_TLS_CERT_PATH="${LPE_CT_PUBLIC_TLS_CERT_PATH:-/etc/lpe-ct/tls/fullchain.pem}"
 LPE_CT_PUBLIC_TLS_KEY_PATH="${LPE_CT_PUBLIC_TLS_KEY_PATH:-/etc/lpe-ct/tls/privkey.pem}"
 

@@ -377,6 +377,11 @@ validate_port() {
   (( value >= 1 && value <= 65535 ))
 }
 
+validate_https_port() {
+  local value="$1"
+  validate_port "${value}" && [[ "${value}" != "80" ]]
+}
+
 validate_hostname() {
   local value="$1"
   [[ "${value}" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$ ]]
