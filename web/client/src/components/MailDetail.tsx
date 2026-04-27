@@ -8,6 +8,8 @@ export function MailDetail(props: {
   current: Message | null;
   mode: Mode;
   draft: MessageDraft;
+  messageBusy: boolean;
+  notice: string;
   composerMailboxes: MailboxAccountAccess[];
   setDraft: React.Dispatch<React.SetStateAction<MessageDraft>>;
   onReply: (message: Message) => void;
@@ -94,8 +96,9 @@ export function MailDetail(props: {
 
         <div className="editor-shell-actions">
           {props.mode === "draft" ? <Button variant="danger" type="button" onClick={props.onDeleteDraft}>{props.copy.editorActions.deleteDraft}</Button> : null}
-          <Button variant="ghost" type="button" onClick={props.onSaveDraft}>{props.copy.editorActions.saveDraft}</Button>
-          <Button variant="primary" type="button" onClick={props.onSend}>{props.copy.editorActions.send}</Button>
+          {props.notice ? <p className="editor-feedback" role="status">{props.notice}</p> : null}
+          <Button variant="ghost" type="button" disabled={props.messageBusy} onClick={props.onSaveDraft}>{props.copy.editorActions.saveDraft}</Button>
+          <Button variant="primary" type="button" disabled={props.messageBusy} onClick={props.onSend}>{props.messageBusy ? props.copy.sendingMessage : props.copy.editorActions.send}</Button>
         </div>
       </section>
     );

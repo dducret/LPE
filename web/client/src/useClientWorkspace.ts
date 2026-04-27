@@ -43,6 +43,24 @@ function mapClientError(error: unknown, fallback: string) {
   return fallback;
 }
 
+function mapSubmitError(error: unknown, copy: ClientCopy) {
+  const detail = error instanceof Error ? error.message : "";
+  const lowered = detail.toLowerCase();
+  if (lowered.includes("at least one recipient") || lowered.includes("subject or body_text")) {
+    return copy.validationMessage;
+  }
+  if (
+    lowered.includes("send as is not granted")
+    || lowered.includes("send on behalf is not granted")
+    || lowered.includes("from email must match")
+    || lowered.includes("sender email must match")
+  ) {
+    return copy.sendPermissionError;
+  }
+  if (detail && !lowered.startsWith("request failed")) return detail;
+  return copy.saveError;
+}
+
 function splitRecipients(value: string) {
   return value
     .split(/[;,]/)
@@ -104,6 +122,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   const [notice, setNotice] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState("");
+  const [messageBusy, setMessageBusy] = React.useState(false);
   const [draft, setDraft] = React.useState<MessageDraft>(() => blankDraft(identity?.account_id));
   const [draftMessageId, setDraftMessageId] = React.useState<string | null>(null);
   const [eventForm, setEventForm] = React.useState(blankEvent());
@@ -350,6 +369,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   }, [mail, openComposer]);
 
   const saveMessage = React.useCallback(async (asDraft: boolean) => {
+    if (messageBusy) return;
     if (!authToken || !identity) return;
     if (!draft.subject.trim() && !draft.body.trim()) return pushNotice(copy.validationMessage);
     if (!asDraft && !draft.to.trim()) return pushNotice(copy.validationMessage);
@@ -368,6 +388,8 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       return pushNotice(copy.saveError);
     }
 
+    setMessageBusy(true);
+    if (!asDraft) pushNotice(copy.sendingMessage);
     try {
       await apiJson(asDraft ? "mail/messages/draft" : "mail/messages/submit", authToken, {
         method: "POST",
@@ -380,10 +402,12 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       setDraft(blankDraft(identity.account_id));
       await loadWorkspace();
       pushNotice(asDraft ? copy.noticeDraft : copy.noticeSent);
-    } catch {
-      pushNotice(copy.saveError);
+    } catch (error) {
+      pushNotice(asDraft ? mapClientError(error, copy.saveError) : mapSubmitError(error, copy));
+    } finally {
+      setMessageBusy(false);
     }
-  }, [authToken, composerMailboxes, copy, draft, draftMessageId, identity, loadWorkspace, pushNotice]);
+  }, [authToken, composerMailboxes, copy, draft, draftMessageId, identity, loadWorkspace, messageBusy, pushNotice]);
 
   const refreshWorkspace = React.useCallback(async () => {
     await loadWorkspace();
@@ -618,6 +642,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     mode,
     closeComposer,
     notice: notice || loadError || (loading ? copy.loadingWorkspace : ""),
+    messageBusy,
     draft,
     setDraft,
     eventForm,

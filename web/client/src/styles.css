@@ -1576,6 +1576,14 @@ textarea {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
+  align-items: center;
+}
+
+.editor-feedback {
+  flex: 1 1 220px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .form-grid {

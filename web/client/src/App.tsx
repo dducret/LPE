@@ -343,6 +343,8 @@ export function App() {
                   current={workspace.current}
                   mode={workspace.mode}
                   draft={workspace.draft}
+                  messageBusy={workspace.messageBusy}
+                  notice={workspace.notice}
                   composerMailboxes={workspace.composerMailboxes}
                   setDraft={workspace.setDraft}
                   onReply={(message) => workspace.openComposer("reply", message)}

@@ -117,7 +117,7 @@ async fn submit_message_with_store<S: ClientSubmissionStore>(
             },
         )
         .await
-        .map_err(internal_error)?;
+        .map_err(classify_client_submission_storage_error)?;
     observability::record_mail_submission("api");
     info!(
         trace_id = %trace_id,
@@ -396,6 +396,29 @@ fn ensure_client_mailbox_write_access(
     }
 }
 
+fn classify_client_submission_storage_error(error: anyhow::Error) -> (StatusCode, String) {
+    let message = error.to_string();
+    let lowered = message.to_ascii_lowercase();
+    if lowered.contains("send as is not granted")
+        || lowered.contains("send on behalf is not granted")
+        || lowered.contains("from email must match authenticated account")
+        || lowered.contains("from email must match delegated mailbox")
+        || lowered.contains("sender email must match authenticated account")
+        || lowered.contains("account not found")
+    {
+        return (StatusCode::FORBIDDEN, message);
+    }
+
+    if lowered.contains("from_address is required")
+        || lowered.contains("at least one recipient")
+        || lowered.contains("subject or body_text")
+    {
+        return (StatusCode::BAD_REQUEST, message);
+    }
+
+    internal_error(message)
+}
+
 fn map_submit_message_request(
     authenticated_account: &AuthenticatedAccount,
     mailbox_access: &MailboxAccountAccess,
@@ -465,7 +488,8 @@ fn map_recipients(input: Vec<SubmitRecipientRequest>) -> Vec<SubmittedRecipientI
 #[cfg(test)]
 mod tests {
     use super::{
-        map_submit_message_request, resolve_client_sender_fields, submit_message_with_store,
+        classify_client_submission_storage_error, map_submit_message_request,
+        resolve_client_sender_fields, submit_message_with_store,
     };
     use crate::types::SubmitMessageRequest;
     use axum::http::{HeaderMap, HeaderValue};
@@ -643,6 +667,21 @@ mod tests {
 
         assert_eq!(sender_display.as_deref(), Some("Delegate"));
         assert_eq!(sender_address.as_deref(), Some("delegate@example.test"));
+    }
+
+    #[test]
+    fn client_submission_storage_errors_keep_actionable_status_codes() {
+        let (status, message) = classify_client_submission_storage_error(anyhow::anyhow!(
+            "at least one recipient is required"
+        ));
+        assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(message, "at least one recipient is required");
+
+        let (status, message) = classify_client_submission_storage_error(anyhow::anyhow!(
+            "send as is not granted for this mailbox"
+        ));
+        assert_eq!(status, axum::http::StatusCode::FORBIDDEN);
+        assert_eq!(message, "send as is not granted for this mailbox");
     }
 
     #[test]
