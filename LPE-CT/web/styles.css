@@ -1136,15 +1136,39 @@ select:disabled {
 }
 
 .dashboard-core-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(13rem, 1fr));
+  align-items: stretch;
 }
 
 .dashboard-module {
   gap: 14px;
 }
 
+.dashboard-core-card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+  gap: 16px;
+  min-height: 100%;
+  border-color: rgba(181, 197, 213, 0.98);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(248, 251, 254, 0.76)),
+    var(--panel-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 14px 30px rgba(17, 27, 39, 0.07);
+}
+
+.dashboard-core-card .mini-stat-list.two-columns {
+  grid-template-columns: 1fr;
+}
+
 .traffic-module {
   grid-column: span 2;
+}
+
+.dashboard-core-grid > .traffic-module {
+  grid-column: 1 / -1;
 }
 
 .mini-stat-list.two-columns {
