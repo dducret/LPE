@@ -34,6 +34,8 @@
   --shadow-panel: 0 12px 28px rgba(17, 27, 39, 0.07);
   --shadow-strong: 0 26px 60px rgba(12, 20, 31, 0.18);
   --spring: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --font-title: 1rem;
+  --font-copy: 0.82rem;
   font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
 
@@ -280,11 +282,19 @@ select:disabled {
 }
 
 .sidebar-stack h1,
+.login-card h1,
 .section-head h3,
 .drawer-header h3,
 .context-card h3,
-.hero-card h2 {
+.hero-card h2,
+.page-header h2,
+.record-title,
+.trace-section h4 {
   margin: 0;
+  font-size: var(--font-title);
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0;
 }
 
 .eyebrow,
@@ -294,10 +304,10 @@ select:disabled {
 .hero-action-label,
 .sidebar-status-label {
   margin: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  font-size: 0.72rem;
-  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--font-copy);
+  font-weight: 400;
 }
 
 .eyebrow,
@@ -330,6 +340,8 @@ select:disabled {
 .search-shell input::placeholder,
 .traffic-row small {
   color: var(--text-soft);
+  font-size: var(--font-copy);
+  font-weight: 400;
 }
 
 .page-list,
@@ -533,13 +545,17 @@ select:disabled {
 
 .page-label {
   display: block;
+  font-size: var(--font-title);
   font-weight: 700;
+  line-height: 1.35;
 }
 
 .page-caption {
   display: block;
   margin-top: 3px;
-  font-size: 0.82rem;
+  font-size: var(--font-copy);
+  font-weight: 400;
+  line-height: 1.4;
   color: var(--nav-muted);
 }
 
@@ -564,12 +580,14 @@ select:disabled {
 
 .sidebar-status-card strong {
   margin-top: 8px;
-  font-size: 1rem;
+  font-size: var(--font-title);
+  font-weight: 700;
 }
 
 .sidebar-status-card p {
   margin: 8px 0 0;
-  font-size: 0.88rem;
+  font-size: var(--font-copy);
+  font-weight: 400;
 }
 
 .sidebar-locale span {
@@ -738,12 +756,17 @@ select:disabled {
 .mini-stat strong,
 .ranked-row strong,
 .traffic-row strong {
-  font-size: 0.98rem;
+  font-size: var(--font-title);
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0;
+  color: var(--text);
 }
 
 .operator-copy span {
   display: block;
-  font-size: 0.85rem;
+  font-size: var(--font-copy);
+  font-weight: 400;
   color: var(--text-soft);
 }
 
@@ -770,12 +793,12 @@ select:disabled {
 
 .page-header h2 {
   margin: 0;
-  font-size: 1.55rem;
-  letter-spacing: 0;
 }
 
 .page-header p {
   margin: 0;
+  font-size: var(--font-copy);
+  font-weight: 400;
   color: var(--text-soft);
   line-height: 1.55;
 }
@@ -833,7 +856,7 @@ select:disabled {
 }
 
 .hero-card h2 {
-  font-size: 2.7rem;
+  font-size: var(--font-title);
   letter-spacing: 0;
 }
 
@@ -859,7 +882,7 @@ select:disabled {
 }
 
 .hero-action-card strong {
-  font-size: 1.2rem;
+  font-size: var(--font-title);
 }
 
 .context-card {
@@ -883,9 +906,10 @@ select:disabled {
 }
 
 .context-list dt {
-  font-size: 0.76rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  font-size: var(--font-copy);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .context-list dd {
@@ -1053,12 +1077,14 @@ select:disabled {
 }
 
 .kpi-card strong {
-  font-size: 2rem;
+  font-size: var(--font-title);
   letter-spacing: 0;
 }
 
 .kpi-card p {
   margin: 0;
+  font-size: var(--font-copy);
+  font-weight: 400;
   line-height: 1.5;
 }
 
@@ -1125,6 +1151,9 @@ select:disabled {
 .ranked-row p,
 .traffic-row small {
   display: block;
+  font-size: var(--font-copy);
+  font-weight: 400;
+  line-height: 1.4;
 }
 
 .status-tile-grid {
@@ -1216,12 +1245,13 @@ select:disabled {
 }
 
 .traffic-bar-label {
-  font-size: 0.8rem;
+  font-size: var(--font-copy);
+  font-weight: 400;
   color: var(--text-soft);
 }
 
 .traffic-bar-total {
-  font-size: 0.82rem;
+  font-size: var(--font-title);
   font-weight: 700;
   color: var(--text);
 }
@@ -1238,7 +1268,7 @@ select:disabled {
   width: 100%;
   min-width: 58rem;
   border-collapse: collapse;
-  font-size: 0.86rem;
+  font-size: var(--font-copy);
 }
 
 .data-table th,
@@ -1256,14 +1286,18 @@ select:disabled {
 
 .data-table thead th {
   color: var(--text-faint);
-  font-size: 0.72rem;
-  font-weight: 800;
-  text-transform: uppercase;
+  font-size: var(--font-copy);
+  font-weight: 400;
+  text-transform: none;
   letter-spacing: 0;
 }
 
 .data-table tbody th {
   color: var(--text);
+  font-weight: 700;
+}
+
+.data-table tbody td {
   font-weight: 700;
 }
 
@@ -1439,7 +1473,6 @@ select.invalid {
 
 .record-title {
   margin: 0;
-  font-size: 1rem;
 }
 
 .record-grid {
@@ -1472,6 +1505,9 @@ select.invalid {
 .empty-state strong {
   display: block;
   margin-bottom: 8px;
+  font-size: var(--font-title);
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 .trace-columns {
