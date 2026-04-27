@@ -73,7 +73,6 @@ body.sidebar-collapsed .sidebar {
 body.sidebar-collapsed .sidebar .brand-copy,
 body.sidebar-collapsed .sidebar .page-copy,
 body.sidebar-collapsed .sidebar .sidebar-heading,
-body.sidebar-collapsed .sidebar .sidebar-status-card,
 body.sidebar-collapsed .sidebar .sidebar-locale span,
 body.sidebar-collapsed .sidebar .secondary-button {
   display: none;
@@ -564,30 +563,10 @@ select:disabled {
   align-content: end;
 }
 
-.sidebar-status-card {
-  padding: 16px;
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.sidebar-status-card strong,
 .context-list dd,
 .hero-action-card strong,
 .kpi-card strong {
   display: block;
-}
-
-.sidebar-status-card strong {
-  margin-top: 8px;
-  font-size: var(--font-title);
-  font-weight: 700;
-}
-
-.sidebar-status-card p {
-  margin: 8px 0 0;
-  font-size: var(--font-copy);
-  font-weight: 400;
 }
 
 .sidebar-locale span {
@@ -671,12 +650,18 @@ select:disabled {
   justify-content: flex-end;
 }
 
+.topbar-primary {
+  min-width: 0;
+}
+
 .mobile-nav-button {
   display: none;
 }
 
 .search-shell {
   min-width: 0;
+  flex: 1 1 auto;
+  width: 100%;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px;
@@ -2031,7 +2016,6 @@ select.invalid {
   body.sidebar-collapsed .sidebar .brand-copy,
   body.sidebar-collapsed .sidebar .page-copy,
   body.sidebar-collapsed .sidebar .sidebar-heading,
-  body.sidebar-collapsed .sidebar .sidebar-status-card,
   body.sidebar-collapsed .sidebar .sidebar-locale span,
   body.sidebar-collapsed .sidebar .secondary-button {
     display: initial;

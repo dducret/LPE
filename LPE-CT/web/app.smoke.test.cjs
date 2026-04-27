@@ -362,8 +362,6 @@ function createContext() {
     "edit-digest-settings",
     "create-digest-default",
     "create-digest-override",
-    "sidebar-node-name",
-    "sidebar-node-copy",
     "operator-email",
     "operator-role",
     "system-overview-list",
@@ -527,7 +525,6 @@ async function main() {
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(document.title, "LPE-CT Management Console");
-  assert.equal(elements["sidebar-node-name"].textContent, "ct-node-1");
   assert.match(elements["quarantine-list"].innerHTML, /trace-1/);
   assert.match(elements["history-list"].innerHTML, /trace-2/);
   assert.match(elements["platform-list"].innerHTML, /Network/);

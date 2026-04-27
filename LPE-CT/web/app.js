@@ -39,8 +39,6 @@ const elements = {
   createDigestOverride: document.getElementById("create-digest-override"),
   nodeName: document.getElementById("node-name"),
   heroSummary: document.getElementById("hero-summary"),
-  sidebarNodeName: document.getElementById("sidebar-node-name"),
-  sidebarNodeCopy: document.getElementById("sidebar-node-copy"),
   statusBadge: document.getElementById("status-badge"),
   upstreamBadge: document.getElementById("upstream-badge"),
   heroPrimaryRelay: document.getElementById("hero-primary-relay"),
@@ -554,8 +552,6 @@ function syncLoadingState() {
   if (!state.dashboard) {
     setText(elements.nodeName, copy.heroLoadingTitle);
     setText(elements.heroSummary, copy.heroLoadingSummary);
-    setText(elements.sidebarNodeName, copy.heroLoadingTitle);
-    setText(elements.sidebarNodeCopy, copy.heroLoadingSummary);
     setText(elements.contextOperator, copy.unset);
     setText(elements.contextRole, copy.operatorRole);
     setText(elements.contextVersion, copy.unset);
@@ -1935,12 +1931,6 @@ function renderOverview() {
   const scanSummary = buildScanSummary(trafficRecords);
   const trafficMax = Math.max(...trafficSeries.map((entry) => entry.total), 1);
 
-  setText(elements.sidebarNodeName, site.node_name || copy.heroLoadingTitle);
-  setText(elements.sidebarNodeCopy, translate(copy.heroSummaryTemplate, {
-    dmzZone: site.dmz_zone || copy.unset,
-    publishedMx: site.published_mx || copy.unset,
-    primaryUpstream: relay.primary_upstream || copy.unset,
-  }));
   setText(elements.operatorEmail, operatorEmail);
   setText(elements.operatorRole, copy.operatorRole);
   setText(elements.contextOperator, operatorEmail);
