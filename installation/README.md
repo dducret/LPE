@@ -61,6 +61,7 @@ The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_D
 - `test-lpe-ct-edge-ports.sh` from the `LPE-CT` server to verify listeners on `25`, `443`, `465`, and `993`
 - `test-lpe-ct-core-bridge.sh` from the `LPE-CT` server to verify the signed `LPE-CT -> LPE` recipient-verification bridge
 - `test-lpe-imap-listener.sh` from the core `LPE` server to verify the internal `IMAP` listener used by the `LPE-CT` `993` proxy
+- `check-lpe-env.sh` from the core `LPE` server to list active variables that are present in `lpe.env.example` but missing from `/etc/lpe/lpe.env`; `update-lpe.sh` runs this check automatically in warning mode
 - `check-lpe-ct-env.sh` from the `LPE-CT` server to list active variables that are present in `lpe-ct.env.example` but missing from `/etc/lpe-ct/lpe-ct.env`; `update-lpe-ct.sh` runs this check automatically in warning mode
 - `test-antivirus-lpe-ct.sh` from the `LPE-CT` server to validate quarantine on an `EICAR` attachment
 
@@ -90,6 +91,22 @@ sudo ./check-lpe-ct-env.sh --append-missing
 
 Review appended values before restarting services, especially secrets, hostnames,
 database URLs, TLS paths, and bridge URLs.
+
+To inspect missing core `LPE` environment variables after an update, run:
+
+```bash
+cd /opt/lpe/src/installation/debian-trixie
+sudo ./check-lpe-env.sh
+```
+
+To append missing variables with their example defaults, run:
+
+```bash
+sudo ./check-lpe-env.sh --append-missing
+```
+
+Review appended values before restarting services, especially secrets,
+database URLs, public hostnames, bridge URLs, and bind addresses.
 
 ### LPE-CT Public TLS Certificate
 
