@@ -79,6 +79,42 @@ struct RelaySettings {
     lan_dependency_note: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AcceptedDomain {
+    id: String,
+    domain: String,
+    destination_server: String,
+    verification_type: String,
+    rbl_checks: bool,
+    spf_checks: bool,
+    greylisting: bool,
+    verified: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AcceptedDomainInput {
+    domain: String,
+    destination_server: String,
+    verification_type: String,
+    rbl_checks: bool,
+    spf_checks: bool,
+    greylisting: bool,
+    verified: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ImportAcceptedDomainsRequest {
+    domains: Vec<AcceptedDomainInput>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AcceptedDomainTestResponse {
+    domain: String,
+    destination_server: String,
+    verified: bool,
+    detail: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct RoutingSettings {
     #[serde(default)]
@@ -312,6 +348,8 @@ struct DashboardState {
     site: SiteProfile,
     relay: RelaySettings,
     #[serde(default)]
+    accepted_domains: Vec<AcceptedDomain>,
+    #[serde(default)]
     routing: RoutingSettings,
     #[serde(default)]
     throttling: ThrottlingSettings,
@@ -456,6 +494,7 @@ async fn main() -> Result<()> {
     let mut dashboard = load_or_initialize_state(&state_file)?;
     apply_env_overrides(&mut dashboard);
     ensure_management_bootstrap(&mut dashboard)?;
+    normalize_accepted_domains(&mut dashboard.accepted_domains);
     normalize_policy_settings(&mut dashboard.policies);
     normalize_local_data_stores(&mut dashboard.local_data_stores);
     reporting::normalize_reporting_settings(&mut dashboard.reporting);
@@ -568,6 +607,22 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/traces/{trace_id}/release", post(release_trace))
         .route("/api/v1/traces/{trace_id}/delete", post(delete_trace))
         .route("/api/v1/routes/diagnostics", get(route_diagnostics))
+        .route(
+            "/api/v1/accepted-domains",
+            get(accepted_domains).post(create_accepted_domain),
+        )
+        .route(
+            "/api/v1/accepted-domains/import",
+            post(import_accepted_domains),
+        )
+        .route(
+            "/api/v1/accepted-domains/{domain_id}",
+            put(update_accepted_domain).delete(delete_accepted_domain),
+        )
+        .route(
+            "/api/v1/accepted-domains/{domain_id}/test",
+            post(test_accepted_domain),
+        )
         .route("/api/v1/policies/status", get(policy_status))
         .route(
             "/api/v1/reporting",
@@ -1007,6 +1062,181 @@ async fn policy_status(
             over_sign: snapshot.policies.dkim.over_sign,
             expiration_seconds: snapshot.policies.dkim.expiration_seconds,
             domains: dkim_domains,
+        },
+    }))
+}
+
+async fn accepted_domains(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<AcceptedDomain>>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    let snapshot = read_state(&state)?;
+    Ok(Json(snapshot.accepted_domains))
+}
+
+async fn create_accepted_domain(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<AcceptedDomainInput>,
+) -> Result<Json<AcceptedDomain>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let domain = accepted_domain_from_input(payload, None)?;
+    let previous = read_state(&state)?;
+    {
+        let mut guard = state
+            .store
+            .lock()
+            .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))?;
+        if guard
+            .accepted_domains
+            .iter()
+            .any(|item| item.domain == domain.domain)
+        {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "accepted domain already exists",
+            ));
+        }
+        guard.accepted_domains.push(domain.clone());
+        normalize_accepted_domains(&mut guard.accepted_domains);
+        append_dashboard_audit_event(&mut guard, &admin.email, "create-accepted-domain");
+        persist_state(&state.state_file, &guard)?;
+    }
+    if let Err(error) = sync_technical_store(&state).await {
+        restore_dashboard_state(&state, &previous)?;
+        return Err(error);
+    }
+    Ok(Json(domain))
+}
+
+async fn update_accepted_domain(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(domain_id): AxumPath<String>,
+    Json(payload): Json<AcceptedDomainInput>,
+) -> Result<Json<AcceptedDomain>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let domain = accepted_domain_from_input(payload, Some(domain_id.clone()))?;
+    let previous = read_state(&state)?;
+    {
+        let mut guard = state
+            .store
+            .lock()
+            .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))?;
+        if guard
+            .accepted_domains
+            .iter()
+            .any(|item| item.id != domain_id && item.domain == domain.domain)
+        {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "accepted domain already exists",
+            ));
+        }
+        let Some(existing) = guard
+            .accepted_domains
+            .iter_mut()
+            .find(|item| item.id == domain_id)
+        else {
+            return Err(ApiError::new(
+                StatusCode::NOT_FOUND,
+                "accepted domain not found",
+            ));
+        };
+        *existing = domain.clone();
+        normalize_accepted_domains(&mut guard.accepted_domains);
+        append_dashboard_audit_event(&mut guard, &admin.email, "update-accepted-domain");
+        persist_state(&state.state_file, &guard)?;
+    }
+    if let Err(error) = sync_technical_store(&state).await {
+        restore_dashboard_state(&state, &previous)?;
+        return Err(error);
+    }
+    Ok(Json(domain))
+}
+
+async fn delete_accepted_domain(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(domain_id): AxumPath<String>,
+) -> Result<StatusCode, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let previous = read_state(&state)?;
+    {
+        let mut guard = state
+            .store
+            .lock()
+            .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))?;
+        let before = guard.accepted_domains.len();
+        guard.accepted_domains.retain(|item| item.id != domain_id);
+        if guard.accepted_domains.len() == before {
+            return Err(ApiError::new(
+                StatusCode::NOT_FOUND,
+                "accepted domain not found",
+            ));
+        }
+        append_dashboard_audit_event(&mut guard, &admin.email, "delete-accepted-domain");
+        persist_state(&state.state_file, &guard)?;
+    }
+    if let Err(error) = sync_technical_store(&state).await {
+        restore_dashboard_state(&state, &previous)?;
+        return Err(error);
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn import_accepted_domains(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<ImportAcceptedDomainsRequest>,
+) -> Result<Json<Vec<AcceptedDomain>>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let mut imported = payload
+        .domains
+        .into_iter()
+        .map(|input| accepted_domain_from_input(input, None))
+        .collect::<Result<Vec<_>, _>>()?;
+    let previous = read_state(&state)?;
+    {
+        let mut guard = state
+            .store
+            .lock()
+            .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))?;
+        guard.accepted_domains.append(&mut imported);
+        normalize_accepted_domains(&mut guard.accepted_domains);
+        append_dashboard_audit_event(&mut guard, &admin.email, "import-accepted-domains");
+        persist_state(&state.state_file, &guard)?;
+        imported = guard.accepted_domains.clone();
+    }
+    if let Err(error) = sync_technical_store(&state).await {
+        restore_dashboard_state(&state, &previous)?;
+        return Err(error);
+    }
+    Ok(Json(imported))
+}
+
+async fn test_accepted_domain(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(domain_id): AxumPath<String>,
+) -> Result<Json<AcceptedDomainTestResponse>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    let snapshot = read_state(&state)?;
+    let domain = snapshot
+        .accepted_domains
+        .into_iter()
+        .find(|item| item.id == domain_id)
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "accepted domain not found"))?;
+    let verified = domain.verified && !domain.destination_server.trim().is_empty();
+    Ok(Json(AcceptedDomainTestResponse {
+        domain: domain.domain,
+        destination_server: domain.destination_server,
+        verified,
+        detail: if verified {
+            "accepted domain has a destination server and is marked verified".to_string()
+        } else {
+            "accepted domain requires destination server configuration and verification".to_string()
         },
     }))
 }
@@ -1655,6 +1885,87 @@ fn normalize_policy_settings(policies: &mut PolicySettings) {
     });
 }
 
+fn accepted_domain_from_input(
+    input: AcceptedDomainInput,
+    existing_id: Option<String>,
+) -> Result<AcceptedDomain, ApiError> {
+    let domain = normalize_domain_name(&input.domain);
+    if !is_valid_domain_name(&domain) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "accepted domain is invalid",
+        ));
+    }
+    let destination_server = input.destination_server.trim().to_string();
+    if destination_server.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "destination server is required",
+        ));
+    }
+    let verification_type = normalize_verification_type(&input.verification_type)?;
+    Ok(AcceptedDomain {
+        id: existing_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
+        domain,
+        destination_server,
+        verification_type,
+        rbl_checks: input.rbl_checks,
+        spf_checks: input.spf_checks,
+        greylisting: input.greylisting,
+        verified: input.verified,
+    })
+}
+
+fn normalize_accepted_domains(domains: &mut Vec<AcceptedDomain>) {
+    let mut seen = std::collections::BTreeSet::new();
+    domains.retain_mut(|domain| {
+        if domain.id.trim().is_empty() {
+            domain.id = Uuid::new_v4().to_string();
+        }
+        domain.domain = normalize_domain_name(&domain.domain);
+        domain.destination_server = domain.destination_server.trim().to_string();
+        domain.verification_type = normalize_verification_type(&domain.verification_type)
+            .unwrap_or_else(|_| "none".to_string());
+        is_valid_domain_name(&domain.domain)
+            && !domain.destination_server.is_empty()
+            && seen.insert(domain.domain.clone())
+    });
+    domains.sort_by(|left, right| left.domain.cmp(&right.domain));
+}
+
+fn normalize_domain_name(value: &str) -> String {
+    value.trim().trim_start_matches('@').to_ascii_lowercase()
+}
+
+fn is_valid_domain_name(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty() || value.len() > 253 || !value.contains('.') {
+        return false;
+    }
+    value.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+    })
+}
+
+fn normalize_verification_type(value: &str) -> Result<String, ApiError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "" | "none" => Ok("none".to_string()),
+        "dynamic" => Ok("dynamic".to_string()),
+        "ldap" => Ok("ldap".to_string()),
+        "allowed" => Ok("allowed".to_string()),
+        _ => Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "verification type must be one of none, dynamic, ldap, or allowed",
+        )),
+    }
+}
+
 fn normalize_local_data_stores(local_data_stores: &mut LocalDataStoresSettings) {
     if local_data_stores.state_file_path.trim().is_empty() {
         local_data_stores.state_file_path = "/var/lib/lpe-ct/state.json".to_string();
@@ -1825,6 +2136,7 @@ fn default_state() -> DashboardState {
             lan_dependency_note: "Only relay and management flows to the LAN are allowed."
                 .to_string(),
         },
+        accepted_domains: Vec::new(),
         routing: RoutingSettings {
             rules: routing_rules,
         },

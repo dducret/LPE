@@ -82,6 +82,7 @@ Retained mail-flow history and scheduled quarantine digest artifacts remain sort
 - `recipient_verification_cache`
 - `recipient_verification_settings`
 - `dkim_domain_configs`
+- `accepted_domains`
 
 Typical target domains for that local database are:
 
@@ -92,6 +93,7 @@ Typical target domains for that local database are:
 - retained perimeter mail-flow history indexes and reporting metadata
 - technical admin policy metadata for allow/block lists, attachment controls, digest schedules, and DKIM domain references
 - recipient-verification cache state and verification-policy materialization
+- accepted-domain relay policy, including destination server, recipient-verification mode, and per-domain perimeter check toggles
 - throttling counters and routing coordination metadata
 - cluster membership, failover coordination, and shared perimeter state across `LPE-CT` nodes
 
@@ -154,6 +156,7 @@ That means the expected rebuild behavior is:
 - `quarantine_messages` may be rebuilt from the current quarantine spool because payload custody remains in `quarantine/`
 - `mail_flow_history` may be partially rebuilt from retained `policy/transport-audit.jsonl` within the configured retention window
 - `policy_address_rules`, `attachment_policy_rules`, `digest_settings`, `digest_recipients`, `recipient_verification_settings`, and `dkim_domain_configs` are mirrors of `state.json` management configuration and can be repopulated from that file at startup
+- `accepted_domains` is a mirror of `state.json` management configuration and can be repopulated from that file at startup
 - `recipient_verification_cache` is disposable short-lived materialized state and may be dropped without changing canonical mailbox truth
 
 Retention remains bounded:

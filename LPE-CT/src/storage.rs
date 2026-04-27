@@ -302,6 +302,24 @@ pub(crate) async fn ensure_local_db_schema(
             .execute(pool)
             .await?;
             sqlx::query(
+                r#"
+                CREATE TABLE IF NOT EXISTS accepted_domains (
+                    domain TEXT PRIMARY KEY,
+                    domain_id TEXT NOT NULL,
+                    destination_server TEXT NOT NULL,
+                    verification_type TEXT NOT NULL,
+                    rbl_checks BOOLEAN NOT NULL DEFAULT TRUE,
+                    spf_checks BOOLEAN NOT NULL DEFAULT TRUE,
+                    greylisting BOOLEAN NOT NULL DEFAULT TRUE,
+                    verified BOOLEAN NOT NULL DEFAULT FALSE,
+                    source TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                "#,
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
                 "CREATE INDEX IF NOT EXISTS mail_flow_history_trace_id_idx ON mail_flow_history (trace_id, event_unix DESC)"
             )
             .execute(pool)
@@ -356,6 +374,11 @@ pub(crate) async fn ensure_local_db_schema(
             )
             .execute(pool)
             .await?;
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS accepted_domains_verified_idx ON accepted_domains (verified, domain)"
+            )
+            .execute(pool)
+            .await?;
             if ensure_pg_trgm_extension(pool).await {
                 sqlx::query(
                     "CREATE INDEX IF NOT EXISTS mail_flow_history_search_trgm_idx ON mail_flow_history USING GIN (search_text gin_trgm_ops)"
@@ -384,6 +407,32 @@ pub(crate) async fn sync_dashboard_configuration(
     };
 
     let mut tx = pool.begin().await?;
+
+    sqlx::query("DELETE FROM accepted_domains")
+        .execute(&mut *tx)
+        .await?;
+    for domain in &dashboard.accepted_domains {
+        sqlx::query(
+            r#"
+            INSERT INTO accepted_domains (
+                domain, domain_id, destination_server, verification_type, rbl_checks,
+                spf_checks, greylisting, verified, source, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            "#,
+        )
+        .bind(domain.domain.trim().to_ascii_lowercase())
+        .bind(domain.id.trim())
+        .bind(domain.destination_server.trim())
+        .bind(domain.verification_type.trim().to_ascii_lowercase())
+        .bind(domain.rbl_checks)
+        .bind(domain.spf_checks)
+        .bind(domain.greylisting)
+        .bind(domain.verified)
+        .bind("state.json")
+        .execute(&mut *tx)
+        .await?;
+    }
 
     sqlx::query("DELETE FROM policy_address_rules")
         .execute(&mut *tx)

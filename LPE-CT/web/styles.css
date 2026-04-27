@@ -1710,6 +1710,104 @@ select.invalid {
   text-align: left;
 }
 
+.accepted-domain-table {
+  min-width: 72rem;
+}
+
+.accepted-domain-table th,
+.accepted-domain-table td {
+  text-align: left;
+  vertical-align: middle;
+}
+
+.table-action-icons,
+.list-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.table-action-icons {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+}
+
+.list-footer-actions {
+  justify-content: flex-end;
+  padding-top: 12px;
+}
+
+.table-icon-button {
+  width: 34px;
+  height: 34px;
+  box-shadow: none;
+}
+
+.danger-icon-button {
+  color: var(--danger);
+}
+
+.action-icon {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  display: block;
+  color: currentColor;
+}
+
+.action-icon-edit::before {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 5px;
+  border: 2px solid currentColor;
+  border-left-width: 6px;
+  transform: translate(1px, 5px) rotate(-35deg);
+}
+
+.action-icon-test::before,
+.action-icon-test::after {
+  content: "";
+  position: absolute;
+}
+
+.action-icon-test::before {
+  inset: 1px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+}
+
+.action-icon-test::after {
+  width: 7px;
+  height: 4px;
+  left: 4px;
+  top: 5px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+}
+
+.action-icon-delete::before,
+.action-icon-delete::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  border: 2px solid currentColor;
+}
+
+.action-icon-delete::before {
+  top: 1px;
+  height: 2px;
+  border-bottom: 0;
+}
+
+.action-icon-delete::after {
+  top: 5px;
+  bottom: 1px;
+  border-top-width: 3px;
+}
+
 .record-actions {
   justify-content: flex-start;
 }

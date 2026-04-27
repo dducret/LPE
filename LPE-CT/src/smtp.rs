@@ -85,6 +85,13 @@ pub(crate) struct RuntimeConfig {
     pub(crate) attachment_policy: transport_policy::AttachmentPolicyConfig,
     pub(crate) dkim: dkim_signing::DkimConfig,
     pub(crate) local_db: storage::LocalDbConfig,
+    pub(crate) accepted_domains: Vec<AcceptedDomainConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AcceptedDomainConfig {
+    pub(crate) domain: String,
+    pub(crate) verified: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -885,6 +892,14 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
         },
+        accepted_domains: dashboard
+            .accepted_domains
+            .iter()
+            .map(|domain| AcceptedDomainConfig {
+                domain: domain.domain.clone(),
+                verified: domain.verified,
+            })
+            .collect(),
     }
 }
 
@@ -1645,6 +1660,14 @@ async fn handle_smtp_session(
             }
             let recipient = command[8..].trim().trim_matches(['<', '>']).to_string();
             let config = runtime_config(&state_file)?;
+            if !recipient_domain_is_accepted(&config, &recipient) {
+                write_smtp(
+                    &mut writer,
+                    "550 recipient domain is not accepted by this sorting center",
+                )
+                .await?;
+                continue;
+            }
             if let transport_policy::AddressPolicyVerdict::Reject(reason) =
                 transport_policy::evaluate_address_policy_with_config(
                     &config.address_policy,
@@ -4942,6 +4965,7 @@ pub(crate) fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
             keys: dkim_domain_configs_at(&value),
         },
         local_db,
+        accepted_domains: accepted_domains_at(&value),
     })
 }
 
@@ -5163,6 +5187,49 @@ fn throttle_rules_at(value: &Value) -> Vec<OutboundThrottleRule> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn accepted_domains_at(value: &Value) -> Vec<AcceptedDomainConfig> {
+    value
+        .get("accepted_domains")
+        .and_then(Value::as_array)
+        .map(|domains| {
+            domains
+                .iter()
+                .filter_map(|domain| {
+                    let domain_name = domain.get("domain")?.as_str()?.trim().to_ascii_lowercase();
+                    let destination_server = domain
+                        .get("destination_server")?
+                        .as_str()?
+                        .trim()
+                        .to_string();
+                    if domain_name.is_empty() || destination_server.is_empty() {
+                        return None;
+                    }
+                    Some(AcceptedDomainConfig {
+                        domain: domain_name,
+                        verified: domain
+                            .get("verified")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn recipient_domain_is_accepted(config: &RuntimeConfig, recipient: &str) -> bool {
+    if config.accepted_domains.is_empty() {
+        return true;
+    }
+    let Some(domain) = domain_part(recipient) else {
+        return false;
+    };
+    config
+        .accepted_domains
+        .iter()
+        .any(|accepted| accepted.verified && accepted.domain.eq_ignore_ascii_case(&domain))
 }
 
 fn string_at(value: &Value, path: &[&str]) -> String {
@@ -5530,6 +5597,7 @@ mod tests {
                 keys: Vec::new(),
             },
             local_db: crate::storage::LocalDbConfig::default(),
+            accepted_domains: Vec::new(),
         }
     }
 

@@ -386,6 +386,14 @@ async function putJson(path, payload) {
   });
 }
 
+async function postJson(path, payload = null) {
+  return fetchJson(path, {
+    method: "POST",
+    headers: payload ? { "Content-Type": "application/json" } : {},
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+}
+
 // State Selectors and Classification
 function currentPolicies() {
   return structuredClone(state.dashboard?.policies ?? {});
@@ -1255,6 +1263,80 @@ function renderNetworkSetup(activeTab, dashboard, copy) {
   return renderSystemSetupTabs(tabs, activeTab, "secondary") + bodies[activeTab];
 }
 
+function formatVerificationType(value) {
+  const copy = getCopy();
+  switch (String(value ?? "").toLowerCase()) {
+    case "dynamic":
+      return copy.acceptedDomainVerificationDynamic;
+    case "ldap":
+      return copy.acceptedDomainVerificationLdap;
+    case "allowed":
+      return copy.acceptedDomainVerificationAllowed;
+    default:
+      return copy.acceptedDomainVerificationNone;
+  }
+}
+
+function renderBooleanCell(value) {
+  const copy = getCopy();
+  return `<span class="${statusChipClass(Boolean(value))}">${escapeHtml(value ? copy.yes : copy.no)}</span>`;
+}
+
+function renderAcceptedDomainsTable(dashboard, copy) {
+  const domains = dashboard.accepted_domains ?? [];
+  const table = domains.length
+    ? `
+      <div class="data-table-wrap accepted-domain-table-wrap">
+        <table class="data-table accepted-domain-table">
+          <thead>
+            <tr>
+              <th scope="col">${escapeHtml(copy.acceptedDomainColumnDomain)}</th>
+              <th scope="col">${escapeHtml(copy.acceptedDomainColumnDestination)}</th>
+              <th scope="col">${escapeHtml(copy.acceptedDomainColumnVerification)}</th>
+              <th scope="col">${escapeHtml(copy.acceptedDomainColumnRbl)}</th>
+              <th scope="col">${escapeHtml(copy.acceptedDomainColumnSpf)}</th>
+              <th scope="col">${escapeHtml(copy.acceptedDomainColumnGreylisting)}</th>
+              <th scope="col">${escapeHtml(copy.acceptedDomainColumnVerified)}</th>
+              <th scope="col">${escapeHtml(copy.acceptedDomainColumnOptions)}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${domains
+              .map(
+                (domain) => `
+                  <tr>
+                    <th scope="row">${escapeHtml(domain.domain)}</th>
+                    <td>${escapeHtml(domain.destination_server || copy.unset)}</td>
+                    <td>${escapeHtml(formatVerificationType(domain.verification_type))}</td>
+                    <td>${renderBooleanCell(domain.rbl_checks)}</td>
+                    <td>${renderBooleanCell(domain.spf_checks)}</td>
+                    <td>${renderBooleanCell(domain.greylisting)}</td>
+                    <td>${renderBooleanCell(domain.verified)}</td>
+                    <td>
+                      <div class="table-action-icons">
+                        <button class="icon-button table-icon-button" type="button" data-action="accepted-domain-edit" data-domain-id="${escapeHtml(domain.id)}" aria-label="${escapeHtml(copy.edit)}" title="${escapeHtml(copy.edit)}"><span class="action-icon action-icon-edit" aria-hidden="true"></span></button>
+                        <button class="icon-button table-icon-button" type="button" data-action="accepted-domain-test" data-domain-id="${escapeHtml(domain.id)}" aria-label="${escapeHtml(copy.test)}" title="${escapeHtml(copy.test)}"><span class="action-icon action-icon-test" aria-hidden="true"></span></button>
+                        <button class="icon-button table-icon-button danger-icon-button" type="button" data-action="accepted-domain-delete" data-domain-id="${escapeHtml(domain.id)}" aria-label="${escapeHtml(copy.remove)}" title="${escapeHtml(copy.remove)}"><span class="action-icon action-icon-delete" aria-hidden="true"></span></button>
+                      </div>
+                    </td>
+                  </tr>
+                `,
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    `
+    : systemSetupEmptyState(copy.systemSetupRelayDomains, copy.noAcceptedDomains);
+  return `
+    ${table}
+    <div class="list-footer-actions">
+      <button class="secondary-button compact-button" type="button" data-action="accepted-domain-import">${copy.import}</button>
+      <button class="primary-button compact-button" type="button" data-action="accepted-domain-create">${copy.add}</button>
+    </div>
+  `;
+}
+
 function renderMailRelaySetup(activeTab, dashboard, copy) {
   const tabs = [
     { id: "general", label: copy.systemSetupRelayGeneral },
@@ -1286,7 +1368,7 @@ function renderMailRelaySetup(activeTab, dashboard, copy) {
     domains: renderSystemSetupPanel(
       copy.systemSetupRelayDomains,
       copy.systemSetupRelayDomainsSummary,
-      systemSetupEmptyState(copy.systemSetupRelayDomains, copy.systemSetupNoRelayDomains),
+      renderAcceptedDomainsTable(dashboard, copy),
     ),
     "ip-controls": renderSystemSetupPanel(
       copy.systemSetupRelayIpControls,
@@ -2635,6 +2717,176 @@ async function deleteDigestOverride(index) {
   showFeedback(copy.recordDeleted);
 }
 
+function currentAcceptedDomains() {
+  return structuredClone(state.dashboard?.accepted_domains ?? []);
+}
+
+function findAcceptedDomain(domainId) {
+  return currentAcceptedDomains().find((domain) => domain.id === domainId) ?? null;
+}
+
+function acceptedDomainPayloadFromForm(form) {
+  return {
+    domain: normalizeDomain(form.elements.namedItem("domain").value),
+    destination_server: String(form.elements.namedItem("destination_server").value).trim(),
+    verification_type: form.elements.namedItem("verification_type").value,
+    rbl_checks: form.elements.namedItem("rbl_checks").checked,
+    spf_checks: form.elements.namedItem("spf_checks").checked,
+    greylisting: form.elements.namedItem("greylisting").checked,
+    verified: form.elements.namedItem("verified").checked,
+  };
+}
+
+function validateAcceptedDomainPayload(payload, existingId = null) {
+  const copy = getCopy();
+  const errors = [];
+  if (!isValidDomain(payload.domain)) {
+    errors.push({ field: "domain", message: copy.validationDomain });
+  }
+  if (!payload.destination_server) {
+    errors.push({ field: "destination_server", message: copy.validationDestinationServer });
+  }
+  if (currentAcceptedDomains().some((domain) => domain.id !== existingId && normalizeDomain(domain.domain) === payload.domain)) {
+    errors.push({ field: "domain", message: copy.validationDuplicateDomain });
+  }
+  return errors;
+}
+
+function openAcceptedDomainDrawer(domainId = null, opener = document.activeElement) {
+  const copy = getCopy();
+  const domain = domainId
+    ? findAcceptedDomain(domainId)
+    : {
+        domain: "",
+        destination_server: "",
+        verification_type: "none",
+        rbl_checks: true,
+        spf_checks: true,
+        greylisting: true,
+        verified: false,
+      };
+  if (!domain) {
+    showFeedback(copy.acceptedDomainNotFound, "error");
+    return;
+  }
+  renderDrawerForm({
+    title: domainId ? copy.edit : copy.addAcceptedDomain,
+    summary: copy.systemSetupRelayDomainsSummary,
+    formId: "accepted-domain-form",
+    opener,
+    content: `
+      <div class="field-grid">
+        <label>
+          <span>${copy.acceptedDomainColumnDomain}</span>
+          <input name="domain" required value="${escapeHtml(domain.domain)}" />
+        </label>
+        <label>
+          <span>${copy.acceptedDomainColumnDestination}</span>
+          <input name="destination_server" required value="${escapeHtml(domain.destination_server)}" />
+        </label>
+        <label class="field-span-full">
+          <span>${copy.acceptedDomainColumnVerification}</span>
+          <select name="verification_type">
+            <option value="none"${domain.verification_type === "none" ? " selected" : ""}>${copy.acceptedDomainVerificationNone}</option>
+            <option value="dynamic"${domain.verification_type === "dynamic" ? " selected" : ""}>${copy.acceptedDomainVerificationDynamic}</option>
+            <option value="ldap"${domain.verification_type === "ldap" ? " selected" : ""}>${copy.acceptedDomainVerificationLdap}</option>
+            <option value="allowed"${domain.verification_type === "allowed" ? " selected" : ""}>${copy.acceptedDomainVerificationAllowed}</option>
+          </select>
+        </label>
+        <label class="toggle-field"><span>${copy.acceptedDomainColumnRbl}</span><input name="rbl_checks" type="checkbox"${domain.rbl_checks ? " checked" : ""} /></label>
+        <label class="toggle-field"><span>${copy.acceptedDomainColumnSpf}</span><input name="spf_checks" type="checkbox"${domain.spf_checks ? " checked" : ""} /></label>
+        <label class="toggle-field"><span>${copy.acceptedDomainColumnGreylisting}</span><input name="greylisting" type="checkbox"${domain.greylisting ? " checked" : ""} /></label>
+        <label class="toggle-field"><span>${copy.acceptedDomainColumnVerified}</span><input name="verified" type="checkbox"${domain.verified ? " checked" : ""} /></label>
+      </div>
+      <div class="record-actions">
+        <button class="primary-button compact-button" type="submit">${domainId ? copy.save : copy.create}</button>
+        <button class="secondary-button compact-button" type="button" data-action="drawer-close">${copy.cancel}</button>
+      </div>
+    `,
+    onSubmit: async (form, context) => {
+      const payload = acceptedDomainPayloadFromForm(form);
+      const errors = validateAcceptedDomainPayload(payload, domainId);
+      if (errors.length) {
+        context.fail(errors);
+      }
+      const path = domainId ? `/api/accepted-domains/${encodeURIComponent(domainId)}` : "/api/accepted-domains";
+      const saved = domainId ? await putJson(path, payload) : await postJson(path, payload);
+      const domains = currentAcceptedDomains().filter((item) => item.id !== saved.id);
+      domains.push(saved);
+      domains.sort((left, right) => left.domain.localeCompare(right.domain));
+      state.dashboard.accepted_domains = domains;
+      renderPlatform();
+      closeDrawer();
+      showFeedback(domainId ? copy.recordSaved : copy.recordCreated);
+    },
+  });
+}
+
+function openAcceptedDomainImportDrawer(opener = document.activeElement) {
+  const copy = getCopy();
+  renderDrawerForm({
+    title: copy.importAcceptedDomains,
+    summary: copy.acceptedDomainImportSummary,
+    formId: "accepted-domain-import-form",
+    opener,
+    content: `
+      <label>
+        <span>${copy.importAcceptedDomains}</span>
+        <textarea name="domains" rows="10" placeholder="${escapeHtml(copy.acceptedDomainImportPlaceholder)}"></textarea>
+      </label>
+      <div class="record-actions">
+        <button class="primary-button compact-button" type="submit">${copy.import}</button>
+        <button class="secondary-button compact-button" type="button" data-action="drawer-close">${copy.cancel}</button>
+      </div>
+    `,
+    onSubmit: async (form, context) => {
+      const rows = parseLines(form.elements.namedItem("domains").value);
+      const domains = rows.map((row) => {
+        const [domain, destinationServer, verificationType = "none", rbl = "yes", spf = "yes", greylisting = "yes", verified = "no"] = row
+          .split(",")
+          .map((value) => value.trim());
+        return {
+          domain: normalizeDomain(domain),
+          destination_server: destinationServer,
+          verification_type: verificationType.toLowerCase(),
+          rbl_checks: /^(yes|true|1|on)$/i.test(rbl),
+          spf_checks: /^(yes|true|1|on)$/i.test(spf),
+          greylisting: /^(yes|true|1|on)$/i.test(greylisting),
+          verified: /^(yes|true|1|on)$/i.test(verified),
+        };
+      });
+      const errors = [];
+      if (!domains.length) {
+        errors.push({ field: "domains", message: copy.validationImportDomains });
+      }
+      domains.forEach((domain) => {
+        errors.push(...validateAcceptedDomainPayload(domain).map((error) => ({ ...error, field: "domains" })));
+      });
+      if (errors.length) {
+        context.fail(errors);
+      }
+      state.dashboard.accepted_domains = await postJson("/api/accepted-domains/import", { domains });
+      renderPlatform();
+      closeDrawer();
+      showFeedback(copy.recordCreated);
+    },
+  });
+}
+
+async function deleteAcceptedDomain(domainId) {
+  const copy = getCopy();
+  await fetchJson(`/api/accepted-domains/${encodeURIComponent(domainId)}`, { method: "DELETE" });
+  state.dashboard.accepted_domains = currentAcceptedDomains().filter((domain) => domain.id !== domainId);
+  renderPlatform();
+  showFeedback(copy.recordDeleted);
+}
+
+async function testAcceptedDomain(domainId) {
+  const copy = getCopy();
+  const result = await postJson(`/api/accepted-domains/${encodeURIComponent(domainId)}/test`);
+  showFeedback(`${result.domain}: ${result.detail}`, result.verified ? "success" : "warning");
+}
+
 function getPlatformDrawerConfigs(dashboard, copy) {
   return {
     site: {
@@ -3070,7 +3322,7 @@ function setSystemSetupTab(actionTarget) {
 }
 
 function getActionHandlers(actionTarget) {
-  const { traceId, ruleId, index, reportId, target } = actionTarget.dataset;
+  const { traceId, ruleId, index, reportId, target, domainId } = actionTarget.dataset;
   return {
     "drawer-close": () => closeDrawer(),
     "trace-open": () => runAction(() => loadTrace(traceId, actionTarget)),
@@ -3093,6 +3345,11 @@ function getActionHandlers(actionTarget) {
     "digest-override-edit": () => openDigestOverrideDrawer(Number(index), actionTarget),
     "digest-override-delete": () => runAction(() => deleteDigestOverride(Number(index))),
     "digest-open": () => runAction(() => openDigestReport(reportId, actionTarget)),
+    "accepted-domain-create": () => openAcceptedDomainDrawer(null, actionTarget),
+    "accepted-domain-edit": () => openAcceptedDomainDrawer(domainId, actionTarget),
+    "accepted-domain-delete": () => runAction(() => deleteAcceptedDomain(domainId)),
+    "accepted-domain-test": () => runAction(() => testAcceptedDomain(domainId)),
+    "accepted-domain-import": () => openAcceptedDomainImportDrawer(actionTarget),
     "platform-edit": () => openPlatformDrawer(target, actionTarget),
     "page-tab": () => setPageTab(actionTarget),
     "system-setup-tab": () => setSystemSetupTab(actionTarget),

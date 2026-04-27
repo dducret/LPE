@@ -27,6 +27,7 @@ The perimeter pipeline now also executes:
 
 When dedicated local PostgreSQL is enabled, `LPE-CT` now also persists technical quarantine metadata into a private `quarantine_messages` table and retained flow-history events into a private `mail_flow_history` table. Payload custody remains in the spool and quarantine directories.
 The same private store now also holds technical management-plane metadata for `policy_address_rules`, `attachment_policy_rules`, `digest_settings`, `digest_recipients`, `recipient_verification_cache`, `recipient_verification_settings`, and `dkim_domain_configs`.
+It also mirrors accepted-domain relay configuration from `state.json`, including each accepted domain, destination server, verification type, per-domain `RBL` / `SPF` / greylisting toggles, and whether the domain has been operator-verified.
 The management surface now also uses sorting-center-owned retained artifacts plus those dedicated technical indexes for quarantine search, retained mail-flow history, address-policy administration, digest scheduling, recipient-verification cache inspection, and DKIM-domain configuration references generated entirely from `LPE-CT` state.
 
 Operational indexing is now deliberately evidence-oriented:
@@ -43,6 +44,7 @@ For the P1 management interface, those operator workflows are exposed as one coh
 - full-width allow/block and attachment-rule lists with drawer-based create, edit, and delete flows
 - recipient-verification settings and status in the same policy workspace
 - DKIM signing profile plus per-domain selector and key-reference management in the same policy workspace
+- accepted domains under `System Setup` / `Mail relay` / `Domains`, with drawer-based add, import, edit, test, and delete workflows
 - digest scheduling, domain defaults, mailbox overrides, and retained digest artifacts under one reporting workspace
 
 That web surface stays bounded to sorting-center-owned state. It must not imply canonical mailbox ownership, direct `LPE` database access, or any parallel user-visible state model in `LPE-CT`.
