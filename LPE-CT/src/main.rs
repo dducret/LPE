@@ -488,6 +488,7 @@ struct ManagementSession {
 #[tokio::main]
 async fn main() -> Result<()> {
     observability::init_tracing("lpe-ct");
+    install_rustls_crypto_provider();
 
     let bind_address =
         env::var("LPE_CT_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:8380".to_string());
@@ -611,6 +612,10 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn install_rustls_crypto_provider() {
+    let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
 }
 
 fn router(state: AppState) -> Router {
