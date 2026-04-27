@@ -1707,6 +1707,30 @@ function formatResourceUsage(usedPercent, total) {
   return `${percent} / ${totalLabel}`;
 }
 
+function renderDashboardDetailTable(rows) {
+  return `
+    <article class="dashboard-detail-table-card">
+      <table class="dashboard-detail-table">
+        <tbody>
+          ${rows
+            .map(
+              (row) => `
+                <tr>
+                  <th scope="row">${escapeHtml(row.label)}</th>
+                  <td>
+                    <strong${row.valueAttributes ?? ""}>${escapeHtml(row.value)}</strong>
+                    ${row.detail ? `<small>${escapeHtml(row.detail)}</small>` : ""}
+                  </td>
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </article>
+  `;
+}
+
 function renderSystemOverview(dashboard, copy) {
   const system = getRuntimeSystem(dashboard);
   const osArchitecture =
@@ -1743,24 +1767,7 @@ function renderSystemOverview(dashboard, copy) {
     },
   ];
 
-  elements.systemOverviewList.innerHTML = `
-    <article class="system-overview-table-card">
-      <table class="system-overview-table">
-        <tbody>
-          ${rows
-            .map(
-              (row) => `
-                <tr>
-                  <th scope="row">${escapeHtml(row.label)}</th>
-                  <td><strong${row.valueAttributes ?? ""}>${escapeHtml(row.value)}</strong></td>
-                </tr>
-              `,
-            )
-            .join("")}
-        </tbody>
-      </table>
-    </article>
-  `;
+  elements.systemOverviewList.innerHTML = renderDashboardDetailTable(rows);
 }
 
 function renderSevenDayTable(series, copy) {
@@ -1881,13 +1888,13 @@ function renderOverview() {
 
   renderSystemOverview(dashboard, copy);
 
-  elements.queueStatusList.innerHTML = [
-    buildMiniStat(copy.queueIncomingQueue, formatMetric(queues.incoming_messages ?? queues.inbound_messages)),
-    buildMiniStat(copy.queueActiveQueue, formatMetric(queues.active_messages)),
-    buildMiniStat(copy.queueDeferredQueue, formatMetric(queues.deferred_messages)),
-    buildMiniStat(copy.queueHoldQueue, formatMetric(queues.held_messages)),
-    buildMiniStat(copy.queueCorruptQueue, formatMetric(queues.corrupt_messages)),
-  ].join("");
+  elements.queueStatusList.innerHTML = renderDashboardDetailTable([
+    { label: copy.queueIncomingQueue, value: formatMetric(queues.incoming_messages ?? queues.inbound_messages) },
+    { label: copy.queueActiveQueue, value: formatMetric(queues.active_messages) },
+    { label: copy.queueDeferredQueue, value: formatMetric(queues.deferred_messages) },
+    { label: copy.queueHoldQueue, value: formatMetric(queues.held_messages) },
+    { label: copy.queueCorruptQueue, value: formatMetric(queues.corrupt_messages) },
+  ]);
 
   elements.scannerStatusList.innerHTML = [
     buildStatusTile(copy.scannerRelayLink, queues.upstream_reachable ? copy.active : copy.inactive, queues.upstream_reachable ? "active" : "disabled", relay.primary_upstream || copy.unset),
@@ -1896,14 +1903,26 @@ function renderOverview() {
     buildStatusTile(copy.scannerDigestSchedule, reporting?.digest_enabled ? copy.enabled : copy.disabled, reporting?.digest_enabled ? "enabled" : "disabled", reporting ? `${formatNumber(reporting.digest_interval_minutes)} min` : copy.unset),
   ].join("");
 
-  elements.relayHealthList.innerHTML = [
-    buildMiniStat(copy.relayHealthNodeRole, site.role || copy.unset, site.region || copy.unset),
-    buildMiniStat(copy.relayHealthMx, site.published_mx || copy.unset, site.dmz_zone || copy.unset),
-    buildMiniStat(copy.relayHealthPrimary, relay.primary_upstream || copy.unset, queues.upstream_reachable ? copy.relayReachable : copy.relayUnreachable),
-    buildMiniStat(copy.relayHealthSecondary, relay.secondary_upstream || copy.unset, relay.ha_enabled ? copy.enabled : copy.disabled),
-    buildMiniStat(copy.relayHealthManagement, site.management_fqdn || copy.unset, site.management_bind || copy.unset),
-    buildMiniStat(copy.relayHealthSync, formatDurationMinutes(relay.sync_interval_seconds), relay.core_delivery_base_url || copy.unset),
-  ].join("");
+  elements.relayHealthList.innerHTML = renderDashboardDetailTable([
+    { label: copy.relayHealthNodeRole, value: site.region || copy.unset, detail: site.role || copy.unset },
+    { label: copy.relayHealthMx, value: site.dmz_zone || copy.unset, detail: site.published_mx || copy.unset },
+    {
+      label: copy.relayHealthPrimary,
+      value: queues.upstream_reachable ? copy.relayReachable : copy.relayUnreachable,
+      detail: relay.primary_upstream || copy.unset,
+    },
+    {
+      label: copy.relayHealthSecondary,
+      value: relay.ha_enabled ? copy.enabled : copy.disabled,
+      detail: relay.secondary_upstream || copy.unset,
+    },
+    { label: copy.relayHealthManagement, value: site.management_bind || copy.unset, detail: site.management_fqdn || copy.unset },
+    {
+      label: copy.relayHealthSync,
+      value: relay.core_delivery_base_url || copy.unset,
+      detail: formatDurationMinutes(relay.sync_interval_seconds),
+    },
+  ]);
 
   elements.topSpamRelaysList.innerHTML = buildRankedRows(
     topSpamRelays.map((entry) => ({ ...entry, detail: copy.topSpamRelaysHeading })),
@@ -1915,17 +1934,17 @@ function renderOverview() {
     topViruses.map((entry) => ({ ...entry, detail: copy.topVirusesHeading })),
   );
 
-  elements.scanSummaryList.innerHTML = [
-    buildMiniStat(copy.scanSummaryClean, formatMetric(scanSummary.clean)),
-    buildMiniStat(copy.scanSummarySpamMessages, formatMetric(scanSummary.spam)),
-    buildMiniStat(copy.scanSummaryVirusMessages, formatMetric(scanSummary.viruses)),
-    buildMiniStat(copy.scanSummaryBannedAttachments, formatMetric(scanSummary.banned)),
-    buildMiniStat(copy.scanSummaryInvalidRecipients, formatMetric(scanSummary.invalidRecipients)),
-    buildMiniStat(copy.scanSummaryRelayDenied, formatMetric(scanSummary.relayDenied)),
-    buildMiniStat(copy.scanSummaryRblReject, formatMetric(scanSummary.rblHits)),
-    buildMiniStat(copy.scanSummaryOther, formatMetric(scanSummary.other)),
-    buildMiniStat(copy.scanSummaryTotalProcessed, formatMetric(scanSummary.total)),
-  ].join("");
+  elements.scanSummaryList.innerHTML = renderDashboardDetailTable([
+    { label: copy.scanSummaryClean, value: formatMetric(scanSummary.clean) },
+    { label: copy.scanSummarySpamMessages, value: formatMetric(scanSummary.spam) },
+    { label: copy.scanSummaryVirusMessages, value: formatMetric(scanSummary.viruses) },
+    { label: copy.scanSummaryBannedAttachments, value: formatMetric(scanSummary.banned) },
+    { label: copy.scanSummaryInvalidRecipients, value: formatMetric(scanSummary.invalidRecipients) },
+    { label: copy.scanSummaryRelayDenied, value: formatMetric(scanSummary.relayDenied) },
+    { label: copy.scanSummaryRblReject, value: formatMetric(scanSummary.rblHits) },
+    { label: copy.scanSummaryOther, value: formatMetric(scanSummary.other) },
+    { label: copy.scanSummaryTotalProcessed, value: formatMetric(scanSummary.total) },
+  ]);
 
   elements.trafficChart.innerHTML = trafficSeries
     .map((entry) => {
