@@ -117,7 +117,7 @@ install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${LPE_PST_IMPORT_DIR}"
 
 cd "${SRC_DIR}"
 systemctl stop "${SERVICE_NAME}" || true
-bash "${SRC_DIR}/installation/debian-trixie/init-schema.sh"
+bash "${SRC_DIR}/installation/debian-trixie/migrate-schema.sh"
 "${CARGO_BIN}" build --release -p lpe-cli
 cd "${SRC_DIR}/web/admin"
 npm ci

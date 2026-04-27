@@ -5,6 +5,7 @@ INSTALL_ROOT="${INSTALL_ROOT:-/opt/lpe}"
 SRC_DIR="${SRC_DIR:-$INSTALL_ROOT/src}"
 ENV_FILE="${ENV_FILE:-/etc/lpe/lpe.env}"
 SCHEMA_FILE="${SCHEMA_FILE:-$SRC_DIR/crates/lpe-storage/sql/schema.sql}"
+MIGRATIONS_DIR="${MIGRATIONS_DIR:-$SRC_DIR/crates/lpe-storage/sql/migrations}"
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "Environment file not found: ${ENV_FILE}" >&2
@@ -33,4 +34,24 @@ psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCA
 psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -c "CREATE SCHEMA public;"
 psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -f "${SCHEMA_FILE}"
 
-echo "LPE 0.1.3 schema initialized successfully."
+schema_version="$(
+  psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -Atc "SELECT schema_version FROM schema_metadata WHERE singleton = TRUE"
+)"
+psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 <<SQL
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version TEXT PRIMARY KEY,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+INSERT INTO schema_migrations (version)
+VALUES ('${schema_version}')
+ON CONFLICT (version) DO NOTHING;
+SQL
+
+if [[ -d "${MIGRATIONS_DIR}" ]]; then
+  while IFS= read -r migration_file; do
+    migration_name="$(basename "${migration_file}" .sql)"
+    psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -c "INSERT INTO schema_migrations (version) VALUES ('${migration_name}') ON CONFLICT (version) DO NOTHING;"
+  done < <(find "${MIGRATIONS_DIR}" -maxdepth 1 -type f -name '*.sql' | sort)
+fi
+
+echo "LPE schema ${schema_version} initialized successfully."

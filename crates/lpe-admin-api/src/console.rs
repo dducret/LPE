@@ -82,18 +82,51 @@ pub(crate) async fn create_account(
 ) -> ApiResult<AdminDashboard> {
     let admin = require_admin(&storage, &headers, "accounts").await?;
     ensure_admin_can_manage_email(&admin, &request.email)?;
+    let email = request.email.trim().to_lowercase();
+    let Some((local_part, domain_name)) = email.split_once('@') else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "account email must contain a local part and managed domain".to_string(),
+        ));
+    };
+    if local_part.trim().is_empty() || domain_name.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "account email must contain a local part and managed domain".to_string(),
+        ));
+    }
+    let dashboard_snapshot = storage
+        .fetch_admin_dashboard()
+        .await
+        .map_err(internal_error)?;
+    if !dashboard_snapshot
+        .domains
+        .iter()
+        .any(|domain| domain.name.eq_ignore_ascii_case(domain_name))
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "account domain must exist before creating the account".to_string(),
+        ));
+    }
+    if request.display_name.trim().is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "account display name is required".to_string(),
+        ));
+    }
     if request.password.trim().len() < 8 {
         return Err((
             StatusCode::BAD_REQUEST,
             "account password must contain at least 8 characters".to_string(),
         ));
     }
-    let account_email = request.email.clone();
+    let account_email = email;
     storage
         .create_account(
             NewAccount {
-                email: request.email.clone(),
-                display_name: request.display_name,
+                email: account_email.clone(),
+                display_name: request.display_name.trim().to_string(),
                 quota_mb: request.quota_mb.max(256),
                 gal_visibility: request
                     .gal_visibility

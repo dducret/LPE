@@ -386,7 +386,11 @@ activate_services() {
 
 run_schema_init_if_requested() {
   if [[ "${LPE_RUN_MIGRATIONS}" == "yes" ]]; then
-    bash "${SCRIPT_DIR}/init-schema.sh"
+    if [[ "${FIRST_INSTALL}" == "1" ]]; then
+      bash "${SCRIPT_DIR}/init-schema.sh"
+    else
+      bash "${SCRIPT_DIR}/migrate-schema.sh"
+    fi
   fi
 }
 

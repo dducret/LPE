@@ -1,8 +1,8 @@
 # Installation
 
-These installation instructions are aligned with repository release `0.1.3`.
+These installation instructions are aligned with the current repository schema `0.1.8`.
 
-Release `0.1.3` is a breaking change. Legacy updates are not supported. A fresh install and database recreation are required.
+Legacy updates from schemas that predate the current schema metadata are not supported. Fresh installs still initialize the database from the canonical schema, but routine updates must preserve existing data and apply only explicit migrations.
 
 ### Debian Trixie
 
@@ -235,19 +235,21 @@ Files:
 - `install-lpe.sh` is now interactive when run in a terminal for first-install values such as the public hostname, PostgreSQL settings, bootstrap administrator, integration secret, install directory, and service actions
 - `install-lpe.sh` also provisions the pinned `Magika` CLI binary with checksum verification into `/opt/lpe/bin/magika`
 - `install-lpe.sh` writes installer layout settings to `/etc/lpe/install.env`, writes runtime settings to `/etc/lpe/lpe.env`, and starts `lpe.service` only when the selected service action enables it
-- `install-lpe.sh` now defaults to running `init-schema.sh` on first install before starting services, so a fresh node comes up against an initialized `0.1.3` schema
+- `install-lpe.sh` now defaults to running `init-schema.sh` on first install before starting services, so a fresh node comes up against the initialized current schema
 - `install-lpe.sh` now verifies that `LPE_DB_PASSWORD`, `DATABASE_URL`, `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD`, and `LPE_INTEGRATION_SHARED_SECRET` were actually persisted to `/etc/lpe/lpe.env` before it continues
 - `install-lpe.sh` writes `DATABASE_URL` to `/etc/lpe/lpe.env`; when an older env file still lacks it, maintenance scripts derive it from `LPE_DB_HOST`, `LPE_DB_PORT`, `LPE_DB_NAME`, `LPE_DB_USER`, and `LPE_DB_PASSWORD`
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
-- `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, recreates the database schema from scratch for `0.1.3`, rebuilds `lpe-cli`, and restarts the service
+- `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, applies non-destructive schema migrations from `crates/lpe-storage/sql/migrations`, rebuilds `lpe-cli`, and restarts the service
 - `update-lpe.sh` also re-provisions the same pinned `Magika` version so content validation stays deterministic
 - `update-lpe.sh` also rebuilds `web/admin` and `web/client`, redeploys static assets, and reloads `nginx`
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
 - `create-lpe-database.sql` provides a SQL-native bootstrap alternative for creating the PostgreSQL role and database
-- `crates/lpe-storage/sql/schema.sql` provides the canonical full schema for fresh `0.1.3` databases
+- `crates/lpe-storage/sql/schema.sql` provides the canonical full schema for fresh databases
+- `crates/lpe-storage/sql/migrations` contains non-destructive update migrations for already-initialized databases
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
-- `init-schema.sh` drops and recreates the PostgreSQL `public` schema, then applies the canonical `0.1.3` schema
+- `init-schema.sh` drops and recreates the PostgreSQL `public` schema, then applies the canonical schema; use it only for fresh installs or intentional resets
+- `migrate-schema.sh` checks the installed schema version, applies pending non-destructive migrations, and refuses to reset or silently create a missing schema
 - `check-lpe.sh` verifies the installation, PostgreSQL, the service, and the HTTP endpoints
 - `check-lpe-ready.sh` returns success only when the local `LPE` node is ready for traffic
 - `lpe-ha-set-role.sh` writes the local HA role (`active`, `standby`, `drain`, `maintenance`)
@@ -268,7 +270,7 @@ Recommended order:
 
 The web client requires user authentication. First create an account and its password from the administration domain page, then sign in to `/mail/` with the full email address and that password.
 
-The administration console now stores its accounts, account passwords, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Release `0.1.3` does not support upgrades from earlier schemas. Initialize a fresh database with `init-schema.sh`, or let `update-lpe.sh` recreate the schema for a destructive reset.
+The administration console stores its accounts, account passwords, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Initialize a fresh database with `init-schema.sh`. Routine updates use `migrate-schema.sh` through `update-lpe.sh` and preserve existing data.
 
 `PST` imports can be uploaded from the browser. The service validates each incoming file with Google `Magika` before storing it in `LPE_PST_IMPORT_DIR`, defaulting to `/var/lib/lpe/imports`, and then creates the `PST` import request with the resulting server path. The maximum accepted API upload size is configured through `LPE_PST_UPLOAD_MAX_BYTES`, defaulting to `21474836480` bytes. The `nginx` reverse proxy is aligned through `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, defaulting to `20g`. The binary path is configured through `LPE_MAGIKA_BIN`, defaulting to `/opt/lpe/bin/magika`, and the minimum confidence threshold through `LPE_MAGIKA_MIN_SCORE`.
 
@@ -334,7 +336,7 @@ The `LPE` installer prompts for:
 - bootstrap administrator display name, default `Bootstrap Administrator`
 - bootstrap administrator password, no default and at least `12` characters
 - whether to enable and start services now, default `yes`
-- whether to run `init-schema.sh` now, default `yes` on first install and `no` on later reruns
+- whether to run schema setup or migrations now, default `yes` on first install and `no` on later reruns
 
 The `LPE-CT` installer prompts for:
 
@@ -540,12 +542,12 @@ The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE
 
 If `LPE_BIND_ADDRESS` or `LPE_SERVER_NAME` changes in `/etc/lpe/lpe.env`, run `update-lpe.sh` again to regenerate the `nginx` configuration. If `LPE_IMAP_BIND_ADDRESS` changes, restart `lpe.service` and rerun `test-lpe-imap-listener.sh` on the core server, then rerun `test-lpe-ct-edge-ports.sh` on the `LPE-CT` server.
 
-For later resets:
+For later updates:
 
 1. push the desired commit to `https://github.com/dducret/LPE`
 2. run `update-lpe.sh`
 
-`update-lpe.sh` now performs a destructive `0.1.3` reset by dropping and recreating the PostgreSQL `public` schema before applying `crates/lpe-storage/sql/schema.sql`. Do not run it on an instance that contains data you need to keep.
+`update-lpe.sh` is no longer destructive by default. It applies pending SQL migrations and exits with an error if the database is uninitialized or if the checked-out code expects a schema version for which no migration has been provided. For an intentional destructive reset, run `init-schema.sh` explicitly.
 
 `LPE-CT/installation/debian-trixie/update-lpe-ct.sh` is not destructive by default. It rebuilds and redeploys the service while preserving `state.json`, the full spool, retained history, and the private local PostgreSQL state unless `LPE_CT_RESET_STATE_ON_UPDATE=true` is set explicitly for a disposable environment.
 
