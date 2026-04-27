@@ -1158,6 +1158,56 @@ function renderSystemSetupSummary(items) {
   `;
 }
 
+function systemNetworkInterfaces(dashboard) {
+  const candidates = [
+    dashboard.system?.network_interfaces,
+    dashboard.system?.interfaces,
+    dashboard.network?.interfaces,
+  ];
+  return candidates.find((candidate) => Array.isArray(candidate)) ?? [];
+}
+
+function renderNetworkInterfaces(dashboard, copy) {
+  const interfaces = systemNetworkInterfaces(dashboard);
+  if (!interfaces.length) {
+    return systemSetupEmptyState(copy.networkInterfacesTitle, copy.networkInterfacesUnavailable);
+  }
+
+  return `
+    <section class="network-interface-panel">
+      <h5>${escapeHtml(copy.networkInterfacesTitle)}</h5>
+      <div class="data-table-wrap network-interface-table-wrap">
+        <table class="data-table network-interface-table">
+          <thead>
+            <tr>
+              <th scope="col">${escapeHtml(copy.networkInterfaceNameLabel)}</th>
+              <th scope="col">${escapeHtml(copy.networkInterfaceAddressLabel)}</th>
+              <th scope="col">${escapeHtml(copy.networkInterfaceNetmaskLabel)}</th>
+              <th scope="col">${escapeHtml(copy.networkInterfaceGatewayLabel)}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${interfaces
+              .map((item) => {
+                const gateway =
+                  item.default_gateway ?? item.gateway ?? item.route_gateway ?? copy.unset;
+                return `
+                  <tr>
+                    <th scope="row">${escapeHtml(item.name ?? item.interface ?? item.iface ?? copy.unset)}</th>
+                    <td>${escapeHtml(item.address ?? item.ip_address ?? item.ip ?? copy.unset)}</td>
+                    <td>${escapeHtml(item.netmask ?? item.subnet_mask ?? item.prefix ?? copy.unset)}</td>
+                    <td>${escapeHtml(gateway)}</td>
+                  </tr>
+                `;
+              })
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
 function renderNetworkSetup(activeTab, dashboard, copy) {
   const tabs = [
     { id: "ip", label: copy.systemSetupNetworkIp },
@@ -1171,14 +1221,14 @@ function renderNetworkSetup(activeTab, dashboard, copy) {
     ip: renderSystemSetupPanel(
       copy.systemSetupNetworkIp,
       copy.systemSetupNetworkIpSummary,
-      renderSystemSetupSummary([
+      `${renderSystemSetupSummary([
         { label: copy.sitePublicSmtpLabel, value: dashboard.site.public_smtp_bind },
         { label: copy.siteManagementBindLabel, value: dashboard.site.management_bind },
         { label: copy.networkPublicListenerLabel, value: dashboard.network.public_listener_enabled ? copy.enabled : copy.disabled },
         { label: copy.networkSubmissionListenerLabel, value: dashboard.network.submission_listener_enabled ? copy.enabled : copy.disabled },
         { label: copy.networkConcurrentLabel, value: formatNumber(dashboard.network.max_concurrent_sessions) },
         { label: copy.networkProxyProtocolLabel, value: dashboard.network.proxy_protocol_enabled ? copy.enabled : copy.disabled },
-      ]),
+      ])}${renderNetworkInterfaces(dashboard, copy)}`,
       editNetwork,
     ),
     dns: renderSystemSetupPanel(

@@ -228,6 +228,14 @@ function createFetchStub() {
       memory_total_bytes: 17179869184,
       disk_used_percent: 62,
       disk_total_bytes: 274877906944,
+      network_interfaces: [
+        {
+          name: "eth0",
+          address: "10.0.0.10",
+          netmask: "255.255.255.0",
+          default_gateway: "10.0.0.1",
+        },
+      ],
     },
     audit: [{ action: "policy.updated", actor: "admin@example.test", timestamp: "2026-04-23T10:05:00Z", details: "Updated policy." }],
   };
@@ -524,6 +532,7 @@ async function main() {
   assert.match(elements["history-list"].innerHTML, /trace-2/);
   assert.match(elements["platform-list"].innerHTML, /Network/);
   assert.match(elements["platform-list"].innerHTML, /IP/);
+  assert.match(elements["platform-list"].innerHTML, /eth0/);
   assert.match(elements["system-overview-list"].innerHTML, /CPU utilization/);
   assert.match(elements["queue-status-list"].innerHTML, /Corrupt queue/);
   assert.match(elements["scan-summary-list"].innerHTML, /Spam messages/);

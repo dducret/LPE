@@ -1615,6 +1615,37 @@ select.invalid {
     var(--panel-muted);
 }
 
+.network-interface-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  min-width: 0;
+}
+
+.network-interface-panel h5 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-title);
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.network-interface-table-wrap {
+  border: 1px solid rgba(216, 226, 236, 0.9);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.network-interface-table {
+  min-width: 38rem;
+}
+
+.network-interface-table th,
+.network-interface-table td {
+  text-align: left;
+}
+
 .record-actions {
   justify-content: flex-start;
 }

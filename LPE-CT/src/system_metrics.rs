@@ -19,6 +19,15 @@ pub(crate) struct SystemMetrics {
     pub(crate) memory_total_bytes: Option<u64>,
     pub(crate) disk_used_percent: Option<f64>,
     pub(crate) disk_total_bytes: Option<u64>,
+    pub(crate) network_interfaces: Vec<NetworkInterfaceMetric>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct NetworkInterfaceMetric {
+    pub(crate) name: String,
+    pub(crate) address: String,
+    pub(crate) netmask: Option<String>,
+    pub(crate) default_gateway: Option<String>,
 }
 
 pub(crate) fn collect(spool_dir: &Path) -> SystemMetrics {
@@ -35,6 +44,7 @@ pub(crate) fn collect(spool_dir: &Path) -> SystemMetrics {
         memory_total_bytes: memory_total_bytes(),
         disk_used_percent: disk_used_percent(spool_dir),
         disk_total_bytes: disk_total_bytes(spool_dir),
+        network_interfaces: network_interfaces(),
     }
 }
 
@@ -152,6 +162,105 @@ fn env_value(name: &str) -> Option<String> {
 
 fn percent(used: u64, total: u64) -> f64 {
     ((used as f64 / total as f64) * 10_000.0).round() / 100.0
+}
+
+#[cfg(unix)]
+fn network_interfaces() -> Vec<NetworkInterfaceMetric> {
+    use std::process::Command;
+
+    let output = Command::new("ip")
+        .args(["-o", "-4", "addr", "show"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success());
+    let Some(output) = output else {
+        return Vec::new();
+    };
+    let Ok(raw) = String::from_utf8(output.stdout) else {
+        return Vec::new();
+    };
+
+    let gateways = default_gateways();
+    raw.lines()
+        .filter_map(|line| parse_ipv4_interface_line(line, &gateways))
+        .collect()
+}
+
+#[cfg(not(unix))]
+fn network_interfaces() -> Vec<NetworkInterfaceMetric> {
+    Vec::new()
+}
+
+#[cfg(unix)]
+fn default_gateways() -> std::collections::BTreeMap<String, String> {
+    use std::process::Command;
+
+    let output = Command::new("ip")
+        .args(["-4", "route", "show", "default"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success());
+    let Some(output) = output else {
+        return std::collections::BTreeMap::new();
+    };
+    let Ok(raw) = String::from_utf8(output.stdout) else {
+        return std::collections::BTreeMap::new();
+    };
+
+    raw.lines()
+        .filter_map(|line| {
+            let parts = line.split_whitespace().collect::<Vec<_>>();
+            let gateway = parts
+                .windows(2)
+                .find_map(|pair| (pair[0] == "via").then(|| pair[1].to_string()))?;
+            let interface = parts
+                .windows(2)
+                .find_map(|pair| (pair[0] == "dev").then(|| pair[1].to_string()))?;
+            Some((interface, gateway))
+        })
+        .collect()
+}
+
+#[cfg(unix)]
+fn parse_ipv4_interface_line(
+    line: &str,
+    gateways: &std::collections::BTreeMap<String, String>,
+) -> Option<NetworkInterfaceMetric> {
+    let parts = line.split_whitespace().collect::<Vec<_>>();
+    let raw_name = parts.get(1)?.trim_end_matches(':');
+    let name = raw_name.split('@').next().unwrap_or(raw_name);
+    if name == "lo" {
+        return None;
+    }
+
+    let inet_index = parts.iter().position(|part| *part == "inet")?;
+    let cidr = parts.get(inet_index + 1)?;
+    let (address, prefix) = cidr.split_once('/')?;
+    Some(NetworkInterfaceMetric {
+        name: name.to_string(),
+        address: address.to_string(),
+        netmask: prefix.parse::<u8>().ok().and_then(ipv4_prefix_to_netmask),
+        default_gateway: gateways.get(name).cloned(),
+    })
+}
+
+#[cfg(unix)]
+fn ipv4_prefix_to_netmask(prefix: u8) -> Option<String> {
+    if prefix > 32 {
+        return None;
+    }
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u32::MAX << (32 - prefix)
+    };
+    Some(format!(
+        "{}.{}.{}.{}",
+        (mask >> 24) & 0xff,
+        (mask >> 16) & 0xff,
+        (mask >> 8) & 0xff,
+        mask & 0xff
+    ))
 }
 
 fn disk_total_bytes(path: &Path) -> Option<u64> {
