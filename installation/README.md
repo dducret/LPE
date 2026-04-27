@@ -56,7 +56,7 @@ It now also provides `test-ha-lpe-ct-active-passive.sh`, `lpe-ct-spool-recover.s
 The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL`, and `LPE_INTEGRATION_SHARED_SECRET` values across the two nodes. `LPE_CT_CORE_DELIVERY_BASE_URL` points from `LPE-CT` to the core `LPE` HTTP listener, default port `8080`, and is used for `/internal/lpe-ct/inbound-deliveries`, `/internal/lpe-ct/recipient-verification`, `/internal/lpe-ct/submission-auth`, and `/internal/lpe-ct/submissions`. `LPE_CT_API_BASE_URL` points from the `LPE` outbound worker to the `LPE-CT` management/API listener, default port `8380`, and is used for `/api/v1/integration/outbound-messages`. `LPE_INTEGRATION_SHARED_SECRET` is mandatory for `LPE <-> LPE-CT` bridge traffic, must stay out of public interfaces, and must be set to a strong non-trivial value of at least `32` characters. On `LPE-CT`, a missing or weak value now leaves the management UI reachable but reports the bridge as degraded until the secret is fixed. The contract is documented in `docs/architecture/lpe-ct-integration.md`.
 
 - `test-local-lpe-ct.sh` from the `LPE-CT` server
-- `test-from-lpe.sh` from the LAN or core server
+- `test-from-lpe.sh` from the LAN or core server to verify the signed canonical `LPE -> LPE-CT` outbound handoff API
 - `test-from-internet.sh` from an external machine
 - `test-lpe-ct-edge-ports.sh` from the `LPE-CT` server to verify listeners on `25`, `443`, `465`, and `993`
 - `test-lpe-ct-core-bridge.sh` from the `LPE-CT` server to verify the signed `LPE-CT -> LPE` recipient-verification bridge
@@ -107,6 +107,24 @@ sudo ./check-lpe-env.sh --append-missing
 
 Review appended values before restarting services, especially secrets,
 database URLs, public hostnames, bridge URLs, and bind addresses.
+
+To test the canonical outbound handoff from `LPE` to `LPE-CT`, run this from the
+core `LPE` server:
+
+```bash
+cd /opt/lpe/src/installation/debian-trixie
+sudo ./test-from-lpe.sh
+```
+
+The script reads `LPE_CT_API_BASE_URL` and `LPE_INTEGRATION_SHARED_SECRET` from
+`/etc/lpe/lpe.env`, signs a `POST
+${LPE_CT_API_BASE_URL}/api/v1/integration/outbound-messages` request, and checks
+the `LPE-CT` response. By default it uses reserved `example.test` addresses. For
+a real relay-path test, pass real values:
+
+```bash
+sudo SENDER=user@example.com RECIPIENT=external@example.net ./test-from-lpe.sh
+```
 
 ### LPE-CT Public TLS Certificate
 
