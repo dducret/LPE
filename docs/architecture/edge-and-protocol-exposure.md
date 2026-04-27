@@ -36,9 +36,11 @@ installations document that certificate through:
 - `LPE_CT_IMAPS_TLS_CERT_PATH` / `LPE_CT_IMAPS_TLS_KEY_PATH` for `993`
 
 The `HTTPS` publication must redirect accidental plain `HTTP` traffic to the
-TLS origin, including nginx's plain-HTTP-on-HTTPS-port case. This avoids
-presenting the default nginx `400 Bad Request` page when an administrator types
-`http://host:443` instead of `https://host`.
+configured TLS origin, including nginx's plain-HTTP-on-HTTPS-port case. This
+avoids presenting the default nginx `400 Bad Request` page when an administrator
+types `http://host:443` instead of `https://host`. Debian deployments render the
+redirect with `LPE_CT_NGINX_LISTEN_PORT` so a non-standard HTTPS port is explicit
+instead of silently redirecting to a closed `443`.
 
 When client submission is enabled, `LPE-CT` terminates the external `TLS` session, performs `AUTH`, and forwards the raw RFC 822 message plus envelope to the internal canonical `LPE` submission workflow. `LPE-CT` does not create the authoritative `Sent` copy itself, and the internal `LPE -> LPE-CT` outbound relay remains a backend-only transport.
 

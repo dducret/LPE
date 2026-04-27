@@ -101,9 +101,13 @@ LPE_CT_IMAPS_TLS_KEY_PATH=/etc/lpe-ct/tls/privkey.pem
 submission pair for `465` and the IMAPS pair for `993`.
 
 The management UI URL must use `https://`. The generated `nginx` site redirects
-plain `HTTP` received on port `80`, and also converts nginx's plain-HTTP-on-TLS
-listener condition into a permanent redirect instead of exposing the default
-`400 Bad Request: The plain HTTP request was sent to HTTPS port` page.
+plain `HTTP` received on port `80` to the configured
+`LPE_CT_NGINX_LISTEN_PORT`, and also converts nginx's plain-HTTP-on-TLS listener
+condition into a permanent redirect instead of exposing the default
+`400 Bad Request: The plain HTTP request was sent to HTTPS port` page. If a
+browser redirects and then reports `connection refused`, verify that nginx is
+actually listening on `LPE_CT_NGINX_LISTEN_PORT`, default `443`, and that the
+local firewall allows that port.
 
 ### Initial preparation on a bare Debian server
 
