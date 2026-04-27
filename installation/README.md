@@ -48,7 +48,7 @@ Path conventions:
 
 For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI, without exposing the core back office on the DMZ server, also provisions a pinned `Magika` CLI binary in `/opt/lpe-ct/bin/magika` for inbound SMTP validation, performs a Git-based sparse synchronization of `takeri` from `https://github.com/AnimeForLife191/Shuhari-CyberForge.git` before building `/opt/lpe-ct/bin/Shuhari-CyberForge-CLI` as the default antivirus provider, and now provisions the default private `LPE-CT` PostgreSQL store for greylisting, reputation, `bayespam`, throttling, and quarantine metadata.
 
-The `LPE-CT` scripts also install the SMTP ingress listener on `25`, publish the HTTPS edge through `nginx` on `443`, configure authenticated implicit-TLS client submission on `465`, configure the IMAPS TLS proxy on `993`, create the full runtime spool layout in `/var/spool/lpe-ct`, and provide these validation scripts:
+The `LPE-CT` scripts also install the SMTP ingress listener on `25`, publish the HTTPS edge through `nginx` on `443`, redirect plain `HTTP` on `80` to `HTTPS`, configure authenticated implicit-TLS client submission on `465`, configure the IMAPS TLS proxy on `993`, create the full runtime spool layout in `/var/spool/lpe-ct`, and provide these validation scripts:
 
 For the first `active/passive` `DMZ` deployment step, `LPE-CT/installation/debian-trixie` also provides `check-lpe-ct-ready.sh`, `lpe-ct-ha-set-role.sh`, and `keepalived-lpe-ct.conf.example`.
 It now also provides `test-ha-lpe-ct-active-passive.sh`, `lpe-ct-spool-recover.sh`, and `test-lpe-ct-spool-recovery.sh` for traffic gating and spool return-to-service validation.
@@ -99,6 +99,11 @@ LPE_CT_IMAPS_TLS_KEY_PATH=/etc/lpe-ct/tls/privkey.pem
 
 `nginx` uses the public pair for `443`. The Rust `LPE-CT` service uses the
 submission pair for `465` and the IMAPS pair for `993`.
+
+The management UI URL must use `https://`. The generated `nginx` site redirects
+plain `HTTP` received on port `80`, and also converts nginx's plain-HTTP-on-TLS
+listener condition into a permanent redirect instead of exposing the default
+`400 Bad Request: The plain HTTP request was sent to HTTPS port` page.
 
 ### Initial preparation on a bare Debian server
 

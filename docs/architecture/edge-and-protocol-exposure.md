@@ -17,6 +17,7 @@ The core `LPE` server must not be directly reachable from the public Internet an
 - inbound `SMTP` on port `25`
 - authenticated client `SMTP` submission on implicit `TLS` port `465` when configured
 - the `LPE` web client and `LPE-CT` management publication over `HTTPS` on `443`
+- plain `HTTP` on port `80` only as a redirect to the `HTTPS` edge
 - `ActiveSync` over `HTTPS` under `/activesync`
 - exposed `JMAP` endpoints over `TLS` toward `LPE` under `/api/jmap/*`
 - secure `JMAP` WebSockets over `TLS` under the same published `JMAP` origin when the `JMAP` WebSocket endpoint is enabled
@@ -33,6 +34,11 @@ installations document that certificate through:
 - `LPE_CT_PUBLIC_TLS_CERT_PATH` / `LPE_CT_PUBLIC_TLS_KEY_PATH` for `nginx` `443`
 - `LPE_CT_SUBMISSION_TLS_CERT_PATH` / `LPE_CT_SUBMISSION_TLS_KEY_PATH` for `465`
 - `LPE_CT_IMAPS_TLS_CERT_PATH` / `LPE_CT_IMAPS_TLS_KEY_PATH` for `993`
+
+The `HTTPS` publication must redirect accidental plain `HTTP` traffic to the
+TLS origin, including nginx's plain-HTTP-on-HTTPS-port case. This avoids
+presenting the default nginx `400 Bad Request` page when an administrator types
+`http://host:443` instead of `https://host`.
 
 When client submission is enabled, `LPE-CT` terminates the external `TLS` session, performs `AUTH`, and forwards the raw RFC 822 message plus envelope to the internal canonical `LPE` submission workflow. `LPE-CT` does not create the authoritative `Sent` copy itself, and the internal `LPE -> LPE-CT` outbound relay remains a backend-only transport.
 
