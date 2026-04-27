@@ -4,6 +4,7 @@ set -euo pipefail
 ENV_FILE="${ENV_FILE:-/etc/lpe-ct/lpe-ct.env}"
 HOST="${HOST:-127.0.0.1}"
 SERVICE_NAME="${SERVICE_NAME:-lpe-ct.service}"
+SERVICE_USER="${SERVICE_USER:-lpe-ct}"
 
 fail() {
   echo "[FAIL] $*" >&2
@@ -47,6 +48,36 @@ recent_logs() {
     echo "[DIAG] Recent ${SERVICE_NAME} logs:"
     journalctl -u "${SERVICE_NAME}" --no-pager -n 30 2>/dev/null || true
   fi
+}
+
+service_user_can_read() {
+  local path="$1"
+  if [[ -z "${path}" ]]; then
+    return 1
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    sudo -u "${SERVICE_USER}" test -r "${path}" >/dev/null 2>&1
+  elif command -v runuser >/dev/null 2>&1; then
+    runuser -u "${SERVICE_USER}" -- test -r "${path}" >/dev/null 2>&1
+  else
+    test -r "${path}"
+  fi
+}
+
+check_tls_file_readable() {
+  local label="$1"
+  local path="$2"
+  [[ -n "${path}" ]] || return 0
+  if service_user_can_read "${path}"; then
+    pass "${label} is readable by ${SERVICE_USER}: ${path}"
+    return 0
+  fi
+  echo "[DIAG] ${label} is not readable by ${SERVICE_USER}: ${path}"
+  if command -v namei >/dev/null 2>&1; then
+    echo "[DIAG] Path permissions for ${path}:"
+    namei -l "${path}" || true
+  fi
+  fail "${label} must be readable by ${SERVICE_USER}; fix owner/group/mode under /etc/lpe-ct/tls before testing edge ports."
 }
 
 diagnose_tcp_failure() {
@@ -106,6 +137,17 @@ SUBMISSION_BIND="${LPE_CT_SUBMISSION_BIND_ADDRESS:-}"
 IMAPS_BIND="${LPE_CT_IMAPS_BIND_ADDRESS:-}"
 SUBMISSION_PORT="${SUBMISSION_BIND##*:}"
 IMAPS_PORT="${IMAPS_BIND##*:}"
+
+check_tls_file_readable "public TLS certificate" "${LPE_CT_PUBLIC_TLS_CERT_PATH:-}"
+check_tls_file_readable "public TLS private key" "${LPE_CT_PUBLIC_TLS_KEY_PATH:-}"
+if [[ -n "${LPE_CT_SUBMISSION_BIND_ADDRESS:-}" ]]; then
+  check_tls_file_readable "submission TLS certificate" "${LPE_CT_SUBMISSION_TLS_CERT_PATH:-${LPE_CT_PUBLIC_TLS_CERT_PATH:-}}"
+  check_tls_file_readable "submission TLS private key" "${LPE_CT_SUBMISSION_TLS_KEY_PATH:-${LPE_CT_PUBLIC_TLS_KEY_PATH:-}}"
+fi
+if [[ -n "${LPE_CT_IMAPS_BIND_ADDRESS:-}" ]]; then
+  check_tls_file_readable "IMAPS TLS certificate" "${LPE_CT_IMAPS_TLS_CERT_PATH:-${LPE_CT_PUBLIC_TLS_CERT_PATH:-}}"
+  check_tls_file_readable "IMAPS TLS private key" "${LPE_CT_IMAPS_TLS_KEY_PATH:-${LPE_CT_PUBLIC_TLS_KEY_PATH:-}}"
+fi
 
 tcp_probe "SMTP ingress" "$HOST" "${SMTP_PORT:-25}"
 

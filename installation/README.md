@@ -98,8 +98,20 @@ certificate covering the public `LPE-CT` hostname, for example
 
 ```bash
 install -d -m 0750 -o root -g lpe-ct /etc/lpe-ct/tls
-install -m 0644 fullchain.pem /etc/lpe-ct/tls/fullchain.pem
+install -m 0640 -o root -g lpe-ct fullchain.pem /etc/lpe-ct/tls/fullchain.pem
 install -m 0640 -o root -g lpe-ct privkey.pem /etc/lpe-ct/tls/privkey.pem
+```
+
+The Rust `lpe-ct` service must read this certificate and private key for `465`
+and `993`. If the service logs `unable to open certificate ... Permission
+denied`, repair the ownership and mode with:
+
+```bash
+chown root:lpe-ct /etc/lpe-ct/tls /etc/lpe-ct/tls/fullchain.pem /etc/lpe-ct/tls/privkey.pem
+chmod 0750 /etc/lpe-ct/tls
+chmod 0640 /etc/lpe-ct/tls/fullchain.pem /etc/lpe-ct/tls/privkey.pem
+sudo -u lpe-ct test -r /etc/lpe-ct/tls/fullchain.pem
+sudo -u lpe-ct test -r /etc/lpe-ct/tls/privkey.pem
 ```
 
 Configure the same certificate paths for the three TLS surfaces unless you
