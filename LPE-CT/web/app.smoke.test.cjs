@@ -457,10 +457,12 @@ function createContext() {
     location: { hash: "" },
     history: { replaceState() {} },
     fetch: createFetchStub(),
+    __intervals: [],
     requestAnimationFrame(callback) {
       callback();
     },
     setInterval(callback, delay) {
+      this.__intervals.push(delay);
       const handle = setInterval(callback, delay);
       handle.unref?.();
       return handle;
@@ -526,6 +528,7 @@ async function main() {
   assert.match(elements["queue-status-list"].innerHTML, /Corrupt queue/);
   assert.match(elements["scan-summary-list"].innerHTML, /Spam messages/);
   assert.match(elements["traffic-table"].innerHTML, /Invalid rcpts/);
+  assert.ok(context.window.__intervals.includes(60_000));
   assert.equal(navButtons[0].getAttribute("aria-current"), "true");
   assert.equal(pageViews[0].classList.contains("page-view-active"), true);
   assert.equal(pageViews[1].classList.contains("hidden"), true);

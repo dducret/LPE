@@ -93,6 +93,7 @@ const containers = {
 
 const AUTH_TOKEN_KEY = 'lpeCtAdminToken';
 const LAST_ADMIN_EMAIL_KEY = 'lpeCtAdminLastEmail';
+const DASHBOARD_REFRESH_INTERVAL_MS = 60_000;
 
 // Application State
 const state = {
@@ -2843,12 +2844,17 @@ async function loadOps({ silent = false } = {}) {
   }
 }
 
-async function load() {
+async function load({ silent = false } = {}) {
+  if (state.loading.dashboard) {
+    return;
+  }
   const copy = getCopy();
   state.loading.dashboard = true;
-  setButtonBusy(elements.refreshToolbar, true, copy.refreshing, copy.refreshState);
-  setButtonBusy(elements.refresh, true, copy.refreshing, copy.refresh);
-  syncLoadingState();
+  if (!silent) {
+    setButtonBusy(elements.refreshToolbar, true, copy.refreshing, copy.refreshState);
+    setButtonBusy(elements.refresh, true, copy.refreshing, copy.refresh);
+    syncLoadingState();
+  }
   try {
     state.dashboard = await fetchDashboard();
     state.hostClockLoadedAt = Date.now();
@@ -2863,12 +2869,23 @@ async function load() {
       return;
     }
     setAuthenticated(Boolean(window.localStorage.getItem(AUTH_TOKEN_KEY)));
-    showFeedback(error instanceof Error ? error.message : copy.unknownError, "error");
+    if (!silent) {
+      showFeedback(error instanceof Error ? error.message : copy.unknownError, "error");
+    }
   } finally {
     state.loading.dashboard = false;
-    setButtonBusy(elements.refreshToolbar, false, copy.refreshing, copy.refreshState);
-    setButtonBusy(elements.refresh, false, copy.refreshing, copy.refresh);
+    if (!silent) {
+      setButtonBusy(elements.refreshToolbar, false, copy.refreshing, copy.refreshState);
+      setButtonBusy(elements.refresh, false, copy.refreshing, copy.refresh);
+    }
   }
+}
+
+function refreshDashboardOnSchedule() {
+  if (!window.localStorage.getItem(AUTH_TOKEN_KEY) || state.loading.auth || state.loading.dashboard) {
+    return;
+  }
+  void load({ silent: true });
 }
 
 async function loginAdmin() {
@@ -3140,6 +3157,7 @@ syncLoadingState();
 window.setInterval(() => {
   renderHostClock();
 }, 1000);
+window.setInterval(refreshDashboardOnSchedule, DASHBOARD_REFRESH_INTERVAL_MS);
 window.addEventListener("resize", () => {
   if (window.innerWidth > 1024) {
     setSidebarOpen(false);
