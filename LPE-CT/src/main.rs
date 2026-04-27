@@ -112,7 +112,14 @@ struct AcceptedDomainTestResponse {
     domain: String,
     destination_server: String,
     verified: bool,
+    checked_url: String,
     detail: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LpeHealthProbeResponse {
+    service: Option<String>,
+    status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1228,15 +1235,16 @@ async fn test_accepted_domain(
         .into_iter()
         .find(|item| item.id == domain_id)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "accepted domain not found"))?;
-    let verified = domain.verified && !domain.destination_server.trim().is_empty();
+    let probe = probe_lpe_destination_server(&domain.destination_server).await?;
     Ok(Json(AcceptedDomainTestResponse {
         domain: domain.domain,
         destination_server: domain.destination_server,
-        verified,
-        detail: if verified {
-            "accepted domain has a destination server and is marked verified".to_string()
+        verified: probe.verified,
+        checked_url: probe.checked_url,
+        detail: if probe.verified {
+            "destination server is reachable as an LPE server".to_string()
         } else {
-            "accepted domain requires destination server configuration and verification".to_string()
+            probe.detail
         },
     }))
 }
@@ -1964,6 +1972,81 @@ fn normalize_verification_type(value: &str) -> Result<String, ApiError> {
             "verification type must be one of none, dynamic, ldap, or allowed",
         )),
     }
+}
+
+#[derive(Debug)]
+struct LpeDestinationProbe {
+    verified: bool,
+    checked_url: String,
+    detail: String,
+}
+
+async fn probe_lpe_destination_server(
+    destination_server: &str,
+) -> Result<LpeDestinationProbe, ApiError> {
+    let checked_url = lpe_health_probe_url(destination_server)?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(1_500))
+        .build()
+        .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+
+    let response = match client.get(&checked_url).send().await {
+        Ok(response) => response,
+        Err(error) => {
+            return Ok(LpeDestinationProbe {
+                verified: false,
+                checked_url,
+                detail: format!("destination server is unreachable as an LPE server: {error}"),
+            });
+        }
+    };
+    let status = response.status();
+    if !status.is_success() {
+        return Ok(LpeDestinationProbe {
+            verified: false,
+            checked_url,
+            detail: format!("destination server health check returned HTTP {status}"),
+        });
+    }
+    let health = match response.json::<LpeHealthProbeResponse>().await {
+        Ok(health) => health,
+        Err(error) => {
+            return Ok(LpeDestinationProbe {
+                verified: false,
+                checked_url,
+                detail: format!("destination server did not return LPE health JSON: {error}"),
+            });
+        }
+    };
+    let is_lpe = health.service.as_deref() == Some("lpe-admin-api")
+        && health.status.as_deref() == Some("ok");
+    Ok(LpeDestinationProbe {
+        verified: is_lpe,
+        checked_url,
+        detail: if is_lpe {
+            "destination server is reachable as an LPE server".to_string()
+        } else {
+            format!(
+                "destination server health response is not an LPE server signature (service={}, status={})",
+                health.service.unwrap_or_else(|| "missing".to_string()),
+                health.status.unwrap_or_else(|| "missing".to_string())
+            )
+        },
+    })
+}
+
+fn lpe_health_probe_url(destination_server: &str) -> Result<String, ApiError> {
+    let trimmed = destination_server.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "destination server is required",
+        ));
+    }
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return Ok(format!("{trimmed}/health/live"));
+    }
+    Ok(format!("http://{trimmed}/health/live"))
 }
 
 fn normalize_local_data_stores(local_data_stores: &mut LocalDataStoresSettings) {
