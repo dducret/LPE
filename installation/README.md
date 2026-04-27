@@ -129,6 +129,13 @@ LPE_CT_IMAPS_TLS_KEY_PATH=/etc/lpe-ct/tls/privkey.pem
 `nginx` uses the public pair for `443`. The Rust `LPE-CT` service uses the
 submission pair for `465` and the IMAPS pair for `993`.
 
+For `993`, `LPE-CT` terminates client `TLS` and then proxies the clear internal
+IMAP stream to `LPE_CT_IMAPS_UPSTREAM_ADDRESS`. The default
+`127.0.0.1:1143` is valid only when the core `LPE` IMAP listener is co-located
+on the same host. In the normal split `DMZ` / `LAN` topology, set this to the
+private LAN address and port of the core `LPE` IMAP listener, for example
+`192.168.1.25:1143`, and allow that flow from `LPE-CT` to `LPE`.
+
 The management UI URL must use `https://`. The generated `nginx` site redirects
 plain `HTTP` received on port `80` to the configured
 `LPE_CT_NGINX_LISTEN_PORT`, and also converts nginx's plain-HTTP-on-TLS listener

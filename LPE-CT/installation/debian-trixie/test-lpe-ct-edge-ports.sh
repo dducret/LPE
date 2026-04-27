@@ -115,27 +115,53 @@ tls_probe_if_possible() {
   local port="$2"
   local name="$3"
   local output_file
+  local openssl_status=0
   if ! command -v openssl >/dev/null 2>&1; then
     echo "[SKIP] openssl is not available; TCP reachability for ${name} was checked, TLS handshake was not."
     return
   fi
   output_file="$(mktemp)"
-  if ! timeout 10 openssl s_client -showcerts -connect "${host}:${port}" -servername "${LPE_CT_PUBLIC_HOSTNAME:-localhost}" </dev/null >"${output_file}" 2>&1; then
+  timeout 10 openssl s_client -showcerts -connect "${host}:${port}" -servername "${LPE_CT_PUBLIC_HOSTNAME:-localhost}" </dev/null >"${output_file}" 2>&1 || openssl_status=$?
+  if grep -q "BEGIN CERTIFICATE" "${output_file}"; then
+    if [[ "${openssl_status}" -ne 0 ]]; then
+      echo "[WARN] ${name} on ${host}:${port} presented a TLS certificate, but openssl exited with status ${openssl_status}. A proxied service may have closed the session after TLS."
+      sed -n '1,40p' "${output_file}" || true
+    fi
+    rm -f "${output_file}"
+    pass "${name} on ${host}:${port} presented a TLS certificate"
+    return
+  fi
+  if [[ "${openssl_status}" -ne 0 ]]; then
     echo "[DIAG] openssl s_client failed for ${name} on ${host}:${port}:"
     sed -n '1,80p' "${output_file}" || true
     recent_logs
     rm -f "${output_file}"
     fail "${name} on ${host}:${port} failed TLS handshake"
   fi
-  if ! grep -q "BEGIN CERTIFICATE" "${output_file}"; then
-    echo "[DIAG] openssl s_client did not report a certificate for ${name} on ${host}:${port}:"
-    sed -n '1,120p' "${output_file}" || true
-    recent_logs
-    rm -f "${output_file}"
-    fail "${name} on ${host}:${port} did not present a TLS certificate"
-  fi
+  echo "[DIAG] openssl s_client did not report a certificate for ${name} on ${host}:${port}:"
+  sed -n '1,120p' "${output_file}" || true
+  recent_logs
   rm -f "${output_file}"
-  pass "${name} on ${host}:${port} presented a TLS certificate"
+  fail "${name} on ${host}:${port} did not present a TLS certificate"
+}
+
+probe_imaps_upstream() {
+  local upstream="$1"
+  local host
+  local port
+  [[ -n "${upstream}" ]] || fail "LPE_CT_IMAPS_UPSTREAM_ADDRESS is required when IMAPS is enabled."
+  host="${upstream%:*}"
+  port="${upstream##*:}"
+  if [[ -z "${host}" || -z "${port}" || "${host}" == "${upstream}" ]]; then
+    fail "LPE_CT_IMAPS_UPSTREAM_ADDRESS must be a host:port address, got: ${upstream}"
+  fi
+  timeout 5 bash -c ":</dev/tcp/${host}/${port}" >/dev/null 2>&1 \
+    || {
+      echo "[DIAG] LPE_CT_IMAPS_UPSTREAM_ADDRESS=${upstream}"
+      echo "[DIAG] LPE-CT accepted TLS on ${HOST}:${IMAPS_PORT}, but could not reach the core LPE IMAP upstream."
+      fail "LPE IMAP upstream ${upstream} is not reachable from LPE-CT; set LPE_CT_IMAPS_UPSTREAM_ADDRESS to the core LPE IMAP listener and ensure that listener is running."
+    }
+  pass "LPE IMAP upstream ${upstream} is reachable from LPE-CT"
 }
 
 SMTP_BIND="${LPE_CT_SMTP_BIND_ADDRESS:-}"
@@ -171,15 +197,14 @@ pass "HTTPS management edge is reachable on ${HOST}:${HTTPS_PORT}"
 tls_probe_if_possible "$HOST" "$HTTPS_PORT" "HTTPS"
 
 if [[ -n "${LPE_CT_SUBMISSION_BIND_ADDRESS:-}" ]]; then
-  tcp_probe "SMTPS submission" "$HOST" "$SUBMISSION_PORT"
   tls_probe_if_possible "$HOST" "$SUBMISSION_PORT" "SMTPS submission"
 else
   echo "[SKIP] LPE_CT_SUBMISSION_BIND_ADDRESS is not configured; port 465 is intentionally not enabled."
 fi
 
 if [[ -n "${LPE_CT_IMAPS_BIND_ADDRESS:-}" ]]; then
-  tcp_probe "IMAPS" "$HOST" "$IMAPS_PORT"
   tls_probe_if_possible "$HOST" "$IMAPS_PORT" "IMAPS"
+  probe_imaps_upstream "${LPE_CT_IMAPS_UPSTREAM_ADDRESS:-}"
 else
   echo "[SKIP] LPE_CT_IMAPS_BIND_ADDRESS is not configured; port 993 is not enabled."
 fi
