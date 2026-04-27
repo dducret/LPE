@@ -1352,6 +1352,77 @@ select:disabled {
   margin-top: 10px;
 }
 
+.setup-tabs {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+
+.tab-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid rgba(204, 216, 229, 0.88);
+  border-radius: var(--radius-md);
+  background: rgba(248, 251, 254, 0.72);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.tab-strip-secondary {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.tab-button {
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  color: var(--text-soft);
+  background: transparent;
+  font-size: var(--font-copy);
+  font-weight: 700;
+}
+
+.tab-button:hover,
+.tab-button:focus-visible {
+  color: var(--text);
+  border-color: rgba(204, 216, 229, 0.88);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.tab-button-active {
+  color: var(--text);
+  border-color: rgba(39, 104, 227, 0.24);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 251, 254, 0.84)),
+    var(--panel-strong);
+  box-shadow: 0 8px 18px rgba(17, 27, 39, 0.06);
+}
+
+.setup-tab-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.setup-panel {
+  border: 1px solid rgba(204, 216, 229, 0.88);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.78),
+    0 8px 22px rgba(17, 27, 39, 0.045);
+}
+
+.compact-empty-state {
+  margin-top: 12px;
+  border: 1px dashed rgba(181, 197, 213, 0.92);
+  background: rgba(248, 251, 254, 0.7);
+}
+
 .section-head,
 .drawer-header,
 .record-head {

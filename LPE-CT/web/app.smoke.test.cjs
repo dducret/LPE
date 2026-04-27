@@ -520,7 +520,8 @@ async function main() {
   assert.equal(elements["sidebar-node-name"].textContent, "ct-node-1");
   assert.match(elements["quarantine-list"].innerHTML, /trace-1/);
   assert.match(elements["history-list"].innerHTML, /trace-2/);
-  assert.match(elements["platform-list"].innerHTML, /Node identity/);
+  assert.match(elements["platform-list"].innerHTML, /Network/);
+  assert.match(elements["platform-list"].innerHTML, /IP/);
   assert.match(elements["system-overview-list"].innerHTML, /CPU utilization/);
   assert.match(elements["queue-status-list"].innerHTML, /Corrupt queue/);
   assert.match(elements["scan-summary-list"].innerHTML, /Spam messages/);

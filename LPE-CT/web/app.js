@@ -102,6 +102,14 @@ const state = {
   digestReports: [],
   policyStatus: null,
   selectedTrace: null,
+  systemSetup: {
+    primaryTab: "network",
+    nestedTabs: {
+      network: "ip",
+      mailRelay: "general",
+      mailAuthentication: "spf",
+    },
+  },
   hostClockLoadedAt: null,
   loading: {
     dashboard: false,
@@ -1058,6 +1066,251 @@ function renderDigestReporting() {
   containers.digestReports.innerHTML = renderDigestReportsList(reports);
 }
 
+function systemSetupEmptyState(title, summary) {
+  return `
+    <article class="empty-state compact-empty-state">
+      <strong>${escapeHtml(title)}</strong>
+      <p>${escapeHtml(summary)}</p>
+    </article>
+  `;
+}
+
+function renderSystemSetupTabs(tabs, activeTab, level = "primary") {
+  return `
+    <div class="tab-strip ${level === "secondary" ? "tab-strip-secondary" : ""}" role="tablist">
+      ${tabs
+        .map((tab) => {
+          const isActive = tab.id === activeTab;
+          return `
+            <button
+              class="tab-button${isActive ? " tab-button-active" : ""}"
+              type="button"
+              role="tab"
+              aria-selected="${String(isActive)}"
+              data-action="system-setup-tab"
+              data-tab-level="${level}"
+              data-tab-id="${escapeHtml(tab.id)}"
+            >${escapeHtml(tab.label)}</button>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderSystemSetupPanel(title, summary, body, actions = "") {
+  return `
+    <article class="record-row setup-panel">
+      <div class="record-head">
+        <div>
+          <h4 class="record-title">${escapeHtml(title)}</h4>
+          <div class="record-copy">${escapeHtml(summary)}</div>
+        </div>
+        ${actions ? `<div class="inline-actions">${actions}</div>` : ""}
+      </div>
+      ${body}
+    </article>
+  `;
+}
+
+function renderSystemSetupSummary(items) {
+  return `
+    <div class="record-grid">
+      ${items
+        .map(
+          (item) => `
+            <div class="summary-card">
+              <p>${escapeHtml(item.label)}</p>
+              <strong>${escapeHtml(item.value ?? getCopy().unset)}</strong>
+            </div>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderNetworkSetup(activeTab, dashboard, copy) {
+  const tabs = [
+    { id: "ip", label: copy.systemSetupNetworkIp },
+    { id: "dns", label: copy.systemSetupNetworkDns },
+    { id: "static-routes", label: copy.systemSetupNetworkStaticRoutes },
+    { id: "ipv6", label: copy.systemSetupNetworkIpv6 },
+  ];
+  const editNetwork = `<button class="list-action" type="button" data-action="platform-edit" data-target="network">${copy.edit}</button>`;
+  const editSite = `<button class="list-action" type="button" data-action="platform-edit" data-target="site">${copy.edit}</button>`;
+  const bodies = {
+    ip: renderSystemSetupPanel(
+      copy.systemSetupNetworkIp,
+      copy.systemSetupNetworkIpSummary,
+      renderSystemSetupSummary([
+        { label: copy.sitePublicSmtpLabel, value: dashboard.site.public_smtp_bind },
+        { label: copy.siteManagementBindLabel, value: dashboard.site.management_bind },
+        { label: copy.networkPublicListenerLabel, value: dashboard.network.public_listener_enabled ? copy.enabled : copy.disabled },
+        { label: copy.networkSubmissionListenerLabel, value: dashboard.network.submission_listener_enabled ? copy.enabled : copy.disabled },
+        { label: copy.networkConcurrentLabel, value: formatNumber(dashboard.network.max_concurrent_sessions) },
+        { label: copy.networkProxyProtocolLabel, value: dashboard.network.proxy_protocol_enabled ? copy.enabled : copy.disabled },
+      ]),
+      editNetwork,
+    ),
+    dns: renderSystemSetupPanel(
+      copy.systemSetupNetworkDns,
+      copy.systemSetupNetworkDnsSummary,
+      renderSystemSetupSummary([
+        { label: copy.sitePublishedMxLabel, value: dashboard.site.published_mx },
+        { label: copy.siteManagementFqdnLabel, value: dashboard.site.management_fqdn },
+        { label: copy.siteDmzZoneLabel, value: dashboard.site.dmz_zone },
+      ]),
+      editSite,
+    ),
+    "static-routes": renderSystemSetupPanel(
+      copy.systemSetupNetworkStaticRoutes,
+      copy.systemSetupNetworkStaticRoutesSummary,
+      systemSetupEmptyState(copy.systemSetupNetworkStaticRoutes, copy.systemSetupNoStaticRoutes),
+    ),
+    ipv6: renderSystemSetupPanel(
+      copy.systemSetupNetworkIpv6,
+      copy.systemSetupNetworkIpv6Summary,
+      systemSetupEmptyState(copy.systemSetupNetworkIpv6, copy.systemSetupNoIpv6),
+    ),
+  };
+  return renderSystemSetupTabs(tabs, activeTab, "secondary") + bodies[activeTab];
+}
+
+function renderMailRelaySetup(activeTab, dashboard, copy) {
+  const tabs = [
+    { id: "general", label: copy.systemSetupRelayGeneral },
+    { id: "domains", label: copy.systemSetupRelayDomains },
+    { id: "ip-controls", label: copy.systemSetupRelayIpControls },
+    { id: "sender-controls", label: copy.systemSetupRelaySenderControls },
+    { id: "outbound", label: copy.systemSetupRelayOutbound },
+    { id: "smtp-settings", label: copy.systemSetupRelaySmtpSettings },
+    { id: "esmtp-settings", label: copy.systemSetupRelayEsmtpSettings },
+    { id: "greylisting", label: copy.systemSetupRelayGreylisting },
+    { id: "dkim-signing", label: copy.systemSetupRelayDkimSigning },
+  ];
+  const editRelay = `<button class="list-action" type="button" data-action="platform-edit" data-target="relay">${copy.edit}</button>`;
+  const editNetwork = `<button class="list-action" type="button" data-action="platform-edit" data-target="network">${copy.edit}</button>`;
+  const goFiltering = `<button class="list-action" type="button" data-page-target="filtering">${copy.navFiltering}</button>`;
+  const dkimDomains = dashboard.policies?.dkim?.domains ?? [];
+  const bodies = {
+    general: renderSystemSetupPanel(
+      copy.systemSetupRelayGeneral,
+      copy.systemSetupRelayGeneralSummary,
+      renderSystemSetupSummary([
+        { label: copy.relayHaLabel, value: dashboard.relay.ha_enabled ? copy.enabled : copy.disabled },
+        { label: copy.relayPrimaryLabel, value: dashboard.relay.primary_upstream },
+        { label: copy.relaySecondaryLabel, value: dashboard.relay.secondary_upstream },
+        { label: copy.relaySyncLabel, value: formatNumber(dashboard.relay.sync_interval_seconds) },
+      ]),
+      editRelay,
+    ),
+    domains: renderSystemSetupPanel(
+      copy.systemSetupRelayDomains,
+      copy.systemSetupRelayDomainsSummary,
+      systemSetupEmptyState(copy.systemSetupRelayDomains, copy.systemSetupNoRelayDomains),
+    ),
+    "ip-controls": renderSystemSetupPanel(
+      copy.systemSetupRelayIpControls,
+      copy.systemSetupRelayIpControlsSummary,
+      renderSystemSetupSummary([
+        { label: copy.networkManagementCidrsLabel, value: formatList(dashboard.network.allowed_management_cidrs) },
+        { label: copy.networkUpstreamCidrsLabel, value: formatList(dashboard.network.allowed_upstream_cidrs) },
+      ]),
+      editNetwork,
+    ),
+    "sender-controls": renderSystemSetupPanel(
+      copy.systemSetupRelaySenderControls,
+      copy.systemSetupRelaySenderControlsSummary,
+      systemSetupEmptyState(copy.systemSetupRelaySenderControls, copy.systemSetupSenderControlsNote),
+      goFiltering,
+    ),
+    outbound: renderSystemSetupPanel(
+      copy.systemSetupRelayOutbound,
+      copy.systemSetupRelayOutboundSummary,
+      renderSystemSetupSummary([
+        { label: copy.networkSmartHostsLabel, value: formatList(dashboard.network.outbound_smart_hosts) },
+        { label: copy.relayCoreDeliveryLabel, value: dashboard.relay.core_delivery_base_url },
+        { label: copy.relayFallbackLabel, value: dashboard.relay.fallback_to_hold_queue ? copy.enabled : copy.disabled },
+      ]),
+      `${editRelay}${editNetwork}`,
+    ),
+    "smtp-settings": renderSystemSetupPanel(
+      copy.systemSetupRelaySmtpSettings,
+      copy.systemSetupRelaySmtpSettingsSummary,
+      renderSystemSetupSummary([
+        { label: copy.networkPublicListenerLabel, value: dashboard.network.public_listener_enabled ? copy.enabled : copy.disabled },
+        { label: copy.networkSubmissionListenerLabel, value: dashboard.network.submission_listener_enabled ? copy.enabled : copy.disabled },
+        { label: copy.networkConcurrentLabel, value: formatNumber(dashboard.network.max_concurrent_sessions) },
+      ]),
+      editNetwork,
+    ),
+    "esmtp-settings": renderSystemSetupPanel(
+      copy.systemSetupRelayEsmtpSettings,
+      copy.systemSetupRelayEsmtpSettingsSummary,
+      renderSystemSetupSummary([
+        { label: copy.networkProxyProtocolLabel, value: dashboard.network.proxy_protocol_enabled ? copy.enabled : copy.disabled },
+        { label: copy.relayMutualTlsLabel, value: dashboard.relay.mutual_tls_required ? copy.enabled : copy.disabled },
+      ]),
+      `${editNetwork}${editRelay}`,
+    ),
+    greylisting: renderSystemSetupPanel(
+      copy.systemSetupRelayGreylisting,
+      copy.systemSetupRelayGreylistingSummary,
+      systemSetupEmptyState(copy.systemSetupRelayGreylisting, copy.systemSetupNoGreylisting),
+    ),
+    "dkim-signing": renderSystemSetupPanel(
+      copy.systemSetupRelayDkimSigning,
+      copy.systemSetupRelayDkimSigningSummary,
+      renderSystemSetupSummary([
+        { label: copy.dkimSigningEnabledLabel, value: dashboard.policies?.dkim?.enabled ? copy.enabled : copy.disabled },
+        { label: copy.dkimHeaders, value: formatList(dashboard.policies?.dkim?.headers) },
+        { label: copy.dkimDomainLabel, value: dkimDomains.length ? formatNumber(dkimDomains.length) : copy.noDkimDomains },
+      ]),
+      goFiltering,
+    ),
+  };
+  return renderSystemSetupTabs(tabs, activeTab, "secondary") + bodies[activeTab];
+}
+
+function renderMailAuthenticationSetup(activeTab, dashboard, copy) {
+  const tabs = [
+    { id: "spf", label: copy.systemSetupAuthSpf },
+    { id: "dkim", label: copy.systemSetupAuthDkim },
+    { id: "dmarc", label: copy.systemSetupAuthDmarc },
+    { id: "arc", label: copy.systemSetupAuthArc },
+  ];
+  const goFiltering = `<button class="list-action" type="button" data-page-target="filtering">${copy.navFiltering}</button>`;
+  const bodies = {
+    spf: renderSystemSetupPanel(
+      copy.systemSetupAuthSpf,
+      copy.systemSetupAuthSpfSummary,
+      systemSetupEmptyState(copy.systemSetupAuthSpf, copy.systemSetupNoSpf),
+    ),
+    dkim: renderSystemSetupPanel(
+      copy.systemSetupAuthDkim,
+      copy.systemSetupAuthDkimSummary,
+      renderSystemSetupSummary([
+        { label: copy.dkimSigningEnabledLabel, value: dashboard.policies?.dkim?.enabled ? copy.enabled : copy.disabled },
+        { label: copy.dkimHeaders, value: formatList(dashboard.policies?.dkim?.headers) },
+        { label: copy.dkimExpiration, value: dashboard.policies?.dkim?.expiration_seconds ? formatNumber(dashboard.policies.dkim.expiration_seconds) : copy.unset },
+      ]),
+      goFiltering,
+    ),
+    dmarc: renderSystemSetupPanel(
+      copy.systemSetupAuthDmarc,
+      copy.systemSetupAuthDmarcSummary,
+      systemSetupEmptyState(copy.systemSetupAuthDmarc, copy.systemSetupNoDmarc),
+    ),
+    arc: renderSystemSetupPanel(
+      copy.systemSetupAuthArc,
+      copy.systemSetupAuthArcSummary,
+      systemSetupEmptyState(copy.systemSetupAuthArc, copy.systemSetupNoArc),
+    ),
+  };
+  return renderSystemSetupTabs(tabs, activeTab, "secondary") + bodies[activeTab];
+}
+
 function renderPlatform() {
   const copy = getCopy();
   const dashboard = state.dashboard;
@@ -1065,63 +1318,54 @@ function renderPlatform() {
     containers.platform.innerHTML = buildLoadingRows(2);
     return;
   }
+  const primaryTabs = [
+    { id: "network", label: copy.systemSetupNetwork },
+    { id: "time", label: copy.systemSetupTime },
+    { id: "mailRelay", label: copy.systemSetupMailRelay },
+    { id: "mailAuthentication", label: copy.systemSetupMailAuthentication },
+    { id: "systemUpdates", label: copy.systemSetupSystemUpdates },
+    { id: "shutdownRestart", label: copy.systemSetupShutdownRestart },
+  ];
+  const activePrimary = state.systemSetup.primaryTab;
+  const nested = state.systemSetup.nestedTabs;
+  const panels = {
+    network: renderNetworkSetup(nested.network, dashboard, copy),
+    time: renderSystemSetupPanel(
+      copy.systemSetupTime,
+      copy.systemSetupTimeSummary,
+      renderSystemSetupSummary([
+        { label: copy.sessionTimeLabel, value: formatDateTime(getHostClockDate()) },
+        { label: copy.systemHostname, value: dashboard.system?.hostname || dashboard.site?.node_name || copy.unset },
+        { label: copy.systemUptime, value: formatUptime(dashboard.system?.uptime_seconds) },
+      ]),
+    ),
+    mailRelay: renderMailRelaySetup(nested.mailRelay, dashboard, copy),
+    mailAuthentication: renderMailAuthenticationSetup(nested.mailAuthentication, dashboard, copy),
+    systemUpdates: renderSystemSetupPanel(
+      copy.systemSetupSystemUpdates,
+      copy.systemSetupSystemUpdatesSummary,
+      renderSystemSetupSummary([
+        { label: copy.updatesChannelLabel, value: dashboard.updates.channel },
+        { label: copy.updatesAutoDownloadLabel, value: dashboard.updates.auto_download ? copy.enabled : copy.disabled },
+        { label: copy.updatesWindowLabel, value: dashboard.updates.maintenance_window },
+        { label: copy.updatesLastReleaseLabel, value: dashboard.updates.last_applied_release },
+        { label: copy.updatesSourceLabel, value: dashboard.updates.update_source },
+      ]),
+      `<button class="list-action" type="button" data-action="platform-edit" data-target="updates">${copy.edit}</button>`,
+    ),
+    shutdownRestart: renderSystemSetupPanel(
+      copy.systemSetupShutdownRestart,
+      copy.systemSetupShutdownRestartSummary,
+      systemSetupEmptyState(copy.systemSetupShutdownRestart, copy.systemSetupNoShutdown),
+    ),
+  };
   containers.platform.innerHTML = `
-    <article class="record-row">
-      <div class="record-head">
-        <div>
-          <h4 class="record-title">${copy.platformNode}</h4>
-          <div class="record-copy">${copy.platformNodeCopy}</div>
-        </div>
+    <div class="setup-tabs">
+      ${renderSystemSetupTabs(primaryTabs, activePrimary)}
+      <div class="setup-tab-panel" role="tabpanel">
+        ${panels[activePrimary]}
       </div>
-      <div class="record-grid">
-        <div class="summary-card"><p>${copy.siteNodeNameLabel}</p><strong>${escapeHtml(dashboard.site.node_name || copy.unset)}</strong></div>
-        <div class="summary-card"><p>${copy.siteDmzZoneLabel}</p><strong>${escapeHtml(dashboard.site.dmz_zone || copy.unset)}</strong></div>
-        <div class="summary-card"><p>${copy.sitePublishedMxLabel}</p><strong>${escapeHtml(dashboard.site.published_mx || copy.unset)}</strong></div>
-      </div>
-      <div class="record-actions">
-        <button class="list-action" type="button" data-action="platform-edit" data-target="site">${copy.edit}</button>
-      </div>
-    </article>
-    <article class="record-row">
-      <div class="record-head">
-        <div>
-          <h4 class="record-title">${copy.platformRelay}</h4>
-          <div class="record-copy">${copy.platformRelayCopy}</div>
-        </div>
-      </div>
-      <div class="record-grid">
-        <div class="summary-card"><p>${copy.relayPrimaryLabel}</p><strong>${escapeHtml(dashboard.relay.primary_upstream || copy.unset)}</strong></div>
-        <div class="summary-card"><p>${copy.relaySecondaryLabel}</p><strong>${escapeHtml(dashboard.relay.secondary_upstream || copy.unset)}</strong></div>
-        <div class="summary-card"><p>${copy.relaySyncLabel}</p><strong>${escapeHtml(formatNumber(dashboard.relay.sync_interval_seconds))}</strong></div>
-      </div>
-      <div class="record-actions">
-        <button class="list-action" type="button" data-action="platform-edit" data-target="relay">${copy.edit}</button>
-      </div>
-    </article>
-    <article class="record-row">
-      <div class="record-head">
-        <div>
-          <h4 class="record-title">${copy.platformNetwork}</h4>
-          <div class="record-copy">${copy.platformNetworkCopy}</div>
-        </div>
-      </div>
-      <div class="record-copy">${escapeHtml(formatList(dashboard.network.allowed_management_cidrs))}</div>
-      <div class="record-actions">
-        <button class="list-action" type="button" data-action="platform-edit" data-target="network">${copy.edit}</button>
-      </div>
-    </article>
-    <article class="record-row">
-      <div class="record-head">
-        <div>
-          <h4 class="record-title">${copy.platformUpdates}</h4>
-          <div class="record-copy">${copy.platformUpdatesCopy}</div>
-        </div>
-      </div>
-      <div class="record-copy">${escapeHtml(`${dashboard.updates.channel || copy.unset} · ${dashboard.updates.maintenance_window || copy.unset}`)}</div>
-      <div class="record-actions">
-        <button class="list-action" type="button" data-action="platform-edit" data-target="updates">${copy.edit}</button>
-      </div>
-    </article>
+    </div>
   `;
 }
 
@@ -2652,6 +2896,36 @@ function runAction(promiseFactory) {
   void promiseFactory().catch((error) => showFeedback(error instanceof Error ? error.message : getCopy().unknownError, "error"));
 }
 
+function setSystemSetupTab(actionTarget) {
+  const { tabId, tabLevel } = actionTarget.dataset;
+  const primaryTabs = new Set(["network", "time", "mailRelay", "mailAuthentication", "systemUpdates", "shutdownRestart"]);
+  const nestedTabs = {
+    network: new Set(["ip", "dns", "static-routes", "ipv6"]),
+    mailRelay: new Set([
+      "general",
+      "domains",
+      "ip-controls",
+      "sender-controls",
+      "outbound",
+      "smtp-settings",
+      "esmtp-settings",
+      "greylisting",
+      "dkim-signing",
+    ]),
+    mailAuthentication: new Set(["spf", "dkim", "dmarc", "arc"]),
+  };
+  if (tabLevel === "primary" && primaryTabs.has(tabId)) {
+    state.systemSetup.primaryTab = tabId;
+    renderPlatform();
+    return;
+  }
+  const primaryTab = state.systemSetup.primaryTab;
+  if (tabLevel === "secondary" && nestedTabs[primaryTab]?.has(tabId)) {
+    state.systemSetup.nestedTabs[primaryTab] = tabId;
+    renderPlatform();
+  }
+}
+
 function getActionHandlers(actionTarget) {
   const { traceId, ruleId, index, reportId, target } = actionTarget.dataset;
   return {
@@ -2677,6 +2951,7 @@ function getActionHandlers(actionTarget) {
     "digest-override-delete": () => runAction(() => deleteDigestOverride(Number(index))),
     "digest-open": () => runAction(() => openDigestReport(reportId, actionTarget)),
     "platform-edit": () => openPlatformDrawer(target, actionTarget),
+    "system-setup-tab": () => setSystemSetupTab(actionTarget),
     "refresh-quarantine": () => runAction(() => loadOps()),
     "refresh-history": () => runAction(() => loadOps()),
   };
