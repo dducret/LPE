@@ -9,10 +9,10 @@ use axum::{
 };
 use lpe_domain::{
     current_unix_timestamp, BridgeAuthError, InboundDeliveryRequest, InboundDeliveryResponse,
-    SignedIntegrationHeaders, SmtpSubmissionAuthRequest, SmtpSubmissionAuthResponse,
-    SmtpSubmissionRequest, SmtpSubmissionResponse, DEFAULT_MAX_SKEW_SECONDS,
-    INTEGRATION_KEY_HEADER, INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER,
-    INTEGRATION_TIMESTAMP_HEADER,
+    RecipientVerificationRequest, RecipientVerificationResponse, SignedIntegrationHeaders,
+    SmtpSubmissionAuthRequest, SmtpSubmissionAuthResponse, SmtpSubmissionRequest,
+    SmtpSubmissionResponse, DEFAULT_MAX_SKEW_SECONDS, INTEGRATION_KEY_HEADER,
+    INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER, INTEGRATION_TIMESTAMP_HEADER,
 };
 use lpe_magika::{
     collect_mime_attachment_parts, ExpectedKind, IngressContext, PolicyDecision, ValidationRequest,
@@ -28,6 +28,8 @@ use tracing::info;
 static INTEGRATION_REPLAY_CACHE: std::sync::OnceLock<
     std::sync::Mutex<std::collections::BTreeMap<String, i64>>,
 > = std::sync::OnceLock::new();
+
+const RECIPIENT_VERIFICATION_CACHE_TTL_SECONDS: u64 = 300;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SmtpSubmissionError {
@@ -94,6 +96,41 @@ pub(crate) async fn deliver_inbound_message(
         "inbound delivery processed"
     );
     Ok(Json(response))
+}
+
+pub(crate) async fn verify_lpe_ct_recipient(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<RecipientVerificationRequest>,
+) -> ApiResult<RecipientVerificationResponse> {
+    require_integration(
+        &headers,
+        "/internal/lpe-ct/recipient-verification",
+        &request,
+    )?;
+    if !ha_allows_active_work().map_err(internal_error)? {
+        let role = ha_current_role()
+            .map_err(internal_error)?
+            .unwrap_or_else(|| "standby".to_string());
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!("node role {role} does not accept LPE-CT recipient verification"),
+        ));
+    }
+
+    let verified = storage
+        .verify_local_recipient(&request.recipient)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(RecipientVerificationResponse {
+        verified,
+        detail: if verified {
+            None
+        } else {
+            Some("unknown local recipient".to_string())
+        },
+        cache_ttl_seconds: Some(RECIPIENT_VERIFICATION_CACHE_TTL_SECONDS),
+    }))
 }
 
 pub(crate) async fn authenticate_smtp_submission(

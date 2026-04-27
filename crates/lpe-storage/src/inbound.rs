@@ -29,6 +29,27 @@ struct SieveFollowUp {
 }
 
 impl Storage {
+    pub async fn verify_local_recipient(&self, recipient: &str) -> Result<bool> {
+        let recipient = crate::normalize_email(recipient);
+        if recipient.is_empty() {
+            bail!("recipient is required");
+        }
+
+        sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM accounts
+                WHERE lower(primary_email) = lower($1)
+            )
+            "#,
+        )
+        .bind(&recipient)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
     pub async fn deliver_inbound_message(
         &self,
         request: InboundDeliveryRequest,

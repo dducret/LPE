@@ -34,11 +34,16 @@ load_env_file_if_present "${ENV_FILE}"
 
 LPE_CT_BIND_ADDRESS_CURRENT="${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}"
 LPE_CT_SMTP_BIND_ADDRESS_CURRENT="${LPE_CT_SMTP_BIND_ADDRESS:-0.0.0.0:25}"
+LPE_CT_SUBMISSION_BIND_ADDRESS_DEFAULT="${LPE_CT_SUBMISSION_BIND_ADDRESS:-0.0.0.0:465}"
 LPE_CT_BIND_HOST_DEFAULT="${LPE_CT_BIND_HOST:-${LPE_CT_BIND_ADDRESS_CURRENT%:*}}"
 LPE_CT_BIND_PORT_DEFAULT="${LPE_CT_BIND_PORT:-${LPE_CT_BIND_ADDRESS_CURRENT##*:}}"
 LPE_CT_SMTP_HOST_DEFAULT="${LPE_CT_SMTP_HOST:-${LPE_CT_SMTP_BIND_ADDRESS_CURRENT%:*}}"
 LPE_CT_SMTP_PORT_DEFAULT="${LPE_CT_SMTP_PORT:-${LPE_CT_SMTP_BIND_ADDRESS_CURRENT##*:}}"
-LPE_CT_NGINX_LISTEN_PORT_DEFAULT="${LPE_CT_NGINX_LISTEN_PORT:-80}"
+LPE_CT_NGINX_LISTEN_PORT_DEFAULT="${LPE_CT_NGINX_LISTEN_PORT:-443}"
+LPE_CT_PUBLIC_TLS_CERT_PATH_DEFAULT="${LPE_CT_PUBLIC_TLS_CERT_PATH:-/etc/lpe-ct/tls/fullchain.pem}"
+LPE_CT_PUBLIC_TLS_KEY_PATH_DEFAULT="${LPE_CT_PUBLIC_TLS_KEY_PATH:-/etc/lpe-ct/tls/privkey.pem}"
+LPE_CT_IMAPS_BIND_ADDRESS_DEFAULT="${LPE_CT_IMAPS_BIND_ADDRESS:-0.0.0.0:993}"
+LPE_CT_IMAPS_UPSTREAM_ADDRESS_DEFAULT="${LPE_CT_IMAPS_UPSTREAM_ADDRESS:-127.0.0.1:1143}"
 LPE_CT_BOOTSTRAP_ADMIN_EMAIL_DEFAULT="${LPE_CT_BOOTSTRAP_ADMIN_EMAIL:-}"
 LPE_CT_BOOTSTRAP_ADMIN_PASSWORD_DEFAULT="${LPE_CT_BOOTSTRAP_ADMIN_PASSWORD:-}"
 LPE_CT_CORE_DELIVERY_BASE_URL_DEFAULT="${LPE_CT_CORE_DELIVERY_BASE_URL:-http://127.0.0.1:8080}"
@@ -134,9 +139,15 @@ collect_runtime_values() {
   LPE_CT_SMTP_PORT="$(ask_with_default "SMTP ingress port" "${LPE_CT_SMTP_PORT_DEFAULT}" validate_port "Enter a valid TCP port.")"
   LPE_CT_SMTP_BIND_ADDRESS="${LPE_CT_SMTP_HOST}:${LPE_CT_SMTP_PORT}"
   LPE_CT_NGINX_LISTEN_PORT="$(ask_with_default "HTTPS port" "${LPE_CT_NGINX_LISTEN_PORT_DEFAULT}" validate_port "Enter a valid TCP port.")"
+  LPE_CT_PUBLIC_TLS_CERT_PATH="$(ask_with_default "Public TLS certificate path" "${LPE_CT_PUBLIC_TLS_CERT_PATH_DEFAULT}" validate_absolute_file_path "Enter an absolute certificate path.")"
+  LPE_CT_PUBLIC_TLS_KEY_PATH="$(ask_with_default "Public TLS private key path" "${LPE_CT_PUBLIC_TLS_KEY_PATH_DEFAULT}" validate_absolute_file_path "Enter an absolute private key path.")"
+  LPE_CT_IMAPS_BIND_ADDRESS="$(ask_with_default "IMAPS bind address" "${LPE_CT_IMAPS_BIND_ADDRESS_DEFAULT}" validate_host_port "Enter a valid host:port bind address.")"
+  LPE_CT_IMAPS_UPSTREAM_ADDRESS="$(ask_with_default "Internal LPE IMAP upstream address" "${LPE_CT_IMAPS_UPSTREAM_ADDRESS_DEFAULT}" validate_host_port "Enter a valid host:port upstream address.")"
+  LPE_CT_SUBMISSION_BIND_ADDRESS="$(ask_with_default "SMTP submission bind address" "${LPE_CT_SUBMISSION_BIND_ADDRESS_DEFAULT}" validate_host_port "Enter a valid host:port bind address.")"
 
   print_section "Integration"
   LPE_CT_CORE_DELIVERY_BASE_URL="$(ask_required "Internal LPE delivery URL" "${LPE_CT_CORE_DELIVERY_BASE_URL_DEFAULT}" validate_http_url "Enter a valid http:// or https:// URL.")"
+  LPE_CT_CORE_DELIVERY_BASE_URL="${LPE_CT_CORE_DELIVERY_BASE_URL%/}"
   LPE_INTEGRATION_SHARED_SECRET="$(ask_secret_with_default_behavior_when_possible "Integration shared secret" "${shared_secret_default}" validate_shared_secret "Enter a strong secret with at least 32 characters.")"
   LPE_CT_USE_HA="$(ask_yes_no "Use high availability relay endpoints" "${LPE_CT_USE_HA_DEFAULT}")"
   if [[ "${LPE_CT_USE_HA}" == "yes" ]]; then
@@ -209,6 +220,15 @@ write_runtime_env_file() {
   write_env_value "${ENV_FILE}" "LPE_CT_SERVER_NAME" "${LPE_CT_SERVER_NAME}"
   write_env_value "${ENV_FILE}" "LPE_CT_PUBLIC_HOSTNAME" "${LPE_CT_PUBLIC_HOSTNAME}"
   write_env_value "${ENV_FILE}" "LPE_CT_NGINX_LISTEN_PORT" "${LPE_CT_NGINX_LISTEN_PORT}"
+  write_env_value "${ENV_FILE}" "LPE_CT_PUBLIC_TLS_CERT_PATH" "${LPE_CT_PUBLIC_TLS_CERT_PATH}"
+  write_env_value "${ENV_FILE}" "LPE_CT_PUBLIC_TLS_KEY_PATH" "${LPE_CT_PUBLIC_TLS_KEY_PATH}"
+  write_env_value "${ENV_FILE}" "LPE_CT_IMAPS_BIND_ADDRESS" "${LPE_CT_IMAPS_BIND_ADDRESS}"
+  write_env_value "${ENV_FILE}" "LPE_CT_IMAPS_UPSTREAM_ADDRESS" "${LPE_CT_IMAPS_UPSTREAM_ADDRESS}"
+  write_env_value "${ENV_FILE}" "LPE_CT_IMAPS_TLS_CERT_PATH" "${LPE_CT_PUBLIC_TLS_CERT_PATH}"
+  write_env_value "${ENV_FILE}" "LPE_CT_IMAPS_TLS_KEY_PATH" "${LPE_CT_PUBLIC_TLS_KEY_PATH}"
+  write_env_value "${ENV_FILE}" "LPE_CT_SUBMISSION_BIND_ADDRESS" "${LPE_CT_SUBMISSION_BIND_ADDRESS}"
+  write_env_value "${ENV_FILE}" "LPE_CT_SUBMISSION_TLS_CERT_PATH" "${LPE_CT_PUBLIC_TLS_CERT_PATH}"
+  write_env_value "${ENV_FILE}" "LPE_CT_SUBMISSION_TLS_KEY_PATH" "${LPE_CT_PUBLIC_TLS_KEY_PATH}"
   write_env_value "${ENV_FILE}" "LPE_CT_STATE_FILE" "${STATE_DIR}/state.json"
   write_env_value "${ENV_FILE}" "LPE_CT_SPOOL_DIR" "${SPOOL_DIR}"
   write_env_value "${ENV_FILE}" "LPE_CT_LOCAL_DB_ENABLED" "${LPE_CT_LOCAL_DB_ENABLED}"
@@ -373,6 +393,9 @@ render_service_files() {
     "LPE_CT_NGINX_LISTEN_PORT=${LPE_CT_NGINX_LISTEN_PORT}" \
     "LPE_CT_SERVER_NAME=${LPE_CT_SERVER_NAME}" \
     "LPE_CT_BIND_ADDRESS=${LPE_CT_BIND_ADDRESS}" \
+    "LPE_CT_CORE_DELIVERY_BASE_URL=${LPE_CT_CORE_DELIVERY_BASE_URL}" \
+    "LPE_CT_PUBLIC_TLS_CERT_PATH=${LPE_CT_PUBLIC_TLS_CERT_PATH}" \
+    "LPE_CT_PUBLIC_TLS_KEY_PATH=${LPE_CT_PUBLIC_TLS_KEY_PATH}" \
     "LPE_CT_WEB_ROOT=${WEB_ROOT}"
 }
 

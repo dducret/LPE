@@ -4,7 +4,7 @@ set -euo pipefail
 CT_PUBLIC_HOST="${CT_PUBLIC_HOST:?Set CT_PUBLIC_HOST to the public MX host or IP}"
 SMTP_PORT="${SMTP_PORT:-25}"
 EXPECT_MANAGEMENT_PUBLIC="${EXPECT_MANAGEMENT_PUBLIC:-false}"
-MANAGEMENT_URL="${MANAGEMENT_URL:-http://${CT_PUBLIC_HOST}/api/dashboard}"
+MANAGEMENT_URL="${MANAGEMENT_URL:-https://${CT_PUBLIC_HOST}/api/dashboard}"
 SENDER="${SENDER:-internet-check@example.net}"
 RECIPIENT="${RECIPIENT:?Set RECIPIENT to a real mailbox hosted behind LPE-CT}"
 
@@ -50,11 +50,11 @@ exec 3<&-
 pass "Internet-side host can reach the public LPE-CT SMTP listener"
 
 if [[ "$EXPECT_MANAGEMENT_PUBLIC" == "true" ]]; then
-  curl --silent --show-error --fail "$MANAGEMENT_URL" >/dev/null \
+  curl --silent --show-error --fail --insecure "$MANAGEMENT_URL" >/dev/null \
     || fail "Management URL is expected to be public but is not reachable: $MANAGEMENT_URL"
   pass "Management URL is publicly reachable as expected"
 else
-  if curl --silent --show-error --fail --max-time 5 "$MANAGEMENT_URL" >/dev/null 2>&1; then
+  if curl --silent --show-error --fail --insecure --max-time 5 "$MANAGEMENT_URL" >/dev/null 2>&1; then
     fail "Management URL is publicly reachable but EXPECT_MANAGEMENT_PUBLIC is false: $MANAGEMENT_URL"
   fi
   pass "Management URL is not publicly reachable"

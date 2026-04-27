@@ -12,9 +12,9 @@ use axum::{
 };
 use lpe_domain::{
     current_unix_timestamp, BridgeAuthError, OutboundMessageHandoffRequest,
-    OutboundMessageHandoffResponse, SignedIntegrationHeaders, DEFAULT_MAX_SKEW_SECONDS,
-    INTEGRATION_KEY_HEADER, INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER,
-    INTEGRATION_TIMESTAMP_HEADER,
+    OutboundMessageHandoffResponse, RecipientVerificationRequest, RecipientVerificationResponse,
+    SignedIntegrationHeaders, DEFAULT_MAX_SKEW_SECONDS, INTEGRATION_KEY_HEADER,
+    INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER, INTEGRATION_TIMESTAMP_HEADER,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -28,6 +28,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 mod dkim_signing;
+mod imaps_proxy;
 mod observability;
 mod reporting;
 mod smtp;
@@ -113,6 +114,9 @@ struct AcceptedDomainTestResponse {
     destination_server: String,
     verified: bool,
     checked_url: String,
+    checked_bridge_url: String,
+    bridge_reachable: bool,
+    recipient_verified: bool,
     detail: String,
 }
 
@@ -490,6 +494,10 @@ async fn main() -> Result<()> {
     let smtp_bind_address =
         env::var("LPE_CT_SMTP_BIND_ADDRESS").unwrap_or_else(|_| "0.0.0.0:25".to_string());
     let submission_bind_address = env::var("LPE_CT_SUBMISSION_BIND_ADDRESS").ok();
+    let imaps_bind_address = imaps_proxy::imaps_bind_address();
+    let imaps_upstream_address = imaps_proxy::imaps_upstream_address();
+    let imaps_tls_cert_path = imaps_proxy::imaps_tls_cert_path();
+    let imaps_tls_key_path = imaps_proxy::imaps_tls_key_path();
     let state_file = PathBuf::from(
         env::var("LPE_CT_STATE_FILE").unwrap_or_else(|_| "/var/lib/lpe-ct/state.json".to_string()),
     );
@@ -580,12 +588,31 @@ async fn main() -> Result<()> {
         }
         Result::<()>::Ok(())
     });
+    let imaps_task = tokio::spawn(async move {
+        if let Some(bind_address) = imaps_bind_address {
+            let cert_path = imaps_tls_cert_path
+                .ok_or_else(|| anyhow::anyhow!("LPE_CT_IMAPS_TLS_CERT_PATH or LPE_CT_PUBLIC_TLS_CERT_PATH must be set when LPE_CT_IMAPS_BIND_ADDRESS is configured"))?;
+            let key_path = imaps_tls_key_path
+                .ok_or_else(|| anyhow::anyhow!("LPE_CT_IMAPS_TLS_KEY_PATH or LPE_CT_PUBLIC_TLS_KEY_PATH must be set when LPE_CT_IMAPS_BIND_ADDRESS is configured"))?;
+            imaps_proxy::run_imaps_proxy(
+                bind_address,
+                imaps_upstream_address,
+                cert_path,
+                key_path,
+            )
+            .await?;
+        } else {
+            let _ = std::future::pending::<Result<()>>().await;
+        }
+        Result::<()>::Ok(())
+    });
 
     tokio::select! {
         result = api_task => result??,
         result = reporting_task => result??,
         result = smtp_task => result??,
         result = submission_task => result??,
+        result = imaps_task => result??,
     }
 
     Ok(())
@@ -1236,15 +1263,25 @@ async fn test_accepted_domain(
         .find(|item| item.id == domain_id)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "accepted domain not found"))?;
     let probe = probe_lpe_destination_server(&domain.destination_server).await?;
+    let bridge_probe = probe_lpe_recipient_bridge(&domain.destination_server, &domain.domain).await?;
+    let verified = probe.verified && bridge_probe.reachable;
     Ok(Json(AcceptedDomainTestResponse {
         domain: domain.domain,
         destination_server: domain.destination_server,
-        verified: probe.verified,
+        verified,
         checked_url: probe.checked_url,
-        detail: if probe.verified {
-            "destination server is reachable as an LPE server".to_string()
-        } else {
+        checked_bridge_url: bridge_probe.checked_url,
+        bridge_reachable: bridge_probe.reachable,
+        recipient_verified: bridge_probe.recipient_verified,
+        detail: if verified {
+            format!(
+                "destination server is reachable and the signed LPE-CT recipient-verification bridge responded ({})",
+                bridge_probe.detail
+            )
+        } else if !probe.verified {
             probe.detail
+        } else {
+            bridge_probe.detail
         },
     }))
 }
@@ -1981,6 +2018,14 @@ struct LpeDestinationProbe {
     detail: String,
 }
 
+#[derive(Debug)]
+struct LpeRecipientBridgeProbe {
+    reachable: bool,
+    recipient_verified: bool,
+    checked_url: String,
+    detail: String,
+}
+
 async fn probe_lpe_destination_server(
     destination_server: &str,
 ) -> Result<LpeDestinationProbe, ApiError> {
@@ -2047,6 +2092,114 @@ fn lpe_health_probe_url(destination_server: &str) -> Result<String, ApiError> {
         return Ok(format!("{trimmed}/health/live"));
     }
     Ok(format!("http://{trimmed}/health/live"))
+}
+
+async fn probe_lpe_recipient_bridge(
+    destination_server: &str,
+    domain: &str,
+) -> Result<LpeRecipientBridgeProbe, ApiError> {
+    let checked_url = lpe_bridge_probe_url(destination_server)?;
+    let recipient = format!("postmaster@{}", domain.trim().trim_start_matches('@'));
+    let request = RecipientVerificationRequest {
+        trace_id: format!("lpe-ct-domain-test-{}", Uuid::new_v4()),
+        direction: "smtp-inbound".to_string(),
+        sender: Some("postmaster@lpe-ct.local".to_string()),
+        recipient,
+        helo: Some("lpe-ct-domain-test".to_string()),
+        peer: None,
+        account_id: None,
+    };
+    let integration_secret = match integration_shared_secret() {
+        Ok(secret) => secret,
+        Err(error) => {
+            return Ok(LpeRecipientBridgeProbe {
+                reachable: false,
+                recipient_verified: false,
+                checked_url,
+                detail: format!("integration secret is not usable for bridge testing: {error}"),
+            });
+        }
+    };
+    let signed = SignedIntegrationHeaders::sign(
+        &integration_secret,
+        "POST",
+        "/internal/lpe-ct/recipient-verification",
+        &request,
+    )
+    .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(1_500))
+        .build()
+        .map_err(|error| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let response = match client
+        .post(&checked_url)
+        .header(INTEGRATION_KEY_HEADER, signed.integration_key)
+        .header(INTEGRATION_TIMESTAMP_HEADER, signed.timestamp)
+        .header(INTEGRATION_NONCE_HEADER, signed.nonce)
+        .header(INTEGRATION_SIGNATURE_HEADER, signed.signature)
+        .header("x-trace-id", &request.trace_id)
+        .json(&request)
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            return Ok(LpeRecipientBridgeProbe {
+                reachable: false,
+                recipient_verified: false,
+                checked_url,
+                detail: format!("signed recipient-verification bridge is unreachable: {error}"),
+            });
+        }
+    };
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Ok(LpeRecipientBridgeProbe {
+            reachable: false,
+            recipient_verified: false,
+            checked_url,
+            detail: format!("signed recipient-verification bridge returned HTTP {status}: {body}"),
+        });
+    }
+    let body = match response.json::<RecipientVerificationResponse>().await {
+        Ok(body) => body,
+        Err(error) => {
+            return Ok(LpeRecipientBridgeProbe {
+                reachable: false,
+                recipient_verified: false,
+                checked_url,
+                detail: format!("signed recipient-verification bridge returned invalid JSON: {error}"),
+            });
+        }
+    };
+    Ok(LpeRecipientBridgeProbe {
+        reachable: true,
+        recipient_verified: body.verified,
+        checked_url,
+        detail: if body.verified {
+            "test recipient is accepted".to_string()
+        } else {
+            body.detail
+                .unwrap_or_else(|| "bridge reachable; test recipient is not accepted".to_string())
+        },
+    })
+}
+
+fn lpe_bridge_probe_url(destination_server: &str) -> Result<String, ApiError> {
+    let trimmed = destination_server.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "destination server is required",
+        ));
+    }
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return Ok(format!("{trimmed}/internal/lpe-ct/recipient-verification"));
+    }
+    Ok(format!(
+        "http://{trimmed}/internal/lpe-ct/recipient-verification"
+    ))
 }
 
 fn normalize_local_data_stores(local_data_stores: &mut LocalDataStoresSettings) {

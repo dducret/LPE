@@ -16,19 +16,37 @@ The core `LPE` server must not be directly reachable from the public Internet an
 
 - inbound `SMTP` on port `25`
 - authenticated client `SMTP` submission on implicit `TLS` port `465` when configured
-- the `LPE` web client over `HTTPS` on `443` under `/mail`
+- the `LPE` web client and `LPE-CT` management publication over `HTTPS` on `443`
 - `ActiveSync` over `HTTPS` under `/activesync`
-- exposed `JMAP` endpoints over `TLS` toward `LPE`
+- exposed `JMAP` endpoints over `TLS` toward `LPE` under `/api/jmap/*`
 - secure `JMAP` WebSockets over `TLS` under the same published `JMAP` origin when the `JMAP` WebSocket endpoint is enabled
-- `IMAPS`
+- `IMAPS` on port `993`, with `LPE-CT` terminating client `TLS` and proxying the internal clear IMAP stream to the core `LPE` IMAP adapter
 - `ManageSieve` over `TLS` on `4190` when enabled
 - `SMTPS`
 
 For secure client submission, the baseline target prefers implicit TLS on port `465`, aligned with `RFC 8314`.
 
+The same public certificate chain may be reused for `HTTPS` `443`, implicit
+`TLS` submission `465`, and `IMAPS` `993` on the same public hostname. Debian
+installations document that certificate through:
+
+- `LPE_CT_PUBLIC_TLS_CERT_PATH` / `LPE_CT_PUBLIC_TLS_KEY_PATH` for `nginx` `443`
+- `LPE_CT_SUBMISSION_TLS_CERT_PATH` / `LPE_CT_SUBMISSION_TLS_KEY_PATH` for `465`
+- `LPE_CT_IMAPS_TLS_CERT_PATH` / `LPE_CT_IMAPS_TLS_KEY_PATH` for `993`
+
 When client submission is enabled, `LPE-CT` terminates the external `TLS` session, performs `AUTH`, and forwards the raw RFC 822 message plus envelope to the internal canonical `LPE` submission workflow. `LPE-CT` does not create the authoritative `Sent` copy itself, and the internal `LPE -> LPE-CT` outbound relay remains a backend-only transport.
 
 When published, the `JMAP` WebSocket endpoint remains a reverse-proxied `LPE` protocol adapter behind `LPE-CT`; it does not change the rule that `LPE-CT` is the only external exposure point.
+
+The public `JMAP` paths published by `LPE-CT` are:
+
+- `/api/jmap/session`
+- `/api/jmap/api`
+- `/api/jmap/upload/{accountId}`
+- `/api/jmap/download/{accountId}/{blobId}/{name}`
+- `/api/jmap/ws`
+
+`/api/jmap/ws` must support `HTTP` upgrade and long-lived `WSS` sessions. `EmailSubmission/set` remains a `JMAP` adapter over the canonical `LPE` submission model and must never hand mail directly to `SMTP`.
 
 ### Separation between publication and protocol logic
 
@@ -77,6 +95,15 @@ This choice is strictly limited to the internal backbone and does not change the
 The preferred Rust implementation for that internal layer is `tonic`.
 
 The current functional v1 contract remains documented separately in `docs/architecture/lpe-ct-integration.md`.
+
+The implemented v1 HTTP topology is:
+
+- Internet `SMTP` port `25` -> `LPE-CT` -> `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/inbound-deliveries` on `LPE`, default `LPE` port `8080`
+- inbound `RCPT TO` verification -> `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/recipient-verification` on `LPE`
+- client `SMTP` submission port `465` -> `LPE-CT` -> `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/submission-auth` and `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/submissions` on `LPE`
+- core outbound queue -> `LPE` worker -> `POST ${LPE_CT_API_BASE_URL}/api/v1/integration/outbound-messages` on `LPE-CT`, default `LPE-CT` API port `8380`
+
+Port `2525` is not part of this canonical `LPE <-> LPE-CT` bridge. If used, it is only a configured technical `SMTP` upstream relay target owned by `LPE-CT`.
 
 The dedicated local-store boundary for `LPE-CT`, including private `5432` use, is documented in `docs/architecture/lpe-ct-local-data-stores.md`.
 

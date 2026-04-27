@@ -25,6 +25,24 @@ pub struct InboundDeliveryResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RecipientVerificationRequest {
+    pub trace_id: String,
+    pub direction: String,
+    pub sender: Option<String>,
+    pub recipient: String,
+    pub helo: Option<String>,
+    pub peer: Option<String>,
+    pub account_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RecipientVerificationResponse {
+    pub verified: bool,
+    pub detail: Option<String>,
+    pub cache_ttl_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SmtpSubmissionAuthRequest {
     pub login: String,
     pub password: String,

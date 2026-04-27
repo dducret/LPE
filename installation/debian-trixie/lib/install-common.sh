@@ -397,6 +397,17 @@ validate_directory_path() {
   [[ "${value}" == /* ]]
 }
 
+validate_absolute_file_path() {
+  local value="$1"
+  [[ "${value}" == /* && "${value}" != */ ]]
+}
+
+validate_host_port() {
+  local value="$1"
+  [[ "${value}" =~ ^[^[:space:]:]+:[0-9]+$ ]] || return 1
+  validate_port "${value##*:}"
+}
+
 validate_exact_path() {
   local expected="$1"
   local actual="$2"

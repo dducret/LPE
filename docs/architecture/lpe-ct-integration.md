@@ -12,6 +12,18 @@ The architectural split remains strict:
 
 ### Outbound flow `LPE -> LPE-CT`
 
+The canonical outbound bridge is HTTP from the core `LPE` worker to the
+private `LPE-CT` management/API listener:
+
+- base URL: `${LPE_CT_API_BASE_URL}`
+- default `LPE-CT` port: `8380`
+- full endpoint: `POST ${LPE_CT_API_BASE_URL}/api/v1/integration/outbound-messages`
+
+This endpoint is the only documented `LPE -> LPE-CT` outbound handoff for
+canonical mail. Any `SMTP` relay port, including `2525`, is only a technical
+upstream relay target when explicitly configured in `LPE-CT`; it is not the
+canonical bridge from `LPE` to `LPE-CT`.
+
 1. a client submits a message through the canonical `LPE` model
 2. `LPE` persists the authoritative copy in `Sent`
 3. `LPE` inserts an `outbound_message_queue` row
@@ -51,6 +63,17 @@ Queue-state handling is replay-safe:
 
 ### Inbound flow `LPE-CT -> LPE`
 
+The canonical inbound and recipient-verification bridge is HTTP from `LPE-CT`
+to the private core `LPE` listener:
+
+- base URL: `${LPE_CT_CORE_DELIVERY_BASE_URL}`
+- default `LPE` port: `8080`
+- final delivery endpoint: `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/inbound-deliveries`
+- recipient verification endpoint: `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/recipient-verification`
+
+This is the final delivery path for accepted Internet mail. It must not be
+replaced by an `SMTP` listener on the core `LPE` server.
+
 1. `LPE-CT` receives the `SMTP` message from the Internet
 2. `LPE-CT` applies drain, quarantine, and edge controls
 3. if the message is accepted for final delivery, `LPE-CT` calls `POST /internal/lpe-ct/inbound-deliveries` on `LPE`
@@ -63,6 +86,12 @@ The raw `SMTP` body is carried into `LPE` to keep delivery context, but mailbox 
 Before `DATA` acceptance is finalized, `LPE-CT` may also call `POST /internal/lpe-ct/recipient-verification` on `LPE` for inbound `RCPT TO` validation. That check is authoritative for local-recipient existence and may be cached briefly by `LPE-CT`, but it must not create a second mailbox directory or rely on public callback verification.
 
 ### Authenticated client submission flow `Client -> LPE-CT -> LPE`
+
+The client-facing `SMTP` submission listener terminates on `LPE-CT`, normally
+on implicit `TLS` port `465`. `LPE-CT` then calls the core `LPE` HTTP bridge:
+
+- auth endpoint: `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/submission-auth`
+- canonical submission endpoint: `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/submissions`
 
 1. the client connects to the external `LPE-CT` submission listener, preferably implicit `TLS` on `465`
 2. `LPE-CT` authenticates the client mailbox credentials by calling `POST /internal/lpe-ct/submission-auth` on `LPE`
@@ -84,12 +113,20 @@ Bridge failure mapping is transport-aware:
 
 ### Internal authentication
 
-Both HTTP calls use the header:
+All internal HTTP calls between `LPE` and `LPE-CT` use the headers:
 
 - `x-lpe-integration-key`
 - `x-lpe-integration-timestamp`
 - `x-lpe-integration-nonce`
 - `x-lpe-integration-signature`
+
+This applies to:
+
+- `POST ${LPE_CT_API_BASE_URL}/api/v1/integration/outbound-messages`
+- `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/inbound-deliveries`
+- `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/recipient-verification`
+- `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/submission-auth`
+- `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/submissions`
 
 The authenticated client-submission bridge uses the same header for:
 

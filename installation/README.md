@@ -48,16 +48,18 @@ Path conventions:
 
 For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI, without exposing the core back office on the DMZ server, also provisions a pinned `Magika` CLI binary in `/opt/lpe-ct/bin/magika` for inbound SMTP validation, performs a Git-based sparse synchronization of `takeri` from `https://github.com/AnimeForLife191/Shuhari-CyberForge.git` before building `/opt/lpe-ct/bin/Shuhari-CyberForge-CLI` as the default antivirus provider, and now provisions the default private `LPE-CT` PostgreSQL store for greylisting, reputation, `bayespam`, throttling, and quarantine metadata.
 
-The `LPE-CT` scripts also install the SMTP ingress listener, optionally support authenticated implicit-TLS client submission when `LPE_CT_SUBMISSION_BIND_ADDRESS` plus TLS material are configured, create the full runtime spool layout in `/var/spool/lpe-ct`, and provide these validation scripts:
+The `LPE-CT` scripts also install the SMTP ingress listener on `25`, publish the HTTPS edge through `nginx` on `443`, configure authenticated implicit-TLS client submission on `465`, configure the IMAPS TLS proxy on `993`, create the full runtime spool layout in `/var/spool/lpe-ct`, and provide these validation scripts:
 
 For the first `active/passive` `DMZ` deployment step, `LPE-CT/installation/debian-trixie` also provides `check-lpe-ct-ready.sh`, `lpe-ct-ha-set-role.sh`, and `keepalived-lpe-ct.conf.example`.
 It now also provides `test-ha-lpe-ct-active-passive.sh`, `lpe-ct-spool-recover.sh`, and `test-lpe-ct-spool-recovery.sh` for traffic gating and spool return-to-service validation.
 
-The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL`, and `LPE_INTEGRATION_SHARED_SECRET` values across the two nodes. `LPE_INTEGRATION_SHARED_SECRET` is mandatory for `LPE <-> LPE-CT` bridge traffic, must stay out of public interfaces, and must be set to a strong non-trivial value of at least `32` characters. On `LPE-CT`, a missing or weak value now leaves the management UI reachable but reports the bridge as degraded until the secret is fixed. The contract is documented in `docs/architecture/lpe-ct-integration.md`.
+The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL`, and `LPE_INTEGRATION_SHARED_SECRET` values across the two nodes. `LPE_CT_CORE_DELIVERY_BASE_URL` points from `LPE-CT` to the core `LPE` HTTP listener, default port `8080`, and is used for `/internal/lpe-ct/inbound-deliveries`, `/internal/lpe-ct/recipient-verification`, `/internal/lpe-ct/submission-auth`, and `/internal/lpe-ct/submissions`. `LPE_CT_API_BASE_URL` points from the `LPE` outbound worker to the `LPE-CT` management/API listener, default port `8380`, and is used for `/api/v1/integration/outbound-messages`. `LPE_INTEGRATION_SHARED_SECRET` is mandatory for `LPE <-> LPE-CT` bridge traffic, must stay out of public interfaces, and must be set to a strong non-trivial value of at least `32` characters. On `LPE-CT`, a missing or weak value now leaves the management UI reachable but reports the bridge as degraded until the secret is fixed. The contract is documented in `docs/architecture/lpe-ct-integration.md`.
 
 - `test-local-lpe-ct.sh` from the `LPE-CT` server
 - `test-from-lpe.sh` from the LAN or core server
 - `test-from-internet.sh` from an external machine
+- `test-lpe-ct-edge-ports.sh` from the `LPE-CT` server to verify listeners on `25`, `443`, `465`, and `993`
+- `test-lpe-ct-core-bridge.sh` from the `LPE-CT` server to verify the signed `LPE-CT -> LPE` recipient-verification bridge
 - `test-antivirus-lpe-ct.sh` from the `LPE-CT` server to validate quarantine on an `EICAR` attachment
 
 The `LPE-CT` test scripts that inject mail require real mailbox addresses through environment variables. For example, run the antivirus check as:
@@ -70,6 +72,33 @@ RECIPIENT=user@example.com \
 ```
 
 For `test-antivirus-lpe-ct.sh`, the SMTP final reply can be either a quarantine `250` or a perimeter-policy `554` depending on the other edge checks that apply to the chosen sender. The validation target is the quarantined trace written under `/var/spool/lpe-ct/quarantine`, and the script now verifies that retained trace instead of assuming one specific SMTP reply text.
+
+### LPE-CT Public TLS Certificate
+
+Before starting the public `LPE-CT` edge on `443`, `465`, and `993`, install a
+certificate covering the public `LPE-CT` hostname, for example
+`mx.example.com`, under `/etc/lpe-ct/tls`:
+
+```bash
+install -d -m 0750 -o root -g lpe-ct /etc/lpe-ct/tls
+install -m 0644 fullchain.pem /etc/lpe-ct/tls/fullchain.pem
+install -m 0640 -o root -g lpe-ct privkey.pem /etc/lpe-ct/tls/privkey.pem
+```
+
+Configure the same certificate paths for the three TLS surfaces unless you
+intentionally split certificates:
+
+```bash
+LPE_CT_PUBLIC_TLS_CERT_PATH=/etc/lpe-ct/tls/fullchain.pem
+LPE_CT_PUBLIC_TLS_KEY_PATH=/etc/lpe-ct/tls/privkey.pem
+LPE_CT_SUBMISSION_TLS_CERT_PATH=/etc/lpe-ct/tls/fullchain.pem
+LPE_CT_SUBMISSION_TLS_KEY_PATH=/etc/lpe-ct/tls/privkey.pem
+LPE_CT_IMAPS_TLS_CERT_PATH=/etc/lpe-ct/tls/fullchain.pem
+LPE_CT_IMAPS_TLS_KEY_PATH=/etc/lpe-ct/tls/privkey.pem
+```
+
+`nginx` uses the public pair for `443`. The Rust `LPE-CT` service uses the
+submission pair for `465` and the IMAPS pair for `993`.
 
 ### Initial preparation on a bare Debian server
 
@@ -209,12 +238,17 @@ The `LPE-CT` installer prompts for:
 - local management port, default `8380`
 - SMTP ingress host, default `0.0.0.0`
 - SMTP ingress port, default `25`
-- HTTPS port, default `80`
+- HTTPS port, default `443`
+- public TLS certificate path, default `/etc/lpe-ct/tls/fullchain.pem`
+- public TLS private key path, default `/etc/lpe-ct/tls/privkey.pem`
+- IMAPS bind address, default `0.0.0.0:993`
+- internal `LPE` IMAP upstream address, default `127.0.0.1:1143`
+- SMTP submission bind address, default `0.0.0.0:465`
 - internal `LPE` delivery URL, default `http://127.0.0.1:8080`
 - integration shared secret, no default and at least `32` characters
 - whether high availability relay endpoints should be configured, default `no`
-- primary relay endpoint, default `smtp://10.20.0.12:2525`, only when HA relay endpoints are enabled
-- secondary relay endpoint, default `smtp://10.20.0.13:2525`, only when HA relay endpoints are enabled
+- primary technical upstream `SMTP` relay endpoint, default `smtp://10.20.0.12:2525`, only when HA relay endpoints are enabled
+- secondary technical upstream `SMTP` relay endpoint, default `smtp://10.20.0.13:2525`, only when HA relay endpoints are enabled
 - quarantine root path, default `/var/spool/lpe-ct`
 - local `PostgreSQL` host, default `127.0.0.1`
 - local `PostgreSQL` port, default `5432`
@@ -227,7 +261,7 @@ The `LPE-CT` installer prompts for:
 
 Selected runtime values are written back to `/etc/lpe/lpe.env` or `/etc/lpe-ct/lpe-ct.env`. Selected install-layout values such as `INSTALL_ROOT`, `SRC_DIR`, `BIN_DIR`, `WEB_ROOT`, and service directories are written to `/etc/lpe/install.env` or `/etc/lpe-ct/install.env` so later `update` runs stay non-interactive and reuse the installed paths.
 
-The optional authenticated submission listener is not auto-enabled by the installer. To expose it intentionally, set:
+The authenticated submission listener is configured by the installer on implicit `TLS` port `465`. It uses:
 
 - `LPE_CT_SUBMISSION_BIND_ADDRESS`, typically `0.0.0.0:465`
 - `LPE_CT_SUBMISSION_TLS_CERT_PATH`
@@ -283,6 +317,15 @@ Typical unattended `LPE-CT` environment variables:
 - `LPE_CT_SMTP_HOST`
 - `LPE_CT_SMTP_PORT`
 - `LPE_CT_NGINX_LISTEN_PORT`
+- `LPE_CT_PUBLIC_TLS_CERT_PATH`
+- `LPE_CT_PUBLIC_TLS_KEY_PATH`
+- `LPE_CT_IMAPS_BIND_ADDRESS`
+- `LPE_CT_IMAPS_UPSTREAM_ADDRESS`
+- `LPE_CT_IMAPS_TLS_CERT_PATH`
+- `LPE_CT_IMAPS_TLS_KEY_PATH`
+- `LPE_CT_SUBMISSION_BIND_ADDRESS`
+- `LPE_CT_SUBMISSION_TLS_CERT_PATH`
+- `LPE_CT_SUBMISSION_TLS_KEY_PATH`
 - `LPE_CT_CORE_DELIVERY_BASE_URL`
 - `LPE_INTEGRATION_SHARED_SECRET`
 - `LPE_CT_RELAY_PRIMARY`
@@ -323,6 +366,16 @@ LPE_CT_PUBLIC_HOSTNAME=mx.example.com \
 LPE_CT_SERVER_NAME=mx.example.com \
 LPE_CT_SMTP_HOST=0.0.0.0 \
 LPE_CT_SMTP_PORT=25 \
+LPE_CT_NGINX_LISTEN_PORT=443 \
+LPE_CT_PUBLIC_TLS_CERT_PATH=/etc/lpe-ct/tls/fullchain.pem \
+LPE_CT_PUBLIC_TLS_KEY_PATH=/etc/lpe-ct/tls/privkey.pem \
+LPE_CT_IMAPS_BIND_ADDRESS=0.0.0.0:993 \
+LPE_CT_IMAPS_UPSTREAM_ADDRESS=127.0.0.1:1143 \
+LPE_CT_IMAPS_TLS_CERT_PATH=/etc/lpe-ct/tls/fullchain.pem \
+LPE_CT_IMAPS_TLS_KEY_PATH=/etc/lpe-ct/tls/privkey.pem \
+LPE_CT_SUBMISSION_BIND_ADDRESS=0.0.0.0:465 \
+LPE_CT_SUBMISSION_TLS_CERT_PATH=/etc/lpe-ct/tls/fullchain.pem \
+LPE_CT_SUBMISSION_TLS_KEY_PATH=/etc/lpe-ct/tls/privkey.pem \
 LPE_CT_CORE_DELIVERY_BASE_URL=http://10.20.0.40:8080 \
 LPE_INTEGRATION_SHARED_SECRET='replace-with-a-secret-of-at-least-32-characters' \
 LPE_CT_RELAY_PRIMARY=smtp://10.20.0.12:2525 \
@@ -338,6 +391,13 @@ LPE_CT_ENABLE_SERVICES=yes \
 ./install-lpe-ct.sh --non-interactive
 ```
 
+The `2525` values above are optional technical upstream relay targets used by
+`LPE-CT` after it accepts an outbound handoff. They are not the canonical
+`LPE <-> LPE-CT` bridge. Final delivery into `LPE` uses
+`${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/inbound-deliveries`; outbound
+handoff from `LPE` uses
+`${LPE_CT_API_BASE_URL}/api/v1/integration/outbound-messages`.
+
 By default:
 
 - `lpe.service` listens on `127.0.0.1:8080`
@@ -348,11 +408,24 @@ By default:
 - `nginx` also publishes `/autodiscover/autodiscover.xml` and `/Autodiscover/Autodiscover.xml`
 - `nginx` also publishes `/autoconfig/mail/config-v1.1.xml` and `/.well-known/autoconfig/mail/config-v1.1.xml`
 
+On the public edge, `LPE-CT` must publish HTTPS on `443` with
+`LPE_CT_PUBLIC_TLS_CERT_PATH` and `LPE_CT_PUBLIC_TLS_KEY_PATH`. The same
+certificate files may be reused for `465` submission through
+`LPE_CT_SUBMISSION_TLS_CERT_PATH` / `LPE_CT_SUBMISSION_TLS_KEY_PATH`, and for
+`993` IMAPS through `LPE_CT_IMAPS_TLS_CERT_PATH` /
+`LPE_CT_IMAPS_TLS_KEY_PATH`. The certificate must cover the public `LPE-CT`
+hostname used by clients.
+
+`LPE-CT` must publish the `JMAP` HTTPS/WSS paths and proxy
+them to the core `LPE` service: `/api/jmap/session`, `/api/jmap/api`,
+`/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`,
+and `/api/jmap/ws`.
+
 For public client auto-configuration, the exposed front end must remain `LPE-CT` or an equivalent HTTPS publication layer. In v1:
 
 - `Thunderbird` receives an `IMAP` profile
 - `Outlook` receives an `ActiveSync` profile
-- no client `SMTP` endpoint is advertised by default unless the optional authenticated `LPE-CT` submission listener is explicitly configured and exposed
+- no client `SMTP` endpoint should be advertised unless the authenticated `LPE-CT` submission listener is configured, exposed on `465`, and covered by the public certificate
 - the internal `LPE -> LPE-CT` relay must never be advertised as a client-submission endpoint
 
 The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, and `LPE_AUTODISCOVER_ACTIVESYNC_URL` variables let you align the published HTTP/XML settings with the real public hostname. The detailed behavior is documented in `docs/architecture/client-autoconfiguration.md`.

@@ -65,7 +65,10 @@ use crate::{
     },
     health::{health, health_live, health_ready},
     http::bad_request_error,
-    integration::{accept_smtp_submission, authenticate_smtp_submission, deliver_inbound_message},
+    integration::{
+        accept_smtp_submission, authenticate_smtp_submission, deliver_inbound_message,
+        verify_lpe_ct_recipient,
+    },
     pst::pst_upload_max_bytes,
     security::hash_password,
     sieve::{
@@ -167,6 +170,10 @@ pub fn router(storage: Storage) -> Router {
         .route(
             "/internal/lpe-ct/submission-auth",
             post(authenticate_smtp_submission),
+        )
+        .route(
+            "/internal/lpe-ct/recipient-verification",
+            post(verify_lpe_ct_recipient),
         )
         .route("/internal/lpe-ct/submissions", post(accept_smtp_submission))
         .route(

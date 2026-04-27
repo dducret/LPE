@@ -1,13 +1,13 @@
 use anyhow::Result;
 use lpe_domain::{
-    SignedIntegrationHeaders, INTEGRATION_KEY_HEADER, INTEGRATION_NONCE_HEADER,
-    INTEGRATION_SIGNATURE_HEADER, INTEGRATION_TIMESTAMP_HEADER,
+    RecipientVerificationRequest, RecipientVerificationResponse, SignedIntegrationHeaders,
+    INTEGRATION_KEY_HEADER, INTEGRATION_NONCE_HEADER, INTEGRATION_SIGNATURE_HEADER,
+    INTEGRATION_TIMESTAMP_HEADER,
 };
 use lpe_magika::{
     collect_mime_attachment_parts, Detector, IngressContext, PolicyDecision, ValidationRequest,
     Validator,
 };
-use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use std::env;
 use std::{
@@ -47,24 +47,6 @@ pub(crate) enum RecipientVerificationVerdict {
 pub(crate) enum AttachmentPolicyVerdict {
     Accept,
     Restrict(String),
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct RecipientVerificationRequest {
-    trace_id: String,
-    direction: String,
-    sender: Option<String>,
-    recipient: String,
-    helo: Option<String>,
-    peer: Option<String>,
-    account_id: Option<Uuid>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct RecipientVerificationResponse {
-    verified: bool,
-    detail: Option<String>,
-    cache_ttl_seconds: Option<u64>,
 }
 
 #[derive(Debug, Clone)]

@@ -15,8 +15,9 @@ pub use crate::document::{
     AccessScope, DocumentAnnotation, DocumentChunk, DocumentKind, DocumentProjection,
 };
 pub use crate::submission::{
-    InboundDeliveryRequest, InboundDeliveryResponse, SmtpSubmissionAuthRequest,
-    SmtpSubmissionAuthResponse, SmtpSubmissionRequest, SmtpSubmissionResponse,
+    InboundDeliveryRequest, InboundDeliveryResponse, RecipientVerificationRequest,
+    RecipientVerificationResponse, SmtpSubmissionAuthRequest, SmtpSubmissionAuthResponse,
+    SmtpSubmissionRequest, SmtpSubmissionResponse,
 };
 pub use crate::transport::{
     OutboundMessageHandoffRequest, OutboundMessageHandoffResponse, TransportDeliveryStatus,

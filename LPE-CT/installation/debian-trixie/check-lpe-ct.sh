@@ -67,6 +67,7 @@ fi
 
 API_HEALTH_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/health"
 API_DASHBOARD_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/api/v1/dashboard"
+CONSOLE_URL="${LPE_CT_CONSOLE_TEST_URL:-https://127.0.0.1:${LPE_CT_NGINX_LISTEN_PORT:-443}/}"
 SMTP_HOST="${LPE_CT_SMTP_TEST_HOST:-127.0.0.1}"
 SMTP_PORT="${LPE_CT_SMTP_TEST_PORT:-${LPE_CT_SMTP_BIND_ADDRESS##*:}}"
 SMTP_TEST_SENDER="${LPE_CT_SMTP_TEST_SENDER:?Set LPE_CT_SMTP_TEST_SENDER in $ENV_FILE or the shell environment}"
@@ -113,7 +114,7 @@ dashboard_after_smtp="$(curl --silent --show-error --fail "$API_DASHBOARD_URL")"
 [[ "$dashboard_after_smtp" == *"deferred_messages"* ]] || fail "Dashboard missing queue metrics after SMTP test"
 pass "SMTP listener accepted an installation-check message"
 
-console_body="$(curl --silent --show-error --fail "http://127.0.0.1/")" || fail "Console request failed"
+console_body="$(curl --silent --show-error --fail --insecure "$CONSOLE_URL")" || fail "Console request failed: $CONSOLE_URL"
 [[ "$console_body" == *"Centre de Tri"* ]] || fail "Unexpected management index content"
 pass "Management console is served by nginx"
 

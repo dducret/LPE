@@ -35,6 +35,10 @@ An `SMTP` block is included in the XML only when a real client-submission endpoi
 
 For the current implementation, that means an authenticated `LPE-CT` submission listener is actually enabled, preferably on implicit `TLS` port `465`, with certificate and key material configured on `LPE-CT`.
 
+For `IMAP`, the public endpoint is `IMAPS` on `LPE-CT` port `993`. `LPE-CT`
+terminates the client `TLS` session with the configured public certificate and
+proxies the internal stream to the core `LPE` IMAP adapter.
+
 ### Outlook
 
 Minimal Outlook autodiscovery publishes only:
@@ -48,11 +52,25 @@ That choice stays aligned with the `LPE` architecture: the first priority for na
 
 ### JMAP
 
-`JMAP` remains the primary modern protocol, but the MVP client-autoconfiguration layer only adds a documentation pointer to the published `JMAP` session endpoint:
+`JMAP` remains the primary modern protocol. Public `JMAP` access is published by
+`LPE-CT` over the HTTPS/WSS client hostname and reverse-proxied to the core
+`LPE` adapter.
+
+The externally published paths are:
 
 - `GET /api/jmap/session`
+- `POST /api/jmap/api`
+- `POST /api/jmap/upload/{accountId}`
+- `GET /api/jmap/download/{accountId}/{blobId}/{name}`
+- `GET /api/jmap/ws`
 
-The MVP does not yet publish a dedicated `JMAP` well-known endpoint.
+The MVP client-autoconfiguration layer only embeds a documentation pointer to
+the published `JMAP` session endpoint. The MVP does not yet publish a dedicated
+`JMAP` well-known endpoint.
+
+`EmailSubmission/set` must continue to call the canonical `LPE` submission
+workflow after loading a draft. It must not hand the message directly to
+`SMTP` or to an internal relay.
 
 ### Environment variables
 
@@ -73,6 +91,7 @@ For a domain `example.test`:
 - publish `autoconfig.example.test` or `mail.example.test` toward the public `LPE-CT` front end
 - publish `autodiscover.example.test` or reuse `mail.example.test` toward the same front end
 - re-expose the `/autoconfig/...`, `/.well-known/autoconfig/...`, `/autodiscover/...`, `/Autodiscover/...`, and `/Microsoft-Server-ActiveSync` routes over HTTPS
+- re-expose `/api/jmap/session`, `/api/jmap/api`, `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`, and `/api/jmap/ws` from `LPE-CT` to the core `LPE` service
 - publish `IMAPS` on the same hostname when native `IMAP` access is exposed
 - publish the authenticated `SMTPS` submission listener only when `LPE-CT` really exposes it
 - do not reuse the internal `LPE -> LPE-CT` relay as a client-submission endpoint
