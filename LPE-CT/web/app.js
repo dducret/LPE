@@ -1712,34 +1712,55 @@ function renderSystemOverview(dashboard, copy) {
   const osArchitecture =
     system.os_architecture ||
     [system.os_name || system.operating_system, system.architecture || system.arch].filter(Boolean).join(" / ");
-  elements.systemOverviewList.innerHTML = [
-    `
-      <article class="mini-stat">
-        <div><span>${escapeHtml(copy.sessionTimeLabel)}</span></div>
-        <strong id="host-clock">${escapeHtml(formatDateTime(getHostClockDate()))}</strong>
-      </article>
-    `,
-    buildMiniStat(copy.systemHostname, system.hostname || dashboard.site?.node_name || copy.unset),
-    buildMiniStat(copy.systemUptime, formatUptime(system.uptime_seconds)),
-    buildMiniStat(copy.systemCpuUtilization, formatPercent(system.cpu_utilization_percent ?? system.cpu_percent)),
-    buildMiniStat(copy.systemProcessorType, system.processor_type || system.processor_model || copy.unset),
-    buildMiniStat(copy.systemProcessorSpeed, system.processor_speed || (system.processor_speed_mhz ? `${formatNumber(system.processor_speed_mhz)} MHz` : copy.unset)),
-    buildMiniStat(copy.systemOsArchitecture, osArchitecture || copy.unset),
-    buildMiniStat(
-      copy.systemMemory,
-      formatResourceUsage(
+  const rows = [
+    {
+      label: copy.sessionTimeLabel,
+      value: formatDateTime(getHostClockDate()),
+      valueAttributes: ' id="host-clock"',
+    },
+    { label: copy.systemHostname, value: system.hostname || dashboard.site?.node_name || copy.unset },
+    { label: copy.systemUptime, value: formatUptime(system.uptime_seconds) },
+    { label: copy.systemCpuUtilization, value: formatPercent(system.cpu_utilization_percent ?? system.cpu_percent) },
+    { label: copy.systemProcessorType, value: system.processor_type || system.processor_model || copy.unset },
+    {
+      label: copy.systemProcessorSpeed,
+      value: system.processor_speed || (system.processor_speed_mhz ? `${formatNumber(system.processor_speed_mhz)} MHz` : copy.unset),
+    },
+    { label: copy.systemOsArchitecture, value: osArchitecture || copy.unset },
+    {
+      label: copy.systemMemory,
+      value: formatResourceUsage(
         system.memory_used_percent ?? system.memory?.used_percent,
         system.memory_total_bytes ?? system.memory?.total_bytes,
       ),
-    ),
-    buildMiniStat(
-      copy.systemDisk,
-      formatResourceUsage(
+    },
+    {
+      label: copy.systemDisk,
+      value: formatResourceUsage(
         system.disk_used_percent ?? system.disk?.used_percent,
         system.disk_total_bytes ?? system.disk?.total_bytes,
       ),
-    ),
-  ].join("");
+    },
+  ];
+
+  elements.systemOverviewList.innerHTML = `
+    <article class="system-overview-table-card">
+      <table class="system-overview-table">
+        <tbody>
+          ${rows
+            .map(
+              (row) => `
+                <tr>
+                  <th scope="row">${escapeHtml(row.label)}</th>
+                  <td><strong${row.valueAttributes ?? ""}>${escapeHtml(row.value)}</strong></td>
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </article>
+  `;
 }
 
 function renderSevenDayTable(series, copy) {

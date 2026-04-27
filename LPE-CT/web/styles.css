@@ -1615,6 +1615,60 @@ select.invalid {
     var(--panel-muted);
 }
 
+.system-overview-list {
+  min-width: 0;
+}
+
+.system-overview-table-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(216, 226, 236, 0.92);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(248, 251, 254, 0.72)),
+    var(--panel-muted);
+}
+
+.system-overview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-copy);
+}
+
+.system-overview-table th,
+.system-overview-table td {
+  min-width: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(216, 226, 236, 0.82);
+  text-align: left;
+  vertical-align: top;
+}
+
+.system-overview-table tr:last-child th,
+.system-overview-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.system-overview-table th {
+  width: 42%;
+  color: var(--text-soft);
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.system-overview-table td {
+  color: var(--text);
+}
+
+.system-overview-table strong {
+  display: block;
+  font-size: var(--font-copy);
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
 .network-interface-panel {
   display: grid;
   gap: 10px;
