@@ -79,6 +79,10 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - the listener is started by `lpe-cli`
 - the bind address is configured through `LPE_IMAP_BIND_ADDRESS`
 - the default bind is `127.0.0.1:1143`
+- public `IMAPS` on `993` is terminated by `LPE-CT`; in a split `DMZ` / `LAN`
+  deployment, the core `LPE` listener must bind to a private LAN address such
+  as `192.168.1.25:1143`, and firewall policy must allow only `LPE-CT` to
+  reach that clear internal `IMAP` upstream
 
 ## Current completion priorities
 

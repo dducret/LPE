@@ -60,6 +60,7 @@ The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_D
 - `test-from-internet.sh` from an external machine
 - `test-lpe-ct-edge-ports.sh` from the `LPE-CT` server to verify listeners on `25`, `443`, `465`, and `993`
 - `test-lpe-ct-core-bridge.sh` from the `LPE-CT` server to verify the signed `LPE-CT -> LPE` recipient-verification bridge
+- `test-lpe-imap-listener.sh` from the core `LPE` server to verify the internal `IMAP` listener used by the `LPE-CT` `993` proxy
 - `check-lpe-ct-env.sh` from the `LPE-CT` server to list active variables that are present in `lpe-ct.env.example` but missing from `/etc/lpe-ct/lpe-ct.env`; `update-lpe-ct.sh` runs this check automatically in warning mode
 - `test-antivirus-lpe-ct.sh` from the `LPE-CT` server to validate quarantine on an `EICAR` attachment
 
@@ -135,6 +136,28 @@ IMAP stream to `LPE_CT_IMAPS_UPSTREAM_ADDRESS`. The default
 on the same host. In the normal split `DMZ` / `LAN` topology, set this to the
 private LAN address and port of the core `LPE` IMAP listener, for example
 `192.168.1.25:1143`, and allow that flow from `LPE-CT` to `LPE`.
+
+On the core `LPE` server, configure the matching private listener in
+`/etc/lpe/lpe.env`:
+
+```bash
+LPE_IMAP_BIND_ADDRESS=192.168.1.25:1143
+LPE_IMAP_BIND_HOST=192.168.1.25
+LPE_IMAP_BIND_PORT=1143
+```
+
+Then restart `LPE` and validate the listener locally:
+
+```bash
+systemctl restart lpe
+cd /opt/lpe/src/installation/debian-trixie
+sudo ./test-lpe-imap-listener.sh
+```
+
+From the `LPE-CT` server, `test-lpe-ct-edge-ports.sh` verifies both public
+`993` TLS and reachability to `LPE_CT_IMAPS_UPSTREAM_ADDRESS`. If that upstream
+probe fails, check that `LPE_IMAP_BIND_ADDRESS` is not loopback-only and that the
+LAN firewall allows `LPE-CT` to connect to the core `LPE` address on `1143`.
 
 The management UI URL must use `https://`. The generated `nginx` site redirects
 plain `HTTP` received on port `80` to the configured
@@ -261,6 +284,9 @@ The `LPE` installer prompts for:
 - server name, defaulting to the selected public hostname
 - local service host, default `127.0.0.1`
 - local service port, default `8080`
+- internal IMAP host for `LPE-CT`, default `127.0.0.1`; in split `DMZ` / `LAN`
+  topologies this must be the core `LPE` private LAN address
+- internal IMAP port for `LPE-CT`, default `1143`
 - HTTPS port, default `80`
 - PostgreSQL host, default `localhost`
 - PostgreSQL port, default `5432`
@@ -477,7 +503,7 @@ For public client auto-configuration, the exposed front end must remain `LPE-CT`
 
 The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, and `LPE_AUTODISCOVER_ACTIVESYNC_URL` variables let you align the published HTTP/XML settings with the real public hostname. The detailed behavior is documented in `docs/architecture/client-autoconfiguration.md`.
 
-If `LPE_BIND_ADDRESS` or `LPE_SERVER_NAME` changes in `/etc/lpe/lpe.env`, run `update-lpe.sh` again to regenerate the `nginx` configuration.
+If `LPE_BIND_ADDRESS` or `LPE_SERVER_NAME` changes in `/etc/lpe/lpe.env`, run `update-lpe.sh` again to regenerate the `nginx` configuration. If `LPE_IMAP_BIND_ADDRESS` changes, restart `lpe.service` and rerun `test-lpe-imap-listener.sh` on the core server, then rerun `test-lpe-ct-edge-ports.sh` on the `LPE-CT` server.
 
 For later resets:
 
