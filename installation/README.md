@@ -60,6 +60,7 @@ The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_D
 - `test-from-internet.sh` from an external machine
 - `test-lpe-ct-edge-ports.sh` from the `LPE-CT` server to verify listeners on `25`, `443`, `465`, and `993`
 - `test-lpe-ct-core-bridge.sh` from the `LPE-CT` server to verify the signed `LPE-CT -> LPE` recipient-verification bridge
+- `check-lpe-ct-env.sh` from the `LPE-CT` server to list active variables that are present in `lpe-ct.env.example` but missing from `/etc/lpe-ct/lpe-ct.env`; `update-lpe-ct.sh` runs this check automatically in warning mode
 - `test-antivirus-lpe-ct.sh` from the `LPE-CT` server to validate quarantine on an `EICAR` attachment
 
 The `LPE-CT` test scripts that inject mail require real mailbox addresses through environment variables. For example, run the antivirus check as:
@@ -72,6 +73,22 @@ RECIPIENT=user@example.com \
 ```
 
 For `test-antivirus-lpe-ct.sh`, the SMTP final reply can be either a quarantine `250` or a perimeter-policy `554` depending on the other edge checks that apply to the chosen sender. The validation target is the quarantined trace written under `/var/spool/lpe-ct/quarantine`, and the script now verifies that retained trace instead of assuming one specific SMTP reply text.
+
+To inspect missing `LPE-CT` environment variables after an update, run:
+
+```bash
+cd /opt/lpe/src/LPE-CT/installation/debian-trixie
+sudo ./check-lpe-ct-env.sh
+```
+
+To append missing variables with their example defaults, run:
+
+```bash
+sudo ./check-lpe-ct-env.sh --append-missing
+```
+
+Review appended values before restarting services, especially secrets, hostnames,
+database URLs, TLS paths, and bridge URLs.
 
 ### LPE-CT Public TLS Certificate
 

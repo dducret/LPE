@@ -86,6 +86,16 @@ git -C "${SRC_DIR}" fetch --all --tags
 git -C "${SRC_DIR}" checkout "${BRANCH}"
 git -C "${SRC_DIR}" pull --ff-only origin "${BRANCH}"
 
+ENV_CHECK_SCRIPT="${SRC_DIR}/LPE-CT/installation/debian-trixie/check-lpe-ct-env.sh"
+ENV_EXAMPLE_FILE="${SRC_DIR}/LPE-CT/installation/debian-trixie/lpe-ct.env.example"
+if [[ -x "${ENV_CHECK_SCRIPT}" || -f "${ENV_CHECK_SCRIPT}" ]]; then
+  if [[ "${LPE_CT_ENV_CHECK_STRICT:-false}" == "true" ]]; then
+    bash "${ENV_CHECK_SCRIPT}" --env-file "${ENV_FILE}" --example-file "${ENV_EXAMPLE_FILE}" --strict
+  else
+    bash "${ENV_CHECK_SCRIPT}" --env-file "${ENV_FILE}" --example-file "${ENV_EXAMPLE_FILE}" || true
+  fi
+fi
+
 "${RUSTUP_BIN}" default stable
 export PATH="/root/.cargo/bin:${PATH}"
 
