@@ -50,71 +50,61 @@
               <p class="eyebrow" data-i18n="brand">La Poste Electronique</p>
               <h1 data-i18n="consoleTitle">Sorting Center</h1>
             </div>
+            <button
+              id="sidebar-toggle"
+              class="icon-button sidebar-collapse-button"
+              type="button"
+              aria-expanded="false"
+              aria-controls="sidebar"
+              data-i18n-aria-label="toggleSidebar"
+              aria-label="Toggle sidebar"
+            >
+              <span class="menu-icon" aria-hidden="true"></span>
+            </button>
           </section>
 
           <div class="sidebar-group">
-            <div class="sidebar-group-header">
-              <p class="sidebar-heading" data-i18n="navConsoleHeading">Console</p>
-              <button
-                id="sidebar-toggle"
-                class="icon-button sidebar-collapse-button"
-                type="button"
-                aria-expanded="false"
-                aria-controls="sidebar"
-                data-i18n-aria-label="toggleSidebar"
-                aria-label="Toggle sidebar"
-              >
-                <span class="menu-icon" aria-hidden="true"></span>
-              </button>
-            </div>
             <nav class="page-list">
               <button class="page-button" type="button" data-nav-button data-page-target="dashboard">
                 <span class="page-icon page-icon-overview" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navDashboard">Dashboard</span>
-                  <span class="page-caption" data-i18n="navDashboardCaption">Health, queues, relay posture</span>
                 </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-page-target="system-setup">
                 <span class="page-icon page-icon-platform" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navSystemSetup">System Setup</span>
-                  <span class="page-caption" data-i18n="navSystemSetupCaption">Network, Relay, System</span>
                 </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-page-target="filtering">
                 <span class="page-icon page-icon-attachment" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navFiltering">Filtering</span>
-                  <span class="page-caption" data-i18n="navFilteringCaption">Policy, recipients, DKIM readiness</span>
                 </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-page-target="anti-spam">
                 <span class="page-icon page-icon-verification" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navAntiSpam">Anti-Spam</span>
-                  <span class="page-caption" data-i18n="navAntiSpamCaption">Scanners, retained sources, detections</span>
                 </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-page-target="quarantine">
                 <span class="page-icon page-icon-quarantine" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navQuarantine">Quarantine</span>
-                  <span class="page-caption" data-i18n="navQuarantineCaption">Retained messages and release actions</span>
                 </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-page-target="reporting">
                 <span class="page-icon page-icon-digest" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navReporting">Reporting</span>
-                  <span class="page-caption" data-i18n="navReportingCaption">History, digests, retained artifacts</span>
                 </span>
               </button>
               <button class="page-button" type="button" data-nav-button data-page-target="logs">
                 <span class="page-icon page-icon-audit" aria-hidden="true"></span>
                 <span class="page-copy">
                   <span class="page-label" data-i18n="navLogs">Logs</span>
-                  <span class="page-caption" data-i18n="navLogsCaption">Audit journal and evidence</span>
                 </span>
               </button>
             </nav>
