@@ -231,7 +231,15 @@
           </section>
         </section>
 
-        <section id="anti-spam-section" class="page-view section-stack" data-page-view="anti-spam">
+        <section class="panel section-panel page-tabs-panel page-view" data-page-view="anti-spam">
+          <div class="tab-strip" role="tablist" aria-label="Anti-spam tabs">
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="anti-spam" data-tab-id="settings" data-i18n="antiSpamTabSettings">Settings</button>
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="anti-spam" data-tab-id="domain-policies" data-i18n="antiSpamTabDomainPolicies">Domain Policies</button>
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="anti-spam" data-tab-id="user-policies" data-i18n="antiSpamTabUserPolicies">User Policies</button>
+          </div>
+        </section>
+
+        <section id="anti-spam-section" class="page-view section-stack" data-page-view="anti-spam" data-page-tab-panel="anti-spam:settings">
           <section class="page-header panel">
             <p class="section-kicker" data-i18n="navAntiSpam">Anti-Spam</p>
             <h2 data-i18n="antiSpamTitle">Anti-spam and scanner posture</h2>
@@ -284,9 +292,58 @@
           </section>
         </section>
 
+        <section class="panel section-panel page-view" data-page-view="anti-spam" data-page-tab-panel="anti-spam:domain-policies">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker" data-i18n="navAntiSpam">Anti-Spam</p>
+              <h3 data-i18n="antiSpamTabDomainPolicies">Domain Policies</h3>
+              <p data-i18n="antiSpamDomainPoliciesSummary">Domain-scoped anti-spam policy controls for the sorting center.</p>
+            </div>
+          </div>
+          <article class="empty-state compact-empty-state">
+            <strong data-i18n="antiSpamTabDomainPolicies">Domain Policies</strong>
+            <p data-i18n="antiSpamDomainPoliciesUnavailable">Domain anti-spam policies are not exposed by the current management API contract.</p>
+          </article>
+        </section>
+
+        <section class="panel section-panel page-view" data-page-view="anti-spam" data-page-tab-panel="anti-spam:user-policies">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker" data-i18n="navAntiSpam">Anti-Spam</p>
+              <h3 data-i18n="antiSpamTabUserPolicies">User Policies</h3>
+              <p data-i18n="antiSpamUserPoliciesSummary">User-scoped anti-spam overrides for perimeter filtering decisions.</p>
+            </div>
+          </div>
+          <article class="empty-state compact-empty-state">
+            <strong data-i18n="antiSpamTabUserPolicies">User Policies</strong>
+            <p data-i18n="antiSpamUserPoliciesUnavailable">User anti-spam policies are not exposed by the current management API contract.</p>
+          </article>
+        </section>
+
         <p id="feedback" class="feedback hidden" role="status" aria-live="polite"></p>
 
-        <section id="quarantine-section" class="panel section-panel page-view" data-page-view="quarantine">
+        <section class="panel section-panel page-tabs-panel page-view" data-page-view="quarantine">
+          <div class="tab-strip" role="tablist" aria-label="Quarantine tabs">
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="quarantine" data-tab-id="settings" data-i18n="quarantineTabSettings">Settings</button>
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="quarantine" data-tab-id="search" data-i18n="quarantineTabSearch">Search</button>
+          </div>
+        </section>
+
+        <section class="panel section-panel page-view" data-page-view="quarantine" data-page-tab-panel="quarantine:settings">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker" data-i18n="navQuarantine">Quarantine</p>
+              <h3 data-i18n="quarantineTabSettings">Settings</h3>
+              <p data-i18n="quarantineSettingsSummary">Retention and quarantine handling controls for perimeter-held messages.</p>
+            </div>
+          </div>
+          <article class="empty-state compact-empty-state">
+            <strong data-i18n="quarantineTabSettings">Settings</strong>
+            <p data-i18n="quarantineSettingsUnavailable">Quarantine settings are not exposed by the current management API contract.</p>
+          </article>
+        </section>
+
+        <section id="quarantine-section" class="panel section-panel page-view" data-page-view="quarantine" data-page-tab-panel="quarantine:search">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navQuarantine">Quarantine</p>
@@ -315,7 +372,44 @@
           <div id="quarantine-list" class="management-list-stack"></div>
         </section>
 
-        <section id="history-section" class="panel section-panel page-view" data-page-view="reporting">
+        <section class="panel section-panel page-tabs-panel page-view" data-page-view="reporting">
+          <div class="tab-strip" role="tablist" aria-label="Reporting tabs">
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="reporting" data-tab-id="system-information" data-i18n="reportingTabSystemInformation">System Information</button>
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="reporting" data-tab-id="admin-statistics" data-i18n="reportingTabAdminStatistics">Admin Statistics</button>
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="reporting" data-tab-id="history" data-i18n="reportingTabHistory">History</button>
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="reporting" data-tab-id="reports" data-i18n="reportingTabReports">Reports</button>
+          </div>
+        </section>
+
+        <section class="panel section-panel page-view" data-page-view="reporting" data-page-tab-panel="reporting:system-information">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker" data-i18n="navReporting">Reporting</p>
+              <h3 data-i18n="reportingTabSystemInformation">System Information</h3>
+              <p data-i18n="reportingSystemInformationSummary">System reporting snapshots retained by the sorting center.</p>
+            </div>
+          </div>
+          <article class="empty-state compact-empty-state">
+            <strong data-i18n="reportingTabSystemInformation">System Information</strong>
+            <p data-i18n="reportingSystemInformationUnavailable">Dedicated system information reports are not exposed by the current management API contract.</p>
+          </article>
+        </section>
+
+        <section class="panel section-panel page-view" data-page-view="reporting" data-page-tab-panel="reporting:admin-statistics">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker" data-i18n="navReporting">Reporting</p>
+              <h3 data-i18n="reportingTabAdminStatistics">Admin Statistics</h3>
+              <p data-i18n="reportingAdminStatisticsSummary">Administrative activity statistics retained by the management plane.</p>
+            </div>
+          </div>
+          <article class="empty-state compact-empty-state">
+            <strong data-i18n="reportingTabAdminStatistics">Admin Statistics</strong>
+            <p data-i18n="reportingAdminStatisticsUnavailable">Administrative statistics reports are not exposed by the current management API contract.</p>
+          </article>
+        </section>
+
+        <section id="history-section" class="panel section-panel page-view" data-page-view="reporting" data-page-tab-panel="reporting:history">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navHistory">Mail history</p>
@@ -356,7 +450,44 @@
           <div id="history-list" class="management-list-stack"></div>
         </section>
 
-        <section id="address-policy-section" class="panel section-panel page-view" data-page-view="filtering">
+        <section class="panel section-panel page-tabs-panel page-view" data-page-view="filtering">
+          <div class="tab-strip" role="tablist" aria-label="Filtering tabs">
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="filtering" data-tab-id="viruses" data-i18n="filteringTabViruses">Viruses</button>
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="filtering" data-tab-id="spam" data-i18n="filteringTabSpam">Spam</button>
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="filtering" data-tab-id="attachments" data-i18n="filteringTabAttachments">Attachments</button>
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="filtering" data-tab-id="content-filtering" data-i18n="filteringTabContentFiltering">Content Filtering</button>
+          </div>
+        </section>
+
+        <section class="panel section-panel page-view" data-page-view="filtering" data-page-tab-panel="filtering:viruses">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker" data-i18n="navFiltering">Filtering</p>
+              <h3 data-i18n="filteringTabViruses">Viruses</h3>
+              <p data-i18n="filteringVirusesSummary">Virus filtering controls for SMTP ingress scanning.</p>
+            </div>
+          </div>
+          <article class="empty-state compact-empty-state">
+            <strong data-i18n="filteringTabViruses">Viruses</strong>
+            <p data-i18n="filteringVirusesUnavailable">Virus filtering settings are not exposed by the current management API contract.</p>
+          </article>
+        </section>
+
+        <section class="panel section-panel page-view" data-page-view="filtering" data-page-tab-panel="filtering:spam">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker" data-i18n="navFiltering">Filtering</p>
+              <h3 data-i18n="filteringTabSpam">Spam</h3>
+              <p data-i18n="filteringSpamSummary">Spam filtering controls for reputation and content decisions.</p>
+            </div>
+          </div>
+          <article class="empty-state compact-empty-state">
+            <strong data-i18n="filteringTabSpam">Spam</strong>
+            <p data-i18n="filteringSpamUnavailable">Spam filtering settings are not exposed by the current management API contract.</p>
+          </article>
+        </section>
+
+        <section id="address-policy-section" class="panel section-panel page-view" data-page-view="filtering" data-page-tab-panel="filtering:content-filtering">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navAddressRules">Allow / block lists</p>
@@ -370,7 +501,7 @@
           <div id="address-rules-list" class="management-list-stack"></div>
         </section>
 
-        <section id="attachment-policy-section" class="panel section-panel page-view" data-page-view="filtering">
+        <section id="attachment-policy-section" class="panel section-panel page-view" data-page-view="filtering" data-page-tab-panel="filtering:attachments">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navAttachmentRules">Attachment rules</p>
@@ -384,7 +515,7 @@
           <div id="attachment-rules-list" class="management-list-stack"></div>
         </section>
 
-        <section id="verification-section" class="panel section-panel page-view" data-page-view="filtering">
+        <section id="verification-section" class="panel section-panel page-view" data-page-view="filtering" data-page-tab-panel="filtering:content-filtering">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navVerification">Recipient verification</p>
@@ -398,7 +529,7 @@
           <div id="recipient-verification-status" class="management-list-stack"></div>
         </section>
 
-        <section id="dkim-section" class="panel section-panel page-view" data-page-view="filtering">
+        <section id="dkim-section" class="panel section-panel page-view" data-page-view="filtering" data-page-tab-panel="filtering:content-filtering">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navDkim">DKIM domains</p>
@@ -415,7 +546,7 @@
           <div id="dkim-domain-list" class="management-list-stack"></div>
         </section>
 
-        <section id="digest-section" class="panel section-panel page-view" data-page-view="reporting">
+        <section id="digest-section" class="panel section-panel page-view" data-page-view="reporting" data-page-tab-panel="reporting:reports">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navDigest">Digest reports</p>
@@ -449,7 +580,30 @@
           <div id="platform-list" class="management-list-stack"></div>
         </section>
 
-        <section id="audit-section" class="panel section-panel page-view" data-page-view="logs">
+        <section class="panel section-panel page-tabs-panel page-view" data-page-view="logs">
+          <div class="tab-strip" role="tablist" aria-label="Logs tabs">
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="logs" data-tab-id="mail" data-i18n="logsTabMail">Mail</button>
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="logs" data-tab-id="interface" data-i18n="logsTabInterface">Interface</button>
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="logs" data-tab-id="messages" data-i18n="logsTabMessages">Messages</button>
+            <button class="tab-button" type="button" role="tab" data-action="page-tab" data-tab-page="logs" data-tab-id="email-alerts" data-i18n="logsTabEmailAlerts">Email Alerts</button>
+          </div>
+        </section>
+
+        <section class="panel section-panel page-view" data-page-view="logs" data-page-tab-panel="logs:mail">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker" data-i18n="navLogs">Logs</p>
+              <h3 data-i18n="logsTabMail">Mail</h3>
+              <p data-i18n="logsMailSummary">Mail-flow log streams retained by the sorting center.</p>
+            </div>
+          </div>
+          <article class="empty-state compact-empty-state">
+            <strong data-i18n="logsTabMail">Mail</strong>
+            <p data-i18n="logsMailUnavailable">Mail log streams are not exposed by the current management API contract.</p>
+          </article>
+        </section>
+
+        <section id="audit-section" class="panel section-panel page-view" data-page-view="logs" data-page-tab-panel="logs:interface">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navAudit">Audit journal</p>
@@ -458,6 +612,34 @@
             </div>
           </div>
           <div id="audit-log" class="audit-log"></div>
+        </section>
+
+        <section class="panel section-panel page-view" data-page-view="logs" data-page-tab-panel="logs:messages">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker" data-i18n="navLogs">Logs</p>
+              <h3 data-i18n="logsTabMessages">Messages</h3>
+              <p data-i18n="logsMessagesSummary">System message log streams for the sorting-center host.</p>
+            </div>
+          </div>
+          <article class="empty-state compact-empty-state">
+            <strong data-i18n="logsTabMessages">Messages</strong>
+            <p data-i18n="logsMessagesUnavailable">System message logs are not exposed by the current management API contract.</p>
+          </article>
+        </section>
+
+        <section class="panel section-panel page-view" data-page-view="logs" data-page-tab-panel="logs:email-alerts">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker" data-i18n="navLogs">Logs</p>
+              <h3 data-i18n="logsTabEmailAlerts">Email Alerts</h3>
+              <p data-i18n="logsEmailAlertsSummary">Email alert delivery history for operator notifications.</p>
+            </div>
+          </div>
+          <article class="empty-state compact-empty-state">
+            <strong data-i18n="logsTabEmailAlerts">Email Alerts</strong>
+            <p data-i18n="logsEmailAlertsUnavailable">Email alert logs are not exposed by the current management API contract.</p>
+          </article>
         </section>
       </section>
     </main>

@@ -21,6 +21,8 @@ const elements = {
   localePickers: Array.from(document.querySelectorAll("[data-locale-picker]")),
   navButtons: Array.from(document.querySelectorAll("[data-nav-button]")),
   pageViews: Array.from(document.querySelectorAll("[data-page-view]")),
+  pageTabButtons: Array.from(document.querySelectorAll("[data-action='page-tab']")),
+  pageTabPanels: Array.from(document.querySelectorAll("[data-page-tab-panel]")),
   refresh: document.getElementById("refresh"),
   refreshToolbar: document.getElementById("refresh-toolbar"),
   runDigests: document.getElementById("run-digests"),
@@ -102,6 +104,13 @@ const state = {
   digestReports: [],
   policyStatus: null,
   selectedTrace: null,
+  pageTabs: {
+    filtering: "content-filtering",
+    "anti-spam": "settings",
+    quarantine: "search",
+    reporting: "history",
+    logs: "interface",
+  },
   systemSetup: {
     primaryTab: "network",
     nestedTabs: {
@@ -560,12 +569,30 @@ function pageFromHash() {
   return pageIdFromHash(window.location?.hash);
 }
 
+function syncPageTabs(activePage = state.activePage) {
+  elements.pageTabPanels.forEach((panel) => {
+    const [pageId, tabId] = String(panel.dataset.pageTabPanel ?? "").split(":");
+    const isActive = pageId === activePage && state.pageTabs[pageId] === tabId;
+    panel.classList.toggle("hidden", !isActive);
+    panel.classList.toggle("page-view-active", isActive);
+    panel.setAttribute("aria-hidden", String(!isActive));
+  });
+  elements.pageTabButtons.forEach((button) => {
+    const pageId = button.dataset.tabPage;
+    const tabId = button.dataset.tabId;
+    const isActive = pageId === activePage && state.pageTabs[pageId] === tabId;
+    button.classList.toggle("tab-button-active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+}
+
 function setActivePage(page = state.activePage, options = {}) {
   const targetPage = activatePageView(page, {
     pageViews: elements.pageViews,
     navButtons: elements.navButtons,
   });
   state.activePage = targetPage;
+  syncPageTabs(targetPage);
   if (options.updateHash) {
     try {
       window.history?.replaceState(null, "", `#${targetPage}`);
@@ -2896,6 +2923,15 @@ function runAction(promiseFactory) {
   void promiseFactory().catch((error) => showFeedback(error instanceof Error ? error.message : getCopy().unknownError, "error"));
 }
 
+function setPageTab(actionTarget) {
+  const { tabPage, tabId } = actionTarget.dataset;
+  if (!tabPage || !tabId || !Object.prototype.hasOwnProperty.call(state.pageTabs, tabPage)) {
+    return;
+  }
+  state.pageTabs[tabPage] = tabId;
+  syncPageTabs(state.activePage);
+}
+
 function setSystemSetupTab(actionTarget) {
   const { tabId, tabLevel } = actionTarget.dataset;
   const primaryTabs = new Set(["network", "time", "mailRelay", "mailAuthentication", "systemUpdates", "shutdownRestart"]);
@@ -2951,6 +2987,7 @@ function getActionHandlers(actionTarget) {
     "digest-override-delete": () => runAction(() => deleteDigestOverride(Number(index))),
     "digest-open": () => runAction(() => openDigestReport(reportId, actionTarget)),
     "platform-edit": () => openPlatformDrawer(target, actionTarget),
+    "page-tab": () => setPageTab(actionTarget),
     "system-setup-tab": () => setSystemSetupTab(actionTarget),
     "refresh-quarantine": () => runAction(() => loadOps()),
     "refresh-history": () => runAction(() => loadOps()),
