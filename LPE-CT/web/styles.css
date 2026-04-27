@@ -753,12 +753,19 @@ select:disabled {
 .context-list dd,
 .hero-action-card strong,
 .kpi-card strong,
-.mini-stat strong,
 .ranked-row strong,
 .traffic-row strong {
   font-size: var(--font-title);
   font-weight: 700;
   line-height: 1.35;
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+.mini-stat strong {
+  font-size: var(--font-copy);
+  font-weight: 700;
+  line-height: 1.4;
   letter-spacing: 0;
   color: var(--text);
 }
