@@ -85,6 +85,12 @@ The raw `SMTP` body is carried into `LPE` to keep delivery context, but mailbox 
 
 Before `DATA` acceptance is finalized, `LPE-CT` may also call `POST /internal/lpe-ct/recipient-verification` on `LPE` for inbound `RCPT TO` validation. That check is authoritative for local-recipient existence and may be cached briefly by `LPE-CT`, but it must not create a second mailbox directory or rely on public callback verification.
 
+The `LPE-CT` management test under `System Setup -> Mail relay -> Domains`
+validates this same canonical bridge through `${LPE_CT_CORE_DELIVERY_BASE_URL}`.
+It must not derive the `LPE` API URL from the accepted-domain destination field,
+because that field is a domain policy attribute and not the authoritative
+internal `LPE` delivery API base URL.
+
 ### Authenticated client submission flow `Client -> LPE-CT -> LPE`
 
 The client-facing `SMTP` submission listener terminates on `LPE-CT`, normally

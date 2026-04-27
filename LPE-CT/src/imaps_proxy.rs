@@ -46,7 +46,9 @@ async fn handle_imaps_session(
     if let Some(role) = crate::ha_non_active_role_for_traffic()? {
         let mut stream = stream;
         stream
-            .write_all(format!("* BYE node role {role} is not accepting IMAPS traffic\r\n").as_bytes())
+            .write_all(
+                format!("* BYE node role {role} is not accepting IMAPS traffic\r\n").as_bytes(),
+            )
             .await?;
         return Ok(());
     }
@@ -70,7 +72,8 @@ fn load_tls_acceptor(cert_path: &PathBuf, key_path: &PathBuf) -> Result<TlsAccep
 
 fn load_certificates(path: &PathBuf) -> Result<Vec<CertificateDer<'static>>> {
     let mut reader = BufReader::new(
-        File::open(path).with_context(|| format!("unable to open certificate {}", path.display()))?,
+        File::open(path)
+            .with_context(|| format!("unable to open certificate {}", path.display()))?,
     );
     rustls_pemfile::certs(&mut reader)
         .collect::<std::result::Result<Vec<_>, _>>()
@@ -93,7 +96,12 @@ fn load_private_key(path: &PathBuf) -> Result<PrivateKeyDer<'static>> {
     );
     let mut keys = rustls_pemfile::rsa_private_keys(&mut reader)
         .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|error| anyhow!("unable to parse rsa private key {}: {error}", path.display()))?;
+        .map_err(|error| {
+            anyhow!(
+                "unable to parse rsa private key {}: {error}",
+                path.display()
+            )
+        })?;
     let Some(key) = keys.pop() else {
         bail!("no private key found in {}", path.display());
     };

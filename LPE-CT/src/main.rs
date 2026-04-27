@@ -594,13 +594,8 @@ async fn main() -> Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("LPE_CT_IMAPS_TLS_CERT_PATH or LPE_CT_PUBLIC_TLS_CERT_PATH must be set when LPE_CT_IMAPS_BIND_ADDRESS is configured"))?;
             let key_path = imaps_tls_key_path
                 .ok_or_else(|| anyhow::anyhow!("LPE_CT_IMAPS_TLS_KEY_PATH or LPE_CT_PUBLIC_TLS_KEY_PATH must be set when LPE_CT_IMAPS_BIND_ADDRESS is configured"))?;
-            imaps_proxy::run_imaps_proxy(
-                bind_address,
-                imaps_upstream_address,
-                cert_path,
-                key_path,
-            )
-            .await?;
+            imaps_proxy::run_imaps_proxy(bind_address, imaps_upstream_address, cert_path, key_path)
+                .await?;
         } else {
             let _ = std::future::pending::<Result<()>>().await;
         }
@@ -1257,13 +1252,14 @@ async fn test_accepted_domain(
 ) -> Result<Json<AcceptedDomainTestResponse>, ApiError> {
     let _admin = require_management_admin(&state, &headers)?;
     let snapshot = read_state(&state)?;
+    let core_delivery_base_url = snapshot.relay.core_delivery_base_url.clone();
     let domain = snapshot
         .accepted_domains
         .into_iter()
         .find(|item| item.id == domain_id)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "accepted domain not found"))?;
-    let probe = probe_lpe_destination_server(&domain.destination_server).await?;
-    let bridge_probe = probe_lpe_recipient_bridge(&domain.destination_server, &domain.domain).await?;
+    let probe = probe_lpe_core_delivery(&core_delivery_base_url).await?;
+    let bridge_probe = probe_lpe_recipient_bridge(&core_delivery_base_url, &domain.domain).await?;
     let verified = probe.verified && bridge_probe.reachable;
     Ok(Json(AcceptedDomainTestResponse {
         domain: domain.domain,
@@ -1275,7 +1271,7 @@ async fn test_accepted_domain(
         recipient_verified: bridge_probe.recipient_verified,
         detail: if verified {
             format!(
-                "destination server is reachable and the signed LPE-CT recipient-verification bridge responded ({})",
+                "core LPE delivery API is reachable and the signed LPE-CT recipient-verification bridge responded ({})",
                 bridge_probe.detail
             )
         } else if !probe.verified {
@@ -2012,7 +2008,7 @@ fn normalize_verification_type(value: &str) -> Result<String, ApiError> {
 }
 
 #[derive(Debug)]
-struct LpeDestinationProbe {
+struct LpeCoreDeliveryProbe {
     verified: bool,
     checked_url: String,
     detail: String,
@@ -2026,10 +2022,10 @@ struct LpeRecipientBridgeProbe {
     detail: String,
 }
 
-async fn probe_lpe_destination_server(
-    destination_server: &str,
-) -> Result<LpeDestinationProbe, ApiError> {
-    let checked_url = lpe_health_probe_url(destination_server)?;
+async fn probe_lpe_core_delivery(
+    core_delivery_base_url: &str,
+) -> Result<LpeCoreDeliveryProbe, ApiError> {
+    let checked_url = lpe_health_probe_url(core_delivery_base_url)?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(1_500))
         .build()
@@ -2038,41 +2034,41 @@ async fn probe_lpe_destination_server(
     let response = match client.get(&checked_url).send().await {
         Ok(response) => response,
         Err(error) => {
-            return Ok(LpeDestinationProbe {
+            return Ok(LpeCoreDeliveryProbe {
                 verified: false,
                 checked_url,
-                detail: format!("destination server is unreachable as an LPE server: {error}"),
+                detail: format!("core LPE delivery API is unreachable: {error}"),
             });
         }
     };
     let status = response.status();
     if !status.is_success() {
-        return Ok(LpeDestinationProbe {
+        return Ok(LpeCoreDeliveryProbe {
             verified: false,
             checked_url,
-            detail: format!("destination server health check returned HTTP {status}"),
+            detail: format!("core LPE delivery API health check returned HTTP {status}"),
         });
     }
     let health = match response.json::<LpeHealthProbeResponse>().await {
         Ok(health) => health,
         Err(error) => {
-            return Ok(LpeDestinationProbe {
+            return Ok(LpeCoreDeliveryProbe {
                 verified: false,
                 checked_url,
-                detail: format!("destination server did not return LPE health JSON: {error}"),
+                detail: format!("core LPE delivery API did not return LPE health JSON: {error}"),
             });
         }
     };
     let is_lpe = health.service.as_deref() == Some("lpe-admin-api")
         && health.status.as_deref() == Some("ok");
-    Ok(LpeDestinationProbe {
+    Ok(LpeCoreDeliveryProbe {
         verified: is_lpe,
         checked_url,
         detail: if is_lpe {
-            "destination server is reachable as an LPE server".to_string()
+            "core LPE delivery API is reachable".to_string()
         } else {
             format!(
-                "destination server health response is not an LPE server signature (service={}, status={})",
+                "core LPE delivery API health response is not an LPE server signature (service={}, status={})",
                 health.service.unwrap_or_else(|| "missing".to_string()),
                 health.status.unwrap_or_else(|| "missing".to_string())
             )
@@ -2080,12 +2076,12 @@ async fn probe_lpe_destination_server(
     })
 }
 
-fn lpe_health_probe_url(destination_server: &str) -> Result<String, ApiError> {
-    let trimmed = destination_server.trim().trim_end_matches('/');
+fn lpe_health_probe_url(core_delivery_base_url: &str) -> Result<String, ApiError> {
+    let trimmed = core_delivery_base_url.trim().trim_end_matches('/');
     if trimmed.is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "destination server is required",
+            "core delivery base URL is required",
         ));
     }
     if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
@@ -2095,10 +2091,10 @@ fn lpe_health_probe_url(destination_server: &str) -> Result<String, ApiError> {
 }
 
 async fn probe_lpe_recipient_bridge(
-    destination_server: &str,
+    core_delivery_base_url: &str,
     domain: &str,
 ) -> Result<LpeRecipientBridgeProbe, ApiError> {
-    let checked_url = lpe_bridge_probe_url(destination_server)?;
+    let checked_url = lpe_bridge_probe_url(core_delivery_base_url)?;
     let recipient = format!("postmaster@{}", domain.trim().trim_start_matches('@'));
     let request = RecipientVerificationRequest {
         trace_id: format!("lpe-ct-domain-test-{}", Uuid::new_v4()),
@@ -2169,7 +2165,9 @@ async fn probe_lpe_recipient_bridge(
                 reachable: false,
                 recipient_verified: false,
                 checked_url,
-                detail: format!("signed recipient-verification bridge returned invalid JSON: {error}"),
+                detail: format!(
+                    "signed recipient-verification bridge returned invalid JSON: {error}"
+                ),
             });
         }
     };
@@ -2186,12 +2184,12 @@ async fn probe_lpe_recipient_bridge(
     })
 }
 
-fn lpe_bridge_probe_url(destination_server: &str) -> Result<String, ApiError> {
-    let trimmed = destination_server.trim().trim_end_matches('/');
+fn lpe_bridge_probe_url(core_delivery_base_url: &str) -> Result<String, ApiError> {
+    let trimmed = core_delivery_base_url.trim().trim_end_matches('/');
     if trimmed.is_empty() {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
-            "destination server is required",
+            "core delivery base URL is required",
         ));
     }
     if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
@@ -3265,8 +3263,9 @@ mod tests {
     use super::{
         address_binds_publicly, apply_env_overrides, default_state, env_test_lock,
         ha_activation_check, ha_non_active_role_for_traffic, integration_shared_secret,
-        normalize_local_data_stores, persist_state, require_integration_request,
-        submission_listener_is_configured, DashboardResponse, OUTBOUND_HANDOFF_PATH,
+        lpe_bridge_probe_url, lpe_health_probe_url, normalize_local_data_stores, persist_state,
+        require_integration_request, submission_listener_is_configured, DashboardResponse,
+        OUTBOUND_HANDOFF_PATH,
     };
     use axum::http::HeaderMap;
     use lpe_domain::{
@@ -3496,6 +3495,22 @@ mod tests {
 
         std::env::remove_var("LPE_CT_SUBMISSION_TLS_CERT_PATH");
         std::env::remove_var("LPE_CT_SUBMISSION_TLS_KEY_PATH");
+    }
+
+    #[test]
+    fn lpe_core_probe_urls_use_configured_delivery_base_url() {
+        assert_eq!(
+            lpe_health_probe_url("http://192.168.1.25:8080").unwrap(),
+            "http://192.168.1.25:8080/health/live"
+        );
+        assert_eq!(
+            lpe_bridge_probe_url("http://192.168.1.25:8080").unwrap(),
+            "http://192.168.1.25:8080/internal/lpe-ct/recipient-verification"
+        );
+        assert_eq!(
+            lpe_health_probe_url("https://lpe-core.example.test:8443/").unwrap(),
+            "https://lpe-core.example.test:8443/health/live"
+        );
     }
 
     #[test]
