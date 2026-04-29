@@ -225,13 +225,6 @@ export function App() {
   const workspaceTitle = workspace.section === "mail"
     ? copy.folders[workspace.folder]
     : copy.altViews[workspace.section];
-  const workspaceBody = workspace.section === "mail"
-    ? copy.heroBody
-    : workspace.section === "calendar"
-      ? copy.calendarBody
-      : workspace.section === "contacts"
-        ? copy.contactsBody
-        : "Delegation, booking, and filtering stay synchronized with the canonical server state.";
 
   return (
     <main className="app-shell">
@@ -303,11 +296,10 @@ export function App() {
             </div>
           </div>
 
-          <section className="workspace-hero-card">
+          <section className="workspace-heading-panel">
             <div>
               <p className="workspace-hero-eyebrow">{copy.sections[workspace.section]}</p>
               <h1>{workspaceTitle}</h1>
-              <p>{workspaceBody}</p>
             </div>
             <div className="workspace-hero-meta">
               <span className="workspace-stat-pill">{`${visibleCount} visible`}</span>

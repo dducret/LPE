@@ -1709,3 +1709,568 @@ textarea {
   margin: 0.2rem 0 0;
   color: var(--text-muted, rgba(15, 23, 42, 0.68));
 }
+
+/* Outlook-style client layer, aligned with the administration console surfaces. */
+:root {
+  --outlook-blue: #2564cf;
+  --outlook-blue-strong: #174ea6;
+  --admin-bg: #eef3f8;
+  --admin-top: #f8fafc;
+  --admin-bottom: #e2ebf3;
+  --admin-panel: rgba(255, 255, 255, 0.74);
+  --admin-panel-strong: rgba(255, 255, 255, 0.92);
+  --admin-panel-soft: rgba(248, 251, 254, 0.84);
+  --admin-line: rgba(204, 216, 229, 0.92);
+  --admin-line-strong: rgba(181, 197, 213, 0.96);
+  --admin-dark: #0f1822;
+  --admin-dark-soft: #152232;
+  --admin-shadow: 0 12px 28px rgba(17, 27, 39, 0.07);
+  --admin-shadow-strong: 0 26px 60px rgba(12, 20, 31, 0.18);
+  --admin-radius-xs: 8px;
+  --admin-radius-sm: 10px;
+  --admin-radius-md: 12px;
+  --admin-radius-lg: 16px;
+  --accent: var(--outlook-blue);
+  --accent-strong: var(--outlook-blue-strong);
+  --accent-soft: rgba(37, 100, 207, 0.12);
+  --line: var(--admin-line);
+  --surface: var(--admin-panel);
+  --surface-strong: var(--admin-panel-strong);
+  --surface-soft: var(--admin-panel-soft);
+  --radius-sm: var(--admin-radius-sm);
+  --radius-md: var(--admin-radius-md);
+  --radius-lg: var(--admin-radius-lg);
+  --shadow-panel: var(--admin-shadow);
+}
+
+body {
+  background:
+    linear-gradient(135deg, rgba(37, 100, 207, 0.06), transparent 34%),
+    linear-gradient(180deg, var(--admin-top) 0%, var(--admin-bg) 58%, var(--admin-bottom) 100%);
+}
+
+.app-shell {
+  background: transparent;
+}
+
+.app-header {
+  min-height: 58px;
+  grid-template-columns: minmax(220px, 280px) minmax(280px, 1fr) auto;
+  gap: 14px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--admin-line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 251, 254, 0.78)),
+    var(--admin-panel-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 10px 24px rgba(17, 27, 39, 0.045);
+}
+
+.header-app-icon,
+.header-action {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--admin-radius-xs);
+  border-color: var(--admin-line);
+  background: var(--admin-panel-strong);
+  color: var(--outlook-blue-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+.header-product strong {
+  font-size: 0.96rem;
+  line-height: 1.3;
+}
+
+.header-product span,
+.header-account {
+  font-size: 0.8rem;
+}
+
+.search-shell {
+  min-height: 40px;
+  padding: 0 13px;
+  border-radius: var(--admin-radius-sm);
+  border-color: rgba(37, 100, 207, 0.18);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.86),
+    0 8px 18px rgba(17, 27, 39, 0.045);
+}
+
+.search-shell.is-header:focus-within {
+  border-color: rgba(37, 100, 207, 0.44);
+  box-shadow:
+    0 0 0 4px rgba(37, 100, 207, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 12px 26px rgba(17, 27, 39, 0.08);
+}
+
+.account-menu-trigger {
+  min-height: 38px;
+  border-radius: var(--admin-radius-sm);
+  border-color: var(--admin-line);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.86),
+    0 8px 18px rgba(17, 27, 39, 0.045);
+}
+
+.account-menu-popover {
+  border-radius: var(--admin-radius-md);
+  border-color: var(--admin-line);
+  background: var(--admin-panel-strong);
+  box-shadow: var(--admin-shadow-strong);
+}
+
+.shell-row {
+  --shell-sidebar-min: 20rem;
+  --shell-sidebar-max: 20rem;
+  min-height: calc(100vh - 58px);
+}
+
+.shell-row.is-sidebar-collapsed {
+  --shell-sidebar-min: 6rem;
+  --shell-sidebar-max: 6rem;
+}
+
+.rail {
+  color: var(--nav-text);
+  border-right: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 26%),
+    linear-gradient(180deg, var(--admin-dark) 0%, var(--admin-dark-soft) 100%);
+  box-shadow:
+    inset -1px 0 0 rgba(255, 255, 255, 0.08),
+    20px 0 40px rgba(12, 20, 31, 0.12);
+}
+
+.sidebar-column {
+  gap: 14px;
+  padding: 16px;
+}
+
+.brand-lockup {
+  padding: 14px;
+  border-radius: var(--admin-radius-lg);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03));
+}
+
+.brand-lockup h1 {
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.brand-mark {
+  width: 46px;
+  height: 46px;
+  border-radius: var(--admin-radius-sm);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  background: linear-gradient(135deg, var(--outlook-blue) 0%, #5da0ff 100%);
+}
+
+.collapse-toggle {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--nav-text);
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
+.compose-button {
+  min-height: 42px;
+  border-radius: var(--admin-radius-sm);
+  background: linear-gradient(135deg, var(--outlook-blue) 0%, var(--outlook-blue-strong) 100%);
+  box-shadow: 0 14px 28px rgba(37, 100, 207, 0.24);
+}
+
+.compose-plus {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--admin-radius-xs);
+}
+
+.panel-title,
+.eyebrow,
+.pane-kicker,
+.detail-label,
+.workspace-hero-eyebrow {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.82rem;
+  font-weight: 400;
+}
+
+.panel-title {
+  color: rgba(209, 221, 234, 0.58);
+}
+
+.section-item,
+.tree-item,
+.tree-group {
+  min-height: 42px;
+  border-radius: var(--admin-radius-sm);
+}
+
+.section-item:hover,
+.tree-item:hover,
+.tree-group:hover,
+.section-item.is-active,
+.tree-item.is-active {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.section-item.is-active,
+.tree-item.is-active {
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(100, 160, 255, 0.12);
+}
+
+.section-item-icon,
+.tree-item-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--admin-radius-xs);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.summary-card {
+  border-radius: var(--admin-radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.workspace {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 14px;
+  padding: 16px;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.workspace-toolbar,
+.workspace-heading-panel,
+.list-pane,
+.reading-pane-card,
+.reading-empty-state,
+.editor-shell,
+.settings-card {
+  min-width: 0;
+  border: 1px solid var(--admin-line);
+  border-radius: var(--admin-radius-md);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.64)),
+    var(--admin-panel);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    var(--admin-shadow);
+  backdrop-filter: blur(18px);
+}
+
+.workspace-toolbar {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--admin-line);
+}
+
+.workspace-heading-panel {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 16px;
+}
+
+.workspace-heading-panel h1 {
+  margin: 2px 0 0;
+  font-size: 1.12rem;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.workspace-hero-meta,
+.workspace-toolbar-summary,
+.workspace-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.workspace-compose-button {
+  min-height: 38px;
+  border-radius: var(--admin-radius-sm);
+  background: linear-gradient(135deg, var(--outlook-blue), var(--outlook-blue-strong));
+  box-shadow: 0 12px 24px rgba(37, 100, 207, 0.2);
+}
+
+.workspace-chip,
+.workspace-stat-pill,
+.message-meta-pill,
+.status-pill,
+.flag-pill,
+.tag-pill,
+.category-pill {
+  min-height: 30px;
+  border-radius: var(--admin-radius-xs);
+  border: 1px solid rgba(204, 216, 229, 0.78);
+  padding: 5px 10px;
+  background: var(--admin-panel-soft);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.workspace-stat-pill:not(.is-soft),
+.status-pill,
+.flag-pill,
+.tag-pill {
+  color: var(--outlook-blue-strong);
+  background: rgba(37, 100, 207, 0.1);
+}
+
+.notice-banner {
+  border-radius: var(--admin-radius-md);
+  border-color: rgba(191, 122, 18, 0.22);
+  background: rgba(191, 122, 18, 0.08);
+}
+
+.content-grid {
+  gap: 14px;
+  padding: 0;
+}
+
+.content-grid.has-detail {
+  grid-template-columns: minmax(21rem, 26rem) minmax(0, 1fr);
+}
+
+.list-pane {
+  width: auto;
+  padding: 0;
+  overflow: hidden;
+}
+
+.pane-header {
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--admin-line);
+  background: rgba(248, 251, 254, 0.72);
+}
+
+.pane-header h3 {
+  margin: 2px 0 0;
+  font-size: 1rem;
+}
+
+.pane-count {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--admin-radius-xs);
+  padding: 5px 10px;
+  color: var(--muted);
+  background: var(--admin-panel-soft);
+}
+
+.message-list,
+.agenda-list,
+.contact-list {
+  gap: 0;
+  padding: 0;
+  overflow: auto;
+}
+
+.mail-list-card,
+.agenda-card,
+.contact-card {
+  border-width: 0 0 1px;
+  border-color: var(--admin-line);
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: none;
+}
+
+.mail-list-card {
+  gap: 8px;
+  padding: 13px 15px;
+}
+
+.mail-list-card:hover,
+.mail-list-card.is-active,
+.agenda-card:hover,
+.agenda-card.is-active,
+.contact-card:hover,
+.contact-card.is-active {
+  transform: none;
+  border-color: var(--admin-line);
+  background:
+    linear-gradient(90deg, rgba(37, 100, 207, 0.1), rgba(255, 255, 255, 0.72));
+  box-shadow: inset 3px 0 0 var(--outlook-blue);
+}
+
+.mail-list-avatar,
+.sender-avatar,
+.contact-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--admin-radius-xs);
+  color: var(--outlook-blue-strong);
+  background: rgba(37, 100, 207, 0.12);
+  box-shadow: none;
+}
+
+.message-preview {
+  line-height: 1.45;
+}
+
+.detail-pane {
+  min-width: 0;
+}
+
+.reading-pane-card,
+.reading-empty-state,
+.editor-shell {
+  padding: 20px;
+  border-radius: var(--admin-radius-md);
+}
+
+.reading-empty-state {
+  min-height: 360px;
+}
+
+.reading-empty-state h3 {
+  font-size: 1.25rem;
+  letter-spacing: 0;
+}
+
+.detail-header {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--admin-line);
+}
+
+.detail-header h3 {
+  margin-top: 4px;
+  font-size: 1.28rem;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.sender-card,
+.attachment-card,
+.settings-item,
+.toggle-field {
+  border: 1px solid rgba(204, 216, 229, 0.78);
+  border-radius: var(--admin-radius-md);
+  background: var(--admin-panel-soft);
+}
+
+.sender-card {
+  margin-top: 16px;
+}
+
+.message-body {
+  margin-top: 18px;
+  line-height: 1.65;
+}
+
+.attachment-panel {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top-color: var(--admin-line);
+}
+
+.editor-shell {
+  position: sticky;
+  top: 74px;
+  box-shadow: var(--admin-shadow-strong);
+}
+
+.editor-shell-header {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--admin-line);
+}
+
+.editor-shell-header h3 {
+  margin: 4px 0 0;
+  font-size: 1.15rem;
+}
+
+.form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-shell {
+  gap: 14px;
+}
+
+.settings-card {
+  padding: 20px;
+}
+
+.settings-grid {
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+}
+
+.settings-item {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(248, 251, 254, 0.72)),
+    var(--admin-panel-soft);
+}
+
+@media (max-width: 1160px) {
+  .content-grid.has-detail {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-header {
+    grid-template-columns: 1fr;
+  }
+
+  .shell-row,
+  .shell-row.is-sidebar-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .rail,
+  .rail.is-collapsed {
+    width: min(22rem, calc(100vw - 24px));
+    inset: 0 auto 0 0;
+    max-width: calc(100vw - 24px);
+    border-radius: 0;
+  }
+
+  .workspace-heading-panel,
+  .detail-header,
+  .sender-card,
+  .editor-shell-header {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .workspace {
+    padding: 12px;
+  }
+
+  .workspace-toolbar,
+  .workspace-heading-panel,
+  .reading-pane-card,
+  .reading-empty-state,
+  .editor-shell,
+  .settings-card {
+    padding: 14px;
+  }
+
+  .form-grid,
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+}

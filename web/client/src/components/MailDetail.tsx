@@ -38,7 +38,6 @@ export function MailDetail(props: {
           <div>
             <p className="detail-label">Compose drawer</p>
             <h3>{props.copy.editorTitles[props.mode]}</h3>
-            <p className="editor-shell-copy">Client composition stays aligned with the canonical LPE submission model.</p>
           </div>
           <Button variant="ghost" type="button" onClick={props.onCancel}>{props.copy.editorActions.cancel}</Button>
         </div>
