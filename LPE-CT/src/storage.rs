@@ -408,10 +408,13 @@ pub(crate) async fn sync_dashboard_configuration(
 
     let mut tx = pool.begin().await?;
 
-    sqlx::query("DELETE FROM accepted_domains")
-        .execute(&mut *tx)
-        .await?;
+    let mut accepted_domain_keys = Vec::new();
     for domain in &dashboard.accepted_domains {
+        let domain_key = domain.domain.trim().to_ascii_lowercase();
+        if domain_key.is_empty() {
+            continue;
+        }
+        accepted_domain_keys.push(domain_key.clone());
         sqlx::query(
             r#"
             INSERT INTO accepted_domains (
@@ -419,9 +422,28 @@ pub(crate) async fn sync_dashboard_configuration(
                 spf_checks, greylisting, verified, source, updated_at
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            ON CONFLICT (domain) DO UPDATE SET
+                domain_id = EXCLUDED.domain_id,
+                destination_server = EXCLUDED.destination_server,
+                verification_type = EXCLUDED.verification_type,
+                rbl_checks = EXCLUDED.rbl_checks,
+                spf_checks = EXCLUDED.spf_checks,
+                greylisting = EXCLUDED.greylisting,
+                verified = EXCLUDED.verified,
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            WHERE
+                accepted_domains.domain_id IS DISTINCT FROM EXCLUDED.domain_id OR
+                accepted_domains.destination_server IS DISTINCT FROM EXCLUDED.destination_server OR
+                accepted_domains.verification_type IS DISTINCT FROM EXCLUDED.verification_type OR
+                accepted_domains.rbl_checks IS DISTINCT FROM EXCLUDED.rbl_checks OR
+                accepted_domains.spf_checks IS DISTINCT FROM EXCLUDED.spf_checks OR
+                accepted_domains.greylisting IS DISTINCT FROM EXCLUDED.greylisting OR
+                accepted_domains.verified IS DISTINCT FROM EXCLUDED.verified OR
+                accepted_domains.source IS DISTINCT FROM EXCLUDED.source
             "#,
         )
-        .bind(domain.domain.trim().to_ascii_lowercase())
+        .bind(domain_key)
         .bind(domain.id.trim())
         .bind(domain.destination_server.trim())
         .bind(domain.verification_type.trim().to_ascii_lowercase())
@@ -433,184 +455,348 @@ pub(crate) async fn sync_dashboard_configuration(
         .execute(&mut *tx)
         .await?;
     }
+    sqlx::query(
+        "DELETE FROM accepted_domains WHERE source = 'state.json' AND NOT (domain = ANY($1))",
+    )
+    .bind(&accepted_domain_keys)
+    .execute(&mut *tx)
+    .await?;
 
-    sqlx::query("DELETE FROM policy_address_rules")
-        .execute(&mut *tx)
-        .await?;
+    let mut allow_sender_keys = Vec::new();
     for value in &dashboard.policies.address_policy.allow_senders {
+        let value = value.trim().to_ascii_lowercase();
+        if value.is_empty() {
+            continue;
+        }
+        allow_sender_keys.push(value.clone());
         sqlx::query(
             r#"
             INSERT INTO policy_address_rules (
                 address_role, action, match_value, enabled, source, updated_at
             )
             VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (address_role, action, match_value) DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            WHERE
+                policy_address_rules.enabled IS DISTINCT FROM EXCLUDED.enabled OR
+                policy_address_rules.source IS DISTINCT FROM EXCLUDED.source
             "#,
         )
         .bind("sender")
         .bind("allow")
-        .bind(value.trim().to_ascii_lowercase())
+        .bind(value)
         .bind(true)
         .bind("state.json")
         .execute(&mut *tx)
         .await?;
     }
-    for value in &dashboard.policies.address_policy.block_senders {
-        sqlx::query(
-            r#"
-            INSERT INTO policy_address_rules (
-                address_role, action, match_value, enabled, source, updated_at
-            )
-            VALUES ($1, $2, $3, $4, $5, NOW())
-            "#,
-        )
-        .bind("sender")
-        .bind("block")
-        .bind(value.trim().to_ascii_lowercase())
-        .bind(true)
-        .bind("state.json")
-        .execute(&mut *tx)
-        .await?;
-    }
-    for value in &dashboard.policies.address_policy.allow_recipients {
-        sqlx::query(
-            r#"
-            INSERT INTO policy_address_rules (
-                address_role, action, match_value, enabled, source, updated_at
-            )
-            VALUES ($1, $2, $3, $4, $5, NOW())
-            "#,
-        )
-        .bind("recipient")
-        .bind("allow")
-        .bind(value.trim().to_ascii_lowercase())
-        .bind(true)
-        .bind("state.json")
-        .execute(&mut *tx)
-        .await?;
-    }
-    for value in &dashboard.policies.address_policy.block_recipients {
-        sqlx::query(
-            r#"
-            INSERT INTO policy_address_rules (
-                address_role, action, match_value, enabled, source, updated_at
-            )
-            VALUES ($1, $2, $3, $4, $5, NOW())
-            "#,
-        )
-        .bind("recipient")
-        .bind("block")
-        .bind(value.trim().to_ascii_lowercase())
-        .bind(true)
-        .bind("state.json")
-        .execute(&mut *tx)
-        .await?;
-    }
+    delete_stale_policy_address_rules(&mut tx, "sender", "allow", &allow_sender_keys).await?;
 
-    sqlx::query("DELETE FROM attachment_policy_rules")
+    let mut block_sender_keys = Vec::new();
+    for value in &dashboard.policies.address_policy.block_senders {
+        let value = value.trim().to_ascii_lowercase();
+        if value.is_empty() {
+            continue;
+        }
+        block_sender_keys.push(value.clone());
+        sqlx::query(
+            r#"
+            INSERT INTO policy_address_rules (
+                address_role, action, match_value, enabled, source, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (address_role, action, match_value) DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            WHERE
+                policy_address_rules.enabled IS DISTINCT FROM EXCLUDED.enabled OR
+                policy_address_rules.source IS DISTINCT FROM EXCLUDED.source
+            "#,
+        )
+        .bind("sender")
+        .bind("block")
+        .bind(value)
+        .bind(true)
+        .bind("state.json")
         .execute(&mut *tx)
         .await?;
+    }
+    delete_stale_policy_address_rules(&mut tx, "sender", "block", &block_sender_keys).await?;
+
+    let mut allow_recipient_keys = Vec::new();
+    for value in &dashboard.policies.address_policy.allow_recipients {
+        let value = value.trim().to_ascii_lowercase();
+        if value.is_empty() {
+            continue;
+        }
+        allow_recipient_keys.push(value.clone());
+        sqlx::query(
+            r#"
+            INSERT INTO policy_address_rules (
+                address_role, action, match_value, enabled, source, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (address_role, action, match_value) DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            WHERE
+                policy_address_rules.enabled IS DISTINCT FROM EXCLUDED.enabled OR
+                policy_address_rules.source IS DISTINCT FROM EXCLUDED.source
+            "#,
+        )
+        .bind("recipient")
+        .bind("allow")
+        .bind(value)
+        .bind(true)
+        .bind("state.json")
+        .execute(&mut *tx)
+        .await?;
+    }
+    delete_stale_policy_address_rules(&mut tx, "recipient", "allow", &allow_recipient_keys).await?;
+
+    let mut block_recipient_keys = Vec::new();
+    for value in &dashboard.policies.address_policy.block_recipients {
+        let value = value.trim().to_ascii_lowercase();
+        if value.is_empty() {
+            continue;
+        }
+        block_recipient_keys.push(value.clone());
+        sqlx::query(
+            r#"
+            INSERT INTO policy_address_rules (
+                address_role, action, match_value, enabled, source, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (address_role, action, match_value) DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            WHERE
+                policy_address_rules.enabled IS DISTINCT FROM EXCLUDED.enabled OR
+                policy_address_rules.source IS DISTINCT FROM EXCLUDED.source
+            "#,
+        )
+        .bind("recipient")
+        .bind("block")
+        .bind(value)
+        .bind(true)
+        .bind("state.json")
+        .execute(&mut *tx)
+        .await?;
+    }
+    delete_stale_policy_address_rules(&mut tx, "recipient", "block", &block_recipient_keys).await?;
+
+    let mut allow_extension_keys = Vec::new();
     for value in &dashboard.policies.attachment_policy.allow_extensions {
+        let value = value.trim().to_ascii_lowercase();
+        if value.is_empty() {
+            continue;
+        }
+        allow_extension_keys.push(value.clone());
         sqlx::query(
             r#"
             INSERT INTO attachment_policy_rules (
                 rule_scope, action, match_value, enabled, source, updated_at
             )
             VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (rule_scope, action, match_value) DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            WHERE
+                attachment_policy_rules.enabled IS DISTINCT FROM EXCLUDED.enabled OR
+                attachment_policy_rules.source IS DISTINCT FROM EXCLUDED.source
             "#,
         )
         .bind("extension")
         .bind("allow")
-        .bind(value.trim().to_ascii_lowercase())
+        .bind(value)
         .bind(true)
         .bind("state.json")
         .execute(&mut *tx)
         .await?;
     }
+    delete_stale_attachment_policy_rules(&mut tx, "extension", "allow", &allow_extension_keys)
+        .await?;
+
+    let mut block_extension_keys = Vec::new();
     for value in &dashboard.policies.attachment_policy.block_extensions {
+        let value = value.trim().to_ascii_lowercase();
+        if value.is_empty() {
+            continue;
+        }
+        block_extension_keys.push(value.clone());
         sqlx::query(
             r#"
             INSERT INTO attachment_policy_rules (
                 rule_scope, action, match_value, enabled, source, updated_at
             )
             VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (rule_scope, action, match_value) DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            WHERE
+                attachment_policy_rules.enabled IS DISTINCT FROM EXCLUDED.enabled OR
+                attachment_policy_rules.source IS DISTINCT FROM EXCLUDED.source
             "#,
         )
         .bind("extension")
         .bind("block")
-        .bind(value.trim().to_ascii_lowercase())
+        .bind(value)
         .bind(true)
         .bind("state.json")
         .execute(&mut *tx)
         .await?;
     }
+    delete_stale_attachment_policy_rules(&mut tx, "extension", "block", &block_extension_keys)
+        .await?;
+
+    let mut allow_mime_type_keys = Vec::new();
     for value in &dashboard.policies.attachment_policy.allow_mime_types {
+        let value = value.trim().to_ascii_lowercase();
+        if value.is_empty() {
+            continue;
+        }
+        allow_mime_type_keys.push(value.clone());
         sqlx::query(
             r#"
             INSERT INTO attachment_policy_rules (
                 rule_scope, action, match_value, enabled, source, updated_at
             )
             VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (rule_scope, action, match_value) DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            WHERE
+                attachment_policy_rules.enabled IS DISTINCT FROM EXCLUDED.enabled OR
+                attachment_policy_rules.source IS DISTINCT FROM EXCLUDED.source
             "#,
         )
         .bind("mime-type")
         .bind("allow")
-        .bind(value.trim().to_ascii_lowercase())
+        .bind(value)
         .bind(true)
         .bind("state.json")
         .execute(&mut *tx)
         .await?;
     }
+    delete_stale_attachment_policy_rules(&mut tx, "mime-type", "allow", &allow_mime_type_keys)
+        .await?;
+
+    let mut block_mime_type_keys = Vec::new();
     for value in &dashboard.policies.attachment_policy.block_mime_types {
+        let value = value.trim().to_ascii_lowercase();
+        if value.is_empty() {
+            continue;
+        }
+        block_mime_type_keys.push(value.clone());
         sqlx::query(
             r#"
             INSERT INTO attachment_policy_rules (
                 rule_scope, action, match_value, enabled, source, updated_at
             )
             VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (rule_scope, action, match_value) DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            WHERE
+                attachment_policy_rules.enabled IS DISTINCT FROM EXCLUDED.enabled OR
+                attachment_policy_rules.source IS DISTINCT FROM EXCLUDED.source
             "#,
         )
         .bind("mime-type")
         .bind("block")
-        .bind(value.trim().to_ascii_lowercase())
+        .bind(value)
         .bind(true)
         .bind("state.json")
         .execute(&mut *tx)
         .await?;
     }
+    delete_stale_attachment_policy_rules(&mut tx, "mime-type", "block", &block_mime_type_keys)
+        .await?;
+
+    let mut allow_detected_type_keys = Vec::new();
     for value in &dashboard.policies.attachment_policy.allow_detected_types {
+        let value = value.trim().to_ascii_lowercase();
+        if value.is_empty() {
+            continue;
+        }
+        allow_detected_type_keys.push(value.clone());
         sqlx::query(
             r#"
             INSERT INTO attachment_policy_rules (
                 rule_scope, action, match_value, enabled, source, updated_at
             )
             VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (rule_scope, action, match_value) DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            WHERE
+                attachment_policy_rules.enabled IS DISTINCT FROM EXCLUDED.enabled OR
+                attachment_policy_rules.source IS DISTINCT FROM EXCLUDED.source
             "#,
         )
         .bind("detected-type")
         .bind("allow")
-        .bind(value.trim().to_ascii_lowercase())
+        .bind(value)
         .bind(true)
         .bind("state.json")
         .execute(&mut *tx)
         .await?;
     }
+    delete_stale_attachment_policy_rules(
+        &mut tx,
+        "detected-type",
+        "allow",
+        &allow_detected_type_keys,
+    )
+    .await?;
+
+    let mut block_detected_type_keys = Vec::new();
     for value in &dashboard.policies.attachment_policy.block_detected_types {
+        let value = value.trim().to_ascii_lowercase();
+        if value.is_empty() {
+            continue;
+        }
+        block_detected_type_keys.push(value.clone());
         sqlx::query(
             r#"
             INSERT INTO attachment_policy_rules (
                 rule_scope, action, match_value, enabled, source, updated_at
             )
             VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (rule_scope, action, match_value) DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            WHERE
+                attachment_policy_rules.enabled IS DISTINCT FROM EXCLUDED.enabled OR
+                attachment_policy_rules.source IS DISTINCT FROM EXCLUDED.source
             "#,
         )
         .bind("detected-type")
         .bind("block")
-        .bind(value.trim().to_ascii_lowercase())
+        .bind(value)
         .bind(true)
         .bind("state.json")
         .execute(&mut *tx)
         .await?;
     }
+    delete_stale_attachment_policy_rules(
+        &mut tx,
+        "detected-type",
+        "block",
+        &block_detected_type_keys,
+    )
+    .await?;
 
     sqlx::query(
         r#"
@@ -634,9 +820,7 @@ pub(crate) async fn sync_dashboard_configuration(
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query("DELETE FROM dkim_domain_configs")
-        .execute(&mut *tx)
-        .await?;
+    let mut dkim_domain_keys = Vec::new();
     for domain in dashboard
         .policies
         .dkim
@@ -644,6 +828,8 @@ pub(crate) async fn sync_dashboard_configuration(
         .iter()
         .filter(|domain| !domain.domain.trim().is_empty())
     {
+        let domain_key = domain.domain.trim().to_ascii_lowercase();
+        dkim_domain_keys.push(domain_key.clone());
         sqlx::query(
             r#"
             INSERT INTO dkim_domain_configs (
@@ -651,9 +837,26 @@ pub(crate) async fn sync_dashboard_configuration(
                 signed_headers, source, updated_at
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+            ON CONFLICT (domain) DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                selector = EXCLUDED.selector,
+                private_key_path = EXCLUDED.private_key_path,
+                over_sign = EXCLUDED.over_sign,
+                expiration_seconds = EXCLUDED.expiration_seconds,
+                signed_headers = EXCLUDED.signed_headers,
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            WHERE
+                dkim_domain_configs.enabled IS DISTINCT FROM EXCLUDED.enabled OR
+                dkim_domain_configs.selector IS DISTINCT FROM EXCLUDED.selector OR
+                dkim_domain_configs.private_key_path IS DISTINCT FROM EXCLUDED.private_key_path OR
+                dkim_domain_configs.over_sign IS DISTINCT FROM EXCLUDED.over_sign OR
+                dkim_domain_configs.expiration_seconds IS DISTINCT FROM EXCLUDED.expiration_seconds OR
+                dkim_domain_configs.signed_headers IS DISTINCT FROM EXCLUDED.signed_headers OR
+                dkim_domain_configs.source IS DISTINCT FROM EXCLUDED.source
             "#,
         )
-        .bind(domain.domain.trim().to_ascii_lowercase())
+        .bind(domain_key)
         .bind(domain.enabled)
         .bind(domain.selector.trim())
         .bind(domain.private_key_path.trim())
@@ -664,6 +867,12 @@ pub(crate) async fn sync_dashboard_configuration(
         .execute(&mut *tx)
         .await?;
     }
+    sqlx::query(
+        "DELETE FROM dkim_domain_configs WHERE source = 'state.json' AND NOT (domain = ANY($1))",
+    )
+    .bind(&dkim_domain_keys)
+    .execute(&mut *tx)
+    .await?;
 
     sqlx::query(
         r#"
@@ -690,22 +899,33 @@ pub(crate) async fn sync_dashboard_configuration(
     .execute(&mut *tx)
     .await?;
 
-    sqlx::query("DELETE FROM digest_recipients")
-        .execute(&mut *tx)
-        .await?;
+    let mut digest_recipient_keys = Vec::new();
     for domain in &dashboard.reporting.domain_defaults {
         for recipient in &domain.recipients {
+            let scope_key = domain.domain.trim().to_ascii_lowercase();
+            let recipient = recipient.trim().to_ascii_lowercase();
+            if scope_key.is_empty() || recipient.is_empty() {
+                continue;
+            }
+            digest_recipient_keys.push(format!("domain-default\t{scope_key}\t{recipient}"));
             sqlx::query(
                 r#"
                 INSERT INTO digest_recipients (
                     scope_type, scope_key, recipient, enabled, source, updated_at
                 )
                 VALUES ($1, $2, $3, $4, $5, NOW())
+                ON CONFLICT (scope_type, scope_key, recipient) DO UPDATE SET
+                    enabled = EXCLUDED.enabled,
+                    source = EXCLUDED.source,
+                    updated_at = NOW()
+                WHERE
+                    digest_recipients.enabled IS DISTINCT FROM EXCLUDED.enabled OR
+                    digest_recipients.source IS DISTINCT FROM EXCLUDED.source
                 "#,
             )
             .bind("domain-default")
-            .bind(domain.domain.trim().to_ascii_lowercase())
-            .bind(recipient.trim().to_ascii_lowercase())
+            .bind(scope_key)
+            .bind(recipient)
             .bind(true)
             .bind("state.json")
             .execute(&mut *tx)
@@ -713,24 +933,91 @@ pub(crate) async fn sync_dashboard_configuration(
         }
     }
     for override_entry in &dashboard.reporting.user_overrides {
+        let scope_key = override_entry.mailbox.trim().to_ascii_lowercase();
+        let recipient = override_entry.recipient.trim().to_ascii_lowercase();
+        if scope_key.is_empty() || recipient.is_empty() {
+            continue;
+        }
+        digest_recipient_keys.push(format!("mailbox-override\t{scope_key}\t{recipient}"));
         sqlx::query(
             r#"
             INSERT INTO digest_recipients (
                 scope_type, scope_key, recipient, enabled, source, updated_at
             )
             VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT (scope_type, scope_key, recipient) DO UPDATE SET
+                enabled = EXCLUDED.enabled,
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            WHERE
+                digest_recipients.enabled IS DISTINCT FROM EXCLUDED.enabled OR
+                digest_recipients.source IS DISTINCT FROM EXCLUDED.source
             "#,
         )
         .bind("mailbox-override")
-        .bind(override_entry.mailbox.trim().to_ascii_lowercase())
-        .bind(override_entry.recipient.trim().to_ascii_lowercase())
+        .bind(scope_key)
+        .bind(recipient)
         .bind(override_entry.enabled)
         .bind("state.json")
         .execute(&mut *tx)
         .await?;
     }
+    sqlx::query(
+        "DELETE FROM digest_recipients WHERE source = 'state.json' AND NOT (concat_ws(chr(9), scope_type, scope_key, recipient) = ANY($1))",
+    )
+    .bind(&digest_recipient_keys)
+    .execute(&mut *tx)
+    .await?;
 
     tx.commit().await?;
+    Ok(())
+}
+
+async fn delete_stale_policy_address_rules(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    address_role: &str,
+    action: &str,
+    active_values: &[String],
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        DELETE FROM policy_address_rules
+        WHERE source = 'state.json'
+          AND address_role = $1
+          AND action = $2
+          AND NOT (match_value = ANY($3))
+        "#,
+    )
+    .bind(address_role)
+    .bind(action)
+    .bind(active_values)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+async fn delete_stale_attachment_policy_rules(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    rule_scope: &str,
+    action: &str,
+    active_values: &[String],
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        DELETE FROM attachment_policy_rules
+        WHERE source = 'state.json'
+          AND rule_scope = $1
+          AND action = $2
+          AND NOT (match_value = ANY($3))
+        "#,
+    )
+    .bind(rule_scope)
+    .bind(action)
+    .bind(active_values)
+    .execute(&mut **tx)
+    .await?;
+
     Ok(())
 }
 
