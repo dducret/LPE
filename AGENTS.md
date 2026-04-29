@@ -1,6 +1,10 @@
 # LPE Development Agent Context
 
 This file defines the minimum context any AI agent must use when changing `LPE`.
+Don't assume. Don't hide confusion. Surface tradeoffs.
+Minimum code that solves the problem. Nothing speculative.
+Touch only what you must. Clean up only your own mess.
+Define sucess criteria. Loop until verified.
 
 ## Reading Scope
 
