@@ -355,12 +355,12 @@ function App() {
   const domainAliases = selectedDomain ? (state?.aliases.filter((alias) => alias.source.endsWith(`@${selectedDomain.name}`) || alias.target.endsWith(`@${selectedDomain.name}`)) ?? []) : [];
   const domainAdmins = selectedDomain ? (state?.server_admins.filter((admin) => admin.domain_id === selectedDomain.id || admin.domain_name === "All domains") ?? []) : [];
   const sidebarPages: { key: PageKey; label: string; icon: string }[] = [
-    { key: "server", label: copy.pageServer, icon: "01" },
-    { key: "domain", label: copy.pageDomain, icon: "02" },
-    { key: "accounts", label: copy.accounts, icon: "03" },
-    { key: "antispam", label: copy.pageAntispam, icon: "04" },
-    { key: "audit", label: copy.pageAudit, icon: "05" },
-    { key: "operations", label: copy.pageOperations, icon: "06" }
+    { key: "server", label: copy.pageServer, icon: "platform" },
+    { key: "domain", label: copy.pageDomain, icon: "address" },
+    { key: "accounts", label: copy.accounts, icon: "digest" },
+    { key: "antispam", label: copy.pageAntispam, icon: "verification" },
+    { key: "audit", label: copy.pageAudit, icon: "audit" },
+    { key: "operations", label: copy.pageOperations, icon: "overview" }
   ];
 
   function navigatePage(nextPage: PageKey) {
@@ -396,19 +396,20 @@ function App() {
     {sidebarMobileOpen ? <button className="sidebar-backdrop" type="button" aria-label={copy.close} onClick={() => setSidebarMobileOpen(false)} /> : null}
     <aside className={sidebarCollapsed ? sidebarMobileOpen ? "sidebar is-collapsed is-mobile-open" : "sidebar is-collapsed" : sidebarMobileOpen ? "sidebar is-mobile-open" : "sidebar"}>
       <div className="sidebar-stack">
-        <div className="sidebar-header"><div><p className="eyebrow">{copy.eyebrow}</p><h1>{copy.title}</h1><p className="sidebar-text">{copy.subtitle}</p></div><button className="icon-button sidebar-toggle" type="button" aria-label={sidebarCollapsed ? copy.open : copy.close} title={sidebarCollapsed ? copy.open : copy.close} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? "→" : "←"}</button></div>
+        <section className="sidebar-brand">
+          <div className="brand-mark" aria-hidden="true">LP</div>
+          <div className="brand-copy"><p className="eyebrow">{copy.eyebrow}</p><h1>{copy.title}</h1><p className="sidebar-text">{copy.subtitle}</p></div>
+          <button className="icon-button sidebar-toggle" type="button" aria-label={sidebarCollapsed ? copy.open : copy.close} title={sidebarCollapsed ? copy.open : copy.close} onClick={() => setSidebarCollapsed((value) => !value)}><span className="menu-icon" aria-hidden="true" /></button>
+        </section>
         <div className="sidebar-group">
-          <p className="sidebar-group-label">Workspace</p>
-          <nav className="page-list">{sidebarPages.slice(0, 4).map((entry) => <button key={entry.key} type="button" title={entry.label} aria-label={entry.label} className={page === entry.key ? "page-button is-active" : "page-button"} onClick={() => navigatePage(entry.key)}><span className="page-icon">{entry.icon}</span><span className="sidebar-label">{entry.label}</span></button>)}</nav>
+          <nav className="page-list">{sidebarPages.slice(0, 4).map((entry) => <button key={entry.key} type="button" title={entry.label} aria-label={entry.label} className={page === entry.key ? "page-button is-active" : "page-button"} onClick={() => navigatePage(entry.key)}><span className={`page-icon page-icon-${entry.icon}`} aria-hidden="true" /><span className="page-copy"><span className="page-label">{entry.label}</span></span></button>)}</nav>
         </div>
         <div className="sidebar-group">
-          <p className="sidebar-group-label">Governance</p>
-          <nav className="page-list">{sidebarPages.slice(4).map((entry) => <button key={entry.key} type="button" title={entry.label} aria-label={entry.label} className={page === entry.key ? "page-button is-active" : "page-button"} onClick={() => navigatePage(entry.key)}><span className="page-icon">{entry.icon}</span><span className="sidebar-label">{entry.label}</span></button>)}</nav>
+          <nav className="page-list">{sidebarPages.slice(4).map((entry) => <button key={entry.key} type="button" title={entry.label} aria-label={entry.label} className={page === entry.key ? "page-button is-active" : "page-button"} onClick={() => navigatePage(entry.key)}><span className={`page-icon page-icon-${entry.icon}`} aria-hidden="true" /><span className="page-copy"><span className="page-label">{entry.label}</span></span></button>)}</nav>
         </div>
       </div>
       <div className="sidebar-footer">
-        <div className="sidebar-note-card"><strong>Advanced shell</strong><span className="sidebar-text">Drawers stay contextual. Lists remain full width.</span></div>
-        <label className="locale-picker"><span>{copy.languageLabel}</span><select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>{supportedLocales.map((entry) => <option key={entry} value={entry}>{localeLabels[entry]}</option>)}</select></label>
+        <label className="locale-picker sidebar-locale"><span>{copy.languageLabel}</span><select value={locale} onChange={(event) => setLocale(event.target.value as Locale)}>{supportedLocales.map((entry) => <option key={entry} value={entry}>{localeLabels[entry]}</option>)}</select></label>
         <button className="secondary-button sidebar-mobile-close" type="button" onClick={() => setSidebarMobileOpen(false)}>{copy.close}</button>
       </div>
     </aside>
