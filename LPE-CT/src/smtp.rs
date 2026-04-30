@@ -102,7 +102,17 @@ pub(crate) struct RuntimeConfig {
 #[derive(Debug, Clone)]
 pub(crate) struct AcceptedDomainConfig {
     pub(crate) domain: String,
+    pub(crate) rbl_checks: bool,
+    pub(crate) spf_checks: bool,
+    pub(crate) greylisting: bool,
     pub(crate) verified: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct InboundDomainPolicy {
+    rbl_checks: bool,
+    spf_checks: bool,
+    greylisting: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -932,6 +942,9 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
             .iter()
             .map(|domain| AcceptedDomainConfig {
                 domain: domain.domain.clone(),
+                rbl_checks: domain.rbl_checks,
+                spf_checks: domain.spf_checks,
+                greylisting: domain.greylisting,
                 verified: domain.verified,
             })
             .collect(),
@@ -1891,14 +1904,7 @@ where
             .await?;
             return Ok(SmtpCommandOutcome::Quit);
         } else if message.status == "deferred" {
-            write_smtp(
-                writer,
-                &format!(
-                    "451 message temporarily deferred by perimeter policy (trace {})",
-                    message.id
-                ),
-            )
-            .await?;
+            write_smtp(writer, &deferred_smtp_reply(&message)).await?;
         } else if message.status == "quarantined" {
             write_smtp(writer, &format!("250 quarantined as {}", message.id)).await?;
             return Ok(SmtpCommandOutcome::Quit);
@@ -2148,6 +2154,12 @@ async fn receive_message_with_validator<D: Detector>(
                 update_reputation(spool_dir, config, &message, FilterAction::Defer).await?;
                 observability::record_security_event("inbound_delivery_deferred");
                 observability::record_smtp_session("deferred");
+                warn!(
+                    trace_id = %message.id,
+                    status = %message.status,
+                    error = %error,
+                    "inbound final delivery deferred"
+                );
             }
         },
         FilterAction::Quarantine => {
@@ -2177,6 +2189,11 @@ async fn receive_message_with_validator<D: Detector>(
             let _ = append_transport_audit(spool_dir, config, "deferred", &message).await;
             update_reputation(spool_dir, config, &message, FilterAction::Defer).await?;
             observability::record_smtp_session("deferred");
+            warn!(
+                trace_id = %message.id,
+                reason = message.relay_error.as_deref().unwrap_or("perimeter policy defer"),
+                "inbound message deferred by perimeter policy"
+            );
         }
     }
 
@@ -2607,6 +2624,7 @@ async fn evaluate_inbound_policy(
     let mut defer_reasons = Vec::new();
     let mut reject_reasons = Vec::new();
     let mut quarantine_reasons = Vec::new();
+    let domain_policy = inbound_domain_policy(config, rcpt_to);
     let reputation_score = if config.reputation_enabled {
         load_reputation_score(spool_dir, config, peer_ip, mail_from).await?
     } else {
@@ -2640,7 +2658,7 @@ async fn evaluate_inbound_policy(
     });
 
     if let Some(ip) = peer_ip {
-        if config.greylisting_enabled {
+        if config.greylisting_enabled && domain_policy.greylisting {
             match evaluate_greylisting(spool_dir, config, ip, mail_from, rcpt_to).await? {
                 Some(reason) => {
                     decision_trace.push(DecisionTraceEntry {
@@ -2668,9 +2686,15 @@ async fn evaluate_inbound_policy(
                     });
                 }
             }
+        } else if config.greylisting_enabled {
+            decision_trace.push(DecisionTraceEntry {
+                stage: "greylisting".to_string(),
+                outcome: "skipped".to_string(),
+                detail: "greylisting disabled for the accepted recipient domain".to_string(),
+            });
         }
 
-        if config.dnsbl_enabled {
+        if config.dnsbl_enabled && domain_policy.rbl_checks {
             dnsbl = query_dnsbl(ip, &config.dnsbl_zones).await;
             if !dnsbl.hits.is_empty() {
                 spam_score += 4.0 + dnsbl.hits.len() as f32;
@@ -2698,30 +2722,45 @@ async fn evaluate_inbound_policy(
                     ),
                 });
             }
+        } else if config.dnsbl_enabled {
+            decision_trace.push(DecisionTraceEntry {
+                stage: "rbl-dns-check".to_string(),
+                outcome: "skipped".to_string(),
+                detail: "RBL checks disabled for the accepted recipient domain".to_string(),
+            });
         }
 
-        match authenticate_message(ip, helo, mail_from, message_bytes).await {
-            Ok((summary, auth_trace, assessment)) => {
-                auth_summary = summary;
-                auth_assessment = Some(assessment.clone());
-                decision_trace.extend(auth_trace);
-                apply_authentication_scores(
-                    &assessment,
-                    &mut spam_score,
-                    &mut security_score,
-                    &mut decision_trace,
-                );
+        if domain_policy.spf_checks {
+            match authenticate_message(ip, helo, mail_from, message_bytes).await {
+                Ok((summary, auth_trace, assessment)) => {
+                    auth_summary = summary;
+                    auth_assessment = Some(assessment.clone());
+                    decision_trace.extend(auth_trace);
+                    apply_authentication_scores(
+                        &assessment,
+                        &mut spam_score,
+                        &mut security_score,
+                        &mut decision_trace,
+                    );
+                }
+                Err(error) => {
+                    security_score += 1.0;
+                    decision_trace.push(DecisionTraceEntry {
+                        stage: "authentication".to_string(),
+                        outcome: "temperror".to_string(),
+                        detail: format!(
+                            "authentication checks failed open with resolver error: {error}"
+                        ),
+                    });
+                }
             }
-            Err(error) => {
-                security_score += 1.0;
-                decision_trace.push(DecisionTraceEntry {
-                    stage: "authentication".to_string(),
-                    outcome: "temperror".to_string(),
-                    detail: format!(
-                        "authentication checks failed open with resolver error: {error}"
-                    ),
-                });
-            }
+        } else {
+            decision_trace.push(DecisionTraceEntry {
+                stage: "authentication".to_string(),
+                outcome: "skipped".to_string(),
+                detail: "SPF/DKIM/DMARC checks disabled for the accepted recipient domain"
+                    .to_string(),
+            });
         }
     } else {
         decision_trace.push(DecisionTraceEntry {
@@ -3245,6 +3284,59 @@ fn parse_peer_ip(peer: &str) -> Option<IpAddr> {
     peer.parse::<IpAddr>().ok()
 }
 
+fn inbound_domain_policy(config: &RuntimeConfig, rcpt_to: &[String]) -> InboundDomainPolicy {
+    if config.accepted_domains.is_empty() {
+        return InboundDomainPolicy {
+            rbl_checks: true,
+            spf_checks: true,
+            greylisting: true,
+        };
+    }
+
+    let mut policy = InboundDomainPolicy {
+        rbl_checks: false,
+        spf_checks: false,
+        greylisting: false,
+    };
+    let mut matched = false;
+
+    for recipient in rcpt_to {
+        let Some(domain) = recipient.rsplit_once('@').map(|(_, domain)| domain.trim()) else {
+            return InboundDomainPolicy {
+                rbl_checks: true,
+                spf_checks: true,
+                greylisting: true,
+            };
+        };
+        let Some(accepted) = config
+            .accepted_domains
+            .iter()
+            .find(|accepted| accepted.verified && accepted.domain.eq_ignore_ascii_case(domain))
+        else {
+            return InboundDomainPolicy {
+                rbl_checks: true,
+                spf_checks: true,
+                greylisting: true,
+            };
+        };
+
+        matched = true;
+        policy.rbl_checks |= accepted.rbl_checks;
+        policy.spf_checks |= accepted.spf_checks;
+        policy.greylisting |= accepted.greylisting;
+    }
+
+    if matched {
+        policy
+    } else {
+        InboundDomainPolicy {
+            rbl_checks: true,
+            spf_checks: true,
+            greylisting: true,
+        }
+    }
+}
+
 async fn evaluate_greylisting(
     spool_dir: &Path,
     config: &RuntimeConfig,
@@ -3732,6 +3824,11 @@ async fn deliver_inbound_message(
     config: &RuntimeConfig,
     message: &QueuedMessage,
 ) -> Result<InboundDeliveryResponse> {
+    if config.core_delivery_base_url.trim().is_empty() {
+        anyhow::bail!(
+            "core final delivery base URL is not configured; set LPE_CT_CORE_DELIVERY_BASE_URL"
+        );
+    }
     let endpoint = format!(
         "{}{}",
         config.core_delivery_base_url.trim_end_matches('/'),
@@ -3795,6 +3892,38 @@ async fn deliver_inbound_message(
         "inbound message delivered to lpe core"
     );
     Ok(delivery)
+}
+
+fn deferred_smtp_reply(message: &QueuedMessage) -> String {
+    format!(
+        "451 {} (trace {})",
+        deferred_smtp_reason(message),
+        message.id
+    )
+}
+
+fn deferred_smtp_reason(message: &QueuedMessage) -> &'static str {
+    if message
+        .decision_trace
+        .iter()
+        .any(|entry| entry.stage == "core-delivery")
+    {
+        "core final delivery temporarily unavailable"
+    } else if message
+        .decision_trace
+        .iter()
+        .any(|entry| entry.stage == "greylisting" && entry.outcome == "defer")
+    {
+        "message temporarily deferred by greylisting"
+    } else if message.decision_trace.iter().any(|entry| {
+        entry.stage == "policy-trigger"
+            && entry.outcome == "defer"
+            && entry.detail.contains("authentication")
+    }) {
+        "message temporarily deferred by authentication dependency"
+    } else {
+        "message temporarily deferred by perimeter policy"
+    }
 }
 
 async fn relay_message(
@@ -5520,6 +5649,36 @@ mod tests {
         }
     }
 
+    fn plaintext_inbound_store(
+        core_delivery_base_url: String,
+    ) -> Arc<Mutex<crate::DashboardState>> {
+        let mut state = crate::default_state();
+        state.relay.primary_upstream = "127.0.0.1:9".to_string();
+        state.relay.secondary_upstream.clear();
+        state.relay.core_delivery_base_url = core_delivery_base_url;
+        state.local_data_stores.dedicated_postgres.enabled = false;
+        state.policies.greylisting_enabled = true;
+        state.policies.dnsbl_enabled = true;
+        state.policies.require_spf = true;
+        state.policies.require_dmarc_enforcement = true;
+        state.policies.defer_on_auth_tempfail = true;
+        state.policies.bayespam_enabled = false;
+        state.policies.reputation_enabled = false;
+        state.policies.antivirus_enabled = false;
+        state.policies.recipient_verification.enabled = false;
+        state.accepted_domains = vec![crate::AcceptedDomain {
+            id: "test-domain-lpe".to_string(),
+            domain: "l-p-e.ch".to_string(),
+            destination_server: "core-lpe".to_string(),
+            verification_type: "bridge".to_string(),
+            rbl_checks: false,
+            spf_checks: false,
+            greylisting: false,
+            verified: true,
+        }];
+        Arc::new(Mutex::new(state))
+    }
+
     fn runtime_store_with_accepted_domains(
         domains: &[(&str, bool)],
     ) -> Arc<Mutex<crate::DashboardState>> {
@@ -5551,6 +5710,9 @@ mod tests {
             runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
         config.accepted_domains = vec![AcceptedDomainConfig {
             domain: "l-p-e.ch".to_string(),
+            rbl_checks: true,
+            spf_checks: true,
+            greylisting: true,
             verified: true,
         }];
 
@@ -5716,6 +5878,151 @@ mod tests {
         assert_eq!(line, "221 bye\r\n");
 
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn smtp_data_accepts_plaintext_for_local_domain_and_hands_to_core() {
+        let _guard = env_test_lock();
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
+        let spool = temp_dir("smtp-data-accept");
+        initialize_spool(&spool).unwrap();
+        let captured = Arc::new(Mutex::new(None::<InboundDeliveryRequest>));
+        let core_base_url = spawn_dummy_core(captured.clone()).await;
+        let dashboard_store = plaintext_inbound_store(core_base_url);
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(
+            b"From: Sender <smtp-test@l-p-e.ch>\r\nMessage-ID: <codex-smtp-test-1777566333254@l-p-e.ch>\r\nSubject: Inbound\r\n\r\nBody\r\n.\r\n"
+                .as_slice(),
+        );
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let peer: SocketAddr = "127.0.0.1:25".parse().unwrap();
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "MAIL FROM:<smtp-test@l-p-e.ch>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "RCPT TO:<test@l-p-e.ch>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "DATA",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let transcript = String::from_utf8(writer).unwrap();
+        assert!(transcript.contains("250 sender accepted\r\n"));
+        assert!(transcript.contains("250 recipient accepted\r\n"));
+        assert!(transcript.contains("354 end with <CRLF>.<CRLF>\r\n"));
+        assert!(transcript.contains("250 queued as lpe-ct-in-"));
+        assert!(!transcript.contains("451 "));
+        let request = captured.lock().unwrap().clone().unwrap();
+        assert_eq!(request.mail_from, "smtp-test@l-p-e.ch");
+        assert_eq!(request.rcpt_to, vec!["test@l-p-e.ch".to_string()]);
+        assert_eq!(request.subject, "Inbound");
+        assert_eq!(
+            request.internet_message_id.as_deref(),
+            Some("<codex-smtp-test-1777566333254@l-p-e.ch>")
+        );
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
+    }
+
+    #[tokio::test]
+    async fn smtp_data_defers_with_trace_when_core_delivery_is_unavailable() {
+        let _guard = env_test_lock();
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
+        let spool = temp_dir("smtp-data-core-defer");
+        initialize_spool(&spool).unwrap();
+        let dashboard_store = plaintext_inbound_store("http://127.0.0.1:9".to_string());
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(
+            b"From: Sender <smtp-test@l-p-e.ch>\r\nSubject: Inbound\r\n\r\nBody\r\n.\r\n"
+                .as_slice(),
+        );
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let peer: SocketAddr = "127.0.0.1:25".parse().unwrap();
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "MAIL FROM:<smtp-test@l-p-e.ch>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "RCPT TO:<test@l-p-e.ch>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "DATA",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let transcript = String::from_utf8(writer).unwrap();
+        assert!(transcript
+            .contains("451 core final delivery temporarily unavailable (trace lpe-ct-in-"));
+        assert!(transcript.contains(")\r\n"));
+        assert!(spool.join("deferred").read_dir().unwrap().next().is_some());
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 
     fn training_message(subject: &str, body: &str) -> QueuedMessage {

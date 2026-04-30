@@ -83,6 +83,8 @@ replaced by an `SMTP` listener on the core `LPE` server.
 
 The raw `SMTP` body is carried into `LPE` to keep delivery context, but mailbox persistence remains controlled by the internal `LPE` model.
 
+If `${LPE_CT_CORE_DELIVERY_BASE_URL}` is missing, invalid, or temporarily unreachable, `LPE-CT` must keep custody in its deferred or held queue and return an explicit temporary final-delivery SMTP response that includes the trace id. That bridge failure is not a generic perimeter-policy decision; operators diagnose it from the trace, retained audit event, and the required core-delivery base URL configuration.
+
 Before `DATA` acceptance is finalized, `LPE-CT` may also call `POST /internal/lpe-ct/recipient-verification` on `LPE` for inbound `RCPT TO` validation. That check is authoritative for local-recipient existence and may be cached briefly by `LPE-CT`, but it must not create a second mailbox directory or rely on public callback verification.
 
 Inbound relay protection is domain-gated before recipient verification. When

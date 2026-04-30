@@ -33,6 +33,7 @@ When the optional local PostgreSQL store is enabled, quarantined messages are al
 
 - default: `true`
 - first-seen triplets are deferred for `90` seconds before a later retry is accepted
+- accepted-domain settings can disable greylisting for a specific verified recipient domain; when disabled there, a normal plaintext inbound message for that domain proceeds to final delivery instead of receiving the first-seen greylist `451`
 
 `LPE_CT_BAYESPAM_ENABLED`
 
@@ -392,12 +393,16 @@ Those retention rules apply only to sorting-center-owned technical evidence and 
 
 ## SMTP outcomes
 
-Typical perimeter outcomes are:
+Typical inbound outcomes are:
 
 - `250 queued as <trace>`: accepted for delivery or quarantine ownership
 - `250 quarantined as <trace>`: accepted but retained locally in quarantine
-- `451 message temporarily deferred by perimeter policy (trace <trace>)`: greylisting or transient auth/DNS conditions
+- `451 message temporarily deferred by greylisting (trace <trace>)`: intentional first-seen greylisting
+- `451 message temporarily deferred by authentication dependency (trace <trace>)`: transient `SPF` / `DKIM` / `DMARC` dependency failure
+- `451 core final delivery temporarily unavailable (trace <trace>)`: accepted edge policy, but the internal `LPE` final-delivery bridge is not configured or reachable
 - `554 message rejected by perimeter policy (trace <trace>)`: hard reject, for example enforced DMARC reject
+
+`LPE_CT_CORE_DELIVERY_BASE_URL` must point at the private core `LPE` listener that exposes `/internal/lpe-ct/inbound-deliveries`. If it is empty, invalid, or unreachable, `LPE-CT` keeps the message in deferred custody and returns the explicit core-final-delivery `451` above rather than a generic perimeter-policy deferral.
 
 The decision matrix is now intentionally stricter:
 
