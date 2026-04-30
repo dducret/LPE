@@ -1884,6 +1884,10 @@ where
         write_smtp(writer, "250 SIZE").await?;
     } else if upper == "STARTTLS" {
         if starttls_available {
+            if transaction.helo.is_empty() {
+                write_smtp(writer, "503 send EHLO or HELO first").await?;
+                return Ok(SmtpCommandOutcome::Continue);
+            }
             return Ok(SmtpCommandOutcome::StartTls);
         }
         write_smtp(writer, "454 TLS not available").await?;
@@ -5756,9 +5760,9 @@ mod tests {
         train_bayespam, unix_now, update_reputation, write_smtp, AcceptedDomainConfig,
         AntivirusProviderConfig, AntivirusProviderDecision, AuthSummary, AuthenticationAssessment,
         BayesLabel, DecisionTraceEntry, DkimDisposition, FilterAction, GreylistEntry,
-        OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig, SmtpTransaction,
-        SpfDisposition, TransportDsnReport, TransportRouteDecision, TransportTechnicalStatus,
-        TransportThrottleStatus,
+        OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig,
+        SmtpCommandOutcome, SmtpTransaction, SpfDisposition, TransportDsnReport,
+        TransportRouteDecision, TransportTechnicalStatus, TransportThrottleStatus,
     };
     use crate::env_test_lock;
     use axum::{routing::post, Json, Router};
@@ -6463,6 +6467,74 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         assert_eq!(
             String::from_utf8(writer).unwrap(),
             "250-LPE-CT\r\n250-STARTTLS\r\n250 SIZE\r\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn smtp_ehlo_does_not_advertise_starttls_without_tls_config() {
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(tokio::io::empty());
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let dashboard_store = runtime_store_with_accepted_domains(&[]);
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            std::path::Path::new("spool"),
+            "127.0.0.1:25".parse().unwrap(),
+            &mut transaction,
+            "EHLO mx.example.test",
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(writer).unwrap(),
+            "250-LPE-CT\r\n250 SIZE\r\n"
+        );
+    }
+
+    #[test]
+    fn smtp_starttls_acceptor_rejects_invalid_tls_config() {
+        let missing = temp_dir("missing-starttls-pems").join("missing.pem");
+
+        assert!(smtp_starttls_acceptor_for_paths(
+            Some(missing.display().to_string()),
+            Some(missing.display().to_string()),
+        )
+        .is_err());
+    }
+
+    #[tokio::test]
+    async fn smtp_starttls_requires_ehlo_or_helo_first() {
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(tokio::io::empty());
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let dashboard_store = runtime_store_with_accepted_domains(&[]);
+
+        let outcome = handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            std::path::Path::new("spool"),
+            "127.0.0.1:25".parse().unwrap(),
+            &mut transaction,
+            "STARTTLS",
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, SmtpCommandOutcome::Continue));
+        assert_eq!(
+            String::from_utf8(writer).unwrap(),
+            "503 send EHLO or HELO first\r\n"
         );
     }
 
