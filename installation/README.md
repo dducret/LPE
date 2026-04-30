@@ -55,6 +55,8 @@ It now also provides `test-ha-lpe-ct-active-passive.sh`, `lpe-ct-spool-recover.s
 
 The functional `LPE` / `LPE-CT` integration also requires aligned `LPE_CT_CORE_DELIVERY_BASE_URL`, `LPE_CT_API_BASE_URL`, and `LPE_INTEGRATION_SHARED_SECRET` values across the two nodes. `LPE_CT_CORE_DELIVERY_BASE_URL` points from `LPE-CT` to the core `LPE` HTTP listener, default port `8080`, and is used for `/internal/lpe-ct/inbound-deliveries`, `/internal/lpe-ct/recipient-verification`, `/internal/lpe-ct/submission-auth`, and `/internal/lpe-ct/submissions`. `LPE_CT_API_BASE_URL` points from the `LPE` outbound worker to the `LPE-CT` management/API listener, default port `8380`, and is used for `/api/v1/integration/outbound-messages`. `LPE_INTEGRATION_SHARED_SECRET` is mandatory for `LPE <-> LPE-CT` bridge traffic, must stay out of public interfaces, and must be set to a strong non-trivial value of at least `32` characters. On `LPE-CT`, a missing or weak value now leaves the management UI reachable but reports the bridge as degraded until the secret is fixed. The contract is documented in `docs/architecture/lpe-ct-integration.md`.
 
+Accepted inbound domains for the public `LPE-CT` SMTP listener are not environment variables. After the `LPE-CT` service is running, add and verify each domain in the management console under `System Setup -> Mail relay -> Domains`; the active domain list is stored in the private `LPE-CT` PostgreSQL dashboard state.
+
 - `test-local-lpe-ct.sh` from the `LPE-CT` server
 - `test-from-lpe.sh` from the LAN or core server to verify the signed canonical `LPE -> LPE-CT` outbound handoff API
 - `test-from-internet.sh` from an external machine

@@ -1932,9 +1932,6 @@ fn apply_env_overrides(state: &mut DashboardState) {
             state.local_data_stores.dedicated_postgres.purposes = parsed;
         }
     }
-    if let Ok(value) = env::var("LPE_CT_ACCEPTED_DOMAINS") {
-        upsert_env_accepted_domains(state, &value);
-    }
 }
 
 fn normalize_policy_settings(policies: &mut PolicySettings) {
@@ -2042,52 +2039,6 @@ fn normalize_accepted_domains(domains: &mut Vec<AcceptedDomain>) {
             && seen.insert(domain.domain.clone())
     });
     domains.sort_by(|left, right| left.domain.cmp(&right.domain));
-}
-
-fn upsert_env_accepted_domains(state: &mut DashboardState, value: &str) {
-    for entry in value.split([',', ';']).map(str::trim) {
-        if entry.is_empty() {
-            continue;
-        }
-        let mut parts = entry.split('|').map(str::trim);
-        let Some(domain) = parts.next().map(normalize_domain_name) else {
-            continue;
-        };
-        if !is_valid_domain_name(&domain) {
-            continue;
-        }
-        let destination_server = parts
-            .next()
-            .filter(|value| !value.is_empty())
-            .unwrap_or("core-delivery")
-            .to_string();
-        let verification_type = parts
-            .next()
-            .map(|value| {
-                normalize_verification_type(value).unwrap_or_else(|_| "dynamic".to_string())
-            })
-            .unwrap_or_else(|| "dynamic".to_string());
-        let verified = parts.next().map(parse_bool).unwrap_or(true);
-        let domain_config = AcceptedDomain {
-            id: format!("env-{domain}"),
-            domain: domain.clone(),
-            destination_server,
-            verification_type,
-            rbl_checks: true,
-            spf_checks: true,
-            greylisting: true,
-            verified,
-        };
-        if let Some(existing) = state
-            .accepted_domains
-            .iter_mut()
-            .find(|item| item.domain.eq_ignore_ascii_case(&domain))
-        {
-            *existing = domain_config;
-        } else {
-            state.accepted_domains.push(domain_config);
-        }
-    }
 }
 
 fn normalize_domain_name(value: &str) -> String {
@@ -3375,9 +3326,8 @@ mod tests {
         address_binds_publicly, apply_env_overrides, default_state, env_test_lock,
         ha_activation_check, ha_non_active_role_for_traffic, integration_shared_secret,
         lpe_bridge_probe_url, lpe_health_probe_url, mark_accepted_domain_verified,
-        normalize_accepted_domains, normalize_local_data_stores, persist_state,
-        require_integration_request, submission_listener_is_configured, AcceptedDomain,
-        DashboardResponse, OUTBOUND_HANDOFF_PATH,
+        normalize_local_data_stores, persist_state, require_integration_request,
+        submission_listener_is_configured, AcceptedDomain, DashboardResponse, OUTBOUND_HANDOFF_PATH,
     };
     use axum::http::HeaderMap;
     use lpe_domain::{
@@ -3642,26 +3592,6 @@ mod tests {
         assert!(domains[0].verified);
         assert!(!mark_accepted_domain_verified(&mut domains, "domain-1"));
         assert!(!mark_accepted_domain_verified(&mut domains, "missing"));
-    }
-
-    #[test]
-    #[ignore = "env-sensitive"]
-    fn env_overrides_bootstrap_verified_accepted_domains() {
-        let _guard = env_test_lock();
-        let mut state = default_state();
-
-        std::env::set_var("LPE_CT_ACCEPTED_DOMAINS", "L-P-E.CH|core-lpe|dynamic|true");
-        apply_env_overrides(&mut state);
-        normalize_accepted_domains(&mut state.accepted_domains);
-
-        assert_eq!(state.accepted_domains.len(), 1);
-        assert_eq!(state.accepted_domains[0].id, "env-l-p-e.ch");
-        assert_eq!(state.accepted_domains[0].domain, "l-p-e.ch");
-        assert_eq!(state.accepted_domains[0].destination_server, "core-lpe");
-        assert_eq!(state.accepted_domains[0].verification_type, "dynamic");
-        assert!(state.accepted_domains[0].verified);
-
-        std::env::remove_var("LPE_CT_ACCEPTED_DOMAINS");
     }
 
     #[test]

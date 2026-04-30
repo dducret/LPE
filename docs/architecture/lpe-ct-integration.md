@@ -89,9 +89,11 @@ Inbound relay protection is domain-gated before recipient verification. When
 any accepted domains are configured, `LPE-CT` accepts `RCPT TO` only for exact,
 case-insensitive matches against verified accepted domains such as `l-p-e.ch`;
 unlisted domains and subdomains are rejected as external relay attempts unless
-they are explicitly configured as their own accepted domain. Operators may add
-domains through the management state or bootstrap them with
-`LPE_CT_ACCEPTED_DOMAINS=domain|destination-label|dynamic|true`.
+they are explicitly configured as their own accepted domain. Operators add,
+verify, edit, import, and delete accepted inbound domains dynamically in the
+management console under `System Setup -> Mail relay -> Domains`, or through
+the equivalent management API. The active list is persisted in `LPE-CT`
+PostgreSQL dashboard state and is not bootstrapped from environment variables.
 
 The `LPE-CT` management test under `System Setup -> Mail relay -> Domains`
 validates this same canonical bridge through `${LPE_CT_CORE_DELIVERY_BASE_URL}`.
@@ -175,7 +177,6 @@ On the `LPE` side:
 On the `LPE-CT` side:
 
 - `LPE_CT_CORE_DELIVERY_BASE_URL`
-- `LPE_CT_ACCEPTED_DOMAINS`
 - `LPE_CT_RELAY_PRIMARY`
 - `LPE_CT_RELAY_SECONDARY`
 - `LPE_CT_SUBMISSION_BIND_ADDRESS`
