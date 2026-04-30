@@ -24,6 +24,10 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::net::TcpListener;
+use tokio_rustls::rustls::{
+    pki_types::{CertificateDer, PrivateKeyDer},
+    ServerConfig,
+};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -39,6 +43,7 @@ mod transport_policy;
 
 const MIN_INTEGRATION_SECRET_LEN: usize = 32;
 const OUTBOUND_HANDOFF_PATH: &str = "/api/v1/integration/outbound-messages";
+const ENV_PUBLIC_TLS_PROFILE_ID: &str = "env-public";
 
 static INTEGRATION_REPLAY_CACHE: std::sync::OnceLock<
     std::sync::Mutex<std::collections::BTreeMap<String, i64>>,
@@ -169,6 +174,39 @@ struct NetworkSettings {
     submission_listener_enabled: bool,
     proxy_protocol_enabled: bool,
     max_concurrent_sessions: u32,
+    #[serde(default)]
+    public_tls: PublicTlsSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PublicTlsSettings {
+    #[serde(default)]
+    active_profile_id: Option<String>,
+    #[serde(default)]
+    profiles: Vec<PublicTlsProfile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PublicTlsProfile {
+    id: String,
+    name: String,
+    cert_path: String,
+    key_path: String,
+    created_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PublicTlsUploadRequest {
+    name: String,
+    certificate_pem: String,
+    private_key_pem: String,
+    #[serde(default)]
+    activate: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct PublicTlsSelectionRequest {
+    profile_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -518,6 +556,7 @@ async fn main() -> Result<()> {
     ensure_management_bootstrap(&mut dashboard)?;
     normalize_accepted_domains(&mut dashboard.accepted_domains);
     normalize_policy_settings(&mut dashboard.policies);
+    normalize_public_tls_settings(&mut dashboard.network.public_tls);
     normalize_local_data_stores(&mut dashboard.local_data_stores);
     reporting::normalize_reporting_settings(&mut dashboard.reporting);
     let runtime = smtp::runtime_config_from_dashboard(&dashboard);
@@ -659,6 +698,15 @@ fn router(state: AppState) -> Router {
         .route(
             "/api/v1/reporting/digests/{report_id}",
             get(digest_report_details),
+        )
+        .route(
+            "/api/v1/public-tls/profiles",
+            post(upload_public_tls_profile),
+        )
+        .route("/api/v1/public-tls/select", put(select_public_tls_profile))
+        .route(
+            "/api/v1/public-tls/profiles/{profile_id}",
+            axum::routing::delete(delete_public_tls_profile),
         )
         .route("/api/v1/site", put(update_site))
         .route("/api/v1/relay", put(update_relay))
@@ -1343,13 +1391,133 @@ async fn update_relay(
 async fn update_network(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(payload): Json<NetworkSettings>,
+    Json(mut payload): Json<NetworkSettings>,
 ) -> Result<Json<DashboardState>, ApiError> {
     let admin = require_management_admin(&state, &headers)?;
+    let current_public_tls = read_state(&state)?.network.public_tls;
+    if payload.public_tls.profiles.is_empty() && payload.public_tls.active_profile_id.is_none() {
+        payload.public_tls = current_public_tls;
+    }
+    normalize_public_tls_settings(&mut payload.public_tls);
     mutate_state(&state, &admin.email, "update-network", move |dashboard| {
         dashboard.network = payload;
     })
     .await
+}
+
+async fn upload_public_tls_profile(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<PublicTlsUploadRequest>,
+) -> Result<Json<DashboardState>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let (profile, activate) = store_public_tls_profile(&state, payload).map_err(ApiError::from)?;
+    mutate_state(
+        &state,
+        &admin.email,
+        "upload-public-tls-profile",
+        move |dashboard| {
+            if activate {
+                dashboard.network.public_tls.active_profile_id = Some(profile.id.clone());
+            }
+            dashboard.network.public_tls.profiles.push(profile);
+            normalize_public_tls_settings(&mut dashboard.network.public_tls);
+        },
+    )
+    .await
+}
+
+async fn select_public_tls_profile(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<PublicTlsSelectionRequest>,
+) -> Result<Json<DashboardState>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let selected_profile = {
+        let snapshot = read_state(&state)?;
+        match payload
+            .profile_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            Some(profile_id) => Some(
+                snapshot
+                    .network
+                    .public_tls
+                    .profiles
+                    .iter()
+                    .find(|profile| profile.id == profile_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        ApiError::new(StatusCode::NOT_FOUND, "public TLS profile not found")
+                    })?,
+            ),
+            None => None,
+        }
+    };
+    if let Some(profile) = &selected_profile {
+        validate_tls_pair_from_paths(&profile.cert_path, &profile.key_path)
+            .map_err(ApiError::from)?;
+    }
+    mutate_state(
+        &state,
+        &admin.email,
+        "select-public-tls-profile",
+        move |dashboard| {
+            dashboard.network.public_tls.active_profile_id =
+                selected_profile.as_ref().map(|profile| profile.id.clone());
+            normalize_public_tls_settings(&mut dashboard.network.public_tls);
+        },
+    )
+    .await
+}
+
+async fn delete_public_tls_profile(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(profile_id): AxumPath<String>,
+) -> Result<Json<DashboardState>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let existing = {
+        let snapshot = read_state(&state)?;
+        snapshot
+            .network
+            .public_tls
+            .profiles
+            .iter()
+            .find(|profile| profile.id == profile_id)
+            .cloned()
+            .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "public TLS profile not found"))?
+    };
+    let existing_id = existing.id.clone();
+    let existing_id_for_update = existing_id.clone();
+    let existing_cert_path = existing.cert_path.clone();
+    let existing_key_path = existing.key_path.clone();
+    let result = mutate_state(
+        &state,
+        &admin.email,
+        "delete-public-tls-profile",
+        move |dashboard| {
+            dashboard
+                .network
+                .public_tls
+                .profiles
+                .retain(|profile| profile.id != profile_id);
+            if dashboard.network.public_tls.active_profile_id.as_deref()
+                == Some(&existing_id_for_update)
+            {
+                dashboard.network.public_tls.active_profile_id = None;
+            }
+            normalize_public_tls_settings(&mut dashboard.network.public_tls);
+        },
+    )
+    .await;
+    if result.is_ok() && existing_id != ENV_PUBLIC_TLS_PROFILE_ID {
+        let _ = fs::remove_file(&existing_cert_path);
+        let _ = fs::remove_file(&existing_key_path);
+    }
+    result
 }
 
 async fn update_policies(
@@ -1721,6 +1889,132 @@ fn persist_state(path: &Path, state: &DashboardState) -> Result<()> {
     Ok(())
 }
 
+fn public_tls_store_dir(state: &AppState) -> PathBuf {
+    env::var("LPE_CT_PUBLIC_TLS_STORE_DIR")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            state
+                .state_file
+                .as_ref()
+                .parent()
+                .map(|parent| parent.join("public-tls"))
+                .unwrap_or_else(|| PathBuf::from("/var/lib/lpe-ct/public-tls"))
+        })
+}
+
+fn store_public_tls_profile(
+    state: &AppState,
+    payload: PublicTlsUploadRequest,
+) -> Result<(PublicTlsProfile, bool)> {
+    let name = payload.name.trim();
+    if name.is_empty() {
+        anyhow::bail!("public TLS profile name is required");
+    }
+    validate_tls_pair_from_pem(&payload.certificate_pem, &payload.private_key_pem)?;
+
+    let profile_id = Uuid::new_v4().to_string();
+    let store_dir = public_tls_store_dir(state);
+    fs::create_dir_all(&store_dir)
+        .with_context(|| format!("unable to create public TLS store {}", store_dir.display()))?;
+
+    let cert_path = store_dir.join(format!("{profile_id}.cert.pem"));
+    let key_path = store_dir.join(format!("{profile_id}.key.pem"));
+    fs::write(&cert_path, normalize_pem_text(&payload.certificate_pem)).with_context(|| {
+        format!(
+            "unable to write public TLS certificate {}",
+            cert_path.display()
+        )
+    })?;
+    write_private_key_file(&key_path, &normalize_pem_text(&payload.private_key_pem)).with_context(
+        || {
+            format!(
+                "unable to write public TLS private key {}",
+                key_path.display()
+            )
+        },
+    )?;
+
+    Ok((
+        PublicTlsProfile {
+            id: profile_id,
+            name: name.to_string(),
+            cert_path: cert_path.display().to_string(),
+            key_path: key_path.display().to_string(),
+            created_at: current_timestamp(),
+        },
+        payload.activate,
+    ))
+}
+
+fn normalize_pem_text(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    format!("{trimmed}\n")
+}
+
+fn write_private_key_file(path: &Path, value: &str) -> Result<()> {
+    fs::write(path, value)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+fn validate_tls_pair_from_paths(cert_path: &str, key_path: &str) -> Result<()> {
+    let cert_pem = fs::read_to_string(cert_path)
+        .with_context(|| format!("unable to read certificate {cert_path}"))?;
+    let key_pem = fs::read_to_string(key_path)
+        .with_context(|| format!("unable to read private key {key_path}"))?;
+    validate_tls_pair_from_pem(&cert_pem, &key_pem)
+}
+
+fn validate_tls_pair_from_pem(cert_pem: &str, key_pem: &str) -> Result<()> {
+    let certificates = parse_certificates_pem(cert_pem)?;
+    let key = parse_private_key_pem(key_pem)?;
+    ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certificates, key)
+        .context("public TLS certificate and private key do not form a usable server identity")?;
+    Ok(())
+}
+
+fn parse_certificates_pem(value: &str) -> Result<Vec<CertificateDer<'static>>> {
+    let mut reader = std::io::BufReader::new(value.as_bytes());
+    let certificates = rustls_pemfile::certs(&mut reader)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("unable to parse public TLS certificate PEM")?;
+    if certificates.is_empty() {
+        anyhow::bail!("public TLS certificate PEM does not contain a certificate");
+    }
+    Ok(certificates)
+}
+
+fn parse_private_key_pem(value: &str) -> Result<PrivateKeyDer<'static>> {
+    let mut reader = std::io::BufReader::new(value.as_bytes());
+    let mut keys = rustls_pemfile::pkcs8_private_keys(&mut reader)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("unable to parse PKCS#8 private key PEM")?;
+    if let Some(key) = keys.pop() {
+        return Ok(PrivateKeyDer::Pkcs8(key));
+    }
+
+    let mut reader = std::io::BufReader::new(value.as_bytes());
+    let mut keys = rustls_pemfile::rsa_private_keys(&mut reader)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .context("unable to parse RSA private key PEM")?;
+    let Some(key) = keys.pop() else {
+        anyhow::bail!("private key PEM does not contain a supported private key");
+    };
+    Ok(PrivateKeyDer::Pkcs1(key))
+}
+
 fn apply_env_overrides(state: &mut DashboardState) {
     if let Ok(value) = env::var("LPE_CT_NODE_NAME") {
         state.site.node_name = value;
@@ -1736,6 +2030,17 @@ fn apply_env_overrides(state: &mut DashboardState) {
     }
     if let Ok(value) = env::var("LPE_CT_CORE_DELIVERY_BASE_URL") {
         state.relay.core_delivery_base_url = value;
+    }
+    let public_tls_cert_path = env::var("LPE_CT_PUBLIC_TLS_CERT_PATH")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let public_tls_key_path = env::var("LPE_CT_PUBLIC_TLS_KEY_PATH")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if let (Some(cert_path), Some(key_path)) = (public_tls_cert_path, public_tls_key_path) {
+        upsert_env_public_tls_profile(&mut state.network.public_tls, cert_path, key_path);
     }
     if let Ok(value) = env::var("LPE_CT_MUTUAL_TLS_REQUIRED") {
         state.relay.mutual_tls_required = parse_bool(&value);
@@ -1930,6 +2235,54 @@ fn apply_env_overrides(state: &mut DashboardState) {
         let parsed = parse_csv(&value);
         if !parsed.is_empty() {
             state.local_data_stores.dedicated_postgres.purposes = parsed;
+        }
+    }
+    normalize_public_tls_settings(&mut state.network.public_tls);
+}
+
+fn upsert_env_public_tls_profile(
+    settings: &mut PublicTlsSettings,
+    cert_path: String,
+    key_path: String,
+) {
+    let profile = PublicTlsProfile {
+        id: ENV_PUBLIC_TLS_PROFILE_ID.to_string(),
+        name: "Environment public TLS".to_string(),
+        cert_path,
+        key_path,
+        created_at: current_timestamp(),
+    };
+    if let Some(existing) = settings
+        .profiles
+        .iter_mut()
+        .find(|existing| existing.id == ENV_PUBLIC_TLS_PROFILE_ID)
+    {
+        *existing = profile;
+    } else {
+        settings.profiles.push(profile);
+    }
+    settings.active_profile_id = Some(ENV_PUBLIC_TLS_PROFILE_ID.to_string());
+}
+
+fn normalize_public_tls_settings(settings: &mut PublicTlsSettings) {
+    settings.profiles.retain(|profile| {
+        !profile.id.trim().is_empty()
+            && !profile.cert_path.trim().is_empty()
+            && !profile.key_path.trim().is_empty()
+    });
+    settings.profiles.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    if let Some(active_id) = settings.active_profile_id.as_deref() {
+        if !settings
+            .profiles
+            .iter()
+            .any(|profile| profile.id == active_id)
+        {
+            settings.active_profile_id = None;
         }
     }
 }
@@ -2465,6 +2818,7 @@ fn default_state() -> DashboardState {
             submission_listener_enabled: false,
             proxy_protocol_enabled: false,
             max_concurrent_sessions: 250,
+            public_tls: PublicTlsSettings::default(),
         },
         local_data_stores: LocalDataStoresSettings {
             state_file_path: env_value("LPE_CT_STATE_FILE")
@@ -3327,7 +3681,8 @@ mod tests {
         ha_activation_check, ha_non_active_role_for_traffic, integration_shared_secret,
         lpe_bridge_probe_url, lpe_health_probe_url, mark_accepted_domain_verified,
         normalize_local_data_stores, persist_state, require_integration_request,
-        submission_listener_is_configured, AcceptedDomain, DashboardResponse, OUTBOUND_HANDOFF_PATH,
+        submission_listener_is_configured, AcceptedDomain, DashboardResponse,
+        OUTBOUND_HANDOFF_PATH,
     };
     use axum::http::HeaderMap;
     use lpe_domain::{

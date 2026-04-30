@@ -183,12 +183,24 @@ struct SmtpTransaction {
     helo: String,
     mail_from: String,
     rcpt_to: Vec<String>,
+    greeting_required: bool,
 }
 
 impl SmtpTransaction {
+    fn after_starttls() -> Self {
+        Self {
+            greeting_required: true,
+            ..Self::default()
+        }
+    }
+
     fn reset_message(&mut self) {
         self.mail_from.clear();
         self.rcpt_to.clear();
+    }
+
+    fn requires_greeting(&self) -> bool {
+        self.greeting_required && self.helo.is_empty()
     }
 }
 
@@ -759,7 +771,6 @@ pub(crate) async fn run_smtp_listener(
     dashboard_store: Arc<Mutex<super::DashboardState>>,
     spool_dir: PathBuf,
 ) -> Result<()> {
-    let starttls = smtp_starttls_acceptor()?;
     let listener = TcpListener::bind(&bind_address)
         .await
         .with_context(|| format!("unable to bind SMTP listener on {bind_address}"))?;
@@ -788,7 +799,13 @@ pub(crate) async fn run_smtp_listener(
         }
         let dashboard_store = dashboard_store.clone();
         let spool_dir = spool_dir.clone();
-        let starttls = starttls.clone();
+        let starttls = match smtp_starttls_acceptor_from_store(&dashboard_store) {
+            Ok(starttls) => starttls,
+            Err(error) => {
+                warn!(error = %error, "public TLS profile is not usable; STARTTLS will not be advertised for this SMTP session");
+                None
+            }
+        };
         tokio::spawn(async move {
             if let Err(error) =
                 handle_smtp_session(stream, peer, dashboard_store, spool_dir, starttls).await
@@ -1730,7 +1747,7 @@ async fn handle_smtp_session(
                     &dashboard_store,
                     &spool_dir,
                     peer,
-                    SmtpTransaction::default(),
+                    SmtpTransaction::after_starttls(),
                 )
                 .await?;
                 return Ok(());
@@ -1800,6 +1817,7 @@ where
     let upper = command.to_ascii_uppercase();
     if upper.starts_with("EHLO ") || upper.starts_with("HELO ") {
         transaction.helo = command[5.min(command.len())..].trim().to_string();
+        transaction.greeting_required = false;
         transaction.reset_message();
         write_smtp(writer, "250-LPE-CT").await?;
         if starttls_available {
@@ -1812,6 +1830,10 @@ where
         }
         write_smtp(writer, "454 TLS not available").await?;
     } else if upper.starts_with("MAIL FROM:") {
+        if transaction.requires_greeting() {
+            write_smtp(writer, "503 send EHLO or HELO after STARTTLS first").await?;
+            return Ok(SmtpCommandOutcome::Continue);
+        }
         let candidate = command[10..].trim().trim_matches(['<', '>']).to_string();
         let config = runtime_config_from_store(dashboard_store)?;
         if let transport_policy::AddressPolicyVerdict::Reject(reason) =
@@ -1828,6 +1850,10 @@ where
         transaction.rcpt_to.clear();
         write_smtp(writer, "250 sender accepted").await?;
     } else if upper.starts_with("RCPT TO:") {
+        if transaction.requires_greeting() {
+            write_smtp(writer, "503 send EHLO or HELO after STARTTLS first").await?;
+            return Ok(SmtpCommandOutcome::Continue);
+        }
         if transaction.mail_from.is_empty() {
             write_smtp(writer, "503 send MAIL FROM first").await?;
             return Ok(SmtpCommandOutcome::Continue);
@@ -1882,6 +1908,10 @@ where
         }
         write_smtp(writer, "250 recipient accepted").await?;
     } else if upper == "DATA" {
+        if transaction.requires_greeting() {
+            write_smtp(writer, "503 send EHLO or HELO after STARTTLS first").await?;
+            return Ok(SmtpCommandOutcome::Continue);
+        }
         if transaction.mail_from.is_empty() || transaction.rcpt_to.is_empty() {
             write_smtp(writer, "503 sender and recipient required").await?;
             return Ok(SmtpCommandOutcome::Continue);
@@ -2625,7 +2655,7 @@ async fn evaluate_inbound_policy(
     let mut dnsbl = DnsblOutcome::default();
     let mut auth_summary = AuthSummary::default();
     let mut auth_assessment = None;
-    let mut defer_reasons = Vec::new();
+    let defer_reasons = Vec::new();
     let mut reject_reasons = Vec::new();
     let mut quarantine_reasons = Vec::new();
     let domain_policy = inbound_domain_policy(config, rcpt_to);
@@ -2867,38 +2897,66 @@ async fn evaluate_inbound_policy(
         });
     }
 
+    let (action, reason) = finalize_policy_decision(
+        config,
+        auth_assessment.as_ref(),
+        spam_score,
+        security_score,
+        reputation_score,
+        &mut decision_trace,
+        defer_reasons,
+        reject_reasons,
+        quarantine_reasons,
+    );
+
+    Ok(FilterVerdict {
+        action,
+        reason,
+        spam_score,
+        security_score,
+        reputation_score,
+        dnsbl_hits: dnsbl.hits,
+        auth_summary,
+        decision_trace,
+    })
+}
+
+fn finalize_policy_decision(
+    config: &RuntimeConfig,
+    auth_assessment: Option<&AuthenticationAssessment>,
+    spam_score: f32,
+    security_score: f32,
+    reputation_score: i32,
+    decision_trace: &mut Vec<DecisionTraceEntry>,
+    mut defer_reasons: Vec<String>,
+    mut reject_reasons: Vec<String>,
+    mut quarantine_reasons: Vec<String>,
+) -> (FilterAction, Option<String>) {
     if config.defer_on_auth_tempfail
-        && auth_assessment
-            .as_ref()
-            .is_some_and(AuthenticationAssessment::has_temporary_failure)
+        && auth_assessment.is_some_and(AuthenticationAssessment::has_temporary_failure)
     {
         defer_reasons.push("authentication dependency temporarily failed".to_string());
     }
     if config.require_dmarc_enforcement
-        && auth_assessment
-            .as_ref()
-            .is_some_and(|assessment| assessment.dmarc == DmarcDisposition::Reject)
+        && auth_assessment.is_some_and(|assessment| assessment.dmarc == DmarcDisposition::Reject)
     {
         reject_reasons.push("DMARC policy requested reject".to_string());
     }
     if config.require_dmarc_enforcement
         && auth_assessment
-            .as_ref()
             .is_some_and(|assessment| assessment.dmarc == DmarcDisposition::Quarantine)
     {
         quarantine_reasons.push("DMARC policy requested quarantine".to_string());
     }
     if config.require_spf
-        && auth_assessment.as_ref().is_some_and(|assessment| {
+        && auth_assessment.is_some_and(|assessment| {
             assessment.spf == SpfDisposition::Fail && !assessment.dkim_aligned
         })
     {
         reject_reasons.push("SPF failed and no aligned DKIM signature passed".to_string());
     }
     if config.require_dkim_alignment
-        && auth_assessment
-            .as_ref()
-            .is_some_and(|assessment| !assessment.dkim_aligned)
+        && auth_assessment.is_some_and(|assessment| !assessment.dkim_aligned)
     {
         quarantine_reasons.push("aligned DKIM verification did not pass".to_string());
     }
@@ -2969,25 +3027,14 @@ async fn evaluate_inbound_policy(
             FilterAction::Defer => "defer",
         }
         .to_string(),
-        detail: reason
-            .clone()
-            .unwrap_or_else(|| {
-                format!(
-                    "message passed SMTP perimeter policy (spam_score={spam_score:.1}, security_score={security_score:.1})"
-                )
-            }),
+        detail: reason.clone().unwrap_or_else(|| {
+            format!(
+                "message passed SMTP perimeter policy (spam_score={spam_score:.1}, security_score={security_score:.1})"
+            )
+        }),
     });
 
-    Ok(FilterVerdict {
-        action,
-        reason,
-        spam_score,
-        security_score,
-        reputation_score,
-        dnsbl_hits: dnsbl.hits,
-        auth_summary,
-        decision_trace,
-    })
+    (action, reason)
 }
 
 fn apply_filter_verdict(message: &mut QueuedMessage, verdict: &FilterVerdict) {
@@ -4383,6 +4430,53 @@ where
 fn smtp_starttls_acceptor() -> Result<Option<TlsAcceptor>> {
     let cert_path = optional_env("LPE_CT_PUBLIC_TLS_CERT_PATH");
     let key_path = optional_env("LPE_CT_PUBLIC_TLS_KEY_PATH");
+    smtp_starttls_acceptor_for_paths(cert_path, key_path)
+}
+
+fn smtp_starttls_acceptor_from_store(
+    dashboard_store: &Arc<Mutex<super::DashboardState>>,
+) -> Result<Option<TlsAcceptor>> {
+    let (cert_path, key_path) = {
+        let snapshot = dashboard_store
+            .lock()
+            .map_err(|_| anyhow!("dashboard state lock poisoned"))?;
+        public_tls_paths_from_dashboard(&snapshot)
+    };
+    smtp_starttls_acceptor_for_paths(cert_path, key_path)
+}
+
+fn public_tls_paths_from_dashboard(
+    dashboard: &super::DashboardState,
+) -> (Option<String>, Option<String>) {
+    let Some(active_id) = dashboard
+        .network
+        .public_tls
+        .active_profile_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return (None, None);
+    };
+    let Some(profile) = dashboard
+        .network
+        .public_tls
+        .profiles
+        .iter()
+        .find(|profile| profile.id == active_id)
+    else {
+        return (None, None);
+    };
+    (
+        Some(profile.cert_path.trim().to_string()).filter(|value| !value.is_empty()),
+        Some(profile.key_path.trim().to_string()).filter(|value| !value.is_empty()),
+    )
+}
+
+fn smtp_starttls_acceptor_for_paths(
+    cert_path: Option<String>,
+    key_path: Option<String>,
+) -> Result<Option<TlsAcceptor>> {
     match (cert_path, key_path) {
         (Some(cert_path), Some(key_path)) => {
             let certificates = load_certificates(&cert_path)?;
@@ -4409,6 +4503,12 @@ fn load_certificates(path: &str) -> Result<Vec<CertificateDer<'static>>> {
     rustls_pemfile::certs(&mut reader)
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(|error| anyhow!("unable to parse certificate {path}: {error}"))
+        .and_then(|certificates| {
+            if certificates.is_empty() {
+                anyhow::bail!("no certificate found in {path}");
+            }
+            Ok(certificates)
+        })
 }
 
 fn load_private_key(path: &str) -> Result<PrivateKeyDer<'static>> {
@@ -5600,17 +5700,18 @@ mod tests {
     use super::{
         apply_authentication_scores, classify_inbound_message, compose_rfc822_message,
         delete_trace, dkim_disposition, dnsbl_query_name, encode_quoted_printable,
-        evaluate_greylisting, handle_smtp_command, handle_smtp_session, initialize_spool,
-        load_antivirus_providers, load_bayespam_corpus, load_reputation_score, load_trace_details,
-        parse_antivirus_output, parse_peer_ip, persist_message, process_outbound_handoff,
-        receive_message, receive_message_with_validator, release_trace, retry_after_seconds,
-        retry_trace, score_bayespam, smtp_starttls_acceptor, spf_disposition, stable_key_id,
-        summarize_dkim, summarize_dmarc, summarize_spf, train_bayespam, unix_now,
+        evaluate_greylisting, finalize_policy_decision, handle_smtp_command, handle_smtp_session,
+        initialize_spool, load_antivirus_providers, load_bayespam_corpus, load_reputation_score,
+        load_trace_details, parse_antivirus_output, parse_peer_ip, persist_message,
+        process_outbound_handoff, receive_message, receive_message_with_validator, release_trace,
+        retry_after_seconds, retry_trace, score_bayespam, smtp_starttls_acceptor, spf_disposition,
+        stable_key_id, summarize_dkim, summarize_dmarc, summarize_spf, train_bayespam, unix_now,
         update_reputation, AcceptedDomainConfig, AntivirusProviderConfig,
         AntivirusProviderDecision, AuthSummary, AuthenticationAssessment, BayesLabel,
-        DkimDisposition, FilterAction, GreylistEntry, OutboundRoutingRule, OutboundThrottleRule,
-        QueuedMessage, RuntimeConfig, SmtpTransaction, SpfDisposition, TransportDsnReport,
-        TransportRouteDecision, TransportTechnicalStatus, TransportThrottleStatus,
+        DecisionTraceEntry, DkimDisposition, FilterAction, GreylistEntry, OutboundRoutingRule,
+        OutboundThrottleRule, QueuedMessage, RuntimeConfig, SmtpTransaction, SpfDisposition,
+        TransportDsnReport, TransportRouteDecision, TransportTechnicalStatus,
+        TransportThrottleStatus,
     };
     use crate::env_test_lock;
     use axum::{routing::post, Json, Router};
@@ -5889,12 +5990,31 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         )
         .await
         .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            "127.0.0.1:25".parse().unwrap(),
+            &mut transaction,
+            "RCPT TO:<test@sdic.ch>",
+            false,
+        )
+        .await
+        .unwrap();
 
         let transcript = String::from_utf8(writer).unwrap();
         assert!(transcript.contains("250 sender accepted\r\n"));
         assert!(transcript.contains("250 recipient accepted\r\n"));
         assert!(
             transcript.contains("550 recipient domain is not accepted by this sorting center\r\n")
+        );
+        assert_eq!(
+            transcript
+                .matches("550 recipient domain is not accepted by this sorting center")
+                .count(),
+            2
         );
         assert_eq!(transaction.rcpt_to, vec!["test@l-p-e.ch".to_string()]);
     }
@@ -6305,6 +6425,10 @@ pzqAuzRp69VoxDpO6hdx/Qc=
     async fn smtp_starttls_upgrades_to_tls_after_ready_reply() {
         let _guard = env_test_lock();
         let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
         let spool = temp_dir("starttls-session-spool");
         initialize_spool(&spool).unwrap();
         let tls_dir = temp_dir("starttls-pems");
@@ -6320,7 +6444,9 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             .expect("test TLS certificate should enable STARTTLS");
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let dashboard_store = runtime_store_with_accepted_domains(&[]);
+        let captured = Arc::new(Mutex::new(None::<InboundDeliveryRequest>));
+        let core_base_url = spawn_dummy_core(captured.clone()).await;
+        let dashboard_store = plaintext_inbound_store(core_base_url);
         let server = tokio::spawn(async move {
             let (stream, peer) = listener.accept().await.unwrap();
             handle_smtp_session(stream, peer, dashboard_store, spool, Some(starttls))
@@ -6366,6 +6492,16 @@ pzqAuzRp69VoxDpO6hdx/Qc=
 
         tls_reader
             .get_mut()
+            .write_all(b"MAIL FROM:<internet-check@external.example>\r\n")
+            .await
+            .unwrap();
+        assert_eq!(
+            read_test_smtp_reply(&mut tls_reader).await,
+            "503 send EHLO or HELO after STARTTLS first\r\n"
+        );
+
+        tls_reader
+            .get_mut()
             .write_all(b"EHLO secure.example.test\r\n")
             .await
             .unwrap();
@@ -6373,12 +6509,50 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             read_test_smtp_reply(&mut tls_reader).await,
             "250-LPE-CT\r\n250 SIZE\r\n"
         );
+        tls_reader
+            .get_mut()
+            .write_all(b"MAIL FROM:<internet-check@external.example>\r\n")
+            .await
+            .unwrap();
+        assert_eq!(
+            read_test_smtp_reply(&mut tls_reader).await,
+            "250 sender accepted\r\n"
+        );
+        tls_reader
+            .get_mut()
+            .write_all(b"RCPT TO:<test@l-p-e.ch>\r\n")
+            .await
+            .unwrap();
+        assert_eq!(
+            read_test_smtp_reply(&mut tls_reader).await,
+            "250 recipient accepted\r\n"
+        );
+        tls_reader.get_mut().write_all(b"DATA\r\n").await.unwrap();
+        assert_eq!(
+            read_test_smtp_reply(&mut tls_reader).await,
+            "354 end with <CRLF>.<CRLF>\r\n"
+        );
+        tls_reader
+            .get_mut()
+            .write_all(
+                b"From: Internet Check <internet-check@external.example>\r\nMessage-ID: <starttls-inbound@external.example>\r\nSubject: STARTTLS inbound\r\n\r\nBody over TLS\r\n.\r\n",
+            )
+            .await
+            .unwrap();
+        assert!(read_test_smtp_reply(&mut tls_reader)
+            .await
+            .starts_with("250 queued as lpe-ct-in-"));
         tls_reader.get_mut().write_all(b"QUIT\r\n").await.unwrap();
         assert_eq!(read_test_smtp_reply(&mut tls_reader).await, "221 bye\r\n");
 
         server.await.unwrap();
+        let request = captured.lock().unwrap().clone().unwrap();
+        assert_eq!(request.mail_from, "internet-check@external.example");
+        assert_eq!(request.rcpt_to, vec!["test@l-p-e.ch".to_string()]);
+        assert_eq!(request.subject, "STARTTLS inbound");
         std::env::remove_var("LPE_CT_PUBLIC_TLS_CERT_PATH");
         std::env::remove_var("LPE_CT_PUBLIC_TLS_KEY_PATH");
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 
     #[derive(Debug, Clone)]
@@ -7427,6 +7601,119 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         assert!(security_score >= 5.0);
         assert!(trace.iter().any(|entry| entry.stage == "spf-alignment"));
         assert!(trace.iter().any(|entry| entry.stage == "dkim-alignment"));
+    }
+
+    fn auth_policy_config() -> RuntimeConfig {
+        let mut config =
+            runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+        config.spam_reject_threshold = 100.0;
+        config.spam_quarantine_threshold = 100.0;
+        config.reputation_enabled = false;
+        config.defer_on_auth_tempfail = false;
+        config
+    }
+
+    fn decide_auth_policy(
+        config: &RuntimeConfig,
+        assessment: &AuthenticationAssessment,
+    ) -> (FilterAction, Option<String>, Vec<DecisionTraceEntry>) {
+        let mut trace = Vec::new();
+        let (action, reason) = finalize_policy_decision(
+            config,
+            Some(assessment),
+            0.0,
+            0.0,
+            0,
+            &mut trace,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        (action, reason, trace)
+    }
+
+    #[test]
+    fn strict_dmarc_rejects_spoofed_local_from_without_aligned_auth() {
+        let config = auth_policy_config();
+        let assessment = AuthenticationAssessment {
+            spf: SpfDisposition::Fail,
+            dkim: DkimDisposition::None,
+            dkim_aligned: false,
+            spf_aligned: false,
+            dmarc: DmarcDisposition::Reject,
+            from_domain: "l-p-e.ch".to_string(),
+            spf_domain: "l-p-e.ch".to_string(),
+        };
+
+        let (action, reason, trace) = decide_auth_policy(&config, &assessment);
+
+        assert_eq!(action, FilterAction::Reject);
+        assert_eq!(
+            reason.as_deref(),
+            Some("DMARC policy requested reject; SPF failed and no aligned DKIM signature passed")
+        );
+        assert!(trace.iter().any(|entry| {
+            entry.stage == "policy-trigger"
+                && entry.outcome == "reject"
+                && entry.detail == "DMARC policy requested reject"
+        }));
+    }
+
+    #[test]
+    fn external_domain_without_rejecting_dmarc_is_accepted_by_auth_policy() {
+        let config = auth_policy_config();
+        let assessment = AuthenticationAssessment {
+            spf: SpfDisposition::None,
+            dkim: DkimDisposition::None,
+            dkim_aligned: false,
+            spf_aligned: false,
+            dmarc: DmarcDisposition::None,
+            from_domain: "external.example".to_string(),
+            spf_domain: "external.example".to_string(),
+        };
+
+        let (action, reason, _) = decide_auth_policy(&config, &assessment);
+
+        assert_eq!(action, FilterAction::Accept);
+        assert_eq!(reason, None);
+    }
+
+    #[test]
+    fn aligned_spf_pass_accepts_message_under_dmarc() {
+        let config = auth_policy_config();
+        let assessment = AuthenticationAssessment {
+            spf: SpfDisposition::Pass,
+            dkim: DkimDisposition::None,
+            dkim_aligned: false,
+            spf_aligned: true,
+            dmarc: DmarcDisposition::Pass,
+            from_domain: "sender.example".to_string(),
+            spf_domain: "sender.example".to_string(),
+        };
+
+        let (action, reason, _) = decide_auth_policy(&config, &assessment);
+
+        assert_eq!(action, FilterAction::Accept);
+        assert_eq!(reason, None);
+    }
+
+    #[test]
+    fn aligned_dkim_pass_compensates_for_spf_fail() {
+        let config = auth_policy_config();
+        let assessment = AuthenticationAssessment {
+            spf: SpfDisposition::Fail,
+            dkim: DkimDisposition::Pass,
+            dkim_aligned: true,
+            spf_aligned: false,
+            dmarc: DmarcDisposition::Pass,
+            from_domain: "sender.example".to_string(),
+            spf_domain: "bounce.example".to_string(),
+        };
+
+        let (action, reason, _) = decide_auth_policy(&config, &assessment);
+
+        assert_eq!(action, FilterAction::Accept);
+        assert_eq!(reason, None);
     }
 
     #[test]

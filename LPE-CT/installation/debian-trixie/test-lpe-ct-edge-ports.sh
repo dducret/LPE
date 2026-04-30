@@ -145,6 +145,33 @@ tls_probe_if_possible() {
   fail "${name} on ${host}:${port} did not present a TLS certificate"
 }
 
+smtp_starttls_probe_if_possible() {
+  local host="$1"
+  local port="$2"
+  local output_file
+  local openssl_status=0
+  if ! command -v openssl >/dev/null 2>&1; then
+    echo "[SKIP] openssl is not available; SMTP STARTTLS handshake was not checked."
+    return
+  fi
+  output_file="$(mktemp)"
+  timeout 10 openssl s_client -starttls smtp -crlf -showcerts -connect "${host}:${port}" -servername "${LPE_CT_PUBLIC_HOSTNAME:-localhost}" </dev/null >"${output_file}" 2>&1 || openssl_status=$?
+  if grep -q "BEGIN CERTIFICATE" "${output_file}"; then
+    if [[ "${openssl_status}" -ne 0 ]]; then
+      echo "[WARN] SMTP STARTTLS on ${host}:${port} presented a TLS certificate, but openssl exited with status ${openssl_status}. The service may have closed the SMTP session after TLS."
+      sed -n '1,40p' "${output_file}" || true
+    fi
+    rm -f "${output_file}"
+    pass "SMTP ingress on ${host}:${port} completed STARTTLS and presented a TLS certificate"
+    return
+  fi
+  echo "[DIAG] openssl s_client -starttls smtp failed for SMTP ingress on ${host}:${port}:"
+  sed -n '1,100p' "${output_file}" || true
+  recent_logs
+  rm -f "${output_file}"
+  fail "SMTP ingress on ${host}:${port} failed STARTTLS handshake"
+}
+
 probe_imaps_upstream() {
   local upstream="$1"
   local host
@@ -190,6 +217,11 @@ if [[ -n "${LPE_CT_IMAPS_BIND_ADDRESS:-}" ]]; then
 fi
 
 tcp_probe "SMTP ingress" "$HOST" "${SMTP_PORT:-25}"
+if [[ -n "${LPE_CT_PUBLIC_TLS_CERT_PATH:-}" && -n "${LPE_CT_PUBLIC_TLS_KEY_PATH:-}" ]]; then
+  smtp_starttls_probe_if_possible "$HOST" "${SMTP_PORT:-25}"
+else
+  echo "[SKIP] LPE_CT_PUBLIC_TLS_CERT_PATH and LPE_CT_PUBLIC_TLS_KEY_PATH are not both configured; SMTP STARTTLS is intentionally not advertised."
+fi
 
 curl --silent --show-error --fail --insecure "https://${HOST}:${HTTPS_PORT}/" >/dev/null \
   || fail "HTTPS management edge is not reachable on ${HOST}:${HTTPS_PORT}"

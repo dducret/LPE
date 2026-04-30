@@ -181,6 +181,8 @@ On the `LPE-CT` side:
 - `LPE_CT_CORE_DELIVERY_BASE_URL`
 - `LPE_CT_RELAY_PRIMARY`
 - `LPE_CT_RELAY_SECONDARY`
+- `LPE_CT_PUBLIC_TLS_CERT_PATH`
+- `LPE_CT_PUBLIC_TLS_KEY_PATH`
 - `LPE_CT_SUBMISSION_BIND_ADDRESS`
 - `LPE_CT_SUBMISSION_TLS_CERT_PATH`
 - `LPE_CT_SUBMISSION_TLS_KEY_PATH`
@@ -188,6 +190,13 @@ On the `LPE-CT` side:
 - `LPE_CT_LOG_FORMAT`
 - `LPE_CT_METRICS_ENABLED`
 - `LPE_INTEGRATION_SHARED_SECRET`
+
+`LPE_CT_PUBLIC_TLS_CERT_PATH` and `LPE_CT_PUBLIC_TLS_KEY_PATH` are accepted as
+an installation bootstrap path for the public inbound `SMTP` `STARTTLS`
+identity. Runtime management is through `LPE-CT` `System Setup -> Mail relay ->
+SMTP Settings`, where operators upload a PEM certificate chain and matching PEM
+private key and select the active profile. `LPE-CT` advertises inbound
+`STARTTLS` only when the active profile has usable certificate and key material.
 
 Any dedicated local database used by `LPE-CT` remains a sorting-center-private technical store. It must not require direct access from the `DMZ` to the core `LPE` `PostgreSQL` database and must not hold canonical mailbox or collaboration state. The full boundary is documented in `docs/architecture/lpe-ct-local-data-stores.md`.
 

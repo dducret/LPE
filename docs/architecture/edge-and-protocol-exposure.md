@@ -14,8 +14,9 @@ The core `LPE` server must not be directly reachable from the public Internet an
 
 `LPE-CT` publishes:
 
-- inbound `SMTP` on port `25`, with `STARTTLS` advertised when
-  `LPE_CT_PUBLIC_TLS_CERT_PATH` and `LPE_CT_PUBLIC_TLS_KEY_PATH` are configured
+- inbound `SMTP` on port `25`, with `STARTTLS` advertised only when an active
+  public certificate and private-key profile is configured in the `LPE-CT`
+  management console under `System Setup -> Mail relay -> SMTP Settings`
 - authenticated client `SMTP` submission on implicit `TLS` port `465` when configured
 - the `LPE` web client and `LPE-CT` management publication over `HTTPS` on `443`
 - plain `HTTP` on port `80` only as a redirect to the `HTTPS` edge; port `80`
@@ -30,12 +31,23 @@ The core `LPE` server must not be directly reachable from the public Internet an
 For secure client submission, the baseline target prefers implicit TLS on port `465`, aligned with `RFC 8314`.
 
 The same public certificate chain may be reused for `HTTPS` `443`, implicit
-`TLS` submission `465`, and `IMAPS` `993` on the same public hostname. Debian
-installations document that certificate through:
+`TLS` submission `465`, and `IMAPS` `993` on the same public hostname. `LPE-CT`
+stores selectable public `SMTP` `STARTTLS` certificate profiles in its private
+management state; operators upload a PEM certificate chain and matching PEM
+private key, then select the active profile in the management console. Debian
+installations may still bootstrap the initial public profile through:
 
+- `LPE_CT_PUBLIC_TLS_CERT_PATH` / `LPE_CT_PUBLIC_TLS_KEY_PATH` to bootstrap the
+  active inbound `SMTP` `STARTTLS` profile on `25`
 - `LPE_CT_PUBLIC_TLS_CERT_PATH` / `LPE_CT_PUBLIC_TLS_KEY_PATH` for `nginx` `443`
 - `LPE_CT_SUBMISSION_TLS_CERT_PATH` / `LPE_CT_SUBMISSION_TLS_KEY_PATH` for `465`
 - `LPE_CT_IMAPS_TLS_CERT_PATH` / `LPE_CT_IMAPS_TLS_KEY_PATH` for `993`
+
+Port `25` is a plaintext `SMTP` listener that upgrades with `STARTTLS`; it is
+not implicit `TLS`. External validation must use `openssl s_client -starttls
+smtp -connect <mx-host>:25 -servername <mx-host>`. After the server replies
+`220 ready to start TLS` and the TLS handshake succeeds, clients must send a
+fresh `EHLO` before `MAIL FROM`, `RCPT TO`, or `DATA`.
 
 The `HTTPS` publication must redirect accidental plain `HTTP` traffic to the
 configured TLS origin, including nginx's plain-HTTP-on-HTTPS-port case. This

@@ -5,7 +5,7 @@ CT_PUBLIC_HOST="${CT_PUBLIC_HOST:?Set CT_PUBLIC_HOST to the public MX host or IP
 SMTP_PORT="${SMTP_PORT:-25}"
 EXPECT_MANAGEMENT_PUBLIC="${EXPECT_MANAGEMENT_PUBLIC:-false}"
 MANAGEMENT_URL="${MANAGEMENT_URL:-https://${CT_PUBLIC_HOST}/api/dashboard}"
-SENDER="${SENDER:-internet-check@example.net}"
+SENDER="${SENDER:-internet-check@external.example}"
 RECIPIENT="${RECIPIENT:?Set RECIPIENT to a real mailbox hosted behind LPE-CT}"
 
 fail() {
@@ -41,7 +41,7 @@ smtp_cmd "MAIL FROM:<${SENDER}>" 250
 smtp_cmd "RCPT TO:<${RECIPIENT}>" 250
 printf 'DATA\r\n' >&3
 smtp_expect 354
-printf 'Subject: LPE-CT Internet ingress test\r\n\r\nMessage emitted from an Internet-side test machine.\r\n.\r\n' >&3
+printf 'From: Internet Check <%s>\r\nTo: <%s>\r\nSubject: LPE-CT Internet ingress test\r\n\r\nMessage emitted from an Internet-side test machine.\r\n.\r\n' "$SENDER" "$RECIPIENT" >&3
 smtp_expect 250
 printf 'QUIT\r\n' >&3
 smtp_expect 221

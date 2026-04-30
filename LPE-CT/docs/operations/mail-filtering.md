@@ -294,6 +294,15 @@ Those rows remain technical only. They exist to keep the sorting-center backend 
 
 This trace is the primary operational artifact for explaining why a message was deferred, quarantined, rejected, or accepted.
 
+Synthetic Internet tests must not use a protected local author domain unless
+the expected result is a hard authentication reject. For example, a message
+with `MAIL FROM:<smtp-test@l-p-e.ch>` and `From: smtp-test@l-p-e.ch` sent from
+an unauthorized external source is expected to fail strict `DMARC` for
+`l-p-e.ch` when no aligned `SPF` pass or aligned `DKIM` signature is present.
+Use a controlled external sender domain with valid aligned `SPF` or `DKIM`, or
+a neutral sender domain that does not publish a rejecting `DMARC` policy, when
+the goal is to validate successful inbound delivery.
+
 The current default profile stores `bayespam` in the private PostgreSQL `bayespam_corpora` table. Legacy `policy/bayespam.json` content is still migrated when present so older technical state can be carried forward during rollout.
 
 Outbound trace files now also persist:
@@ -403,6 +412,36 @@ Typical inbound outcomes are:
 - `554 message rejected by perimeter policy: <reason> (trace <trace>)`: hard reject, for example enforced DMARC reject, SPF fail without aligned DKIM, explicit block-list hit, spam reject threshold, or reputation reject threshold
 
 `LPE_CT_CORE_DELIVERY_BASE_URL` must point at the private core `LPE` listener that exposes `/internal/lpe-ct/inbound-deliveries`. If it is empty, invalid, or unreachable, `LPE-CT` keeps the message in deferred custody and returns the explicit core-final-delivery `451` above rather than a generic perimeter-policy deferral.
+
+Recommended external validation commands:
+
+Inbound `STARTTLS` is advertised only when `System Setup -> Mail relay -> SMTP
+Settings` has an active public TLS profile with usable certificate and key
+material. If no profile is selected, the validation should confirm that EHLO
+does not include `STARTTLS`.
+
+```bash
+openssl s_client -starttls smtp -crlf -connect mail.l-p-e.ch:25 -servername mail.l-p-e.ch
+```
+
+After the `STARTTLS` handshake, send a fresh `EHLO`, then verify recipient
+domain filtering:
+
+```smtp
+EHLO validator.example
+MAIL FROM:<internet-check@external.example>
+RCPT TO:<test@l-p-e.ch>
+RCPT TO:<test@sdic.ch>
+RCPT TO:<relay-test@example.net>
+```
+
+The expected results are `250 recipient accepted` for `test@l-p-e.ch` and `550
+recipient domain is not accepted by this sorting center` for `test@sdic.ch`
+and `relay-test@example.net`. A successful DATA test should use a matching
+neutral or controlled external `From` header. A spoofed `l-p-e.ch` author from
+an unauthorized source should return `554 message rejected by perimeter
+policy: DMARC policy requested reject; SPF failed and no aligned DKIM signature
+passed (trace <trace>)`.
 
 The decision matrix is now intentionally stricter:
 

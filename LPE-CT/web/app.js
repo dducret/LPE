@@ -1314,6 +1314,69 @@ function renderBooleanCell(value) {
   return `<span class="${statusChipClass(Boolean(value))}">${escapeHtml(value ? copy.yes : copy.no)}</span>`;
 }
 
+function publicTlsSettings(dashboard = state.dashboard) {
+  return dashboard?.network?.public_tls ?? { active_profile_id: null, profiles: [] };
+}
+
+function publicTlsActiveProfile(settings = publicTlsSettings()) {
+  return (settings.profiles ?? []).find((profile) => profile.id === settings.active_profile_id) ?? null;
+}
+
+function publicTlsStatusLabel(settings = publicTlsSettings()) {
+  const copy = getCopy();
+  return publicTlsActiveProfile(settings) ? copy.enabled : copy.disabled;
+}
+
+function renderPublicTlsProfiles(dashboard, copy) {
+  const settings = publicTlsSettings(dashboard);
+  const profiles = settings.profiles ?? [];
+  const rows = profiles.length
+    ? `
+      <div class="data-table-wrap public-tls-table-wrap">
+        <table class="data-table public-tls-table">
+          <thead>
+            <tr>
+              <th scope="col">${escapeHtml(copy.publicTlsProfileNameLabel)}</th>
+              <th scope="col">${escapeHtml(copy.publicTlsCertPathLabel)}</th>
+              <th scope="col">${escapeHtml(copy.publicTlsKeyPathLabel)}</th>
+              <th scope="col">${escapeHtml(copy.statusLabel)}</th>
+              <th scope="col">${escapeHtml(copy.acceptedDomainColumnOptions)}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${profiles
+              .map((profile) => {
+                const active = profile.id === settings.active_profile_id;
+                return `
+                  <tr>
+                    <th scope="row">${escapeHtml(profile.name)}</th>
+                    <td><span class="record-copy">${escapeHtml(profile.cert_path)}</span></td>
+                    <td><span class="record-copy">${escapeHtml(profile.key_path)}</span></td>
+                    <td><span class="${statusChipClass(active)}">${escapeHtml(active ? copy.active : copy.inactive)}</span></td>
+                    <td>
+                      <div class="table-action-icons">
+                        <button class="icon-button table-icon-button" type="button" data-action="public-tls-select" data-profile-id="${escapeHtml(profile.id)}" aria-label="${escapeHtml(copy.publicTlsSelectAction)}" title="${escapeHtml(copy.publicTlsSelectAction)}"><span class="action-icon action-icon-test" aria-hidden="true"></span></button>
+                        <button class="icon-button table-icon-button danger-icon-button" type="button" data-action="public-tls-delete" data-profile-id="${escapeHtml(profile.id)}" aria-label="${escapeHtml(copy.remove)}" title="${escapeHtml(copy.remove)}"><span class="action-icon action-icon-delete" aria-hidden="true"></span></button>
+                      </div>
+                    </td>
+                  </tr>
+                `;
+              })
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    `
+    : systemSetupEmptyState(copy.publicTlsProfilesTitle, copy.publicTlsNoProfiles);
+  return `
+    ${rows}
+    <div class="list-footer-actions">
+      ${settings.active_profile_id ? `<button class="secondary-button compact-button" type="button" data-action="public-tls-disable">${copy.publicTlsDisableAction}</button>` : ""}
+      <button class="primary-button compact-button" type="button" data-action="public-tls-upload">${copy.publicTlsUploadAction}</button>
+    </div>
+  `;
+}
+
 function renderAcceptedDomainsTable(dashboard, copy) {
   const domains = dashboard.accepted_domains ?? [];
   const table = domains.length
@@ -1430,11 +1493,12 @@ function renderMailRelaySetup(activeTab, dashboard, copy) {
     "smtp-settings": renderSystemSetupPanel(
       copy.systemSetupRelaySmtpSettings,
       copy.systemSetupRelaySmtpSettingsSummary,
-      renderSystemSetupSummary([
+      `${renderSystemSetupSummary([
         { label: copy.networkPublicListenerLabel, value: dashboard.network.public_listener_enabled ? copy.enabled : copy.disabled },
+        { label: copy.publicTlsStarttlsLabel, value: publicTlsStatusLabel(publicTlsSettings(dashboard)) },
         { label: copy.networkSubmissionListenerLabel, value: dashboard.network.submission_listener_enabled ? copy.enabled : copy.disabled },
         { label: copy.networkConcurrentLabel, value: formatNumber(dashboard.network.max_concurrent_sessions) },
-      ]),
+      ])}${renderPublicTlsProfiles(dashboard, copy)}`,
       editNetwork,
     ),
     "esmtp-settings": renderSystemSetupPanel(
@@ -3096,6 +3160,7 @@ function getPlatformDrawerConfigs(dashboard, copy) {
         submission_listener_enabled: form.elements.namedItem("submission_listener_enabled").checked,
         proxy_protocol_enabled: form.elements.namedItem("proxy_protocol_enabled").checked,
         max_concurrent_sessions: Number(form.elements.namedItem("max_concurrent_sessions").value),
+        public_tls: publicTlsSettings(),
       }),
       validate: (form) => {
         const value = Number(form.elements.namedItem("max_concurrent_sessions").value);
@@ -3153,6 +3218,92 @@ function openPlatformDrawer(target, opener = document.activeElement) {
       showFeedback(copy.recordSaved);
     },
   });
+}
+
+async function readSelectedTextFile(input) {
+  const file = input.files?.[0];
+  if (!file) {
+    return "";
+  }
+  return file.text();
+}
+
+function openPublicTlsUploadDrawer(opener = document.activeElement) {
+  const copy = getCopy();
+  renderDrawerForm({
+    title: copy.publicTlsUploadAction,
+    summary: copy.publicTlsUploadSummary,
+    formId: "public-tls-upload-form",
+    opener,
+    content: `
+      <label>
+        <span>${copy.publicTlsProfileNameLabel}</span>
+        <input name="name" required value="" />
+      </label>
+      <label>
+        <span>${copy.publicTlsCertificateFileLabel}</span>
+        <input name="certificate_pem" type="file" accept=".pem,.crt,.cer" required />
+      </label>
+      <label>
+        <span>${copy.publicTlsPrivateKeyFileLabel}</span>
+        <input name="private_key_pem" type="file" accept=".pem,.key" required />
+      </label>
+      <label class="toggle-field">
+        <span>${copy.publicTlsActivateLabel}</span>
+        <input name="activate" type="checkbox" checked />
+      </label>
+      <div class="record-actions">
+        <button class="primary-button compact-button" type="submit">${copy.publicTlsUploadAction}</button>
+        <button class="secondary-button compact-button" type="button" data-action="drawer-close">${copy.cancel}</button>
+      </div>
+    `,
+    onSubmit: async (form, context) => {
+      const name = String(form.elements.namedItem("name").value).trim();
+      const certificateInput = form.elements.namedItem("certificate_pem");
+      const privateKeyInput = form.elements.namedItem("private_key_pem");
+      const errors = [];
+      if (!name) {
+        errors.push({ field: "name", message: copy.validationPublicTlsName });
+      }
+      if (!certificateInput.files?.length) {
+        errors.push({ field: "certificate_pem", message: copy.validationPublicTlsCertificate });
+      }
+      if (!privateKeyInput.files?.length) {
+        errors.push({ field: "private_key_pem", message: copy.validationPublicTlsKey });
+      }
+      if (errors.length) {
+        context.fail(errors);
+      }
+      state.dashboard = await postJson("/api/public-tls/profiles", {
+        name,
+        certificate_pem: await readSelectedTextFile(certificateInput),
+        private_key_pem: await readSelectedTextFile(privateKeyInput),
+        activate: form.elements.namedItem("activate").checked,
+      });
+      await loadOps({ silent: true });
+      closeDrawer();
+      showFeedback(copy.recordSaved);
+    },
+  });
+}
+
+async function selectPublicTlsProfile(profileId) {
+  state.dashboard = await putJson("/api/public-tls/select", { profile_id: profileId });
+  await loadOps({ silent: true });
+  showFeedback(getCopy().recordSaved);
+}
+
+async function disablePublicTlsProfile() {
+  state.dashboard = await putJson("/api/public-tls/select", { profile_id: null });
+  await loadOps({ silent: true });
+  showFeedback(getCopy().recordSaved);
+}
+
+async function deletePublicTlsProfile(profileId) {
+  await fetchJson(`/api/public-tls/profiles/${encodeURIComponent(profileId)}`, { method: "DELETE" });
+  state.dashboard = await fetchDashboard();
+  await loadOps({ silent: true });
+  showFeedback(getCopy().recordDeleted);
 }
 
 function renderTraceDrawer(trace, opener = document.activeElement) {
@@ -3460,7 +3611,7 @@ function setSystemSetupTab(actionTarget) {
 }
 
 function getActionHandlers(actionTarget) {
-  const { traceId, ruleId, index, reportId, target, domainId } = actionTarget.dataset;
+  const { traceId, ruleId, index, reportId, target, domainId, profileId } = actionTarget.dataset;
   return {
     "drawer-close": () => closeDrawer(),
     "trace-open": () => runAction(() => loadTrace(traceId, actionTarget)),
@@ -3488,6 +3639,10 @@ function getActionHandlers(actionTarget) {
     "accepted-domain-delete": () => runAction(() => deleteAcceptedDomain(domainId)),
     "accepted-domain-test": () => runAction(() => testAcceptedDomain(domainId)),
     "accepted-domain-import": () => openAcceptedDomainImportDrawer(actionTarget),
+    "public-tls-upload": () => openPublicTlsUploadDrawer(actionTarget),
+    "public-tls-select": () => runAction(() => selectPublicTlsProfile(profileId)),
+    "public-tls-disable": () => runAction(() => disablePublicTlsProfile()),
+    "public-tls-delete": () => runAction(() => deletePublicTlsProfile(profileId)),
     "platform-edit": () => openPlatformDrawer(target, actionTarget),
     "page-tab": () => setPageTab(actionTarget),
     "system-setup-tab": () => setSystemSetupTab(actionTarget),

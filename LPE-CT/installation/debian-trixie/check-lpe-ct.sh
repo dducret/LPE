@@ -103,6 +103,8 @@ smtp_response="$({
   printf 'MAIL FROM:<%s>\r\n' "$SMTP_TEST_SENDER"
   printf 'RCPT TO:<%s>\r\n' "$SMTP_TEST_RECIPIENT"
   printf 'DATA\r\n'
+  printf 'From: LPE-CT Check <%s>\r\n' "$SMTP_TEST_SENDER"
+  printf 'To: <%s>\r\n' "$SMTP_TEST_RECIPIENT"
   printf 'Subject: LPE-CT local installation check\r\n'
   printf '\r\n'
   printf 'check-lpe-ct generated message\r\n'
