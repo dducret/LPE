@@ -178,6 +178,16 @@ function createFetchStub() {
     },
     policies: {
       drain_mode: false,
+      require_spf: true,
+      require_dkim_alignment: false,
+      require_dmarc_enforcement: true,
+      defer_on_auth_tempfail: true,
+      bayespam_enabled: true,
+      reputation_enabled: true,
+      spam_quarantine_threshold: 5.0,
+      spam_reject_threshold: 9.0,
+      reputation_quarantine_threshold: -4,
+      reputation_reject_threshold: -8,
       address_policy: {
         allow_senders: ["trusted@example.test"],
         block_senders: [],
@@ -356,6 +366,7 @@ function createContext() {
     "run-digests",
     "create-address-rule",
     "create-attachment-rule",
+    "edit-filtering-policy",
     "edit-recipient-verification",
     "edit-dkim-settings",
     "create-dkim-domain",
@@ -376,6 +387,7 @@ function createContext() {
     "traffic-table",
     "quarantine-list",
     "history-list",
+    "filtering-policy-status",
     "address-rules-list",
     "attachment-rules-list",
     "recipient-verification-status",
@@ -534,6 +546,8 @@ async function main() {
   assert.match(elements["queue-status-list"].innerHTML, /Corrupt queue/);
   assert.match(elements["scan-summary-list"].innerHTML, /Spam messages/);
   assert.match(elements["traffic-table"].innerHTML, /Invalid rcpts/);
+  assert.match(elements["filtering-policy-status"].innerHTML, /SPF enforcement/);
+  assert.match(elements["filtering-policy-status"].innerHTML, /Spam reject threshold/);
   assert.ok(context.window.__intervals.includes(60_000));
   assert.equal(navButtons[0].getAttribute("aria-current"), "true");
   assert.equal(pageViews[0].classList.contains("page-view-active"), true);

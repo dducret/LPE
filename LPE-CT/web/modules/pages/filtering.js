@@ -5,5 +5,5 @@ export const filteringPage = createPageModule({
   labelKey: "navFiltering",
   captionKey: "navFilteringCaption",
   sectionIds: ["address-policy-section", "attachment-policy-section", "verification-section", "dkim-section"],
-  rendererKeys: ["addressRules", "attachmentRules", "recipientVerification", "dkim"],
+  rendererKeys: ["filteringPolicy", "addressRules", "attachmentRules", "recipientVerification", "dkim"],
 });

@@ -1900,14 +1900,7 @@ where
         )
         .await?;
         if message.status == "rejected" {
-            write_smtp(
-                writer,
-                &format!(
-                    "554 message rejected by perimeter policy (trace {})",
-                    message.id
-                ),
-            )
-            .await?;
+            write_smtp(writer, &rejected_smtp_reply(&message)).await?;
             return Ok(SmtpCommandOutcome::Quit);
         } else if message.status == "deferred" {
             write_smtp(writer, &deferred_smtp_reply(&message)).await?;
@@ -2187,6 +2180,11 @@ async fn receive_message_with_validator<D: Detector>(
             update_reputation(spool_dir, config, &message, FilterAction::Reject).await?;
             train_bayespam(spool_dir, config, &message, BayesLabel::Spam).await?;
             observability::record_smtp_session("rejected");
+            warn!(
+                trace_id = %message.id,
+                reason = message.relay_error.as_deref().unwrap_or("perimeter policy reject"),
+                "inbound message rejected by perimeter policy"
+            );
         }
         FilterAction::Defer => {
             observability::record_security_event("inbound_defer");
@@ -3929,6 +3927,50 @@ fn deferred_smtp_reason(message: &QueuedMessage) -> &'static str {
         "message temporarily deferred by authentication dependency"
     } else {
         "message temporarily deferred by perimeter policy"
+    }
+}
+
+fn rejected_smtp_reply(message: &QueuedMessage) -> String {
+    match message
+        .relay_error
+        .as_deref()
+        .map(sanitize_smtp_reply_detail)
+        .filter(|reason| !reason.is_empty())
+    {
+        Some(reason) => format!(
+            "554 message rejected by perimeter policy: {} (trace {})",
+            reason, message.id
+        ),
+        None => format!(
+            "554 message rejected by perimeter policy (trace {})",
+            message.id
+        ),
+    }
+}
+
+fn sanitize_smtp_reply_detail(detail: &str) -> String {
+    let normalized = detail
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_graphic() || ch == ' ' {
+                ch
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>();
+    let compacted = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
+    const MAX_REPLY_DETAIL_LEN: usize = 180;
+    if compacted.len() <= MAX_REPLY_DETAIL_LEN {
+        compacted
+    } else {
+        format!(
+            "{}...",
+            compacted
+                .chars()
+                .take(MAX_REPLY_DETAIL_LEN)
+                .collect::<String>()
+        )
     }
 }
 
@@ -6082,6 +6124,80 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         assert!(transcript.contains(")\r\n"));
         assert!(spool.join("deferred").read_dir().unwrap().next().is_some());
         std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
+    }
+
+    #[tokio::test]
+    async fn smtp_data_rejects_with_policy_reason_and_trace() {
+        let spool = temp_dir("smtp-data-policy-reject");
+        initialize_spool(&spool).unwrap();
+        let dashboard_store = plaintext_inbound_store("http://127.0.0.1:9".to_string());
+        {
+            let mut state = dashboard_store.lock().unwrap();
+            state.policies.require_spf = false;
+            state.policies.require_dmarc_enforcement = false;
+            state.policies.defer_on_auth_tempfail = false;
+            state.policies.spam_reject_threshold = 0.0;
+        }
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(
+            b"From: Sender <smtp-test@l-p-e.ch>\r\nSubject: Inbound\r\n\r\nBody\r\n.\r\n"
+                .as_slice(),
+        );
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let peer: SocketAddr = "127.0.0.1:25".parse().unwrap();
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "MAIL FROM:<smtp-test@l-p-e.ch>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "RCPT TO:<test@l-p-e.ch>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "DATA",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let transcript = String::from_utf8(writer).unwrap();
+        assert!(transcript.contains("354 end with <CRLF>.<CRLF>\r\n"));
+        assert!(transcript.contains(
+            "554 message rejected by perimeter policy: spam score 0.0 reached reject threshold 0.0 (trace lpe-ct-in-"
+        ));
+        assert!(spool
+            .join("quarantine")
+            .read_dir()
+            .unwrap()
+            .next()
+            .is_some());
     }
 
     fn training_message(subject: &str, body: &str) -> QueuedMessage {

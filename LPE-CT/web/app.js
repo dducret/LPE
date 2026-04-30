@@ -31,6 +31,7 @@ const elements = {
   historySearchForm: document.getElementById("history-search-form"),
   createAddressRule: document.getElementById("create-address-rule"),
   createAttachmentRule: document.getElementById("create-attachment-rule"),
+  editFilteringPolicy: document.getElementById("edit-filtering-policy"),
   editRecipientVerification: document.getElementById("edit-recipient-verification"),
   editDkimSettings: document.getElementById("edit-dkim-settings"),
   createDkimDomain: document.getElementById("create-dkim-domain"),
@@ -77,6 +78,7 @@ const elements = {
 const containers = {
   quarantine: document.getElementById("quarantine-list"),
   history: document.getElementById("history-list"),
+  filteringPolicy: document.getElementById("filtering-policy-status"),
   addressRules: document.getElementById("address-rules-list"),
   attachmentRules: document.getElementById("attachment-rules-list"),
   recipientVerification: document.getElementById("recipient-verification-status"),
@@ -780,6 +782,40 @@ function renderHistory() {
         `,
       )
       .join("")}
+  `;
+}
+
+function renderFilteringPolicy() {
+  const copy = getCopy();
+  const policies = state.dashboard?.policies ?? {};
+  const rows = [
+    { label: copy.requireSpfLabel, value: policies.require_spf ? copy.enabled : copy.disabled },
+    { label: copy.requireDmarcLabel, value: policies.require_dmarc_enforcement ? copy.enabled : copy.disabled },
+    { label: copy.requireDkimAlignmentLabel, value: policies.require_dkim_alignment ? copy.enabled : copy.disabled },
+    { label: copy.deferOnAuthTempfailLabel, value: policies.defer_on_auth_tempfail ? copy.enabled : copy.disabled },
+    { label: copy.bayespamEnabledLabel, value: policies.bayespam_enabled ? copy.enabled : copy.disabled },
+    { label: copy.reputationEnabledLabel, value: policies.reputation_enabled ? copy.enabled : copy.disabled },
+    { label: copy.spamQuarantineThresholdLabel, value: formatScore(policies.spam_quarantine_threshold) },
+    { label: copy.spamRejectThresholdLabel, value: formatScore(policies.spam_reject_threshold) },
+    { label: copy.reputationQuarantineThresholdLabel, value: formatNumber(policies.reputation_quarantine_threshold) },
+    { label: copy.reputationRejectThresholdLabel, value: formatNumber(policies.reputation_reject_threshold) },
+  ];
+  containers.filteringPolicy.innerHTML = `
+    <article class="summary-card">
+      <strong>${escapeHtml(copy.filteringPolicyTitle)}</strong>
+      <div class="summary-grid">
+        ${rows
+          .map(
+            (row) => `
+              <div>
+                <p>${escapeHtml(row.label)}</p>
+                <span class="pill">${escapeHtml(row.value)}</span>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </article>
   `;
 }
 
@@ -2045,6 +2081,7 @@ const PAGE_RENDERERS = {
   overview: renderOverview,
   quarantine: renderQuarantine,
   history: renderHistory,
+  filteringPolicy: renderFilteringPolicy,
   addressRules: renderAddressRules,
   attachmentRules: renderAttachmentRules,
   recipientVerification: renderRecipientVerification,
@@ -2351,6 +2388,111 @@ async function deleteAttachmentRule(ruleId) {
   policies.attachment_policy[routeToAttachmentPolicies(rule.scope, rule.action)].splice(rule.index, 1);
   await savePolicies(policies);
   showFeedback(copy.recordDeleted);
+}
+
+function openFilteringPolicyDrawer(opener = document.activeElement) {
+  const copy = getCopy();
+  const policies = currentPolicies();
+  const numberValue = (value) => (value === null || value === undefined ? "" : escapeHtml(value));
+  renderDrawerForm({
+    title: copy.editSettings,
+    summary: copy.filteringPolicySummary,
+    formId: "filtering-policy-form",
+    opener,
+    content: `
+      <div class="field-grid">
+        <label class="toggle-field">
+          <span>${copy.requireSpfLabel}</span>
+          <input name="require_spf" type="checkbox"${policies.require_spf ? " checked" : ""} />
+        </label>
+        <label class="toggle-field">
+          <span>${copy.requireDmarcLabel}</span>
+          <input name="require_dmarc_enforcement" type="checkbox"${policies.require_dmarc_enforcement ? " checked" : ""} />
+        </label>
+        <label class="toggle-field">
+          <span>${copy.requireDkimAlignmentLabel}</span>
+          <input name="require_dkim_alignment" type="checkbox"${policies.require_dkim_alignment ? " checked" : ""} />
+        </label>
+        <label class="toggle-field">
+          <span>${copy.deferOnAuthTempfailLabel}</span>
+          <input name="defer_on_auth_tempfail" type="checkbox"${policies.defer_on_auth_tempfail ? " checked" : ""} />
+        </label>
+        <label class="toggle-field">
+          <span>${copy.bayespamEnabledLabel}</span>
+          <input name="bayespam_enabled" type="checkbox"${policies.bayespam_enabled ? " checked" : ""} />
+        </label>
+        <label class="toggle-field">
+          <span>${copy.reputationEnabledLabel}</span>
+          <input name="reputation_enabled" type="checkbox"${policies.reputation_enabled ? " checked" : ""} />
+        </label>
+        <label>
+          <span>${copy.spamQuarantineThresholdLabel}</span>
+          <input name="spam_quarantine_threshold" type="number" min="0" step="0.1" value="${numberValue(policies.spam_quarantine_threshold)}" />
+        </label>
+        <label>
+          <span>${copy.spamRejectThresholdLabel}</span>
+          <input name="spam_reject_threshold" type="number" min="0" step="0.1" value="${numberValue(policies.spam_reject_threshold)}" />
+        </label>
+        <label>
+          <span>${copy.reputationQuarantineThresholdLabel}</span>
+          <input name="reputation_quarantine_threshold" type="number" step="1" value="${numberValue(policies.reputation_quarantine_threshold)}" />
+        </label>
+        <label>
+          <span>${copy.reputationRejectThresholdLabel}</span>
+          <input name="reputation_reject_threshold" type="number" step="1" value="${numberValue(policies.reputation_reject_threshold)}" />
+        </label>
+      </div>
+      <div class="record-actions">
+        <button class="primary-button compact-button" type="submit">${copy.save}</button>
+        <button class="secondary-button compact-button" type="button" data-action="drawer-close">${copy.cancel}</button>
+      </div>
+    `,
+    onSubmit: async (form, context) => {
+      const spamQuarantineThreshold = Number(form.elements.namedItem("spam_quarantine_threshold").value);
+      const spamRejectThreshold = Number(form.elements.namedItem("spam_reject_threshold").value);
+      const reputationQuarantineThreshold = Number(form.elements.namedItem("reputation_quarantine_threshold").value);
+      const reputationRejectThreshold = Number(form.elements.namedItem("reputation_reject_threshold").value);
+      const errors = [];
+      if (!Number.isFinite(spamQuarantineThreshold) || spamQuarantineThreshold < 0) {
+        errors.push({ field: "spam_quarantine_threshold", message: copy.validationNonNegativeNumber });
+      }
+      if (!Number.isFinite(spamRejectThreshold) || spamRejectThreshold < 0) {
+        errors.push({ field: "spam_reject_threshold", message: copy.validationNonNegativeNumber });
+      }
+      if (Number.isFinite(spamQuarantineThreshold) && Number.isFinite(spamRejectThreshold) && spamQuarantineThreshold > spamRejectThreshold) {
+        errors.push({ field: "spam_reject_threshold", message: copy.validationSpamThresholdOrder });
+      }
+      if (!Number.isInteger(reputationQuarantineThreshold)) {
+        errors.push({ field: "reputation_quarantine_threshold", message: copy.validationInteger });
+      }
+      if (!Number.isInteger(reputationRejectThreshold)) {
+        errors.push({ field: "reputation_reject_threshold", message: copy.validationInteger });
+      }
+      if (
+        Number.isInteger(reputationQuarantineThreshold) &&
+        Number.isInteger(reputationRejectThreshold) &&
+        reputationRejectThreshold > reputationQuarantineThreshold
+      ) {
+        errors.push({ field: "reputation_reject_threshold", message: copy.validationReputationThresholdOrder });
+      }
+      if (errors.length) {
+        context.fail(errors);
+      }
+      policies.require_spf = form.elements.namedItem("require_spf").checked;
+      policies.require_dmarc_enforcement = form.elements.namedItem("require_dmarc_enforcement").checked;
+      policies.require_dkim_alignment = form.elements.namedItem("require_dkim_alignment").checked;
+      policies.defer_on_auth_tempfail = form.elements.namedItem("defer_on_auth_tempfail").checked;
+      policies.bayespam_enabled = form.elements.namedItem("bayespam_enabled").checked;
+      policies.reputation_enabled = form.elements.namedItem("reputation_enabled").checked;
+      policies.spam_quarantine_threshold = spamQuarantineThreshold;
+      policies.spam_reject_threshold = spamRejectThreshold;
+      policies.reputation_quarantine_threshold = reputationQuarantineThreshold;
+      policies.reputation_reject_threshold = reputationRejectThreshold;
+      await savePolicies(policies);
+      closeDrawer();
+      showFeedback(copy.recordSaved);
+    },
+  });
 }
 
 function openRecipientVerificationDrawer(opener = document.activeElement) {
@@ -3455,6 +3597,7 @@ elements.historySearchForm.addEventListener("submit", (event) => {
 
 elements.createAddressRule.addEventListener("click", (event) => openAddressRuleDrawer(null, event.currentTarget));
 elements.createAttachmentRule.addEventListener("click", (event) => openAttachmentRuleDrawer(null, event.currentTarget));
+elements.editFilteringPolicy.addEventListener("click", (event) => openFilteringPolicyDrawer(event.currentTarget));
 elements.editRecipientVerification.addEventListener("click", (event) => openRecipientVerificationDrawer(event.currentTarget));
 elements.editDkimSettings.addEventListener("click", (event) => openDkimSettingsDrawer(event.currentTarget));
 elements.createDkimDomain.addEventListener("click", (event) => openDkimDomainDrawer(null, event.currentTarget));

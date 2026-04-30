@@ -465,11 +465,9 @@
               <h3 data-i18n="filteringTabSpam">Spam</h3>
               <p data-i18n="filteringSpamSummary">Spam filtering controls for reputation and content decisions.</p>
             </div>
+            <button id="edit-filtering-policy" class="primary-button compact-button" type="button" data-i18n="editSettings">Edit settings</button>
           </div>
-          <article class="empty-state compact-empty-state">
-            <strong data-i18n="filteringTabSpam">Spam</strong>
-            <p data-i18n="filteringSpamUnavailable">Spam filtering settings are not exposed by the current management API contract.</p>
-          </article>
+          <div id="filtering-policy-status" class="record-list"></div>
         </section>
 
         <section id="address-policy-section" class="panel section-panel page-view" data-page-view="filtering" data-page-tab-panel="filtering:content-filtering">

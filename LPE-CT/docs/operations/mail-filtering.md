@@ -400,7 +400,7 @@ Typical inbound outcomes are:
 - `451 message temporarily deferred by greylisting (trace <trace>)`: intentional first-seen greylisting
 - `451 message temporarily deferred by authentication dependency (trace <trace>)`: transient `SPF` / `DKIM` / `DMARC` dependency failure
 - `451 core final delivery temporarily unavailable (trace <trace>)`: accepted edge policy, but the internal `LPE` final-delivery bridge is not configured or reachable
-- `554 message rejected by perimeter policy (trace <trace>)`: hard reject, for example enforced DMARC reject
+- `554 message rejected by perimeter policy: <reason> (trace <trace>)`: hard reject, for example enforced DMARC reject, SPF fail without aligned DKIM, explicit block-list hit, spam reject threshold, or reputation reject threshold
 
 `LPE_CT_CORE_DELIVERY_BASE_URL` must point at the private core `LPE` listener that exposes `/internal/lpe-ct/inbound-deliveries`. If it is empty, invalid, or unreachable, `LPE-CT` keeps the message in deferred custody and returns the explicit core-final-delivery `451` above rather than a generic perimeter-policy deferral.
 
@@ -423,6 +423,8 @@ The decision matrix is now intentionally stricter:
 - outbound handoff now also runs through `bayespam`; high-scoring outbound content is quarantined before relay
 - outbound handoff now also runs through the same antivirus provider chain before relay
 - outbound relay can add a DKIM signature for sender domains that have an explicit configured key
+
+The management UI exposes these inbound reject/quarantine knobs under `Filtering` -> `Spam` -> `Edit settings`, including SPF enforcement, DMARC reject enforcement, aligned-DKIM requirement, authentication temporary-failure deferral, Bayesian spam scoring, reputation scoring, and the spam/reputation quarantine and reject thresholds.
 
 Operator trace actions now behave defensively:
 
