@@ -4427,12 +4427,6 @@ where
     Ok(())
 }
 
-fn smtp_starttls_acceptor() -> Result<Option<TlsAcceptor>> {
-    let cert_path = optional_env("LPE_CT_PUBLIC_TLS_CERT_PATH");
-    let key_path = optional_env("LPE_CT_PUBLIC_TLS_KEY_PATH");
-    smtp_starttls_acceptor_for_paths(cert_path, key_path)
-}
-
 fn smtp_starttls_acceptor_from_store(
     dashboard_store: &Arc<Mutex<super::DashboardState>>,
 ) -> Result<Option<TlsAcceptor>> {
@@ -4531,13 +4525,6 @@ fn load_private_key(path: &str) -> Result<PrivateKeyDer<'static>> {
         anyhow::bail!("no private key found in {path}");
     };
     Ok(PrivateKeyDer::Pkcs1(key))
-}
-
-fn optional_env(name: &str) -> Option<String> {
-    env::var(name)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
 }
 
 async fn persist_message(spool_dir: &Path, queue: &str, message: &QueuedMessage) -> Result<()> {
@@ -5704,9 +5691,9 @@ mod tests {
         initialize_spool, load_antivirus_providers, load_bayespam_corpus, load_reputation_score,
         load_trace_details, parse_antivirus_output, parse_peer_ip, persist_message,
         process_outbound_handoff, receive_message, receive_message_with_validator, release_trace,
-        retry_after_seconds, retry_trace, score_bayespam, smtp_starttls_acceptor, spf_disposition,
-        stable_key_id, summarize_dkim, summarize_dmarc, summarize_spf, train_bayespam, unix_now,
-        update_reputation, AcceptedDomainConfig, AntivirusProviderConfig,
+        retry_after_seconds, retry_trace, score_bayespam, smtp_starttls_acceptor_for_paths,
+        spf_disposition, stable_key_id, summarize_dkim, summarize_dmarc, summarize_spf,
+        train_bayespam, unix_now, update_reputation, AcceptedDomainConfig, AntivirusProviderConfig,
         AntivirusProviderDecision, AuthSummary, AuthenticationAssessment, BayesLabel,
         DecisionTraceEntry, DkimDisposition, FilterAction, GreylistEntry, OutboundRoutingRule,
         OutboundThrottleRule, QueuedMessage, RuntimeConfig, SmtpTransaction, SpfDisposition,
@@ -6436,12 +6423,12 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         let key_path = tls_dir.join("key.pem");
         std::fs::write(&cert_path, TEST_STARTTLS_CERT).unwrap();
         std::fs::write(&key_path, TEST_STARTTLS_KEY).unwrap();
-        std::env::set_var("LPE_CT_PUBLIC_TLS_CERT_PATH", &cert_path);
-        std::env::set_var("LPE_CT_PUBLIC_TLS_KEY_PATH", &key_path);
-
-        let starttls = smtp_starttls_acceptor()
-            .unwrap()
-            .expect("test TLS certificate should enable STARTTLS");
+        let starttls = smtp_starttls_acceptor_for_paths(
+            Some(cert_path.display().to_string()),
+            Some(key_path.display().to_string()),
+        )
+        .unwrap()
+        .expect("test TLS certificate should enable STARTTLS");
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let captured = Arc::new(Mutex::new(None::<InboundDeliveryRequest>));
