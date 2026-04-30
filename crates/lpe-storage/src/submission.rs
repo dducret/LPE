@@ -1029,8 +1029,8 @@ impl Storage {
                         VALUES (
                             $1, $2, $3, $4, $5, $6,
                             $7, NOW(), NOW(), $8, $9, $10,
-                            $11, $12, $13, $14, FALSE, FALSE, FALSE, $15, $16,
-                            $17, 'queued'
+                            $11, $12, $13, $14, $15, FALSE, FALSE, FALSE, $16, $17,
+                            $18, 'queued'
                         )
                         "#,
                     )
