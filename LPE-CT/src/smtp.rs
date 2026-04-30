@@ -2380,7 +2380,48 @@ fn marker_matches(output: &str, markers: &[String]) -> bool {
         .iter()
         .map(|marker| marker.trim().to_ascii_lowercase())
         .filter(|marker| !marker.is_empty())
-        .any(|marker| output.contains(&marker))
+        .any(|marker| marker_has_positive_match(output, &marker))
+}
+
+fn marker_has_positive_match(output: &str, marker: &str) -> bool {
+    let mut search_from = 0;
+    while let Some(relative_index) = output[search_from..].find(marker) {
+        let marker_start = search_from + relative_index;
+        let marker_end = marker_start + marker.len();
+        if !marker_match_is_explicitly_negative(output, marker_start, marker_end) {
+            return true;
+        }
+        search_from = marker_end;
+    }
+    false
+}
+
+fn marker_match_is_explicitly_negative(
+    output: &str,
+    marker_start: usize,
+    marker_end: usize,
+) -> bool {
+    let line_start = output[..marker_start]
+        .rfind('\n')
+        .map_or(0, |index| index + 1);
+    let line_end = output[marker_end..]
+        .find('\n')
+        .map_or(output.len(), |index| marker_end + index);
+    let before_marker = output[line_start..marker_start]
+        .trim_end_matches(|ch: char| ch.is_whitespace() || matches!(ch, ':' | '=' | '-' | '>'));
+    if before_marker.ends_with("no") || before_marker.ends_with("not") {
+        return true;
+    }
+
+    let after_marker = output[marker_end..line_end].trim_start_matches(|ch: char| {
+        ch.is_whitespace() || matches!(ch, ':' | '=' | '-' | '>' | '"' | '\'')
+    });
+    !after_marker.is_empty()
+        && (after_marker.starts_with('0')
+            || after_marker.starts_with("false")
+            || after_marker.starts_with("no")
+            || after_marker.starts_with("none")
+            || after_marker.starts_with("not "))
 }
 
 fn takeri_summary_count(output: &str, prefix: &str) -> usize {
@@ -6529,6 +6570,7 @@ mod tests {
                 "status: infected".to_string(),
                 "infected files detected".to_string(),
                 "infected files:".to_string(),
+                "critical: malware detected".to_string(),
             ],
             suspicious_markers: vec![
                 "status: suspicious".to_string(),
@@ -6561,6 +6603,48 @@ mod tests {
         let clean =
             parse_antivirus_output(&provider, "No threats detected.\n", "", Some(0)).unwrap();
         assert_eq!(clean.decision, AntivirusProviderDecision::Clean);
+    }
+
+    #[test]
+    fn antivirus_output_parser_ignores_negative_takeri_markers() {
+        let provider = AntivirusProviderConfig {
+            id: "takeri".to_string(),
+            display_name: "takeri".to_string(),
+            command: "/opt/lpe-ct/bin/Shuhari-CyberForge-CLI".to_string(),
+            args: vec!["takeri".to_string(), "scan".to_string()],
+            infected_markers: vec![
+                "status: infected".to_string(),
+                "infected files detected".to_string(),
+                "infected files:".to_string(),
+                "critical: malware detected".to_string(),
+            ],
+            suspicious_markers: vec![
+                "status: suspicious".to_string(),
+                "suspicious files:".to_string(),
+            ],
+            clean_markers: vec![
+                "status: clean".to_string(),
+                "no threats detected".to_string(),
+            ],
+        };
+
+        let clean = parse_antivirus_output(
+            &provider,
+            "-------Scan Summary-------\nCritical: Malware detected: false\nInfected files: 0\nSuspicious files: 0\n",
+            "",
+            Some(0),
+        )
+        .unwrap();
+        assert_eq!(clean.decision, AntivirusProviderDecision::Clean);
+
+        let infected = parse_antivirus_output(
+            &provider,
+            "-------Scan Summary-------\nCritical: Malware detected: true\n",
+            "",
+            Some(0),
+        )
+        .unwrap();
+        assert_eq!(infected.decision, AntivirusProviderDecision::Infected);
     }
 
     #[test]
