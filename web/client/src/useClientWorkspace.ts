@@ -395,7 +395,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
         method: "POST",
         body: JSON.stringify(buildMessagePayload(identity, mailbox, draft, draftMessageId))
       });
-      setFolder(asDraft ? "drafts" : draftMessageId ? "inbox" : "sent");
+      setFolder(asDraft ? "drafts" : "sent");
       setMode("closed");
       setDraftMessageId(null);
       setMessageId("");
