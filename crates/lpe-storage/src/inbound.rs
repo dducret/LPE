@@ -65,9 +65,6 @@ impl Storage {
             .filter(|recipient| !recipient.is_empty())
             .collect::<Vec<_>>();
 
-        if mail_from.is_empty() {
-            bail!("mail_from is required");
-        }
         if rcpt_to.is_empty() {
             bail!("at least one recipient is required");
         }
@@ -329,9 +326,10 @@ impl Storage {
         }
 
         if let Some(vacation) = &followup.vacation {
-            if !followup
-                .sender_address
-                .eq_ignore_ascii_case(&followup.account_email)
+            if !followup.sender_address.is_empty()
+                && !followup
+                    .sender_address
+                    .eq_ignore_ascii_case(&followup.account_email)
                 && self
                     .should_send_sieve_vacation(
                         followup.account_id,

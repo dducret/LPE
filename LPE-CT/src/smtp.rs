@@ -107,6 +107,7 @@ pub(crate) struct AcceptedDomainConfig {
     pub(crate) rbl_checks: bool,
     pub(crate) spf_checks: bool,
     pub(crate) greylisting: bool,
+    pub(crate) accept_null_reverse_path: bool,
     pub(crate) verified: bool,
 }
 
@@ -184,6 +185,7 @@ struct QuarantineMetadata {
 struct SmtpTransaction {
     helo: String,
     mail_from: String,
+    mail_from_seen: bool,
     rcpt_to: Vec<String>,
     greeting_required: bool,
 }
@@ -198,6 +200,7 @@ impl SmtpTransaction {
 
     fn reset_message(&mut self) {
         self.mail_from.clear();
+        self.mail_from_seen = false;
         self.rcpt_to.clear();
     }
 
@@ -964,6 +967,7 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
                 rbl_checks: domain.rbl_checks,
                 spf_checks: domain.spf_checks,
                 greylisting: domain.greylisting,
+                accept_null_reverse_path: domain.accept_null_reverse_path,
                 verified: domain.verified,
             })
             .collect(),
@@ -1898,17 +1902,20 @@ where
         }
         let candidate = command[10..].trim().trim_matches(['<', '>']).to_string();
         let config = runtime_config_from_store(dashboard_store)?;
-        if let transport_policy::AddressPolicyVerdict::Reject(reason) =
-            transport_policy::evaluate_address_policy_with_config(
-                &config.address_policy,
-                transport_policy::AddressRole::Sender,
-                &candidate,
-            )
-        {
-            write_smtp(writer, &format!("550 sender rejected ({reason})")).await?;
-            return Ok(SmtpCommandOutcome::Continue);
+        if !candidate.is_empty() {
+            if let transport_policy::AddressPolicyVerdict::Reject(reason) =
+                transport_policy::evaluate_address_policy_with_config(
+                    &config.address_policy,
+                    transport_policy::AddressRole::Sender,
+                    &candidate,
+                )
+            {
+                write_smtp(writer, &format!("550 sender rejected ({reason})")).await?;
+                return Ok(SmtpCommandOutcome::Continue);
+            }
         }
         transaction.mail_from = candidate;
+        transaction.mail_from_seen = true;
         transaction.rcpt_to.clear();
         write_smtp(writer, "250 sender accepted").await?;
     } else if upper.starts_with("RCPT TO:") {
@@ -1916,7 +1923,7 @@ where
             write_smtp(writer, "503 send EHLO or HELO after STARTTLS first").await?;
             return Ok(SmtpCommandOutcome::Continue);
         }
-        if transaction.mail_from.is_empty() {
+        if !transaction.mail_from_seen {
             write_smtp(writer, "503 send MAIL FROM first").await?;
             return Ok(SmtpCommandOutcome::Continue);
         }
@@ -1926,6 +1933,16 @@ where
             write_smtp(
                 writer,
                 "550 recipient domain is not accepted by this sorting center",
+            )
+            .await?;
+            return Ok(SmtpCommandOutcome::Continue);
+        }
+        if transaction.mail_from.is_empty()
+            && !recipient_domain_accepts_null_reverse_path(&config, &recipient)
+        {
+            write_smtp(
+                writer,
+                "550 recipient domain does not accept null reverse-path",
             )
             .await?;
             return Ok(SmtpCommandOutcome::Continue);
@@ -1974,7 +1991,7 @@ where
             write_smtp(writer, "503 send EHLO or HELO after STARTTLS first").await?;
             return Ok(SmtpCommandOutcome::Continue);
         }
-        if transaction.mail_from.is_empty() || transaction.rcpt_to.is_empty() {
+        if !transaction.mail_from_seen || transaction.rcpt_to.is_empty() {
             write_smtp(writer, "503 sender and recipient required").await?;
             return Ok(SmtpCommandOutcome::Continue);
         }
@@ -5563,6 +5580,20 @@ fn recipient_domain_is_accepted(config: &RuntimeConfig, recipient: &str) -> bool
         .any(|accepted| accepted.verified && accepted.domain.eq_ignore_ascii_case(&domain))
 }
 
+fn recipient_domain_accepts_null_reverse_path(config: &RuntimeConfig, recipient: &str) -> bool {
+    if config.accepted_domains.is_empty() {
+        return true;
+    }
+    let Some(domain) = domain_part(recipient) else {
+        return false;
+    };
+    config.accepted_domains.iter().any(|accepted| {
+        accepted.verified
+            && accepted.accept_null_reverse_path
+            && accepted.domain.eq_ignore_ascii_case(&domain)
+    })
+}
+
 fn should_quarantine(data: &[u8]) -> bool {
     String::from_utf8_lossy(data).lines().any(|line| {
         let lower = line.to_ascii_lowercase();
@@ -5929,6 +5960,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             rbl_checks: false,
             spf_checks: false,
             greylisting: false,
+            accept_null_reverse_path: true,
             verified: true,
         }];
         Arc::new(Mutex::new(state))
@@ -5953,6 +5985,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
                 rbl_checks: true,
                 spf_checks: true,
                 greylisting: true,
+                accept_null_reverse_path: true,
                 verified: *verified,
             })
             .collect();
@@ -5968,6 +6001,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             rbl_checks: true,
             spf_checks: true,
             greylisting: true,
+            accept_null_reverse_path: true,
             verified: true,
         }];
 
@@ -6070,6 +6104,78 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             2
         );
         assert_eq!(transaction.rcpt_to, vec!["test@l-p-e.ch".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn smtp_null_reverse_path_is_controlled_per_recipient_domain() {
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(tokio::io::empty());
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let dashboard_store = runtime_store_with_accepted_domains(&[
+            ("l-p-e.ch", true),
+            ("blocked.example", true),
+        ]);
+        {
+            let mut state = dashboard_store.lock().unwrap();
+            state.accepted_domains
+                .iter_mut()
+                .find(|domain| domain.domain == "blocked.example")
+                .unwrap()
+                .accept_null_reverse_path = false;
+        }
+        let spool = temp_dir("null-reverse-path-domain-policy");
+        let peer = "127.0.0.1:25".parse().unwrap();
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "MAIL FROM:<>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "RCPT TO:<dsn@l-p-e.ch>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "RCPT TO:<dsn@blocked.example>",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let transcript = String::from_utf8(writer).unwrap();
+        assert!(transcript.contains("250 sender accepted\r\n"));
+        assert!(transcript.contains("250 recipient accepted\r\n"));
+        assert!(transcript.contains(
+            "550 recipient domain does not accept null reverse-path\r\n"
+        ));
+        assert!(transaction.mail_from_seen);
+        assert_eq!(transaction.mail_from, "");
+        assert_eq!(transaction.rcpt_to, vec!["dsn@l-p-e.ch".to_string()]);
     }
 
     #[tokio::test]
@@ -6229,6 +6335,78 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             request.internet_message_id.as_deref(),
             Some("<codex-smtp-test-1777566333254@l-p-e.ch>")
         );
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
+    }
+
+    #[tokio::test]
+    async fn smtp_data_accepts_null_reverse_path_for_dsn_delivery() {
+        let _guard = env_test_lock();
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
+        let spool = temp_dir("smtp-data-null-reverse-path");
+        initialize_spool(&spool).unwrap();
+        let captured = Arc::new(Mutex::new(None::<InboundDeliveryRequest>));
+        let core_base_url = spawn_dummy_core(captured.clone()).await;
+        let dashboard_store = plaintext_inbound_store(core_base_url);
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(
+            b"From: Mail Delivery System <mailer-daemon@example.test>\r\nSubject: Delivery Status Notification\r\n\r\nDelivery failed\r\n.\r\n"
+                .as_slice(),
+        );
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let peer: SocketAddr = "127.0.0.1:25".parse().unwrap();
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "MAIL FROM:<>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "RCPT TO:<test@l-p-e.ch>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "DATA",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let transcript = String::from_utf8(writer).unwrap();
+        assert!(transcript.contains("250 sender accepted\r\n"));
+        assert!(transcript.contains("250 recipient accepted\r\n"));
+        assert!(transcript.contains("250 queued as lpe-ct-in-"));
+        let request = captured.lock().unwrap().clone().unwrap();
+        assert_eq!(request.mail_from, "");
+        assert_eq!(request.rcpt_to, vec!["test@l-p-e.ch".to_string()]);
+        assert_eq!(request.subject, "Delivery Status Notification");
         std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 

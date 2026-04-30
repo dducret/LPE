@@ -435,6 +435,14 @@ mod tests {
     }
 
     #[test]
+    fn participants_normalized_allows_null_reverse_path() {
+        let visible = normalize_visible_recipients(&submit_input());
+        let participants = participants_normalized("", &visible);
+
+        assert_eq!(participants, "to@example.test cc@example.test");
+    }
+
+    #[test]
     fn pst_processing_requires_prior_validation_record() {
         let suffix = SystemTime::now()
             .duration_since(UNIX_EPOCH)

@@ -94,6 +94,8 @@ struct AcceptedDomain {
     rbl_checks: bool,
     spf_checks: bool,
     greylisting: bool,
+    #[serde(default = "default_true")]
+    accept_null_reverse_path: bool,
     verified: bool,
 }
 
@@ -105,6 +107,8 @@ struct AcceptedDomainInput {
     rbl_checks: bool,
     spf_checks: bool,
     greylisting: bool,
+    #[serde(default = "default_true")]
+    accept_null_reverse_path: bool,
     verified: bool,
 }
 
@@ -2373,6 +2377,7 @@ fn accepted_domain_from_input(
         rbl_checks: input.rbl_checks,
         spf_checks: input.spf_checks,
         greylisting: input.greylisting,
+        accept_null_reverse_path: input.accept_null_reverse_path,
         verified: input.verified,
     })
 }
@@ -3940,6 +3945,7 @@ mod tests {
             rbl_checks: true,
             spf_checks: true,
             greylisting: true,
+            accept_null_reverse_path: true,
             verified: false,
         }];
 

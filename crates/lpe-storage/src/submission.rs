@@ -1660,7 +1660,9 @@ pub(crate) fn participants_normalized(
     recipients: &[(&'static str, SubmittedRecipientInput)],
 ) -> String {
     let mut participants = Vec::with_capacity(recipients.len() + 1);
-    participants.push(from_address.to_string());
+    if !from_address.is_empty() {
+        participants.push(from_address.to_string());
+    }
     participants.extend(
         recipients
             .iter()

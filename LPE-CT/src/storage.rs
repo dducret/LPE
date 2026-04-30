@@ -322,11 +322,17 @@ pub(crate) async fn ensure_local_db_schema(
                     rbl_checks BOOLEAN NOT NULL DEFAULT TRUE,
                     spf_checks BOOLEAN NOT NULL DEFAULT TRUE,
                     greylisting BOOLEAN NOT NULL DEFAULT TRUE,
+                    accept_null_reverse_path BOOLEAN NOT NULL DEFAULT TRUE,
                     verified BOOLEAN NOT NULL DEFAULT FALSE,
                     source TEXT NOT NULL,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
                 "#,
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "ALTER TABLE accepted_domains ADD COLUMN IF NOT EXISTS accept_null_reverse_path BOOLEAN NOT NULL DEFAULT TRUE"
             )
             .execute(pool)
             .await?;
@@ -473,9 +479,9 @@ pub(crate) async fn sync_dashboard_configuration(
             r#"
             INSERT INTO accepted_domains (
                 domain, domain_id, destination_server, verification_type, rbl_checks,
-                spf_checks, greylisting, verified, source, updated_at
+                spf_checks, greylisting, accept_null_reverse_path, verified, source, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
             ON CONFLICT (domain) DO UPDATE SET
                 domain_id = EXCLUDED.domain_id,
                 destination_server = EXCLUDED.destination_server,
@@ -483,6 +489,7 @@ pub(crate) async fn sync_dashboard_configuration(
                 rbl_checks = EXCLUDED.rbl_checks,
                 spf_checks = EXCLUDED.spf_checks,
                 greylisting = EXCLUDED.greylisting,
+                accept_null_reverse_path = EXCLUDED.accept_null_reverse_path,
                 verified = EXCLUDED.verified,
                 source = EXCLUDED.source,
                 updated_at = NOW()
@@ -493,6 +500,7 @@ pub(crate) async fn sync_dashboard_configuration(
                 accepted_domains.rbl_checks IS DISTINCT FROM EXCLUDED.rbl_checks OR
                 accepted_domains.spf_checks IS DISTINCT FROM EXCLUDED.spf_checks OR
                 accepted_domains.greylisting IS DISTINCT FROM EXCLUDED.greylisting OR
+                accepted_domains.accept_null_reverse_path IS DISTINCT FROM EXCLUDED.accept_null_reverse_path OR
                 accepted_domains.verified IS DISTINCT FROM EXCLUDED.verified OR
                 accepted_domains.source IS DISTINCT FROM EXCLUDED.source
             "#,
@@ -504,6 +512,7 @@ pub(crate) async fn sync_dashboard_configuration(
         .bind(domain.rbl_checks)
         .bind(domain.spf_checks)
         .bind(domain.greylisting)
+        .bind(domain.accept_null_reverse_path)
         .bind(domain.verified)
         .bind("dashboard_state")
         .execute(&mut *tx)

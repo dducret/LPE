@@ -1391,6 +1391,7 @@ function renderAcceptedDomainsTable(dashboard, copy) {
               <th scope="col">${escapeHtml(copy.acceptedDomainColumnRbl)}</th>
               <th scope="col">${escapeHtml(copy.acceptedDomainColumnSpf)}</th>
               <th scope="col">${escapeHtml(copy.acceptedDomainColumnGreylisting)}</th>
+              <th scope="col">${escapeHtml(copy.acceptedDomainColumnNullReversePath)}</th>
               <th scope="col">${escapeHtml(copy.acceptedDomainColumnVerified)}</th>
               <th scope="col">${escapeHtml(copy.acceptedDomainColumnOptions)}</th>
             </tr>
@@ -1406,6 +1407,7 @@ function renderAcceptedDomainsTable(dashboard, copy) {
                     <td>${renderBooleanCell(domain.rbl_checks)}</td>
                     <td>${renderBooleanCell(domain.spf_checks)}</td>
                     <td>${renderBooleanCell(domain.greylisting)}</td>
+                    <td>${renderBooleanCell(domain.accept_null_reverse_path ?? true)}</td>
                     <td>${renderBooleanCell(domain.verified)}</td>
                     <td>
                       <div class="table-action-icons">
@@ -2929,6 +2931,7 @@ function acceptedDomainPayloadFromForm(form) {
     rbl_checks: form.elements.namedItem("rbl_checks").checked,
     spf_checks: form.elements.namedItem("spf_checks").checked,
     greylisting: form.elements.namedItem("greylisting").checked,
+    accept_null_reverse_path: form.elements.namedItem("accept_null_reverse_path").checked,
     verified: form.elements.namedItem("verified").checked,
   };
 }
@@ -2959,6 +2962,7 @@ function openAcceptedDomainDrawer(domainId = null, opener = document.activeEleme
         rbl_checks: true,
         spf_checks: true,
         greylisting: true,
+        accept_null_reverse_path: true,
         verified: false,
       };
   if (!domain) {
@@ -2992,6 +2996,7 @@ function openAcceptedDomainDrawer(domainId = null, opener = document.activeEleme
         <label class="toggle-field"><span>${copy.acceptedDomainColumnRbl}</span><input name="rbl_checks" type="checkbox"${domain.rbl_checks ? " checked" : ""} /></label>
         <label class="toggle-field"><span>${copy.acceptedDomainColumnSpf}</span><input name="spf_checks" type="checkbox"${domain.spf_checks ? " checked" : ""} /></label>
         <label class="toggle-field"><span>${copy.acceptedDomainColumnGreylisting}</span><input name="greylisting" type="checkbox"${domain.greylisting ? " checked" : ""} /></label>
+        <label class="toggle-field"><span>${copy.acceptedDomainColumnNullReversePath}</span><input name="accept_null_reverse_path" type="checkbox"${(domain.accept_null_reverse_path ?? true) ? " checked" : ""} /></label>
         <label class="toggle-field"><span>${copy.acceptedDomainColumnVerified}</span><input name="verified" type="checkbox"${domain.verified ? " checked" : ""} /></label>
       </div>
       <div class="record-actions">
@@ -3038,7 +3043,16 @@ function openAcceptedDomainImportDrawer(opener = document.activeElement) {
     onSubmit: async (form, context) => {
       const rows = parseLines(form.elements.namedItem("domains").value);
       const domains = rows.map((row) => {
-        const [domain, destinationServer, verificationType = "none", rbl = "yes", spf = "yes", greylisting = "yes", verified = "no"] = row
+        const [
+          domain,
+          destinationServer,
+          verificationType = "none",
+          rbl = "yes",
+          spf = "yes",
+          greylisting = "yes",
+          verified = "no",
+          nullReversePath = "yes",
+        ] = row
           .split(",")
           .map((value) => value.trim());
         return {
@@ -3048,6 +3062,7 @@ function openAcceptedDomainImportDrawer(opener = document.activeElement) {
           rbl_checks: /^(yes|true|1|on)$/i.test(rbl),
           spf_checks: /^(yes|true|1|on)$/i.test(spf),
           greylisting: /^(yes|true|1|on)$/i.test(greylisting),
+          accept_null_reverse_path: /^(yes|true|1|on)$/i.test(nullReversePath),
           verified: /^(yes|true|1|on)$/i.test(verified),
         };
       });

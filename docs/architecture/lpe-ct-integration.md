@@ -96,6 +96,10 @@ verify, edit, import, and delete accepted inbound domains dynamically in the
 management console under `System Setup -> Mail relay -> Domains`, or through
 the equivalent management API. The active list is persisted in `LPE-CT`
 PostgreSQL dashboard state and is not bootstrapped from environment variables.
+Each accepted domain also controls whether inbound `MAIL FROM:<>` null
+reverse-path traffic is accepted for bounces and `DSN`s. `LPE-CT` accepts the
+SMTP `MAIL FROM:<>` command, then applies that domain option during `RCPT TO`
+because the recipient domain is not known until then.
 
 The `LPE-CT` management test under `System Setup -> Mail relay -> Domains`
 validates this same canonical bridge through `${LPE_CT_CORE_DELIVERY_BASE_URL}`.

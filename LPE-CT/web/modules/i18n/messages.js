@@ -528,9 +528,9 @@ export const baseMessages = {
   addAcceptedDomain: "Add accepted domain",
   importAcceptedDomains: "Import accepted domains",
   acceptedDomainImportSummary:
-    "Import one domain per line as domain,destination server,verification type,rbl,spf,greylisting,verified.",
+    "Import one domain per line as domain,destination server,verification type,rbl,spf,greylisting,verified,null reverse-path.",
   acceptedDomainImportPlaceholder:
-    "example.com,10.0.10.20:25,dynamic,yes,yes,yes,no",
+    "example.com,10.0.10.20:25,dynamic,yes,yes,yes,no,yes",
   acceptedDomainNotFound: "Accepted domain not found.",
   acceptedDomainColumnDomain: "Domain",
   acceptedDomainColumnDestination: "Destination server",
@@ -538,6 +538,7 @@ export const baseMessages = {
   acceptedDomainColumnRbl: "RBL Checks",
   acceptedDomainColumnSpf: "SPF Checks",
   acceptedDomainColumnGreylisting: "Greylisting",
+  acceptedDomainColumnNullReversePath: "Null reverse-path",
   acceptedDomainColumnVerified: "Verified",
   acceptedDomainColumnOptions: "Options",
   acceptedDomainVerificationNone: "None",
