@@ -1255,7 +1255,7 @@ async fn test_accepted_domain(
     headers: HeaderMap,
     AxumPath(domain_id): AxumPath<String>,
 ) -> Result<Json<AcceptedDomainTestResponse>, ApiError> {
-    let _admin = require_management_admin(&state, &headers)?;
+    let admin = require_management_admin(&state, &headers)?;
     let snapshot = read_state(&state)?;
     let core_delivery_base_url = snapshot.relay.core_delivery_base_url.clone();
     let domain = snapshot
@@ -1266,6 +1266,22 @@ async fn test_accepted_domain(
     let probe = probe_lpe_core_delivery(&core_delivery_base_url).await?;
     let bridge_probe = probe_lpe_recipient_bridge(&core_delivery_base_url, &domain.domain).await?;
     let verified = probe.verified && bridge_probe.reachable;
+    if verified && !domain.verified {
+        let previous = read_state(&state)?;
+        {
+            let mut guard = state.store.lock().map_err(|_| {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned")
+            })?;
+            if mark_accepted_domain_verified(&mut guard.accepted_domains, &domain_id) {
+                append_dashboard_audit_event(&mut guard, &admin.email, "verify-accepted-domain");
+                persist_state(&state.state_file, &guard)?;
+            }
+        }
+        if let Err(error) = sync_technical_store(&state).await {
+            restore_dashboard_state(&state, &previous)?;
+            return Err(error);
+        }
+    }
     Ok(Json(AcceptedDomainTestResponse {
         domain: domain.domain,
         destination_server: domain.destination_server,
@@ -1285,6 +1301,17 @@ async fn test_accepted_domain(
             bridge_probe.detail
         },
     }))
+}
+
+fn mark_accepted_domain_verified(domains: &mut [AcceptedDomain], domain_id: &str) -> bool {
+    let Some(domain) = domains.iter_mut().find(|item| item.id == domain_id) else {
+        return false;
+    };
+    if domain.verified {
+        return false;
+    }
+    domain.verified = true;
+    true
 }
 
 async fn update_site(
@@ -3268,8 +3295,9 @@ mod tests {
     use super::{
         address_binds_publicly, apply_env_overrides, default_state, env_test_lock,
         ha_activation_check, ha_non_active_role_for_traffic, integration_shared_secret,
-        lpe_bridge_probe_url, lpe_health_probe_url, normalize_local_data_stores, persist_state,
-        require_integration_request, submission_listener_is_configured, DashboardResponse,
+        lpe_bridge_probe_url, lpe_health_probe_url, mark_accepted_domain_verified,
+        normalize_local_data_stores, persist_state, require_integration_request,
+        submission_listener_is_configured, AcceptedDomain, DashboardResponse,
         OUTBOUND_HANDOFF_PATH,
     };
     use axum::http::HeaderMap;
@@ -3516,6 +3544,25 @@ mod tests {
             lpe_health_probe_url("https://lpe-core.example.test:8443/").unwrap(),
             "https://lpe-core.example.test:8443/health/live"
         );
+    }
+
+    #[test]
+    fn accepted_domain_test_marks_domain_verified_once() {
+        let mut domains = vec![AcceptedDomain {
+            id: "domain-1".to_string(),
+            domain: "example.test".to_string(),
+            destination_server: "10.0.10.20:25".to_string(),
+            verification_type: "dynamic".to_string(),
+            rbl_checks: true,
+            spf_checks: true,
+            greylisting: true,
+            verified: false,
+        }];
+
+        assert!(mark_accepted_domain_verified(&mut domains, "domain-1"));
+        assert!(domains[0].verified);
+        assert!(!mark_accepted_domain_verified(&mut domains, "domain-1"));
+        assert!(!mark_accepted_domain_verified(&mut domains, "missing"));
     }
 
     #[test]

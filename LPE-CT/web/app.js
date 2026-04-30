@@ -2874,6 +2874,12 @@ async function deleteAcceptedDomain(domainId) {
 async function testAcceptedDomain(domainId) {
   const copy = getCopy();
   const result = await postJson(`/api/accepted-domains/${encodeURIComponent(domainId)}/test`);
+  if (result.verified) {
+    state.dashboard.accepted_domains = currentAcceptedDomains().map((domain) =>
+      domain.id === domainId ? { ...domain, verified: true } : domain
+    );
+    renderPlatform();
+  }
   showFeedback(`${result.domain}: ${result.detail}`, result.verified ? "success" : "warning");
 }
 

@@ -44,7 +44,7 @@ For the P1 management interface, those operator workflows are exposed as one coh
 - full-width allow/block and attachment-rule lists with drawer-based create, edit, and delete flows
 - recipient-verification settings and status in the same policy workspace
 - DKIM signing profile plus per-domain selector and key-reference management in the same policy workspace
-- accepted domains under `System Setup` / `Mail relay` / `Domains`, with drawer-based add, import, edit, test, and delete workflows
+- accepted domains under `System Setup` / `Mail relay` / `Domains`, with drawer-based add, import, edit, test, and delete workflows; a successful signed bridge test marks the domain as verified for inbound `RCPT TO` acceptance
 - digest scheduling, domain defaults, mailbox overrides, and retained digest artifacts under one reporting workspace
 
 That web surface stays bounded to sorting-center-owned state. It must not imply canonical mailbox ownership, direct `LPE` database access, or any parallel user-visible state model in `LPE-CT`.
