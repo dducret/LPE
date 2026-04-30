@@ -27,9 +27,9 @@ The current `LPE-CT` implementation now uses a dedicated private `PostgreSQL` st
 
 It currently persists local state in three ways:
 
-- `LPE_CT_STATE_FILE`, default `/var/lib/lpe-ct/state.json`
+- private `PostgreSQL` technical tables on the dedicated `LPE-CT` local database, including the active management dashboard state
 - `LPE_CT_SPOOL_DIR`, default `/var/spool/lpe-ct`
-- private `PostgreSQL` technical tables on the dedicated `LPE-CT` local database
+- `LPE_CT_STATE_FILE`, default `/var/lib/lpe-ct/state.json`, only as a legacy bootstrap/export file for first-start migration and operator inspection
 
 The active spool layout in the current code is:
 
@@ -45,7 +45,7 @@ The active spool layout in the current code is:
 
 The currently implemented technical local state already includes:
 
-- management configuration and audit metadata in `state.json`
+- management configuration and audit metadata in the private `dashboard_state` PostgreSQL table
 - queued inbound and outbound message traces as JSON files in the spool
 - quarantine ownership in `quarantine/`
 - greylisting triplets in `greylist_entries`
@@ -65,7 +65,7 @@ This keeps indexed perimeter state in a private database while leaving payload c
 
 The target storage model is therefore:
 
-- `state.json` for local management configuration and bootstrap state
+- private PostgreSQL for local management configuration and bootstrap state
 - spool files for raw queue ownership, raw message payload traces, quarantine payload custody, and replay-oriented artifacts
 - dedicated local database stores for higher-churn technical indexes and coordination state
 
@@ -148,15 +148,20 @@ Even in those cases, `LPE-CT` remains non-canonical.
 
 ### Rebuild and retention expectations
 
-The local PostgreSQL store must remain operationally discardable.
+Most indexed local PostgreSQL state must remain operationally discardable.
+The exception is the `dashboard_state` row, which is the active management
+configuration for the sorting center and must be backed up or exported before
+discarding the database.
 
 That means the expected rebuild behavior is:
 
+- `dashboard_state` may be restored from database backup or a legacy
+  `state.json` export when an operator intentionally imports one
 - `greylist_entries`, `reputation_entries`, `bayespam_corpora`, and `throttle_windows` may be rebuilt or relearned from future traffic plus any retained spool artifacts
 - `quarantine_messages` may be rebuilt from the current quarantine spool because payload custody remains in `quarantine/`
 - `mail_flow_history` may be partially rebuilt from retained `policy/transport-audit.jsonl` within the configured retention window
-- `policy_address_rules`, `attachment_policy_rules`, `digest_settings`, `digest_recipients`, `recipient_verification_settings`, and `dkim_domain_configs` are mirrors of `state.json` management configuration and can be repopulated from that file at startup
-- `accepted_domains` is a mirror of `state.json` management configuration and can be repopulated from that file at startup
+- `policy_address_rules`, `attachment_policy_rules`, `digest_settings`, `digest_recipients`, `recipient_verification_settings`, and `dkim_domain_configs` are materialized from the active `dashboard_state` row and may be repopulated from it at startup
+- `accepted_domains` is materialized from the active `dashboard_state` row and may be repopulated from it at startup
 - `recipient_verification_cache` is disposable short-lived materialized state and may be dropped without changing canonical mailbox truth
 
 Retention remains bounded:
@@ -178,7 +183,7 @@ The current reporting and quarantine implementation also makes the rebuild bound
 
 Recommended storage ownership for the target architecture is:
 
-- `state.json`: node identity, relay settings, management bootstrap, local admin audit trail, declared local-store topology
+- local `PostgreSQL`: node identity, relay settings, management bootstrap, local admin audit trail, declared local-store topology
 - spool: inbound/outbound queue files, raw message traces, quarantine payload custody, replay-oriented artifacts
 - local `PostgreSQL`: Bayesian state, reputation, greylisting, quarantine metadata indexes, throttling counters, cluster metadata
 

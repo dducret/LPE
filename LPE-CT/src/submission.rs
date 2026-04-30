@@ -7,7 +7,13 @@ use lpe_domain::{
 };
 use lpe_magika::{IngressContext, Validator};
 use reqwest::StatusCode;
-use std::{env, fs::File, io::BufReader, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    env,
+    fs::File,
+    io::BufReader,
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader as TokioBufReader},
     net::{TcpListener, TcpStream},
@@ -62,7 +68,7 @@ impl SubmissionTransaction {
 pub(crate) async fn run_submission_listener(
     bind_address: String,
     core_base_url: String,
-    state_file: PathBuf,
+    dashboard_store: Arc<Mutex<crate::DashboardState>>,
 ) -> Result<()> {
     let tls = load_tls_acceptor()?;
     let listener = TcpListener::bind(&bind_address)
@@ -76,10 +82,10 @@ pub(crate) async fn run_submission_listener(
         let tls = tls.clone();
         let client = client.clone();
         let core_base_url = core_base_url.clone();
-        let state_file = state_file.clone();
+        let dashboard_store = dashboard_store.clone();
         tokio::spawn(async move {
             if let Err(error) =
-                handle_submission_session(stream, peer, tls, client, core_base_url, state_file)
+                handle_submission_session(stream, peer, tls, client, core_base_url, dashboard_store)
                     .await
             {
                 warn!(peer = %peer, error = %error, "smtp submission session failed");
@@ -94,7 +100,7 @@ async fn handle_submission_session(
     tls: TlsAcceptor,
     client: reqwest::Client,
     core_base_url: String,
-    state_file: PathBuf,
+    dashboard_store: Arc<Mutex<crate::DashboardState>>,
 ) -> Result<()> {
     let tls_stream = tls.accept(stream).await?;
 
@@ -183,7 +189,7 @@ async fn handle_submission_session(
 
         if upper.starts_with("MAIL FROM:") {
             let candidate = normalize_path_argument(&command[10..]);
-            let config = crate::smtp::runtime_config(&state_file)?;
+            let config = crate::smtp::runtime_config_from_store(&dashboard_store)?;
             if let transport_policy::AddressPolicyVerdict::Reject(reason) =
                 transport_policy::evaluate_address_policy_with_config(
                     &config.address_policy,
@@ -206,7 +212,7 @@ async fn handle_submission_session(
                 continue;
             }
             let recipient = normalize_path_argument(&command[8..]);
-            let config = crate::smtp::runtime_config(&state_file)?;
+            let config = crate::smtp::runtime_config_from_store(&dashboard_store)?;
             if let transport_policy::AddressPolicyVerdict::Reject(reason) =
                 transport_policy::evaluate_address_policy_with_config(
                     &config.address_policy,
@@ -234,7 +240,7 @@ async fn handle_submission_session(
             write_line(&mut writer, "354 end with <CRLF>.<CRLF>").await?;
             let data = read_data(&mut reader).await?;
             let validator = Validator::from_env();
-            let config = crate::smtp::runtime_config(&state_file)?;
+            let config = crate::smtp::runtime_config_from_store(&dashboard_store)?;
             match transport_policy::evaluate_attachment_policy_with_config(
                 &config.attachment_policy,
                 &validator,

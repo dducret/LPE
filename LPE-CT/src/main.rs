@@ -507,7 +507,13 @@ async fn main() -> Result<()> {
     );
     smtp::initialize_spool(&spool_dir)?;
 
-    let mut dashboard = load_or_initialize_state(&state_file)?;
+    let mut bootstrap_dashboard = load_or_initialize_state(&state_file)?;
+    apply_env_overrides(&mut bootstrap_dashboard);
+    normalize_local_data_stores(&mut bootstrap_dashboard.local_data_stores);
+    let local_db_config = local_db_config_from_dashboard(&bootstrap_dashboard);
+    let mut dashboard = storage::load_dashboard_state(&local_db_config)
+        .await?
+        .unwrap_or(bootstrap_dashboard);
     apply_env_overrides(&mut dashboard);
     ensure_management_bootstrap(&mut dashboard)?;
     normalize_accepted_domains(&mut dashboard.accepted_domains);
@@ -531,21 +537,7 @@ async fn main() -> Result<()> {
     dashboard.network.submission_listener_enabled =
         submission_listener_is_configured(&submission_bind_address);
     persist_state(&state_file, &dashboard)?;
-    if let Err(error) = storage::sync_dashboard_configuration(
-        &local_db_config_from_dashboard(&dashboard),
-        &dashboard,
-    )
-    .await
-    {
-        if dashboard.local_data_stores.dedicated_postgres.enabled {
-            warn!(
-                error = %error,
-                "unable to mirror dashboard configuration into the private LPE-CT PostgreSQL store; continuing with degraded management state"
-            );
-        } else {
-            return Err(error);
-        }
-    }
+    sync_dashboard_to_postgres(&dashboard).await?;
 
     let state = AppState {
         store: Arc::new(Mutex::new(dashboard)),
@@ -555,9 +547,9 @@ async fn main() -> Result<()> {
     };
 
     let api_state = state.clone();
-    let smtp_state_file = state.state_file.as_ref().clone();
+    let smtp_dashboard_store = state.store.clone();
     let smtp_spool_dir = state.spool_dir.as_ref().clone();
-    let submission_state_file = state.state_file.as_ref().clone();
+    let submission_dashboard_store = state.store.clone();
     let submission_core_base_url = {
         let snapshot = state.store.lock().unwrap().clone();
         snapshot.relay.core_delivery_base_url
@@ -574,14 +566,14 @@ async fn main() -> Result<()> {
         Result::<()>::Ok(())
     });
     let smtp_task = tokio::spawn(async move {
-        smtp::run_smtp_listener(smtp_bind_address, smtp_state_file, smtp_spool_dir).await
+        smtp::run_smtp_listener(smtp_bind_address, smtp_dashboard_store, smtp_spool_dir).await
     });
     let submission_task = tokio::spawn(async move {
         if let Some(bind_address) = submission_bind_address {
             submission::run_submission_listener(
                 bind_address,
                 submission_core_base_url,
-                submission_state_file,
+                submission_dashboard_store,
             )
             .await?;
         } else {
@@ -714,7 +706,7 @@ async fn health_ready(State(state): State<AppState>) -> Result<Json<ReadinessRes
 
     checks.push(ha_activation_check());
 
-    checks.push(check_state_file(&state.state_file));
+    checks.push(check_dashboard_state_store(&snapshot.local_data_stores));
     checks.push(check_spool_layout(&state.spool_dir));
     checks.push(check_local_data_store_policy(&snapshot.local_data_stores));
     checks.push(check_non_empty_value(
@@ -783,7 +775,8 @@ async fn login(
             &email,
             "management-login-failed",
             "Invalid LPE-CT management credentials",
-        )?;
+        )
+        .await?;
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "invalid management credentials",
@@ -807,7 +800,8 @@ async fn login(
         &email,
         "management-login-succeeded",
         "LPE-CT management session opened",
-    )?;
+    )
+    .await?;
 
     Ok(Json(LoginResponse {
         token,
@@ -823,18 +817,23 @@ async fn logout(
     headers: HeaderMap,
 ) -> Result<Json<HealthResponse>, ApiError> {
     if let Some(token) = bearer_token(&headers) {
-        if let Some(session) = state
-            .sessions
-            .lock()
-            .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "session lock poisoned"))?
-            .remove(&token)
-        {
+        let session = {
+            state
+                .sessions
+                .lock()
+                .map_err(|_| {
+                    ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "session lock poisoned")
+                })?
+                .remove(&token)
+        };
+        if let Some(session) = session {
             append_audit_event_with_actor(
                 &state,
                 &session.email,
                 "management-logout",
                 "LPE-CT management session closed",
-            )?;
+            )
+            .await?;
         }
     }
 
@@ -959,7 +958,8 @@ async fn retry_trace(
         &admin.email,
         "trace-retry",
         &format!("requested retry for {}", result.trace_id),
-    )?;
+    )
+    .await?;
     Ok(Json(result))
 }
 
@@ -985,7 +985,8 @@ async fn release_trace(
         &admin.email,
         "trace-release",
         &format!("requested release for {}", result.trace_id),
-    )?;
+    )
+    .await?;
     Ok(Json(result))
 }
 
@@ -1011,7 +1012,8 @@ async fn delete_trace(
         &admin.email,
         "trace-delete",
         &format!("deleted quarantined trace {}", result.trace_id),
-    )?;
+    )
+    .await?;
     Ok(Json(result))
 }
 
@@ -1323,6 +1325,7 @@ async fn update_site(
     mutate_state(&state, &admin.email, "update-site", move |dashboard| {
         dashboard.site = payload;
     })
+    .await
 }
 
 async fn update_relay(
@@ -1334,6 +1337,7 @@ async fn update_relay(
     mutate_state(&state, &admin.email, "update-relay", move |dashboard| {
         dashboard.relay = payload;
     })
+    .await
 }
 
 async fn update_network(
@@ -1345,6 +1349,7 @@ async fn update_network(
     mutate_state(&state, &admin.email, "update-network", move |dashboard| {
         dashboard.network = payload;
     })
+    .await
 }
 
 async fn update_policies(
@@ -1355,14 +1360,13 @@ async fn update_policies(
     let admin = require_management_admin(&state, &headers)?;
     normalize_policy_settings(&mut payload);
     let previous = read_state(&state)?;
-    let response = mutate_state(&state, &admin.email, "update-policies", move |dashboard| {
+    mutate_state(&state, &admin.email, "update-policies", move |dashboard| {
         dashboard.policies = payload;
-    })?;
-    if let Err(error) = sync_technical_store(&state).await {
-        restore_dashboard_state(&state, &previous)?;
-        return Err(error);
-    }
-    Ok(response)
+    })
+    .await
+    .inspect_err(|_| {
+        let _ = restore_dashboard_state(&state, &previous);
+    })
 }
 
 async fn update_updates(
@@ -1374,6 +1378,7 @@ async fn update_updates(
     mutate_state(&state, &admin.email, "update-updates", move |dashboard| {
         dashboard.updates = payload;
     })
+    .await
 }
 
 async fn reporting_snapshot(
@@ -1420,7 +1425,7 @@ async fn run_digest_reports(
 ) -> Result<Json<reporting::DigestRunResponse>, ApiError> {
     let admin = require_management_admin(&state, &headers)?;
     let generated_at = current_timestamp();
-    let generated_reports = {
+    let (generated_reports, snapshot) = {
         let mut guard = state
             .store
             .lock()
@@ -1442,8 +1447,11 @@ async fn run_digest_reports(
         );
         guard.audit.truncate(12);
         persist_state(&state.state_file, &guard)?;
-        generated_reports
+        (generated_reports, guard.clone())
     };
+    sync_dashboard_to_postgres(&snapshot)
+        .await
+        .map_err(ApiError::from)?;
     let next_digest_run_at = read_state(&state)?.reporting.next_digest_run_at;
     Ok(Json(reporting::DigestRunResponse {
         generated_at,
@@ -1508,7 +1516,7 @@ async fn outbound_handoff(
     Ok(Json(response))
 }
 
-fn mutate_state<F>(
+async fn mutate_state<F>(
     state: &AppState,
     actor: &str,
     action: &str,
@@ -1517,14 +1525,20 @@ fn mutate_state<F>(
 where
     F: FnOnce(&mut DashboardState),
 {
-    let mut guard = state
-        .store
-        .lock()
-        .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))?;
-    update(&mut guard);
-    append_dashboard_audit_event(&mut guard, actor, action);
-    persist_state(&state.state_file, &guard)?;
-    Ok(Json(guard.clone()))
+    let snapshot = {
+        let mut guard = state
+            .store
+            .lock()
+            .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))?;
+        update(&mut guard);
+        append_dashboard_audit_event(&mut guard, actor, action);
+        persist_state(&state.state_file, &guard)?;
+        guard.clone()
+    };
+    sync_dashboard_to_postgres(&snapshot)
+        .await
+        .map_err(ApiError::from)?;
+    Ok(Json(snapshot))
 }
 
 async fn run_reporting_scheduler(state: AppState) {
@@ -1544,7 +1558,7 @@ async fn run_reporting_scheduler(state: AppState) {
                 tracing::warn!(error = %error, "reporting retention enforcement failed");
             }
         }
-        let generated_reports = {
+        let (generated_reports, snapshot) = {
             let mut guard = match state.store.lock() {
                 Ok(guard) => guard,
                 Err(_) => continue,
@@ -1560,7 +1574,7 @@ async fn run_reporting_scheduler(state: AppState) {
                 }
             };
             if generated_reports.is_empty() {
-                0
+                (0, None)
             } else {
                 guard.audit.insert(
                     0,
@@ -1578,9 +1592,17 @@ async fn run_reporting_scheduler(state: AppState) {
                 if let Err(error) = persist_state(&state.state_file, &guard) {
                     tracing::warn!(error = %error, "unable to persist scheduled reporting state");
                 }
-                generated_reports.len()
+                (generated_reports.len(), Some(guard.clone()))
             }
         };
+        if let Some(snapshot) = snapshot {
+            if let Err(error) = sync_dashboard_to_postgres(&snapshot).await {
+                tracing::warn!(
+                    error = %error,
+                    "unable to persist scheduled reporting state to PostgreSQL"
+                );
+            }
+        }
         if generated_reports > 0 {
             tracing::info!(generated_reports, "scheduled quarantine digests generated");
         }
@@ -1607,9 +1629,16 @@ fn local_db_config_from_dashboard(dashboard: &DashboardState) -> storage::LocalD
 
 async fn sync_technical_store(state: &AppState) -> Result<(), ApiError> {
     let snapshot = read_state(state)?;
-    storage::sync_dashboard_configuration(&local_db_config_from_dashboard(&snapshot), &snapshot)
+    sync_dashboard_to_postgres(&snapshot)
         .await
         .map_err(ApiError::from)
+}
+
+async fn sync_dashboard_to_postgres(snapshot: &DashboardState) -> Result<()> {
+    let config = local_db_config_from_dashboard(snapshot);
+    storage::persist_dashboard_state(&config, snapshot).await?;
+    storage::sync_dashboard_configuration(&config, snapshot).await?;
+    Ok(())
 }
 
 fn restore_dashboard_state(state: &AppState, snapshot: &DashboardState) -> Result<(), ApiError> {
@@ -1636,27 +1665,33 @@ fn append_dashboard_audit_event(state: &mut DashboardState, actor: &str, action:
     state.audit.truncate(12);
 }
 
-fn append_audit_event_with_actor(
+async fn append_audit_event_with_actor(
     state: &AppState,
     actor: &str,
     action: &str,
     details: &str,
 ) -> Result<(), ApiError> {
-    let mut guard = state
-        .store
-        .lock()
-        .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))?;
-    guard.audit.insert(
-        0,
-        AuditEvent {
-            timestamp: current_timestamp(),
-            actor: actor.to_string(),
-            action: action.to_string(),
-            details: details.to_string(),
-        },
-    );
-    guard.audit.truncate(12);
-    persist_state(&state.state_file, &guard)?;
+    let snapshot = {
+        let mut guard = state
+            .store
+            .lock()
+            .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "state lock poisoned"))?;
+        guard.audit.insert(
+            0,
+            AuditEvent {
+                timestamp: current_timestamp(),
+                actor: actor.to_string(),
+                action: action.to_string(),
+                details: details.to_string(),
+            },
+        );
+        guard.audit.truncate(12);
+        persist_state(&state.state_file, &guard)?;
+        guard.clone()
+    };
+    sync_dashboard_to_postgres(&snapshot)
+        .await
+        .map_err(ApiError::from)?;
     Ok(())
 }
 
@@ -1897,6 +1932,9 @@ fn apply_env_overrides(state: &mut DashboardState) {
             state.local_data_stores.dedicated_postgres.purposes = parsed;
         }
     }
+    if let Ok(value) = env::var("LPE_CT_ACCEPTED_DOMAINS") {
+        upsert_env_accepted_domains(state, &value);
+    }
 }
 
 fn normalize_policy_settings(policies: &mut PolicySettings) {
@@ -2004,6 +2042,52 @@ fn normalize_accepted_domains(domains: &mut Vec<AcceptedDomain>) {
             && seen.insert(domain.domain.clone())
     });
     domains.sort_by(|left, right| left.domain.cmp(&right.domain));
+}
+
+fn upsert_env_accepted_domains(state: &mut DashboardState, value: &str) {
+    for entry in value.split([',', ';']).map(str::trim) {
+        if entry.is_empty() {
+            continue;
+        }
+        let mut parts = entry.split('|').map(str::trim);
+        let Some(domain) = parts.next().map(normalize_domain_name) else {
+            continue;
+        };
+        if !is_valid_domain_name(&domain) {
+            continue;
+        }
+        let destination_server = parts
+            .next()
+            .filter(|value| !value.is_empty())
+            .unwrap_or("core-delivery")
+            .to_string();
+        let verification_type = parts
+            .next()
+            .map(|value| {
+                normalize_verification_type(value).unwrap_or_else(|_| "dynamic".to_string())
+            })
+            .unwrap_or_else(|| "dynamic".to_string());
+        let verified = parts.next().map(parse_bool).unwrap_or(true);
+        let domain_config = AcceptedDomain {
+            id: format!("env-{domain}"),
+            domain: domain.clone(),
+            destination_server,
+            verification_type,
+            rbl_checks: true,
+            spf_checks: true,
+            greylisting: true,
+            verified,
+        };
+        if let Some(existing) = state
+            .accepted_domains
+            .iter_mut()
+            .find(|item| item.domain.eq_ignore_ascii_case(&domain))
+        {
+            *existing = domain_config;
+        } else {
+            state.accepted_domains.push(domain_config);
+        }
+    }
 }
 
 fn normalize_domain_name(value: &str) -> String {
@@ -2827,24 +2911,19 @@ fn check_non_empty_value(
     }
 }
 
-fn check_state_file(path: &Path) -> ReadinessCheck {
-    match fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => readiness_ok(
-            "state-file",
+fn check_dashboard_state_store(local_data_stores: &LocalDataStoresSettings) -> ReadinessCheck {
+    if !local_data_stores.dedicated_postgres.enabled {
+        return readiness_failed(
+            "dashboard-state-store",
             true,
-            format!("state file is present at {}", path.display()),
-        ),
-        Ok(_) => readiness_failed(
-            "state-file",
-            true,
-            format!("state path is not a regular file: {}", path.display()),
-        ),
-        Err(error) => readiness_failed(
-            "state-file",
-            true,
-            format!("unable to access state file {}: {error}", path.display()),
-        ),
+            "dashboard state requires the private LPE-CT PostgreSQL store",
+        );
     }
+    readiness_ok(
+        "dashboard-state-store",
+        true,
+        "dashboard state is persisted in the private LPE-CT PostgreSQL store",
+    )
 }
 
 fn check_spool_layout(path: &Path) -> ReadinessCheck {
@@ -3296,9 +3375,9 @@ mod tests {
         address_binds_publicly, apply_env_overrides, default_state, env_test_lock,
         ha_activation_check, ha_non_active_role_for_traffic, integration_shared_secret,
         lpe_bridge_probe_url, lpe_health_probe_url, mark_accepted_domain_verified,
-        normalize_local_data_stores, persist_state, require_integration_request,
-        submission_listener_is_configured, AcceptedDomain, DashboardResponse,
-        OUTBOUND_HANDOFF_PATH,
+        normalize_accepted_domains, normalize_local_data_stores, persist_state,
+        require_integration_request, submission_listener_is_configured, AcceptedDomain,
+        DashboardResponse, OUTBOUND_HANDOFF_PATH,
     };
     use axum::http::HeaderMap;
     use lpe_domain::{
@@ -3563,6 +3642,26 @@ mod tests {
         assert!(domains[0].verified);
         assert!(!mark_accepted_domain_verified(&mut domains, "domain-1"));
         assert!(!mark_accepted_domain_verified(&mut domains, "missing"));
+    }
+
+    #[test]
+    #[ignore = "env-sensitive"]
+    fn env_overrides_bootstrap_verified_accepted_domains() {
+        let _guard = env_test_lock();
+        let mut state = default_state();
+
+        std::env::set_var("LPE_CT_ACCEPTED_DOMAINS", "L-P-E.CH|core-lpe|dynamic|true");
+        apply_env_overrides(&mut state);
+        normalize_accepted_domains(&mut state.accepted_domains);
+
+        assert_eq!(state.accepted_domains.len(), 1);
+        assert_eq!(state.accepted_domains[0].id, "env-l-p-e.ch");
+        assert_eq!(state.accepted_domains[0].domain, "l-p-e.ch");
+        assert_eq!(state.accepted_domains[0].destination_server, "core-lpe");
+        assert_eq!(state.accepted_domains[0].verification_type, "dynamic");
+        assert!(state.accepted_domains[0].verified);
+
+        std::env::remove_var("LPE_CT_ACCEPTED_DOMAINS");
     }
 
     #[test]

@@ -24,18 +24,29 @@ use serde_json::Value;
 use sqlx::{types::Json, PgPool, Row};
 use std::{
     collections::{hash_map::DefaultHasher, HashMap, HashSet},
-    convert::TryFrom,
-    env, fs,
+    env,
+    fs::{self, File},
     hash::{Hash, Hasher},
+    io::BufReader as StdBufReader,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU32, Ordering},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc, Mutex,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::{tcp::OwnedReadHalf, tcp::OwnedWriteHalf, TcpListener, TcpStream},
     process::Command,
+};
+use tokio_rustls::{
+    rustls::{
+        pki_types::{CertificateDer, PrivateKeyDer},
+        ServerConfig,
+    },
+    TlsAcceptor,
 };
 use tracing::{info, warn};
 
@@ -155,6 +166,26 @@ struct QuarantineMetadata {
     remote_message_ref: Option<String>,
     route_target: Option<String>,
     search_text: String,
+}
+
+#[derive(Default)]
+struct SmtpTransaction {
+    helo: String,
+    mail_from: String,
+    rcpt_to: Vec<String>,
+}
+
+impl SmtpTransaction {
+    fn reset_message(&mut self) {
+        self.mail_from.clear();
+        self.rcpt_to.clear();
+    }
+}
+
+enum SmtpCommandOutcome {
+    Continue,
+    StartTls,
+    Quit,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -715,9 +746,10 @@ pub(crate) fn queue_metrics(
 
 pub(crate) async fn run_smtp_listener(
     bind_address: String,
-    state_file: PathBuf,
+    dashboard_store: Arc<Mutex<super::DashboardState>>,
     spool_dir: PathBuf,
 ) -> Result<()> {
+    let starttls = smtp_starttls_acceptor()?;
     let listener = TcpListener::bind(&bind_address)
         .await
         .with_context(|| format!("unable to bind SMTP listener on {bind_address}"))?;
@@ -725,7 +757,7 @@ pub(crate) async fn run_smtp_listener(
 
     loop {
         let (stream, peer) = listener.accept().await?;
-        let max_concurrent_sessions = runtime_config(&state_file)
+        let max_concurrent_sessions = runtime_config_from_store(&dashboard_store)
             .map(|config| config.max_concurrent_sessions.max(1))
             .unwrap_or(250);
         let current = SMTP_ACTIVE_SESSIONS.fetch_add(1, Ordering::SeqCst) + 1;
@@ -744,10 +776,13 @@ pub(crate) async fn run_smtp_listener(
             });
             continue;
         }
-        let state_file = state_file.clone();
+        let dashboard_store = dashboard_store.clone();
         let spool_dir = spool_dir.clone();
+        let starttls = starttls.clone();
         tokio::spawn(async move {
-            if let Err(error) = handle_smtp_session(stream, peer, state_file, spool_dir).await {
+            if let Err(error) =
+                handle_smtp_session(stream, peer, dashboard_store, spool_dir, starttls).await
+            {
                 observability::record_smtp_session("failed");
                 warn!(peer = %peer, error = %error, "smtp session failed");
             }
@@ -901,6 +936,16 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
             })
             .collect(),
     }
+}
+
+pub(crate) fn runtime_config_from_store(
+    dashboard_store: &Arc<Mutex<super::DashboardState>>,
+) -> Result<RuntimeConfig> {
+    let dashboard = dashboard_store
+        .lock()
+        .map_err(|_| anyhow!("dashboard state lock poisoned"))?
+        .clone();
+    Ok(runtime_config_from_dashboard(&dashboard))
 }
 
 fn load_antivirus_providers(provider_chain: &[String]) -> Vec<AntivirusProviderConfig> {
@@ -1603,16 +1648,13 @@ fn matches_any_domain(expected: Option<&str>, actual: &[String]) -> bool {
 async fn handle_smtp_session(
     stream: TcpStream,
     peer: SocketAddr,
-    state_file: PathBuf,
+    dashboard_store: Arc<Mutex<super::DashboardState>>,
     spool_dir: PathBuf,
+    starttls: Option<TlsAcceptor>,
 ) -> Result<()> {
     let client = reqwest::Client::new();
     let (reader, mut writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
-    let mut line = String::new();
-    let mut helo = String::new();
-    let mut mail_from = String::new();
-    let mut rcpt_to = Vec::new();
 
     if let Some(role) = crate::ha_non_active_role_for_traffic()? {
         write_smtp(
@@ -1625,6 +1667,8 @@ async fn handle_smtp_session(
     }
 
     write_smtp(&mut writer, "220 LPE-CT ESMTP ready").await?;
+    let mut transaction = SmtpTransaction::default();
+    let mut line = String::new();
     loop {
         line.clear();
         if reader.read_line(&mut line).await? == 0 {
@@ -1632,141 +1676,249 @@ async fn handle_smtp_session(
         }
 
         let command = line.trim_end_matches(['\r', '\n']).to_string();
-        let upper = command.to_ascii_uppercase();
-        if upper.starts_with("EHLO ") || upper.starts_with("HELO ") {
-            helo = command[5.min(command.len())..].trim().to_string();
-            write_smtp(&mut writer, "250-LPE-CT").await?;
-            write_smtp(&mut writer, "250 SIZE").await?;
-        } else if upper.starts_with("MAIL FROM:") {
-            let candidate = command[10..].trim().trim_matches(['<', '>']).to_string();
-            let config = runtime_config(&state_file)?;
-            if let transport_policy::AddressPolicyVerdict::Reject(reason) =
-                transport_policy::evaluate_address_policy_with_config(
-                    &config.address_policy,
-                    transport_policy::AddressRole::Sender,
-                    &candidate,
-                )
-            {
-                write_smtp(&mut writer, &format!("550 sender rejected ({reason})")).await?;
-                continue;
-            }
-            mail_from = candidate;
-            rcpt_to.clear();
-            write_smtp(&mut writer, "250 sender accepted").await?;
-        } else if upper.starts_with("RCPT TO:") {
-            if mail_from.is_empty() {
-                write_smtp(&mut writer, "503 send MAIL FROM first").await?;
-                continue;
-            }
-            let recipient = command[8..].trim().trim_matches(['<', '>']).to_string();
-            let config = runtime_config(&state_file)?;
-            if !recipient_domain_is_accepted(&config, &recipient) {
-                write_smtp(
-                    &mut writer,
-                    "550 recipient domain is not accepted by this sorting center",
-                )
-                .await?;
-                continue;
-            }
-            if let transport_policy::AddressPolicyVerdict::Reject(reason) =
-                transport_policy::evaluate_address_policy_with_config(
-                    &config.address_policy,
-                    transport_policy::AddressRole::Recipient,
-                    &recipient,
-                )
-            {
-                write_smtp(&mut writer, &format!("550 recipient rejected ({reason})")).await?;
-                continue;
-            }
-            match transport_policy::verify_recipient_with_core(
-                &client,
-                &config.recipient_verification,
-                &config.core_delivery_base_url,
-                Some(&mail_from),
-                &recipient,
-                Some(&helo),
-                Some(&peer.to_string()),
-                None,
-            )
-            .await
-            {
-                transport_policy::RecipientVerificationVerdict::Accept => {
-                    rcpt_to.push(recipient);
-                }
-                transport_policy::RecipientVerificationVerdict::Reject(reason) => {
-                    write_smtp(&mut writer, &format!("550 recipient rejected ({reason})")).await?;
+        match handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool_dir,
+            peer,
+            &mut transaction,
+            &command,
+            starttls.is_some(),
+        )
+        .await?
+        {
+            SmtpCommandOutcome::Continue => {}
+            SmtpCommandOutcome::Quit => return Ok(()),
+            SmtpCommandOutcome::StartTls => {
+                let Some(starttls) = starttls.clone() else {
+                    write_smtp(&mut writer, "454 TLS not available").await?;
                     continue;
-                }
-                transport_policy::RecipientVerificationVerdict::Defer(reason) => {
-                    write_smtp(
-                        &mut writer,
-                        &format!("451 recipient verification unavailable ({reason})"),
-                    )
-                    .await?;
-                    continue;
-                }
-            }
-            write_smtp(&mut writer, "250 recipient accepted").await?;
-        } else if upper == "DATA" {
-            if mail_from.is_empty() || rcpt_to.is_empty() {
-                write_smtp(&mut writer, "503 sender and recipient required").await?;
-                continue;
-            }
-            let config = runtime_config(&state_file)?;
-            write_smtp(&mut writer, "354 end with <CRLF>.<CRLF>").await?;
-            let data = read_smtp_data(&mut reader, config.max_message_size_mb).await?;
-            let message = receive_message(
-                &spool_dir,
-                &config,
-                peer.to_string(),
-                helo.clone(),
-                mail_from.clone(),
-                rcpt_to.clone(),
-                data,
-            )
-            .await?;
-            if message.status == "rejected" {
-                write_smtp(
+                };
+                write_smtp(&mut writer, "220 ready to start TLS").await?;
+                let stream = reader
+                    .into_inner()
+                    .reunite(writer)
+                    .map_err(|_| anyhow!("unable to prepare SMTP stream for STARTTLS"))?;
+                let tls_stream = starttls.accept(stream).await?;
+                let (reader, mut writer) = tokio::io::split(tls_stream);
+                let mut reader = BufReader::new(reader);
+                run_smtp_command_loop(
+                    &client,
+                    &mut reader,
                     &mut writer,
-                    &format!(
-                        "554 message rejected by perimeter policy (trace {})",
-                        message.id
-                    ),
+                    &dashboard_store,
+                    &spool_dir,
+                    peer,
+                    SmtpTransaction::default(),
                 )
                 .await?;
-            } else if message.status == "deferred" {
-                write_smtp(
-                    &mut writer,
-                    &format!(
-                        "451 message temporarily deferred by perimeter policy (trace {})",
-                        message.id
-                    ),
-                )
-                .await?;
-            } else if message.status == "quarantined" {
-                write_smtp(&mut writer, &format!("250 quarantined as {}", message.id)).await?;
-                return Ok(());
-            } else {
-                write_smtp(&mut writer, &format!("250 queued as {}", message.id)).await?;
-            }
-            if message.status == "rejected" {
                 return Ok(());
             }
-            mail_from.clear();
-            rcpt_to.clear();
-        } else if upper == "RSET" {
-            mail_from.clear();
-            rcpt_to.clear();
-            write_smtp(&mut writer, "250 reset").await?;
-        } else if upper == "NOOP" {
-            write_smtp(&mut writer, "250 ok").await?;
-        } else if upper == "QUIT" {
-            write_smtp(&mut writer, "221 bye").await?;
-            return Ok(());
-        } else {
-            write_smtp(&mut writer, "502 command not implemented").await?;
         }
     }
+}
+
+async fn run_smtp_command_loop<R, W>(
+    client: &reqwest::Client,
+    reader: &mut BufReader<R>,
+    writer: &mut W,
+    dashboard_store: &Arc<Mutex<super::DashboardState>>,
+    spool_dir: &Path,
+    peer: SocketAddr,
+    mut transaction: SmtpTransaction,
+) -> Result<()>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut line = String::new();
+    loop {
+        line.clear();
+        if reader.read_line(&mut line).await? == 0 {
+            return Ok(());
+        }
+
+        let command = line.trim_end_matches(['\r', '\n']).to_string();
+        match handle_smtp_command(
+            client,
+            reader,
+            writer,
+            dashboard_store,
+            spool_dir,
+            peer,
+            &mut transaction,
+            &command,
+            false,
+        )
+        .await?
+        {
+            SmtpCommandOutcome::Continue => {}
+            SmtpCommandOutcome::StartTls => {
+                write_smtp(writer, "454 TLS already active").await?;
+            }
+            SmtpCommandOutcome::Quit => return Ok(()),
+        }
+    }
+}
+
+async fn handle_smtp_command<R, W>(
+    client: &reqwest::Client,
+    reader: &mut BufReader<R>,
+    writer: &mut W,
+    dashboard_store: &Arc<Mutex<super::DashboardState>>,
+    spool_dir: &Path,
+    peer: SocketAddr,
+    transaction: &mut SmtpTransaction,
+    command: &str,
+    starttls_available: bool,
+) -> Result<SmtpCommandOutcome>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let upper = command.to_ascii_uppercase();
+    if upper.starts_with("EHLO ") || upper.starts_with("HELO ") {
+        transaction.helo = command[5.min(command.len())..].trim().to_string();
+        transaction.reset_message();
+        write_smtp(writer, "250-LPE-CT").await?;
+        if starttls_available {
+            write_smtp(writer, "250-STARTTLS").await?;
+        }
+        write_smtp(writer, "250 SIZE").await?;
+    } else if upper == "STARTTLS" {
+        if starttls_available {
+            return Ok(SmtpCommandOutcome::StartTls);
+        }
+        write_smtp(writer, "454 TLS not available").await?;
+    } else if upper.starts_with("MAIL FROM:") {
+        let candidate = command[10..].trim().trim_matches(['<', '>']).to_string();
+        let config = runtime_config_from_store(dashboard_store)?;
+        if let transport_policy::AddressPolicyVerdict::Reject(reason) =
+            transport_policy::evaluate_address_policy_with_config(
+                &config.address_policy,
+                transport_policy::AddressRole::Sender,
+                &candidate,
+            )
+        {
+            write_smtp(writer, &format!("550 sender rejected ({reason})")).await?;
+            return Ok(SmtpCommandOutcome::Continue);
+        }
+        transaction.mail_from = candidate;
+        transaction.rcpt_to.clear();
+        write_smtp(writer, "250 sender accepted").await?;
+    } else if upper.starts_with("RCPT TO:") {
+        if transaction.mail_from.is_empty() {
+            write_smtp(writer, "503 send MAIL FROM first").await?;
+            return Ok(SmtpCommandOutcome::Continue);
+        }
+        let recipient = command[8..].trim().trim_matches(['<', '>']).to_string();
+        let config = runtime_config_from_store(dashboard_store)?;
+        if !recipient_domain_is_accepted(&config, &recipient) {
+            write_smtp(
+                writer,
+                "550 recipient domain is not accepted by this sorting center",
+            )
+            .await?;
+            return Ok(SmtpCommandOutcome::Continue);
+        }
+        if let transport_policy::AddressPolicyVerdict::Reject(reason) =
+            transport_policy::evaluate_address_policy_with_config(
+                &config.address_policy,
+                transport_policy::AddressRole::Recipient,
+                &recipient,
+            )
+        {
+            write_smtp(writer, &format!("550 recipient rejected ({reason})")).await?;
+            return Ok(SmtpCommandOutcome::Continue);
+        }
+        match transport_policy::verify_recipient_with_core(
+            client,
+            &config.recipient_verification,
+            &config.core_delivery_base_url,
+            Some(&transaction.mail_from),
+            &recipient,
+            Some(&transaction.helo),
+            Some(&peer.to_string()),
+            None,
+        )
+        .await
+        {
+            transport_policy::RecipientVerificationVerdict::Accept => {
+                transaction.rcpt_to.push(recipient);
+            }
+            transport_policy::RecipientVerificationVerdict::Reject(reason) => {
+                write_smtp(writer, &format!("550 recipient rejected ({reason})")).await?;
+                return Ok(SmtpCommandOutcome::Continue);
+            }
+            transport_policy::RecipientVerificationVerdict::Defer(reason) => {
+                write_smtp(
+                    writer,
+                    &format!("451 recipient verification unavailable ({reason})"),
+                )
+                .await?;
+                return Ok(SmtpCommandOutcome::Continue);
+            }
+        }
+        write_smtp(writer, "250 recipient accepted").await?;
+    } else if upper == "DATA" {
+        if transaction.mail_from.is_empty() || transaction.rcpt_to.is_empty() {
+            write_smtp(writer, "503 sender and recipient required").await?;
+            return Ok(SmtpCommandOutcome::Continue);
+        }
+        let config = runtime_config_from_store(dashboard_store)?;
+        write_smtp(writer, "354 end with <CRLF>.<CRLF>").await?;
+        let data = read_smtp_data(reader, config.max_message_size_mb).await?;
+        let message = receive_message(
+            spool_dir,
+            &config,
+            peer.to_string(),
+            transaction.helo.clone(),
+            transaction.mail_from.clone(),
+            transaction.rcpt_to.clone(),
+            data,
+        )
+        .await?;
+        if message.status == "rejected" {
+            write_smtp(
+                writer,
+                &format!(
+                    "554 message rejected by perimeter policy (trace {})",
+                    message.id
+                ),
+            )
+            .await?;
+            return Ok(SmtpCommandOutcome::Quit);
+        } else if message.status == "deferred" {
+            write_smtp(
+                writer,
+                &format!(
+                    "451 message temporarily deferred by perimeter policy (trace {})",
+                    message.id
+                ),
+            )
+            .await?;
+        } else if message.status == "quarantined" {
+            write_smtp(writer, &format!("250 quarantined as {}", message.id)).await?;
+            return Ok(SmtpCommandOutcome::Quit);
+        } else {
+            write_smtp(writer, &format!("250 queued as {}", message.id)).await?;
+        }
+        transaction.reset_message();
+    } else if upper == "RSET" {
+        transaction.reset_message();
+        write_smtp(writer, "250 reset").await?;
+    } else if upper == "NOOP" {
+        write_smtp(writer, "250 ok").await?;
+    } else if upper == "QUIT" {
+        write_smtp(writer, "221 bye").await?;
+        return Ok(SmtpCommandOutcome::Quit);
+    } else {
+        write_smtp(writer, "502 command not implemented").await?;
+    }
+
+    Ok(SmtpCommandOutcome::Continue)
 }
 
 async fn receive_message(
@@ -4014,7 +4166,10 @@ async fn read_smtp_reply(reader: &mut BufReader<OwnedReadHalf>) -> Result<SmtpRe
     Ok(SmtpReply { code, message })
 }
 
-async fn read_smtp_data(reader: &mut BufReader<OwnedReadHalf>, max_mb: u32) -> Result<Vec<u8>> {
+async fn read_smtp_data<R>(reader: &mut R, max_mb: u32) -> Result<Vec<u8>>
+where
+    R: AsyncBufRead + Unpin,
+{
     let max_bytes = max_mb.max(1) as usize * 1024 * 1024;
     let mut data = Vec::new();
     let mut line = Vec::new();
@@ -4038,10 +4193,73 @@ async fn read_smtp_data(reader: &mut BufReader<OwnedReadHalf>, max_mb: u32) -> R
     Ok(data)
 }
 
-async fn write_smtp(writer: &mut OwnedWriteHalf, line: &str) -> Result<()> {
+async fn write_smtp<W>(writer: &mut W, line: &str) -> Result<()>
+where
+    W: AsyncWrite + Unpin,
+{
     writer.write_all(line.as_bytes()).await?;
     writer.write_all(b"\r\n").await?;
     Ok(())
+}
+
+fn smtp_starttls_acceptor() -> Result<Option<TlsAcceptor>> {
+    let cert_path = optional_env("LPE_CT_PUBLIC_TLS_CERT_PATH");
+    let key_path = optional_env("LPE_CT_PUBLIC_TLS_KEY_PATH");
+    match (cert_path, key_path) {
+        (Some(cert_path), Some(key_path)) => {
+            let certificates = load_certificates(&cert_path)?;
+            let key = load_private_key(&key_path)?;
+            let config = ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(certificates, key)?;
+            Ok(Some(TlsAcceptor::from(Arc::new(config))))
+        }
+        (None, None) => Ok(None),
+        (Some(_), None) => Err(anyhow!(
+            "LPE_CT_PUBLIC_TLS_KEY_PATH must be set when LPE_CT_PUBLIC_TLS_CERT_PATH is set"
+        )),
+        (None, Some(_)) => Err(anyhow!(
+            "LPE_CT_PUBLIC_TLS_CERT_PATH must be set when LPE_CT_PUBLIC_TLS_KEY_PATH is set"
+        )),
+    }
+}
+
+fn load_certificates(path: &str) -> Result<Vec<CertificateDer<'static>>> {
+    let mut reader = StdBufReader::new(
+        File::open(path).with_context(|| format!("unable to open certificate {path}"))?,
+    );
+    rustls_pemfile::certs(&mut reader)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| anyhow!("unable to parse certificate {path}: {error}"))
+}
+
+fn load_private_key(path: &str) -> Result<PrivateKeyDer<'static>> {
+    let mut reader =
+        StdBufReader::new(File::open(path).with_context(|| format!("unable to open key {path}"))?);
+    let mut keys = rustls_pemfile::pkcs8_private_keys(&mut reader)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| anyhow!("unable to parse private key {path}: {error}"))?;
+    if let Some(key) = keys.pop() {
+        return Ok(PrivateKeyDer::Pkcs8(key));
+    }
+
+    let mut reader = StdBufReader::new(
+        File::open(path).with_context(|| format!("unable to reopen key {path}"))?,
+    );
+    let mut keys = rustls_pemfile::rsa_private_keys(&mut reader)
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|error| anyhow!("unable to parse rsa private key {path}: {error}"))?;
+    let Some(key) = keys.pop() else {
+        anyhow::bail!("no private key found in {path}");
+    };
+    Ok(PrivateKeyDer::Pkcs1(key))
+}
+
+fn optional_env(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 async fn persist_message(spool_dir: &Path, queue: &str, message: &QueuedMessage) -> Result<()> {
@@ -4840,176 +5058,6 @@ fn outbound_sender_policy_addresses<'a>(
     addresses
 }
 
-pub(crate) fn runtime_config(state_file: &Path) -> Result<RuntimeConfig> {
-    let raw = fs::read_to_string(state_file)
-        .with_context(|| format!("unable to read state file {}", state_file.display()))?;
-    let value = serde_json::from_str::<Value>(&raw)?;
-    let antivirus_provider_chain = strings_at(
-        &value,
-        &["policies", "antivirus_provider_chain"],
-        &["takeri"],
-    );
-    let local_db = storage::LocalDbConfig {
-        enabled: bool_at(
-            &value,
-            &["local_data_stores", "dedicated_postgres", "enabled"],
-            true,
-        ),
-        database_url: env::var("LPE_CT_LOCAL_DB_URL")
-            .ok()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty()),
-    };
-    Ok(RuntimeConfig {
-        primary_upstream: string_at(&value, &["relay", "primary_upstream"]),
-        secondary_upstream: string_at(&value, &["relay", "secondary_upstream"]),
-        core_delivery_base_url: string_at(&value, &["relay", "core_delivery_base_url"]),
-        mutual_tls_required: bool_at(&value, &["relay", "mutual_tls_required"], false),
-        fallback_to_hold_queue: bool_at(&value, &["relay", "fallback_to_hold_queue"], false),
-        drain_mode: bool_at(&value, &["policies", "drain_mode"], false),
-        quarantine_enabled: bool_at(&value, &["policies", "quarantine_enabled"], true),
-        greylisting_enabled: bool_at(&value, &["policies", "greylisting_enabled"], true),
-        antivirus_enabled: bool_at(&value, &["policies", "antivirus_enabled"], false),
-        antivirus_fail_closed: bool_at(&value, &["policies", "antivirus_fail_closed"], true),
-        antivirus_provider_chain: antivirus_provider_chain.clone(),
-        antivirus_providers: load_antivirus_providers(&antivirus_provider_chain),
-        bayespam_enabled: bool_at(&value, &["policies", "bayespam_enabled"], true),
-        bayespam_auto_learn: bool_at(&value, &["policies", "bayespam_auto_learn"], true),
-        bayespam_score_weight: f32_at(&value, &["policies", "bayespam_score_weight"], 6.0),
-        bayespam_min_token_length: u32_at(&value, &["policies", "bayespam_min_token_length"], 3),
-        bayespam_max_tokens: u32_at(&value, &["policies", "bayespam_max_tokens"], 256),
-        require_spf: bool_at(&value, &["policies", "require_spf"], true),
-        require_dkim_alignment: bool_at(&value, &["policies", "require_dkim_alignment"], false),
-        require_dmarc_enforcement: bool_at(
-            &value,
-            &["policies", "require_dmarc_enforcement"],
-            true,
-        ),
-        defer_on_auth_tempfail: bool_at(&value, &["policies", "defer_on_auth_tempfail"], true),
-        dnsbl_enabled: bool_at(&value, &["policies", "dnsbl_enabled"], true),
-        dnsbl_zones: strings_at(
-            &value,
-            &["policies", "dnsbl_zones"],
-            &["zen.spamhaus.org", "bl.spamcop.net"],
-        ),
-        reputation_enabled: bool_at(&value, &["policies", "reputation_enabled"], true),
-        reputation_quarantine_threshold: i32_at(
-            &value,
-            &["policies", "reputation_quarantine_threshold"],
-            -4,
-        ),
-        reputation_reject_threshold: i32_at(
-            &value,
-            &["policies", "reputation_reject_threshold"],
-            -8,
-        ),
-        spam_quarantine_threshold: f32_at(&value, &["policies", "spam_quarantine_threshold"], 5.0),
-        spam_reject_threshold: f32_at(&value, &["policies", "spam_reject_threshold"], 9.0),
-        max_message_size_mb: u32_at(&value, &["policies", "max_message_size_mb"], 64),
-        max_concurrent_sessions: u32_at(&value, &["network", "max_concurrent_sessions"], 250)
-            .max(1),
-        routing_rules: routing_rules_at(&value),
-        throttle_enabled: bool_at(&value, &["throttling", "enabled"], true),
-        throttle_rules: throttle_rules_at(&value),
-        address_policy: transport_policy::AddressPolicyConfig {
-            allow_senders: strings_at(
-                &value,
-                &["policies", "address_policy", "allow_senders"],
-                &[],
-            ),
-            block_senders: strings_at(
-                &value,
-                &["policies", "address_policy", "block_senders"],
-                &[],
-            ),
-            allow_recipients: strings_at(
-                &value,
-                &["policies", "address_policy", "allow_recipients"],
-                &[],
-            ),
-            block_recipients: strings_at(
-                &value,
-                &["policies", "address_policy", "block_recipients"],
-                &[],
-            ),
-        },
-        recipient_verification: transport_policy::RecipientVerificationConfig {
-            enabled: bool_at(
-                &value,
-                &["policies", "recipient_verification", "enabled"],
-                false,
-            ),
-            fail_closed: bool_at(
-                &value,
-                &["policies", "recipient_verification", "fail_closed"],
-                true,
-            ),
-            cache_ttl_seconds: u64::from(u32_at(
-                &value,
-                &["policies", "recipient_verification", "cache_ttl_seconds"],
-                300,
-            )),
-            local_db: local_db.clone(),
-        },
-        attachment_policy: transport_policy::AttachmentPolicyConfig {
-            allow_extensions: strings_at(
-                &value,
-                &["policies", "attachment_policy", "allow_extensions"],
-                &[],
-            ),
-            block_extensions: strings_at(
-                &value,
-                &["policies", "attachment_policy", "block_extensions"],
-                &[],
-            ),
-            allow_mime_types: strings_at(
-                &value,
-                &["policies", "attachment_policy", "allow_mime_types"],
-                &[],
-            ),
-            block_mime_types: strings_at(
-                &value,
-                &["policies", "attachment_policy", "block_mime_types"],
-                &[],
-            ),
-            allow_detected_types: strings_at(
-                &value,
-                &["policies", "attachment_policy", "allow_detected_types"],
-                &[],
-            ),
-            block_detected_types: strings_at(
-                &value,
-                &["policies", "attachment_policy", "block_detected_types"],
-                &[],
-            ),
-        },
-        dkim: dkim_signing::DkimConfig {
-            enabled: bool_at(&value, &["policies", "dkim", "enabled"], false),
-            headers: strings_at(
-                &value,
-                &["policies", "dkim", "headers"],
-                &[
-                    "from",
-                    "to",
-                    "cc",
-                    "subject",
-                    "mime-version",
-                    "content-type",
-                    "message-id",
-                ],
-            ),
-            over_sign: bool_at(&value, &["policies", "dkim", "over_sign"], true),
-            expiration_seconds: {
-                let value = u32_at(&value, &["policies", "dkim", "expiration_seconds"], 0);
-                (value > 0).then_some(u64::from(value))
-            },
-            keys: dkim_domain_configs_at(&value),
-        },
-        local_db,
-        accepted_domains: accepted_domains_at(&value),
-    })
-}
-
 fn quarantine_metadata(spool_dir: &Path, message: &QueuedMessage) -> QuarantineMetadata {
     let sender_domain = domain_part(&message.mail_from);
     let recipient_domains = message
@@ -5173,93 +5221,6 @@ async fn remove_quarantine_metadata_or_warn(config: &RuntimeConfig, trace_id: &s
     }
 }
 
-fn routing_rules_at(value: &Value) -> Vec<OutboundRoutingRule> {
-    value
-        .get("routing")
-        .and_then(|routing| routing.get("rules"))
-        .and_then(Value::as_array)
-        .map(|rules| {
-            rules
-                .iter()
-                .filter_map(|rule| {
-                    Some(OutboundRoutingRule {
-                        id: rule.get("id")?.as_str()?.to_string(),
-                        sender_domain: rule
-                            .get("sender_domain")
-                            .and_then(Value::as_str)
-                            .map(ToString::to_string),
-                        recipient_domain: rule
-                            .get("recipient_domain")
-                            .and_then(Value::as_str)
-                            .map(ToString::to_string),
-                        relay_target: rule.get("relay_target")?.as_str()?.to_string(),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn throttle_rules_at(value: &Value) -> Vec<OutboundThrottleRule> {
-    value
-        .get("throttling")
-        .and_then(|throttling| throttling.get("rules"))
-        .and_then(Value::as_array)
-        .map(|rules| {
-            rules
-                .iter()
-                .filter_map(|rule| {
-                    Some(OutboundThrottleRule {
-                        id: rule.get("id")?.as_str()?.to_string(),
-                        scope: rule.get("scope")?.as_str()?.to_string(),
-                        recipient_domain: rule
-                            .get("recipient_domain")
-                            .and_then(Value::as_str)
-                            .map(ToString::to_string),
-                        sender_domain: rule
-                            .get("sender_domain")
-                            .and_then(Value::as_str)
-                            .map(ToString::to_string),
-                        max_messages: rule.get("max_messages")?.as_u64()? as u32,
-                        window_seconds: rule.get("window_seconds")?.as_u64()? as u32,
-                        retry_after_seconds: rule.get("retry_after_seconds")?.as_u64()? as u32,
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn accepted_domains_at(value: &Value) -> Vec<AcceptedDomainConfig> {
-    value
-        .get("accepted_domains")
-        .and_then(Value::as_array)
-        .map(|domains| {
-            domains
-                .iter()
-                .filter_map(|domain| {
-                    let domain_name = domain.get("domain")?.as_str()?.trim().to_ascii_lowercase();
-                    let destination_server = domain
-                        .get("destination_server")?
-                        .as_str()?
-                        .trim()
-                        .to_string();
-                    if domain_name.is_empty() || destination_server.is_empty() {
-                        return None;
-                    }
-                    Some(AcceptedDomainConfig {
-                        domain: domain_name,
-                        verified: domain
-                            .get("verified")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 fn recipient_domain_is_accepted(config: &RuntimeConfig, recipient: &str) -> bool {
     if config.accepted_domains.is_empty() {
         return true;
@@ -5271,90 +5232,6 @@ fn recipient_domain_is_accepted(config: &RuntimeConfig, recipient: &str) -> bool
         .accepted_domains
         .iter()
         .any(|accepted| accepted.verified && accepted.domain.eq_ignore_ascii_case(&domain))
-}
-
-fn string_at(value: &Value, path: &[&str]) -> String {
-    path.iter()
-        .try_fold(value, |current, key| current.get(*key))
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string()
-}
-
-fn bool_at(value: &Value, path: &[&str], fallback: bool) -> bool {
-    path.iter()
-        .try_fold(value, |current, key| current.get(*key))
-        .and_then(Value::as_bool)
-        .unwrap_or(fallback)
-}
-
-fn u32_at(value: &Value, path: &[&str], fallback: u32) -> u32 {
-    path.iter()
-        .try_fold(value, |current, key| current.get(*key))
-        .and_then(Value::as_u64)
-        .map(|value| value as u32)
-        .unwrap_or(fallback)
-}
-
-fn f32_at(value: &Value, path: &[&str], fallback: f32) -> f32 {
-    path.iter()
-        .try_fold(value, |current, key| current.get(*key))
-        .and_then(Value::as_f64)
-        .map(|value| value as f32)
-        .unwrap_or(fallback)
-}
-
-fn i32_at(value: &Value, path: &[&str], fallback: i32) -> i32 {
-    path.iter()
-        .try_fold(value, |current, key| current.get(*key))
-        .and_then(Value::as_i64)
-        .and_then(|parsed| i32::try_from(parsed).ok())
-        .unwrap_or(fallback)
-}
-
-fn strings_at(value: &Value, path: &[&str], fallback: &[&str]) -> Vec<String> {
-    path.iter()
-        .try_fold(value, |current, key| current.get(*key))
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .filter(|items| !items.is_empty())
-        .unwrap_or_else(|| fallback.iter().map(|value| value.to_string()).collect())
-}
-
-fn dkim_domain_configs_at(value: &Value) -> Vec<dkim_signing::DkimKeyConfig> {
-    value
-        .get("policies")
-        .and_then(|value| value.get("dkim"))
-        .and_then(|value| value.get("domains"))
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| {
-                    let enabled = item.get("enabled").and_then(Value::as_bool).unwrap_or(true);
-                    if !enabled {
-                        return None;
-                    }
-                    Some(dkim_signing::DkimKeyConfig {
-                        domain: item.get("domain")?.as_str()?.trim().to_ascii_lowercase(),
-                        selector: item.get("selector")?.as_str()?.trim().to_string(),
-                        key_path: item.get("private_key_path")?.as_str()?.trim().to_string(),
-                    })
-                })
-                .filter(|item| {
-                    !item.domain.is_empty()
-                        && !item.selector.is_empty()
-                        && !item.key_path.is_empty()
-                })
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 fn should_quarantine(data: &[u8]) -> bool {
@@ -5545,16 +5422,17 @@ mod tests {
     use super::{
         apply_authentication_scores, classify_inbound_message, compose_rfc822_message,
         delete_trace, dkim_disposition, dnsbl_query_name, encode_quoted_printable,
-        evaluate_greylisting, handle_smtp_session, initialize_spool, load_antivirus_providers,
-        load_bayespam_corpus, load_reputation_score, load_trace_details, parse_antivirus_output,
-        parse_peer_ip, persist_message, process_outbound_handoff, receive_message,
-        receive_message_with_validator, release_trace, retry_after_seconds, retry_trace,
-        score_bayespam, spf_disposition, stable_key_id, summarize_dkim, summarize_dmarc,
-        summarize_spf, train_bayespam, unix_now, update_reputation, AntivirusProviderConfig,
-        AntivirusProviderDecision, AuthSummary, AuthenticationAssessment, BayesLabel,
-        DkimDisposition, FilterAction, GreylistEntry, OutboundRoutingRule, OutboundThrottleRule,
-        QueuedMessage, RuntimeConfig, SpfDisposition, TransportDsnReport, TransportRouteDecision,
-        TransportTechnicalStatus, TransportThrottleStatus,
+        evaluate_greylisting, handle_smtp_command, handle_smtp_session, initialize_spool,
+        load_antivirus_providers, load_bayespam_corpus, load_reputation_score, load_trace_details,
+        parse_antivirus_output, parse_peer_ip, persist_message, process_outbound_handoff,
+        receive_message, receive_message_with_validator, release_trace, retry_after_seconds,
+        retry_trace, score_bayespam, spf_disposition, stable_key_id, summarize_dkim,
+        summarize_dmarc, summarize_spf, train_bayespam, unix_now, update_reputation,
+        AcceptedDomainConfig, AntivirusProviderConfig, AntivirusProviderDecision, AuthSummary,
+        AuthenticationAssessment, BayesLabel, DkimDisposition, FilterAction, GreylistEntry,
+        OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig, SmtpTransaction,
+        SpfDisposition, TransportDsnReport, TransportRouteDecision, TransportTechnicalStatus,
+        TransportThrottleStatus,
     };
     use crate::env_test_lock;
     use axum::{routing::post, Json, Router};
@@ -5642,6 +5520,204 @@ mod tests {
         }
     }
 
+    fn runtime_store_with_accepted_domains(
+        domains: &[(&str, bool)],
+    ) -> Arc<Mutex<crate::DashboardState>> {
+        let mut state = crate::default_state();
+        state.relay.primary_upstream = "127.0.0.1:9".to_string();
+        state.relay.secondary_upstream.clear();
+        state.relay.core_delivery_base_url = "http://127.0.0.1:9".to_string();
+        state.policies.recipient_verification.enabled = false;
+        state.accepted_domains = domains
+            .iter()
+            .enumerate()
+            .map(|(index, (domain, verified))| crate::AcceptedDomain {
+                id: format!("test-domain-{index}"),
+                domain: domain.to_ascii_lowercase(),
+                destination_server: "core-delivery".to_string(),
+                verification_type: "dynamic".to_string(),
+                rbl_checks: true,
+                spf_checks: true,
+                greylisting: true,
+                verified: *verified,
+            })
+            .collect();
+        Arc::new(Mutex::new(state))
+    }
+
+    #[test]
+    fn recipient_domain_acceptance_is_exact_case_insensitive_and_verified() {
+        let mut config =
+            runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+        config.accepted_domains = vec![AcceptedDomainConfig {
+            domain: "l-p-e.ch".to_string(),
+            verified: true,
+        }];
+
+        assert!(super::recipient_domain_is_accepted(
+            &config,
+            "test@l-p-e.ch"
+        ));
+        assert!(super::recipient_domain_is_accepted(
+            &config,
+            "Test@L-P-E.CH"
+        ));
+        assert!(!super::recipient_domain_is_accepted(
+            &config,
+            "relay-test@example.net"
+        ));
+        assert!(!super::recipient_domain_is_accepted(
+            &config,
+            "test@mail.l-p-e.ch"
+        ));
+
+        config.accepted_domains[0].verified = false;
+        assert!(!super::recipient_domain_is_accepted(
+            &config,
+            "test@l-p-e.ch"
+        ));
+    }
+
+    #[tokio::test]
+    async fn smtp_rcpt_accepts_configured_domain_and_rejects_external_relay_domain() {
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(tokio::io::empty());
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let dashboard_store = runtime_store_with_accepted_domains(&[("l-p-e.ch", true)]);
+        let spool = temp_dir("accepted-domain-spool");
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            "127.0.0.1:25".parse().unwrap(),
+            &mut transaction,
+            "MAIL FROM:<smtp-test@l-p-e.ch>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            "127.0.0.1:25".parse().unwrap(),
+            &mut transaction,
+            "RCPT TO:<test@l-p-e.ch>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            "127.0.0.1:25".parse().unwrap(),
+            &mut transaction,
+            "RCPT TO:<relay-test@example.net>",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let transcript = String::from_utf8(writer).unwrap();
+        assert!(transcript.contains("250 sender accepted\r\n"));
+        assert!(transcript.contains("250 recipient accepted\r\n"));
+        assert!(
+            transcript.contains("550 recipient domain is not accepted by this sorting center\r\n")
+        );
+        assert_eq!(transaction.rcpt_to, vec!["test@l-p-e.ch".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn smtp_session_accepts_lpe_domain_and_rejects_external_relay_domain() {
+        let spool = temp_dir("accepted-domain-session-spool");
+        initialize_spool(&spool).unwrap();
+        let dashboard_store = runtime_store_with_accepted_domains(&[("l-p-e.ch", true)]);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server_spool = spool.clone();
+        let server = tokio::spawn(async move {
+            let (stream, peer) = listener.accept().await.unwrap();
+            handle_smtp_session(stream, peer, dashboard_store, server_spool, None)
+                .await
+                .unwrap();
+        });
+
+        let stream = TcpStream::connect(address).await.unwrap();
+        let (reader, mut writer) = stream.into_split();
+        let mut reader = BufReader::new(reader);
+        let mut line = String::new();
+
+        reader.read_line(&mut line).await.unwrap();
+        assert_eq!(line, "220 LPE-CT ESMTP ready\r\n");
+
+        writer
+            .write_all(b"EHLO validator.l-p-e.ch\r\n")
+            .await
+            .unwrap();
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        assert_eq!(line, "250-LPE-CT\r\n");
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        assert_eq!(line, "250 SIZE\r\n");
+
+        writer
+            .write_all(b"MAIL FROM:<smtp-test@l-p-e.ch>\r\n")
+            .await
+            .unwrap();
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        assert_eq!(line, "250 sender accepted\r\n");
+
+        writer
+            .write_all(b"RCPT TO:<test@l-p-e.ch>\r\n")
+            .await
+            .unwrap();
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        assert_eq!(line, "250 recipient accepted\r\n");
+
+        writer.write_all(b"RSET\r\n").await.unwrap();
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        assert_eq!(line, "250 reset\r\n");
+
+        writer
+            .write_all(b"MAIL FROM:<relay-test@example.com>\r\n")
+            .await
+            .unwrap();
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        assert_eq!(line, "250 sender accepted\r\n");
+
+        writer
+            .write_all(b"RCPT TO:<relay-test@example.net>\r\n")
+            .await
+            .unwrap();
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        assert_eq!(
+            line,
+            "550 recipient domain is not accepted by this sorting center\r\n"
+        );
+
+        writer.write_all(b"QUIT\r\n").await.unwrap();
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        assert_eq!(line, "221 bye\r\n");
+
+        server.await.unwrap();
+    }
+
     fn training_message(subject: &str, body: &str) -> QueuedMessage {
         QueuedMessage {
             id: format!("trace-{}", stable_key_id(&(subject, body))),
@@ -5668,6 +5744,62 @@ mod tests {
             throttle: None,
             data: format!("Subject: {subject}\r\n\r\n{body}").into_bytes(),
         }
+    }
+
+    #[tokio::test]
+    async fn smtp_ehlo_advertises_starttls_when_tls_is_available() {
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(tokio::io::empty());
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let dashboard_store = runtime_store_with_accepted_domains(&[]);
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            std::path::Path::new("spool"),
+            "127.0.0.1:25".parse().unwrap(),
+            &mut transaction,
+            "EHLO mx.example.test",
+            true,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(writer).unwrap(),
+            "250-LPE-CT\r\n250-STARTTLS\r\n250 SIZE\r\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn smtp_ehlo_does_not_advertise_starttls_after_tls_upgrade() {
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(tokio::io::empty());
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let dashboard_store = runtime_store_with_accepted_domains(&[]);
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            std::path::Path::new("spool"),
+            "127.0.0.1:25".parse().unwrap(),
+            &mut transaction,
+            "EHLO mx.example.test",
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(writer).unwrap(),
+            "250-LPE-CT\r\n250 SIZE\r\n"
+        );
     }
 
     #[derive(Debug, Clone)]
@@ -5767,8 +5899,9 @@ mod tests {
             handle_smtp_session(
                 stream,
                 peer,
-                spool_for_server.join("state.json"),
+                runtime_store_with_accepted_domains(&[]),
                 spool_for_server,
+                None,
             )
             .await
             .unwrap();

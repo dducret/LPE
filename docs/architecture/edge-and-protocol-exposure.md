@@ -14,7 +14,8 @@ The core `LPE` server must not be directly reachable from the public Internet an
 
 `LPE-CT` publishes:
 
-- inbound `SMTP` on port `25`
+- inbound `SMTP` on port `25`, with `STARTTLS` advertised when
+  `LPE_CT_PUBLIC_TLS_CERT_PATH` and `LPE_CT_PUBLIC_TLS_KEY_PATH` are configured
 - authenticated client `SMTP` submission on implicit `TLS` port `465` when configured
 - the `LPE` web client and `LPE-CT` management publication over `HTTPS` on `443`
 - plain `HTTP` on port `80` only as a redirect to the `HTTPS` edge; port `80`

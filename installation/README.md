@@ -46,7 +46,7 @@ Path conventions:
 - configuration lives under `/etc/lpe` and `/etc/lpe-ct`
 - `bayespam` is not installed as a separate package root under `/opt`; its mutable corpus and technical state remain part of `LPE-CT` runtime state under `/var`
 
-For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI, without exposing the core back office on the DMZ server, also provisions a pinned `Magika` CLI binary in `/opt/lpe-ct/bin/magika` for inbound SMTP validation, performs a Git-based sparse synchronization of `takeri` from `https://github.com/AnimeForLife191/Shuhari-CyberForge.git` before building `/opt/lpe-ct/bin/Shuhari-CyberForge-CLI` as the default antivirus provider, and now provisions the default private `LPE-CT` PostgreSQL store for greylisting, reputation, `bayespam`, throttling, and quarantine metadata.
+For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trixie` instead. That subdirectory installs a distinct component into `/opt/lpe-ct` with its own management UI, without exposing the core back office on the DMZ server, also provisions a pinned `Magika` CLI binary in `/opt/lpe-ct/bin/magika` for inbound SMTP validation, performs a Git-based sparse synchronization of `takeri` from `https://github.com/AnimeForLife191/Shuhari-CyberForge.git` before building `/opt/lpe-ct/bin/Shuhari-CyberForge-CLI` as the default antivirus provider, and now provisions the default private `LPE-CT` PostgreSQL store for dashboard management state, greylisting, reputation, `bayespam`, throttling, and quarantine metadata.
 
 The `LPE-CT` scripts also install the SMTP ingress listener on `25`, publish the HTTPS edge through `nginx` on `443`, redirect plain `HTTP` on `80` to `HTTPS`, configure authenticated implicit-TLS client submission on `465`, configure the IMAPS TLS proxy on `993`, create the full runtime spool layout in `/var/spool/lpe-ct`, and provide these validation scripts:
 
@@ -549,9 +549,9 @@ For later updates:
 
 `update-lpe.sh` is no longer destructive by default. It applies pending SQL migrations and exits with an error if the database is uninitialized or if the checked-out code expects a schema version for which no migration has been provided. For an intentional destructive reset, run `init-schema.sh` explicitly.
 
-`LPE-CT/installation/debian-trixie/update-lpe-ct.sh` is not destructive by default. It rebuilds and redeploys the service while preserving `state.json`, the full spool, retained history, and the private local PostgreSQL state unless `LPE_CT_RESET_STATE_ON_UPDATE=true` is set explicitly for a disposable environment.
+`LPE-CT/installation/debian-trixie/update-lpe-ct.sh` is not destructive by default. It rebuilds and redeploys the service while preserving the full spool, retained history, the private local PostgreSQL state, and the legacy `state.json` bootstrap/export file unless `LPE_CT_RESET_STATE_ON_UPDATE=true` is set explicitly for a disposable environment.
 
-When `LPE_CT_LOCAL_DB_ENABLED=true` but `LPE_CT_LOCAL_DB_URL` is missing or the private PostgreSQL store is unavailable, the `LPE-CT` management UI now still starts and reports a degraded state instead of failing closed behind `nginx`. Mail-flow indexing, recipient-verification cache persistence, and related management mirrors remain degraded until the database is reachable again.
+When `LPE_CT_LOCAL_DB_ENABLED=true`, `LPE_CT_LOCAL_DB_URL` and the private PostgreSQL store are required at startup because the LPE-CT management dashboard state is persisted there. Queue payload custody remains in `/var/spool/lpe-ct`, while `state.json` is only a legacy bootstrap/export file.
 
 If you want to fetch the latest scripts first before an update:
 

@@ -42,6 +42,17 @@ pub(crate) async fn ensure_local_db_schema(
         .get_or_try_init(|| async {
             sqlx::query(
                 r#"
+                CREATE TABLE IF NOT EXISTS dashboard_state (
+                    state_key TEXT PRIMARY KEY,
+                    state JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                "#,
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                r#"
                 CREATE TABLE IF NOT EXISTS greylist_entries (
                     entry_key TEXT PRIMARY KEY,
                     state JSONB NOT NULL,
@@ -398,6 +409,49 @@ pub(crate) async fn ensure_local_db_schema(
     Ok(Some(pool))
 }
 
+pub(crate) async fn load_dashboard_state(
+    config: &LocalDbConfig,
+) -> Result<Option<crate::DashboardState>> {
+    let Some(pool) = ensure_local_db_schema(config).await? else {
+        return Ok(None);
+    };
+
+    let row = sqlx::query("SELECT state FROM dashboard_state WHERE state_key = $1")
+        .bind("active")
+        .fetch_optional(pool)
+        .await?;
+    row.map(|row| {
+        let state = row.try_get::<Json<crate::DashboardState>, _>("state")?.0;
+        Ok(state)
+    })
+    .transpose()
+}
+
+pub(crate) async fn persist_dashboard_state(
+    config: &LocalDbConfig,
+    dashboard: &crate::DashboardState,
+) -> Result<()> {
+    let Some(pool) = ensure_local_db_schema(config).await? else {
+        return Ok(());
+    };
+
+    sqlx::query(
+        r#"
+        INSERT INTO dashboard_state (state_key, state, updated_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (state_key) DO UPDATE SET
+            state = EXCLUDED.state,
+            updated_at = NOW()
+        "#,
+    )
+    .bind("active")
+    .bind(Json(dashboard.clone()))
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 pub(crate) async fn sync_dashboard_configuration(
     config: &LocalDbConfig,
     dashboard: &crate::DashboardState,
@@ -451,12 +505,12 @@ pub(crate) async fn sync_dashboard_configuration(
         .bind(domain.spf_checks)
         .bind(domain.greylisting)
         .bind(domain.verified)
-        .bind("state.json")
+        .bind("dashboard_state")
         .execute(&mut *tx)
         .await?;
     }
     sqlx::query(
-        "DELETE FROM accepted_domains WHERE source = 'state.json' AND NOT (domain = ANY($1))",
+        "DELETE FROM accepted_domains WHERE source = 'dashboard_state' AND NOT (domain = ANY($1))",
     )
     .bind(&accepted_domain_keys)
     .execute(&mut *tx)
@@ -488,7 +542,7 @@ pub(crate) async fn sync_dashboard_configuration(
         .bind("allow")
         .bind(value)
         .bind(true)
-        .bind("state.json")
+        .bind("dashboard_state")
         .execute(&mut *tx)
         .await?;
     }
@@ -520,7 +574,7 @@ pub(crate) async fn sync_dashboard_configuration(
         .bind("block")
         .bind(value)
         .bind(true)
-        .bind("state.json")
+        .bind("dashboard_state")
         .execute(&mut *tx)
         .await?;
     }
@@ -552,7 +606,7 @@ pub(crate) async fn sync_dashboard_configuration(
         .bind("allow")
         .bind(value)
         .bind(true)
-        .bind("state.json")
+        .bind("dashboard_state")
         .execute(&mut *tx)
         .await?;
     }
@@ -584,7 +638,7 @@ pub(crate) async fn sync_dashboard_configuration(
         .bind("block")
         .bind(value)
         .bind(true)
-        .bind("state.json")
+        .bind("dashboard_state")
         .execute(&mut *tx)
         .await?;
     }
@@ -616,7 +670,7 @@ pub(crate) async fn sync_dashboard_configuration(
         .bind("allow")
         .bind(value)
         .bind(true)
-        .bind("state.json")
+        .bind("dashboard_state")
         .execute(&mut *tx)
         .await?;
     }
@@ -649,7 +703,7 @@ pub(crate) async fn sync_dashboard_configuration(
         .bind("block")
         .bind(value)
         .bind(true)
-        .bind("state.json")
+        .bind("dashboard_state")
         .execute(&mut *tx)
         .await?;
     }
@@ -682,7 +736,7 @@ pub(crate) async fn sync_dashboard_configuration(
         .bind("allow")
         .bind(value)
         .bind(true)
-        .bind("state.json")
+        .bind("dashboard_state")
         .execute(&mut *tx)
         .await?;
     }
@@ -715,7 +769,7 @@ pub(crate) async fn sync_dashboard_configuration(
         .bind("block")
         .bind(value)
         .bind(true)
-        .bind("state.json")
+        .bind("dashboard_state")
         .execute(&mut *tx)
         .await?;
     }
@@ -748,7 +802,7 @@ pub(crate) async fn sync_dashboard_configuration(
         .bind("allow")
         .bind(value)
         .bind(true)
-        .bind("state.json")
+        .bind("dashboard_state")
         .execute(&mut *tx)
         .await?;
     }
@@ -786,7 +840,7 @@ pub(crate) async fn sync_dashboard_configuration(
         .bind("block")
         .bind(value)
         .bind(true)
-        .bind("state.json")
+        .bind("dashboard_state")
         .execute(&mut *tx)
         .await?;
     }
@@ -863,12 +917,12 @@ pub(crate) async fn sync_dashboard_configuration(
         .bind(dashboard.policies.dkim.over_sign)
         .bind(dashboard.policies.dkim.expiration_seconds.map(i64::from))
         .bind(Json(dashboard.policies.dkim.headers.clone()))
-        .bind("state.json")
+        .bind("dashboard_state")
         .execute(&mut *tx)
         .await?;
     }
     sqlx::query(
-        "DELETE FROM dkim_domain_configs WHERE source = 'state.json' AND NOT (domain = ANY($1))",
+        "DELETE FROM dkim_domain_configs WHERE source = 'dashboard_state' AND NOT (domain = ANY($1))",
     )
     .bind(&dkim_domain_keys)
     .execute(&mut *tx)
@@ -927,7 +981,7 @@ pub(crate) async fn sync_dashboard_configuration(
             .bind(scope_key)
             .bind(recipient)
             .bind(true)
-            .bind("state.json")
+            .bind("dashboard_state")
             .execute(&mut *tx)
             .await?;
         }
@@ -958,12 +1012,12 @@ pub(crate) async fn sync_dashboard_configuration(
         .bind(scope_key)
         .bind(recipient)
         .bind(override_entry.enabled)
-        .bind("state.json")
+        .bind("dashboard_state")
         .execute(&mut *tx)
         .await?;
     }
     sqlx::query(
-        "DELETE FROM digest_recipients WHERE source = 'state.json' AND NOT (concat_ws(chr(9), scope_type, scope_key, recipient) = ANY($1))",
+        "DELETE FROM digest_recipients WHERE source = 'dashboard_state' AND NOT (concat_ws(chr(9), scope_type, scope_key, recipient) = ANY($1))",
     )
     .bind(&digest_recipient_keys)
     .execute(&mut *tx)
@@ -982,7 +1036,7 @@ async fn delete_stale_policy_address_rules(
     sqlx::query(
         r#"
         DELETE FROM policy_address_rules
-        WHERE source = 'state.json'
+        WHERE source = 'dashboard_state'
           AND address_role = $1
           AND action = $2
           AND NOT (match_value = ANY($3))
@@ -1006,7 +1060,7 @@ async fn delete_stale_attachment_policy_rules(
     sqlx::query(
         r#"
         DELETE FROM attachment_policy_rules
-        WHERE source = 'state.json'
+        WHERE source = 'dashboard_state'
           AND rule_scope = $1
           AND action = $2
           AND NOT (match_value = ANY($3))

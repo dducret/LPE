@@ -85,6 +85,14 @@ The raw `SMTP` body is carried into `LPE` to keep delivery context, but mailbox 
 
 Before `DATA` acceptance is finalized, `LPE-CT` may also call `POST /internal/lpe-ct/recipient-verification` on `LPE` for inbound `RCPT TO` validation. That check is authoritative for local-recipient existence and may be cached briefly by `LPE-CT`, but it must not create a second mailbox directory or rely on public callback verification.
 
+Inbound relay protection is domain-gated before recipient verification. When
+any accepted domains are configured, `LPE-CT` accepts `RCPT TO` only for exact,
+case-insensitive matches against verified accepted domains such as `l-p-e.ch`;
+unlisted domains and subdomains are rejected as external relay attempts unless
+they are explicitly configured as their own accepted domain. Operators may add
+domains through the management state or bootstrap them with
+`LPE_CT_ACCEPTED_DOMAINS=domain|destination-label|dynamic|true`.
+
 The `LPE-CT` management test under `System Setup -> Mail relay -> Domains`
 validates this same canonical bridge through `${LPE_CT_CORE_DELIVERY_BASE_URL}`.
 It must not derive the `LPE` API URL from the accepted-domain destination field,
@@ -167,6 +175,7 @@ On the `LPE` side:
 On the `LPE-CT` side:
 
 - `LPE_CT_CORE_DELIVERY_BASE_URL`
+- `LPE_CT_ACCEPTED_DOMAINS`
 - `LPE_CT_RELAY_PRIMARY`
 - `LPE_CT_RELAY_SECONDARY`
 - `LPE_CT_SUBMISSION_BIND_ADDRESS`

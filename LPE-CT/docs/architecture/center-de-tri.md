@@ -27,7 +27,7 @@ The perimeter pipeline now also executes:
 
 When dedicated local PostgreSQL is enabled, `LPE-CT` now also persists technical quarantine metadata into a private `quarantine_messages` table and retained flow-history events into a private `mail_flow_history` table. Payload custody remains in the spool and quarantine directories.
 The same private store now also holds technical management-plane metadata for `policy_address_rules`, `attachment_policy_rules`, `digest_settings`, `digest_recipients`, `recipient_verification_cache`, `recipient_verification_settings`, and `dkim_domain_configs`.
-It also mirrors accepted-domain relay configuration from `state.json`, including each accepted domain, destination server, verification type, per-domain `RBL` / `SPF` / greylisting toggles, and whether the domain has been operator-verified.
+It also materializes accepted-domain relay configuration from the private PostgreSQL `dashboard_state` row, including each accepted domain, destination server, verification type, per-domain `RBL` / `SPF` / greylisting toggles, and whether the domain has been operator-verified.
 The management surface now also uses sorting-center-owned retained artifacts plus those dedicated technical indexes for quarantine search, retained mail-flow history, address-policy administration, digest scheduling, recipient-verification cache inspection, and DKIM-domain configuration references generated entirely from `LPE-CT` state.
 
 Operational indexing is now deliberately evidence-oriented:
@@ -36,7 +36,7 @@ Operational indexing is now deliberately evidence-oriented:
 - `mail_flow_history` indexes retained perimeter events by trace, time, direction, queue, disposition, and bounded technical evidence
 - full-text search is enabled for retained operator text lookups, with optional trigram acceleration when `pg_trgm` is available on the private local PostgreSQL instance
 
-Those indexes exist only to improve sorting-center operations. They must stay rebuildable from current spool artifacts, retained audit history, and `state.json` mirrors.
+Those indexes exist only to improve sorting-center operations. They must stay rebuildable from current spool artifacts, retained audit history, and the active PostgreSQL dashboard state.
 
 For the P1 management interface, those operator workflows are exposed as one coherent web surface instead of separate technical screens:
 
@@ -53,7 +53,7 @@ That web surface stays bounded to sorting-center-owned state. It must not imply 
 
 In the current repository state, the runtime now uses:
 
-- `state.json` for management configuration and bootstrap mirrors
+- private PostgreSQL for management configuration and bootstrap state
 - the local spool for inbound and outbound queue ownership, quarantine payload custody, retained transport audit artifacts, and generated digest reports
 - the private dedicated PostgreSQL store as the default backend for indexed technical state such as greylisting, reputation, `bayespam`, throttling, quarantine metadata, retained history indexes, recipient-verification cache rows, and DKIM-domain references
 
@@ -85,7 +85,7 @@ The dedicated local-store rules for `LPE-CT` are documented in `docs/architectur
 Technical rebuild expectations remain strict:
 
 - queue and quarantine payload custody stay in the spool
-- local PostgreSQL indexes may be repopulated from `state.json`, retained audit history, and current spool artifacts
+- local PostgreSQL indexes may be repopulated from the active dashboard state, retained audit history, and current spool artifacts
 - recipient-verification cache rows are disposable and expire by TTL
 - no private table in `LPE-CT` becomes authoritative mailbox or tenant state
 
