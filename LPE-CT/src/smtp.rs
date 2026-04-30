@@ -1714,7 +1714,13 @@ async fn handle_smtp_session(
                     .into_inner()
                     .reunite(writer)
                     .map_err(|_| anyhow!("unable to prepare SMTP stream for STARTTLS"))?;
-                let tls_stream = starttls.accept(stream).await?;
+                let tls_stream = match starttls.accept(stream).await {
+                    Ok(tls_stream) => tls_stream,
+                    Err(error) => {
+                        warn!(peer = %peer, error = %error, "smtp STARTTLS handshake failed");
+                        return Err(error.into());
+                    }
+                };
                 let (reader, mut writer) = tokio::io::split(tls_stream);
                 let mut reader = BufReader::new(reader);
                 run_smtp_command_loop(
@@ -4328,6 +4334,7 @@ where
 {
     writer.write_all(line.as_bytes()).await?;
     writer.write_all(b"\r\n").await?;
+    writer.flush().await?;
     Ok(())
 }
 
@@ -5555,13 +5562,13 @@ mod tests {
         load_antivirus_providers, load_bayespam_corpus, load_reputation_score, load_trace_details,
         parse_antivirus_output, parse_peer_ip, persist_message, process_outbound_handoff,
         receive_message, receive_message_with_validator, release_trace, retry_after_seconds,
-        retry_trace, score_bayespam, spf_disposition, stable_key_id, summarize_dkim,
-        summarize_dmarc, summarize_spf, train_bayespam, unix_now, update_reputation,
-        AcceptedDomainConfig, AntivirusProviderConfig, AntivirusProviderDecision, AuthSummary,
-        AuthenticationAssessment, BayesLabel, DkimDisposition, FilterAction, GreylistEntry,
-        OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig, SmtpTransaction,
-        SpfDisposition, TransportDsnReport, TransportRouteDecision, TransportTechnicalStatus,
-        TransportThrottleStatus,
+        retry_trace, score_bayespam, smtp_starttls_acceptor, spf_disposition, stable_key_id,
+        summarize_dkim, summarize_dmarc, summarize_spf, train_bayespam, unix_now,
+        update_reputation, AcceptedDomainConfig, AntivirusProviderConfig,
+        AntivirusProviderDecision, AuthSummary, AuthenticationAssessment, BayesLabel,
+        DkimDisposition, FilterAction, GreylistEntry, OutboundRoutingRule, OutboundThrottleRule,
+        QueuedMessage, RuntimeConfig, SmtpTransaction, SpfDisposition, TransportDsnReport,
+        TransportRouteDecision, TransportTechnicalStatus, TransportThrottleStatus,
     };
     use crate::env_test_lock;
     use axum::{routing::post, Json, Router};
@@ -5572,6 +5579,7 @@ mod tests {
     };
     use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
     use std::{
+        io::{BufReader as StdIoBufReader, Cursor},
         net::IpAddr,
         net::SocketAddr,
         path::PathBuf,
@@ -5582,7 +5590,58 @@ mod tests {
         io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
         net::{TcpListener, TcpStream},
     };
+    use tokio_rustls::{
+        rustls::{pki_types::ServerName, ClientConfig, RootCertStore},
+        TlsConnector,
+    };
     use uuid::Uuid;
+
+    const TEST_STARTTLS_CERT: &str = r#"-----BEGIN CERTIFICATE-----
+MIICwzCCAaugAwIBAgIJAJuoO4jMAtuIMA0GCSqGSIb3DQEBCwUAMBQxEjAQBgNV
+BAMTCWxvY2FsaG9zdDAeFw0yNDAxMDEwMDAwMDBaFw0zNjAxMDEwMDAwMDBaMBQx
+EjAQBgNVBAMTCWxvY2FsaG9zdDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoC
+ggEBANfmEnGwg+Tpia0A8yWhRyaVZPVG+Jkz9NrWpC7nmxmAJAnINjgdRdxAlnpL
+v+3bomPjdvylkIIwbnUciIV+vXT5lzwRIwBnGbAX65zMLNfgTKX4Lfq/Tve19WD5
+LBBricGcgXdCOQUFLOo/TsG7i+A8pf2bi5k7rNnKSS4NaLD76UPq7mx6VnJ8T6Rx
+9GZPIvCQV1WYhkMT67H5o1emMNs025fjksbV/5onGw613mCtXOXrqNkV1ciebeh4
+Ng5LerupzuUBLCzXbpczhveGuSDPjS1ciaqJ9auTTyBVHM7IEfPxa4lsULWezh1G
+9J4ZhlmNttZKT72dSVDBmRaJh70CAwEAAaMYMBYwFAYDVR0RBA0wC4IJbG9jYWxo
+b3N0MA0GCSqGSIb3DQEBCwUAA4IBAQBVBJ9FbRtJxsFNOHGorrwKx5vIhZa2bfk8
+cTEqteUCpv6s7C0kURdAGe8Ljm87Wi2/GLcSzS6CEiN7IiPpQJohTmAFVyDx4HQY
+a2b232lX28qUgwgptXCLjHpBYi9a8i1a3T3b5bOno3dA1fB87ktj4AphsyEaZ9fj
+s6Uk7PVtHdGm/s0v2RKNqQmxk97b0RmLLjHG/uQdo1c3QK3yjnRxDAKyyD+M2/IX
+qjRNTd1pSZBVFB3myZXaazG+hJDfQvYTMbNjqjF3I3rRUT+Jcp2Mr3ATYf0TCeNO
+YO6eB+mUriJFwZ9gvz3C9oRfY+krdODdUK/6JJSK0Lr4kX4GJVi3
+-----END CERTIFICATE-----"#;
+
+    const TEST_STARTTLS_KEY: &str = r#"-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDX5hJxsIPk6Ymt
+APMloUcmlWT1RviZM/Ta1qQu55sZgCQJyDY4HUXcQJZ6S7/t26Jj43b8pZCCMG51
+HIiFfr10+Zc8ESMAZxmwF+uczCzX4Eyl+C36v073tfVg+SwQa4nBnIF3QjkFBSzq
+P07Bu4vgPKX9m4uZO6zZykkuDWiw++lD6u5selZyfE+kcfRmTyLwkFdVmIZDE+ux
++aNXpjDbNNuX45LG1f+aJxsOtd5grVzl66jZFdXInm3oeDYOS3q7qc7lASws126X
+M4b3hrkgz40tXImqifWrk08gVRzOyBHz8WuJbFC1ns4dRvSeGYZZjbbWSk+9nUlQ
+wZkWiYe9AgMBAAECggEACpTQGppYHIQFp2EAibuZzR5NUGgmDvwo6ADVEyduxpUt
+Lv2NCrsEjYLs3RmRUosNLnAbiM5kgrz07PB1EHXhuzXwX5VHbeGftK23cnvfRsVL
+fGbpefyeVi2o1RPhQPzER6TwA3RPbxuN0/0+UuhqNpdCW2egM+Zk1le/tm4Zz3Ky
+JgbJhynYemOMc4/2OCcPpyEssaLZGnTlwbzGbR0EidS4ekfd1lfPYU3Kk4KfgifN
+jFdkAr4kkqrCvlIuY5mwPzDgK1sNgEACHGgPJC3k3lYsdo8tWqjdn4qPlVvBHk9s
+7yBJczo/guZfzZbG2n3YgSj++rw1piz4N39tI8dZ0QKBgQDbIeO/7wY8C2YJUuOM
+aueusm30aeWdiPdd3W0jUOE1gDsHHwTUzGUU6DwxVuZRs8/k45pm76Pp/28wy7AX
+CMOy4NlnWe/7pFW9sOb/ZV4cJf7632XJJ0UEWd2lSqWDxhxKjfrFEdJmiTEgpJHT
++suobWWiO5+JfYdEVaOS8aM4IwKBgQD8OOhLBuh+zrJDM45DoRSUlg70Ek+K5P2c
+7EHjBi0Zai2ccTD7+BQB4QHgXnMspy53/1+TWxYo7omqseiVJ/SBVDBqZN9jR1mm
++84AD13FIXdm44MIaotgOw9RNqe/w3J0TkZOMnHYjD0BAFAH/Sa747+AYapsy4N/
+XVZmziVOnwKBgF6MV803n7QGowcA2ad7dO1+lUyw6F65eynn4TAstI81/cIL0zTR
+4AdOULJlMUktUVUME1G4sjvDd8FREXBO2slylLswJgiolkobav/lR97TUhoCi9Nn
++zJuZ+DqvVGHCCvu6LVhBCwzo5vXBgi1nGvWj9SY7zQOkm+cl9BOLEOLAoGBAKTK
+faM/gToQzFGx5ppzLSIjpON87zF9ieI0TpwI1gCL6f8TyYBnRpMvsu0oaLHdDTRj
+ystZMPJPX+0Bzkdd0peJLRTmkTmpTX8XeDF72LVKt1um/F7MVgHqtIhIYHOfPDGX
+TsIanV1xyw3TaXa+xMbv95fmt9XbZjAaCLCksaVbAoGAQ1PE6Kqty08g4rF2weQQ
+AJ0FxI7ZrH2cf/SAlGG+B60qVuhnRfBFiJRSBPET8ty9pSqAR+bNwURUln82/d6P
+7rEifWa5MXwng2tG+DOIBrirfb0cpnTpdzvDOQNmJucsOQ2Us9nHrhHovYygRLpO
+pzqAuzRp69VoxDpO6hdx/Qc=
+-----END PRIVATE KEY-----"#;
 
     fn temp_dir(label: &str) -> PathBuf {
         let suffix = SystemTime::now()
@@ -6107,6 +6166,103 @@ mod tests {
             String::from_utf8(writer).unwrap(),
             "250-LPE-CT\r\n250 SIZE\r\n"
         );
+    }
+
+    async fn read_test_smtp_reply<R>(reader: &mut BufReader<R>) -> String
+    where
+        R: tokio::io::AsyncRead + Unpin,
+    {
+        let mut reply = String::new();
+        loop {
+            let mut line = String::new();
+            let bytes = reader.read_line(&mut line).await.unwrap();
+            assert_ne!(bytes, 0, "SMTP session closed before reply completed");
+            let is_last = line.as_bytes().get(3).copied() != Some(b'-');
+            reply.push_str(&line);
+            if is_last {
+                return reply;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn smtp_starttls_upgrades_to_tls_after_ready_reply() {
+        let _guard = env_test_lock();
+        let _ = tokio_rustls::rustls::crypto::ring::default_provider().install_default();
+        let spool = temp_dir("starttls-session-spool");
+        initialize_spool(&spool).unwrap();
+        let tls_dir = temp_dir("starttls-pems");
+        let cert_path = tls_dir.join("cert.pem");
+        let key_path = tls_dir.join("key.pem");
+        std::fs::write(&cert_path, TEST_STARTTLS_CERT).unwrap();
+        std::fs::write(&key_path, TEST_STARTTLS_KEY).unwrap();
+        std::env::set_var("LPE_CT_PUBLIC_TLS_CERT_PATH", &cert_path);
+        std::env::set_var("LPE_CT_PUBLIC_TLS_KEY_PATH", &key_path);
+
+        let starttls = smtp_starttls_acceptor()
+            .unwrap()
+            .expect("test TLS certificate should enable STARTTLS");
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let dashboard_store = runtime_store_with_accepted_domains(&[]);
+        let server = tokio::spawn(async move {
+            let (stream, peer) = listener.accept().await.unwrap();
+            handle_smtp_session(stream, peer, dashboard_store, spool, Some(starttls))
+                .await
+                .unwrap();
+        });
+
+        let stream = TcpStream::connect(address).await.unwrap();
+        let mut reader = BufReader::new(stream);
+        assert_eq!(
+            read_test_smtp_reply(&mut reader).await,
+            "220 LPE-CT ESMTP ready\r\n"
+        );
+        reader
+            .get_mut()
+            .write_all(b"EHLO mx.example.test\r\n")
+            .await
+            .unwrap();
+        let ehlo = read_test_smtp_reply(&mut reader).await;
+        assert_eq!(ehlo, "250-LPE-CT\r\n250-STARTTLS\r\n250 SIZE\r\n");
+
+        reader.get_mut().write_all(b"STARTTLS\r\n").await.unwrap();
+        assert_eq!(
+            read_test_smtp_reply(&mut reader).await,
+            "220 ready to start TLS\r\n"
+        );
+
+        let stream = reader.into_inner();
+        let mut cert_reader = StdIoBufReader::new(Cursor::new(TEST_STARTTLS_CERT.as_bytes()));
+        let certificate = rustls_pemfile::certs(&mut cert_reader)
+            .next()
+            .expect("test certificate should be present")
+            .unwrap();
+        let mut root_store = RootCertStore::empty();
+        root_store.add(certificate).unwrap();
+        let client_config = ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        let connector = TlsConnector::from(Arc::new(client_config));
+        let server_name = ServerName::try_from("localhost").unwrap().to_owned();
+        let tls_stream = connector.connect(server_name, stream).await.unwrap();
+        let mut tls_reader = BufReader::new(tls_stream);
+
+        tls_reader
+            .get_mut()
+            .write_all(b"EHLO secure.example.test\r\n")
+            .await
+            .unwrap();
+        assert_eq!(
+            read_test_smtp_reply(&mut tls_reader).await,
+            "250-LPE-CT\r\n250 SIZE\r\n"
+        );
+        tls_reader.get_mut().write_all(b"QUIT\r\n").await.unwrap();
+        assert_eq!(read_test_smtp_reply(&mut tls_reader).await, "221 bye\r\n");
+
+        server.await.unwrap();
+        std::env::remove_var("LPE_CT_PUBLIC_TLS_CERT_PATH");
+        std::env::remove_var("LPE_CT_PUBLIC_TLS_KEY_PATH");
     }
 
     #[derive(Debug, Clone)]
