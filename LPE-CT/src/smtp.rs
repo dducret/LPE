@@ -27,17 +27,19 @@ use std::{
     env,
     fs::{self, File},
     hash::{Hash, Hasher},
-    io::BufReader as StdBufReader,
+    io::{BufReader as StdBufReader, Cursor},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     path::{Path, PathBuf},
+    pin::Pin,
     sync::{
         atomic::{AtomicU32, Ordering},
         Arc, Mutex,
     },
+    task::{Context as TaskContext, Poll},
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader, ReadBuf},
     net::{tcp::OwnedReadHalf, tcp::OwnedWriteHalf, TcpListener, TcpStream},
     process::Command,
 };
@@ -1675,6 +1677,60 @@ fn matches_any_domain(expected: Option<&str>, actual: &[String]) -> bool {
     }
 }
 
+struct StartTlsStream {
+    stream: TcpStream,
+    prefix: Cursor<Vec<u8>>,
+}
+
+impl StartTlsStream {
+    fn new(stream: TcpStream, buffered: Vec<u8>) -> Self {
+        Self {
+            stream,
+            prefix: Cursor::new(buffered),
+        }
+    }
+}
+
+impl AsyncRead for StartTlsStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let prefix_position = self.prefix.position() as usize;
+        let prefix_len = self.prefix.get_ref().len();
+        if prefix_position < prefix_len {
+            let available = &self.prefix.get_ref()[prefix_position..];
+            let to_copy = available.len().min(buf.remaining());
+            buf.put_slice(&available[..to_copy]);
+            self.prefix.set_position((prefix_position + to_copy) as u64);
+            return Poll::Ready(Ok(()));
+        }
+        Pin::new(&mut self.stream).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for StartTlsStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        data: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.stream).poll_write(cx, data)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.stream).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.stream).poll_shutdown(cx)
+    }
+}
+
 async fn handle_smtp_session(
     stream: TcpStream,
     peer: SocketAddr,
@@ -1727,10 +1783,12 @@ async fn handle_smtp_session(
                     continue;
                 };
                 write_smtp(&mut writer, "220 ready to start TLS").await?;
+                let buffered = reader.buffer().to_vec();
                 let stream = reader
                     .into_inner()
                     .reunite(writer)
                     .map_err(|_| anyhow!("unable to prepare SMTP stream for STARTTLS"))?;
+                let stream = StartTlsStream::new(stream, buffered);
                 let tls_stream = match starttls.accept(stream).await {
                     Ok(tls_stream) => tls_stream,
                     Err(error) => {
@@ -4421,8 +4479,10 @@ async fn write_smtp<W>(writer: &mut W, line: &str) -> Result<()>
 where
     W: AsyncWrite + Unpin,
 {
-    writer.write_all(line.as_bytes()).await?;
-    writer.write_all(b"\r\n").await?;
+    let mut response = Vec::with_capacity(line.len() + 2);
+    response.extend_from_slice(line.as_bytes());
+    response.extend_from_slice(b"\r\n");
+    writer.write_all(&response).await?;
     writer.flush().await?;
     Ok(())
 }
@@ -5693,11 +5753,11 @@ mod tests {
         process_outbound_handoff, receive_message, receive_message_with_validator, release_trace,
         retry_after_seconds, retry_trace, score_bayespam, smtp_starttls_acceptor_for_paths,
         spf_disposition, stable_key_id, summarize_dkim, summarize_dmarc, summarize_spf,
-        train_bayespam, unix_now, update_reputation, AcceptedDomainConfig, AntivirusProviderConfig,
-        AntivirusProviderDecision, AuthSummary, AuthenticationAssessment, BayesLabel,
-        DecisionTraceEntry, DkimDisposition, FilterAction, GreylistEntry, OutboundRoutingRule,
-        OutboundThrottleRule, QueuedMessage, RuntimeConfig, SmtpTransaction, SpfDisposition,
-        TransportDsnReport, TransportRouteDecision, TransportTechnicalStatus,
+        train_bayespam, unix_now, update_reputation, write_smtp, AcceptedDomainConfig,
+        AntivirusProviderConfig, AntivirusProviderDecision, AuthSummary, AuthenticationAssessment,
+        BayesLabel, DecisionTraceEntry, DkimDisposition, FilterAction, GreylistEntry,
+        OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig, SmtpTransaction,
+        SpfDisposition, TransportDsnReport, TransportRouteDecision, TransportTechnicalStatus,
         TransportThrottleStatus,
     };
     use crate::env_test_lock;
@@ -5713,7 +5773,9 @@ mod tests {
         net::IpAddr,
         net::SocketAddr,
         path::PathBuf,
+        pin::Pin,
         sync::{Arc, Mutex},
+        task::{Context as TaskContext, Poll},
         time::{Instant, SystemTime, UNIX_EPOCH},
     };
     use tokio::{
@@ -6333,6 +6395,47 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             throttle: None,
             data: format!("Subject: {subject}\r\n\r\n{body}").into_bytes(),
         }
+    }
+
+    #[derive(Default)]
+    struct CountingWriter {
+        writes: Vec<Vec<u8>>,
+    }
+
+    impl tokio::io::AsyncWrite for CountingWriter {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            _cx: &mut TaskContext<'_>,
+            data: &[u8],
+        ) -> Poll<std::io::Result<usize>> {
+            self.writes.push(data.to_vec());
+            Poll::Ready(Ok(data.len()))
+        }
+
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _cx: &mut TaskContext<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_shutdown(
+            self: Pin<&mut Self>,
+            _cx: &mut TaskContext<'_>,
+        ) -> Poll<std::io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    #[tokio::test]
+    async fn smtp_write_emits_reply_and_crlf_in_one_write() {
+        let mut writer = CountingWriter::default();
+
+        write_smtp(&mut writer, "220 ready to start TLS")
+            .await
+            .unwrap();
+
+        assert_eq!(writer.writes, vec![b"220 ready to start TLS\r\n".to_vec()]);
     }
 
     #[tokio::test]
