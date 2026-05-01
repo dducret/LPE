@@ -184,6 +184,8 @@ export const baseMessages = {
   connect: "Connect",
   flush: "Flush",
   output: "Output",
+  diagnosticRunning: "Running",
+  diagnosticWaitingOutput: "Waiting for command output",
   fileRequired: "Select a file before running this diagnostic.",
   targetRequired: "Enter a target before running this diagnostic.",
   queueStatusTitle: "Mail queue status",

@@ -1,5 +1,5 @@
-import { i18n, getCopy, translate } from './modules/i18n/index.js?v=20260501-system-information-layout';
-import { DEFAULT_PAGE_ID, activatePageView, pageIdFromHash, renderPageModules } from "./modules/pages/index.js?v=20260501-system-information-layout";
+import { i18n, getCopy, translate } from './modules/i18n/index.js?v=20260501-system-diagnostic-pending';
+import { DEFAULT_PAGE_ID, activatePageView, pageIdFromHash, renderPageModules } from "./modules/pages/index.js?v=20260501-system-diagnostic-pending";
 
 // DOM References
 const elements = {
@@ -4518,6 +4518,43 @@ function renderDiagnosticDrawer(report, opener = document.activeElement) {
   );
 }
 
+function diagnosticToolTitle(tool, copy = getCopy()) {
+  if (tool === "ping") {
+    return copy.systemToolPing;
+  }
+  if (tool === "traceroute") {
+    return copy.systemToolTraceroute;
+  }
+  if (tool === "dig") {
+    return copy.systemToolDig;
+  }
+  return copy.systemToolsTitle;
+}
+
+function renderPendingDiagnosticDrawer(title, summary, opener = document.activeElement) {
+  const copy = getCopy();
+  renderDrawerContent(
+    title,
+    summary || copy.loadingRecords,
+    `
+      <section class="trace-section">
+        <h4>${escapeHtml(copy.statusLabel)}</h4>
+        <span class="status-chip warn">${escapeHtml(copy.diagnosticRunning)}</span>
+      </section>
+      <section class="trace-section">
+        <h4>${escapeHtml(copy.output)}</h4>
+        <div class="diagnostic-output diagnostic-output-pending" role="status" aria-live="polite">
+          <span class="diagnostic-hourglass" aria-hidden="true"></span>
+          <span>${escapeHtml(copy.diagnosticWaitingOutput)}</span>
+        </div>
+      </section>
+    `,
+    opener,
+    null,
+    "wide",
+  );
+}
+
 async function openDiagnostic(kind, opener = document.activeElement) {
   const copy = getCopy();
   renderDrawerContent(copy.systemDiagnosticsTitle, copy.loadingRecords, buildLoadingRows(1), opener, null, "wide");
@@ -4556,7 +4593,7 @@ async function runDiagnosticTool(tool, opener = document.activeElement) {
     return;
   }
   const copy = getCopy();
-  renderDrawerContent(copy.systemToolsTitle, copy.loadingRecords, buildLoadingRows(1), opener, null, "wide");
+  renderPendingDiagnosticDrawer(diagnosticToolTitle(tool, copy), target, opener);
   const report = await postJson("/api/system-diagnostics/tools", { tool, target });
   renderDiagnosticDrawer(report, opener);
 }
