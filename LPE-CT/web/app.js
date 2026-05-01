@@ -94,6 +94,8 @@ const containers = {
 const AUTH_TOKEN_KEY = 'lpeCtAdminToken';
 const LAST_ADMIN_EMAIL_KEY = 'lpeCtAdminLastEmail';
 const DASHBOARD_REFRESH_INTERVAL_MS = 60_000;
+const DEFAULT_HISTORY_COLUMN_WIDTHS = [172, 176, 144, 132, 220, 220, 112];
+const MIN_HISTORY_COLUMN_WIDTH = 88;
 
 // Application State
 const state = {
@@ -129,6 +131,11 @@ const state = {
     runDigests: false,
   },
   activePage: DEFAULT_PAGE_ID,
+  historySort: {
+    key: "date",
+    direction: "desc",
+  },
+  historyColumnWidths: [...DEFAULT_HISTORY_COLUMN_WIDTHS],
   drawer: {
     open: false,
     previousFocus: null,
@@ -195,7 +202,52 @@ function formatHistoryDateTime(value) {
     date.getFullYear(),
     pad(date.getMonth() + 1),
     pad(date.getDate()),
-  ].join("-") + ` ${pad(date.getHours())}.${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  ].join("-") + ` ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function displayTraceId(value) {
+  return String(value || getCopy().unset).replace(/^lpe-ct-(?:in|out)-/i, "");
+}
+
+function displayClientAddress(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return getCopy().unset;
+  }
+  const bracketedIpv6 = text.match(/^\[([^\]]+)\](?::\d+)?$/);
+  if (bracketedIpv6) {
+    return bracketedIpv6[1];
+  }
+  const hostPort = text.match(/^([^:\s]+):\d+$/);
+  if (hostPort) {
+    return hostPort[1];
+  }
+  return text;
+}
+
+function displayMailAddress(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return getCopy().unset;
+  }
+  const pathMatch = text.match(/<([^>]*)>/);
+  if (pathMatch) {
+    return pathMatch[1] || getCopy().unset;
+  }
+  const emailMatch = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  if (emailMatch) {
+    return emailMatch[0];
+  }
+  return text.split(/\s+/)[0].replace(/[<>]/g, "");
+}
+
+function historySizeBytes(item) {
+  const stored = Number(item?.message_size_bytes);
+  if (Number.isFinite(stored) && stored >= 0) {
+    return stored;
+  }
+  const sizeMatch = String(item?.mail_from || "").match(/\bSIZE=(\d+)\b/i);
+  return sizeMatch ? Number(sizeMatch[1]) : null;
 }
 
 function formatShortDate(value) {
@@ -238,7 +290,8 @@ function formatBytes(value) {
 }
 
 function firstRecipient(item) {
-  return (item?.rcpt_to ?? []).find(Boolean) || getCopy().unset;
+  const recipient = (item?.rcpt_to ?? []).find(Boolean);
+  return recipient ? displayMailAddress(recipient) : getCopy().unset;
 }
 
 function humanizeStatus(value) {
@@ -256,6 +309,50 @@ function formatHistoryType(item) {
   const label = cleanStatuses.has(status) || cleanStatuses.has(queue) ? "Clean" : humanizeStatus(item?.status);
   const score = Number(item?.spam_score);
   return Number.isNaN(score) ? label : `${label} (${score.toFixed(2)})`;
+}
+
+function historyColumns(copy) {
+  return [
+    { key: "date", label: copy.historyColumnDate, value: (item) => formatHistoryDateTime(item.latest_event_at), sortValue: (item) => parseHistoryTimestamp(item.latest_event_at)?.getTime() ?? 0 },
+    { key: "lpeId", label: copy.historyColumnLpeId, value: (item) => displayTraceId(item.trace_id), sortValue: (item) => displayTraceId(item.trace_id).toLowerCase() },
+    { key: "client", label: copy.historyColumnClientAddress, value: (item) => displayClientAddress(item.peer), sortValue: (item) => displayClientAddress(item.peer).toLowerCase() },
+    { key: "type", label: copy.historyColumnType, value: (item) => formatHistoryType(item), sortValue: (item) => formatHistoryType(item).toLowerCase() },
+    { key: "from", label: copy.historyColumnFrom, value: (item) => displayMailAddress(item.mail_from), sortValue: (item) => displayMailAddress(item.mail_from).toLowerCase() },
+    { key: "to", label: copy.historyColumnTo, value: firstRecipient, sortValue: (item) => firstRecipient(item).toLowerCase() },
+    { key: "size", label: copy.historyColumnSize, value: (item) => formatBytes(historySizeBytes(item)), sortValue: (item) => historySizeBytes(item) ?? -1 },
+  ];
+}
+
+function historyGridTemplate() {
+  return state.historyColumnWidths.map((width) => `${Math.max(MIN_HISTORY_COLUMN_WIDTH, Number(width) || MIN_HISTORY_COLUMN_WIDTH)}px`).join(" ");
+}
+
+function sortHistoryItems(items, columns) {
+  const column = columns.find((candidate) => candidate.key === state.historySort.key) ?? columns[0];
+  const direction = state.historySort.direction === "asc" ? 1 : -1;
+  return [...items].sort((left, right) => {
+    const leftValue = column.sortValue(left);
+    const rightValue = column.sortValue(right);
+    if (typeof leftValue === "number" && typeof rightValue === "number") {
+      return (leftValue - rightValue) * direction;
+    }
+    return String(leftValue).localeCompare(String(rightValue), i18n.getLocale(), { numeric: true, sensitivity: "base" }) * direction;
+  });
+}
+
+function sortIndicator(key) {
+  if (state.historySort.key !== key) {
+    return "";
+  }
+  return state.historySort.direction === "asc" ? " ▲" : " ▼";
+}
+
+function setHistorySort(key) {
+  state.historySort = {
+    key,
+    direction: state.historySort.key === key && state.historySort.direction === "asc" ? "desc" : "asc",
+  };
+  renderHistory();
 }
 
 function formatDurationMinutes(seconds) {
@@ -784,6 +881,9 @@ function renderQuarantine() {
 function renderHistory() {
   const copy = getCopy();
   const items = state.history;
+  const columns = historyColumns(copy);
+  const sortedItems = sortHistoryItems(items, columns);
+  const gridTemplate = historyGridTemplate();
   if (!items.length) {
     containers.history.innerHTML = buildEmptyState(
       copy.emptyHistoryTitle,
@@ -795,26 +895,23 @@ function renderHistory() {
 
   containers.history.innerHTML = `
     <div class="history-summary">${translate(copy.historyResultSummary, { count: items.length })}</div>
-    <div class="history-table-header" aria-hidden="true">
-      <span>${escapeHtml(copy.historyColumnDate)}</span>
-      <span>${escapeHtml(copy.historyColumnLpeId)}</span>
-      <span>${escapeHtml(copy.historyColumnClientAddress)}</span>
-      <span>${escapeHtml(copy.historyColumnType)}</span>
-      <span>${escapeHtml(copy.historyColumnFrom)}</span>
-      <span>${escapeHtml(copy.historyColumnTo)}</span>
-      <span>${escapeHtml(copy.historyColumnSize)}</span>
+    <div class="history-table-header" style="--history-grid-columns: ${escapeHtml(gridTemplate)}">
+      ${columns
+        .map(
+          (column, index) => `
+            <span class="history-column-heading">
+              <button type="button" data-action="history-sort" data-sort-key="${escapeHtml(column.key)}" aria-sort="${state.historySort.key === column.key ? state.historySort.direction : "none"}">${escapeHtml(column.label)}${escapeHtml(sortIndicator(column.key))}</button>
+              <span class="history-column-resizer" role="separator" aria-orientation="vertical" data-history-resizer data-column-index="${index}"></span>
+            </span>
+          `,
+        )
+        .join("")}
     </div>
-    ${items
+    ${sortedItems
       .map(
         (item) => `
-          <button class="history-message-row" type="button" data-action="trace-open" data-trace-id="${escapeHtml(item.trace_id)}" aria-label="${escapeHtml(`${copy.traceOpen}: ${item.trace_id}`)}">
-            <span>${escapeHtml(formatHistoryDateTime(item.latest_event_at))}</span>
-            <span>${escapeHtml(item.trace_id || copy.unset)}</span>
-            <span>${escapeHtml(item.peer || copy.unset)}</span>
-            <span>${escapeHtml(formatHistoryType(item))}</span>
-            <span>${escapeHtml(item.mail_from || copy.unset)}</span>
-            <span>${escapeHtml(firstRecipient(item))}</span>
-            <span>${escapeHtml(formatBytes(item.message_size_bytes))}</span>
+          <button class="history-message-row" type="button" data-action="trace-open" data-trace-id="${escapeHtml(item.trace_id)}" aria-label="${escapeHtml(`${copy.traceOpen}: ${item.trace_id}`)}" style="--history-grid-columns: ${escapeHtml(gridTemplate)}">
+            ${columns.map((column) => `<span>${escapeHtml(column.value(item))}</span>`).join("")}
           </button>
         `,
       )
@@ -3367,7 +3464,7 @@ function renderTraceDrawer(trace, opener = document.activeElement) {
   const current = trace.current ?? {};
   const retainedHistory = trace.history ?? [];
   const latestHistoryEvent = retainedHistory.length ? retainedHistory[retainedHistory.length - 1] : null;
-  const messageSizeBytes = current.message_size_bytes ?? latestHistoryEvent?.message_size_bytes;
+  const messageSizeBytes = current.message_size_bytes ?? historySizeBytes(latestHistoryEvent);
   const technicalStatus = current.technical_status ? escapeHtml(JSON.stringify(current.technical_status, null, 2)) : escapeHtml(copy.unset);
   const authSummary = current.auth_summary ? escapeHtml(JSON.stringify(current.auth_summary, null, 2)) : escapeHtml(copy.unset);
   const dsn = current.dsn ? escapeHtml(JSON.stringify(current.dsn, null, 2)) : "";
@@ -3395,7 +3492,7 @@ function renderTraceDrawer(trace, opener = document.activeElement) {
     .join("");
   renderDrawerContent(
     current.subject || trace.trace_id,
-    `${current.mail_from || copy.unset} -> ${formatList(current.rcpt_to ?? [])}`,
+    `${displayMailAddress(current.mail_from)} -> ${formatList((current.rcpt_to ?? []).map(displayMailAddress))}`,
     `
       <div class="record-actions">
         ${current.trace_id || trace.trace_id ? `<button class="list-action" type="button" data-action="trace-retry" data-trace-id="${escapeHtml(trace.trace_id)}">${copy.traceRetry}</button>` : ""}
@@ -3409,7 +3506,7 @@ function renderTraceDrawer(trace, opener = document.activeElement) {
           <div><p>${copy.statusLabel}</p><span class="record-copy">${escapeHtml(current.status || copy.unset)}</span></div>
           <div><p>${copy.queueLabel}</p><span class="record-copy">${escapeHtml(current.queue || copy.unset)}</span></div>
           <div><p>${copy.routeLabel}</p><span class="record-copy">${escapeHtml(current.route?.relay_target || copy.unset)}</span></div>
-          <div><p>${copy.historyColumnClientAddress}</p><span class="record-copy">${escapeHtml(current.peer || latestHistoryEvent?.peer || copy.unset)}</span></div>
+          <div><p>${copy.historyColumnClientAddress}</p><span class="record-copy">${escapeHtml(displayClientAddress(current.peer || latestHistoryEvent?.peer))}</span></div>
           <div><p>${copy.historyColumnSize}</p><span class="record-copy">${escapeHtml(formatBytes(messageSizeBytes))}</span></div>
           <div><p>${copy.spamLabel}</p><span class="record-copy">${escapeHtml(formatScore(current.spam_score))}</span></div>
           <div><p>${copy.securityLabel}</p><span class="record-copy">${escapeHtml(formatScore(current.security_score))}</span></div>
@@ -3668,7 +3765,7 @@ function setSystemSetupTab(actionTarget) {
 }
 
 function getActionHandlers(actionTarget) {
-  const { traceId, ruleId, index, reportId, target, domainId, profileId } = actionTarget.dataset;
+  const { traceId, ruleId, index, reportId, target, domainId, profileId, sortKey } = actionTarget.dataset;
   return {
     "drawer-close": () => closeDrawer(),
     "trace-open": () => runAction(() => loadTrace(traceId, actionTarget)),
@@ -3701,6 +3798,7 @@ function getActionHandlers(actionTarget) {
     "public-tls-disable": () => runAction(() => disablePublicTlsProfile()),
     "public-tls-delete": () => runAction(() => deletePublicTlsProfile(profileId)),
     "platform-edit": () => openPlatformDrawer(target, actionTarget),
+    "history-sort": () => setHistorySort(sortKey),
     "page-tab": () => setPageTab(actionTarget),
     "system-setup-tab": () => setSystemSetupTab(actionTarget),
     "refresh-quarantine": () => runAction(() => loadOps()),
@@ -3723,6 +3821,35 @@ function handleBodyClick(event) {
     setActivePage(pageTarget.dataset.pageTarget, { focus: true, updateHash: true });
     setSidebarOpen(false);
   }
+}
+
+function startHistoryColumnResize(event) {
+  const resizer = event.target.closest("[data-history-resizer]");
+  if (!resizer) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  const columnIndex = Number(resizer.dataset.columnIndex);
+  if (!Number.isInteger(columnIndex)) {
+    return;
+  }
+  const startX = event.clientX;
+  const startWidth = state.historyColumnWidths[columnIndex] ?? DEFAULT_HISTORY_COLUMN_WIDTHS[columnIndex] ?? MIN_HISTORY_COLUMN_WIDTH;
+  const handleMove = (moveEvent) => {
+    const nextWidth = Math.max(MIN_HISTORY_COLUMN_WIDTH, startWidth + moveEvent.clientX - startX);
+    state.historyColumnWidths[columnIndex] = nextWidth;
+    const gridTemplate = historyGridTemplate();
+    containers.history
+      .querySelectorAll(".history-table-header, .history-message-row")
+      .forEach((row) => row.style.setProperty("--history-grid-columns", gridTemplate));
+  };
+  const handleEnd = () => {
+    window.removeEventListener("pointermove", handleMove);
+    window.removeEventListener("pointerup", handleEnd);
+  };
+  window.addEventListener("pointermove", handleMove);
+  window.addEventListener("pointerup", handleEnd);
 }
 
 function trapDrawerFocus(event) {
@@ -3818,6 +3945,7 @@ elements.createDigestDefault.addEventListener("click", (event) => openDigestDefa
 elements.createDigestOverride.addEventListener("click", (event) => openDigestOverrideDrawer(null, event.currentTarget));
 
 document.body.addEventListener("click", handleBodyClick);
+document.body.addEventListener("pointerdown", startHistoryColumnResize);
 
 elements.drawerClose.addEventListener("click", closeDrawer);
 elements.drawerBackdrop.addEventListener("click", (event) => {

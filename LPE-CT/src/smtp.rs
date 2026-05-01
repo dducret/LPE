@@ -1903,7 +1903,7 @@ where
             write_smtp(writer, "503 send EHLO or HELO after STARTTLS first").await?;
             return Ok(SmtpCommandOutcome::Continue);
         }
-        let candidate = command[10..].trim().trim_matches(['<', '>']).to_string();
+        let candidate = parse_smtp_path(command[10..].trim());
         let config = runtime_config_from_store(dashboard_store)?;
         if !candidate.is_empty() {
             if let transport_policy::AddressPolicyVerdict::Reject(reason) =
@@ -1930,7 +1930,7 @@ where
             write_smtp(writer, "503 send MAIL FROM first").await?;
             return Ok(SmtpCommandOutcome::Continue);
         }
-        let recipient = command[8..].trim().trim_matches(['<', '>']).to_string();
+        let recipient = parse_smtp_path(command[8..].trim());
         let config = runtime_config_from_store(dashboard_store)?;
         if !recipient_domain_is_accepted(&config, &recipient) {
             write_smtp(
@@ -4499,6 +4499,21 @@ where
     Ok(data)
 }
 
+fn parse_smtp_path(value: &str) -> String {
+    let trimmed = value.trim();
+    if let Some(rest) = trimmed.strip_prefix('<') {
+        if let Some(end) = rest.find('>') {
+            return rest[..end].trim().to_string();
+        }
+    }
+    trimmed
+        .split_ascii_whitespace()
+        .next()
+        .unwrap_or_default()
+        .trim_matches(['<', '>'])
+        .to_string()
+}
+
 async fn write_smtp<W>(writer: &mut W, line: &str) -> Result<()>
 where
     W: AsyncWrite + Unpin,
@@ -6037,6 +6052,19 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             &config,
             "test@l-p-e.ch"
         ));
+    }
+
+    #[test]
+    fn smtp_path_parser_ignores_mail_parameters() {
+        assert_eq!(
+            super::parse_smtp_path("<sender@example.test> SIZE=2048"),
+            "sender@example.test"
+        );
+        assert_eq!(super::parse_smtp_path("<> SIZE=2048"), "");
+        assert_eq!(
+            super::parse_smtp_path("sender@example.test SIZE=2048"),
+            "sender@example.test"
+        );
     }
 
     #[tokio::test]

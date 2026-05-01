@@ -1584,10 +1584,10 @@ select.invalid {
 .history-table-header,
 .history-message-row {
   display: grid;
-  grid-template-columns: 10.5rem 13rem 11rem minmax(8rem, 0.75fr) minmax(14rem, 1fr) minmax(14rem, 1fr) 7rem;
+  grid-template-columns: var(--history-grid-columns, 172px 176px 144px 132px 220px 220px 112px);
   gap: 12px;
   align-items: center;
-  min-width: 78rem;
+  min-width: max-content;
 }
 
 .history-table-header {
@@ -1624,6 +1624,52 @@ select.invalid {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.history-column-heading {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: visible;
+}
+
+.history-column-heading button {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+}
+
+.history-column-heading button:hover,
+.history-column-heading button:focus-visible {
+  color: var(--text);
+}
+
+.history-column-resizer {
+  position: absolute;
+  top: -10px;
+  right: -8px;
+  bottom: -10px;
+  width: 12px;
+  overflow: visible;
+  cursor: col-resize;
+}
+
+.history-column-resizer::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: 5px;
+  bottom: 8px;
+  width: 1px;
+  background: rgba(181, 197, 213, 0.8);
 }
 
 .record-title {

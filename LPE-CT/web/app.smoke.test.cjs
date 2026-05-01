@@ -286,11 +286,12 @@ function createFetchStub() {
   const history = {
     items: [
       {
-        trace_id: "trace-2",
+        trace_id: "lpe-ct-in-177764830abcdef",
         subject: "Outbound delivery",
         latest_event_at: "2026-05-01T09:50:00Z",
-        mail_from: "ops@example.test",
+        mail_from: "<ops@example.test> SIZE=2048",
         rcpt_to: ["dest@example.org"],
+        peer: "203.0.113.44:587",
         queue: "sent",
         status: "relayed",
         direction: "outbound",
@@ -541,8 +542,15 @@ async function main() {
 
   assert.equal(document.title, "LPE-CT Management Console");
   assert.match(elements["quarantine-list"].innerHTML, /trace-1/);
-  assert.match(elements["history-list"].innerHTML, /trace-2/);
+  assert.match(elements["history-list"].innerHTML, /177764830abcdef/);
   assert.match(elements["history-list"].innerHTML, /Client Address/);
+  assert.match(elements["history-list"].innerHTML, /data-sort-key="date"/);
+  assert.match(elements["history-list"].innerHTML, /data-history-resizer/);
+  assert.match(elements["history-list"].innerHTML, /2026-05-01 \d{2}:50:00/);
+  assert.match(elements["history-list"].innerHTML, /203\.0\.113\.44/);
+  assert.doesNotMatch(elements["history-list"].innerHTML, /203\.0\.113\.44:587/);
+  assert.match(elements["history-list"].innerHTML, /ops@example\.test/);
+  assert.doesNotMatch(elements["history-list"].innerHTML, /SIZE=2048/);
   assert.match(elements["history-list"].innerHTML, /Clean \(2\.10\)/);
   assert.match(elements["history-list"].innerHTML, /2 KB/);
   assert.match(elements["platform-list"].innerHTML, /Network/);
