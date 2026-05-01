@@ -19,6 +19,7 @@ pub(crate) struct SystemMetrics {
     pub(crate) memory_total_bytes: Option<u64>,
     pub(crate) disk_used_percent: Option<f64>,
     pub(crate) disk_total_bytes: Option<u64>,
+    pub(crate) load_averages: Option<[f64; 3]>,
     pub(crate) network_interfaces: Vec<NetworkInterfaceMetric>,
 }
 
@@ -44,6 +45,7 @@ pub(crate) fn collect(spool_dir: &Path) -> SystemMetrics {
         memory_total_bytes: memory_total_bytes(),
         disk_used_percent: disk_used_percent(spool_dir),
         disk_total_bytes: disk_total_bytes(spool_dir),
+        load_averages: load_averages(),
         network_interfaces: network_interfaces(),
     }
 }
@@ -88,6 +90,16 @@ fn cpu_utilization_percent() -> Option<f64> {
     }
 
     Some(percent(total.saturating_sub(idle), total))
+}
+
+fn load_averages() -> Option<[f64; 3]> {
+    let raw = read_trimmed("/proc/loadavg")?;
+    let values = raw
+        .split_whitespace()
+        .take(3)
+        .filter_map(|value| value.parse::<f64>().ok())
+        .collect::<Vec<_>>();
+    (values.len() == 3).then(|| [values[0], values[1], values[2]])
 }
 
 fn processor_type() -> Option<String> {

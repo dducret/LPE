@@ -1822,6 +1822,55 @@ select.invalid {
   font-weight: 400;
 }
 
+.system-reporting-page {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.system-report-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.system-report-section-head h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-title);
+  line-height: 1.25;
+}
+
+.system-report-row,
+.system-tool-row {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.system-tool-row label {
+  display: grid;
+  grid-template-columns: minmax(96px, 0.18fr) minmax(180px, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: var(--font-copy);
+}
+
+.system-tool-row input,
+.system-file-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.diagnostic-output {
+  max-height: 56vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .network-interface-panel {
   display: grid;
   gap: 10px;

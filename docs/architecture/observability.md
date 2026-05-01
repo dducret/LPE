@@ -75,6 +75,23 @@ must not become a source of canonical mailbox, collaboration, rights, or
 user-visible state. When a current log file is not present yet, the console may
 show an empty virtual row so the intended stream remains visible during early
 deployment.
+
+The `Reporting -> System Information` page in the `LPE-CT` management console
+is the supported v1 host diagnostics surface for the sorting-center node. It
+uses the runtime system snapshot from `/api/v1/dashboard` for processor,
+memory, mail/log disk, uptime, and load-average values, and exposes only
+whitelisted management diagnostics under `/api/v1/system-diagnostics/*`.
+
+The supported diagnostics are service status and start/stop control for the
+configured antivirus and `LPE-CT` systemd units, mail queue metrics from the
+local `LPE-CT` spool, process list, network connections, routing table, support
+connection command, health check, `ping`, `traceroute`, `dig`, spam-test upload,
+and mail-queue flush. Host commands are fixed by diagnostic type or by explicit
+environment-configured command paths such as `LPE_CT_SPAM_TEST_BIN`,
+`LPE_CT_SUPPORT_CONNECT_BIN`, and `LPE_CT_FLUSH_MAIL_QUEUE_BIN`; the management
+API must not accept arbitrary shell commands from the browser. These diagnostics
+remain operational evidence only and must not become canonical mailbox,
+collaboration, rights, or user-visible state.
  
 ## Metric families
 

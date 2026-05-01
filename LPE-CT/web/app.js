@@ -87,6 +87,7 @@ const containers = {
   digestDefaults: document.getElementById("digest-defaults-list"),
   digestOverrides: document.getElementById("digest-overrides-list"),
   digestReports: document.getElementById("digest-report-list"),
+  systemInformation: document.getElementById("reporting-system-information"),
   platform: document.getElementById("platform-list"),
   mailLog: document.getElementById("mail-log"),
   audit: document.getElementById("audit-log"),
@@ -115,6 +116,7 @@ const state = {
   routeDiagnostics: null,
   reporting: null,
   digestReports: [],
+  systemServices: [],
   policyStatus: null,
   hostLogs: {
     mail: [],
@@ -126,7 +128,7 @@ const state = {
     filtering: "content-filtering",
     "anti-spam": "settings",
     quarantine: "search",
-    reporting: "history",
+    reporting: "system-information",
     logs: "interface",
   },
   systemSetup: {
@@ -417,6 +419,20 @@ function formatBytes(value) {
     unitIndex += 1;
   }
   return `${new Intl.NumberFormat(i18n.getLocale(), { maximumFractionDigits: size >= 10 ? 0 : 1 }).format(size)} ${units[unitIndex]}`;
+}
+
+function formatCompactBytes(value) {
+  if (value === undefined || value === null || Number.isNaN(Number(value))) {
+    return getCopy().unset;
+  }
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let size = Math.max(0, Number(value));
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${new Intl.NumberFormat(i18n.getLocale(), { maximumFractionDigits: size >= 10 ? 0 : 1 }).format(size)}${units[unitIndex]}`;
 }
 
 function firstRecipient(item) {
@@ -737,6 +753,18 @@ function formatUptime(seconds) {
   return `${formatNumber(Math.max(1, minutes))}m`;
 }
 
+function formatReportingUptime(seconds) {
+  if (seconds === undefined || seconds === null || Number.isNaN(Number(seconds))) {
+    return getCopy().unset;
+  }
+  const totalSeconds = Math.max(0, Math.floor(Number(seconds)));
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const time = `${String(hours).padStart(1, "0")}:${String(minutes).padStart(2, "0")}`;
+  return days > 0 ? `${formatNumber(days)} days, ${time}` : time;
+}
+
 function formatBooleanLabel(value) {
   return value ? getCopy().enabled : getCopy().disabled;
 }
@@ -916,13 +944,13 @@ function currentReporting() {
 }
 
 function statusChipClass(value) {
-  if (value === true || value === "present" || value === "active" || value === "enabled") {
+  if (value === true || value === "present" || value === "active" || value === "enabled" || value === "running" || value === "ok") {
     return "status-chip ok";
   }
-  if (value === false || value === "missing" || value === "disabled" || value === "misconfigured") {
+  if (value === false || value === "missing" || value === "disabled" || value === "misconfigured" || value === "failed" || value === "not-started") {
     return "status-chip danger";
   }
-  if (value === "unreadable" || value === "invalid-path" || value === "degraded") {
+  if (value === "unreadable" || value === "invalid-path" || value === "degraded" || value === "unknown" || value === "not-configured") {
     return "status-chip warn";
   }
   return "status-chip muted";
@@ -1671,6 +1699,169 @@ function renderDigestReporting() {
   containers.digestDefaults.innerHTML = renderDigestDefaults(reporting);
   containers.digestOverrides.innerHTML = renderDigestOverrides(reporting);
   containers.digestReports.innerHTML = renderDigestReportsList(reports);
+}
+
+function formatSystemResource(percentValue, totalBytes) {
+  const percent = formatPercent(percentValue);
+  const total = formatCompactBytes(totalBytes);
+  if (percent === getCopy().unset && total === getCopy().unset) {
+    return getCopy().unset;
+  }
+  if (total === getCopy().unset) {
+    return percent;
+  }
+  if (percent === getCopy().unset) {
+    return total;
+  }
+  return `${percent} ${percent} of ${total}`;
+}
+
+function renderSystemInformation() {
+  const copy = getCopy();
+  const container = containers.systemInformation;
+  if (!container) {
+    return;
+  }
+  const dashboard = state.dashboard;
+  if (!dashboard) {
+    container.innerHTML = buildLoadingRows(4);
+    return;
+  }
+  const system = getRuntimeSystem(dashboard);
+  const loadAverages = system.load_averages || system.loadAverages || [];
+  const systemRows = [
+    { label: copy.systemProcessorType, value: system.processor_type || system.processor_model || copy.unset },
+    {
+      label: copy.systemMemory,
+      value: formatSystemResource(system.memory_used_percent ?? system.memory?.used_percent, system.memory_total_bytes ?? system.memory?.total_bytes),
+    },
+    {
+      label: copy.systemMailLogDiskSpace,
+      value: formatSystemResource(system.disk_used_percent ?? system.disk?.used_percent, system.disk_total_bytes ?? system.disk?.total_bytes),
+    },
+    { label: copy.systemUptime, value: formatReportingUptime(system.uptime_seconds) },
+    {
+      label: copy.systemLoadAverages,
+      value: loadAverages.length >= 3 ? loadAverages.slice(0, 3).map((value) => Number(value).toFixed(2)).join(", ") : copy.unset,
+    },
+  ];
+  const services = state.systemServices.length
+    ? state.systemServices
+    : [
+        { id: "antivirus", name: copy.serviceAntivirus, status: "unknown", action: "start" },
+        { id: "lpe-ct", name: copy.serviceLpeCt, status: "unknown", action: "start" },
+      ];
+  const diagnostics = [
+    { kind: "spam-test", label: copy.systemSpamTest, upload: true },
+    { kind: "mail-queue", label: copy.systemMailQueue },
+    { kind: "process-list", label: copy.systemProcessList },
+    { kind: "network-connections", label: copy.systemNetworkConnections },
+    { kind: "routing-table", label: copy.systemRoutingTable },
+  ];
+  const tools = [
+    { tool: "ping", label: copy.systemToolPing, placeholder: "mail.example.test" },
+    { tool: "traceroute", label: copy.systemToolTraceroute, placeholder: "mail.example.test" },
+    { tool: "dig", label: copy.systemToolDig, placeholder: "example.test" },
+  ];
+
+  container.innerHTML = `
+    <section class="system-report-section">
+      <div class="system-report-section-head">
+        <h4>${escapeHtml(copy.reportingTabSystemInformation)}</h4>
+      </div>
+      ${renderDashboardDetailTable(systemRows)}
+    </section>
+    <section class="system-report-section">
+      <div class="system-report-section-head">
+        <h4>${escapeHtml(copy.systemServicesTitle)}</h4>
+      </div>
+      <div class="management-list-stack">
+        ${services.map((service) => renderServiceRow(service, copy)).join("")}
+      </div>
+    </section>
+    <section class="system-report-section">
+      <div class="system-report-section-head">
+        <h4>${escapeHtml(copy.systemDiagnosticsTitle)}</h4>
+      </div>
+      <div class="management-list-stack">
+        ${diagnostics.map((diagnostic) => renderDiagnosticRow(diagnostic, copy)).join("")}
+        ${renderSimpleActionRow(copy.systemSupportConnect, copy.connect, "support-connect")}
+        ${renderSimpleActionRow(copy.systemHealthCheck, copy.run, "health-check-run")}
+      </div>
+    </section>
+    <section class="system-report-section">
+      <div class="system-report-section-head">
+        <h4>${escapeHtml(copy.systemToolsTitle)}</h4>
+      </div>
+      <div class="management-list-stack">
+        ${tools.map((tool) => renderToolRow(tool, copy)).join("")}
+        ${renderSimpleActionRow(copy.systemFlushMailQueue, copy.flush, "flush-mail-queue")}
+      </div>
+    </section>
+  `;
+}
+
+function renderServiceRow(service, copy) {
+  const status = humanizeStatus(service.status);
+  const action = service.action === "stop" ? "stop" : "start";
+  const actionLabel = action === "stop" ? copy.stop : copy.start;
+  return `
+    <article class="record-row system-report-row">
+      <div class="record-head">
+        <div>
+          <h4 class="record-title">${escapeHtml(service.name)}</h4>
+          <div class="record-copy">${escapeHtml(service.unit || copy.unset)}</div>
+        </div>
+        <span class="${statusChipClass(service.status)}">${escapeHtml(status)}</span>
+      </div>
+      <div class="record-actions">
+        <button class="secondary-button compact-button" type="button" data-action="system-service-action" data-service-id="${escapeHtml(service.id)}" data-service-action="${escapeHtml(action)}">${escapeHtml(actionLabel)}</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderDiagnosticRow(diagnostic, copy) {
+  return `
+    <article class="record-row system-report-row">
+      <div class="record-head">
+        <div>
+          <h4 class="record-title">${escapeHtml(diagnostic.label)}</h4>
+          ${diagnostic.upload ? `<input id="spam-test-file" class="system-file-input" type="file" />` : ""}
+        </div>
+      </div>
+      <div class="record-actions">
+        <button class="secondary-button compact-button" type="button" data-action="${diagnostic.upload ? "spam-test-show" : "diagnostic-show"}" data-diagnostic-kind="${escapeHtml(diagnostic.kind)}">${escapeHtml(copy.show)}</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderSimpleActionRow(label, buttonLabel, action) {
+  return `
+    <article class="record-row system-report-row">
+      <div class="record-head">
+        <h4 class="record-title">${escapeHtml(label)}</h4>
+      </div>
+      <div class="record-actions">
+        <button class="secondary-button compact-button" type="button" data-action="${escapeHtml(action)}">${escapeHtml(buttonLabel)}</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderToolRow(tool, copy) {
+  return `
+    <article class="record-row system-tool-row">
+      <label>
+        <span>${escapeHtml(tool.label)}</span>
+        <input id="diagnostic-tool-${escapeHtml(tool.tool)}" type="text" autocomplete="off" placeholder="${escapeHtml(tool.placeholder)}" />
+      </label>
+      <div class="record-actions">
+        <button class="secondary-button compact-button" type="button" data-action="diagnostic-tool-run" data-diagnostic-tool="${escapeHtml(tool.tool)}">${escapeHtml(copy.run)}</button>
+      </div>
+    </article>
+  `;
 }
 
 function systemSetupEmptyState(title, summary) {
@@ -2725,6 +2916,7 @@ const PAGE_RENDERERS = {
   attachmentRules: renderAttachmentRules,
   recipientVerification: renderRecipientVerification,
   dkim: renderDkim,
+  systemInformation: renderSystemInformation,
   digestReporting: renderDigestReporting,
   platform: renderPlatform,
   mailLog: renderMailLog,
@@ -4291,6 +4483,105 @@ async function openDigestReport(reportId, opener = document.activeElement) {
   );
 }
 
+function renderDiagnosticDrawer(report, opener = document.activeElement) {
+  const copy = getCopy();
+  renderDrawerContent(
+    report?.title || copy.systemDiagnosticsTitle,
+    report?.detail || copy.unset,
+    `
+      <section class="trace-section">
+        <h4>${escapeHtml(copy.statusLabel)}</h4>
+        <span class="${statusChipClass(report?.status)}">${escapeHtml(humanizeStatus(report?.status))}</span>
+      </section>
+      <section class="trace-section">
+        <h4>${escapeHtml(copy.output)}</h4>
+        <pre class="diagnostic-output">${escapeHtml(report?.output || copy.unset)}</pre>
+      </section>
+    `,
+    opener,
+    null,
+    "wide",
+  );
+}
+
+async function openDiagnostic(kind, opener = document.activeElement) {
+  const copy = getCopy();
+  renderDrawerContent(copy.systemDiagnosticsTitle, copy.loadingRecords, buildLoadingRows(1), opener, null, "wide");
+  const report = await fetchJson(`/api/system-diagnostics/${encodeURIComponent(kind)}`);
+  renderDiagnosticDrawer(report, opener);
+}
+
+async function runHealthCheck(opener = document.activeElement) {
+  const copy = getCopy();
+  renderDrawerContent(copy.systemHealthCheck, copy.loadingRecords, buildLoadingRows(1), opener, null, "wide");
+  const report = await postJson("/api/system-diagnostics/health-check");
+  renderDiagnosticDrawer(report, opener);
+}
+
+async function connectSupport(opener = document.activeElement) {
+  const copy = getCopy();
+  renderDrawerContent(copy.systemSupportConnect, copy.loadingRecords, buildLoadingRows(1), opener, null, "wide");
+  const report = await postJson("/api/system-diagnostics/support-connect");
+  renderDiagnosticDrawer(report, opener);
+}
+
+async function flushMailQueue(opener = document.activeElement) {
+  const copy = getCopy();
+  renderDrawerContent(copy.systemFlushMailQueue, copy.loadingRecords, buildLoadingRows(1), opener, null, "wide");
+  const report = await postJson("/api/system-diagnostics/flush-mail-queue");
+  renderDiagnosticDrawer(report, opener);
+  await loadOps({ silent: true });
+}
+
+async function runDiagnosticTool(tool, opener = document.activeElement) {
+  const input = document.getElementById(`diagnostic-tool-${tool}`);
+  const target = input?.value?.trim() ?? "";
+  if (!target) {
+    showFeedback(getCopy().targetRequired, "error");
+    input?.focus();
+    return;
+  }
+  const copy = getCopy();
+  renderDrawerContent(copy.systemToolsTitle, copy.loadingRecords, buildLoadingRows(1), opener, null, "wide");
+  const report = await postJson("/api/system-diagnostics/tools", { tool, target });
+  renderDiagnosticDrawer(report, opener);
+}
+
+async function runSpamTest(opener = document.activeElement) {
+  const input = document.getElementById("spam-test-file");
+  const file = input?.files?.[0];
+  if (!file) {
+    showFeedback(getCopy().fileRequired, "error");
+    input?.focus();
+    return;
+  }
+  const copy = getCopy();
+  renderDrawerContent(copy.systemSpamTest, copy.loadingRecords, buildLoadingRows(1), opener, null, "wide");
+  const contentBase64 = await fileToBase64(file);
+  const report = await postJson("/api/system-diagnostics/spam-test", {
+    filename: file.name,
+    content_base64: contentBase64,
+  });
+  renderDiagnosticDrawer(report, opener);
+}
+
+async function fileToBase64(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return window.btoa(binary);
+}
+
+async function runServiceAction(serviceId, serviceAction) {
+  await postJson(`/api/system-diagnostics/services/${encodeURIComponent(serviceId)}/${encodeURIComponent(serviceAction)}`);
+  state.systemServices = (await fetchJson("/api/system-diagnostics/services"))?.items ?? [];
+  renderSystemInformation();
+  showFeedback(getCopy().recordSaved);
+}
+
 async function loadOps({ silent = false } = {}) {
   const copy = getCopy();
   state.loading.ops = true;
@@ -4302,13 +4593,14 @@ async function loadOps({ silent = false } = {}) {
   try {
     const quarantineParams = new URLSearchParams(new FormData(elements.quarantineSearchForm));
     const historyParams = new URLSearchParams(new FormData(elements.historySearchForm));
-    const [quarantine, history, routes, reporting, digestReports, policyStatus, mailLogs, interfaceLogs, messageLogs] = await Promise.all([
+    const [quarantine, history, routes, reporting, digestReports, policyStatus, systemServices, mailLogs, interfaceLogs, messageLogs] = await Promise.all([
       fetchJson(`/api/quarantine?${quarantineParams.toString()}`),
       fetchJson(`/api/history?${historyParams.toString()}`),
       fetchJson("/api/routes/diagnostics"),
       fetchJson("/api/reporting"),
       fetchJson("/api/reporting/digests"),
       fetchJson("/api/policies/status"),
+      fetchJson("/api/system-diagnostics/services"),
       fetchJson("/api/host-logs/mail"),
       fetchJson("/api/host-logs/interface"),
       fetchJson("/api/host-logs/messages"),
@@ -4320,6 +4612,7 @@ async function loadOps({ silent = false } = {}) {
     state.reporting = reporting;
     state.digestReports = digestReports ?? [];
     state.policyStatus = policyStatus;
+    state.systemServices = systemServices?.items ?? [];
     state.hostLogs.mail = mailLogs?.items ?? [];
     state.hostLogs.interface = interfaceLogs?.items ?? [];
     state.hostLogs.messages = messageLogs?.items ?? [];
@@ -4467,7 +4760,7 @@ function setSystemSetupTab(actionTarget) {
 }
 
 function getActionHandlers(actionTarget) {
-  const { traceId, ruleId, index, reportId, target, domainId, profileId, sortKey, logTable, logCategory, logId, bulkAction, tabId } = actionTarget.dataset;
+  const { traceId, ruleId, index, reportId, target, domainId, profileId, sortKey, logTable, logCategory, logId, bulkAction, tabId, diagnosticKind, diagnosticTool, serviceId, serviceAction } = actionTarget.dataset;
   return {
     "drawer-close": () => closeDrawer(),
     "trace-open": () => runAction(() => loadTrace(traceId, actionTarget)),
@@ -4509,6 +4802,13 @@ function getActionHandlers(actionTarget) {
     "host-log-view": () => runAction(() => openHostLog(logCategory, logId, actionTarget)),
     "host-log-download": () => runAction(() => downloadHostLog(logCategory, logId)),
     "host-log-delete": () => runAction(() => deleteHostLog(logCategory, logId)),
+    "diagnostic-show": () => runAction(() => openDiagnostic(diagnosticKind, actionTarget)),
+    "spam-test-show": () => runAction(() => runSpamTest(actionTarget)),
+    "diagnostic-tool-run": () => runAction(() => runDiagnosticTool(diagnosticTool, actionTarget)),
+    "support-connect": () => runAction(() => connectSupport(actionTarget)),
+    "health-check-run": () => runAction(() => runHealthCheck(actionTarget)),
+    "flush-mail-queue": () => runAction(() => flushMailQueue(actionTarget)),
+    "system-service-action": () => runAction(() => runServiceAction(serviceId, serviceAction)),
     "page-tab": () => setPageTab(actionTarget),
     "system-setup-tab": () => setSystemSetupTab(actionTarget),
     "refresh-quarantine": () => runAction(() => loadOps()),

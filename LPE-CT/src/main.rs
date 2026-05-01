@@ -43,6 +43,7 @@ mod reporting;
 mod smtp;
 mod storage;
 mod submission;
+mod system_diagnostics;
 mod system_metrics;
 mod transport_policy;
 
@@ -716,6 +717,32 @@ fn router(state: AppState) -> Router {
         .route(
             "/api/v1/reporting/digests/{report_id}",
             get(digest_report_details),
+        )
+        .route(
+            "/api/v1/system-diagnostics/services",
+            get(system_diagnostic_services),
+        )
+        .route(
+            "/api/v1/system-diagnostics/services/{service_id}/{action}",
+            post(system_diagnostic_service_action),
+        )
+        .route(
+            "/api/v1/system-diagnostics/{kind}",
+            get(system_diagnostic_report),
+        )
+        .route(
+            "/api/v1/system-diagnostics/health-check",
+            post(system_health_check),
+        )
+        .route("/api/v1/system-diagnostics/tools", post(run_system_tool))
+        .route("/api/v1/system-diagnostics/spam-test", post(run_spam_test))
+        .route(
+            "/api/v1/system-diagnostics/support-connect",
+            post(connect_lpe_support),
+        )
+        .route(
+            "/api/v1/system-diagnostics/flush-mail-queue",
+            post(flush_mail_queue),
         )
         .route(
             "/api/v1/public-tls/profiles",
@@ -1739,6 +1766,147 @@ async fn digest_report_details(
     let report = reporting::load_digest_report(&state.spool_dir, &report_id)
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "digest report not found"))?;
+    Ok(Json(report))
+}
+
+async fn system_diagnostic_services(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<system_diagnostics::ServiceStatusList>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    Ok(Json(system_diagnostics::service_statuses().await))
+}
+
+async fn system_diagnostic_service_action(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath((service_id, action)): AxumPath<(String, String)>,
+) -> Result<Json<system_diagnostics::ServiceStatus>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let status = system_diagnostics::service_action(&service_id, &action).await?;
+    append_audit_event_with_actor(
+        &state,
+        &admin.email,
+        "system-service-action",
+        &format!("{} {}", action, service_id),
+    )
+    .await?;
+    Ok(Json(status))
+}
+
+async fn system_diagnostic_report(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(kind): AxumPath<String>,
+) -> Result<Json<system_diagnostics::DiagnosticReport>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    if kind == "mail-queue" {
+        let mut snapshot = read_state(&state)?;
+        snapshot.queues = smtp::queue_metrics(&state.spool_dir, snapshot.queues.upstream_reachable)
+            .map_err(ApiError::from)?;
+        return Ok(Json(system_diagnostics::DiagnosticReport {
+            title: "Mail Queue".to_string(),
+            status: "ok".to_string(),
+            detail: "Live LPE-CT spool queue metrics.".to_string(),
+            output: serde_json::to_string_pretty(&snapshot.queues)
+                .map_err(anyhow::Error::from)
+                .map_err(ApiError::from)?,
+        }));
+    }
+    Ok(Json(system_diagnostics::command_diagnostic(&kind).await?))
+}
+
+async fn system_health_check(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<system_diagnostics::DiagnosticReport>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let Json(readiness) = health_ready(State(state.clone())).await?;
+    append_audit_event_with_actor(
+        &state,
+        &admin.email,
+        "system-health-check",
+        "Ran LPE-CT readiness diagnostics from Reporting/System Information",
+    )
+    .await?;
+    Ok(Json(system_diagnostics::DiagnosticReport {
+        title: "System Health Check".to_string(),
+        status: readiness.status.clone(),
+        detail: format!(
+            "{} checks completed with {} warning(s)",
+            readiness.checks.len(),
+            readiness.warnings
+        ),
+        output: serde_json::to_string_pretty(&readiness)
+            .map_err(anyhow::Error::from)
+            .map_err(ApiError::from)?,
+    }))
+}
+
+async fn run_system_tool(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<system_diagnostics::ToolRunRequest>,
+) -> Result<Json<system_diagnostics::DiagnosticReport>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let tool = payload.tool.clone();
+    let report = system_diagnostics::run_tool(payload).await?;
+    append_audit_event_with_actor(
+        &state,
+        &admin.email,
+        "system-diagnostic-tool",
+        &format!("Ran {tool}"),
+    )
+    .await?;
+    Ok(Json(report))
+}
+
+async fn run_spam_test(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<system_diagnostics::SpamTestRequest>,
+) -> Result<Json<system_diagnostics::DiagnosticReport>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let report = system_diagnostics::spam_test(payload).await?;
+    append_audit_event_with_actor(
+        &state,
+        &admin.email,
+        "spam-test",
+        "Ran configured spam-test command against uploaded file",
+    )
+    .await?;
+    Ok(Json(report))
+}
+
+async fn connect_lpe_support(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<system_diagnostics::DiagnosticReport>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let report = system_diagnostics::support_connect().await?;
+    append_audit_event_with_actor(
+        &state,
+        &admin.email,
+        "support-connect",
+        "Started configured secure support connection command",
+    )
+    .await?;
+    Ok(Json(report))
+}
+
+async fn flush_mail_queue(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<system_diagnostics::DiagnosticReport>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let report = system_diagnostics::flush_mail_queue().await?;
+    append_audit_event_with_actor(
+        &state,
+        &admin.email,
+        "flush-mail-queue",
+        "Ran LPE-CT mail queue flush action",
+    )
+    .await?;
     Ok(Json(report))
 }
 
