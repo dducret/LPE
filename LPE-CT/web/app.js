@@ -150,6 +150,7 @@ const state = {
     direction: "desc",
   },
   quarantineSelection: new Set(),
+  quarantineDialogTab: "details",
   historyColumnWidths: [...DEFAULT_HISTORY_COLUMN_WIDTHS],
   logTables: Object.fromEntries(
     Object.entries(DEFAULT_LOG_COLUMN_WIDTHS).map(([key, widths]) => [
@@ -193,6 +194,13 @@ function formatScore(value) {
     return getCopy().unset;
   }
   return Number(value).toFixed(1);
+}
+
+function formatDetailedScore(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return getCopy().unset;
+  }
+  return Number(value).toFixed(3);
 }
 
 function formatDateTime(value) {
@@ -272,6 +280,99 @@ function historySizeBytes(item) {
   }
   const sizeMatch = String(item?.mail_from || "").match(/\bSIZE=(\d+)\b/i);
   return sizeMatch ? Number(sizeMatch[1]) : null;
+}
+
+function formatLongTraceDateTime(value) {
+  const date = parseHistoryTimestamp(value);
+  if (!date) {
+    return getCopy().unset;
+  }
+  return new Intl.DateTimeFormat(i18n.getLocale(), {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  })
+    .format(date)
+    .replace(/\s+at\s+/i, ", ");
+}
+
+function traceHeaderValue(current, name) {
+  const target = String(name).toLowerCase();
+  for (const header of current?.headers ?? []) {
+    const headerName = Array.isArray(header) ? header[0] : header?.name;
+    const headerValue = Array.isArray(header) ? header[1] : header?.value;
+    if (String(headerName || "").toLowerCase() === target) {
+      return String(headerValue || "").trim();
+    }
+  }
+  return "";
+}
+
+function traceHeadersText(current) {
+  return (current?.headers ?? [])
+    .map((header) => {
+      const name = Array.isArray(header) ? header[0] : header?.name;
+      const value = Array.isArray(header) ? header[1] : header?.value;
+      return name ? `${name}: ${value ?? ""}` : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function traceTextValue(value) {
+  const text = String(value ?? "").trim();
+  return text || getCopy().unset;
+}
+
+function traceObjectValue(value) {
+  if (!value) {
+    return "";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return JSON.stringify(value, null, 2);
+}
+
+function traceContentClassification(current) {
+  const reason = String(current?.reason || current?.status || "").toLowerCase();
+  if (reason.includes("virus") || reason.includes("malware") || reason.includes("infected")) {
+    return "Virus";
+  }
+  if (reason.includes("spam") || Number(current?.spam_score) >= 5) {
+    return "Spam";
+  }
+  return humanizeStatus(current?.status || current?.queue);
+}
+
+function traceBooleanLabel(value) {
+  const copy = getCopy();
+  return value ? copy.yes : copy.no;
+}
+
+function tracePolicyFlag(address, policyKey) {
+  const policy = state.dashboard?.policies?.address_policy ?? {};
+  const values = Array.isArray(policy[policyKey]) ? policy[policyKey] : [];
+  const normalized = displayMailAddress(address).toLowerCase();
+  return normalized !== getCopy().unset.toLowerCase() && values.map((item) => String(item).toLowerCase()).includes(normalized);
+}
+
+function traceMessageSize(current, fallbackEvent) {
+  return current?.message_size_bytes ?? historySizeBytes(fallbackEvent);
+}
+
+function traceAttachmentItems(current) {
+  if (Array.isArray(current?.attachments)) {
+    return current.attachments;
+  }
+  if (Array.isArray(current?.magika_summary?.attachments)) {
+    return current.magika_summary.attachments;
+  }
+  return [];
 }
 
 function formatShortDate(value) {
@@ -828,10 +929,11 @@ function markInvalid(form, names) {
   });
 }
 
-function renderDrawerContent(title, summary, content, opener = document.activeElement, onClose = null) {
+function renderDrawerContent(title, summary, content, opener = document.activeElement, onClose = null, variant = "") {
   state.drawer.previousFocus = opener instanceof HTMLElement ? opener : null;
   state.drawer.onClose = onClose;
   state.drawer.open = true;
+  elements.drawer.classList.toggle("drawer-wide", variant === "wide");
   elements.drawerTitle.textContent = title;
   elements.drawerSummary.textContent = summary;
   elements.drawerContent.innerHTML = content;
@@ -848,6 +950,7 @@ function closeDrawer() {
     return;
   }
   state.drawer.open = false;
+  elements.drawer.classList.remove("drawer-wide");
   elements.drawerBackdrop.classList.add("hidden");
   document.body.classList.remove("drawer-open");
   if (typeof state.drawer.onClose === "function") {
@@ -1086,7 +1189,7 @@ function renderQuarantine() {
           const traceId = quarantineTraceId(item);
           const selected = state.quarantineSelection.has(traceId);
           return `
-            <label class="quarantine-message-row${selected ? " selected" : ""}" style="--quarantine-grid-columns: ${escapeHtml(gridTemplate)}">
+            <div class="quarantine-message-row${selected ? " selected" : ""}" role="button" tabindex="0" data-action="quarantine-open" data-trace-id="${escapeHtml(traceId)}" aria-label="${escapeHtml(`${copy.traceOpen}: ${traceId}`)}" style="--quarantine-grid-columns: ${escapeHtml(gridTemplate)}">
               <span>
                 <input class="quarantine-select-checkbox" type="checkbox" data-quarantine-select data-trace-id="${escapeHtml(traceId)}" aria-label="${escapeHtml(`${copy.quarantineColumnSelection}: ${traceId}`)}"${selected ? " checked" : ""} />
               </span>
@@ -1094,7 +1197,7 @@ function renderQuarantine() {
                 .slice(1)
                 .map((column) => `<span title="${escapeHtml(column.value(item))}">${escapeHtml(column.value(item))}</span>`)
                 .join("")}
-            </label>
+            </div>
           `;
         },
       )
@@ -3719,6 +3822,133 @@ async function deletePublicTlsProfile(profileId) {
   showFeedback(getCopy().recordDeleted);
 }
 
+function quarantineDialogTabButton(tabId, label, activeTab) {
+  return `
+    <button class="tab-button${activeTab === tabId ? " tab-button-active" : ""}" type="button" data-action="quarantine-dialog-tab" data-tab-id="${escapeHtml(tabId)}" aria-selected="${activeTab === tabId ? "true" : "false"}">
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
+function quarantineDetailRows(rows) {
+  return rows
+    .map(
+      ([label, value]) => `
+        <div>
+          <dt>${escapeHtml(label)}:</dt>
+          <dd>${escapeHtml(traceTextValue(value))}</dd>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function renderQuarantineDetails(trace, current, retainedHistory) {
+  const copy = getCopy();
+  const latestHistoryEvent = retainedHistory.length ? retainedHistory[retainedHistory.length - 1] : null;
+  const senderAddress = displayMailAddress(current.mail_from);
+  const statusText = String(current.status || current.queue || "").toLowerCase();
+  const reasonText = String(current.reason || "").toLowerCase();
+  const smtpResponse =
+    current.smtp_response ||
+    current.smtp_response_text ||
+    current.reason ||
+    traceObjectValue(current.technical_status) ||
+    traceObjectValue(current.dsn);
+  const detailRows = [
+    [copy.quarantineDetailId, trace.trace_id || current.trace_id],
+    [copy.quarantineDetailMessageReceived, formatLongTraceDateTime(current.received_at || latestHistoryEvent?.timestamp || quarantineDate(current))],
+    [copy.quarantineDetailEnvelopeFrom, displayMailAddress(current.mail_from)],
+    [copy.quarantineDetailFromAddress, traceHeaderValue(current, "From") || displayMailAddress(current.mail_from)],
+    [copy.quarantineDetailRecipient, formatList((current.rcpt_to ?? []).map(displayMailAddress))],
+    [copy.quarantineDetailSubject, current.subject],
+    [copy.quarantineDetailClientAddress, displayClientAddress(current.peer || latestHistoryEvent?.peer)],
+    [copy.quarantineDetailCountryOfOrigin, current.country_of_origin || current.geo_country || current.country],
+    [copy.quarantineDetailMessageSize, formatNumber(traceMessageSize(current, latestHistoryEvent))],
+    [copy.quarantineDetailContentClassification, traceContentClassification(current)],
+    [copy.quarantineDetailVirusInfected, traceBooleanLabel(reasonText.includes("virus") || reasonText.includes("malware"))],
+    [copy.quarantineDetailScore, formatDetailedScore(quarantineScoreValue(current))],
+    [copy.quarantineDetailQuarantined, traceBooleanLabel(statusText.includes("quarantine") || String(current.queue || "").toLowerCase() === "quarantine")],
+    [copy.quarantineDetailMessageId, current.internet_message_id || traceHeaderValue(current, "Message-ID")],
+    [copy.quarantineDetailSmtpResponse, smtpResponse],
+    [copy.quarantineDetailDeliveryStatus, humanizeStatus(current.status)],
+    [copy.quarantineDetailLastStatusUpdate, formatLongTraceDateTime(latestHistoryEvent?.timestamp || current.received_at)],
+    [copy.quarantineDetailBlockedSender, tracePolicyFlag(senderAddress, "block_senders") ? "Y" : "N"],
+    [copy.quarantineDetailAllowedSender, tracePolicyFlag(senderAddress, "allow_senders") ? "Y" : "N"],
+    [copy.quarantineDetailMailFlowDirection, humanizeStatus(current.direction)],
+    [copy.quarantineDetailEncryption, current.encryption || current.tls_cipher || current.tls_protocol || "None"],
+  ];
+
+  return `<dl class="quarantine-detail-list">${quarantineDetailRows(detailRows)}</dl>`;
+}
+
+function renderMessageView(current) {
+  const copy = getCopy();
+  const headersText = traceHeadersText(current);
+  const attachments = traceAttachmentItems(current);
+  const attachmentItems = attachments
+    .map((attachment) => {
+      const name = attachment.name || attachment.filename || attachment.file_name || copy.unset;
+      const size = attachment.size ?? attachment.size_bytes ?? attachment.bytes;
+      return `<li>${escapeHtml(name)} <span>${escapeHtml(formatBytes(size))}</span></li>`;
+    })
+    .join("");
+
+  return `
+    <section class="quarantine-message-view">
+      <dl class="message-header-list">
+        <div><dt>${escapeHtml(copy.historyColumnFrom)}:</dt><dd>${escapeHtml(traceHeaderValue(current, "From") || displayMailAddress(current.mail_from))}</dd></div>
+        <div><dt>${escapeHtml(copy.historyColumnTo)}:</dt><dd>${escapeHtml(traceHeaderValue(current, "To") || formatList((current.rcpt_to ?? []).map(displayMailAddress)))}</dd></div>
+        <div><dt>${escapeHtml(copy.historyColumnDate)}:</dt><dd>${escapeHtml(traceHeaderValue(current, "Date") || formatHistoryDateTime(current.received_at))}</dd></div>
+        <div><dt>${escapeHtml(copy.quarantineColumnSubject)}:</dt><dd>${escapeHtml(current.subject || traceHeaderValue(current, "Subject") || copy.unset)}</dd></div>
+        <div>
+          <dt>${escapeHtml(copy.traceHeadersTitle)}:</dt>
+          <dd>
+            <details class="message-headers-toggle">
+              <summary>${escapeHtml(copy.quarantineShowAllHeaders)}</summary>
+              <pre>${escapeHtml(headersText || copy.unset)}</pre>
+            </details>
+          </dd>
+        </div>
+      </dl>
+      <pre class="message-raw-content">${escapeHtml(current.body_content || current.raw_content || current.body_excerpt || copy.unset)}</pre>
+      ${attachmentItems ? `<ul class="message-attachment-list">${attachmentItems}</ul>` : ""}
+    </section>
+  `;
+}
+
+function renderQuarantineTraceDialog(trace, opener = document.activeElement) {
+  const copy = getCopy();
+  if (!trace) {
+    renderDrawerContent(copy.quarantineDialogTitle, copy.noTraceLoaded, `<p class="record-copy">${escapeHtml(copy.noTraceLoaded)}</p>`, opener, null, "wide");
+    return;
+  }
+  const current = trace.current ?? {};
+  const retainedHistory = trace.history ?? [];
+  const activeTab = state.quarantineDialogTab === "message" ? "message" : "details";
+  const detailsHtml = renderQuarantineDetails(trace, current, retainedHistory);
+  const messageHtml = renderMessageView(current);
+  const panelHtml = activeTab === "message" ? messageHtml : detailsHtml;
+  renderDrawerContent(
+    current.subject || trace.trace_id || copy.quarantineDialogTitle,
+    `${displayMailAddress(current.mail_from)} -> ${formatList((current.rcpt_to ?? []).map(displayMailAddress))}`,
+    `
+      <div class="quarantine-dialog">
+        <div class="quarantine-dialog-tabs" role="tablist" aria-label="${escapeHtml(copy.quarantineDialogTitle)}">
+          ${quarantineDialogTabButton("details", copy.quarantineDialogDetailsTab, activeTab)}
+          ${quarantineDialogTabButton("message", copy.quarantineDialogViewMessageTab, activeTab)}
+        </div>
+        <section class="quarantine-dialog-panel">
+          ${panelHtml}
+        </section>
+      </div>
+    `,
+    opener,
+    null,
+    "wide",
+  );
+}
+
 function renderTraceDrawer(trace, opener = document.activeElement) {
   const copy = getCopy();
   if (!trace) {
@@ -3833,6 +4063,29 @@ async function loadTrace(traceId, opener = document.activeElement) {
   } finally {
     state.loading.trace = false;
   }
+}
+
+async function loadQuarantineTrace(traceId, opener = document.activeElement) {
+  const copy = getCopy();
+  state.loading.trace = true;
+  state.quarantineDialogTab = "details";
+  renderDrawerContent(copy.quarantineDialogTitle, copy.loadingTrace, buildLoadingRows(2), opener, null, "wide");
+  try {
+    state.selectedTrace = await fetchJson(`/api/history/${traceId}`);
+    renderQuarantineTraceDialog(state.selectedTrace, opener);
+  } catch (error) {
+    renderDrawerContent(copy.quarantineDialogTitle, copy.noTraceLoaded, `<p class="record-copy">${escapeHtml(error instanceof Error ? error.message : copy.unknownError)}</p>`, opener, null, "wide");
+  } finally {
+    state.loading.trace = false;
+  }
+}
+
+function setQuarantineDialogTab(tabId) {
+  if (!["details", "message"].includes(tabId)) {
+    return;
+  }
+  state.quarantineDialogTab = tabId;
+  renderQuarantineTraceDialog(state.selectedTrace, elements.drawerClose);
 }
 
 async function triggerTraceAction(traceId, action) {
@@ -4088,10 +4341,12 @@ function setSystemSetupTab(actionTarget) {
 }
 
 function getActionHandlers(actionTarget) {
-  const { traceId, ruleId, index, reportId, target, domainId, profileId, sortKey, logTable, bulkAction } = actionTarget.dataset;
+  const { traceId, ruleId, index, reportId, target, domainId, profileId, sortKey, logTable, bulkAction, tabId } = actionTarget.dataset;
   return {
     "drawer-close": () => closeDrawer(),
     "trace-open": () => runAction(() => loadTrace(traceId, actionTarget)),
+    "quarantine-open": () => runAction(() => loadQuarantineTrace(traceId, actionTarget)),
+    "quarantine-dialog-tab": () => setQuarantineDialogTab(tabId),
     "trace-release": () => runAction(() => triggerTraceAction(traceId, "release")),
     "trace-delete": () => runAction(() => triggerTraceAction(traceId, "delete")),
     "trace-retry": () => runAction(() => triggerTraceAction(traceId, "retry")),
@@ -4133,6 +4388,9 @@ function getActionHandlers(actionTarget) {
 }
 
 function handleBodyClick(event) {
+  if (event.target.closest("[data-quarantine-select], [data-quarantine-select-all]")) {
+    return;
+  }
   const actionTarget = event.target.closest("[data-action]");
   if (actionTarget) {
     const handler = getActionHandlers(actionTarget)[actionTarget.dataset.action];
@@ -4357,6 +4615,11 @@ elements.sidebarToggle?.addEventListener("click", toggleSidebarState);
 elements.mobileSidebarToggle?.addEventListener("click", toggleSidebarState);
 
 document.addEventListener("keydown", (event) => {
+  if ((event.key === "Enter" || event.key === " ") && event.target?.closest?.("[data-action='quarantine-open']")) {
+    event.preventDefault();
+    handleBodyClick(event);
+    return;
+  }
   if (event.key === "Escape") {
     if (state.drawer.open) {
       closeDrawer();

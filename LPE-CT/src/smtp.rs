@@ -259,6 +259,12 @@ pub(crate) struct QuarantineQuery {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub(crate) struct TraceAttachmentSummary {
+    pub name: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct TraceDetails {
     pub trace_id: String,
     pub queue: String,
@@ -287,6 +293,8 @@ pub(crate) struct TraceDetails {
     pub message_size_bytes: u64,
     pub headers: Vec<(String, String)>,
     pub body_excerpt: String,
+    pub body_content: String,
+    pub attachments: Vec<TraceAttachmentSummary>,
     pub decision_trace: Vec<DecisionTraceEntry>,
 }
 
@@ -5034,6 +5042,32 @@ fn body_excerpt(data: &[u8]) -> String {
         .collect()
 }
 
+fn body_content(data: &[u8]) -> String {
+    extract_visible_text(data)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| body_excerpt(data))
+}
+
+fn attachment_summaries(data: &[u8]) -> Vec<TraceAttachmentSummary> {
+    collect_mime_attachment_parts(data)
+        .map(|attachments| {
+            attachments
+                .into_iter()
+                .enumerate()
+                .map(|(index, attachment)| TraceAttachmentSummary {
+                    name: attachment
+                        .filename
+                        .filter(|value| !value.trim().is_empty())
+                        .unwrap_or_else(|| format!("attachment-{}", index + 1)),
+                    size_bytes: attachment.bytes.len() as u64,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn spool_path(spool_dir: &Path, queue: &str, id: &str) -> PathBuf {
     spool_dir.join(queue).join(format!("{id}.json"))
 }
@@ -5287,6 +5321,8 @@ fn trace_details_from_message(queue: &str, message: &QueuedMessage) -> TraceDeta
         message_size_bytes: message.data.len() as u64,
         headers: inspect_headers(&message.data),
         body_excerpt: body_excerpt(&message.data),
+        body_content: body_content(&message.data),
+        attachments: attachment_summaries(&message.data),
         decision_trace: message.decision_trace.clone(),
     }
 }

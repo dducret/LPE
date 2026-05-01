@@ -281,6 +281,18 @@ function createFetchStub() {
       internet_message_id: "<msg1@example.test>",
       spam_score: 6.4,
       security_score: 1.1,
+      peer: "52.102.183.2:12031",
+      message_size_bytes: 56872,
+      headers: [
+        ["From", "<sender@example.test>"],
+        ["To", "<user@example.test>"],
+        ["Date", "Thu, 30 Apr 2026 11:52:54 +0000"],
+        ["Subject", "Suspicious inbound"],
+        ["Message-ID", "<msg1@example.test>"],
+      ],
+      body_excerpt: "Raw body preview",
+      body_content: "Raw body preview",
+      attachments: [{ name: "invoice.pdf", size_bytes: 12345 }],
     },
   ];
   const history = {
@@ -322,6 +334,20 @@ function createFetchStub() {
       },
     ],
   };
+  const traceDetails = {
+    trace_id: "trace-1",
+    current: quarantine[0],
+    history: [
+      {
+        timestamp: "2026-05-01T10:04:00Z",
+        queue: "quarantine",
+        status: "quarantined",
+        reason: "spam threshold",
+        peer: "52.102.183.2:12031",
+        message_size_bytes: 56872,
+      },
+    ],
+  };
 
   return async function fetchStub(url) {
     const ok = (body) => ({
@@ -339,6 +365,7 @@ function createFetchStub() {
     if (url === "/api/dashboard") return ok(dashboard);
     if (String(url).startsWith("/api/quarantine")) return ok(quarantine);
     if (String(url).startsWith("/api/history?")) return ok(history);
+    if (url === "/api/history/trace-1") return ok(traceDetails);
     if (url === "/api/routes/diagnostics") return ok(routes);
     if (url === "/api/reporting") return ok(reporting);
     if (url === "/api/reporting/digests") return ok([]);
@@ -533,6 +560,7 @@ async function main() {
   globalThis.IntersectionObserver = context.IntersectionObserver;
   globalThis.URLSearchParams = context.URLSearchParams;
   globalThis.FormData = context.FormData;
+  globalThis.HTMLElement = MockElement;
   globalThis.setTimeout = context.setTimeout;
   globalThis.clearTimeout = context.clearTimeout;
   globalThis.setInterval = setInterval;
@@ -557,6 +585,37 @@ async function main() {
   assert.match(elements["quarantine-list"].innerHTML, /Suspicious inbound/);
   assert.match(elements["quarantine-list"].innerHTML, /6\.4/);
   assert.doesNotMatch(elements["quarantine-list"].innerHTML, /trace-open/);
+  assert.match(elements["quarantine-list"].innerHTML, /data-action="quarantine-open"/);
+  const quarantineOpenTarget = new MockElement("", "div");
+  quarantineOpenTarget.dataset.action = "quarantine-open";
+  quarantineOpenTarget.dataset.traceId = "trace-1";
+  document.body.listeners.click({
+    target: {
+      closest(selector) {
+        return selector === "[data-action]" ? quarantineOpenTarget : null;
+      },
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.match(elements["drawer-content"].innerHTML, /Details/);
+  assert.match(elements["drawer-content"].innerHTML, /View Message/);
+  assert.match(elements["drawer-content"].innerHTML, /Envelope From Address/);
+  assert.match(elements["drawer-content"].innerHTML, /Message Size/);
+  assert.match(elements["drawer-content"].innerHTML, /52\.102\.183\.2/);
+  const messageTabTarget = new MockElement("", "button");
+  messageTabTarget.dataset.action = "quarantine-dialog-tab";
+  messageTabTarget.dataset.tabId = "message";
+  document.body.listeners.click({
+    target: {
+      closest(selector) {
+        return selector === "[data-action]" ? messageTabTarget : null;
+      },
+    },
+  });
+  assert.match(elements["drawer-content"].innerHTML, /Show all Headers/);
+  assert.match(elements["drawer-content"].innerHTML, /Raw body preview/);
+  assert.match(elements["drawer-content"].innerHTML, /invoice\.pdf/);
   assert.match(elements["history-list"].innerHTML, /177764830abcdef/);
   assert.match(elements["history-list"].innerHTML, /Client Address/);
   assert.match(elements["history-list"].innerHTML, /data-sort-key="date"/);

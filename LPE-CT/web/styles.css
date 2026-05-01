@@ -1647,6 +1647,7 @@ select.invalid {
 
 .quarantine-message-row {
   cursor: pointer;
+  text-align: left;
 }
 
 .history-message-row:last-child,
@@ -1659,6 +1660,7 @@ select.invalid {
 .history-message-row:focus-visible,
 .log-message-row:hover,
 .quarantine-message-row:hover,
+.quarantine-message-row:focus-visible,
 .quarantine-message-row.selected {
   background: rgba(248, 251, 254, 0.9);
 }
@@ -2012,6 +2014,85 @@ select.invalid {
   border: 1px solid rgba(204, 216, 229, 0.72);
 }
 
+.quarantine-dialog,
+.quarantine-dialog-panel,
+.quarantine-message-view {
+  display: grid;
+  gap: 14px;
+}
+
+.quarantine-dialog-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-bottom: 1px solid rgba(204, 216, 229, 0.88);
+  padding-bottom: 10px;
+}
+
+.quarantine-detail-list,
+.message-header-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.quarantine-detail-list div,
+.message-header-list div {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.quarantine-detail-list dt,
+.message-header-list dt {
+  color: var(--text-soft);
+  font-weight: 700;
+}
+
+.quarantine-detail-list dd,
+.message-header-list dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.message-headers-toggle summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.message-raw-content,
+.message-headers-toggle pre {
+  margin: 0;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(204, 216, 229, 0.72);
+  background: var(--panel-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.message-attachment-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.message-attachment-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(204, 216, 229, 0.72);
+  background: var(--panel-soft);
+}
+
 .trace-section pre,
 .digest-content {
   margin: 0;
@@ -2064,6 +2145,10 @@ select.invalid {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-strong);
   animation: drawer-in 180ms var(--spring);
+}
+
+.drawer.drawer-wide {
+  width: min(920px, calc(100vw - 32px));
 }
 
 @keyframes drawer-in {
@@ -2247,5 +2332,11 @@ select.invalid {
     height: calc(100vh - 18px);
     margin: 18px 0 0;
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  .quarantine-detail-list div,
+  .message-header-list div {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 }
