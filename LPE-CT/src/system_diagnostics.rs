@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
-use std::{env, path::PathBuf, time::Duration};
+use std::{env, net::Ipv4Addr, path::PathBuf, time::Duration};
 use tokio::{fs, process::Command, time};
 use uuid::Uuid;
 
@@ -108,17 +108,98 @@ pub(crate) async fn command_diagnostic(kind: &str) -> Result<DiagnosticReport> {
                 }
             }
         }
-        "routing-table" => {
-            command_report(
-                "Routing Table",
-                "Kernel routing table collected from iproute2.",
-                "ip",
-                &["route", "show"],
-            )
-            .await
-        }
+        "routing-table" => routing_table_report().await,
         _ => bail!("unsupported diagnostic"),
     }
+}
+
+async fn routing_table_report() -> Result<DiagnosticReport> {
+    let ip_output = run_command("ip", &["route", "show"]).await;
+    match ip_output {
+        Ok(output) if output.status.success() => Ok(DiagnosticReport {
+            title: "Routing Table".to_string(),
+            status: "ok".to_string(),
+            detail: "Kernel routing table collected from ip route show.".to_string(),
+            output: output_text(&output),
+        }),
+        Ok(output) => routing_table_from_proc(Some(output_text(&output))).await,
+        Err(error) => routing_table_from_proc(Some(error.to_string())).await,
+    }
+}
+
+async fn routing_table_from_proc(ip_error: Option<String>) -> Result<DiagnosticReport> {
+    match fs::read_to_string("/proc/net/route").await {
+        Ok(content) => Ok(DiagnosticReport {
+            title: "Routing Table".to_string(),
+            status: "ok".to_string(),
+            detail: ip_error
+                .filter(|error| !error.trim().is_empty())
+                .map(|error| {
+                    format!("Kernel IPv4 routing table collected from /proc/net/route because ip route show failed: {error}")
+                })
+                .unwrap_or_else(|| "Kernel IPv4 routing table collected from /proc/net/route.".to_string()),
+            output: format_proc_ipv4_routes(&content),
+        }),
+        Err(error) => Ok(DiagnosticReport {
+            title: "Routing Table".to_string(),
+            status: "failed".to_string(),
+            detail: "Routing table could not be collected from iproute2 or /proc/net/route."
+                .to_string(),
+            output: format!(
+                "ip route show failed: {}\n/proc/net/route failed: {}",
+                ip_error.unwrap_or_else(|| "unavailable".to_string()),
+                error
+            ),
+        }),
+    }
+}
+
+fn format_proc_ipv4_routes(content: &str) -> String {
+    let routes = content
+        .lines()
+        .skip(1)
+        .filter_map(format_proc_ipv4_route)
+        .collect::<Vec<_>>();
+    if routes.is_empty() {
+        "No IPv4 routes were found in /proc/net/route.".to_string()
+    } else {
+        routes.join("\n")
+    }
+}
+
+fn format_proc_ipv4_route(line: &str) -> Option<String> {
+    let fields = line.split_whitespace().collect::<Vec<_>>();
+    if fields.len() < 8 {
+        return None;
+    }
+    let iface = fields[0];
+    let destination = ipv4_from_proc_hex(fields[1])?;
+    let gateway = ipv4_from_proc_hex(fields[2])?;
+    let metric = fields[6].parse::<u32>().unwrap_or(0);
+    let mask = ipv4_from_proc_hex(fields[7])?;
+    let prefix = u32::from(mask).count_ones();
+    let destination_text = if destination == Ipv4Addr::UNSPECIFIED && prefix == 0 {
+        "default".to_string()
+    } else {
+        format!("{destination}/{prefix}")
+    };
+    let via = if gateway == Ipv4Addr::UNSPECIFIED {
+        String::new()
+    } else {
+        format!(" via {gateway}")
+    };
+    let metric = if metric == 0 {
+        String::new()
+    } else {
+        format!(" metric {metric}")
+    };
+    Some(format!("{destination_text}{via} dev {iface}{metric}"))
+}
+
+fn ipv4_from_proc_hex(value: &str) -> Option<Ipv4Addr> {
+    let raw = u32::from_str_radix(value, 16).ok()?;
+    let octets = raw.to_le_bytes();
+    Some(Ipv4Addr::new(octets[0], octets[1], octets[2], octets[3]))
 }
 
 pub(crate) async fn run_tool(payload: ToolRunRequest) -> Result<DiagnosticReport> {
@@ -366,4 +447,29 @@ fn env_value(name: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn formats_proc_default_route() {
+        let content = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\neth0\t00000000\t0102A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n";
+
+        assert_eq!(
+            format_proc_ipv4_routes(content),
+            "default via 192.168.2.1 dev eth0 metric 100"
+        );
+    }
+
+    #[test]
+    fn formats_proc_network_route() {
+        let line = "eth0\t0002A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0";
+
+        assert_eq!(
+            format_proc_ipv4_route(line).as_deref(),
+            Some("192.168.2.0/24 dev eth0")
+        );
+    }
 }
