@@ -98,10 +98,10 @@ export const baseMessages = {
   reportingTabAdminStatistics: "Admin Statistics",
   reportingTabHistory: "History",
   reportingTabReports: "Reports",
-  reportingSystemInformationSummary: "System reporting snapshots retained by the sorting center.",
+  reportingSystemInformationSummary: "Live Debian host resources, services, diagnostics, and tools for LPE-CT.",
   reportingAdminStatisticsSummary: "Administrative activity statistics retained by the management plane.",
   reportingSystemInformationUnavailable:
-    "Dedicated system information reports are not exposed by the current management API contract.",
+    "Live system information is loading from the LPE-CT management API.",
   reportingAdminStatisticsUnavailable:
     "Administrative statistics reports are not exposed by the current management API contract.",
   logsTabMail: "Mail",
@@ -153,7 +153,7 @@ export const baseMessages = {
   systemHostname: "Hostname",
   systemUptime: "Uptime",
   systemCpuUtilization: "CPU utilization",
-  systemProcessorType: "Processor type",
+  systemProcessorType: "Processor",
   systemProcessorSpeed: "Processor speed",
   systemOsArchitecture: "OS / Architecture",
   systemMemory: "Memory",

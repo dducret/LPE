@@ -1,5 +1,5 @@
-import { i18n, getCopy, translate } from './modules/i18n/index.js';
-import { DEFAULT_PAGE_ID, activatePageView, pageIdFromHash, renderPageModules } from "./modules/pages/index.js";
+import { i18n, getCopy, translate } from './modules/i18n/index.js?v=20260501-system-information';
+import { DEFAULT_PAGE_ID, activatePageView, pageIdFromHash, renderPageModules } from "./modules/pages/index.js?v=20260501-system-information";
 
 // DOM References
 const elements = {
@@ -898,6 +898,14 @@ async function fetchJson(path, init = {}) {
     await parseError(response);
   }
   return response.status === 204 ? null : response.json();
+}
+
+async function fetchOptionalJson(path, fallback) {
+  try {
+    return await fetchJson(path);
+  } catch {
+    return fallback;
+  }
 }
 
 async function fetchBlob(path, init = {}) {
@@ -2951,6 +2959,7 @@ function renderDashboard() {
   renderMetric(elements.metricQuarantine, dashboard.queues?.quarantined_messages);
   renderMetric(elements.metricAttempts, dashboard.queues?.delivery_attempts_last_hour);
   renderOverview();
+  renderSystemInformation();
 
   renderPageModules(PAGE_RENDERERS);
 }
@@ -4600,7 +4609,7 @@ async function loadOps({ silent = false } = {}) {
       fetchJson("/api/reporting"),
       fetchJson("/api/reporting/digests"),
       fetchJson("/api/policies/status"),
-      fetchJson("/api/system-diagnostics/services"),
+      fetchOptionalJson("/api/system-diagnostics/services", { items: [] }),
       fetchJson("/api/host-logs/mail"),
       fetchJson("/api/host-logs/interface"),
       fetchJson("/api/host-logs/messages"),
