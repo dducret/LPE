@@ -490,18 +490,16 @@
           </div>
         </section>
 
-        <section class="panel section-panel page-view" data-page-view="filtering" data-page-tab-panel="filtering:viruses">
+        <section id="virus-filtering-section" class="panel section-panel page-view" data-page-view="filtering" data-page-tab-panel="filtering:viruses">
           <div class="section-head">
             <div>
               <p class="section-kicker" data-i18n="navFiltering">Filtering</p>
               <h3 data-i18n="filteringTabViruses">Viruses</h3>
-              <p data-i18n="filteringVirusesSummary">Virus filtering controls for SMTP ingress scanning.</p>
+              <p data-i18n="filteringVirusesSummary">Virus filtering controls for SMTP ingress and outbound handoff scanning.</p>
             </div>
+            <button id="edit-virus-filtering" class="primary-button compact-button" type="button" data-i18n="editSettings">Edit settings</button>
           </div>
-          <article class="empty-state compact-empty-state">
-            <strong data-i18n="filteringTabViruses">Viruses</strong>
-            <p data-i18n="filteringVirusesUnavailable">Virus filtering settings are not exposed by the current management API contract.</p>
-          </article>
+          <div id="virus-filtering-status" class="record-list"></div>
         </section>
 
         <section class="panel section-panel page-view" data-page-view="filtering" data-page-tab-panel="filtering:spam">

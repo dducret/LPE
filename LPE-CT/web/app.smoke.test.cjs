@@ -184,6 +184,9 @@ function createFetchStub() {
       defer_on_auth_tempfail: true,
       bayespam_enabled: true,
       reputation_enabled: true,
+      antivirus_enabled: true,
+      antivirus_fail_closed: true,
+      antivirus_provider_chain: ["takeri"],
       spam_quarantine_threshold: 5.0,
       spam_reject_threshold: 9.0,
       reputation_quarantine_threshold: -4,
@@ -252,6 +255,35 @@ function createFetchStub() {
 
   const routes = { relay_targets: ["lpe-core-a"] };
   const reporting = { settings: dashboard.reporting, recent_reports: [] };
+  const mailLogs = {
+    items: [
+      {
+        id: "mail-log",
+        name: "177764830abcdef-mail.log",
+        modified_at_unix_seconds: 1777648200,
+        size_bytes: 4096,
+        exists: true,
+        previewable: true,
+        downloadable: true,
+        deletable: false,
+      },
+    ],
+  };
+  const interfaceLogs = {
+    items: [
+      {
+        id: "interface-log",
+        name: "policy.updated-admin@example.test-CFMA.log",
+        modified_at_unix_seconds: 1777648300,
+        size_bytes: 1024,
+        exists: true,
+        previewable: true,
+        downloadable: true,
+        deletable: false,
+      },
+    ],
+  };
+  const messageLogs = { items: [] };
   const policyStatus = {
     recipient_verification: {
       enabled: true,
@@ -370,6 +402,9 @@ function createFetchStub() {
     if (url === "/api/reporting") return ok(reporting);
     if (url === "/api/reporting/digests") return ok([]);
     if (url === "/api/policies/status") return ok(policyStatus);
+    if (url === "/api/host-logs/mail") return ok(mailLogs);
+    if (url === "/api/host-logs/interface") return ok(interfaceLogs);
+    if (url === "/api/host-logs/messages") return ok(messageLogs);
 
     throw new Error(`Unexpected fetch url: ${url}`);
   };
@@ -397,6 +432,7 @@ function createContext() {
     "run-digests",
     "create-address-rule",
     "create-attachment-rule",
+    "edit-virus-filtering",
     "edit-filtering-policy",
     "edit-recipient-verification",
     "edit-dkim-settings",
@@ -418,6 +454,7 @@ function createContext() {
     "traffic-table",
     "quarantine-list",
     "history-list",
+    "virus-filtering-status",
     "filtering-policy-status",
     "address-rules-list",
     "attachment-rules-list",
@@ -427,6 +464,7 @@ function createContext() {
     "digest-defaults-list",
     "digest-overrides-list",
     "digest-report-list",
+    "reporting-system-information",
     "platform-list",
     "mail-log",
     "audit-log",
@@ -628,13 +666,13 @@ async function main() {
   assert.match(elements["history-list"].innerHTML, /Clean \(2\.10\)/);
   assert.match(elements["history-list"].innerHTML, /2 KB/);
   assert.match(elements["mail-log"].innerHTML, /177764830abcdef/);
-  assert.match(elements["mail-log"].innerHTML, /data-action="log-sort"/);
-  assert.match(elements["mail-log"].innerHTML, /data-log-resizer/);
+  assert.match(elements["mail-log"].innerHTML, /data-action="host-log-view"/);
+  assert.match(elements["mail-log"].innerHTML, /data-action="host-log-download"/);
   assert.doesNotMatch(elements["mail-log"].innerHTML, /trace-open/);
   assert.match(elements["audit-log"].innerHTML, /policy\.updated/);
   assert.match(elements["audit-log"].innerHTML, /admin@example\.test/);
-  assert.match(elements["audit-log"].innerHTML, /data-log-table="interface"/);
-  assert.match(elements["message-log"].innerHTML, /System message logs are not exposed/);
+  assert.match(elements["audit-log"].innerHTML, /data-log-category="interface"/);
+  assert.match(elements["message-log"].innerHTML, /No system message log files are available/);
   assert.match(elements["email-alert-log"].innerHTML, /Email alert logs are not exposed/);
   assert.match(elements["platform-list"].innerHTML, /Network/);
   assert.match(elements["platform-list"].innerHTML, /IP/);
@@ -643,6 +681,8 @@ async function main() {
   assert.match(elements["queue-status-list"].innerHTML, /Corrupt queue/);
   assert.match(elements["scan-summary-list"].innerHTML, /Spam messages/);
   assert.match(elements["traffic-table"].innerHTML, /Invalid rcpts/);
+  assert.match(elements["virus-filtering-status"].innerHTML, /Takeri/);
+  assert.match(elements["virus-filtering-status"].innerHTML, /Fail closed/);
   assert.match(elements["filtering-policy-status"].innerHTML, /SPF enforcement/);
   assert.match(elements["filtering-policy-status"].innerHTML, /Spam reject threshold/);
   assert.ok(context.window.__intervals.includes(60_000));

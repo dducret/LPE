@@ -31,6 +31,7 @@ const elements = {
   historySearchForm: document.getElementById("history-search-form"),
   createAddressRule: document.getElementById("create-address-rule"),
   createAttachmentRule: document.getElementById("create-attachment-rule"),
+  editVirusFiltering: document.getElementById("edit-virus-filtering"),
   editFilteringPolicy: document.getElementById("edit-filtering-policy"),
   editRecipientVerification: document.getElementById("edit-recipient-verification"),
   editDkimSettings: document.getElementById("edit-dkim-settings"),
@@ -78,6 +79,7 @@ const elements = {
 const containers = {
   quarantine: document.getElementById("quarantine-list"),
   history: document.getElementById("history-list"),
+  virusFiltering: document.getElementById("virus-filtering-status"),
   filteringPolicy: document.getElementById("filtering-policy-status"),
   addressRules: document.getElementById("address-rules-list"),
   attachmentRules: document.getElementById("attachment-rules-list"),
@@ -187,6 +189,29 @@ function escapeHtml(value) {
 
 function formatList(values) {
   return (values ?? []).filter(Boolean).join(", ") || getCopy().unset;
+}
+
+function parseProviderChain(value) {
+  return dedupeList(
+    String(value ?? "")
+      .split(/[\n,]+/)
+      .map((provider) => provider.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+function antivirusProviderChain(policies = state.dashboard?.policies) {
+  return Array.isArray(policies?.antivirus_provider_chain)
+    ? policies.antivirus_provider_chain.map((provider) => String(provider ?? "").trim().toLowerCase()).filter(Boolean)
+    : [];
+}
+
+function labelForAntivirusProvider(provider) {
+  return String(provider ?? "").toLowerCase() === "takeri" ? getCopy().virusProviderTakeri : provider;
+}
+
+function formatAntivirusProviders(providers) {
+  return formatList(providers.map(labelForAntivirusProvider));
 }
 
 function formatNumber(value) {
@@ -1386,6 +1411,42 @@ function renderFilteringPolicy() {
               <div>
                 <p>${escapeHtml(row.label)}</p>
                 <span class="pill">${escapeHtml(row.value)}</span>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderVirusFiltering() {
+  const copy = getCopy();
+  const policies = state.dashboard?.policies ?? {};
+  const providerChain = antivirusProviderChain(policies);
+  const enabled = Boolean(policies.antivirus_enabled);
+  const rows = [
+    {
+      label: copy.virusFilteringEnabledLabel,
+      html: `<span class="${statusChipClass(enabled ? "enabled" : "disabled")}">${escapeHtml(enabled ? copy.enabled : copy.disabled)}</span>`,
+    },
+    {
+      label: copy.virusFailClosedLabel,
+      html: `<span class="${statusChipClass(policies.antivirus_fail_closed ? "enabled" : "disabled")}">${escapeHtml(policies.antivirus_fail_closed ? copy.enabled : copy.disabled)}</span>`,
+    },
+    { label: copy.virusProviderChainLabel, html: `<span class="record-copy">${escapeHtml(formatAntivirusProviders(providerChain))}</span>` },
+    { label: copy.virusScopeLabel, html: `<span class="pill">${escapeHtml(copy.virusScopeInboundOutbound)}</span>` },
+  ];
+  containers.virusFiltering.innerHTML = `
+    <article class="summary-card">
+      <strong>${escapeHtml(copy.virusFilteringTitle)}</strong>
+      <div class="summary-grid">
+        ${rows
+          .map(
+            (row) => `
+              <div>
+                <p>${escapeHtml(row.label)}</p>
+                ${row.html}
               </div>
             `,
           )
@@ -2925,6 +2986,7 @@ const PAGE_RENDERERS = {
   overview: renderOverview,
   quarantine: renderQuarantine,
   history: renderHistory,
+  virusFiltering: renderVirusFiltering,
   filteringPolicy: renderFilteringPolicy,
   addressRules: renderAddressRules,
   attachmentRules: renderAttachmentRules,
@@ -3337,6 +3399,50 @@ function openFilteringPolicyDrawer(opener = document.activeElement) {
       policies.spam_reject_threshold = spamRejectThreshold;
       policies.reputation_quarantine_threshold = reputationQuarantineThreshold;
       policies.reputation_reject_threshold = reputationRejectThreshold;
+      await savePolicies(policies);
+      closeDrawer();
+      showFeedback(copy.recordSaved);
+    },
+  });
+}
+
+function openVirusFilteringDrawer(opener = document.activeElement) {
+  const copy = getCopy();
+  const policies = currentPolicies();
+  const providerChain = antivirusProviderChain(policies);
+  renderDrawerForm({
+    title: copy.editSettings,
+    summary: copy.virusFilteringSummary,
+    formId: "virus-filtering-form",
+    opener,
+    content: `
+      <label class="toggle-field">
+        <span>${copy.virusFilteringEnabledLabel}</span>
+        <input name="antivirus_enabled" type="checkbox"${policies.antivirus_enabled ? " checked" : ""} />
+      </label>
+      <label class="toggle-field">
+        <span>${copy.virusFailClosedLabel}</span>
+        <input name="antivirus_fail_closed" type="checkbox"${policies.antivirus_fail_closed ? " checked" : ""} />
+      </label>
+      <label>
+        <span>${copy.virusProviderChainLabel}</span>
+        <textarea name="antivirus_provider_chain" rows="4">${escapeHtml(providerChain.join("\n"))}</textarea>
+        <small>${copy.virusProviderChainHelp}</small>
+      </label>
+      <div class="record-actions">
+        <button class="primary-button compact-button" type="submit">${copy.save}</button>
+        <button class="secondary-button compact-button" type="button" data-action="drawer-close">${copy.cancel}</button>
+      </div>
+    `,
+    onSubmit: async (form, context) => {
+      const antivirusEnabled = form.elements.namedItem("antivirus_enabled").checked;
+      const providerChainInput = parseProviderChain(form.elements.namedItem("antivirus_provider_chain").value);
+      if (antivirusEnabled && !providerChainInput.length) {
+        context.fail([{ field: "antivirus_provider_chain", message: copy.validationProviderChain }]);
+      }
+      policies.antivirus_enabled = antivirusEnabled;
+      policies.antivirus_fail_closed = form.elements.namedItem("antivirus_fail_closed").checked;
+      policies.antivirus_provider_chain = providerChainInput;
       await savePolicies(policies);
       closeDrawer();
       showFeedback(copy.recordSaved);
@@ -5270,6 +5376,7 @@ elements.historySearchForm.addEventListener("submit", (event) => {
 
 elements.createAddressRule.addEventListener("click", (event) => openAddressRuleDrawer(null, event.currentTarget));
 elements.createAttachmentRule.addEventListener("click", (event) => openAttachmentRuleDrawer(null, event.currentTarget));
+elements.editVirusFiltering.addEventListener("click", (event) => openVirusFilteringDrawer(event.currentTarget));
 elements.editFilteringPolicy.addEventListener("click", (event) => openFilteringPolicyDrawer(event.currentTarget));
 elements.editRecipientVerification.addEventListener("click", (event) => openRecipientVerificationDrawer(event.currentTarget));
 elements.editDkimSettings.addEventListener("click", (event) => openDkimSettingsDrawer(event.currentTarget));
