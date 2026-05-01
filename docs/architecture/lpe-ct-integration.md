@@ -183,8 +183,6 @@ On the `LPE` side:
 On the `LPE-CT` side:
 
 - `LPE_CT_CORE_DELIVERY_BASE_URL`
-- `LPE_CT_RELAY_PRIMARY` optional upstream smart host; empty means direct recipient-domain `MX` delivery
-- `LPE_CT_RELAY_SECONDARY` optional backup upstream smart host
 - `LPE_CT_PUBLIC_TLS_CERT_PATH`
 - `LPE_CT_PUBLIC_TLS_KEY_PATH`
 - `LPE_CT_SUBMISSION_BIND_ADDRESS`
@@ -194,6 +192,12 @@ On the `LPE-CT` side:
 - `LPE_CT_LOG_FORMAT`
 - `LPE_CT_METRICS_ENABLED`
 - `LPE_INTEGRATION_SHARED_SECRET`
+
+Optional upstream smart hosts are not service-environment variables. They are
+managed only in the `LPE-CT` Web GUI under `System Setup -> Mail relay ->
+General Settings` and persisted in the private `LPE-CT` PostgreSQL dashboard
+state. The default mode has no upstream gateway because `LPE-CT` is the
+outbound gateway and uses recipient-domain `MX` routing.
 
 `LPE_CT_PUBLIC_TLS_CERT_PATH` and `LPE_CT_PUBLIC_TLS_KEY_PATH` are accepted as
 an installation bootstrap path for the public inbound `SMTP` `STARTTLS`

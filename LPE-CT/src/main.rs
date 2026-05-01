@@ -2275,12 +2275,6 @@ fn apply_env_overrides(state: &mut DashboardState) {
     if let Ok(value) = env::var("LPE_CT_USE_HA") {
         state.relay.ha_enabled = parse_bool(&value);
     }
-    if let Ok(value) = env::var("LPE_CT_RELAY_PRIMARY") {
-        state.relay.primary_upstream = value;
-    }
-    if let Ok(value) = env::var("LPE_CT_RELAY_SECONDARY") {
-        state.relay.secondary_upstream = value;
-    }
     if let Ok(value) = env::var("LPE_CT_CORE_DELIVERY_BASE_URL") {
         state.relay.core_delivery_base_url = value;
     }
@@ -3000,26 +2994,6 @@ fn default_state() -> DashboardState {
         .or_else(|| env_value("LPE_CT_SERVER_NAME"))
         .unwrap_or_else(|| node_name.clone());
     let published_mx = env_value("LPE_CT_PUBLISHED_MX").unwrap_or_else(|| management_fqdn.clone());
-    let primary_upstream = env_value("LPE_CT_RELAY_PRIMARY").unwrap_or_default();
-    let secondary_upstream = env_value("LPE_CT_RELAY_SECONDARY").unwrap_or_default();
-    let outbound_smart_hosts = [primary_upstream.clone(), secondary_upstream.clone()]
-        .into_iter()
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| value.trim_start_matches("smtp://").to_string())
-        .collect();
-    let routing_rules = if primary_upstream.trim().is_empty() {
-        Vec::new()
-    } else {
-        vec![RoutingRule {
-            id: "default-primary".to_string(),
-            description:
-                "Optional outbound smart-host route through the configured primary smart host"
-                    .to_string(),
-            sender_domain: None,
-            recipient_domain: None,
-            relay_target: primary_upstream.clone(),
-        }]
-    };
     DashboardState {
         site: SiteProfile {
             node_name,
@@ -3037,8 +3011,8 @@ fn default_state() -> DashboardState {
             ha_enabled: env_value("LPE_CT_USE_HA")
                 .map(|value| parse_bool(&value))
                 .unwrap_or(true),
-            primary_upstream,
-            secondary_upstream,
+            primary_upstream: String::new(),
+            secondary_upstream: String::new(),
             core_delivery_base_url: default_core_delivery_base_url(),
             mutual_tls_required: false,
             fallback_to_hold_queue: false,
@@ -3047,9 +3021,7 @@ fn default_state() -> DashboardState {
                 .to_string(),
         },
         accepted_domains: Vec::new(),
-        routing: RoutingSettings {
-            rules: routing_rules,
-        },
+        routing: RoutingSettings { rules: Vec::new() },
         throttling: ThrottlingSettings {
             enabled: true,
             rules: vec![ThrottleRule {
@@ -3069,7 +3041,7 @@ fn default_state() -> DashboardState {
             allowed_upstream_cidrs: env_value("LPE_CT_ALLOWED_UPSTREAM_CIDRS")
                 .map(|value| parse_csv(&value))
                 .unwrap_or_default(),
-            outbound_smart_hosts,
+            outbound_smart_hosts: Vec::new(),
             public_listener_enabled: true,
             submission_listener_enabled: false,
             proxy_protocol_enabled: false,

@@ -48,15 +48,6 @@ LPE_CT_BOOTSTRAP_ADMIN_EMAIL_DEFAULT="${LPE_CT_BOOTSTRAP_ADMIN_EMAIL:-}"
 LPE_CT_BOOTSTRAP_ADMIN_PASSWORD_DEFAULT="${LPE_CT_BOOTSTRAP_ADMIN_PASSWORD:-}"
 LPE_CT_CORE_DELIVERY_BASE_URL_DEFAULT="${LPE_CT_CORE_DELIVERY_BASE_URL:-http://127.0.0.1:8080}"
 LPE_CT_USE_HA_DEFAULT="${LPE_CT_USE_HA:-no}"
-if [[ -n "${LPE_CT_CONFIGURE_SMART_HOSTS:-}" ]]; then
-  LPE_CT_CONFIGURE_SMART_HOSTS_DEFAULT="${LPE_CT_CONFIGURE_SMART_HOSTS}"
-elif [[ -n "${LPE_CT_RELAY_PRIMARY:-}${LPE_CT_RELAY_SECONDARY:-}" ]]; then
-  LPE_CT_CONFIGURE_SMART_HOSTS_DEFAULT="yes"
-else
-  LPE_CT_CONFIGURE_SMART_HOSTS_DEFAULT="no"
-fi
-LPE_CT_RELAY_PRIMARY_DEFAULT="${LPE_CT_RELAY_PRIMARY:-}"
-LPE_CT_RELAY_SECONDARY_DEFAULT="${LPE_CT_RELAY_SECONDARY:-}"
 LPE_CT_ENABLE_SERVICES_DEFAULT="${LPE_CT_ENABLE_SERVICES:-yes}"
 LPE_CT_LOCAL_DB_HOST_DEFAULT="${LPE_CT_LOCAL_DB_HOST:-127.0.0.1}"
 LPE_CT_LOCAL_DB_PORT_DEFAULT="${LPE_CT_LOCAL_DB_PORT:-5432}"
@@ -157,14 +148,6 @@ collect_runtime_values() {
   LPE_CT_CORE_DELIVERY_BASE_URL="${LPE_CT_CORE_DELIVERY_BASE_URL%/}"
   LPE_INTEGRATION_SHARED_SECRET="$(ask_secret_with_default_behavior_when_possible "Integration shared secret" "${shared_secret_default}" validate_shared_secret "Enter a strong secret with at least 32 characters.")"
   LPE_CT_USE_HA="$(ask_yes_no "Enable LPE-CT HA role support" "${LPE_CT_USE_HA_DEFAULT}")"
-  LPE_CT_CONFIGURE_SMART_HOSTS="$(ask_yes_no "Configure optional upstream smart-host relay endpoints" "${LPE_CT_CONFIGURE_SMART_HOSTS_DEFAULT}")"
-  if [[ "${LPE_CT_CONFIGURE_SMART_HOSTS}" == "yes" ]]; then
-    LPE_CT_RELAY_PRIMARY="$(ask_with_default "Primary upstream smart-host endpoint" "${LPE_CT_RELAY_PRIMARY_DEFAULT}" validate_smtp_url "Enter a valid smtp:// relay endpoint.")"
-    LPE_CT_RELAY_SECONDARY="$(ask_with_default "Secondary upstream smart-host endpoint" "${LPE_CT_RELAY_SECONDARY_DEFAULT}" validate_smtp_url "Enter a valid smtp:// relay endpoint.")"
-  else
-    LPE_CT_RELAY_PRIMARY=""
-    LPE_CT_RELAY_SECONDARY=""
-  fi
 
   print_section "Storage"
   SPOOL_DIR="$(ask_with_default "Quarantine root path" "${SPOOL_DIR}" validate_directory_path "Enter an absolute directory path.")"
@@ -251,8 +234,6 @@ write_runtime_env_file() {
   write_env_value "${ENV_FILE}" "LPE_CT_BOOTSTRAP_ADMIN_EMAIL" "${LPE_CT_BOOTSTRAP_ADMIN_EMAIL}"
   write_env_value "${ENV_FILE}" "LPE_CT_BOOTSTRAP_ADMIN_PASSWORD" "${LPE_CT_BOOTSTRAP_ADMIN_PASSWORD}"
   write_env_value "${ENV_FILE}" "LPE_CT_CORE_DELIVERY_BASE_URL" "${LPE_CT_CORE_DELIVERY_BASE_URL}"
-  write_env_value "${ENV_FILE}" "LPE_CT_RELAY_PRIMARY" "${LPE_CT_RELAY_PRIMARY}"
-  write_env_value "${ENV_FILE}" "LPE_CT_RELAY_SECONDARY" "${LPE_CT_RELAY_SECONDARY}"
   write_env_value "${ENV_FILE}" "LPE_INTEGRATION_SHARED_SECRET" "${LPE_INTEGRATION_SHARED_SECRET}"
   write_env_value "${ENV_FILE}" "RUST_LOG" "${RUST_LOG:-info}"
   write_env_value "${ENV_FILE}" "LPE_MAGIKA_BIN" "${BIN_DIR}/magika"

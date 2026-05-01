@@ -293,12 +293,13 @@ Alert when:
   Root directory for spool queues used by live spool gauges.
 - `LPE_CT_CORE_DELIVERY_BASE_URL`
   Base URL used for final inbound delivery toward `LPE`.
-- `LPE_CT_RELAY_PRIMARY`
-  Optional primary upstream smart host. When unset, `LPE-CT` uses direct recipient-domain `MX` delivery.
-- `LPE_CT_RELAY_SECONDARY`
-  Optional secondary upstream smart host.
 - `LPE_INTEGRATION_SHARED_SECRET`
   Shared secret used for internal `LPE <-> LPE-CT` authentication.
+
+Optional upstream smart-host settings are managed in the `LPE-CT` Web GUI and
+persisted in the private local PostgreSQL dashboard state, not in the service
+environment. By default `LPE-CT` is the outbound gateway and no upstream gateway
+is required.
 
 ## Operating notes
 

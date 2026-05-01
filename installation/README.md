@@ -359,9 +359,6 @@ The `LPE-CT` installer prompts for:
 - internal `LPE` delivery URL, default `http://127.0.0.1:8080`
 - integration shared secret, no default and at least `32` characters
 - whether `LPE-CT` HA role support should be enabled, default `no`
-- whether optional upstream smart-host relay endpoints should be configured, default `no`
-- primary upstream smart-host endpoint, no default, only when smart-host routing is explicitly enabled
-- secondary upstream smart-host endpoint, no default, only when smart-host routing is explicitly enabled
 - quarantine root path, default `/var/spool/lpe-ct`
 - local `PostgreSQL` host, default `127.0.0.1`
 - local `PostgreSQL` port, default `5432`
@@ -441,8 +438,6 @@ Typical unattended `LPE-CT` environment variables:
 - `LPE_CT_SUBMISSION_TLS_KEY_PATH`
 - `LPE_CT_CORE_DELIVERY_BASE_URL`
 - `LPE_INTEGRATION_SHARED_SECRET`
-- `LPE_CT_RELAY_PRIMARY`
-- `LPE_CT_RELAY_SECONDARY`
 - `SPOOL_DIR`
 - `LPE_CT_LOCAL_DB_HOST`
 - `LPE_CT_LOCAL_DB_PORT`
@@ -502,9 +497,11 @@ LPE_CT_ENABLE_SERVICES=yes \
 ./install-lpe-ct.sh --non-interactive
 ```
 
-`LPE_CT_RELAY_PRIMARY` and `LPE_CT_RELAY_SECONDARY` are intentionally omitted
-above. They are optional upstream smart-host targets only; by default `LPE-CT`
-is the outbound gateway and delivers through recipient-domain `MX` routing.
+Optional upstream smart-host targets are intentionally omitted from the service
+environment. Configure them only in the `LPE-CT` Web GUI under `System Setup ->
+Mail relay -> General Settings`, where they are persisted in the private
+`LPE-CT` PostgreSQL dashboard state. By default `LPE-CT` is the outbound gateway
+and delivers through recipient-domain `MX` routing.
 Port `2525` is not the canonical `LPE <-> LPE-CT` bridge. Final delivery into
 `LPE` uses
 `${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/inbound-deliveries`; outbound
