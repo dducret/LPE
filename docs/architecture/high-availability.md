@@ -294,6 +294,11 @@ Readiness is intentionally conservative:
 
 Core reachability is reported as a warning, not a hard readiness failure, because `LPE-CT` can continue to receive and queue mail locally during a temporary LAN-side outage.
 
+`LPE-CT` HA is a sorting-center node and publication topology concern. It is
+controlled by `LPE_CT_HA_ROLE_FILE` and the local role value
+(`active`, `standby`, `drain`, or `maintenance`). It is not a mail-relay
+upstream setting and is not configured under Mail Relay General Settings.
+
 ## Recovery Model
 
 ### Local process recovery

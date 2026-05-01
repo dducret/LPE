@@ -358,7 +358,6 @@ The `LPE-CT` installer prompts for:
 - SMTP submission bind address, default `0.0.0.0:465`
 - internal `LPE` delivery URL, default `http://127.0.0.1:8080`
 - integration shared secret, no default and at least `32` characters
-- whether `LPE-CT` HA role support should be enabled, default `no`
 - quarantine root path, default `/var/spool/lpe-ct`
 - local `PostgreSQL` host, default `127.0.0.1`
 - local `PostgreSQL` port, default `5432`

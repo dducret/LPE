@@ -79,8 +79,6 @@ struct SiteProfile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RelaySettings {
-    #[serde(default = "default_true")]
-    ha_enabled: bool,
     primary_upstream: String,
     secondary_upstream: String,
     #[serde(default = "default_core_delivery_base_url")]
@@ -2272,9 +2270,6 @@ fn apply_env_overrides(state: &mut DashboardState) {
     if let Ok(value) = env::var("LPE_CT_NODE_NAME") {
         state.site.node_name = value;
     }
-    if let Ok(value) = env::var("LPE_CT_USE_HA") {
-        state.relay.ha_enabled = parse_bool(&value);
-    }
     if let Ok(value) = env::var("LPE_CT_CORE_DELIVERY_BASE_URL") {
         state.relay.core_delivery_base_url = value;
     }
@@ -3008,9 +3003,6 @@ fn default_state() -> DashboardState {
                 .unwrap_or_else(|| "127.0.0.1:8380".to_string()),
         },
         relay: RelaySettings {
-            ha_enabled: env_value("LPE_CT_USE_HA")
-                .map(|value| parse_bool(&value))
-                .unwrap_or(true),
             primary_upstream: String::new(),
             secondary_upstream: String::new(),
             core_delivery_base_url: default_core_delivery_base_url(),

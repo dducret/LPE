@@ -2268,7 +2268,6 @@ function renderMailRelaySetup(activeTab, dashboard, copy) {
       copy.systemSetupRelayGeneral,
       copy.systemSetupRelayGeneralSummary,
       renderSystemSetupSummary([
-        { label: copy.relayHaLabel, value: dashboard.relay.ha_enabled ? copy.enabled : copy.disabled },
         { label: copy.relayPrimaryLabel, value: dashboard.relay.primary_upstream },
         { label: copy.relaySecondaryLabel, value: dashboard.relay.secondary_upstream },
         { label: copy.relaySyncLabel, value: formatNumber(dashboard.relay.sync_interval_seconds) },
@@ -2934,7 +2933,7 @@ function renderOverview() {
     },
     {
       label: copy.relayHealthSecondary,
-      value: relay.ha_enabled ? copy.enabled : copy.disabled,
+      value: relay.secondary_upstream ? copy.enabled : copy.unset,
       detail: relay.secondary_upstream || copy.unset,
     },
     { label: copy.relayHealthManagement, value: site.management_bind || copy.unset, detail: site.management_fqdn || copy.unset },
@@ -4027,7 +4026,6 @@ function getPlatformDrawerConfigs(dashboard, copy) {
       summary: copy.platformRelayCopy,
       submitPath: "/api/relay",
       content: `
-        <label class="toggle-field"><span>${copy.relayHaLabel}</span><input name="ha_enabled" type="checkbox"${dashboard.relay.ha_enabled ? " checked" : ""} /></label>
         <label><span>${copy.relayPrimaryLabel}</span><input name="primary_upstream" value="${escapeHtml(dashboard.relay.primary_upstream)}" /></label>
         <label><span>${copy.relaySecondaryLabel}</span><input name="secondary_upstream" value="${escapeHtml(dashboard.relay.secondary_upstream)}" /></label>
         <label><span>${copy.relayCoreDeliveryLabel}</span><input name="core_delivery_base_url" value="${escapeHtml(dashboard.relay.core_delivery_base_url)}" /></label>
@@ -4037,7 +4035,6 @@ function getPlatformDrawerConfigs(dashboard, copy) {
         <label><span>${copy.relayDependencyLabel}</span><textarea name="lan_dependency_note" rows="4">${escapeHtml(dashboard.relay.lan_dependency_note)}</textarea></label>
       `,
       payload: (form) => ({
-        ha_enabled: form.elements.namedItem("ha_enabled").checked,
         primary_upstream: form.elements.namedItem("primary_upstream").value.trim(),
         secondary_upstream: form.elements.namedItem("secondary_upstream").value.trim(),
         core_delivery_base_url: form.elements.namedItem("core_delivery_base_url").value,

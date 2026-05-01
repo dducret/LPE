@@ -180,7 +180,6 @@ function createFetchStub() {
       management_bind: "127.0.0.1:8080",
     },
     relay: {
-      ha_enabled: true,
       primary_upstream: "lpe-core-a",
       secondary_upstream: "lpe-core-b",
       core_delivery_base_url: "https://lpe-core.internal",
