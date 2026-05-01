@@ -1,5 +1,5 @@
-import { i18n, getCopy, translate } from './modules/i18n/index.js?v=20260501-system-diagnostic-pending-copy';
-import { DEFAULT_PAGE_ID, activatePageView, pageIdFromHash, renderPageModules } from "./modules/pages/index.js?v=20260501-system-diagnostic-pending-copy";
+import { i18n, getCopy, translate } from './modules/i18n/index.js?v=20260501-system-diagnostic-actions';
+import { DEFAULT_PAGE_ID, activatePageView, pageIdFromHash, renderPageModules } from "./modules/pages/index.js?v=20260501-system-diagnostic-actions";
 
 // DOM References
 const elements = {
@@ -4509,13 +4509,65 @@ function renderDiagnosticDrawer(report, opener = document.activeElement) {
       </section>
       <section class="trace-section">
         <h4>${escapeHtml(copy.output)}</h4>
-        <pre class="diagnostic-output">${escapeHtml(report?.output || copy.unset)}</pre>
+        ${renderDiagnosticOutput(report, copy)}
       </section>
     `,
     opener,
     null,
     "wide",
   );
+}
+
+function renderDiagnosticOutput(report, copy = getCopy()) {
+  if (report?.title === copy.systemMailQueue || report?.title === "Mail Queue") {
+    const metrics = parseJsonObject(report.output);
+    if (metrics) {
+      return renderMailQueueOutput(metrics, copy);
+    }
+  }
+  return `<pre class="diagnostic-output">${escapeHtml(report?.output || copy.unset)}</pre>`;
+}
+
+function parseJsonObject(value) {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function renderMailQueueOutput(metrics, copy = getCopy()) {
+  const queueRows = [
+    [copy.mailQueueInbound, metrics.inbound_messages],
+    [copy.mailQueueIncoming, metrics.incoming_messages],
+    [copy.mailQueueActive, metrics.active_messages],
+    [copy.mailQueueDeferred, metrics.deferred_messages],
+    [copy.mailQueueQuarantined, metrics.quarantined_messages],
+    [copy.mailQueueHeld, metrics.held_messages],
+    [copy.mailQueueCorrupt, metrics.corrupt_messages],
+    [copy.mailQueueAttemptsLastHour, metrics.delivery_attempts_last_hour],
+  ];
+  const reachable = Boolean(metrics.upstream_reachable);
+  return `
+    <div class="mail-queue-output">
+      <div class="mail-queue-reachability">
+        <span class="${statusChipClass(reachable ? "ok" : "failed")}">${escapeHtml(reachable ? copy.relayReachable : copy.relayUnreachable)}</span>
+      </div>
+      <div class="mail-queue-metric-grid">
+        ${queueRows
+          .map(
+            ([label, value]) => `
+              <div class="mail-queue-metric">
+                <span>${escapeHtml(label)}</span>
+                <strong>${escapeHtml(formatNumber(value ?? 0))}</strong>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
 }
 
 function diagnosticToolTitle(tool, copy = getCopy()) {
@@ -4529,6 +4581,38 @@ function diagnosticToolTitle(tool, copy = getCopy()) {
     return copy.systemToolDig;
   }
   return copy.systemToolsTitle;
+}
+
+function diagnosticTitle(kind, copy = getCopy()) {
+  if (kind === "mail-queue") {
+    return copy.systemMailQueue;
+  }
+  if (kind === "process-list") {
+    return copy.systemProcessList;
+  }
+  if (kind === "network-connections") {
+    return copy.systemNetworkConnections;
+  }
+  if (kind === "routing-table") {
+    return copy.systemRoutingTable;
+  }
+  return copy.systemDiagnosticsTitle;
+}
+
+function diagnosticSummary(kind, copy = getCopy()) {
+  if (kind === "mail-queue") {
+    return copy.systemMailQueueSummary;
+  }
+  if (kind === "process-list") {
+    return copy.systemProcessListSummary;
+  }
+  if (kind === "network-connections") {
+    return copy.systemNetworkConnectionsSummary;
+  }
+  if (kind === "routing-table") {
+    return copy.systemRoutingTableSummary;
+  }
+  return copy.systemDiagnosticsTitle;
 }
 
 function diagnosticToolSummary(tool, copy = getCopy()) {
@@ -4574,28 +4658,32 @@ function renderPendingDiagnosticDrawer(title, summary, opener = document.activeE
 
 async function openDiagnostic(kind, opener = document.activeElement) {
   const copy = getCopy();
-  renderDrawerContent(copy.systemDiagnosticsTitle, copy.loadingRecords, buildLoadingRows(1), opener, null, "wide");
+  renderPendingDiagnosticDrawer(diagnosticTitle(kind, copy), diagnosticSummary(kind, copy), opener);
+  await waitForNextFrame();
   const report = await fetchJson(`/api/system-diagnostics/${encodeURIComponent(kind)}`);
   renderDiagnosticDrawer(report, opener);
 }
 
 async function runHealthCheck(opener = document.activeElement) {
   const copy = getCopy();
-  renderDrawerContent(copy.systemHealthCheck, copy.loadingRecords, buildLoadingRows(1), opener, null, "wide");
+  renderPendingDiagnosticDrawer(copy.systemHealthCheck, copy.systemHealthCheckSummary, opener);
+  await waitForNextFrame();
   const report = await postJson("/api/system-diagnostics/health-check");
   renderDiagnosticDrawer(report, opener);
 }
 
 async function connectSupport(opener = document.activeElement) {
   const copy = getCopy();
-  renderDrawerContent(copy.systemSupportConnect, copy.loadingRecords, buildLoadingRows(1), opener, null, "wide");
+  renderPendingDiagnosticDrawer(copy.systemSupportConnect, copy.systemSupportConnectSummary, opener);
+  await waitForNextFrame();
   const report = await postJson("/api/system-diagnostics/support-connect");
   renderDiagnosticDrawer(report, opener);
 }
 
 async function flushMailQueue(opener = document.activeElement) {
   const copy = getCopy();
-  renderDrawerContent(copy.systemFlushMailQueue, copy.loadingRecords, buildLoadingRows(1), opener, null, "wide");
+  renderPendingDiagnosticDrawer(copy.systemFlushMailQueue, copy.systemFlushMailQueueSummary, opener);
+  await waitForNextFrame();
   const report = await postJson("/api/system-diagnostics/flush-mail-queue");
   renderDiagnosticDrawer(report, opener);
   await loadOps({ silent: true });
@@ -4625,7 +4713,8 @@ async function runSpamTest(opener = document.activeElement) {
     return;
   }
   const copy = getCopy();
-  renderDrawerContent(copy.systemSpamTest, copy.loadingRecords, buildLoadingRows(1), opener, null, "wide");
+  renderPendingDiagnosticDrawer(copy.systemSpamTest, copy.systemSpamTestSummary, opener);
+  await waitForNextFrame();
   const contentBase64 = await fileToBase64(file);
   const report = await postJson("/api/system-diagnostics/spam-test", {
     filename: file.name,

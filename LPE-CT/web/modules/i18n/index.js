@@ -1,4 +1,4 @@
-import { LOCALE_KEY, baseMessages, localeLabels, localizedMessages, supportedLocales } from "./messages.js?v=20260501-system-diagnostic-pending-copy";
+import { LOCALE_KEY, baseMessages, localeLabels, localizedMessages, supportedLocales } from "./messages.js?v=20260501-system-diagnostic-actions";
 
 const { createI18n, defineLocaleCatalog } = window.LpeCtI18n;
 

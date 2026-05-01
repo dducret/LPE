@@ -1943,6 +1943,48 @@ select.invalid {
   white-space: normal;
 }
 
+.mail-queue-output {
+  display: grid;
+  gap: 12px;
+}
+
+.mail-queue-reachability {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.mail-queue-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mail-queue-metric {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(216, 226, 236, 0.88);
+  border-radius: var(--radius-sm);
+  background: rgba(248, 251, 254, 0.78);
+}
+
+.mail-queue-metric span,
+.mail-queue-metric strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.mail-queue-metric span {
+  color: var(--text-soft);
+  font-size: var(--font-copy);
+}
+
+.mail-queue-metric strong {
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 1.25rem;
+  line-height: 1.1;
+}
+
 .diagnostic-hourglass {
   position: relative;
   width: 18px;
@@ -2539,6 +2581,7 @@ select.invalid {
 
   .kpi-grid,
   .dashboard-grid,
+  .mail-queue-metric-grid,
   .traffic-layout {
     grid-template-columns: 1fr;
   }

@@ -113,7 +113,7 @@ pub(crate) async fn command_diagnostic(kind: &str) -> Result<DiagnosticReport> {
                 "Routing Table",
                 "Kernel routing table collected from iproute2.",
                 "ip",
-                &["route", "show", "table", "all"],
+                &["route", "show"],
             )
             .await
         }
