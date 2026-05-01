@@ -97,6 +97,7 @@ const containers = {
 const AUTH_TOKEN_KEY = 'lpeCtAdminToken';
 const LAST_ADMIN_EMAIL_KEY = 'lpeCtAdminLastEmail';
 const DASHBOARD_REFRESH_INTERVAL_MS = 60_000;
+const DEFAULT_QUARANTINE_COLUMN_WIDTHS = [112, 220, 220, 280, 172, 112];
 const DEFAULT_HISTORY_COLUMN_WIDTHS = [172, 176, 144, 132, 220, 220, 112];
 const MIN_HISTORY_COLUMN_WIDTH = 88;
 const DEFAULT_LOG_COLUMN_WIDTHS = {
@@ -144,6 +145,11 @@ const state = {
     key: "date",
     direction: "desc",
   },
+  quarantineSort: {
+    key: "date",
+    direction: "desc",
+  },
+  quarantineSelection: new Set(),
   historyColumnWidths: [...DEFAULT_HISTORY_COLUMN_WIDTHS],
   logTables: Object.fromEntries(
     Object.entries(DEFAULT_LOG_COLUMN_WIDTHS).map(([key, widths]) => [
@@ -341,8 +347,58 @@ function historyColumns(copy) {
   ];
 }
 
+function quarantineTraceId(item) {
+  return String(item?.trace_id ?? "").trim();
+}
+
+function quarantineDate(item) {
+  return item?.received_at ?? item?.latest_event_at;
+}
+
+function quarantineScoreValue(item) {
+  const spamScore = Number(item?.spam_score);
+  if (Number.isFinite(spamScore)) {
+    return spamScore;
+  }
+  const securityScore = Number(item?.security_score);
+  return Number.isFinite(securityScore) ? securityScore : null;
+}
+
+function quarantineColumns(copy) {
+  return [
+    {
+      key: "selected",
+      label: copy.quarantineColumnSelection,
+      value: (item) => (state.quarantineSelection.has(quarantineTraceId(item)) ? copy.yes : copy.no),
+      sortValue: (item) => (state.quarantineSelection.has(quarantineTraceId(item)) ? 1 : 0),
+    },
+    { key: "from", label: copy.historyColumnFrom, value: (item) => displayMailAddress(item.mail_from), sortValue: (item) => displayMailAddress(item.mail_from).toLowerCase() },
+    { key: "to", label: copy.historyColumnTo, value: firstRecipient, sortValue: (item) => firstRecipient(item).toLowerCase() },
+    { key: "subject", label: copy.quarantineColumnSubject, value: (item) => item.subject || quarantineTraceId(item) || copy.unset, sortValue: (item) => String(item.subject || quarantineTraceId(item) || "").toLowerCase() },
+    { key: "date", label: copy.historyColumnDate, value: (item) => formatHistoryDateTime(quarantineDate(item)), sortValue: (item) => parseHistoryTimestamp(quarantineDate(item))?.getTime() ?? 0 },
+    { key: "score", label: copy.quarantineColumnScore, value: (item) => formatScore(quarantineScoreValue(item)), sortValue: (item) => quarantineScoreValue(item) ?? -1 },
+  ];
+}
+
+function quarantineGridTemplate() {
+  return DEFAULT_QUARANTINE_COLUMN_WIDTHS.map((width) => `${Math.max(MIN_HISTORY_COLUMN_WIDTH, Number(width) || MIN_HISTORY_COLUMN_WIDTH)}px`).join(" ");
+}
+
 function historyGridTemplate() {
   return state.historyColumnWidths.map((width) => `${Math.max(MIN_HISTORY_COLUMN_WIDTH, Number(width) || MIN_HISTORY_COLUMN_WIDTH)}px`).join(" ");
+}
+
+function sortQuarantineItems(items, columns) {
+  const column = columns.find((candidate) => candidate.key === state.quarantineSort.key) ?? columns[0];
+  const direction = state.quarantineSort.direction === "asc" ? 1 : -1;
+  return [...items].sort((left, right) => {
+    const leftValue = column.sortValue(left);
+    const rightValue = column.sortValue(right);
+    if (typeof leftValue === "number" && typeof rightValue === "number") {
+      return (leftValue - rightValue) * direction;
+    }
+    return String(leftValue).localeCompare(String(rightValue), i18n.getLocale(), { numeric: true, sensitivity: "base" }) * direction;
+  });
 }
 
 function sortHistoryItems(items, columns) {
@@ -358,11 +414,26 @@ function sortHistoryItems(items, columns) {
   });
 }
 
+function quarantineSortIndicator(key) {
+  if (state.quarantineSort.key !== key) {
+    return "";
+  }
+  return state.quarantineSort.direction === "asc" ? " ▲" : " ▼";
+}
+
 function sortIndicator(key) {
   if (state.historySort.key !== key) {
     return "";
   }
   return state.historySort.direction === "asc" ? " ▲" : " ▼";
+}
+
+function setQuarantineSort(key) {
+  state.quarantineSort = {
+    key,
+    direction: state.quarantineSort.key === key && state.quarantineSort.direction === "asc" ? "desc" : "asc",
+  };
+  renderQuarantine();
 }
 
 function setHistorySort(key) {
@@ -952,10 +1023,30 @@ function findAttachmentRule(ruleId) {
   return getAttachmentRules().find((rule) => rule.id === ruleId) ?? null;
 }
 
+function selectedQuarantineItems() {
+  return state.quarantine.filter((item) => state.quarantineSelection.has(quarantineTraceId(item)));
+}
+
+function pruneQuarantineSelection() {
+  const currentIds = new Set(state.quarantine.map(quarantineTraceId).filter(Boolean));
+  state.quarantineSelection.forEach((traceId) => {
+    if (!currentIds.has(traceId)) {
+      state.quarantineSelection.delete(traceId);
+    }
+  });
+}
+
 // Renderers
 function renderQuarantine() {
   const copy = getCopy();
   const items = state.quarantine;
+  pruneQuarantineSelection();
+  const columns = quarantineColumns(copy);
+  const sortedItems = sortQuarantineItems(items, columns);
+  const gridTemplate = quarantineGridTemplate();
+  const selectedCount = selectedQuarantineItems().length;
+  const allSelected = items.length > 0 && selectedCount === items.length;
+  const actionDisabled = selectedCount === 0 ? " disabled" : "";
   if (!items.length) {
     containers.quarantine.innerHTML = buildEmptyState(
       copy.emptyQuarantineTitle,
@@ -966,34 +1057,46 @@ function renderQuarantine() {
   }
 
   containers.quarantine.innerHTML = `
+    <div class="quarantine-bulk-actions" role="toolbar" aria-label="${escapeHtml(copy.quarantineBulkActions)}">
+      <button class="secondary-button compact-button" type="button" data-action="quarantine-bulk" data-bulk-action="release"${actionDisabled}>${escapeHtml(copy.traceRelease)}</button>
+      <button class="secondary-button compact-button" type="button" data-action="quarantine-bulk" data-bulk-action="allow"${actionDisabled}>${escapeHtml(copy.policyActionAllow)}</button>
+      <button class="secondary-button compact-button" type="button" data-action="quarantine-bulk" data-bulk-action="block"${actionDisabled}>${escapeHtml(copy.policyActionBlock)}</button>
+      <button class="secondary-button compact-button" type="button" data-action="quarantine-bulk" data-bulk-action="delete"${actionDisabled}>${escapeHtml(copy.traceDelete)}</button>
+    </div>
     <div class="history-summary">${translate(copy.searchResults, { count: items.length })}</div>
-    ${items
+    <div class="quarantine-table-header" style="--quarantine-grid-columns: ${escapeHtml(gridTemplate)}">
+      ${columns
+        .map(
+          (column, index) => `
+            <span class="quarantine-column-heading">
+              ${
+                index === 0
+                  ? `<input class="quarantine-select-checkbox" type="checkbox" data-quarantine-select-all aria-label="${escapeHtml(copy.quarantineSelectAll)}"${allSelected ? " checked" : ""} />`
+                  : ""
+              }
+              <button type="button" data-action="quarantine-sort" data-sort-key="${escapeHtml(column.key)}" aria-sort="${state.quarantineSort.key === column.key ? state.quarantineSort.direction : "none"}">${escapeHtml(column.label)}${escapeHtml(quarantineSortIndicator(column.key))}</button>
+            </span>
+          `,
+        )
+        .join("")}
+    </div>
+    ${sortedItems
       .map(
-        (item) => `
-          <article class="record-row">
-            <div class="record-head">
-              <div>
-                <h4 class="record-title">${escapeHtml(item.subject || item.trace_id)}</h4>
-                <div class="record-meta">${escapeHtml(item.received_at || copy.unset)} · ${escapeHtml(item.mail_from || copy.unset)} -> ${escapeHtml(formatList(item.rcpt_to ?? []))}</div>
-              </div>
-              <div class="record-tags">
-                <span class="badge danger">${escapeHtml(item.status || copy.unset)}</span>
-                <span class="pill">${escapeHtml(item.direction || copy.unset)}</span>
-              </div>
-            </div>
-            <div class="record-copy">${escapeHtml(item.reason || item.internet_message_id || copy.unset)}</div>
-            <div class="record-grid">
-              <div class="summary-card"><p>${copy.traceLabel}</p><strong>${escapeHtml(item.trace_id)}</strong></div>
-              <div class="summary-card"><p>${copy.spamLabel}</p><strong>${escapeHtml(formatScore(item.spam_score))}</strong></div>
-              <div class="summary-card"><p>${copy.securityLabel}</p><strong>${escapeHtml(formatScore(item.security_score))}</strong></div>
-            </div>
-            <div class="record-actions">
-              <button class="list-action" type="button" data-action="trace-open" data-trace-id="${escapeHtml(item.trace_id)}">${copy.traceOpen}</button>
-              <button class="list-action" type="button" data-action="trace-release" data-trace-id="${escapeHtml(item.trace_id)}">${copy.traceRelease}</button>
-              <button class="list-action" type="button" data-action="trace-delete" data-trace-id="${escapeHtml(item.trace_id)}">${copy.traceDelete}</button>
-            </div>
-          </article>
-        `,
+        (item) => {
+          const traceId = quarantineTraceId(item);
+          const selected = state.quarantineSelection.has(traceId);
+          return `
+            <label class="quarantine-message-row${selected ? " selected" : ""}" style="--quarantine-grid-columns: ${escapeHtml(gridTemplate)}">
+              <span>
+                <input class="quarantine-select-checkbox" type="checkbox" data-quarantine-select data-trace-id="${escapeHtml(traceId)}" aria-label="${escapeHtml(`${copy.quarantineColumnSelection}: ${traceId}`)}"${selected ? " checked" : ""} />
+              </span>
+              ${columns
+                .slice(1)
+                .map((column) => `<span title="${escapeHtml(column.value(item))}">${escapeHtml(column.value(item))}</span>`)
+                .join("")}
+            </label>
+          `;
+        },
       )
       .join("")}
   `;
@@ -3745,6 +3848,64 @@ async function triggerTraceAction(traceId, action) {
   }
 }
 
+async function triggerSelectedTraceAction(action) {
+  const copy = getCopy();
+  const traceIds = selectedQuarantineItems().map(quarantineTraceId).filter(Boolean);
+  if (!traceIds.length) {
+    showFeedback(copy.quarantineSelectAtLeastOne, "warning");
+    return;
+  }
+  showFeedback(translate(copy.quarantineBulkRunning, { action, count: traceIds.length }), "warning");
+  for (const traceId of traceIds) {
+    await fetchJson(`/api/traces/${traceId}/${action}`, { method: "POST" });
+  }
+  state.quarantineSelection.clear();
+  showFeedback(translate(copy.quarantineBulkCompleted, { action, count: traceIds.length }));
+  await loadOps({ silent: true });
+}
+
+async function updateSelectedSenderPolicy(action) {
+  const copy = getCopy();
+  const senders = [
+    ...new Set(
+      selectedQuarantineItems()
+        .map((item) => displayMailAddress(item.mail_from))
+        .filter((sender) => sender && sender !== copy.unset)
+        .map((sender) => sender.toLowerCase()),
+    ),
+  ];
+  if (!senders.length) {
+    showFeedback(copy.quarantineSelectAtLeastOne, "warning");
+    return;
+  }
+  const policies = currentPolicies();
+  policies.address_policy = policies.address_policy ?? {};
+  policies.address_policy.allow_senders = policies.address_policy.allow_senders ?? [];
+  policies.address_policy.block_senders = policies.address_policy.block_senders ?? [];
+  const targetKey = action === "allow" ? "allow_senders" : "block_senders";
+  const oppositeKey = action === "allow" ? "block_senders" : "allow_senders";
+  const target = new Set(policies.address_policy[targetKey].map((value) => String(value).toLowerCase()));
+  senders.forEach((sender) => target.add(sender));
+  policies.address_policy[targetKey] = [...target].sort();
+  const selectedSenderSet = new Set(senders);
+  policies.address_policy[oppositeKey] = policies.address_policy[oppositeKey].filter(
+    (value) => !selectedSenderSet.has(String(value).toLowerCase()),
+  );
+  state.quarantineSelection.clear();
+  await savePolicies(policies);
+  showFeedback(translate(copy.quarantineBulkPolicyCompleted, { action: labelForAction(action), count: senders.length }));
+}
+
+async function runQuarantineBulkAction(action) {
+  if (action === "release" || action === "delete") {
+    await triggerSelectedTraceAction(action);
+    return;
+  }
+  if (action === "allow" || action === "block") {
+    await updateSelectedSenderPolicy(action);
+  }
+}
+
 async function openDigestReport(reportId, opener = document.activeElement) {
   const copy = getCopy();
   renderDrawerContent(copy.digestOpen, copy.loadingRecords, buildLoadingRows(1), opener);
@@ -3777,6 +3938,7 @@ async function loadOps({ silent = false } = {}) {
       fetchJson("/api/policies/status"),
     ]);
     state.quarantine = quarantine ?? [];
+    pruneQuarantineSelection();
     state.history = history?.items ?? [];
     state.routeDiagnostics = routes;
     state.reporting = reporting;
@@ -3926,7 +4088,7 @@ function setSystemSetupTab(actionTarget) {
 }
 
 function getActionHandlers(actionTarget) {
-  const { traceId, ruleId, index, reportId, target, domainId, profileId, sortKey, logTable } = actionTarget.dataset;
+  const { traceId, ruleId, index, reportId, target, domainId, profileId, sortKey, logTable, bulkAction } = actionTarget.dataset;
   return {
     "drawer-close": () => closeDrawer(),
     "trace-open": () => runAction(() => loadTrace(traceId, actionTarget)),
@@ -3959,6 +4121,8 @@ function getActionHandlers(actionTarget) {
     "public-tls-disable": () => runAction(() => disablePublicTlsProfile()),
     "public-tls-delete": () => runAction(() => deletePublicTlsProfile(profileId)),
     "platform-edit": () => openPlatformDrawer(target, actionTarget),
+    "quarantine-bulk": () => runAction(() => runQuarantineBulkAction(bulkAction)),
+    "quarantine-sort": () => setQuarantineSort(sortKey),
     "history-sort": () => setHistorySort(sortKey),
     "log-sort": () => setLogSort(logTable, sortKey),
     "page-tab": () => setPageTab(actionTarget),
@@ -3983,6 +4147,38 @@ function handleBodyClick(event) {
     setActivePage(pageTarget.dataset.pageTarget, { focus: true, updateHash: true });
     setSidebarOpen(false);
   }
+}
+
+function handleBodyChange(event) {
+  const selectAll = event.target.closest("[data-quarantine-select-all]");
+  if (selectAll) {
+    state.quarantineSelection.clear();
+    if (selectAll.checked) {
+      state.quarantine.forEach((item) => {
+        const traceId = quarantineTraceId(item);
+        if (traceId) {
+          state.quarantineSelection.add(traceId);
+        }
+      });
+    }
+    renderQuarantine();
+    return;
+  }
+
+  const selection = event.target.closest("[data-quarantine-select]");
+  if (!selection) {
+    return;
+  }
+  const traceId = selection.dataset.traceId;
+  if (!traceId) {
+    return;
+  }
+  if (selection.checked) {
+    state.quarantineSelection.add(traceId);
+  } else {
+    state.quarantineSelection.delete(traceId);
+  }
+  renderQuarantine();
 }
 
 function startHistoryColumnResize(event) {
@@ -4145,6 +4341,7 @@ elements.createDigestDefault.addEventListener("click", (event) => openDigestDefa
 elements.createDigestOverride.addEventListener("click", (event) => openDigestOverrideDrawer(null, event.currentTarget));
 
 document.body.addEventListener("click", handleBodyClick);
+document.body.addEventListener("change", handleBodyChange);
 document.body.addEventListener("pointerdown", startHistoryColumnResize);
 document.body.addEventListener("pointerdown", startLogColumnResize);
 

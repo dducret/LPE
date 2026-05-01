@@ -545,6 +545,18 @@ async function main() {
 
   assert.equal(document.title, "LPE-CT Management Console");
   assert.match(elements["quarantine-list"].innerHTML, /trace-1/);
+  assert.match(elements["quarantine-list"].innerHTML, /quarantine-bulk-actions/);
+  assert.match(elements["quarantine-list"].innerHTML, /data-bulk-action="release"/);
+  assert.match(elements["quarantine-list"].innerHTML, /data-bulk-action="allow"/);
+  assert.match(elements["quarantine-list"].innerHTML, /data-bulk-action="block"/);
+  assert.match(elements["quarantine-list"].innerHTML, /data-bulk-action="delete"/);
+  assert.match(elements["quarantine-list"].innerHTML, /data-quarantine-select/);
+  assert.match(elements["quarantine-list"].innerHTML, /data-sort-key="from"/);
+  assert.match(elements["quarantine-list"].innerHTML, /sender@example\.test/);
+  assert.match(elements["quarantine-list"].innerHTML, /user@example\.test/);
+  assert.match(elements["quarantine-list"].innerHTML, /Suspicious inbound/);
+  assert.match(elements["quarantine-list"].innerHTML, /6\.4/);
+  assert.doesNotMatch(elements["quarantine-list"].innerHTML, /trace-open/);
   assert.match(elements["history-list"].innerHTML, /177764830abcdef/);
   assert.match(elements["history-list"].innerHTML, /Client Address/);
   assert.match(elements["history-list"].innerHTML, /data-sort-key="date"/);
