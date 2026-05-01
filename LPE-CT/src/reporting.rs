@@ -95,6 +95,7 @@ pub(crate) struct MailHistorySummary {
     pub technical_status: Option<Value>,
     pub dsn: Option<Value>,
     pub latest_decision: Option<String>,
+    pub message_size_bytes: Option<u64>,
     pub event_count: usize,
     pub policy_tags: Vec<String>,
 }
@@ -130,6 +131,7 @@ pub(crate) struct MailHistoryEvent {
     pub technical_status: Option<Value>,
     pub dsn: Option<Value>,
     pub throttle: Option<Value>,
+    pub message_size_bytes: Option<u64>,
     pub decision_trace: Vec<Value>,
 }
 
@@ -219,6 +221,8 @@ struct StoredMailHistoryEvent {
     #[serde(default)]
     throttle: Option<Value>,
     #[serde(default)]
+    message_size_bytes: Option<u64>,
+    #[serde(default)]
     decision_trace: Vec<Value>,
 }
 
@@ -248,6 +252,7 @@ impl From<StoredMailHistoryEvent> for MailHistoryEvent {
             technical_status: value.technical_status,
             dsn: value.dsn,
             throttle: value.throttle,
+            message_size_bytes: value.message_size_bytes,
             decision_trace: value.decision_trace,
         }
     }
@@ -620,7 +625,7 @@ async fn search_mail_history_from_db(
                    subject, internet_message_id, reason, route_target, remote_message_ref,
                    spam_score, security_score, reputation_score, dnsbl_hits, auth_summary,
                    magika_summary, magika_decision, technical_status, dsn, throttle,
-                   decision_trace, search_text
+                   message_size_bytes, decision_trace, search_text
               FROM mail_flow_history
              WHERE event_unix >= $1
              ORDER BY trace_id, event_unix DESC
@@ -637,7 +642,7 @@ async fn search_mail_history_from_db(
                latest.security_score, latest.reputation_score, latest.dnsbl_hits,
                latest.auth_summary, latest.magika_summary, latest.magika_decision,
                latest.technical_status, latest.dsn, latest.throttle, latest.decision_trace,
-               counts.event_count
+               latest.message_size_bytes, counts.event_count
           FROM latest
           JOIN counts ON counts.trace_id = latest.trace_id
          WHERE ($2::TEXT IS NULL OR LOWER(latest.direction) = $2)
@@ -733,6 +738,7 @@ async fn search_mail_history_from_db(
                 technical_status: event.technical_status.clone(),
                 dsn: event.dsn.clone(),
                 latest_decision: latest_decision(&event),
+                message_size_bytes: event.message_size_bytes,
                 event_count,
                 policy_tags: policy_tags_from_event(&event),
             })
@@ -760,7 +766,7 @@ async fn load_trace_history_from_db(
         SELECT timestamp, trace_id, direction, queue, status, peer, mail_from, rcpt_to, subject,
                internet_message_id, reason, route_target, remote_message_ref, spam_score,
                security_score, reputation_score, dnsbl_hits, auth_summary, magika_summary,
-               magika_decision, technical_status, dsn, throttle, decision_trace
+               magika_decision, technical_status, dsn, throttle, message_size_bytes, decision_trace
           FROM mail_flow_history
          WHERE trace_id = $1
            AND event_unix >= $2
@@ -821,6 +827,9 @@ fn mail_history_event_from_row(row: &sqlx::postgres::PgRow) -> Result<MailHistor
         throttle: row
             .try_get::<Option<sqlx::types::Json<Value>>, _>("throttle")?
             .map(|value| value.0),
+        message_size_bytes: row
+            .try_get::<Option<i64>, _>("message_size_bytes")?
+            .and_then(|value| u64::try_from(value).ok()),
         decision_trace: row
             .try_get::<sqlx::types::Json<Vec<Value>>, _>("decision_trace")?
             .0,
@@ -870,6 +879,7 @@ fn summarize_trace_history(events: Vec<MailHistoryEvent>) -> Option<MailHistoryS
         technical_status: latest.technical_status.clone(),
         dsn: latest.dsn.clone(),
         latest_decision: latest_decision(latest),
+        message_size_bytes: latest.message_size_bytes,
         event_count: events.len(),
         policy_tags: policy_tags_from_event(latest),
     })

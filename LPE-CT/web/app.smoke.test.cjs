@@ -171,8 +171,8 @@ function createFetchStub() {
       digest_interval_minutes: 30,
       digest_max_items: 25,
       history_retention_days: 14,
-      last_digest_run_at: "2026-04-23T10:00:00Z",
-      next_digest_run_at: "2026-04-23T10:30:00Z",
+      last_digest_run_at: "2026-05-01T10:00:00Z",
+      next_digest_run_at: "2026-05-01T10:30:00Z",
       domain_defaults: [{ domain: "example.test", recipients: ["ops@example.test"] }],
       user_overrides: [{ mailbox: "security@example.test", recipient: "security@example.test", enabled: true }],
     },
@@ -226,7 +226,7 @@ function createFetchStub() {
       delivery_attempts_last_hour: 12,
     },
     system: {
-      host_time: "2026-04-23T10:06:00Z",
+      host_time: "2026-05-01T10:06:00Z",
       hostname: "ct-node-1",
       uptime_seconds: 172800,
       cpu_utilization_percent: 18.5,
@@ -247,7 +247,7 @@ function createFetchStub() {
         },
       ],
     },
-    audit: [{ action: "policy.updated", actor: "admin@example.test", timestamp: "2026-04-23T10:05:00Z", details: "Updated policy." }],
+    audit: [{ action: "policy.updated", actor: "admin@example.test", timestamp: "2026-05-01T10:05:00Z", details: "Updated policy." }],
   };
 
   const routes = { relay_targets: ["lpe-core-a"] };
@@ -272,7 +272,7 @@ function createFetchStub() {
     {
       trace_id: "trace-1",
       subject: "Suspicious inbound",
-      received_at: "2026-04-23T10:03:00Z",
+      received_at: "2026-05-01T10:03:00Z",
       mail_from: "sender@example.test",
       rcpt_to: ["user@example.test"],
       status: "quarantined",
@@ -288,7 +288,7 @@ function createFetchStub() {
       {
         trace_id: "trace-2",
         subject: "Outbound delivery",
-        latest_event_at: "2026-04-23T09:50:00Z",
+        latest_event_at: "2026-05-01T09:50:00Z",
         mail_from: "ops@example.test",
         rcpt_to: ["dest@example.org"],
         queue: "sent",
@@ -297,12 +297,14 @@ function createFetchStub() {
         reason: "250 ok",
         route_target: "relay.example.test",
         event_count: 3,
+        spam_score: 2.1,
+        message_size_bytes: 2048,
         policy_tags: ["dkim", "relay"],
       },
       {
         trace_id: "trace-3",
         subject: "Spam inbound",
-        latest_event_at: "2026-04-22T09:50:00Z",
+        latest_event_at: "2026-04-30T09:50:00Z",
         mail_from: "spam@example.test",
         rcpt_to: ["dest@example.org"],
         queue: "quarantine",
@@ -312,6 +314,7 @@ function createFetchStub() {
         route_target: "relay.example.test",
         event_count: 2,
         spam_score: 7.2,
+        message_size_bytes: 4096,
         security_score: 0,
         dnsbl_hits: [],
         policy_tags: ["spam"],
@@ -539,6 +542,9 @@ async function main() {
   assert.equal(document.title, "LPE-CT Management Console");
   assert.match(elements["quarantine-list"].innerHTML, /trace-1/);
   assert.match(elements["history-list"].innerHTML, /trace-2/);
+  assert.match(elements["history-list"].innerHTML, /Client Address/);
+  assert.match(elements["history-list"].innerHTML, /Clean \(2\.10\)/);
+  assert.match(elements["history-list"].innerHTML, /2 KB/);
   assert.match(elements["platform-list"].innerHTML, /Network/);
   assert.match(elements["platform-list"].innerHTML, /IP/);
   assert.match(elements["platform-list"].innerHTML, /eth0/);

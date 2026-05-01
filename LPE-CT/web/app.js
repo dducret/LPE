@@ -175,6 +175,29 @@ function formatDateTime(value) {
   }).format(date);
 }
 
+function parseHistoryTimestamp(value) {
+  if (!value) {
+    return null;
+  }
+  const text = String(value);
+  const unixValue = text.startsWith("unix:") ? Number(text.slice(5)) : Number.NaN;
+  const date = Number.isFinite(unixValue) ? new Date(unixValue * 1000) : new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatHistoryDateTime(value) {
+  const date = parseHistoryTimestamp(value);
+  if (!date) {
+    return getCopy().unset;
+  }
+  const pad = (part) => String(part).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join("-") + ` ${pad(date.getHours())}.${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 function formatShortDate(value) {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) {
@@ -212,6 +235,27 @@ function formatBytes(value) {
     unitIndex += 1;
   }
   return `${new Intl.NumberFormat(i18n.getLocale(), { maximumFractionDigits: size >= 10 ? 0 : 1 }).format(size)} ${units[unitIndex]}`;
+}
+
+function firstRecipient(item) {
+  return (item?.rcpt_to ?? []).find(Boolean) || getCopy().unset;
+}
+
+function humanizeStatus(value) {
+  return String(value || getCopy().unset)
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatHistoryType(item) {
+  const status = String(item?.status ?? "").toLowerCase();
+  const queue = String(item?.queue ?? "").toLowerCase();
+  const cleanStatuses = new Set(["accepted", "clean", "delivered", "incoming", "relayed", "sent"]);
+  const label = cleanStatuses.has(status) || cleanStatuses.has(queue) ? "Clean" : humanizeStatus(item?.status);
+  const score = Number(item?.spam_score);
+  return Number.isNaN(score) ? label : `${label} (${score.toFixed(2)})`;
 }
 
 function formatDurationMinutes(seconds) {
@@ -751,34 +795,27 @@ function renderHistory() {
 
   containers.history.innerHTML = `
     <div class="history-summary">${translate(copy.historyResultSummary, { count: items.length })}</div>
+    <div class="history-table-header" aria-hidden="true">
+      <span>${escapeHtml(copy.historyColumnDate)}</span>
+      <span>${escapeHtml(copy.historyColumnLpeId)}</span>
+      <span>${escapeHtml(copy.historyColumnClientAddress)}</span>
+      <span>${escapeHtml(copy.historyColumnType)}</span>
+      <span>${escapeHtml(copy.historyColumnFrom)}</span>
+      <span>${escapeHtml(copy.historyColumnTo)}</span>
+      <span>${escapeHtml(copy.historyColumnSize)}</span>
+    </div>
     ${items
       .map(
         (item) => `
-          <article class="record-row">
-            <div class="record-head">
-              <div>
-                <h4 class="record-title">${escapeHtml(item.subject || item.trace_id)}</h4>
-                <div class="record-meta">${escapeHtml(item.latest_event_at || copy.unset)} · ${escapeHtml(item.mail_from || copy.unset)} -> ${escapeHtml(formatList(item.rcpt_to ?? []))}</div>
-              </div>
-              <div class="record-tags">
-                <span class="badge">${escapeHtml(item.queue || copy.unset)}</span>
-                <span class="pill">${escapeHtml(item.status || copy.unset)}</span>
-                <span class="pill">${escapeHtml(item.direction || copy.unset)}</span>
-              </div>
-            </div>
-            <div class="record-copy">${escapeHtml(item.reason || item.route_target || item.internet_message_id || copy.unset)}</div>
-            <div class="record-grid">
-              <div class="summary-card"><p>${copy.traceLabel}</p><strong>${escapeHtml(item.trace_id)}</strong></div>
-              <div class="summary-card"><p>${copy.eventCountLabel}</p><strong>${escapeHtml(formatNumber(item.event_count))}</strong></div>
-              <div class="summary-card"><p>${copy.routeLabel}</p><strong>${escapeHtml(item.route_target || copy.unset)}</strong></div>
-            </div>
-            <div class="record-tags">
-              ${(item.policy_tags ?? []).slice(0, 4).map((tag) => `<span class="pill">${escapeHtml(tag)}</span>`).join("")}
-            </div>
-            <div class="record-actions">
-              <button class="list-action" type="button" data-action="trace-open" data-trace-id="${escapeHtml(item.trace_id)}">${copy.traceOpen}</button>
-            </div>
-          </article>
+          <button class="history-message-row" type="button" data-action="trace-open" data-trace-id="${escapeHtml(item.trace_id)}" aria-label="${escapeHtml(`${copy.traceOpen}: ${item.trace_id}`)}">
+            <span>${escapeHtml(formatHistoryDateTime(item.latest_event_at))}</span>
+            <span>${escapeHtml(item.trace_id || copy.unset)}</span>
+            <span>${escapeHtml(item.peer || copy.unset)}</span>
+            <span>${escapeHtml(formatHistoryType(item))}</span>
+            <span>${escapeHtml(item.mail_from || copy.unset)}</span>
+            <span>${escapeHtml(firstRecipient(item))}</span>
+            <span>${escapeHtml(formatBytes(item.message_size_bytes))}</span>
+          </button>
         `,
       )
       .join("")}
@@ -3328,10 +3365,13 @@ function renderTraceDrawer(trace, opener = document.activeElement) {
     return;
   }
   const current = trace.current ?? {};
+  const retainedHistory = trace.history ?? [];
+  const latestHistoryEvent = retainedHistory.length ? retainedHistory[retainedHistory.length - 1] : null;
+  const messageSizeBytes = current.message_size_bytes ?? latestHistoryEvent?.message_size_bytes;
   const technicalStatus = current.technical_status ? escapeHtml(JSON.stringify(current.technical_status, null, 2)) : escapeHtml(copy.unset);
   const authSummary = current.auth_summary ? escapeHtml(JSON.stringify(current.auth_summary, null, 2)) : escapeHtml(copy.unset);
   const dsn = current.dsn ? escapeHtml(JSON.stringify(current.dsn, null, 2)) : "";
-  const historyItems = (trace.history ?? [])
+  const historyItems = retainedHistory
     .map(
       (item) => `
         <div class="trace-item">
@@ -3369,6 +3409,8 @@ function renderTraceDrawer(trace, opener = document.activeElement) {
           <div><p>${copy.statusLabel}</p><span class="record-copy">${escapeHtml(current.status || copy.unset)}</span></div>
           <div><p>${copy.queueLabel}</p><span class="record-copy">${escapeHtml(current.queue || copy.unset)}</span></div>
           <div><p>${copy.routeLabel}</p><span class="record-copy">${escapeHtml(current.route?.relay_target || copy.unset)}</span></div>
+          <div><p>${copy.historyColumnClientAddress}</p><span class="record-copy">${escapeHtml(current.peer || latestHistoryEvent?.peer || copy.unset)}</span></div>
+          <div><p>${copy.historyColumnSize}</p><span class="record-copy">${escapeHtml(formatBytes(messageSizeBytes))}</span></div>
           <div><p>${copy.spamLabel}</p><span class="record-copy">${escapeHtml(formatScore(current.spam_score))}</span></div>
           <div><p>${copy.securityLabel}</p><span class="record-copy">${escapeHtml(formatScore(current.security_score))}</span></div>
         </div>

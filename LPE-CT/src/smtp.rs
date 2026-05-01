@@ -284,6 +284,7 @@ pub(crate) struct TraceDetails {
     pub dsn: Option<TransportDsnReport>,
     pub route: Option<TransportRouteDecision>,
     pub throttle: Option<TransportThrottleStatus>,
+    pub message_size_bytes: u64,
     pub headers: Vec<(String, String)>,
     pub body_excerpt: String,
     pub decision_trace: Vec<DecisionTraceEntry>,
@@ -362,6 +363,8 @@ struct TransportAuditEvent {
     technical_status: Option<Value>,
     dsn: Option<Value>,
     throttle: Option<Value>,
+    #[serde(default)]
+    message_size_bytes: Option<u64>,
     decision_trace: Vec<Value>,
 }
 
@@ -4660,6 +4663,7 @@ async fn append_transport_audit(
         technical_status: serde_json::to_value(&message.technical_status).ok(),
         dsn: serde_json::to_value(&message.dsn).ok(),
         throttle: serde_json::to_value(&message.throttle).ok(),
+        message_size_bytes: Some(message.data.len() as u64),
         decision_trace: message
             .decision_trace
             .iter()
@@ -4692,13 +4696,13 @@ async fn persist_transport_audit_db_event(
             event_key, event_unix, timestamp, trace_id, direction, queue, status, peer, mail_from,
             rcpt_to, subject, internet_message_id, reason, route_target, remote_message_ref,
             spam_score, security_score, reputation_score, dnsbl_hits, auth_summary, magika_summary,
-            magika_decision, technical_status, dsn, throttle, decision_trace, search_text
+            magika_decision, technical_status, dsn, throttle, message_size_bytes, decision_trace, search_text
         )
         VALUES (
             $1, $2, $3, $4, $5, $6, $7, $8, $9,
             $10, $11, $12, $13, $14, $15,
             $16, $17, $18, $19, $20, $21,
-            $22, $23, $24, $25, $26, $27
+            $22, $23, $24, $25, $26, $27, $28
         )
         ON CONFLICT (event_key) DO NOTHING
         "#,
@@ -4728,6 +4732,11 @@ async fn persist_transport_audit_db_event(
     .bind(&event.technical_status)
     .bind(&event.dsn)
     .bind(&event.throttle)
+    .bind(
+        event
+            .message_size_bytes
+            .map(|value| i64::try_from(value).unwrap_or(i64::MAX)),
+    )
     .bind(Json(event.decision_trace.clone()))
     .bind(transport_audit_search_text(event))
     .execute(pool)
@@ -5260,6 +5269,7 @@ fn trace_details_from_message(queue: &str, message: &QueuedMessage) -> TraceDeta
         dsn: message.dsn.clone(),
         route: message.route.clone(),
         throttle: message.throttle.clone(),
+        message_size_bytes: message.data.len() as u64,
         headers: inspect_headers(&message.data),
         body_excerpt: body_excerpt(&message.data),
         decision_trace: message.decision_trace.clone(),
@@ -6112,13 +6122,12 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         let mut reader = BufReader::new(tokio::io::empty());
         let mut writer = Vec::new();
         let mut transaction = SmtpTransaction::default();
-        let dashboard_store = runtime_store_with_accepted_domains(&[
-            ("l-p-e.ch", true),
-            ("blocked.example", true),
-        ]);
+        let dashboard_store =
+            runtime_store_with_accepted_domains(&[("l-p-e.ch", true), ("blocked.example", true)]);
         {
             let mut state = dashboard_store.lock().unwrap();
-            state.accepted_domains
+            state
+                .accepted_domains
                 .iter_mut()
                 .find(|domain| domain.domain == "blocked.example")
                 .unwrap()
@@ -6170,9 +6179,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         let transcript = String::from_utf8(writer).unwrap();
         assert!(transcript.contains("250 sender accepted\r\n"));
         assert!(transcript.contains("250 recipient accepted\r\n"));
-        assert!(transcript.contains(
-            "550 recipient domain does not accept null reverse-path\r\n"
-        ));
+        assert!(transcript.contains("550 recipient domain does not accept null reverse-path\r\n"));
         assert!(transaction.mail_from_seen);
         assert_eq!(transaction.mail_from, "");
         assert_eq!(transaction.rcpt_to, vec!["dsn@l-p-e.ch".to_string()]);

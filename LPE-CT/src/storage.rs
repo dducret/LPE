@@ -162,6 +162,7 @@ pub(crate) async fn ensure_local_db_schema(
                     technical_status JSONB,
                     dsn JSONB,
                     throttle JSONB,
+                    message_size_bytes BIGINT,
                     decision_trace JSONB NOT NULL,
                     search_text TEXT NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -333,6 +334,11 @@ pub(crate) async fn ensure_local_db_schema(
             .await?;
             sqlx::query(
                 "ALTER TABLE accepted_domains ADD COLUMN IF NOT EXISTS accept_null_reverse_path BOOLEAN NOT NULL DEFAULT TRUE"
+            )
+            .execute(pool)
+            .await?;
+            sqlx::query(
+                "ALTER TABLE mail_flow_history ADD COLUMN IF NOT EXISTS message_size_bytes BIGINT"
             )
             .execute(pool)
             .await?;
