@@ -62,6 +62,20 @@ The minimum correlation fields for production diagnostics are:
 
 These identifiers should be attached to logs and spans as fields, not exploded into high-cardinality Prometheus labels unless the metric is explicitly designed for bounded aggregation.
 
+The `LPE-CT` management console also exposes a narrow host-log browser for
+operator diagnostics. The supported host-log categories are:
+
+- `Mail`: `/var/log/mail.log` and rotated `mail.log.*` files
+- `Interface`: `CFMA.log`, reserved for the future console/interface logger
+- `Messages`: `/var/log/dmesg` and rotated `dmesg.*` files
+
+This browser is limited to listing, previewing, downloading, and deleting those
+whitelisted host log files. It must not expose arbitrary filesystem paths and
+must not become a source of canonical mailbox, collaboration, rights, or
+user-visible state. When a current log file is not present yet, the console may
+show an empty virtual row so the intended stream remains visible during early
+deployment.
+ 
 ## Metric families
 
 The v1 metric families are intentionally compact.

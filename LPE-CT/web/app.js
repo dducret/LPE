@@ -101,9 +101,9 @@ const DEFAULT_QUARANTINE_COLUMN_WIDTHS = [112, 220, 220, 280, 172, 112];
 const DEFAULT_HISTORY_COLUMN_WIDTHS = [172, 176, 144, 132, 220, 220, 112];
 const MIN_HISTORY_COLUMN_WIDTH = 88;
 const DEFAULT_LOG_COLUMN_WIDTHS = {
-  mail: [172, 176, 144, 132, 220, 220, 112],
-  interface: [172, 180, 220, 360],
-  messages: [172, 132, 180, 360],
+  mail: [56, 280, 172, 112, 132],
+  interface: [56, 280, 172, 112, 132],
+  messages: [56, 280, 172, 112, 132],
   emailAlerts: [172, 180, 132, 360],
 };
 
@@ -116,6 +116,11 @@ const state = {
   reporting: null,
   digestReports: [],
   policyStatus: null,
+  hostLogs: {
+    mail: [],
+    interface: [],
+    messages: [],
+  },
   selectedTrace: null,
   pageTabs: {
     filtering: "content-filtering",
@@ -648,6 +653,65 @@ function emailAlertLogColumns(copy) {
   ];
 }
 
+function hostLogDate(item) {
+  return item.modified_at_unix_seconds
+    ? formatHistoryDateTime(new Date(item.modified_at_unix_seconds * 1000).toISOString())
+    : getCopy().unset;
+}
+
+function hostLogColumns(copy) {
+  return [
+    { key: "select", label: copy.logColumnSelect },
+    { key: "name", label: copy.logColumnName },
+    { key: "date", label: copy.historyColumnDate },
+    { key: "size", label: copy.historyColumnSize },
+    { key: "actions", label: copy.logColumnActions },
+  ];
+}
+
+function hostLogActionButton({ action, category, item, label, iconClass, disabled = false, danger = false }) {
+  return `
+    <button class="icon-button table-icon-button${danger ? " danger-icon-button" : ""}" type="button" data-action="${escapeHtml(action)}" data-log-category="${escapeHtml(category)}" data-log-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(`${label}: ${item.name}`)}" title="${escapeHtml(label)}"${disabled ? " disabled" : ""}>
+      <span class="${escapeHtml(iconClass)}" aria-hidden="true"></span>
+    </button>
+  `;
+}
+
+function renderHostLogTable({ tableId, container, rows, emptyTitle, emptyMessage }) {
+  if (!container) {
+    return;
+  }
+  const copy = getCopy();
+  const columns = hostLogColumns(copy);
+  const gridTemplate = logGridTemplate(tableId);
+  container.innerHTML = `
+    <div class="log-table-header host-log-table-header" style="--log-grid-columns: ${escapeHtml(gridTemplate)}">
+      ${columns.map((column) => `<span class="log-column-heading">${escapeHtml(column.label)}</span>`).join("")}
+    </div>
+    ${
+      rows.length
+        ? rows
+            .map(
+              (item) => `
+                <div class="log-message-row host-log-row" style="--log-grid-columns: ${escapeHtml(gridTemplate)}">
+                  <span><input class="quarantine-select-checkbox" type="checkbox" aria-label="${escapeHtml(`${copy.logColumnSelect}: ${item.name}`)}" /></span>
+                  <span title="${escapeHtml(item.name)}">${escapeHtml(item.name)}${item.exists ? "" : ` <small class="muted-inline">${escapeHtml(copy.logMissingFile)}</small>`}</span>
+                  <span>${escapeHtml(hostLogDate(item))}</span>
+                  <span>${escapeHtml(formatBytes(item.size_bytes))}</span>
+                  <span class="table-action-icons">
+                    ${hostLogActionButton({ action: "host-log-view", category: tableId, item, label: copy.logViewAction, iconClass: "action-icon action-icon-view", disabled: !item.previewable })}
+                    ${hostLogActionButton({ action: "host-log-download", category: tableId, item, label: copy.logDownloadAction, iconClass: "action-icon action-icon-download", disabled: !item.downloadable })}
+                    ${hostLogActionButton({ action: "host-log-delete", category: tableId, item, label: copy.logDeleteAction, iconClass: "close-icon", disabled: !item.deletable, danger: true })}
+                  </span>
+                </div>
+              `,
+            )
+            .join("")
+        : buildEmptyState(emptyTitle, emptyMessage)
+    }
+  `;
+}
+
 function formatDurationMinutes(seconds) {
   if (seconds === undefined || seconds === null || Number.isNaN(Number(seconds))) {
     return getCopy().unset;
@@ -806,6 +870,20 @@ async function fetchJson(path, init = {}) {
     await parseError(response);
   }
   return response.status === 204 ? null : response.json();
+}
+
+async function fetchBlob(path, init = {}) {
+  const response = await fetch(path, {
+    ...init,
+    headers: { ...authHeaders(), ...(init.headers ?? {}) },
+  });
+  if (response.status === 401) {
+    throw new Error("401");
+  }
+  if (!response.ok) {
+    await parseError(response);
+  }
+  return response.blob();
 }
 
 async function fetchDashboard() {
@@ -2090,35 +2168,32 @@ function renderPlatform() {
 
 function renderMailLog() {
   const copy = getCopy();
-  renderLogTable({
+  renderHostLogTable({
     tableId: "mail",
     container: containers.mailLog,
-    columns: historyColumns(copy),
-    rows: state.history,
+    rows: state.hostLogs.mail,
     emptyTitle: copy.logsTabMail,
-    emptyMessage: copy.noResults,
+    emptyMessage: copy.logsMailUnavailable,
   });
 }
 
 function renderAudit() {
   const copy = getCopy();
-  renderLogTable({
+  renderHostLogTable({
     tableId: "interface",
     container: containers.audit,
-    columns: auditColumns(copy),
-    rows: state.dashboard?.audit ?? [],
-    emptyTitle: copy.auditTitle,
-    emptyMessage: copy.noAuditEntries,
+    rows: state.hostLogs.interface,
+    emptyTitle: copy.logsTabInterface,
+    emptyMessage: copy.logsInterfaceUnavailable,
   });
 }
 
 function renderMessageLog() {
   const copy = getCopy();
-  renderLogTable({
+  renderHostLogTable({
     tableId: "messages",
     container: containers.messageLog,
-    columns: messageLogColumns(copy),
-    rows: [],
+    rows: state.hostLogs.messages,
     emptyTitle: copy.logsTabMessages,
     emptyMessage: copy.logsMessagesUnavailable,
   });
@@ -4051,6 +4126,51 @@ function renderTraceDrawer(trace, opener = document.activeElement) {
 }
 
 // Async Actions and Lifecycle
+async function openHostLog(category, logId, opener = document.activeElement) {
+  const copy = getCopy();
+  renderDrawerContent(copy.logPreviewTitle, logId, buildLoadingRows(2), opener, null, "wide");
+  try {
+    const entry = await fetchJson(`/api/host-logs/${encodeURIComponent(category)}/${encodeURIComponent(logId)}`);
+    renderDrawerContent(
+      entry.name,
+      `${formatBytes(entry.size_bytes)}${entry.truncated ? ` · ${copy.logPreviewTruncated}` : ""}`,
+      `<section class="trace-section host-log-preview"><pre>${escapeHtml(entry.content || copy.logEmptyContent)}</pre></section>`,
+      opener,
+      null,
+      "wide",
+    );
+  } catch (error) {
+    renderDrawerContent(
+      copy.logPreviewTitle,
+      logId,
+      `<p class="record-copy">${escapeHtml(error instanceof Error ? error.message : copy.unknownError)}</p>`,
+      opener,
+      null,
+      "wide",
+    );
+  }
+}
+
+async function downloadHostLog(category, logId) {
+  const blob = await fetchBlob(`/api/host-logs/${encodeURIComponent(category)}/${encodeURIComponent(logId)}/download`);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = logId;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function deleteHostLog(category, logId) {
+  await fetchJson(`/api/host-logs/${encodeURIComponent(category)}/${encodeURIComponent(logId)}`, { method: "DELETE" });
+  const response = await fetchJson(`/api/host-logs/${encodeURIComponent(category)}`);
+  state.hostLogs[category] = response?.items ?? [];
+  renderLogTableById(category);
+  showFeedback(getCopy().logDeleted);
+}
+
 async function loadTrace(traceId, opener = document.activeElement) {
   const copy = getCopy();
   state.loading.trace = true;
@@ -4182,13 +4302,16 @@ async function loadOps({ silent = false } = {}) {
   try {
     const quarantineParams = new URLSearchParams(new FormData(elements.quarantineSearchForm));
     const historyParams = new URLSearchParams(new FormData(elements.historySearchForm));
-    const [quarantine, history, routes, reporting, digestReports, policyStatus] = await Promise.all([
+    const [quarantine, history, routes, reporting, digestReports, policyStatus, mailLogs, interfaceLogs, messageLogs] = await Promise.all([
       fetchJson(`/api/quarantine?${quarantineParams.toString()}`),
       fetchJson(`/api/history?${historyParams.toString()}`),
       fetchJson("/api/routes/diagnostics"),
       fetchJson("/api/reporting"),
       fetchJson("/api/reporting/digests"),
       fetchJson("/api/policies/status"),
+      fetchJson("/api/host-logs/mail"),
+      fetchJson("/api/host-logs/interface"),
+      fetchJson("/api/host-logs/messages"),
     ]);
     state.quarantine = quarantine ?? [];
     pruneQuarantineSelection();
@@ -4197,6 +4320,9 @@ async function loadOps({ silent = false } = {}) {
     state.reporting = reporting;
     state.digestReports = digestReports ?? [];
     state.policyStatus = policyStatus;
+    state.hostLogs.mail = mailLogs?.items ?? [];
+    state.hostLogs.interface = interfaceLogs?.items ?? [];
+    state.hostLogs.messages = messageLogs?.items ?? [];
     renderDashboard();
   } finally {
     state.loading.ops = false;
@@ -4341,7 +4467,7 @@ function setSystemSetupTab(actionTarget) {
 }
 
 function getActionHandlers(actionTarget) {
-  const { traceId, ruleId, index, reportId, target, domainId, profileId, sortKey, logTable, bulkAction, tabId } = actionTarget.dataset;
+  const { traceId, ruleId, index, reportId, target, domainId, profileId, sortKey, logTable, logCategory, logId, bulkAction, tabId } = actionTarget.dataset;
   return {
     "drawer-close": () => closeDrawer(),
     "trace-open": () => runAction(() => loadTrace(traceId, actionTarget)),
@@ -4380,6 +4506,9 @@ function getActionHandlers(actionTarget) {
     "quarantine-sort": () => setQuarantineSort(sortKey),
     "history-sort": () => setHistorySort(sortKey),
     "log-sort": () => setLogSort(logTable, sortKey),
+    "host-log-view": () => runAction(() => openHostLog(logCategory, logId, actionTarget)),
+    "host-log-download": () => runAction(() => downloadHostLog(logCategory, logId)),
+    "host-log-delete": () => runAction(() => deleteHostLog(logCategory, logId)),
     "page-tab": () => setPageTab(actionTarget),
     "system-setup-tab": () => setSystemSetupTab(actionTarget),
     "refresh-quarantine": () => runAction(() => loadOps()),

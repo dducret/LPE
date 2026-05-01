@@ -5,8 +5,12 @@ use argon2::{
 };
 use axum::{
     extract::{Path as AxumPath, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{
+        header::{CONTENT_DISPOSITION, CONTENT_TYPE},
+        HeaderMap, HeaderValue, StatusCode,
+    },
     middleware,
+    response::{IntoResponse, Response},
     routing::{get, post, put},
     Json, Router,
 };
@@ -32,6 +36,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 mod dkim_signing;
+mod host_logs;
 mod imaps_proxy;
 mod observability;
 mod reporting;
@@ -675,6 +680,15 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/traces/{trace_id}/retry", post(retry_trace))
         .route("/api/v1/traces/{trace_id}/release", post(release_trace))
         .route("/api/v1/traces/{trace_id}/delete", post(delete_trace))
+        .route("/api/v1/host-logs/{category}", get(host_logs_list))
+        .route(
+            "/api/v1/host-logs/{category}/{log_id}",
+            get(host_log_content).delete(delete_host_log),
+        )
+        .route(
+            "/api/v1/host-logs/{category}/{log_id}/download",
+            get(download_host_log),
+        )
         .route("/api/v1/routes/diagnostics", get(route_diagnostics))
         .route(
             "/api/v1/accepted-domains",
@@ -1067,6 +1081,80 @@ async fn delete_trace(
     )
     .await?;
     Ok(Json(result))
+}
+
+async fn host_logs_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(category): AxumPath<String>,
+) -> Result<Json<host_logs::HostLogList>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    host_logs::list(&category)
+        .map(Json)
+        .map_err(host_log_api_error)
+}
+
+async fn host_log_content(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath((category, log_id)): AxumPath<(String, String)>,
+) -> Result<Json<host_logs::HostLogContent>, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    host_logs::read_content(&category, &log_id)
+        .map(Json)
+        .map_err(host_log_api_error)
+}
+
+async fn download_host_log(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath((category, log_id)): AxumPath<(String, String)>,
+) -> Result<Response, ApiError> {
+    let _admin = require_management_admin(&state, &headers)?;
+    let download = host_logs::download(&category, &log_id).map_err(host_log_api_error)?;
+    let mut response_headers = HeaderMap::new();
+    response_headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    let filename = download.name.replace(['"', '\\', '/', '\r', '\n'], "_");
+    let disposition = format!("attachment; filename=\"{filename}\"");
+    response_headers.insert(
+        CONTENT_DISPOSITION,
+        HeaderValue::from_str(&disposition).map_err(|error| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("invalid download header: {error}"),
+            )
+        })?,
+    );
+    Ok((response_headers, download.bytes).into_response())
+}
+
+async fn delete_host_log(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath((category, log_id)): AxumPath<(String, String)>,
+) -> Result<Json<HealthResponse>, ApiError> {
+    let admin = require_management_admin(&state, &headers)?;
+    let name = host_logs::delete(&category, &log_id).map_err(host_log_api_error)?;
+    append_audit_event_with_actor(
+        &state,
+        &admin.email,
+        "host-log-delete",
+        &format!("deleted host log {category}/{name}"),
+    )
+    .await?;
+    Ok(Json(HealthResponse {
+        status: "ok".to_string(),
+        service: "lpe-ct".to_string(),
+        node_name: "management".to_string(),
+        role: "management".to_string(),
+    }))
+}
+
+fn host_log_api_error(error: host_logs::HostLogError) -> ApiError {
+    ApiError::new(error.status(), error.message().to_string())
 }
 
 async fn route_diagnostics(

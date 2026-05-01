@@ -1930,6 +1930,49 @@ select.invalid {
   transform: rotate(-45deg);
 }
 
+.action-icon-view::before,
+.action-icon-view::after,
+.action-icon-download::before,
+.action-icon-download::after {
+  content: "";
+  position: absolute;
+}
+
+.action-icon-view::before {
+  inset: 1px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+}
+
+.action-icon-view::after {
+  width: 7px;
+  height: 2px;
+  right: -1px;
+  bottom: 1px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: rotate(45deg);
+}
+
+.action-icon-download::before {
+  left: 7px;
+  top: 1px;
+  width: 2px;
+  height: 10px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.action-icon-download::after {
+  left: 3px;
+  top: 8px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+
 .action-icon-delete::before,
 .action-icon-delete::after {
   content: "";
@@ -1949,6 +1992,20 @@ select.invalid {
   top: 5px;
   bottom: 1px;
   border-top-width: 3px;
+}
+
+.host-log-row .table-action-icons {
+  justify-content: flex-start;
+}
+
+.host-log-preview pre {
+  max-height: 62vh;
+  overflow: auto;
+}
+
+.muted-inline {
+  color: var(--text-faint);
+  font-size: var(--font-caption);
 }
 
 .record-actions {
