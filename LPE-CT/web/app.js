@@ -1987,6 +1987,14 @@ function renderSystemSetupPanel(title, summary, body, actions = "") {
 }
 
 function renderSystemSetupSummary(items) {
+  const copy = getCopy();
+  const valueOrUnset = (value) => {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      return trimmed ? trimmed : copy.unset;
+    }
+    return value ?? copy.unset;
+  };
   return `
     <div class="record-grid">
       ${items
@@ -1994,7 +2002,7 @@ function renderSystemSetupSummary(items) {
           (item) => `
             <div class="summary-card">
               <p>${escapeHtml(item.label)}</p>
-              <strong>${escapeHtml(item.value ?? getCopy().unset)}</strong>
+              <strong>${escapeHtml(valueOrUnset(item.value))}</strong>
             </div>
           `,
         )
@@ -4030,8 +4038,8 @@ function getPlatformDrawerConfigs(dashboard, copy) {
       `,
       payload: (form) => ({
         ha_enabled: form.elements.namedItem("ha_enabled").checked,
-        primary_upstream: form.elements.namedItem("primary_upstream").value,
-        secondary_upstream: form.elements.namedItem("secondary_upstream").value,
+        primary_upstream: form.elements.namedItem("primary_upstream").value.trim(),
+        secondary_upstream: form.elements.namedItem("secondary_upstream").value.trim(),
         core_delivery_base_url: form.elements.namedItem("core_delivery_base_url").value,
         mutual_tls_required: form.elements.namedItem("mutual_tls_required").checked,
         fallback_to_hold_queue: form.elements.namedItem("fallback_to_hold_queue").checked,

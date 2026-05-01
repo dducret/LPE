@@ -74,7 +74,7 @@ class MockElement {
   }
 
   querySelector(selector) {
-    if (selector === 'button[type="submit"]') {
+    if (selector === 'button[type="submit"]' || selector === '[type="submit"]') {
       return this.submitButton ?? null;
     }
     return null;
@@ -110,11 +110,50 @@ class MockFormData {
   }
 }
 
+function decodeHtml(value) {
+  return String(value)
+    .replaceAll("&quot;", '"')
+    .replaceAll("&#39;", "'")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
+}
+
+function readAttribute(attributes, name) {
+  const match = new RegExp(`${name}\\s*=\\s*"([^"]*)"`, "i").exec(attributes);
+  return match ? decodeHtml(match[1]) : "";
+}
+
+function parseFormFields(markup) {
+  const fields = {};
+  for (const match of markup.matchAll(/<input\b([^>]*)>/gi)) {
+    const attributes = match[1];
+    const name = readAttribute(attributes, "name");
+    if (name) {
+      fields[name] = {
+        value: readAttribute(attributes, "value"),
+        checked: /\bchecked\b/i.test(attributes),
+      };
+    }
+  }
+  for (const match of markup.matchAll(/<textarea\b([^>]*)>([\s\S]*?)<\/textarea>/gi)) {
+    const name = readAttribute(match[1], "name");
+    if (name) {
+      fields[name] = { value: decodeHtml(match[2]), checked: false };
+    }
+  }
+  return fields;
+}
+
 function createForm(id, fields) {
   const form = new MockElement(id, "form");
   const fieldMap = {};
   for (const [name, config] of Object.entries(fields)) {
-    fieldMap[name] = { name, value: config.value ?? "", checked: Boolean(config.checked) };
+    const field = new MockElement(name, "input");
+    field.name = name;
+    field.value = config.value ?? "";
+    field.checked = Boolean(config.checked);
+    fieldMap[name] = field;
   }
   form.elements = {
     namedItem(name) {
@@ -381,7 +420,9 @@ function createFetchStub() {
     ],
   };
 
-  return async function fetchStub(url) {
+  const requests = [];
+  async function fetchStub(url, options = {}) {
+    requests.push({ url, options });
     const ok = (body) => ({
       ok: true,
       status: 200,
@@ -395,6 +436,10 @@ function createFetchStub() {
     });
 
     if (url === "/api/dashboard") return ok(dashboard);
+    if (url === "/api/relay" && options.method === "PUT") {
+      Object.assign(dashboard.relay, JSON.parse(options.body));
+      return ok(dashboard);
+    }
     if (String(url).startsWith("/api/quarantine")) return ok(quarantine);
     if (String(url).startsWith("/api/history?")) return ok(history);
     if (url === "/api/history/trace-1") return ok(traceDetails);
@@ -407,7 +452,9 @@ function createFetchStub() {
     if (url === "/api/host-logs/messages") return ok(messageLogs);
 
     throw new Error(`Unexpected fetch url: ${url}`);
-  };
+  }
+  fetchStub.requests = requests;
+  return fetchStub;
 }
 
 function createContext() {
@@ -473,6 +520,19 @@ function createContext() {
   ];
 
   const elements = Object.fromEntries(ids.map((id) => [id, new MockElement(id)]));
+  let drawerContentHtml = "";
+  Object.defineProperty(elements["drawer-content"], "innerHTML", {
+    get() {
+      return drawerContentHtml;
+    },
+    set(value) {
+      drawerContentHtml = String(value);
+      if (drawerContentHtml.includes('id="platform-form"')) {
+        elements["platform-form"] = createForm("platform-form", parseFormFields(drawerContentHtml));
+        elements["platform-form-errors"] = new MockElement("platform-form-errors");
+      }
+    },
+  });
   elements["login-form"] = createForm("login-form", {
     email: { value: "" },
     password: { value: "" },
@@ -540,13 +600,14 @@ function createContext() {
     disconnect() {}
   }
 
+  const fetchStub = createFetchStub();
   const window = {
     document,
     localStorage,
     navigator: { languages: ["en-US"], language: "en-US" },
     location: { hash: "" },
     history: { replaceState() {} },
-    fetch: createFetchStub(),
+    fetch: fetchStub,
     __intervals: [],
     requestAnimationFrame(callback) {
       callback();
@@ -579,11 +640,11 @@ function createContext() {
   };
 
   window.window = window;
-  return { context, elements, document, navButtons, pageViews };
+  return { context, elements, document, navButtons, pageViews, fetchStub };
 }
 
 async function main() {
-  const { context, elements, document, navButtons, pageViews } = createContext();
+  const { context, elements, document, navButtons, pageViews, fetchStub } = createContext();
   const i18nSource = fs.readFileSync(path.join(__dirname, "i18n.js"), "utf8");
   globalThis.window = context.window;
   globalThis.document = context.document;
@@ -685,6 +746,38 @@ async function main() {
   assert.match(elements["virus-filtering-status"].innerHTML, /Fail closed/);
   assert.match(elements["filtering-policy-status"].innerHTML, /SPF enforcement/);
   assert.match(elements["filtering-policy-status"].innerHTML, /Spam reject threshold/);
+  const relayEditTarget = new MockElement("", "button");
+  relayEditTarget.dataset.action = "platform-edit";
+  relayEditTarget.dataset.target = "relay";
+  document.body.listeners.click({
+    target: {
+      closest(selector) {
+        return selector === "[data-action]" ? relayEditTarget : null;
+      },
+    },
+  });
+  assert.match(elements["drawer-content"].innerHTML, /name="primary_upstream"/);
+  elements["platform-form"].elements.namedItem("primary_upstream").value = "   ";
+  elements["platform-form"].elements.namedItem("secondary_upstream").value = "";
+  await elements["platform-form"].listeners.submit({ preventDefault() {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  const relayRequest = fetchStub.requests.find((request) => request.url === "/api/relay");
+  assert.ok(relayRequest);
+  const relayPayload = JSON.parse(relayRequest.options.body);
+  assert.equal(relayPayload.primary_upstream, "");
+  assert.equal(relayPayload.secondary_upstream, "");
+  const mailRelayTabTarget = new MockElement("", "button");
+  mailRelayTabTarget.dataset.action = "system-setup-tab";
+  mailRelayTabTarget.dataset.tabLevel = "primary";
+  mailRelayTabTarget.dataset.tabId = "mailRelay";
+  document.body.listeners.click({
+    target: {
+      closest(selector) {
+        return selector === "[data-action]" ? mailRelayTabTarget : null;
+      },
+    },
+  });
+  assert.match(elements["platform-list"].innerHTML, /Unset/);
   assert.ok(context.window.__intervals.includes(60_000));
   assert.equal(navButtons[0].getAttribute("aria-current"), "true");
   assert.equal(pageViews[0].classList.contains("page-view-active"), true);
