@@ -1,5 +1,5 @@
-import { i18n, getCopy, translate } from './modules/i18n/index.js?v=20260501-system-diagnostic-pending';
-import { DEFAULT_PAGE_ID, activatePageView, pageIdFromHash, renderPageModules } from "./modules/pages/index.js?v=20260501-system-diagnostic-pending";
+import { i18n, getCopy, translate } from './modules/i18n/index.js?v=20260501-system-diagnostic-pending-copy';
+import { DEFAULT_PAGE_ID, activatePageView, pageIdFromHash, renderPageModules } from "./modules/pages/index.js?v=20260501-system-diagnostic-pending-copy";
 
 // DOM References
 const elements = {
@@ -4531,6 +4531,23 @@ function diagnosticToolTitle(tool, copy = getCopy()) {
   return copy.systemToolsTitle;
 }
 
+function diagnosticToolSummary(tool, copy = getCopy()) {
+  if (tool === "ping") {
+    return copy.systemToolPingSummary;
+  }
+  if (tool === "traceroute") {
+    return copy.systemToolTracerouteSummary;
+  }
+  if (tool === "dig") {
+    return copy.systemToolDigSummary;
+  }
+  return copy.systemToolsTitle;
+}
+
+function waitForNextFrame() {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
 function renderPendingDiagnosticDrawer(title, summary, opener = document.activeElement) {
   const copy = getCopy();
   renderDrawerContent(
@@ -4593,7 +4610,8 @@ async function runDiagnosticTool(tool, opener = document.activeElement) {
     return;
   }
   const copy = getCopy();
-  renderPendingDiagnosticDrawer(diagnosticToolTitle(tool, copy), target, opener);
+  renderPendingDiagnosticDrawer(diagnosticToolTitle(tool, copy), diagnosticToolSummary(tool, copy), opener);
+  await waitForNextFrame();
   const report = await postJson("/api/system-diagnostics/tools", { tool, target });
   renderDiagnosticDrawer(report, opener);
 }
