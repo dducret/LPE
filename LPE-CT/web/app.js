@@ -1,5 +1,5 @@
-import { i18n, getCopy, translate } from './modules/i18n/index.js?v=20260501-system-diagnostic-actions';
-import { DEFAULT_PAGE_ID, activatePageView, pageIdFromHash, renderPageModules } from "./modules/pages/index.js?v=20260501-system-diagnostic-actions";
+import { i18n, getCopy, translate } from './modules/i18n/index.js?v=20260501-health-check-output';
+import { DEFAULT_PAGE_ID, activatePageView, pageIdFromHash, renderPageModules } from "./modules/pages/index.js?v=20260501-health-check-output";
 
 // DOM References
 const elements = {
@@ -952,13 +952,14 @@ function currentReporting() {
 }
 
 function statusChipClass(value) {
-  if (value === true || value === "present" || value === "active" || value === "enabled" || value === "running" || value === "ok") {
+  const normalized = typeof value === "string" ? value.toLowerCase() : value;
+  if (normalized === true || normalized === "present" || normalized === "active" || normalized === "enabled" || normalized === "running" || normalized === "ok" || normalized === "ready") {
     return "status-chip ok";
   }
-  if (value === false || value === "missing" || value === "disabled" || value === "misconfigured" || value === "failed" || value === "not-started") {
+  if (normalized === false || normalized === "missing" || normalized === "disabled" || normalized === "misconfigured" || normalized === "failed" || normalized === "not-started" || normalized === "error") {
     return "status-chip danger";
   }
-  if (value === "unreadable" || value === "invalid-path" || value === "degraded" || value === "unknown" || value === "not-configured") {
+  if (normalized === "unreadable" || normalized === "invalid-path" || normalized === "degraded" || normalized === "unknown" || normalized === "not-configured" || normalized === "warn") {
     return "status-chip warn";
   }
   return "status-chip muted";
@@ -4525,6 +4526,12 @@ function renderDiagnosticOutput(report, copy = getCopy()) {
       return renderMailQueueOutput(metrics, copy);
     }
   }
+  if (report?.title === copy.systemHealthCheck || report?.title === "System Health Check") {
+    const readiness = parseJsonObject(report.output);
+    if (readiness && Array.isArray(readiness.checks)) {
+      return renderHealthCheckOutput(readiness, copy);
+    }
+  }
   return `<pre class="diagnostic-output">${escapeHtml(report?.output || copy.unset)}</pre>`;
 }
 
@@ -4565,6 +4572,92 @@ function renderMailQueueOutput(metrics, copy = getCopy()) {
             `,
           )
           .join("")}
+      </div>
+    </div>
+  `;
+}
+
+function healthCheckSummaryValue(value, copy = getCopy()) {
+  const normalized = value === undefined || value === null || value === "" ? copy.unset : value;
+  return escapeHtml(String(normalized));
+}
+
+function healthCheckMarkerClass(value) {
+  const normalized = String(value || "unknown").toLowerCase();
+  if (normalized === "ok" || normalized === "ready") {
+    return "ok";
+  }
+  if (normalized === "warn" || normalized === "degraded") {
+    return "warn";
+  }
+  if (normalized === "failed" || normalized === "danger" || normalized === "error") {
+    return "failed";
+  }
+  return "unknown";
+}
+
+function renderHealthCheckOutput(readiness, copy = getCopy()) {
+  const checks = Array.isArray(readiness.checks) ? readiness.checks : [];
+  const warningCount = Number(readiness.warnings);
+  const summaryRows = [
+    {
+      label: copy.healthCheckStatus,
+      html: `<span class="${statusChipClass(readiness.status)}">${escapeHtml(humanizeStatus(readiness.status))}</span>`,
+    },
+    {
+      label: copy.healthCheckWarnings,
+      html: `<strong>${escapeHtml(formatNumber(Number.isFinite(warningCount) ? warningCount : 0))}</strong>`,
+    },
+    {
+      label: copy.healthCheckService,
+      html: `<strong>${healthCheckSummaryValue(humanizeStatus(readiness.service), copy)}</strong>`,
+    },
+    {
+      label: copy.healthCheckNode,
+      html: `<strong>${healthCheckSummaryValue(readiness.node_name, copy)}</strong>`,
+    },
+    {
+      label: copy.healthCheckRole,
+      html: `<strong>${healthCheckSummaryValue(humanizeStatus(readiness.role), copy)}</strong>`,
+    },
+  ];
+
+  return `
+    <div class="health-check-output">
+      <div class="health-check-summary-grid">
+        ${summaryRows
+          .map(
+            (item) => `
+              <div class="health-check-summary-card">
+                <span class="health-check-summary-label">${escapeHtml(item.label)}</span>
+                ${item.html}
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+      <div class="health-check-list" aria-label="${escapeHtml(copy.healthCheckChecks)}">
+        ${checks.length
+          ? checks
+              .map((check) => {
+                const status = String(check?.status || "unknown").toLowerCase();
+                const critical = Boolean(check?.critical);
+                return `
+                  <article class="health-check-row">
+                    <span class="health-check-marker ${healthCheckMarkerClass(status)}" aria-hidden="true"></span>
+                    <div class="health-check-row-body">
+                      <strong>${escapeHtml(humanizeStatus(check?.name))}</strong>
+                      <p>${escapeHtml(check?.detail || copy.unset)}</p>
+                    </div>
+                    <div class="health-check-row-actions">
+                      <span class="${statusChipClass(status)}">${escapeHtml(humanizeStatus(status))}</span>
+                      <span class="health-check-impact ${critical ? "critical" : "advisory"}">${escapeHtml(critical ? copy.healthCheckCritical : copy.healthCheckAdvisory)}</span>
+                    </div>
+                  </article>
+                `;
+              })
+              .join("")
+          : `<p class="muted-copy">${escapeHtml(copy.unset)}</p>`}
       </div>
     </div>
   `;
