@@ -294,9 +294,9 @@ Alert when:
 - `LPE_CT_CORE_DELIVERY_BASE_URL`
   Base URL used for final inbound delivery toward `LPE`.
 - `LPE_CT_RELAY_PRIMARY`
-  Primary outbound relay target.
+  Optional primary upstream smart host. When unset, `LPE-CT` uses direct recipient-domain `MX` delivery.
 - `LPE_CT_RELAY_SECONDARY`
-  Secondary outbound relay target.
+  Optional secondary upstream smart host.
 - `LPE_INTEGRATION_SHARED_SECRET`
   Shared secret used for internal `LPE <-> LPE-CT` authentication.
 

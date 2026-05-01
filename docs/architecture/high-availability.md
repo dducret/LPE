@@ -288,7 +288,7 @@ Readiness is intentionally conservative:
 - optional HA role activation state from `LPE_CT_HA_ROLE_FILE`
 - presence of the local state file
 - presence of required spool directories
-- configured primary relay target
+- outbound delivery mode: direct recipient-domain `MX` by default, with optional upstream smart-host reachability when configured
 - configured core delivery base URL
 - optional reachability of the core `LPE` API
 

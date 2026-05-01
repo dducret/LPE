@@ -358,9 +358,10 @@ The `LPE-CT` installer prompts for:
 - SMTP submission bind address, default `0.0.0.0:465`
 - internal `LPE` delivery URL, default `http://127.0.0.1:8080`
 - integration shared secret, no default and at least `32` characters
-- whether high availability relay endpoints should be configured, default `no`
-- primary technical upstream `SMTP` relay endpoint, default `smtp://10.20.0.12:2525`, only when HA relay endpoints are enabled
-- secondary technical upstream `SMTP` relay endpoint, default `smtp://10.20.0.13:2525`, only when HA relay endpoints are enabled
+- whether `LPE-CT` HA role support should be enabled, default `no`
+- whether optional upstream smart-host relay endpoints should be configured, default `no`
+- primary upstream smart-host endpoint, no default, only when smart-host routing is explicitly enabled
+- secondary upstream smart-host endpoint, no default, only when smart-host routing is explicitly enabled
 - quarantine root path, default `/var/spool/lpe-ct`
 - local `PostgreSQL` host, default `127.0.0.1`
 - local `PostgreSQL` port, default `5432`
@@ -490,8 +491,6 @@ LPE_CT_SUBMISSION_TLS_CERT_PATH=/etc/lpe-ct/tls/fullchain.pem \
 LPE_CT_SUBMISSION_TLS_KEY_PATH=/etc/lpe-ct/tls/privkey.pem \
 LPE_CT_CORE_DELIVERY_BASE_URL=http://10.20.0.40:8080 \
 LPE_INTEGRATION_SHARED_SECRET='replace-with-a-secret-of-at-least-32-characters' \
-LPE_CT_RELAY_PRIMARY=smtp://10.20.0.12:2525 \
-LPE_CT_RELAY_SECONDARY=smtp://10.20.0.13:2525 \
 LPE_CT_LOCAL_DB_HOST=127.0.0.1 \
 LPE_CT_LOCAL_DB_PORT=5432 \
 LPE_CT_LOCAL_DB_NAME=lpe_ct \
@@ -503,9 +502,11 @@ LPE_CT_ENABLE_SERVICES=yes \
 ./install-lpe-ct.sh --non-interactive
 ```
 
-The `2525` values above are optional technical upstream relay targets used by
-`LPE-CT` after it accepts an outbound handoff. They are not the canonical
-`LPE <-> LPE-CT` bridge. Final delivery into `LPE` uses
+`LPE_CT_RELAY_PRIMARY` and `LPE_CT_RELAY_SECONDARY` are intentionally omitted
+above. They are optional upstream smart-host targets only; by default `LPE-CT`
+is the outbound gateway and delivers through recipient-domain `MX` routing.
+Port `2525` is not the canonical `LPE <-> LPE-CT` bridge. Final delivery into
+`LPE` uses
 `${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/inbound-deliveries`; outbound
 handoff from `LPE` uses
 `${LPE_CT_API_BASE_URL}/api/v1/integration/outbound-messages`.

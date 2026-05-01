@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{types::Json, PgPool, Row};
 use std::{
-    collections::{hash_map::DefaultHasher, HashMap, HashSet},
+    collections::{hash_map::DefaultHasher, BTreeMap, HashMap, HashSet},
     env,
     fs::{self, File},
     hash::{Hash, Hasher},
@@ -4156,6 +4156,10 @@ async fn relay_message(
         }
     }
 
+    if targets.is_empty() {
+        return relay_message_direct_mx(message, route, attempt_count).await;
+    }
+
     let mut last_error = None;
     for target in targets {
         match relay_message_to_target(&target, message, route, attempt_count).await {
@@ -4165,7 +4169,7 @@ async fn relay_message(
     }
 
     let (target, error) =
-        last_error.unwrap_or_else(|| ("".to_string(), anyhow!("no relay target configured")));
+        last_error.unwrap_or_else(|| ("".to_string(), anyhow!("no SMTP target attempted")));
     let detail = error.to_string();
     let status = if is_permanent_relay_error(&detail) {
         TransportDeliveryStatus::Failed
@@ -4226,11 +4230,220 @@ async fn relay_message(
     }
 }
 
+async fn relay_message_direct_mx(
+    message: &QueuedMessage,
+    route: &TransportRouteDecision,
+    attempt_count: u32,
+) -> OutboundExecution {
+    let resolver = match SystemDnsResolver::new() {
+        Ok(resolver) => resolver,
+        Err(error) => {
+            return direct_mx_failure(
+                route,
+                attempt_count,
+                format!("unable to initialize DNS resolver for direct MX delivery: {error}"),
+                None,
+                false,
+            );
+        }
+    };
+
+    let mut recipients_by_domain = BTreeMap::<String, Vec<String>>::new();
+    for recipient in &message.rcpt_to {
+        let Some(domain) = domain_part(recipient) else {
+            return direct_mx_failure(
+                route,
+                attempt_count,
+                format!("recipient address has no domain: {recipient}"),
+                None,
+                true,
+            );
+        };
+        recipients_by_domain
+            .entry(domain)
+            .or_default()
+            .push(recipient.clone());
+    }
+
+    let mut relayed = Vec::new();
+    let mut last_execution = None;
+    for (domain, recipients) in recipients_by_domain {
+        let targets = match direct_mx_targets(&resolver, &domain).await {
+            Ok(targets) => targets,
+            Err(error) => {
+                let detail = error.to_string();
+                return direct_mx_failure(
+                    route,
+                    attempt_count,
+                    detail.clone(),
+                    Some(domain),
+                    is_permanent_direct_mx_error(&detail),
+                );
+            }
+        };
+
+        let mut last_error = None;
+        for target in targets {
+            match relay_message_to_target_for_recipients(
+                &target,
+                message,
+                route,
+                attempt_count,
+                &recipients,
+            )
+            .await
+            {
+                Ok(execution) if execution.status == TransportDeliveryStatus::Relayed => {
+                    relayed.push(format!("{domain} via {target}"));
+                    last_execution = Some(execution);
+                    last_error = None;
+                    break;
+                }
+                Ok(execution) => return execution,
+                Err(error) => last_error = Some((target, error)),
+            }
+        }
+
+        if let Some((target, error)) = last_error {
+            return direct_mx_failure(
+                route,
+                attempt_count,
+                error.to_string(),
+                Some(format!("{domain} via {target}")),
+                false,
+            );
+        }
+    }
+
+    let Some(mut execution) = last_execution else {
+        return direct_mx_failure(
+            route,
+            attempt_count,
+            "no outbound recipients available for direct MX delivery".to_string(),
+            None,
+            true,
+        );
+    };
+
+    if relayed.len() > 1 {
+        execution.detail = Some(format!(
+            "direct MX delivery completed for {} recipient domains",
+            relayed.len()
+        ));
+        execution.remote_message_ref = Some(relayed.join("; "));
+        execution.route = Some(TransportRouteDecision {
+            rule_id: route.rule_id.clone(),
+            relay_target: Some("direct-mx".to_string()),
+            queue: "sent".to_string(),
+        });
+    }
+    execution
+}
+
+async fn direct_mx_targets(resolver: &SystemDnsResolver, domain: &str) -> Result<Vec<String>> {
+    match resolver.query_mx(domain).await {
+        Ok(mut records) if !records.is_empty() => {
+            records.sort_by_key(|record| record.preference);
+            let mut targets = Vec::new();
+            for record in records {
+                let exchange = record.exchange.trim().trim_end_matches('.');
+                if exchange.is_empty() || exchange == "." {
+                    anyhow::bail!(
+                        "recipient domain {domain} publishes a null MX and does not accept mail"
+                    );
+                }
+                targets.push(format!("{exchange}:25"));
+            }
+            Ok(targets)
+        }
+        Ok(_) | Err(DnsError::NoRecords) => Ok(vec![format!("{domain}:25")]),
+        Err(DnsError::NxDomain) => anyhow::bail!("recipient domain {domain} does not exist"),
+        Err(DnsError::TempFail) => {
+            anyhow::bail!("temporary DNS failure while resolving MX for {domain}")
+        }
+    }
+}
+
+fn direct_mx_failure(
+    route: &TransportRouteDecision,
+    attempt_count: u32,
+    detail: String,
+    remote_host: Option<String>,
+    permanent: bool,
+) -> OutboundExecution {
+    let status = if permanent {
+        TransportDeliveryStatus::Bounced
+    } else {
+        TransportDeliveryStatus::Deferred
+    };
+    OutboundExecution {
+        status: status.clone(),
+        detail: Some(detail.clone()),
+        remote_message_ref: None,
+        retry: if status == TransportDeliveryStatus::Deferred {
+            Some(TransportRetryAdvice {
+                retry_after_seconds: retry_after_seconds(300, attempt_count),
+                policy: "direct-mx".to_string(),
+                reason: Some(detail.clone()),
+            })
+        } else {
+            None
+        },
+        dsn: Some(TransportDsnReport {
+            action: if status == TransportDeliveryStatus::Bounced {
+                "failed".to_string()
+            } else {
+                "delayed".to_string()
+            },
+            status: if status == TransportDeliveryStatus::Bounced {
+                "5.1.2".to_string()
+            } else {
+                "4.4.1".to_string()
+            },
+            diagnostic_code: Some(format!("smtp; {detail}")),
+            remote_mta: remote_host.clone(),
+        }),
+        technical: Some(TransportTechnicalStatus {
+            phase: "mx-lookup".to_string(),
+            smtp_code: None,
+            enhanced_code: None,
+            remote_host,
+            detail: Some(detail),
+        }),
+        route: Some(TransportRouteDecision {
+            rule_id: route.rule_id.clone(),
+            relay_target: Some("direct-mx".to_string()),
+            queue: default_queue_for_status(&status).to_string(),
+        }),
+        throttle: None,
+    }
+}
+
+fn is_permanent_direct_mx_error(detail: &str) -> bool {
+    let lower = detail.to_ascii_lowercase();
+    lower.contains("does not exist")
+        || lower.contains("null mx")
+        || lower.contains("does not accept mail")
+        || lower.contains("recipient address has no domain")
+        || lower.contains("no outbound recipients")
+}
+
 async fn relay_message_to_target(
     target: &str,
     message: &QueuedMessage,
     route: &TransportRouteDecision,
     attempt_count: u32,
+) -> Result<OutboundExecution> {
+    relay_message_to_target_for_recipients(target, message, route, attempt_count, &message.rcpt_to)
+        .await
+}
+
+async fn relay_message_to_target_for_recipients(
+    target: &str,
+    message: &QueuedMessage,
+    route: &TransportRouteDecision,
+    attempt_count: u32,
+    recipients: &[String],
 ) -> Result<OutboundExecution> {
     let address = normalize_smtp_target(target);
     let stream = TcpStream::connect(&address)
@@ -4248,7 +4461,7 @@ async fn relay_message_to_target(
         250,
     )
     .await?;
-    for recipient in &message.rcpt_to {
+    for recipient in recipients {
         let reply = smtp_command_reply(
             &mut reader,
             &mut writer,
@@ -5798,8 +6011,7 @@ fn encode_quoted_printable(value: &str) -> String {
 
 fn is_permanent_relay_error(detail: &str) -> bool {
     let lower = detail.to_ascii_lowercase();
-    lower.contains("no relay target configured")
-        || lower.contains("mutual tls relay is configured but not implemented")
+    lower.contains("mutual tls relay is configured but not implemented")
 }
 
 fn parse_enhanced_status(detail: &str) -> Option<String> {
@@ -5847,12 +6059,12 @@ mod tests {
         initialize_spool, load_antivirus_providers, load_bayespam_corpus, load_reputation_score,
         load_trace_details, parse_antivirus_output, parse_peer_ip, persist_message,
         process_outbound_handoff, receive_message, receive_message_with_validator, release_trace,
-        retry_after_seconds, retry_trace, score_bayespam, smtp_starttls_acceptor_for_paths,
-        spf_disposition, stable_key_id, summarize_dkim, summarize_dmarc, summarize_spf,
-        train_bayespam, unix_now, update_reputation, write_smtp, AcceptedDomainConfig,
-        AntivirusProviderConfig, AntivirusProviderDecision, AuthSummary, AuthenticationAssessment,
-        BayesLabel, DecisionTraceEntry, DkimDisposition, FilterAction, GreylistEntry,
-        OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig,
+        resolve_outbound_route, retry_after_seconds, retry_trace, score_bayespam,
+        smtp_starttls_acceptor_for_paths, spf_disposition, stable_key_id, summarize_dkim,
+        summarize_dmarc, summarize_spf, train_bayespam, unix_now, update_reputation, write_smtp,
+        AcceptedDomainConfig, AntivirusProviderConfig, AntivirusProviderDecision, AuthSummary,
+        AuthenticationAssessment, BayesLabel, DecisionTraceEntry, DkimDisposition, FilterAction,
+        GreylistEntry, OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig,
         SmtpCommandOutcome, SmtpTransaction, SpfDisposition, TransportDsnReport,
         TransportRouteDecision, TransportTechnicalStatus, TransportThrottleStatus,
     };
@@ -7230,6 +7442,16 @@ pzqAuzRp69VoxDpO6hdx/Qc=
                 .and_then(|route| route.relay_target.as_deref()),
             Some(smtp_address.as_str())
         );
+    }
+
+    #[test]
+    fn outbound_route_without_smart_host_uses_direct_mx_default() {
+        let config = runtime_config(String::new(), "http://127.0.0.1:9".to_string());
+        let route = resolve_outbound_route(&config, &outbound_request("Direct MX"));
+
+        assert_eq!(route.rule_id, None);
+        assert_eq!(route.relay_target, None);
+        assert_eq!(route.queue, "outbound");
     }
 
     #[tokio::test]

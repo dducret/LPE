@@ -183,8 +183,8 @@ On the `LPE` side:
 On the `LPE-CT` side:
 
 - `LPE_CT_CORE_DELIVERY_BASE_URL`
-- `LPE_CT_RELAY_PRIMARY`
-- `LPE_CT_RELAY_SECONDARY`
+- `LPE_CT_RELAY_PRIMARY` optional upstream smart host; empty means direct recipient-domain `MX` delivery
+- `LPE_CT_RELAY_SECONDARY` optional backup upstream smart host
 - `LPE_CT_PUBLIC_TLS_CERT_PATH`
 - `LPE_CT_PUBLIC_TLS_KEY_PATH`
 - `LPE_CT_SUBMISSION_BIND_ADDRESS`

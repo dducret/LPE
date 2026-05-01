@@ -803,13 +803,6 @@ async fn health_ready(State(state): State<AppState>) -> Result<Json<ReadinessRes
     checks.push(check_spool_layout(&state.spool_dir));
     checks.push(check_local_data_store_policy(&snapshot.local_data_stores));
     checks.push(check_non_empty_value(
-        "primary-relay",
-        true,
-        &snapshot.relay.primary_upstream,
-        "primary relay is configured",
-        "primary relay is missing",
-    ));
-    checks.push(check_non_empty_value(
         "core-delivery-base-url",
         true,
         &snapshot.relay.core_delivery_base_url,
@@ -833,10 +826,10 @@ async fn health_ready(State(state): State<AppState>) -> Result<Json<ReadinessRes
     );
     checks.push(
         check_optional_tcp_dependency(
-            "relay-reachability",
+            "smart-host-reachability",
             &snapshot.relay.primary_upstream,
-            "primary relay target accepted a TCP connection",
-            "primary relay target is unreachable; outbound spool will grow until recovery",
+            "configured upstream smart host accepted a TCP connection",
+            "configured upstream smart host is unreachable; direct MX delivery remains available when no smart host route is selected",
         )
         .await,
     );
@@ -3019,7 +3012,9 @@ fn default_state() -> DashboardState {
     } else {
         vec![RoutingRule {
             id: "default-primary".to_string(),
-            description: "Default outbound route through the configured primary relay".to_string(),
+            description:
+                "Optional outbound smart-host route through the configured primary smart host"
+                    .to_string(),
             sender_domain: None,
             recipient_domain: None,
             relay_target: primary_upstream.clone(),
@@ -3644,7 +3639,11 @@ async fn check_optional_tcp_dependency(
 ) -> ReadinessCheck {
     let normalized = target.trim();
     if normalized.is_empty() {
-        return readiness_warn(name, "no relay target configured for connectivity probing");
+        return readiness_ok(
+            name,
+            false,
+            "no upstream smart host configured; direct MX delivery is the default outbound mode",
+        );
     }
     let address = smtp_target_socket_address(normalized);
     match tokio::time::timeout(
