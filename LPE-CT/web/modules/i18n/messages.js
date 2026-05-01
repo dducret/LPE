@@ -169,6 +169,7 @@ export const baseMessages = {
   systemProcessList: "Process List",
   systemNetworkConnections: "Network Connections",
   systemRoutingTable: "Routing Table",
+  showDiagnosticStatus: "Ready to show status",
   systemSupportConnect: "Establish Secure Connection to LPE Support",
   systemHealthCheck: "System Health Check",
   systemToolsTitle: "Tools",

@@ -1822,6 +1822,69 @@ select.invalid {
   font-weight: 400;
 }
 
+.system-report-table th {
+  width: 32%;
+}
+
+.system-report-table td {
+  vertical-align: middle;
+}
+
+.system-report-table-actions {
+  table-layout: fixed;
+}
+
+.system-report-table-actions th {
+  width: 32%;
+}
+
+.system-report-table-actions td:last-child {
+  width: 10rem;
+}
+
+.system-report-action-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.system-report-action-cell .secondary-button {
+  width: auto;
+}
+
+.resource-meter {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.resource-meter-track {
+  position: relative;
+  display: block;
+  height: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(181, 197, 213, 0.72);
+  border-radius: 999px;
+  background: rgba(226, 233, 241, 0.92);
+}
+
+.resource-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--success) 0%, var(--accent) 100%);
+}
+
+.resource-meter-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 8.5rem;
+  color: var(--text-soft);
+}
+
 .system-reporting-page {
   display: grid;
   gap: 18px;
@@ -1859,6 +1922,7 @@ select.invalid {
 }
 
 .system-tool-row input,
+.system-report-table input,
 .system-file-input {
   width: 100%;
   min-width: 0;

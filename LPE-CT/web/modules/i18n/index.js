@@ -1,4 +1,4 @@
-import { LOCALE_KEY, baseMessages, localeLabels, localizedMessages, supportedLocales } from "./messages.js?v=20260501-system-information";
+import { LOCALE_KEY, baseMessages, localeLabels, localizedMessages, supportedLocales } from "./messages.js?v=20260501-system-information-layout";
 
 const { createI18n, defineLocaleCatalog } = window.LpeCtI18n;
 

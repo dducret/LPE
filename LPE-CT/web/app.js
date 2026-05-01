@@ -1,5 +1,5 @@
-import { i18n, getCopy, translate } from './modules/i18n/index.js?v=20260501-system-information';
-import { DEFAULT_PAGE_ID, activatePageView, pageIdFromHash, renderPageModules } from "./modules/pages/index.js?v=20260501-system-information";
+import { i18n, getCopy, translate } from './modules/i18n/index.js?v=20260501-system-information-layout';
+import { DEFAULT_PAGE_ID, activatePageView, pageIdFromHash, renderPageModules } from "./modules/pages/index.js?v=20260501-system-information-layout";
 
 // DOM References
 const elements = {
@@ -1709,19 +1709,53 @@ function renderDigestReporting() {
   containers.digestReports.innerHTML = renderDigestReportsList(reports);
 }
 
-function formatSystemResource(percentValue, totalBytes) {
-  const percent = formatPercent(percentValue);
-  const total = formatCompactBytes(totalBytes);
-  if (percent === getCopy().unset && total === getCopy().unset) {
+function formatGigabytes(value) {
+  if (value === undefined || value === null || Number.isNaN(Number(value))) {
     return getCopy().unset;
   }
-  if (total === getCopy().unset) {
-    return percent;
-  }
-  if (percent === getCopy().unset) {
-    return total;
-  }
-  return `${percent} ${percent} of ${total}`;
+  const gib = Math.max(0, Number(value)) / 1024 / 1024 / 1024;
+  return `${new Intl.NumberFormat(i18n.getLocale(), { maximumFractionDigits: gib >= 10 ? 0 : 1 }).format(gib)} GB`;
+}
+
+function renderResourceGauge(percentValue, totalBytes) {
+  const percentNumber = Number(percentValue);
+  const hasPercent = !Number.isNaN(percentNumber);
+  const boundedPercent = hasPercent ? Math.max(0, Math.min(100, percentNumber)) : 0;
+  const percent = hasPercent ? formatPercent(percentNumber) : getCopy().unset;
+  const total = formatGigabytes(totalBytes);
+  return `
+    <div class="resource-meter" aria-label="${escapeHtml(`${percent} used of ${total}`)}">
+      <span class="resource-meter-track" aria-hidden="true">
+        <span class="resource-meter-fill" style="width: ${escapeHtml(String(boundedPercent))}%"></span>
+      </span>
+      <span class="resource-meter-meta">
+        <strong>${escapeHtml(percent)}</strong>
+        <small>${escapeHtml(total)}</small>
+      </span>
+    </div>
+  `;
+}
+
+function renderSystemTable(rows, { actionColumn = false } = {}) {
+  return `
+    <article class="dashboard-detail-table-card">
+      <table class="dashboard-detail-table system-report-table${actionColumn ? " system-report-table-actions" : ""}">
+        <tbody>
+          ${rows
+            .map(
+              (row) => `
+                <tr>
+                  <th scope="row">${escapeHtml(row.label)}</th>
+                  <td>${row.html ?? `<strong>${escapeHtml(row.value)}</strong>`}</td>
+                  ${actionColumn ? `<td class="system-report-action-cell">${row.action ?? ""}</td>` : ""}
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </article>
+  `;
 }
 
 function renderSystemInformation() {
@@ -1741,11 +1775,11 @@ function renderSystemInformation() {
     { label: copy.systemProcessorType, value: system.processor_type || system.processor_model || copy.unset },
     {
       label: copy.systemMemory,
-      value: formatSystemResource(system.memory_used_percent ?? system.memory?.used_percent, system.memory_total_bytes ?? system.memory?.total_bytes),
+      html: renderResourceGauge(system.memory_used_percent ?? system.memory?.used_percent, system.memory_total_bytes ?? system.memory?.total_bytes),
     },
     {
       label: copy.systemMailLogDiskSpace,
-      value: formatSystemResource(system.disk_used_percent ?? system.disk?.used_percent, system.disk_total_bytes ?? system.disk?.total_bytes),
+      html: renderResourceGauge(system.disk_used_percent ?? system.disk?.used_percent, system.disk_total_bytes ?? system.disk?.total_bytes),
     },
     { label: copy.systemUptime, value: formatReportingUptime(system.uptime_seconds) },
     {
@@ -1777,99 +1811,70 @@ function renderSystemInformation() {
       <div class="system-report-section-head">
         <h4>${escapeHtml(copy.reportingTabSystemInformation)}</h4>
       </div>
-      ${renderDashboardDetailTable(systemRows)}
+      ${renderSystemTable(systemRows)}
     </section>
     <section class="system-report-section">
       <div class="system-report-section-head">
         <h4>${escapeHtml(copy.systemServicesTitle)}</h4>
       </div>
-      <div class="management-list-stack">
-        ${services.map((service) => renderServiceRow(service, copy)).join("")}
-      </div>
+      ${renderSystemTable(services.map((service) => serviceTableRow(service, copy)), { actionColumn: true })}
     </section>
     <section class="system-report-section">
       <div class="system-report-section-head">
         <h4>${escapeHtml(copy.systemDiagnosticsTitle)}</h4>
       </div>
-      <div class="management-list-stack">
-        ${diagnostics.map((diagnostic) => renderDiagnosticRow(diagnostic, copy)).join("")}
-        ${renderSimpleActionRow(copy.systemSupportConnect, copy.connect, "support-connect")}
-        ${renderSimpleActionRow(copy.systemHealthCheck, copy.run, "health-check-run")}
-      </div>
+      ${renderSystemTable([
+        ...diagnostics.map((diagnostic) => diagnosticTableRow(diagnostic, copy)),
+        actionTableRow(copy.systemSupportConnect, "", copy.connect, "support-connect"),
+        actionTableRow(copy.systemHealthCheck, "", copy.run, "health-check-run"),
+      ], { actionColumn: true })}
     </section>
     <section class="system-report-section">
       <div class="system-report-section-head">
         <h4>${escapeHtml(copy.systemToolsTitle)}</h4>
       </div>
-      <div class="management-list-stack">
-        ${tools.map((tool) => renderToolRow(tool, copy)).join("")}
-        ${renderSimpleActionRow(copy.systemFlushMailQueue, copy.flush, "flush-mail-queue")}
-      </div>
+      ${renderSystemTable([
+        ...tools.map((tool) => toolTableRow(tool, copy)),
+        actionTableRow(copy.systemFlushMailQueue, "", copy.flush, "flush-mail-queue"),
+      ], { actionColumn: true })}
     </section>
   `;
 }
 
-function renderServiceRow(service, copy) {
+function serviceTableRow(service, copy) {
   const status = humanizeStatus(service.status);
   const action = service.action === "stop" ? "stop" : "start";
   const actionLabel = action === "stop" ? copy.stop : copy.start;
-  return `
-    <article class="record-row system-report-row">
-      <div class="record-head">
-        <div>
-          <h4 class="record-title">${escapeHtml(service.name)}</h4>
-          <div class="record-copy">${escapeHtml(service.unit || copy.unset)}</div>
-        </div>
-        <span class="${statusChipClass(service.status)}">${escapeHtml(status)}</span>
-      </div>
-      <div class="record-actions">
-        <button class="secondary-button compact-button" type="button" data-action="system-service-action" data-service-id="${escapeHtml(service.id)}" data-service-action="${escapeHtml(action)}">${escapeHtml(actionLabel)}</button>
-      </div>
-    </article>
-  `;
+  const label = service.id === "antivirus" ? `${copy.serviceAntivirus} Takeri` : copy.serviceLpeCt;
+  return {
+    label,
+    html: `<span class="${statusChipClass(service.status)}">${escapeHtml(status)}</span>`,
+    action: `<button class="secondary-button compact-button" type="button" data-action="system-service-action" data-service-id="${escapeHtml(service.id)}" data-service-action="${escapeHtml(action)}">${escapeHtml(actionLabel)}</button>`,
+  };
 }
 
-function renderDiagnosticRow(diagnostic, copy) {
-  return `
-    <article class="record-row system-report-row">
-      <div class="record-head">
-        <div>
-          <h4 class="record-title">${escapeHtml(diagnostic.label)}</h4>
-          ${diagnostic.upload ? `<input id="spam-test-file" class="system-file-input" type="file" />` : ""}
-        </div>
-      </div>
-      <div class="record-actions">
-        <button class="secondary-button compact-button" type="button" data-action="${diagnostic.upload ? "spam-test-show" : "diagnostic-show"}" data-diagnostic-kind="${escapeHtml(diagnostic.kind)}">${escapeHtml(copy.show)}</button>
-      </div>
-    </article>
-  `;
+function diagnosticTableRow(diagnostic, copy) {
+  return {
+    label: diagnostic.label,
+    html: diagnostic.upload ? `<input id="spam-test-file" class="system-file-input" type="file" />` : `<span class="record-copy">${escapeHtml(copy.showDiagnosticStatus)}</span>`,
+    action: `<button class="secondary-button compact-button" type="button" data-action="${diagnostic.upload ? "spam-test-show" : "diagnostic-show"}" data-diagnostic-kind="${escapeHtml(diagnostic.kind)}">${escapeHtml(copy.show)}</button>`,
+  };
 }
 
-function renderSimpleActionRow(label, buttonLabel, action) {
-  return `
-    <article class="record-row system-report-row">
-      <div class="record-head">
-        <h4 class="record-title">${escapeHtml(label)}</h4>
-      </div>
-      <div class="record-actions">
-        <button class="secondary-button compact-button" type="button" data-action="${escapeHtml(action)}">${escapeHtml(buttonLabel)}</button>
-      </div>
-    </article>
-  `;
+function actionTableRow(label, value, buttonLabel, action) {
+  return {
+    label,
+    html: value ? `<strong>${escapeHtml(value)}</strong>` : `<span class="record-copy">&nbsp;</span>`,
+    action: `<button class="secondary-button compact-button" type="button" data-action="${escapeHtml(action)}">${escapeHtml(buttonLabel)}</button>`,
+  };
 }
 
-function renderToolRow(tool, copy) {
-  return `
-    <article class="record-row system-tool-row">
-      <label>
-        <span>${escapeHtml(tool.label)}</span>
-        <input id="diagnostic-tool-${escapeHtml(tool.tool)}" type="text" autocomplete="off" placeholder="${escapeHtml(tool.placeholder)}" />
-      </label>
-      <div class="record-actions">
-        <button class="secondary-button compact-button" type="button" data-action="diagnostic-tool-run" data-diagnostic-tool="${escapeHtml(tool.tool)}">${escapeHtml(copy.run)}</button>
-      </div>
-    </article>
-  `;
+function toolTableRow(tool, copy) {
+  return {
+    label: tool.label,
+    html: `<input id="diagnostic-tool-${escapeHtml(tool.tool)}" type="text" autocomplete="off" placeholder="${escapeHtml(tool.placeholder)}" />`,
+    action: `<button class="secondary-button compact-button" type="button" data-action="diagnostic-tool-run" data-diagnostic-tool="${escapeHtml(tool.tool)}">${escapeHtml(copy.run)}</button>`,
+  };
 }
 
 function systemSetupEmptyState(title, summary) {

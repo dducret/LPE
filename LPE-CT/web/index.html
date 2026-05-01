@@ -393,18 +393,35 @@
             </section>
             <section class="system-report-section">
               <div class="system-report-section-head"><h4 data-i18n="systemServicesTitle">Services</h4></div>
-              <div class="management-list-stack">
-                <article class="record-row system-report-row"><div class="record-head"><h4 class="record-title" data-i18n="serviceAntivirus">AntiVirus</h4><span class="status-chip muted" data-i18n="loadingRecords">Loading records...</span></div></article>
-                <article class="record-row system-report-row"><div class="record-head"><h4 class="record-title" data-i18n="serviceLpeCt">LPE CT</h4><span class="status-chip muted" data-i18n="loadingRecords">Loading records...</span></div></article>
-              </div>
+              <article class="dashboard-detail-table-card">
+                <table class="dashboard-detail-table system-report-table system-report-table-actions">
+                  <tbody>
+                    <tr><th scope="row" data-i18n="serviceAntivirus">AntiVirus</th><td><span class="status-chip muted" data-i18n="loadingRecords">Loading records...</span></td><td class="system-report-action-cell"><button class="secondary-button compact-button" type="button" disabled data-i18n="start">Start</button></td></tr>
+                    <tr><th scope="row" data-i18n="serviceLpeCt">LPE CT</th><td><span class="status-chip muted" data-i18n="loadingRecords">Loading records...</span></td><td class="system-report-action-cell"><button class="secondary-button compact-button" type="button" disabled data-i18n="start">Start</button></td></tr>
+                  </tbody>
+                </table>
+              </article>
             </section>
             <section class="system-report-section">
               <div class="system-report-section-head"><h4 data-i18n="systemDiagnosticsTitle">System Diagnostics</h4></div>
-              <div class="management-list-stack"><article class="loading-row" data-i18n="loadingRecords">Loading records...</article></div>
+              <article class="dashboard-detail-table-card">
+                <table class="dashboard-detail-table system-report-table system-report-table-actions">
+                  <tbody>
+                    <tr><th scope="row" data-i18n="systemSpamTest">Spam Test</th><td><strong data-i18n="loadingRecords">Loading records...</strong></td><td class="system-report-action-cell"><button class="secondary-button compact-button" type="button" disabled data-i18n="show">Show</button></td></tr>
+                    <tr><th scope="row" data-i18n="systemMailQueue">Mail Queue</th><td><strong data-i18n="loadingRecords">Loading records...</strong></td><td class="system-report-action-cell"><button class="secondary-button compact-button" type="button" disabled data-i18n="show">Show</button></td></tr>
+                  </tbody>
+                </table>
+              </article>
             </section>
             <section class="system-report-section">
               <div class="system-report-section-head"><h4 data-i18n="systemToolsTitle">Tools</h4></div>
-              <div class="management-list-stack"><article class="loading-row" data-i18n="loadingRecords">Loading records...</article></div>
+              <article class="dashboard-detail-table-card">
+                <table class="dashboard-detail-table system-report-table system-report-table-actions">
+                  <tbody>
+                    <tr><th scope="row" data-i18n="systemToolPing">Ping</th><td><strong data-i18n="loadingRecords">Loading records...</strong></td><td class="system-report-action-cell"><button class="secondary-button compact-button" type="button" disabled data-i18n="run">Run</button></td></tr>
+                  </tbody>
+                </table>
+              </article>
             </section>
           </div>
         </section>
@@ -666,7 +683,7 @@
       </aside>
     </div>
 
-    <script src="./i18n.js?v=20260501-system-information" defer></script>
-    <script type="module" src="./app.js?v=20260501-system-information"></script>
+    <script src="./i18n.js?v=20260501-system-information-layout" defer></script>
+    <script type="module" src="./app.js?v=20260501-system-information-layout"></script>
   </body>
 </html>
