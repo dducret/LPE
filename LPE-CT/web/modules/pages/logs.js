@@ -5,5 +5,5 @@ export const logsPage = createPageModule({
   labelKey: "navLogs",
   captionKey: "navLogsCaption",
   sectionIds: ["audit-section"],
-  rendererKeys: ["audit"],
+  rendererKeys: ["mailLog", "audit", "messageLog", "emailAlertLog"],
 });

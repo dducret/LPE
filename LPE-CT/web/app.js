@@ -88,7 +88,10 @@ const containers = {
   digestOverrides: document.getElementById("digest-overrides-list"),
   digestReports: document.getElementById("digest-report-list"),
   platform: document.getElementById("platform-list"),
+  mailLog: document.getElementById("mail-log"),
   audit: document.getElementById("audit-log"),
+  messageLog: document.getElementById("message-log"),
+  emailAlertLog: document.getElementById("email-alert-log"),
 };
 
 const AUTH_TOKEN_KEY = 'lpeCtAdminToken';
@@ -96,6 +99,12 @@ const LAST_ADMIN_EMAIL_KEY = 'lpeCtAdminLastEmail';
 const DASHBOARD_REFRESH_INTERVAL_MS = 60_000;
 const DEFAULT_HISTORY_COLUMN_WIDTHS = [172, 176, 144, 132, 220, 220, 112];
 const MIN_HISTORY_COLUMN_WIDTH = 88;
+const DEFAULT_LOG_COLUMN_WIDTHS = {
+  mail: [172, 176, 144, 132, 220, 220, 112],
+  interface: [172, 180, 220, 360],
+  messages: [172, 132, 180, 360],
+  emailAlerts: [172, 180, 132, 360],
+};
 
 // Application State
 const state = {
@@ -136,6 +145,15 @@ const state = {
     direction: "desc",
   },
   historyColumnWidths: [...DEFAULT_HISTORY_COLUMN_WIDTHS],
+  logTables: Object.fromEntries(
+    Object.entries(DEFAULT_LOG_COLUMN_WIDTHS).map(([key, widths]) => [
+      key,
+      {
+        sort: { key: "date", direction: "desc" },
+        columnWidths: [...widths],
+      },
+    ]),
+  ),
   drawer: {
     open: false,
     previousFocus: null,
@@ -353,6 +371,109 @@ function setHistorySort(key) {
     direction: state.historySort.key === key && state.historySort.direction === "asc" ? "desc" : "asc",
   };
   renderHistory();
+}
+
+function logTableState(tableId) {
+  return state.logTables[tableId] ?? state.logTables.interface;
+}
+
+function logGridTemplate(tableId) {
+  const table = logTableState(tableId);
+  return table.columnWidths.map((width) => `${Math.max(MIN_HISTORY_COLUMN_WIDTH, Number(width) || MIN_HISTORY_COLUMN_WIDTH)}px`).join(" ");
+}
+
+function sortLogItems(tableId, items, columns) {
+  const table = logTableState(tableId);
+  const column = columns.find((candidate) => candidate.key === table.sort.key) ?? columns[0];
+  const direction = table.sort.direction === "asc" ? 1 : -1;
+  return [...items].sort((left, right) => {
+    const leftValue = column.sortValue(left);
+    const rightValue = column.sortValue(right);
+    if (typeof leftValue === "number" && typeof rightValue === "number") {
+      return (leftValue - rightValue) * direction;
+    }
+    return String(leftValue).localeCompare(String(rightValue), i18n.getLocale(), { numeric: true, sensitivity: "base" }) * direction;
+  });
+}
+
+function logSortIndicator(tableId, key) {
+  const table = logTableState(tableId);
+  if (table.sort.key !== key) {
+    return "";
+  }
+  return table.sort.direction === "asc" ? " ▲" : " ▼";
+}
+
+function setLogSort(tableId, key) {
+  const table = logTableState(tableId);
+  table.sort = {
+    key,
+    direction: table.sort.key === key && table.sort.direction === "asc" ? "desc" : "asc",
+  };
+  renderLogTableById(tableId);
+}
+
+function renderLogTable({ tableId, container, columns, rows, emptyTitle, emptyMessage }) {
+  if (!container) {
+    return;
+  }
+  const table = logTableState(tableId);
+  const gridTemplate = logGridTemplate(tableId);
+  const sortedRows = sortLogItems(tableId, rows, columns);
+  container.innerHTML = `
+    <div class="log-table-header" style="--log-grid-columns: ${escapeHtml(gridTemplate)}">
+      ${columns
+        .map(
+          (column, index) => `
+            <span class="log-column-heading">
+              <button type="button" data-action="log-sort" data-log-table="${escapeHtml(tableId)}" data-sort-key="${escapeHtml(column.key)}" aria-sort="${table.sort.key === column.key ? table.sort.direction : "none"}">${escapeHtml(column.label)}${escapeHtml(logSortIndicator(tableId, column.key))}</button>
+              <span class="log-column-resizer" role="separator" aria-orientation="vertical" data-log-resizer data-log-table="${escapeHtml(tableId)}" data-column-index="${index}"></span>
+            </span>
+          `,
+        )
+        .join("")}
+    </div>
+    ${
+      sortedRows.length
+        ? sortedRows
+            .map(
+              (row) => `
+                <div class="log-message-row" style="--log-grid-columns: ${escapeHtml(gridTemplate)}">
+                  ${columns.map((column) => `<span>${escapeHtml(column.value(row))}</span>`).join("")}
+                </div>
+              `,
+            )
+            .join("")
+        : buildEmptyState(emptyTitle, emptyMessage)
+    }
+  `;
+}
+
+function auditColumns(copy) {
+  return [
+    { key: "date", label: copy.historyColumnDate, value: (entry) => formatHistoryDateTime(entry.timestamp), sortValue: (entry) => parseHistoryTimestamp(entry.timestamp)?.getTime() ?? 0 },
+    { key: "actor", label: copy.logColumnActor, value: (entry) => entry.actor ?? copy.unset, sortValue: (entry) => String(entry.actor ?? "").toLowerCase() },
+    { key: "action", label: copy.logColumnAction, value: (entry) => entry.action ?? copy.unset, sortValue: (entry) => String(entry.action ?? "").toLowerCase() },
+    { key: "details", label: copy.logColumnDetails, value: (entry) => entry.details ?? copy.unset, sortValue: (entry) => String(entry.details ?? "").toLowerCase() },
+  ];
+}
+
+function messageLogColumns(copy) {
+  return [
+    { key: "date", label: copy.historyColumnDate, value: (entry) => formatHistoryDateTime(entry.timestamp), sortValue: (entry) => parseHistoryTimestamp(entry.timestamp)?.getTime() ?? 0 },
+    { key: "level", label: copy.logColumnLevel, value: (entry) => entry.level ?? copy.unset, sortValue: (entry) => String(entry.level ?? "").toLowerCase() },
+    { key: "source", label: copy.logColumnSource, value: (entry) => entry.source ?? copy.unset, sortValue: (entry) => String(entry.source ?? "").toLowerCase() },
+    { key: "message", label: copy.logColumnMessage, value: (entry) => entry.message ?? copy.unset, sortValue: (entry) => String(entry.message ?? "").toLowerCase() },
+  ];
+}
+
+function emailAlertLogColumns(copy) {
+  return [
+    { key: "date", label: copy.historyColumnDate, value: (entry) => formatHistoryDateTime(entry.timestamp), sortValue: (entry) => parseHistoryTimestamp(entry.timestamp)?.getTime() ?? 0 },
+    { key: "recipient", label: copy.logColumnRecipient, value: (entry) => entry.recipient ?? copy.unset, sortValue: (entry) => String(entry.recipient ?? "").toLowerCase() },
+    { key: "status", label: copy.logColumnStatus, value: (entry) => entry.status ?? copy.unset, sortValue: (entry) => String(entry.status ?? "").toLowerCase() },
+    { key: "message", label: copy.logColumnMessage, value: (entry) => entry.message ?? copy.unset, sortValue: (entry) => String(entry.message ?? "").toLowerCase() },
+  ];
 }
 
 function formatDurationMinutes(seconds) {
@@ -1761,25 +1882,62 @@ function renderPlatform() {
   `;
 }
 
+function renderMailLog() {
+  const copy = getCopy();
+  renderLogTable({
+    tableId: "mail",
+    container: containers.mailLog,
+    columns: historyColumns(copy),
+    rows: state.history,
+    emptyTitle: copy.logsTabMail,
+    emptyMessage: copy.noResults,
+  });
+}
+
 function renderAudit() {
   const copy = getCopy();
-  const entries = state.dashboard?.audit ?? [];
-  if (!entries.length) {
-    containers.audit.innerHTML = buildEmptyState(copy.auditTitle, copy.noAuditEntries);
-    return;
-  }
-  containers.audit.innerHTML = entries
-    .map(
-      (entry) => `
-        <article class="audit-entry">
-          <strong>${escapeHtml(entry.action)}</strong>
-          <span>${escapeHtml(entry.actor)}</span>
-          <span>${escapeHtml(entry.timestamp)}</span>
-          <p>${escapeHtml(entry.details)}</p>
-        </article>
-      `,
-    )
-    .join("");
+  renderLogTable({
+    tableId: "interface",
+    container: containers.audit,
+    columns: auditColumns(copy),
+    rows: state.dashboard?.audit ?? [],
+    emptyTitle: copy.auditTitle,
+    emptyMessage: copy.noAuditEntries,
+  });
+}
+
+function renderMessageLog() {
+  const copy = getCopy();
+  renderLogTable({
+    tableId: "messages",
+    container: containers.messageLog,
+    columns: messageLogColumns(copy),
+    rows: [],
+    emptyTitle: copy.logsTabMessages,
+    emptyMessage: copy.logsMessagesUnavailable,
+  });
+}
+
+function renderEmailAlertLog() {
+  const copy = getCopy();
+  renderLogTable({
+    tableId: "emailAlerts",
+    container: containers.emailAlertLog,
+    columns: emailAlertLogColumns(copy),
+    rows: [],
+    emptyTitle: copy.logsTabEmailAlerts,
+    emptyMessage: copy.logsEmailAlertsUnavailable,
+  });
+}
+
+function renderLogTableById(tableId) {
+  const renderers = {
+    mail: renderMailLog,
+    interface: renderAudit,
+    messages: renderMessageLog,
+    emailAlerts: renderEmailAlertLog,
+  };
+  renderers[tableId]?.();
 }
 
 function buildMiniStat(label, value, detail = "") {
@@ -2288,7 +2446,10 @@ const PAGE_RENDERERS = {
   dkim: renderDkim,
   digestReporting: renderDigestReporting,
   platform: renderPlatform,
+  mailLog: renderMailLog,
   audit: renderAudit,
+  messageLog: renderMessageLog,
+  emailAlertLog: renderEmailAlertLog,
 };
 
 function renderDashboard() {
@@ -3765,7 +3926,7 @@ function setSystemSetupTab(actionTarget) {
 }
 
 function getActionHandlers(actionTarget) {
-  const { traceId, ruleId, index, reportId, target, domainId, profileId, sortKey } = actionTarget.dataset;
+  const { traceId, ruleId, index, reportId, target, domainId, profileId, sortKey, logTable } = actionTarget.dataset;
   return {
     "drawer-close": () => closeDrawer(),
     "trace-open": () => runAction(() => loadTrace(traceId, actionTarget)),
@@ -3799,6 +3960,7 @@ function getActionHandlers(actionTarget) {
     "public-tls-delete": () => runAction(() => deletePublicTlsProfile(profileId)),
     "platform-edit": () => openPlatformDrawer(target, actionTarget),
     "history-sort": () => setHistorySort(sortKey),
+    "log-sort": () => setLogSort(logTable, sortKey),
     "page-tab": () => setPageTab(actionTarget),
     "system-setup-tab": () => setSystemSetupTab(actionTarget),
     "refresh-quarantine": () => runAction(() => loadOps()),
@@ -3843,6 +4005,44 @@ function startHistoryColumnResize(event) {
     containers.history
       .querySelectorAll(".history-table-header, .history-message-row")
       .forEach((row) => row.style.setProperty("--history-grid-columns", gridTemplate));
+  };
+  const handleEnd = () => {
+    window.removeEventListener("pointermove", handleMove);
+    window.removeEventListener("pointerup", handleEnd);
+  };
+  window.addEventListener("pointermove", handleMove);
+  window.addEventListener("pointerup", handleEnd);
+}
+
+function startLogColumnResize(event) {
+  const resizer = event.target.closest("[data-log-resizer]");
+  if (!resizer) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  const { logTable } = resizer.dataset;
+  const table = logTableState(logTable);
+  const columnIndex = Number(resizer.dataset.columnIndex);
+  if (!Number.isInteger(columnIndex)) {
+    return;
+  }
+  const startX = event.clientX;
+  const fallbackWidth = DEFAULT_LOG_COLUMN_WIDTHS[logTable]?.[columnIndex] ?? MIN_HISTORY_COLUMN_WIDTH;
+  const startWidth = table.columnWidths[columnIndex] ?? fallbackWidth;
+  const container = {
+    mail: containers.mailLog,
+    interface: containers.audit,
+    messages: containers.messageLog,
+    emailAlerts: containers.emailAlertLog,
+  }[logTable];
+  const handleMove = (moveEvent) => {
+    const nextWidth = Math.max(MIN_HISTORY_COLUMN_WIDTH, startWidth + moveEvent.clientX - startX);
+    table.columnWidths[columnIndex] = nextWidth;
+    const gridTemplate = logGridTemplate(logTable);
+    container
+      ?.querySelectorAll(".log-table-header, .log-message-row")
+      .forEach((row) => row.style.setProperty("--log-grid-columns", gridTemplate));
   };
   const handleEnd = () => {
     window.removeEventListener("pointermove", handleMove);
@@ -3946,6 +4146,7 @@ elements.createDigestOverride.addEventListener("click", (event) => openDigestOve
 
 document.body.addEventListener("click", handleBodyClick);
 document.body.addEventListener("pointerdown", startHistoryColumnResize);
+document.body.addEventListener("pointerdown", startLogColumnResize);
 
 elements.drawerClose.addEventListener("click", closeDrawer);
 elements.drawerBackdrop.addEventListener("click", (event) => {

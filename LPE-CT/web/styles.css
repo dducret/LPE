@@ -1577,20 +1577,36 @@ select.invalid {
   background: rgba(248, 251, 254, 0.84);
 }
 
-#history-list {
+#history-list,
+#mail-log,
+#audit-log,
+#message-log,
+#email-alert-log {
   overflow-x: auto;
 }
 
 .history-table-header,
-.history-message-row {
+.history-message-row,
+.log-table-header,
+.log-message-row {
   display: grid;
-  grid-template-columns: var(--history-grid-columns, 172px 176px 144px 132px 220px 220px 112px);
   gap: 12px;
   align-items: center;
   min-width: max-content;
 }
 
-.history-table-header {
+.history-table-header,
+.history-message-row {
+  grid-template-columns: var(--history-grid-columns, 172px 176px 144px 132px 220px 220px 112px);
+}
+
+.log-table-header,
+.log-message-row {
+  grid-template-columns: var(--log-grid-columns, 172px 180px 220px 360px);
+}
+
+.history-table-header,
+.log-table-header {
   padding: 10px 16px;
   border-bottom: 1px solid rgba(204, 216, 229, 0.88);
   color: var(--text-faint);
@@ -1599,7 +1615,8 @@ select.invalid {
   background: rgba(248, 251, 254, 0.74);
 }
 
-.history-message-row {
+.history-message-row,
+.log-message-row {
   width: 100%;
   padding: 12px 16px;
   border: 0;
@@ -1609,24 +1626,29 @@ select.invalid {
   text-align: left;
 }
 
-.history-message-row:last-child {
+.history-message-row:last-child,
+.log-message-row:last-child {
   border-bottom: 0;
 }
 
 .history-message-row:hover,
-.history-message-row:focus-visible {
+.history-message-row:focus-visible,
+.log-message-row:hover {
   background: rgba(248, 251, 254, 0.9);
 }
 
 .history-table-header span,
-.history-message-row span {
+.history-message-row span,
+.log-table-header span,
+.log-message-row span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.history-column-heading {
+.history-column-heading,
+.log-column-heading {
   position: relative;
   display: flex;
   align-items: center;
@@ -1634,7 +1656,8 @@ select.invalid {
   overflow: visible;
 }
 
-.history-column-heading button {
+.history-column-heading button,
+.log-column-heading button {
   width: 100%;
   min-width: 0;
   overflow: hidden;
@@ -1648,11 +1671,14 @@ select.invalid {
 }
 
 .history-column-heading button:hover,
-.history-column-heading button:focus-visible {
+.history-column-heading button:focus-visible,
+.log-column-heading button:hover,
+.log-column-heading button:focus-visible {
   color: var(--text);
 }
 
-.history-column-resizer {
+.history-column-resizer,
+.log-column-resizer {
   position: absolute;
   top: -10px;
   right: -8px;
@@ -1662,7 +1688,8 @@ select.invalid {
   cursor: col-resize;
 }
 
-.history-column-resizer::after {
+.history-column-resizer::after,
+.log-column-resizer::after {
   content: "";
   position: absolute;
   top: 8px;

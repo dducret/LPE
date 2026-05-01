@@ -401,7 +401,10 @@ function createContext() {
     "digest-overrides-list",
     "digest-report-list",
     "platform-list",
+    "mail-log",
     "audit-log",
+    "message-log",
+    "email-alert-log",
   ];
 
   const elements = Object.fromEntries(ids.map((id) => [id, new MockElement(id)]));
@@ -553,6 +556,15 @@ async function main() {
   assert.doesNotMatch(elements["history-list"].innerHTML, /SIZE=2048/);
   assert.match(elements["history-list"].innerHTML, /Clean \(2\.10\)/);
   assert.match(elements["history-list"].innerHTML, /2 KB/);
+  assert.match(elements["mail-log"].innerHTML, /177764830abcdef/);
+  assert.match(elements["mail-log"].innerHTML, /data-action="log-sort"/);
+  assert.match(elements["mail-log"].innerHTML, /data-log-resizer/);
+  assert.doesNotMatch(elements["mail-log"].innerHTML, /trace-open/);
+  assert.match(elements["audit-log"].innerHTML, /policy\.updated/);
+  assert.match(elements["audit-log"].innerHTML, /admin@example\.test/);
+  assert.match(elements["audit-log"].innerHTML, /data-log-table="interface"/);
+  assert.match(elements["message-log"].innerHTML, /System message logs are not exposed/);
+  assert.match(elements["email-alert-log"].innerHTML, /Email alert logs are not exposed/);
   assert.match(elements["platform-list"].innerHTML, /Network/);
   assert.match(elements["platform-list"].innerHTML, /IP/);
   assert.match(elements["platform-list"].innerHTML, /eth0/);
