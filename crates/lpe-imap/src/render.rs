@@ -42,15 +42,23 @@ pub(crate) fn mailbox_name_matches(display_name: &str, role: &str, requested: &s
         || (role == "inbox" && requested.eq_ignore_ascii_case("INBOX"))
 }
 
-pub(crate) fn render_list_flags(role: &str) -> String {
+pub(crate) fn render_list_flags(role: &str, legacy_xlist: bool) -> String {
     let mut flags = vec!["\\HasNoChildren"];
     match role {
-        "inbox" => flags.push("\\Inbox"),
+        "inbox" if legacy_xlist => flags.push("\\Inbox"),
         "sent" => flags.push("\\Sent"),
         "drafts" => flags.push("\\Drafts"),
         _ => {}
     }
     format!("({})", flags.join(" "))
+}
+
+pub(crate) fn render_mailbox_name(mailbox: &JmapMailbox) -> String {
+    if mailbox.role == "inbox" {
+        "INBOX".to_string()
+    } else {
+        mailbox.name.clone()
+    }
 }
 
 pub(crate) fn parse_fetch_attributes(input: &str) -> Result<FetchAttributes> {

@@ -7,48 +7,80 @@ use crate::{
     parse::{first_token, tokenize},
     render::{
         first_unseen_sequence, mailbox_name_matches, parse_status_items, render_list_flags,
-        render_status_response, sanitize_imap_quoted,
+        render_mailbox_name, render_status_response, sanitize_imap_quoted,
     },
     SelectedMailbox, Session, UID_VALIDITY,
 };
 
 impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
-    pub(crate) async fn handle_list<W>(&mut self, tag: &str, writer: &mut W) -> Result<bool>
+    pub(crate) async fn handle_list<W>(
+        &mut self,
+        tag: &str,
+        arguments: &str,
+        writer: &mut W,
+    ) -> Result<bool>
     where
         W: AsyncWriteExt + Unpin,
     {
-        self.handle_mailbox_listing(tag, writer, "LIST").await
+        self.handle_mailbox_listing(tag, arguments, writer, "LIST", false)
+            .await
     }
 
-    pub(crate) async fn handle_xlist<W>(&mut self, tag: &str, writer: &mut W) -> Result<bool>
+    pub(crate) async fn handle_xlist<W>(
+        &mut self,
+        tag: &str,
+        arguments: &str,
+        writer: &mut W,
+    ) -> Result<bool>
     where
         W: AsyncWriteExt + Unpin,
     {
-        self.handle_mailbox_listing(tag, writer, "XLIST").await
+        self.handle_mailbox_listing(tag, arguments, writer, "XLIST", true)
+            .await
     }
 
     async fn handle_mailbox_listing<W>(
         &mut self,
         tag: &str,
+        arguments: &str,
         writer: &mut W,
         command_name: &str,
+        legacy_xlist: bool,
     ) -> Result<bool>
     where
         W: AsyncWriteExt + Unpin,
     {
         let principal = self.require_auth()?;
+        let pattern = parse_list_pattern(arguments)?;
+        if pattern.is_empty() {
+            writer
+                .write_all(format!("* {command_name} (\\Noselect) \"/\" \"\"\r\n").as_bytes())
+                .await?;
+            writer
+                .write_all(format!("{tag} OK {command_name} completed\r\n").as_bytes())
+                .await?;
+            writer.flush().await?;
+            return Ok(true);
+        }
+
         let mailboxes = self
             .store
             .ensure_imap_mailboxes(principal.account_id)
             .await?;
         for mailbox in mailboxes {
+            let mailbox_name = render_mailbox_name(&mailbox);
+            if !mailbox_pattern_matches(&mailbox_name, &pattern)
+                && !mailbox_pattern_matches(&mailbox.name, &pattern)
+            {
+                continue;
+            }
             writer
                 .write_all(
                     format!(
                         "* {} {} \"/\" \"{}\"\r\n",
                         command_name,
-                        render_list_flags(&mailbox.role),
-                        sanitize_imap_quoted(&mailbox.name)
+                        render_list_flags(&mailbox.role, legacy_xlist),
+                        sanitize_imap_quoted(&mailbox_name)
                     )
                     .as_bytes(),
                 )
@@ -61,22 +93,34 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         Ok(true)
     }
 
-    pub(crate) async fn handle_lsub<W>(&mut self, tag: &str, writer: &mut W) -> Result<bool>
+    pub(crate) async fn handle_lsub<W>(
+        &mut self,
+        tag: &str,
+        arguments: &str,
+        writer: &mut W,
+    ) -> Result<bool>
     where
         W: AsyncWriteExt + Unpin,
     {
         let principal = self.require_auth()?;
+        let pattern = parse_list_pattern(arguments)?;
         let mailboxes = self
             .store
             .ensure_imap_mailboxes(principal.account_id)
             .await?;
         for mailbox in mailboxes {
+            let mailbox_name = render_mailbox_name(&mailbox);
+            if !mailbox_pattern_matches(&mailbox_name, &pattern)
+                && !mailbox_pattern_matches(&mailbox.name, &pattern)
+            {
+                continue;
+            }
             writer
                 .write_all(
                     format!(
                         "* LSUB {} \"/\" \"{}\"\r\n",
-                        render_list_flags(&mailbox.role),
-                        sanitize_imap_quoted(&mailbox.name)
+                        render_list_flags(&mailbox.role, false),
+                        sanitize_imap_quoted(&mailbox_name)
                     )
                     .as_bytes(),
                 )
@@ -458,4 +502,55 @@ fn validate_flat_mailbox_name(value: &str) -> Result<()> {
         bail!("hierarchical mailbox names are not supported yet");
     }
     Ok(())
+}
+
+fn parse_list_pattern(arguments: &str) -> Result<String> {
+    let tokens = tokenize(arguments)?;
+    if tokens.len() < 2 {
+        bail!("LIST expects reference name and mailbox pattern");
+    }
+    Ok(tokens[1].clone())
+}
+
+fn mailbox_pattern_matches(name: &str, pattern: &str) -> bool {
+    if pattern == "*" || pattern == "%" {
+        return true;
+    }
+    wildcard_match(
+        &name.to_ascii_uppercase(),
+        &pattern.replace('%', "*").to_ascii_uppercase(),
+    )
+}
+
+fn wildcard_match(value: &str, pattern: &str) -> bool {
+    let value = value.as_bytes();
+    let pattern = pattern.as_bytes();
+    let (mut value_index, mut pattern_index) = (0usize, 0usize);
+    let mut star_index = None;
+    let mut star_value_index = 0usize;
+
+    while value_index < value.len() {
+        if pattern_index < pattern.len()
+            && (pattern[pattern_index] == value[value_index] || pattern[pattern_index] == b'?')
+        {
+            value_index += 1;
+            pattern_index += 1;
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+            star_index = Some(pattern_index);
+            star_value_index = value_index;
+            pattern_index += 1;
+        } else if let Some(index) = star_index {
+            pattern_index = index + 1;
+            star_value_index += 1;
+            value_index = star_value_index;
+        } else {
+            return false;
+        }
+    }
+
+    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+        pattern_index += 1;
+    }
+
+    pattern_index == pattern.len()
 }

@@ -669,7 +669,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     assert!(namespace.contains("* NAMESPACE ((\"\" \"/\")) NIL NIL"));
 
     let list = send_command(&mut stream, "A2 LIST \"\" \"*\"\r\n", "A2").await;
-    assert!(list.contains("* LIST (\\HasNoChildren \\Inbox) \"/\" \"Inbox\""));
+    assert!(list.contains("* LIST (\\HasNoChildren) \"/\" \"INBOX\""));
     assert!(list.contains("* LIST (\\HasNoChildren \\Sent) \"/\" \"Sent\""));
     assert!(list.contains("* LIST (\\HasNoChildren \\Drafts) \"/\" \"Drafts\""));
 
@@ -829,7 +829,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
     assert!(subscribe.contains("OL5 OK SUBSCRIBE completed"));
 
     let lsub = send_command(&mut stream, "OL6 LSUB \"\" \"*\"\r\n", "OL6").await;
-    assert!(lsub.contains("* LSUB (\\HasNoChildren \\Inbox) \"/\" \"Inbox\""));
+    assert!(lsub.contains("* LSUB (\\HasNoChildren) \"/\" \"INBOX\""));
     assert!(lsub.contains("* LSUB (\\HasNoChildren \\Sent) \"/\" \"Sent\""));
     assert!(lsub.contains("* LSUB (\\HasNoChildren \\Drafts) \"/\" \"Drafts\""));
 
@@ -837,12 +837,21 @@ async fn outlook_first_login_list_select_sync_transcript() {
     assert!(unsubscribe.contains("OL7 OK UNSUBSCRIBE completed"));
 
     let list = send_command(&mut stream, "OL8 LIST \"\" \"*\"\r\n", "OL8").await;
-    assert!(list.contains("* LIST (\\HasNoChildren \\Inbox) \"/\" \"Inbox\""));
+    assert!(list.contains("* LIST (\\HasNoChildren) \"/\" \"INBOX\""));
     assert!(list.contains("* LIST (\\HasNoChildren \\Sent) \"/\" \"Sent\""));
     assert!(list.contains("* LIST (\\HasNoChildren \\Drafts) \"/\" \"Drafts\""));
 
+    let list_inbox = send_command(&mut stream, "OL8A LIST \"\" \"INBOX\"\r\n", "OL8A").await;
+    assert_eq!(list_inbox.matches("* LIST ").count(), 1);
+    assert!(list_inbox.contains("* LIST (\\HasNoChildren) \"/\" \"INBOX\""));
+    assert!(!list_inbox.contains("\"Sent\""));
+    assert!(!list_inbox.contains("\"Drafts\""));
+
+    let list_root = send_command(&mut stream, "OL8B LIST \"\" \"\"\r\n", "OL8B").await;
+    assert!(list_root.contains("* LIST (\\Noselect) \"/\" \"\""));
+
     let xlist = send_command(&mut stream, "OL8X XLIST \"\" \"*\"\r\n", "OL8X").await;
-    assert!(xlist.contains("* XLIST (\\HasNoChildren \\Inbox) \"/\" \"Inbox\""));
+    assert!(xlist.contains("* XLIST (\\HasNoChildren \\Inbox) \"/\" \"INBOX\""));
     assert!(xlist.contains("OL8X OK XLIST completed"));
 
     let examine = send_command(&mut stream, "OL8E EXAMINE Inbox\r\n", "OL8E").await;

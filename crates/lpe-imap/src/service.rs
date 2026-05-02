@@ -138,9 +138,18 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                 self.handle_authenticate(&request.tag, &request.arguments, writer)
                     .await
             }
-            "LIST" => self.handle_list(&request.tag, writer).await,
-            "XLIST" => self.handle_xlist(&request.tag, writer).await,
-            "LSUB" => self.handle_lsub(&request.tag, writer).await,
+            "LIST" => {
+                self.handle_list(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "XLIST" => {
+                self.handle_xlist(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "LSUB" => {
+                self.handle_lsub(&request.tag, &request.arguments, writer)
+                    .await
+            }
             "SUBSCRIBE" => {
                 self.handle_subscribe(&request.tag, &request.arguments, writer)
                     .await
