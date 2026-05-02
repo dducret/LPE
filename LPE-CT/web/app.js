@@ -906,7 +906,7 @@ async function parseError(response) {
       detail = (await response.text()).trim();
     }
   } catch {}
-  const prefix = getCopy().backendErrorPrefix;
+  const prefix = getCopy().backendErrorPrefix || "Backend error";
   const suffix = detail ? `: ${detail}` : "";
   throw new Error(`${prefix} (${response.status})${suffix}`);
 }

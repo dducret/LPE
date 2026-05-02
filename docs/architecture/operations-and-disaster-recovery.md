@@ -185,8 +185,10 @@ The minimum checklist is:
 The `LPE-CT` management console may expose Debian host maintenance controls for authenticated
 management administrators, including live network inventory, NTP configuration through
 `systemd-timesyncd`, manual NTP sync, `apt update` followed by `apt upgrade -y`, and explicit
-restart or shutdown requests. Operators must still perform the release safety checks above before
-using the package-upgrade action on a production node.
+restart or shutdown requests. The `lpe-ct` service itself remains non-root; root host changes are
+mediated by the installer-managed `/opt/lpe-ct/bin/lpe-ct-host-action` helper and a sudoers rule
+that allows only the supported helper actions. Operators must still perform the release safety
+checks above before using the package-upgrade action on a production node.
 
 ### Schema migration safety
 

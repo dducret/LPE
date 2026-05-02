@@ -51,6 +51,36 @@ LPE_CT_CORE_DELIVERY_BASE_URL="${LPE_CT_CORE_DELIVERY_BASE_URL%/}"
 LPE_CT_PUBLIC_TLS_CERT_PATH="${LPE_CT_PUBLIC_TLS_CERT_PATH:-/etc/lpe-ct/tls/fullchain.pem}"
 LPE_CT_PUBLIC_TLS_KEY_PATH="${LPE_CT_PUBLIC_TLS_KEY_PATH:-/etc/lpe-ct/tls/privkey.pem}"
 
+install_host_action_prerequisites() {
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y --no-install-recommends sudo systemd-timesyncd
+}
+
+install_host_action_helper() {
+  local helper_path="${BIN_DIR}/lpe-ct-host-action"
+  local sudoers_file="/etc/sudoers.d/lpe-ct-host-actions"
+  local sudoers_temp="/tmp/lpe-ct-host-actions.sudoers.$$"
+
+  install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${BIN_DIR}"
+  install -m 0750 -o root -g root "${SRC_DIR}/LPE-CT/installation/debian-trixie/lpe-ct-host-action.sh" "${helper_path}"
+  cat > "${sudoers_temp}" <<EOF
+# Managed by LPE-CT installer. Allows only the audited host maintenance helper.
+Cmnd_Alias LPE_CT_HOST_ACTIONS = ${helper_path} ntp-update true, \\
+    ${helper_path} ntp-update false, \\
+    ${helper_path} ntp-sync, \\
+    ${helper_path} apt-upgrade, \\
+    ${helper_path} restart, \\
+    ${helper_path} shutdown
+Defaults:${SERVICE_USER} !requiretty
+${SERVICE_USER} ALL=(root) NOPASSWD: LPE_CT_HOST_ACTIONS
+EOF
+  visudo -cf "${sudoers_temp}" >/dev/null
+  install -m 0440 -o root -g root "${sudoers_temp}" "${sudoers_file}"
+  rm -f "${sudoers_temp}"
+  write_env_value "${ENV_FILE}" "LPE_CT_HOST_ACTION_HELPER" "${helper_path}"
+}
+
 install_magika() {
   local version="$1"
   local expected_sha="$2"
@@ -85,6 +115,8 @@ git -C "${SRC_DIR}" remote set-url origin "${REPO_URL}" || true
 git -C "${SRC_DIR}" fetch --all --tags
 git -C "${SRC_DIR}" checkout "${BRANCH}"
 git -C "${SRC_DIR}" pull --ff-only origin "${BRANCH}"
+install_host_action_prerequisites
+install_host_action_helper
 
 ENV_CHECK_SCRIPT="${SRC_DIR}/LPE-CT/installation/debian-trixie/check-lpe-ct-env.sh"
 ENV_EXAMPLE_FILE="${SRC_DIR}/LPE-CT/installation/debian-trixie/lpe-ct.env.example"

@@ -235,6 +235,7 @@ write_runtime_env_file() {
   write_env_value "${ENV_FILE}" "RUST_LOG" "${RUST_LOG:-info}"
   write_env_value "${ENV_FILE}" "LPE_MAGIKA_BIN" "${BIN_DIR}/magika"
   write_env_value "${ENV_FILE}" "LPE_MAGIKA_MIN_SCORE" "${LPE_MAGIKA_MIN_SCORE:-0.80}"
+  write_env_value "${ENV_FILE}" "LPE_CT_HOST_ACTION_HELPER" "${BIN_DIR}/lpe-ct-host-action"
   write_env_value "${ENV_FILE}" "LPE_CT_ANTIVIRUS_TAKERI_BIN" "${TAKERI_BIN_PATH}"
   write_env_value "${ENV_FILE}" "LPE_CT_ANTIVIRUS_TAKERI_REPO_URL" "${TAKERI_REPO_URL}"
   write_env_value "${ENV_FILE}" "LPE_CT_ANTIVIRUS_TAKERI_BRANCH" "${TAKERI_BRANCH}"
@@ -255,6 +256,8 @@ install_prerequisites() {
     postgresql-client \
     pkg-config \
     rustup \
+    sudo \
+    systemd-timesyncd \
     xz-utils
 }
 
@@ -314,6 +317,28 @@ prepare_directories() {
     "${SPOOL_DIR}/policy" \
     "${SPOOL_DIR}/greylist"
   install -d -o root -g root "${WEB_ROOT}" "${ENV_DIR}"
+}
+
+install_host_action_helper() {
+  local helper_path="${BIN_DIR}/lpe-ct-host-action"
+  local sudoers_file="/etc/sudoers.d/lpe-ct-host-actions"
+  local sudoers_temp="/tmp/lpe-ct-host-actions.sudoers.$$"
+
+  install -m 0750 -o root -g root "${SCRIPT_DIR}/lpe-ct-host-action.sh" "${helper_path}"
+  cat > "${sudoers_temp}" <<EOF
+# Managed by LPE-CT installer. Allows only the audited host maintenance helper.
+Cmnd_Alias LPE_CT_HOST_ACTIONS = ${helper_path} ntp-update true, \\
+    ${helper_path} ntp-update false, \\
+    ${helper_path} ntp-sync, \\
+    ${helper_path} apt-upgrade, \\
+    ${helper_path} restart, \\
+    ${helper_path} shutdown
+Defaults:${SERVICE_USER} !requiretty
+${SERVICE_USER} ALL=(root) NOPASSWD: LPE_CT_HOST_ACTIONS
+EOF
+  visudo -cf "${sudoers_temp}" >/dev/null
+  install -m 0440 -o root -g root "${sudoers_temp}" "${sudoers_file}"
+  rm -f "${sudoers_temp}"
 }
 
 checkout_source() {
@@ -412,6 +437,7 @@ main() {
   bootstrap_local_postgresql
   ensure_service_user
   prepare_directories
+  install_host_action_helper
   write_install_layout_file
   checkout_source
   prepare_rust

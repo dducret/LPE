@@ -448,6 +448,7 @@ export const baseMessages = {
   saving: "Saving...",
   cancel: "Cancel",
   retry: "Retry",
+  backendErrorPrefix: "Backend error",
   recordSaved: "Changes saved.",
   recordDeleted: "Record deleted.",
   recordCreated: "Record created.",
