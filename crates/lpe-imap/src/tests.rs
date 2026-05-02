@@ -870,6 +870,15 @@ async fn outlook_first_login_list_select_sync_transcript() {
     assert!(select.contains("* OK [UIDNEXT 2]"));
     assert!(select.contains("* OK [HIGHESTMODSEQ 3]"));
 
+    let status = send_command(
+        &mut stream,
+        "OL9S STATUS INBOX (MESSAGES UIDNEXT UIDVALIDITY UNSEEN)\r\n",
+        "OL9S",
+    )
+    .await;
+    assert!(status.contains("* STATUS \"INBOX\""));
+    assert!(status.contains("MESSAGES 1"));
+
     let fetch_summary = send_command(
         &mut stream,
         "OL10 UID FETCH 1:* (UID FLAGS INTERNALDATE RFC822.SIZE ENVELOPE BODYSTRUCTURE)\r\n",
@@ -896,6 +905,17 @@ async fn outlook_first_login_list_select_sync_transcript() {
     let search_not_deleted =
         send_command(&mut stream, "OL10D UID SEARCH 1:* NOT DELETED\r\n", "OL10D").await;
     assert!(search_not_deleted.contains("* SEARCH 1"));
+
+    let uid_fetch_flags =
+        send_command(&mut stream, "OL10E UID FETCH 1:* (FLAGS)\r\n", "OL10E").await;
+    assert!(uid_fetch_flags.contains("* 1 FETCH (UID 1 FLAGS ("));
+
+    let search_unkeyword =
+        send_command(&mut stream, "OL10F UID SEARCH UNKEYWORD $Junk\r\n", "OL10F").await;
+    assert!(search_unkeyword.contains("* SEARCH 1"));
+
+    let uid_expunge = send_command(&mut stream, "OL10G UID EXPUNGE 1\r\n", "OL10G").await;
+    assert!(uid_expunge.contains("OL10G OK UID EXPUNGE completed"));
 
     let fetch_headers = send_command(
         &mut stream,
@@ -1191,7 +1211,7 @@ async fn store_survives_concurrent_selected_mailbox_removal() {
     assert!(store_response.contains("A3 OK STORE completed"));
 
     let fetch_after = send_command(&mut stream, "A4 UID FETCH 3 (FLAGS MODSEQ)\r\n", "A4").await;
-    assert!(fetch_after.contains("* 1 FETCH (FLAGS (\\Flagged) MODSEQ (5))"));
+    assert!(fetch_after.contains("* 1 FETCH (UID 3 FLAGS (\\Flagged) MODSEQ (5))"));
     assert!(fetch_after.contains("A4 OK FETCH completed"));
     assert!(store
         .emails

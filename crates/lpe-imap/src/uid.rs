@@ -38,7 +38,21 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                 self.handle_move(tag, rest, writer, MessageRefKind::Uid)
                     .await
             }
+            "EXPUNGE" => self.handle_uid_expunge(tag, writer).await,
             other => bail!("UID {} is not supported", other),
         }
+    }
+
+    async fn handle_uid_expunge<W>(&mut self, tag: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        self.require_selected()?;
+        self.refresh_selected().await?;
+        writer
+            .write_all(format!("{tag} OK UID EXPUNGE completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
     }
 }

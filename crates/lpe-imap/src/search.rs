@@ -16,6 +16,7 @@ pub(crate) enum SearchExpression {
     Answered(bool),
     Draft(bool),
     Recent(bool),
+    Keyword(bool),
     Text(String),
     Subject(String),
     From(String),
@@ -68,6 +69,7 @@ impl SearchExpression {
             Self::Answered(expected) => !*expected,
             Self::Draft(expected) => (email.mailbox_role == "drafts") == *expected,
             Self::Recent(expected) => !*expected,
+            Self::Keyword(expected) => !*expected,
             Self::Text(query) => {
                 let query = normalize_search_text(query);
                 search_email_text(email).contains(&query)
@@ -194,6 +196,14 @@ fn parse_search_key(tokens: &[String], cursor: &mut usize) -> Result<SearchExpre
         "UNDRAFT" => SearchExpression::Draft(false),
         "RECENT" | "NEW" => SearchExpression::Recent(true),
         "OLD" => SearchExpression::Recent(false),
+        "KEYWORD" => {
+            let _ = next_search_argument(tokens, cursor, "KEYWORD")?;
+            SearchExpression::Keyword(true)
+        }
+        "UNKEYWORD" => {
+            let _ = next_search_argument(tokens, cursor, "UNKEYWORD")?;
+            SearchExpression::Keyword(false)
+        }
         "TEXT" => SearchExpression::Text(next_search_argument(tokens, cursor, "TEXT")?),
         "SUBJECT" => SearchExpression::Subject(next_search_argument(tokens, cursor, "SUBJECT")?),
         "FROM" => SearchExpression::From(next_search_argument(tokens, cursor, "FROM")?),
@@ -204,15 +214,15 @@ fn parse_search_key(tokens: &[String], cursor: &mut usize) -> Result<SearchExpre
             next_search_argument(tokens, cursor, "HEADER")?,
             next_search_argument(tokens, cursor, "HEADER")?,
         ),
-        "BEFORE" => SearchExpression::Before(parse_search_date(&next_search_argument(
-            tokens, cursor, "BEFORE",
-        )?)?),
-        "ON" => SearchExpression::On(parse_search_date(&next_search_argument(
+        "BEFORE" | "SENTBEFORE" => SearchExpression::Before(parse_search_date(
+            &next_search_argument(tokens, cursor, "BEFORE")?,
+        )?),
+        "ON" | "SENTON" => SearchExpression::On(parse_search_date(&next_search_argument(
             tokens, cursor, "ON",
         )?)?),
-        "SINCE" => SearchExpression::Since(parse_search_date(&next_search_argument(
-            tokens, cursor, "SINCE",
-        )?)?),
+        "SINCE" | "SENTSINCE" => SearchExpression::Since(parse_search_date(
+            &next_search_argument(tokens, cursor, "SINCE")?,
+        )?),
         "LARGER" => SearchExpression::Larger(
             next_search_argument(tokens, cursor, "LARGER")?.parse::<i64>()?,
         ),

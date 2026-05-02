@@ -98,6 +98,16 @@ pub(crate) fn parse_fetch_attributes(input: &str) -> Result<FetchAttributes> {
     })
 }
 
+pub(crate) fn ensure_uid_fetch_attributes(requested: &mut FetchAttributes) {
+    if !requested
+        .items
+        .iter()
+        .any(|item| matches!(item, FetchItem::Uid))
+    {
+        requested.items.insert(0, FetchItem::Uid);
+    }
+}
+
 pub(crate) fn render_fetch_response(
     sequence: usize,
     email: &ImapEmail,
@@ -374,7 +384,7 @@ pub(crate) fn render_status_response(
         .join(" ");
     format!(
         "* STATUS \"{}\" ({})\r\n",
-        sanitize_imap_quoted(&mailbox.name),
+        sanitize_imap_quoted(&render_mailbox_name(mailbox)),
         items
     )
 }

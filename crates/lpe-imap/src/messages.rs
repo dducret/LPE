@@ -6,8 +6,8 @@ use tokio::io::AsyncWriteExt;
 use crate::{
     parse::{split_two, tokenize},
     render::{
-        parse_fetch_attributes, render_fetch_response, render_flags, render_modified_set,
-        resolve_message_indexes,
+        ensure_uid_fetch_attributes, parse_fetch_attributes, render_fetch_response, render_flags,
+        render_modified_set, resolve_message_indexes,
     },
     search::SearchExpression,
     store_args::{parse_flag_list, parse_store_arguments, parse_store_mode},
@@ -26,7 +26,10 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         W: AsyncWriteExt + Unpin,
     {
         let (set_token, attr_token) = split_two(arguments)?;
-        let requested = parse_fetch_attributes(attr_token)?;
+        let mut requested = parse_fetch_attributes(attr_token)?;
+        if matches!(ref_kind, MessageRefKind::Uid) {
+            ensure_uid_fetch_attributes(&mut requested);
+        }
         let selected = self.require_selected()?;
         let indices = resolve_message_indexes(&selected.emails, set_token, ref_kind)?;
         let mut mark_seen_ids = Vec::new();

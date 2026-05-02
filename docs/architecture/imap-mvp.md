@@ -34,6 +34,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `MOVE` and `UID MOVE` between `Inbox` and custom user mailboxes
 - richer `SEARCH`
 - `UID FETCH`, `UID STORE`, and `UID SEARCH`
+- tolerant no-op `UID EXPUNGE` while destructive expunge remains deferred
 - `APPEND` to `Drafts` only, persisted through the canonical draft workflow
 - `UIDPLUS` response codes where the current canonical workflow can supply them directly
 - `ACL` admin commands `GETACL`, `MYRIGHTS`, `LISTRIGHTS`, `SETACL`, and `DELETEACL` projected from canonical mailbox and sender delegation grants
@@ -67,9 +68,10 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `MOVE` uses the same guardrail and only supports `Inbox` plus custom user mailboxes
 - `SEARCH` now supports optional `CHARSET`, `ALL`, `SEEN`, `UNSEEN`, `FLAGGED`,
   `UNFLAGGED`, `DELETED`, `UNDELETED`, `ANSWERED`, `UNANSWERED`, `DRAFT`,
-  `UNDRAFT`, `RECENT`, `OLD`, `NEW`, `TEXT`, `SUBJECT`, `FROM`, `TO`, `CC`,
-  `BODY`, `HEADER`, `BEFORE`, `ON`, `SINCE`, `LARGER`, `SMALLER`, `NOT`,
-  `OR`, sequence-set criteria, and `UID`
+  `UNDRAFT`, `RECENT`, `OLD`, `NEW`, `KEYWORD`, `UNKEYWORD`, `TEXT`,
+  `SUBJECT`, `FROM`, `TO`, `CC`, `BODY`, `HEADER`, `BEFORE`, `ON`, `SINCE`,
+  `SENTBEFORE`, `SENTON`, `SENTSINCE`, `LARGER`, `SMALLER`, `NOT`, `OR`,
+  sequence-set criteria, and `UID`
 - `EXPUNGE` is accepted for client compatibility but is currently a no-op because the adapter does not yet expose `\Deleted` or permanent message deletion
 - `IDLE` currently refreshes by polling canonical mailbox state for the selected mailbox; it now coexists with a reusable canonical mail change watermark, but still does not publish `QRESYNC`-grade vanished history
 - the current `ACL` slice is administrative only for the authenticated owner mailbox namespace; delegated mailbox projection through IMAP remains deferred even though the grants are canonical today
