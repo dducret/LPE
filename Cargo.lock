@@ -1494,6 +1494,7 @@ dependencies = [
  "lpe-mail-auth",
  "lpe-storage",
  "tokio",
+ "tracing",
  "uuid",
 ]
 

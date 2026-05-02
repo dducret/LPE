@@ -914,6 +914,14 @@ async fn outlook_first_login_list_select_sync_transcript() {
         send_command(&mut stream, "OL10F UID SEARCH UNKEYWORD $Junk\r\n", "OL10F").await;
     assert!(search_unkeyword.contains("* SEARCH 1"));
 
+    let search_return_all = send_command(
+        &mut stream,
+        "OL10R UID SEARCH RETURN (ALL) CHARSET UTF-8 UNDELETED\r\n",
+        "OL10R",
+    )
+    .await;
+    assert!(search_return_all.contains("* SEARCH 1"));
+
     let uid_expunge = send_command(&mut stream, "OL10G UID EXPUNGE 1\r\n", "OL10G").await;
     assert!(uid_expunge.contains("OL10G OK UID EXPUNGE completed"));
 

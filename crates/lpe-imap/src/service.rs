@@ -7,6 +7,7 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
 };
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::{parse::parse_request_line, render::sanitize_imap_text, store::ImapStore};
@@ -263,6 +264,11 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                     .await
             }
             other => {
+                warn!(
+                    command = %other,
+                    arguments = %request.arguments,
+                    "unsupported IMAP command"
+                );
                 writer
                     .write_all(
                         format!("{} BAD unsupported command {}\r\n", request.tag, other).as_bytes(),
@@ -276,6 +282,12 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         match result {
             Ok(keep_running) => Ok(keep_running),
             Err(error) => {
+                warn!(
+                    command = %request.command,
+                    arguments = %request.arguments,
+                    error = %sanitize_imap_text(&error.to_string()),
+                    "IMAP command failed"
+                );
                 writer
                     .write_all(
                         format!(

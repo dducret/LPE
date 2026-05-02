@@ -174,6 +174,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         W: AsyncWriteExt + Unpin,
     {
         let mut tokens = tokenize(arguments)?;
+        strip_search_return_options(&mut tokens)?;
         if tokens
             .first()
             .is_some_and(|token| token.eq_ignore_ascii_case("CHARSET"))
@@ -333,6 +334,20 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         writer.flush().await?;
         Ok(true)
     }
+}
+
+fn strip_search_return_options(tokens: &mut Vec<String>) -> Result<()> {
+    if !tokens
+        .first()
+        .is_some_and(|token| token.eq_ignore_ascii_case("RETURN"))
+    {
+        return Ok(());
+    }
+    if tokens.len() < 2 {
+        bail!("SEARCH RETURN requires an option list");
+    }
+    tokens.drain(0..2);
+    Ok(())
 }
 
 fn ensure_copy_allowed(source_role: &str, target_role: &str) -> Result<()> {

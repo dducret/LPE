@@ -11,6 +11,7 @@ lpe-magika = { path = "../lpe-magika" }
 lpe-mail-auth = { path = "../lpe-mail-auth" }
 lpe-storage = { path = "../lpe-storage" }
 tokio.workspace = true
+tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
