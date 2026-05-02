@@ -48,6 +48,7 @@ LPE_CT_IMAPS_UPSTREAM_ADDRESS_DEFAULT="${LPE_CT_IMAPS_UPSTREAM_ADDRESS:-127.0.0.
 LPE_CT_BOOTSTRAP_ADMIN_EMAIL_DEFAULT="${LPE_CT_BOOTSTRAP_ADMIN_EMAIL:-}"
 LPE_CT_BOOTSTRAP_ADMIN_PASSWORD_DEFAULT="${LPE_CT_BOOTSTRAP_ADMIN_PASSWORD:-}"
 LPE_CT_CORE_DELIVERY_BASE_URL_DEFAULT="${LPE_CT_CORE_DELIVERY_BASE_URL:-http://127.0.0.1:8080}"
+LPE_CT_GREYLIST_DELAY_SECONDS_DEFAULT="${LPE_CT_GREYLIST_DELAY_SECONDS:-30}"
 LPE_CT_ENABLE_SERVICES_DEFAULT="${LPE_CT_ENABLE_SERVICES:-yes}"
 LPE_CT_LOCAL_DB_HOST_DEFAULT="${LPE_CT_LOCAL_DB_HOST:-127.0.0.1}"
 LPE_CT_LOCAL_DB_PORT_DEFAULT="${LPE_CT_LOCAL_DB_PORT:-5432}"
@@ -147,6 +148,7 @@ collect_runtime_values() {
   LPE_CT_CORE_DELIVERY_BASE_URL="$(ask_required "Internal LPE delivery URL" "${LPE_CT_CORE_DELIVERY_BASE_URL_DEFAULT}" validate_http_url "Enter a valid http:// or https:// URL.")"
   LPE_CT_CORE_DELIVERY_BASE_URL="${LPE_CT_CORE_DELIVERY_BASE_URL%/}"
   LPE_INTEGRATION_SHARED_SECRET="$(ask_secret_with_default_behavior_when_possible "Integration shared secret" "${shared_secret_default}" validate_shared_secret "Enter a strong secret with at least 32 characters.")"
+  LPE_CT_GREYLIST_DELAY_SECONDS="${LPE_CT_GREYLIST_DELAY_SECONDS_DEFAULT}"
 
   print_section "Storage"
   SPOOL_DIR="$(ask_with_default "Quarantine root path" "${SPOOL_DIR}" validate_directory_path "Enter an absolute directory path.")"
@@ -236,6 +238,7 @@ write_runtime_env_file() {
   write_env_value "${ENV_FILE}" "LPE_CT_BOOTSTRAP_ADMIN_EMAIL" "${LPE_CT_BOOTSTRAP_ADMIN_EMAIL}"
   write_env_value "${ENV_FILE}" "LPE_CT_BOOTSTRAP_ADMIN_PASSWORD" "${LPE_CT_BOOTSTRAP_ADMIN_PASSWORD}"
   write_env_value "${ENV_FILE}" "LPE_CT_CORE_DELIVERY_BASE_URL" "${LPE_CT_CORE_DELIVERY_BASE_URL}"
+  write_env_value "${ENV_FILE}" "LPE_CT_GREYLIST_DELAY_SECONDS" "${LPE_CT_GREYLIST_DELAY_SECONDS}"
   write_env_value "${ENV_FILE}" "LPE_INTEGRATION_SHARED_SECRET" "${LPE_INTEGRATION_SHARED_SECRET}"
   write_env_value "${ENV_FILE}" "RUST_LOG" "${RUST_LOG:-info}"
   write_env_value "${ENV_FILE}" "LPE_MAGIKA_BIN" "${BIN_DIR}/magika"

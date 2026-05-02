@@ -68,6 +68,7 @@ pub(crate) struct RuntimeConfig {
     pub(crate) drain_mode: bool,
     pub(crate) quarantine_enabled: bool,
     pub(crate) greylisting_enabled: bool,
+    pub(crate) greylist_delay_seconds: u64,
     pub(crate) antivirus_enabled: bool,
     pub(crate) antivirus_fail_closed: bool,
     pub(crate) antivirus_provider_chain: Vec<String>,
@@ -553,7 +554,8 @@ enum BayesLabel {
     Spam,
 }
 
-const GREYLIST_DELAY_SECONDS: u64 = 90;
+const DEFAULT_GREYLIST_DELAY_SECONDS: u64 = 30;
+const DEFAULT_OUTBOUND_RETRY_AFTER_SECONDS: u32 = 60;
 
 pub(crate) const SPOOL_QUEUES: [&str; 9] = [
     "incoming",
@@ -845,6 +847,11 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
         drain_mode: dashboard.policies.drain_mode,
         quarantine_enabled: dashboard.policies.quarantine_enabled,
         greylisting_enabled: dashboard.policies.greylisting_enabled,
+        greylist_delay_seconds: env::var("LPE_CT_GREYLIST_DELAY_SECONDS")
+            .ok()
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .unwrap_or(DEFAULT_GREYLIST_DELAY_SECONDS)
+            .max(1),
         antivirus_enabled: dashboard.policies.antivirus_enabled,
         antivirus_fail_closed: dashboard.policies.antivirus_fail_closed,
         antivirus_provider_chain: dashboard.policies.antivirus_provider_chain.clone(),
@@ -3502,6 +3509,7 @@ async fn evaluate_greylisting(
     mail_from: &str,
     rcpt_to: &[String],
 ) -> Result<Option<String>> {
+    let greylist_delay_seconds = config.greylist_delay_seconds.max(1);
     let rcpt = rcpt_to.first().map(String::as_str).unwrap_or_default();
     let key = stable_key_id(&(
         ip,
@@ -3519,7 +3527,7 @@ async fn evaluate_greylisting(
             .map(|value| value.0)
             .unwrap_or_else(|| GreylistEntry {
                 first_seen_unix: now,
-                release_after_unix: now + GREYLIST_DELAY_SECONDS,
+                release_after_unix: now + greylist_delay_seconds,
                 pass_count: 0,
             })
     } else {
@@ -3529,7 +3537,7 @@ async fn evaluate_greylisting(
         } else {
             GreylistEntry {
                 first_seen_unix: now,
-                release_after_unix: now + GREYLIST_DELAY_SECONDS,
+                release_after_unix: now + greylist_delay_seconds,
                 pass_count: 0,
             }
         }
@@ -3558,7 +3566,7 @@ async fn evaluate_greylisting(
         }
         return Ok(Some(format!(
             "greylisted triplet {} for {} seconds",
-            key, GREYLIST_DELAY_SECONDS
+            key, greylist_delay_seconds
         )));
     }
 
@@ -4194,7 +4202,7 @@ async fn relay_message(
         TransportDeliveryStatus::Deferred
     };
     let retry = if status == TransportDeliveryStatus::Deferred {
-        let retry_after = retry_after_seconds(300, attempt_count);
+        let retry_after = retry_after_seconds(DEFAULT_OUTBOUND_RETRY_AFTER_SECONDS, attempt_count);
         Some(TransportRetryAdvice {
             retry_after_seconds: retry_after,
             policy: "connect-backoff".to_string(),
@@ -4399,7 +4407,10 @@ fn direct_mx_failure(
         remote_message_ref: None,
         retry: if status == TransportDeliveryStatus::Deferred {
             Some(TransportRetryAdvice {
-                retry_after_seconds: retry_after_seconds(300, attempt_count),
+                retry_after_seconds: retry_after_seconds(
+                    DEFAULT_OUTBOUND_RETRY_AFTER_SECONDS,
+                    attempt_count,
+                ),
                 policy: "direct-mx".to_string(),
                 reason: Some(detail.clone()),
             })
@@ -4497,7 +4508,8 @@ async fn relay_message_to_target_for_recipients(
                 detail: Some(reply.message.clone()),
                 remote_message_ref: None,
                 retry: if status == TransportDeliveryStatus::Deferred {
-                    let retry_after = retry_after_seconds(300, attempt_count);
+                    let retry_after =
+                        retry_after_seconds(DEFAULT_OUTBOUND_RETRY_AFTER_SECONDS, attempt_count);
                     Some(TransportRetryAdvice {
                         retry_after_seconds: retry_after,
                         policy: "remote-smtp".to_string(),
@@ -4546,7 +4558,8 @@ async fn relay_message_to_target_for_recipients(
             detail: Some(data_reply.message.clone()),
             remote_message_ref: None,
             retry: {
-                let retry_after = retry_after_seconds(300, attempt_count);
+                let retry_after =
+                    retry_after_seconds(DEFAULT_OUTBOUND_RETRY_AFTER_SECONDS, attempt_count);
                 Some(TransportRetryAdvice {
                     retry_after_seconds: retry_after,
                     policy: "remote-smtp".to_string(),
@@ -4593,7 +4606,8 @@ async fn relay_message_to_target_for_recipients(
             detail: Some(final_reply.message.clone()),
             remote_message_ref: None,
             retry: if status == TransportDeliveryStatus::Deferred {
-                let retry_after = retry_after_seconds(300, attempt_count);
+                let retry_after =
+                    retry_after_seconds(DEFAULT_OUTBOUND_RETRY_AFTER_SECONDS, attempt_count);
                 Some(TransportRetryAdvice {
                     retry_after_seconds: retry_after,
                     policy: "remote-smtp".to_string(),
@@ -6200,7 +6214,7 @@ mod tests {
         DecisionTraceEntry, DkimDisposition, FilterAction, GreylistEntry, OutboundRoutingRule,
         OutboundThrottleRule, QueuedMessage, RuntimeConfig, SmtpCommandOutcome, SmtpTransaction,
         SpfDisposition, TransportAuditEvent, TransportDsnReport, TransportRouteDecision,
-        TransportTechnicalStatus, TransportThrottleStatus,
+        TransportTechnicalStatus, TransportThrottleStatus, DEFAULT_GREYLIST_DELAY_SECONDS,
     };
     use crate::env_test_lock;
     use axum::{routing::post, Json, Router};
@@ -6343,6 +6357,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             drain_mode: false,
             quarantine_enabled: true,
             greylisting_enabled: false,
+            greylist_delay_seconds: DEFAULT_GREYLIST_DELAY_SECONDS,
             antivirus_enabled: false,
             antivirus_fail_closed: true,
             antivirus_provider_chain: vec!["takeri".to_string()],

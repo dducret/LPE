@@ -174,8 +174,8 @@ That secret is mandatory at startup on both components, must fail closed when mi
 On the `LPE` side:
 
 - `LPE_CT_API_BASE_URL`
-- `LPE_OUTBOUND_WORKER_INTERVAL_MS`
-- `LPE_OUTBOUND_WORKER_BATCH_SIZE`
+- `LPE_OUTBOUND_WORKER_INTERVAL_MS` (default `1000`)
+- `LPE_OUTBOUND_WORKER_BATCH_SIZE` (default `50`)
 - `LPE_LOG_FORMAT`
 - `LPE_METRICS_ENABLED`
 - `LPE_INTEGRATION_SHARED_SECRET`
@@ -189,6 +189,7 @@ On the `LPE-CT` side:
 - `LPE_CT_SUBMISSION_TLS_CERT_PATH`
 - `LPE_CT_SUBMISSION_TLS_KEY_PATH`
 - `LPE_CT_SUBMISSION_MAX_MESSAGE_SIZE_MB`
+- `LPE_CT_GREYLIST_DELAY_SECONDS` (default `30`)
 - `LPE_CT_LOG_FORMAT`
 - `LPE_CT_METRICS_ENABLED`
 - `LPE_INTEGRATION_SHARED_SECRET`
@@ -246,7 +247,7 @@ The detailed metric families and logging behavior are documented in `docs/archit
 - `LPE-CT` can now add outbound DKIM signatures for sender domains that have an explicit configured key
 - `LPE-CT` can now reject or constrain sender and recipient addresses through local allow/block policy before relay or submission acceptance
 - `LPE-CT` applies outbound routing rules and throttling before the actual SMTP relay
-- `LPE-CT` classifies outbound failures into `deferred`, `bounced`, or `failed` from SMTP replies and produces structured technical and `DSN` feedback with retry backoff derived from the upstream attempt count
+- `LPE-CT` classifies outbound failures into `deferred`, `bounced`, or `failed` from SMTP replies and produces structured technical and `DSN` feedback with retry backoff derived from the upstream attempt count; the default first retry advice is `60` seconds
 - inbound `RCPT TO` can now call an internal `LPE` recipient-verification API with short-lived local caching on the `LPE-CT` side
 - inbound final delivery creates per-mailbox `Inbox` copies in `LPE`
 - standard search and visible projections do not reinject `Bcc`

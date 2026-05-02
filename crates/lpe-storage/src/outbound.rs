@@ -67,7 +67,7 @@ fn synthesized_retry_policy(response: &OutboundMessageHandoffResponse) -> &'stat
 
 fn default_retry_after_seconds(attempts: i32) -> i32 {
     let next_attempt = attempts.saturating_add(1).max(1);
-    next_attempt.saturating_mul(300).min(3600)
+    next_attempt.saturating_mul(60).min(3600)
 }
 
 fn normalize_handoff_response(
@@ -507,7 +507,7 @@ mod tests {
         assert_eq!(
             normalized.retry,
             Some(TransportRetryAdvice {
-                retry_after_seconds: 300,
+                retry_after_seconds: 60,
                 policy: "dispatch-backoff".to_string(),
                 reason: Some("connection lost".to_string()),
             })

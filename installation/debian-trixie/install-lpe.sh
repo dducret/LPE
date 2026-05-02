@@ -46,6 +46,8 @@ LPE_DB_USER_DEFAULT="${LPE_DB_USER:-lpe}"
 LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME_DEFAULT="${LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME:-Bootstrap Administrator}"
 LPE_PST_IMPORT_DIR_DEFAULT="${LPE_PST_IMPORT_DIR:-${DATA_DIR}/imports}"
 LPE_PUBLIC_SCHEME_DEFAULT="${LPE_PUBLIC_SCHEME:-https}"
+LPE_OUTBOUND_WORKER_INTERVAL_MS_DEFAULT="${LPE_OUTBOUND_WORKER_INTERVAL_MS:-1000}"
+LPE_OUTBOUND_WORKER_BATCH_SIZE_DEFAULT="${LPE_OUTBOUND_WORKER_BATCH_SIZE:-50}"
 LPE_ENABLE_SERVICES_DEFAULT="${LPE_ENABLE_SERVICES:-yes}"
 if [[ -n "${LPE_RUN_MIGRATIONS:-}" ]]; then
   LPE_RUN_MIGRATIONS_DEFAULT="${LPE_RUN_MIGRATIONS}"
@@ -158,6 +160,8 @@ collect_runtime_values() {
   fi
   LPE_CT_API_BASE_URL="$(ask_required "LPE-CT API base URL" "${lpe_ct_api_base_url_default}" validate_http_url "Enter a valid http:// or https:// URL.")"
   LPE_INTEGRATION_SHARED_SECRET="$(ask_secret_with_default_behavior_when_possible "Integration shared secret" "${shared_secret_default}" validate_shared_secret "Enter a strong secret with at least 32 characters.")"
+  LPE_OUTBOUND_WORKER_INTERVAL_MS="${LPE_OUTBOUND_WORKER_INTERVAL_MS_DEFAULT}"
+  LPE_OUTBOUND_WORKER_BATCH_SIZE="${LPE_OUTBOUND_WORKER_BATCH_SIZE_DEFAULT}"
 
   print_section "Administrator"
   LPE_BOOTSTRAP_ADMIN_EMAIL="$(ask_required "Admin email" "${bootstrap_admin_email_default}" validate_email "Enter a valid email address.")"
@@ -224,6 +228,8 @@ write_runtime_env_file() {
   write_env_value "${ENV_FILE}" "LPE_DB_PASSWORD" "${LPE_DB_PASSWORD}"
   write_env_value "${ENV_FILE}" "DATABASE_URL" "${DATABASE_URL}"
   write_env_value "${ENV_FILE}" "LPE_CT_API_BASE_URL" "${LPE_CT_API_BASE_URL}"
+  write_env_value "${ENV_FILE}" "LPE_OUTBOUND_WORKER_INTERVAL_MS" "${LPE_OUTBOUND_WORKER_INTERVAL_MS}"
+  write_env_value "${ENV_FILE}" "LPE_OUTBOUND_WORKER_BATCH_SIZE" "${LPE_OUTBOUND_WORKER_BATCH_SIZE}"
   write_env_value "${ENV_FILE}" "LPE_INTEGRATION_SHARED_SECRET" "${LPE_INTEGRATION_SHARED_SECRET}"
   write_env_value "${ENV_FILE}" "LPE_BOOTSTRAP_ADMIN_EMAIL" "${LPE_BOOTSTRAP_ADMIN_EMAIL}"
   write_env_value "${ENV_FILE}" "LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME" "${LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME}"

@@ -109,12 +109,12 @@ async fn run_outbound_worker(storage: Storage) -> Result<()> {
     let integration_key = integration_shared_secret()?;
     let interval_ms = env::var("LPE_OUTBOUND_WORKER_INTERVAL_MS")
         .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(5_000)
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(1_000)
         .max(250);
     let batch_size = env::var("LPE_OUTBOUND_WORKER_BATCH_SIZE")
         .ok()
-        .and_then(|value| value.parse::<i64>().ok())
+        .and_then(|value| value.trim().parse::<i64>().ok())
         .unwrap_or(10)
         .max(1);
     let client = reqwest::Client::builder().build()?;

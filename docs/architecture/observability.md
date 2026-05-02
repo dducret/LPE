@@ -280,9 +280,9 @@ Alert when:
 - `LPE_CT_API_BASE_URL`
   Base URL used by the outbound worker for `LPE -> LPE-CT` handoff.
 - `LPE_OUTBOUND_WORKER_INTERVAL_MS`
-  Poll interval for the outbound worker.
+  Poll interval for the outbound worker. Defaults to `1000` milliseconds.
 - `LPE_OUTBOUND_WORKER_BATCH_SIZE`
-  Maximum batch size per worker cycle.
+  Maximum batch size per worker cycle. Defaults to `50`.
 - `LPE_INTEGRATION_SHARED_SECRET`
   Shared secret used for internal `LPE <-> LPE-CT` authentication.
 
@@ -313,6 +313,9 @@ Alert when:
   `/var/log/lpe-ct/mail.log`.
 - `LPE_CT_CORE_DELIVERY_BASE_URL`
   Base URL used for final inbound delivery toward `LPE`.
+- `LPE_CT_GREYLIST_DELAY_SECONDS`
+  First-seen greylisting delay before a sender triplet can pass on retry.
+  Defaults to `30` seconds.
 - `LPE_INTEGRATION_SHARED_SECRET`
   Shared secret used for internal `LPE <-> LPE-CT` authentication.
 
