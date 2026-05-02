@@ -1945,14 +1945,14 @@ where
 
     let upper = command.to_ascii_uppercase();
     if upper.starts_with("EHLO ") || upper.starts_with("HELO ") {
+        let config = runtime_config_from_store(dashboard_store)?;
         transaction.helo = command[5.min(command.len())..].trim().to_string();
         transaction.greeting_required = false;
         transaction.reset_message();
-        write_smtp(writer, "250-LPE-CT").await?;
+        write_smtp(writer, &format!("250-{}", config.outbound_ehlo_name)).await?;
         if starttls_available {
             write_smtp(writer, "250-STARTTLS").await?;
         }
-        let config = runtime_config_from_store(dashboard_store)?;
         write_smtp(
             writer,
             &format!(
@@ -1970,6 +1970,8 @@ where
             return Ok(SmtpCommandOutcome::StartTls);
         }
         write_smtp(writer, "454 TLS not available").await?;
+    } else if upper == "AUTH" || upper.starts_with("AUTH ") {
+        write_smtp(writer, "502 AUTH not available on public SMTP ingress").await?;
     } else if upper.starts_with("MAIL FROM:") {
         if transaction.requires_greeting() {
             write_smtp(writer, "503 send EHLO or HELO after STARTTLS first").await?;
@@ -7203,7 +7205,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             .unwrap();
         line.clear();
         reader.read_line(&mut line).await.unwrap();
-        assert_eq!(line, "250-LPE-CT\r\n");
+        assert_eq!(line, "250-mx.lpe.example\r\n");
         line.clear();
         reader.read_line(&mut line).await.unwrap();
         assert_eq!(line, "250 SIZE 67108864\r\n");
@@ -7470,6 +7472,100 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             .contains("451 core final delivery temporarily unavailable (trace lpe-ct-in-"));
         assert!(transcript.contains(")\r\n"));
         assert!(spool.join("deferred").read_dir().unwrap().next().is_some());
+        assert!(spool.join("bounces").read_dir().unwrap().next().is_none());
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
+    }
+
+    #[tokio::test]
+    async fn smtp_unknown_local_recipient_core_rejection_defers_without_backscatter_bounce() {
+        let _guard = env_test_lock();
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
+        let spool = temp_dir("smtp-data-core-recipient-reject");
+        initialize_spool(&spool).unwrap();
+        let captured = Arc::new(Mutex::new(None::<InboundDeliveryRequest>));
+        let capture = captured.clone();
+        let router = Router::new().route(
+            "/internal/lpe-ct/inbound-deliveries",
+            post(move |Json(request): Json<InboundDeliveryRequest>| {
+                let capture = capture.clone();
+                async move {
+                    *capture.lock().unwrap() = Some(request);
+                    Json(InboundDeliveryResponse {
+                        accepted: false,
+                        delivered_mailboxes: Vec::new(),
+                        detail: Some("unknown local recipient".to_string()),
+                    })
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let dashboard_store = plaintext_inbound_store(format!("http://{address}"));
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(
+            b"From: Sender <smtp-test@l-p-e.ch>\r\nSubject: Unknown recipient\r\n\r\nBody\r\n.\r\n"
+                .as_slice(),
+        );
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let peer: SocketAddr = "127.0.0.1:25".parse().unwrap();
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "MAIL FROM:<smtp-test@l-p-e.ch>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "RCPT TO:<definitely-not-a-real-user-260502@l-p-e.ch>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "DATA",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let transcript = String::from_utf8(writer).unwrap();
+        assert!(transcript.contains("250 recipient accepted\r\n"));
+        assert!(transcript
+            .contains("451 core final delivery temporarily unavailable (trace lpe-ct-in-"));
+        assert!(spool.join("deferred").read_dir().unwrap().next().is_some());
+        assert!(spool.join("bounces").read_dir().unwrap().next().is_none());
+        assert_eq!(
+            captured.lock().unwrap().clone().unwrap().rcpt_to,
+            vec!["definitely-not-a-real-user-260502@l-p-e.ch".to_string()]
+        );
         std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 
@@ -7640,7 +7736,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
 
         assert_eq!(
             String::from_utf8(writer).unwrap(),
-            "250-LPE-CT\r\n250-STARTTLS\r\n250 SIZE 67108864\r\n"
+            "250-mx.lpe.example\r\n250-STARTTLS\r\n250 SIZE 67108864\r\n"
         );
     }
 
@@ -7668,8 +7764,49 @@ pzqAuzRp69VoxDpO6hdx/Qc=
 
         assert_eq!(
             String::from_utf8(writer).unwrap(),
-            "250-LPE-CT\r\n250 SIZE 67108864\r\n"
+            "250-mx.lpe.example\r\n250 SIZE 67108864\r\n"
         );
+    }
+
+    #[tokio::test]
+    async fn smtp_public_ingress_does_not_advertise_or_accept_auth() {
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(tokio::io::empty());
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let dashboard_store = runtime_store_with_accepted_domains(&[]);
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            std::path::Path::new("spool"),
+            "127.0.0.1:25".parse().unwrap(),
+            &mut transaction,
+            "EHLO mx.example.test",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            std::path::Path::new("spool"),
+            "127.0.0.1:25".parse().unwrap(),
+            &mut transaction,
+            "AUTH PLAIN",
+            false,
+        )
+        .await
+        .unwrap();
+
+        let transcript = String::from_utf8(writer).unwrap();
+        assert!(!transcript.to_ascii_uppercase().contains("250-AUTH"));
+        assert!(!transcript.to_ascii_uppercase().contains("250 AUTH"));
+        assert!(transcript.ends_with("502 AUTH not available on public SMTP ingress\r\n"));
     }
 
     #[test]
@@ -7736,7 +7873,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
 
         assert_eq!(
             String::from_utf8(writer).unwrap(),
-            "250-LPE-CT\r\n250 SIZE 67108864\r\n"
+            "250-mx.lpe.example\r\n250 SIZE 67108864\r\n"
         );
     }
 
@@ -7802,7 +7939,10 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             .await
             .unwrap();
         let ehlo = read_test_smtp_reply(&mut reader).await;
-        assert_eq!(ehlo, "250-LPE-CT\r\n250-STARTTLS\r\n250 SIZE 67108864\r\n");
+        assert_eq!(
+            ehlo,
+            "250-mx.lpe.example\r\n250-STARTTLS\r\n250 SIZE 67108864\r\n"
+        );
 
         reader.get_mut().write_all(b"STARTTLS\r\n").await.unwrap();
         assert_eq!(
@@ -7843,7 +7983,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             .unwrap();
         assert_eq!(
             read_test_smtp_reply(&mut tls_reader).await,
-            "250-LPE-CT\r\n250 SIZE 67108864\r\n"
+            "250-mx.lpe.example\r\n250 SIZE 67108864\r\n"
         );
         tls_reader
             .get_mut()

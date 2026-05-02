@@ -203,6 +203,7 @@ Additional command-style providers can be chained after `takeri` with:
 - default: `false`
 - when enabled, inbound `SMTP` recipient acceptance is checked against an internal `LPE` verification API and cached locally
 - when disabled, `LPE-CT` intentionally uses deferred local-part validation for verified accepted domains: any syntactically valid recipient at a verified accepted domain is accepted at `RCPT TO`, and final mailbox existence is left to the private `LPE` final-delivery bridge
+- if the final-delivery bridge later rejects an accepted local recipient, `LPE-CT` treats that as a local deferred-delivery condition and retains the message in sorting-center custody; it does not generate an outbound bounce to the reverse path from that post-acceptance rejection
 - if no accepted domains are configured and verified, inbound `RCPT TO` is rejected so the edge cannot become an open relay
 
 `LPE_CT_RECIPIENT_VERIFICATION_FAIL_CLOSED`
@@ -429,12 +430,14 @@ Those retention rules apply only to sorting-center-owned technical evidence and 
 
 SMTP envelope parsing is strict for the currently implemented ESMTP surface:
 
+- the `220` banner and `EHLO` response use the configured `System Setup` / `Mail relay` / `SMTP Settings` EHLO name, normally the public MX FQDN such as `mail.l-p-e.ch`
 - command lines longer than the SMTP command limit return `500 command line too long`
 - `MAIL FROM` and `RCPT TO` require bracketed reverse-path or forward-path syntax such as `MAIL FROM:<sender@example.test>`
 - malformed envelope paths return `501`
 - unsupported `MAIL FROM` or `RCPT TO` parameters return `555`
 - only the `MAIL FROM` `SIZE=` parameter is implemented; values larger than `LPE_CT_MAX_MESSAGE_SIZE_MB` return `552`
 - each transaction accepts at most 25 recipients before returning `452 too many recipients`
+- public port `25` does not advertise or accept `AUTH`; authenticated client submission must stay on the dedicated submission surface, not public inbound SMTP
 
 Typical inbound outcomes are:
 
@@ -476,6 +479,25 @@ neutral or controlled external `From` header. A spoofed `l-p-e.ch` author from
 an unauthorized source should return `554 message rejected by perimeter
 policy: DMARC policy requested reject; SPF failed and no aligned DKIM signature
 passed (trace <trace>)`.
+
+## MTA-STS and TLS-RPT deployment notes
+
+`LPE-CT` does not currently automate `MTA-STS` DNS publication, HTTPS policy hosting, or `TLS-RPT` report generation. Operators can still deploy the public policy artifacts alongside the SMTP TLS profile:
+
+- publish `_mta-sts.<domain>` as a `TXT` record such as `v=STSv1; id=2026050201`
+- host `https://mta-sts.<domain>/.well-known/mta-sts.txt`
+- use a policy body such as:
+
+```text
+version: STSv1
+mode: enforce
+mx: mail.l-p-e.ch
+max_age: 86400
+```
+
+- publish `_smtp._tls.<domain>` as a `TXT` record such as `v=TLSRPTv1; rua=mailto:tlsrpt@<domain>`
+- keep the `mx:` value aligned with the configured `LPE-CT` public EHLO/banner FQDN and the certificate SAN used by inbound `STARTTLS`
+- start with `mode: testing` until STARTTLS, certificate renewal, and external delivery telemetry are verified; switch to `enforce` only after the MX hostname, certificate, and policy file are stable
 
 The decision matrix is now intentionally stricter:
 
