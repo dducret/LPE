@@ -170,7 +170,16 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     where
         W: AsyncWriteExt + Unpin,
     {
-        let tokens = tokenize(arguments)?;
+        let mut tokens = tokenize(arguments)?;
+        if tokens
+            .first()
+            .is_some_and(|token| token.eq_ignore_ascii_case("CHARSET"))
+        {
+            if tokens.len() < 2 {
+                bail!("SEARCH CHARSET requires a charset name");
+            }
+            tokens.drain(0..2);
+        }
         let selected = self.require_selected()?;
         let criteria = SearchExpression::from_tokens(&tokens)?;
 

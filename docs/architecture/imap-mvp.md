@@ -65,7 +65,11 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `FETCH BODYSTRUCTURE` and MIME section rendering are compatibility projections over the canonical message text and sanitized HTML fields; attachment MIME reserialization remains deferred
 - `COPY` intentionally rejects `Sent` and `Drafts` as source or target mailboxes so the adapter cannot become an alternate sent-message or draft workflow
 - `MOVE` uses the same guardrail and only supports `Inbox` plus custom user mailboxes
-- `SEARCH` now supports `ALL`, `SEEN`, `UNSEEN`, `FLAGGED`, `UNFLAGGED`, `TEXT`, `SUBJECT`, `FROM`, `TO`, `CC`, `BODY`, `HEADER`, `BEFORE`, `ON`, `SINCE`, `LARGER`, `SMALLER`, `NOT`, `OR`, sequence-set criteria, and `UID`
+- `SEARCH` now supports optional `CHARSET`, `ALL`, `SEEN`, `UNSEEN`, `FLAGGED`,
+  `UNFLAGGED`, `DELETED`, `UNDELETED`, `ANSWERED`, `UNANSWERED`, `DRAFT`,
+  `UNDRAFT`, `RECENT`, `OLD`, `NEW`, `TEXT`, `SUBJECT`, `FROM`, `TO`, `CC`,
+  `BODY`, `HEADER`, `BEFORE`, `ON`, `SINCE`, `LARGER`, `SMALLER`, `NOT`,
+  `OR`, sequence-set criteria, and `UID`
 - `EXPUNGE` is accepted for client compatibility but is currently a no-op because the adapter does not yet expose `\Deleted` or permanent message deletion
 - `IDLE` currently refreshes by polling canonical mailbox state for the selected mailbox; it now coexists with a reusable canonical mail change watermark, but still does not publish `QRESYNC`-grade vanished history
 - the current `ACL` slice is administrative only for the authenticated owner mailbox namespace; delegated mailbox projection through IMAP remains deferred even though the grants are canonical today

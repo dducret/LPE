@@ -885,6 +885,18 @@ async fn outlook_first_login_list_select_sync_transcript() {
     let fetch_body = send_command(&mut stream, "OL10B UID FETCH 1 (UID BODY)\r\n", "OL10B").await;
     assert!(fetch_body.contains("UID 1 BODY ((\"TEXT\" \"PLAIN\""));
 
+    let search_undeleted = send_command(
+        &mut stream,
+        "OL10C UID SEARCH CHARSET UTF-8 UNDELETED\r\n",
+        "OL10C",
+    )
+    .await;
+    assert!(search_undeleted.contains("* SEARCH 1"));
+
+    let search_not_deleted =
+        send_command(&mut stream, "OL10D UID SEARCH 1:* NOT DELETED\r\n", "OL10D").await;
+    assert!(search_not_deleted.contains("* SEARCH 1"));
+
     let fetch_headers = send_command(
         &mut stream,
         "OL11 UID FETCH 1 (BODY.PEEK[HEADER.FIELDS (DATE FROM TO SUBJECT MESSAGE-ID)])\r\n",
