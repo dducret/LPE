@@ -204,6 +204,8 @@ The outbound `EHLO` / `HELO` hostname is also managed in the same `LPE-CT` Web
 GUI relay settings. It must be a fully-qualified hostname, normally the
 published `MX` name for the sorting-center node, because external MTAs may
 reject short names such as `lpe-ct`.
+The public inbound `SMTP` greeting uses the same validated hostname so the
+sorting center presents one consistent `SMTP` identity.
 
 `LPE_CT_PUBLIC_TLS_CERT_PATH` and `LPE_CT_PUBLIC_TLS_KEY_PATH` are accepted as
 an installation bootstrap path for the public inbound `SMTP` `STARTTLS`

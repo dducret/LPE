@@ -1794,7 +1794,8 @@ async fn handle_smtp_session(
         return Ok(());
     }
 
-    write_smtp(&mut writer, "220 LPE-CT ESMTP ready").await?;
+    let smtp_name = runtime_config_from_store(&dashboard_store)?.outbound_ehlo_name;
+    write_smtp(&mut writer, &format!("220 {smtp_name} ESMTP ready")).await?;
     let mut transaction = SmtpTransaction::default();
     let mut line = String::new();
     loop {
@@ -6468,6 +6469,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         let mut state = crate::default_state();
         state.relay.primary_upstream = "127.0.0.1:9".to_string();
         state.relay.secondary_upstream.clear();
+        state.relay.outbound_ehlo_name = "mx.lpe.example".to_string();
         state.relay.core_delivery_base_url = core_delivery_base_url;
         state.local_data_stores.dedicated_postgres.enabled = false;
         state.policies.greylisting_enabled = true;
@@ -6499,6 +6501,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         let mut state = crate::default_state();
         state.relay.primary_upstream = "127.0.0.1:9".to_string();
         state.relay.secondary_upstream.clear();
+        state.relay.outbound_ehlo_name = "mx.lpe.example".to_string();
         state.relay.core_delivery_base_url = "http://127.0.0.1:9".to_string();
         state.policies.recipient_verification.enabled = false;
         state.accepted_domains = domains
@@ -6736,7 +6739,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         let mut line = String::new();
 
         reader.read_line(&mut line).await.unwrap();
-        assert_eq!(line, "220 LPE-CT ESMTP ready\r\n");
+        assert_eq!(line, "220 mx.lpe.example ESMTP ready\r\n");
 
         writer
             .write_all(b"EHLO validator.l-p-e.ch\r\n")
@@ -7335,7 +7338,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         let mut reader = BufReader::new(stream);
         assert_eq!(
             read_test_smtp_reply(&mut reader).await,
-            "220 LPE-CT ESMTP ready\r\n"
+            "220 mx.lpe.example ESMTP ready\r\n"
         );
         reader
             .get_mut()
