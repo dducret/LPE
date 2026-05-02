@@ -839,6 +839,7 @@ impl Storage {
             SELECT
                 m.id,
                 m.imap_uid,
+                m.imap_modseq,
                 m.thread_id,
                 m.mailbox_id,
                 mb.role AS mailbox_role,
