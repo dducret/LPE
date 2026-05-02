@@ -2186,6 +2186,28 @@ select.invalid {
   text-align: left;
 }
 
+.system-value-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.system-value-list code {
+  display: block;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(204, 216, 229, 0.78);
+  border-radius: var(--radius-sm);
+  background: rgba(248, 251, 254, 0.82);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.danger-action {
+  border-color: rgba(218, 82, 82, 0.42);
+  color: #9f1f1f;
+}
+
 .accepted-domain-table {
   min-width: 72rem;
 }

@@ -2061,6 +2061,57 @@ function renderNetworkInterfaces(dashboard, copy) {
   `;
 }
 
+function renderSimpleList(title, values, emptyMessage) {
+  const rows = (values ?? []).filter(Boolean);
+  if (!rows.length) {
+    return systemSetupEmptyState(title, emptyMessage);
+  }
+  return `
+    <section class="network-interface-panel">
+      <h5>${escapeHtml(title)}</h5>
+      <div class="system-value-list">
+        ${rows.map((value) => `<code>${escapeHtml(value)}</code>`).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderIpv6Addresses(dashboard, copy) {
+  const addresses = dashboard.system?.ipv6_addresses ?? [];
+  if (!addresses.length) {
+    return systemSetupEmptyState(copy.systemSetupNetworkIpv6, copy.systemSetupNoIpv6);
+  }
+  return `
+    <section class="network-interface-panel">
+      <h5>${escapeHtml(copy.systemSetupNetworkIpv6)}</h5>
+      <div class="data-table-wrap network-interface-table-wrap">
+        <table class="data-table network-interface-table">
+          <thead>
+            <tr>
+              <th scope="col">${escapeHtml(copy.networkInterfaceNameLabel)}</th>
+              <th scope="col">${escapeHtml(copy.networkInterfaceAddressLabel)}</th>
+              <th scope="col">${escapeHtml(copy.networkInterfacePrefixLabel)}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${addresses
+              .map(
+                (item) => `
+                  <tr>
+                    <th scope="row">${escapeHtml(item.interface ?? copy.unset)}</th>
+                    <td>${escapeHtml(item.address ?? copy.unset)}</td>
+                    <td>${escapeHtml(item.prefix ?? copy.unset)}</td>
+                  </tr>
+                `,
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
 function renderNetworkSetup(activeTab, dashboard, copy) {
   const tabs = [
     { id: "ip", label: copy.systemSetupNetworkIp },
@@ -2087,22 +2138,22 @@ function renderNetworkSetup(activeTab, dashboard, copy) {
     dns: renderSystemSetupPanel(
       copy.systemSetupNetworkDns,
       copy.systemSetupNetworkDnsSummary,
-      renderSystemSetupSummary([
+      `${renderSystemSetupSummary([
         { label: copy.sitePublishedMxLabel, value: dashboard.site.published_mx },
         { label: copy.siteManagementFqdnLabel, value: dashboard.site.management_fqdn },
         { label: copy.siteDmzZoneLabel, value: dashboard.site.dmz_zone },
-      ]),
+      ])}${renderSimpleList(copy.systemSetupDebianDnsServers, dashboard.system?.dns_servers, copy.systemSetupNoDnsServers)}`,
       editSite,
     ),
     "static-routes": renderSystemSetupPanel(
       copy.systemSetupNetworkStaticRoutes,
       copy.systemSetupNetworkStaticRoutesSummary,
-      systemSetupEmptyState(copy.systemSetupNetworkStaticRoutes, copy.systemSetupNoStaticRoutes),
+      renderSimpleList(copy.systemSetupNetworkStaticRoutes, dashboard.system?.ipv4_routes, copy.systemSetupNoStaticRoutes),
     ),
     ipv6: renderSystemSetupPanel(
       copy.systemSetupNetworkIpv6,
       copy.systemSetupNetworkIpv6Summary,
-      systemSetupEmptyState(copy.systemSetupNetworkIpv6, copy.systemSetupNoIpv6),
+      `${renderIpv6Addresses(dashboard, copy)}${renderSimpleList(copy.systemSetupIpv6Routes, dashboard.system?.ipv6_routes, copy.systemSetupNoIpv6Routes)}`,
     ),
   };
   return renderSystemSetupTabs(tabs, activeTab, "secondary") + bodies[activeTab];
@@ -2407,7 +2458,11 @@ function renderPlatform() {
         { label: copy.sessionTimeLabel, value: formatDateTime(getHostClockDate()) },
         { label: copy.systemHostname, value: dashboard.system?.hostname || dashboard.site?.node_name || copy.unset },
         { label: copy.systemUptime, value: formatUptime(dashboard.system?.uptime_seconds) },
+        { label: copy.ntpEnabledLabel, value: dashboard.system?.ntp?.enabled ? copy.enabled : copy.disabled },
+        { label: copy.ntpSynchronizedLabel, value: dashboard.system?.ntp?.synchronized === true ? copy.yes : dashboard.system?.ntp?.synchronized === false ? copy.no : copy.unset },
+        { label: copy.ntpServersLabel, value: formatList(dashboard.system?.ntp?.servers) },
       ]),
+      `<button class="list-action" type="button" data-action="platform-edit" data-target="time">${copy.edit}</button><button class="list-action" type="button" data-action="ntp-sync">${copy.ntpSyncAction}</button>`,
     ),
     mailRelay: renderMailRelaySetup(nested.mailRelay, dashboard, copy),
     mailAuthentication: renderMailAuthenticationSetup(nested.mailAuthentication, dashboard, copy),
@@ -2421,12 +2476,13 @@ function renderPlatform() {
         { label: copy.updatesLastReleaseLabel, value: dashboard.updates.last_applied_release },
         { label: copy.updatesSourceLabel, value: dashboard.updates.update_source },
       ]),
-      `<button class="list-action" type="button" data-action="platform-edit" data-target="updates">${copy.edit}</button>`,
+      `<button class="list-action" type="button" data-action="platform-edit" data-target="updates">${copy.edit}</button><button class="list-action" type="button" data-action="apt-upgrade">${copy.aptUpgradeAction}</button>`,
     ),
     shutdownRestart: renderSystemSetupPanel(
       copy.systemSetupShutdownRestart,
       copy.systemSetupShutdownRestartSummary,
-      systemSetupEmptyState(copy.systemSetupShutdownRestart, copy.systemSetupNoShutdown),
+      renderSystemSetupSummary([{ label: copy.systemHostname, value: dashboard.system?.hostname || dashboard.site?.node_name || copy.unset }]),
+      `<button class="list-action danger-action" type="button" data-action="power-action" data-power-action="restart">${copy.restartAction}</button><button class="list-action danger-action" type="button" data-action="power-action" data-power-action="shutdown">${copy.shutdownAction}</button>`,
     ),
   };
   containers.platform.innerHTML = `
@@ -3811,6 +3867,35 @@ async function deleteDigestOverride(index) {
   showFeedback(copy.recordDeleted);
 }
 
+async function syncNtp() {
+  const copy = getCopy();
+  showFeedback(copy.actionInProgress, "warning");
+  const result = await postJson("/api/system-time/sync");
+  await loadOps({ silent: true });
+  renderPlatform();
+  showFeedback(result?.detail || copy.ntpSyncRequested, result?.status === "failed" ? "warning" : "success");
+}
+
+async function runAptUpgrade() {
+  const copy = getCopy();
+  showFeedback(copy.aptUpgradeRunning, "warning");
+  const result = await postJson("/api/system-updates/apt-upgrade");
+  await loadOps({ silent: true });
+  renderPlatform();
+  showFeedback(result?.detail || copy.aptUpgradeComplete, result?.status === "failed" ? "warning" : "success");
+}
+
+async function runPowerAction(action) {
+  const copy = getCopy();
+  const isShutdown = action === "shutdown";
+  const message = isShutdown ? copy.shutdownConfirm : copy.restartConfirm;
+  if (!(window.confirm?.(message) ?? false)) {
+    return;
+  }
+  const result = await postJson(`/api/system-power/${encodeURIComponent(action)}`);
+  showFeedback(result?.detail || copy.powerActionRequested, "warning");
+}
+
 function currentAcceptedDomains() {
   return structuredClone(state.dashboard?.accepted_domains ?? []);
 }
@@ -4076,6 +4161,24 @@ function getPlatformDrawerConfigs(dashboard, copy) {
         return !Number.isInteger(value) || value < 1 ? [{ field: "max_concurrent_sessions", message: copy.validationPositiveInteger }] : [];
       },
     },
+    time: {
+      title: copy.systemSetupTime,
+      summary: copy.systemSetupTimeSummary,
+      submitPath: "/api/system-time/ntp",
+      content: `
+        <label class="toggle-field"><span>${copy.ntpEnabledLabel}</span><input name="enabled" type="checkbox"${dashboard.system?.ntp?.enabled ? " checked" : ""} /></label>
+        <label><span>${copy.ntpServersLabel}</span><textarea name="servers" rows="5">${escapeHtml((dashboard.system?.ntp?.servers ?? []).join("\n"))}</textarea></label>
+      `,
+      payload: (form) => ({
+        enabled: form.elements.namedItem("enabled").checked,
+        servers: parseLines(form.elements.namedItem("servers").value),
+      }),
+      validate: (form) => {
+        const enabled = form.elements.namedItem("enabled").checked;
+        const servers = parseLines(form.elements.namedItem("servers").value);
+        return enabled && !servers.length ? [{ field: "servers", message: copy.validationNtpServers }] : [];
+      },
+    },
     updates: {
       title: copy.platformUpdates,
       summary: copy.platformUpdatesCopy,
@@ -4121,10 +4224,13 @@ function openPlatformDrawer(target, opener = document.activeElement) {
       if (errors.length) {
         context.fail(errors);
       }
-      state.dashboard = await putJson(config.submitPath, config.payload(form));
+      const result = await putJson(config.submitPath, config.payload(form));
+      if (result?.site && result?.network) {
+        state.dashboard = result;
+      }
       await loadOps({ silent: true });
       closeDrawer();
-      showFeedback(copy.recordSaved);
+      showFeedback(result?.detail || copy.recordSaved, result?.status === "failed" ? "warning" : "success");
     },
   });
 }
@@ -5122,7 +5228,7 @@ function setSystemSetupTab(actionTarget) {
 }
 
 function getActionHandlers(actionTarget) {
-  const { traceId, ruleId, index, reportId, target, domainId, profileId, sortKey, logTable, logCategory, logId, bulkAction, tabId, diagnosticKind, diagnosticTool, serviceId, serviceAction } = actionTarget.dataset;
+  const { traceId, ruleId, index, reportId, target, domainId, profileId, sortKey, logTable, logCategory, logId, bulkAction, tabId, diagnosticKind, diagnosticTool, serviceId, serviceAction, powerAction } = actionTarget.dataset;
   return {
     "drawer-close": () => closeDrawer(),
     "trace-open": () => runAction(() => loadTrace(traceId, actionTarget)),
@@ -5157,6 +5263,9 @@ function getActionHandlers(actionTarget) {
     "public-tls-disable": () => runAction(() => disablePublicTlsProfile()),
     "public-tls-delete": () => runAction(() => deletePublicTlsProfile(profileId)),
     "platform-edit": () => openPlatformDrawer(target, actionTarget),
+    "ntp-sync": () => runAction(() => syncNtp()),
+    "apt-upgrade": () => runAction(() => runAptUpgrade()),
+    "power-action": () => runAction(() => runPowerAction(powerAction)),
     "quarantine-bulk": () => runAction(() => runQuarantineBulkAction(bulkAction)),
     "quarantine-sort": () => setQuarantineSort(sortKey),
     "history-sort": () => setHistorySort(sortKey),

@@ -182,6 +182,12 @@ The minimum checklist is:
 6. confirm all standby or spare nodes are still on the pre-upgrade role expected for the rollout
 7. confirm enough free disk for database migration temp space, spool growth, and package staging
 
+The `LPE-CT` management console may expose Debian host maintenance controls for authenticated
+management administrators, including live network inventory, NTP configuration through
+`systemd-timesyncd`, manual NTP sync, `apt update` followed by `apt upgrade -y`, and explicit
+restart or shutdown requests. Operators must still perform the release safety checks above before
+using the package-upgrade action on a production node.
+
 ### Schema migration safety
 
 Schema migration safety is release-blocking.

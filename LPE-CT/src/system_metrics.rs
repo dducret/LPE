@@ -21,6 +21,11 @@ pub(crate) struct SystemMetrics {
     pub(crate) disk_total_bytes: Option<u64>,
     pub(crate) load_averages: Option<[f64; 3]>,
     pub(crate) network_interfaces: Vec<NetworkInterfaceMetric>,
+    pub(crate) dns_servers: Vec<String>,
+    pub(crate) ipv4_routes: Vec<String>,
+    pub(crate) ipv6_addresses: Vec<NetworkAddressMetric>,
+    pub(crate) ipv6_routes: Vec<String>,
+    pub(crate) ntp: NtpMetric,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -29,6 +34,21 @@ pub(crate) struct NetworkInterfaceMetric {
     pub(crate) address: String,
     pub(crate) netmask: Option<String>,
     pub(crate) default_gateway: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct NetworkAddressMetric {
+    pub(crate) interface: String,
+    pub(crate) address: String,
+    pub(crate) prefix: Option<u8>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct NtpMetric {
+    pub(crate) enabled: bool,
+    pub(crate) servers: Vec<String>,
+    pub(crate) synchronized: Option<bool>,
+    pub(crate) service: Option<String>,
 }
 
 pub(crate) fn collect(spool_dir: &Path) -> SystemMetrics {
@@ -47,6 +67,11 @@ pub(crate) fn collect(spool_dir: &Path) -> SystemMetrics {
         disk_total_bytes: disk_total_bytes(spool_dir),
         load_averages: load_averages(),
         network_interfaces: network_interfaces(),
+        dns_servers: dns_servers(),
+        ipv4_routes: ip_route_lines("ip", &["-4", "route", "show"]),
+        ipv6_addresses: ipv6_addresses(),
+        ipv6_routes: ip_route_lines("ip", &["-6", "route", "show"]),
+        ntp: ntp_metric(),
     }
 }
 
@@ -172,6 +197,16 @@ fn env_value(name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+#[cfg(unix)]
+fn split_words(value: &str) -> Vec<String> {
+    value
+        .split_whitespace()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
 fn percent(used: u64, total: u64) -> f64 {
     ((used as f64 / total as f64) * 10_000.0).round() / 100.0
 }
@@ -201,6 +236,180 @@ fn network_interfaces() -> Vec<NetworkInterfaceMetric> {
 #[cfg(not(unix))]
 fn network_interfaces() -> Vec<NetworkInterfaceMetric> {
     Vec::new()
+}
+
+#[cfg(unix)]
+fn dns_servers() -> Vec<String> {
+    let mut servers = read_dns_servers_from_resolv_conf();
+    for server in read_dns_servers_from_resolvectl() {
+        if !servers.contains(&server) {
+            servers.push(server);
+        }
+    }
+    servers
+}
+
+#[cfg(not(unix))]
+fn dns_servers() -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(unix)]
+fn read_dns_servers_from_resolv_conf() -> Vec<String> {
+    fs::read_to_string("/etc/resolv.conf")
+        .ok()
+        .map(|raw| {
+            raw.lines()
+                .filter_map(|line| {
+                    let line = line.split('#').next()?.trim();
+                    let parts = line.split_whitespace().collect::<Vec<_>>();
+                    (parts.first().copied() == Some("nameserver"))
+                        .then(|| parts.get(1).copied())
+                        .flatten()
+                        .map(ToString::to_string)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(unix)]
+fn read_dns_servers_from_resolvectl() -> Vec<String> {
+    let Some(raw) = command_stdout("resolvectl", &["dns"]) else {
+        return Vec::new();
+    };
+    raw.lines()
+        .flat_map(|line| line.split_once(':').map(|(_, value)| value).unwrap_or(line).split_whitespace())
+        .filter(|value| value.chars().any(|ch| ch == '.' || ch == ':'))
+        .map(ToString::to_string)
+        .collect()
+}
+
+#[cfg(unix)]
+fn ip_route_lines(program: &str, args: &[&str]) -> Vec<String> {
+    command_stdout(program, args)
+        .map(|raw| {
+            raw.lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(not(unix))]
+fn ip_route_lines(_program: &str, _args: &[&str]) -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(unix)]
+fn ipv6_addresses() -> Vec<NetworkAddressMetric> {
+    let Some(raw) = command_stdout("ip", &["-o", "-6", "addr", "show", "scope", "global"]) else {
+        return Vec::new();
+    };
+    raw.lines().filter_map(parse_ipv6_address_line).collect()
+}
+
+#[cfg(not(unix))]
+fn ipv6_addresses() -> Vec<NetworkAddressMetric> {
+    Vec::new()
+}
+
+#[cfg(unix)]
+fn parse_ipv6_address_line(line: &str) -> Option<NetworkAddressMetric> {
+    let parts = line.split_whitespace().collect::<Vec<_>>();
+    let raw_interface = parts.get(1)?.trim_end_matches(':');
+    let interface = raw_interface.split('@').next().unwrap_or(raw_interface);
+    let inet6_index = parts.iter().position(|part| *part == "inet6")?;
+    let cidr = parts.get(inet6_index + 1)?;
+    let (address, prefix) = cidr
+        .split_once('/')
+        .map(|(address, prefix)| (address, prefix.parse::<u8>().ok()))
+        .unwrap_or((*cidr, None));
+    Some(NetworkAddressMetric {
+        interface: interface.to_string(),
+        address: address.to_string(),
+        prefix,
+    })
+}
+
+#[cfg(unix)]
+fn ntp_metric() -> NtpMetric {
+    let mut enabled = false;
+    let mut synchronized = None;
+    let mut service = None;
+
+    if let Some(raw) = command_stdout("timedatectl", &["show", "-p", "NTP", "-p", "NTPSynchronized"]) {
+        for line in raw.lines() {
+            if let Some(value) = line.strip_prefix("NTP=") {
+                enabled = value.trim() == "yes";
+            }
+            if let Some(value) = line.strip_prefix("NTPSynchronized=") {
+                synchronized = Some(value.trim() == "yes");
+            }
+        }
+    }
+
+    if let Some(raw) = command_stdout("systemctl", &["is-enabled", "systemd-timesyncd"]) {
+        service = Some("systemd-timesyncd".to_string());
+        if raw.lines().next().map(str::trim) == Some("enabled") {
+            enabled = true;
+        }
+    }
+
+    NtpMetric {
+        enabled,
+        servers: configured_ntp_servers(),
+        synchronized,
+        service,
+    }
+}
+
+#[cfg(not(unix))]
+fn ntp_metric() -> NtpMetric {
+    NtpMetric {
+        enabled: false,
+        servers: Vec::new(),
+        synchronized: None,
+        service: None,
+    }
+}
+
+#[cfg(unix)]
+fn configured_ntp_servers() -> Vec<String> {
+    let mut servers = Vec::new();
+    for path in [
+        "/etc/systemd/timesyncd.conf",
+        "/etc/systemd/timesyncd.conf.d/lpe-ct.conf",
+    ] {
+        if let Ok(raw) = fs::read_to_string(path) {
+            for line in raw.lines() {
+                let line = line.split('#').next().unwrap_or("").trim();
+                if let Some(value) = line.strip_prefix("NTP=") {
+                    servers.extend(split_words(value));
+                }
+                if let Some(value) = line.strip_prefix("FallbackNTP=") {
+                    servers.extend(split_words(value));
+                }
+            }
+        }
+    }
+    servers.sort();
+    servers.dedup();
+    servers
+}
+
+#[cfg(unix)]
+fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new(program).args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 #[cfg(unix)]

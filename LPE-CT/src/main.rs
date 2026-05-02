@@ -43,6 +43,7 @@ mod reporting;
 mod smtp;
 mod storage;
 mod submission;
+mod system_actions;
 mod system_diagnostics;
 mod system_metrics;
 mod transport_policy;
@@ -754,6 +755,13 @@ fn router(state: AppState) -> Router {
         .route("/api/v1/site", put(update_site))
         .route("/api/v1/relay", put(update_relay))
         .route("/api/v1/network", put(update_network))
+        .route("/api/v1/system-time/ntp", put(update_system_ntp))
+        .route("/api/v1/system-time/sync", post(sync_system_ntp))
+        .route(
+            "/api/v1/system-updates/apt-upgrade",
+            post(run_apt_update_upgrade),
+        )
+        .route("/api/v1/system-power/{action}", post(run_system_power_action))
         .route("/api/v1/policies", put(update_policies))
         .route("/api/v1/updates", put(update_updates))
         .route(
@@ -1513,6 +1521,52 @@ async fn update_network(
         dashboard.network = payload;
     })
     .await
+}
+
+async fn update_system_ntp(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<system_actions::NtpUpdateRequest>,
+) -> Result<Json<system_actions::SystemActionResponse>, ApiError> {
+    require_management_admin(&state, &headers)?;
+    system_actions::update_ntp(payload)
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+async fn sync_system_ntp(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<system_actions::SystemActionResponse>, ApiError> {
+    require_management_admin(&state, &headers)?;
+    system_actions::sync_ntp()
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+async fn run_apt_update_upgrade(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<system_actions::SystemActionResponse>, ApiError> {
+    require_management_admin(&state, &headers)?;
+    system_actions::apt_update_upgrade()
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
+}
+
+async fn run_system_power_action(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(action): AxumPath<String>,
+) -> Result<Json<system_actions::SystemActionResponse>, ApiError> {
+    require_management_admin(&state, &headers)?;
+    system_actions::power_action(&action)
+        .await
+        .map(Json)
+        .map_err(ApiError::from)
 }
 
 async fn upload_public_tls_profile(
