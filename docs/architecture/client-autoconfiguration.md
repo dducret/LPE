@@ -45,11 +45,10 @@ Minimal Outlook autodiscovery publishes:
 
 - `IMAP` against the configured public host
 - port `993` by default
-- `SSL` / `Encryption=SSL` enabled
-- basic password authentication inside the TLS-protected `IMAP` connection
+- `SSL` enabled
 - username equal to the discovered email address
 
-An `SMTP` protocol block is included only when a real authenticated client-submission endpoint is explicitly configured through the same environment variables used by Thunderbird autoconfig. When present, the block uses the configured submission host, port, and socket type and includes Outlook's standard authenticated-submission hints.
+An `SMTP` protocol block is included only when a real authenticated client-submission endpoint is explicitly configured through the same environment variables used by Thunderbird autoconfig.
 
 The MVP does not advertise `EWS`, `MAPI`, or `MobileSync` for Outlook desktop. Outlook for Windows desktop must not be forced to use `ActiveSync` as an Exchange account; it currently uses the `IMAP` compatibility layer unless and until `EWS` or `MAPI` is implemented.
 
