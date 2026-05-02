@@ -77,6 +77,28 @@ pub(crate) fn permissions_from_storage(
     normalize_admin_permissions(role, rights_summary.unwrap_or_default(), &explicit)
 }
 
+pub(crate) fn system_mailbox_aliases(role: &str, display_name: &str) -> Vec<String> {
+    let mut aliases = match role {
+        "inbox" => vec!["inbox".to_string()],
+        "drafts" => vec!["draft".to_string(), "drafts".to_string()],
+        "sent" => vec![
+            "sent".to_string(),
+            "sent items".to_string(),
+            "sent messages".to_string(),
+        ],
+        _ => Vec::new(),
+    };
+    let normalized_display_name = display_name.trim().to_lowercase();
+    if !normalized_display_name.is_empty()
+        && !aliases
+            .iter()
+            .any(|alias| alias == &normalized_display_name)
+    {
+        aliases.push(normalized_display_name);
+    }
+    aliases
+}
+
 pub(crate) fn normalize_admin_permissions(
     role: &str,
     rights_summary: &str,

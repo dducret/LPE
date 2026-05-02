@@ -2,6 +2,8 @@ use anyhow::{anyhow, bail, Result};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
+use crate::util::system_mailbox_aliases;
+
 pub mod admin;
 pub mod attachments;
 pub mod auth;
@@ -153,7 +155,144 @@ impl Storage {
         sort_order: i32,
         retention_days: i32,
     ) -> Result<Uuid> {
-        if let Some(row) = sqlx::query(
+        let aliases = system_mailbox_aliases(role, display_name);
+        if !aliases.is_empty() {
+            let rows = sqlx::query(
+                r#"
+                SELECT id, role
+                FROM mailboxes
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND (role = $3 OR lower(display_name) = ANY($4))
+                ORDER BY
+                    CASE WHEN role = $3 THEN 0 ELSE 1 END,
+                    created_at ASC
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(role)
+            .bind(&aliases)
+            .fetch_all(&mut **tx)
+            .await?;
+
+            if let Some(canonical_row) = rows.first() {
+                let canonical_id = canonical_row.try_get::<Uuid, _>("id")?;
+                if canonical_row.try_get::<String, _>("role")? != role {
+                    sqlx::query(
+                        r#"
+                        UPDATE mailboxes
+                        SET role = $4,
+                            sort_order = $5,
+                            retention_days = $6
+                        WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                        "#,
+                    )
+                    .bind(tenant_id)
+                    .bind(account_id)
+                    .bind(canonical_id)
+                    .bind(role)
+                    .bind(sort_order)
+                    .bind(retention_days)
+                    .execute(&mut **tx)
+                    .await?;
+                }
+
+                let alias_ids = rows
+                    .iter()
+                    .skip(1)
+                    .map(|row| row.try_get::<Uuid, _>("id"))
+                    .collect::<std::result::Result<Vec<_>, sqlx::Error>>()?;
+                if !alias_ids.is_empty() {
+                    sqlx::query(
+                        r#"
+                        UPDATE mailbox_pst_jobs
+                        SET mailbox_id = $4
+                        WHERE tenant_id = $1
+                          AND mailbox_id = ANY($2)
+                          AND EXISTS (
+                              SELECT 1
+                              FROM mailboxes mb
+                              WHERE mb.tenant_id = $1
+                                AND mb.account_id = $3
+                                AND mb.id = mailbox_pst_jobs.mailbox_id
+                          )
+                        "#,
+                    )
+                    .bind(tenant_id)
+                    .bind(&alias_ids)
+                    .bind(account_id)
+                    .bind(canonical_id)
+                    .execute(&mut **tx)
+                    .await?;
+
+                    sqlx::query(
+                        r#"
+                        UPDATE messages
+                        SET mailbox_id = $4,
+                            imap_uid = nextval('message_imap_uid_seq'),
+                            imap_modseq = nextval('message_modseq_seq')
+                        WHERE tenant_id = $1
+                          AND mailbox_id = ANY($2)
+                          AND account_id = $3
+                        "#,
+                    )
+                    .bind(tenant_id)
+                    .bind(&alias_ids)
+                    .bind(account_id)
+                    .bind(canonical_id)
+                    .execute(&mut **tx)
+                    .await?;
+
+                    sqlx::query(
+                        r#"
+                        UPDATE accounts
+                        SET mail_sync_modseq = GREATEST(
+                            mail_sync_modseq,
+                            COALESCE((
+                                SELECT MAX(imap_modseq)
+                                FROM messages
+                                WHERE tenant_id = $1 AND account_id = $2
+                            ), mail_sync_modseq)
+                        )
+                        WHERE tenant_id = $1 AND id = $2
+                        "#,
+                    )
+                    .bind(tenant_id)
+                    .bind(account_id)
+                    .execute(&mut **tx)
+                    .await?;
+
+                    sqlx::query(
+                        r#"
+                        DELETE FROM mailboxes mb
+                        WHERE mb.tenant_id = $1
+                          AND mb.account_id = $2
+                          AND mb.id = ANY($3)
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM messages m
+                              WHERE m.tenant_id = mb.tenant_id
+                                AND m.mailbox_id = mb.id
+                          )
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM mailbox_pst_jobs job
+                              WHERE job.tenant_id = mb.tenant_id
+                                AND job.mailbox_id = mb.id
+                          )
+                        "#,
+                    )
+                    .bind(tenant_id)
+                    .bind(account_id)
+                    .bind(&alias_ids)
+                    .execute(&mut **tx)
+                    .await?;
+                }
+
+                return Ok(canonical_id);
+            }
+        } else if let Some(row) = sqlx::query(
             r#"
             SELECT id
             FROM mailboxes
