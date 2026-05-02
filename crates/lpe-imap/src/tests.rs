@@ -927,6 +927,16 @@ async fn outlook_first_login_list_select_sync_transcript() {
     assert!(fetch_summary.contains("\"ALTERNATIVE\""));
     assert!(fetch_summary.contains("(\"BOUNDARY\" \"lpe-alt-"));
 
+    let fetch_full = send_command(
+        &mut stream,
+        "OL10A UID FETCH 1 (RFC822.SIZE BODY[])\r\n",
+        "OL10A",
+    )
+    .await;
+    let advertised_size = parse_response_number_after(&fetch_full, "RFC822.SIZE ");
+    let body_literal_size = parse_literal_size_after_label(&fetch_full, "BODY[]");
+    assert_eq!(advertised_size, body_literal_size);
+
     let fetch_body = send_command(&mut stream, "OL10B UID FETCH 1 (UID BODY)\r\n", "OL10B").await;
     assert!(fetch_body.contains("UID 1 BODY ((\"TEXT\" \"PLAIN\""));
 
@@ -1569,6 +1579,23 @@ async fn send_command(stream: &mut TcpStream, command: &str, tag: &str) -> Strin
     stream.write_all(command.as_bytes()).await.unwrap();
     stream.flush().await.unwrap();
     read_response(stream, Some(tag)).await
+}
+
+fn parse_response_number_after(value: &str, marker: &str) -> usize {
+    value
+        .split_once(marker)
+        .and_then(|(_, rest)| rest.split_whitespace().next())
+        .and_then(|number| number.parse().ok())
+        .unwrap()
+}
+
+fn parse_literal_size_after_label(value: &str, label: &str) -> usize {
+    value
+        .split_once(label)
+        .and_then(|(_, rest)| rest.split_once('{').map(|(_, rest)| rest))
+        .and_then(|rest| rest.split_once('}').map(|(number, _)| number))
+        .and_then(|number| number.parse().ok())
+        .unwrap()
 }
 
 async fn read_response(stream: &mut TcpStream, tag: Option<&str>) -> String {

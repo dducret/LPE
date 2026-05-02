@@ -76,6 +76,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - no durable subscribe state, hierarchy management, destructive `EXPUNGE`, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
 - mailbox management remains a flat namespace for now; hierarchical folder trees are not implemented yet
 - `FETCH BODYSTRUCTURE` and MIME section rendering are compatibility projections over the canonical message text and sanitized HTML fields; attachment MIME reserialization remains deferred
+- `RFC822.SIZE` reports the byte length of the RFC822 projection returned by `BODY[]`, not the original raw ingest size, so size metadata stays consistent with what IMAP clients fetch
 - `COPY` intentionally rejects `Sent` and `Drafts` as source or target mailboxes so the adapter cannot become an alternate sent-message or draft workflow
 - `MOVE` uses the same guardrail and only supports `Inbox` plus custom user mailboxes
 - `SEARCH` now supports optional `RETURN (...)`, optional `CHARSET`, `ALL`,

@@ -132,8 +132,9 @@ pub(crate) fn render_fetch_response(
             FetchItem::InternalDate => output.extend_from_slice(
                 format!("INTERNALDATE \"{}\"", format_internal_date(email)).as_bytes(),
             ),
-            FetchItem::Rfc822Size => output
-                .extend_from_slice(format!("RFC822.SIZE {}", email.size_octets.max(0)).as_bytes()),
+            FetchItem::Rfc822Size => output.extend_from_slice(
+                format!("RFC822.SIZE {}", message_rfc822_size(email)).as_bytes(),
+            ),
             FetchItem::Envelope => {
                 output.extend_from_slice(format!("ENVELOPE {}", render_envelope(email)).as_bytes())
             }
@@ -463,6 +464,10 @@ fn render_full_message(email: &ImapEmail) -> String {
     format!("{}{}", render_header(email), email.body_text)
 }
 
+fn message_rfc822_size(email: &ImapEmail) -> usize {
+    render_full_message(email).as_bytes().len()
+}
+
 fn render_text_part_mime_header(subtype: &str) -> String {
     format!(
         "Content-Type: text/{subtype}; charset=UTF-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\n"
@@ -592,7 +597,7 @@ fn render_text_bodystructure(value: &str, subtype: &str) -> String {
     format!(
         "(\"TEXT\" \"{}\" (\"CHARSET\" \"UTF-8\") NIL NIL \"7BIT\" {} {} NIL NIL NIL)",
         subtype,
-        value.len(),
+        value.as_bytes().len(),
         value.lines().count().max(1)
     )
 }
