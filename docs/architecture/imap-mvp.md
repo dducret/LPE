@@ -25,6 +25,8 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - tolerant `LSUB`, `SUBSCRIBE`, and `UNSUBSCRIBE` for Outlook compatibility; subscription state is not persisted yet
 - `STATUS` for mailbox counters and stable UID metadata
 - flat mailbox management through `CREATE`, `RENAME`, and `DELETE` for custom user mailboxes
+- custom `CREATE` folders, including Outlook defaults such as `Deleted Items` and
+  `Junk Email`, are stored with the neutral canonical role `custom`
 - `SELECT` on `Inbox`, `Sent`, and `Drafts`
 - `EXAMINE`, `CHECK`, `CLOSE`, `UNSELECT`, and no-op `EXPUNGE` for Outlook desktop synchronization flows
 - `FETCH` over canonical message state, including `ENVELOPE`, `BODYSTRUCTURE`,

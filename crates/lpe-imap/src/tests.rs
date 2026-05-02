@@ -288,7 +288,7 @@ impl ImapStore for FakeStore {
         let mut mailboxes = self.mailboxes.lock().unwrap();
         let mailbox = mailbox(
             &Uuid::new_v4().to_string(),
-            "",
+            "custom",
             name,
             mailboxes
                 .iter()
@@ -706,8 +706,17 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     let create_projects = send_command(&mut stream, "A7 CREATE Projects\r\n", "A7").await;
     assert!(create_projects.contains("A7 OK CREATE completed"));
 
+    let create_deleted_items =
+        send_command(&mut stream, "A7B CREATE \"Deleted Items\"\r\n", "A7B").await;
+    assert!(create_deleted_items.contains("A7B OK CREATE completed"));
+
+    let create_junk_email = send_command(&mut stream, "A7C CREATE \"Junk Email\"\r\n", "A7C").await;
+    assert!(create_junk_email.contains("A7C OK CREATE completed"));
+
     let list_custom = send_command(&mut stream, "A8 LIST \"\" \"*\"\r\n", "A8").await;
     assert!(list_custom.contains("\"Projects\""));
+    assert!(list_custom.contains("\"Deleted Items\""));
+    assert!(list_custom.contains("\"Junk Email\""));
 
     let create_temp = send_command(&mut stream, "A8B CREATE Temp\r\n", "A8B").await;
     assert!(create_temp.contains("A8B OK CREATE completed"));

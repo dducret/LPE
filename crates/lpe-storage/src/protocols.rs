@@ -331,7 +331,7 @@ impl Storage {
         sqlx::query(
             r#"
             INSERT INTO mailboxes (id, tenant_id, account_id, role, display_name, sort_order, retention_days)
-            VALUES ($1, $2, $3, '', $4, $5, 365)
+            VALUES ($1, $2, $3, 'custom', $4, $5, 365)
             "#,
         )
         .bind(mailbox_id)
