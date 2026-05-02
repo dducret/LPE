@@ -15,6 +15,9 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `NAMESPACE` for the flat personal namespace
 - `LIST` for the canonical system mailboxes, rendering the inbox as the single
   canonical `INBOX` name and honoring mailbox patterns such as `INBOX`, `%`, and `*`
+- system mailbox discovery canonicalizes legacy aliases such as `INBOX`,
+  `Draft`, `Drafts`, `Sent Items`, and `Sent Messages` before Outlook selects
+  those folders, including rows with extra whitespace or non-normalized role text
 - tolerant legacy `XLIST` for Outlook desktop compatibility
 - `SPECIAL-USE` folder flags on listed system mailboxes where the flag is standard;
   regular `LIST` identifies the inbox by the special `INBOX` name rather than a

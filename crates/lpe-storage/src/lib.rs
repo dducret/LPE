@@ -163,9 +163,18 @@ impl Storage {
                 FROM mailboxes
                 WHERE tenant_id = $1
                   AND account_id = $2
-                  AND (role = $3 OR lower(display_name) = ANY($4))
+                  AND (
+                    lower(btrim(role)) = $3
+                    OR lower(btrim(display_name)) = ANY($4)
+                  )
                 ORDER BY
-                    CASE WHEN role = $3 THEN 0 ELSE 1 END,
+                    CASE
+                        WHEN lower(btrim(role)) = $3
+                         AND lower(btrim(display_name)) = lower(btrim($5)) THEN 0
+                        WHEN lower(btrim(display_name)) = lower(btrim($5)) THEN 1
+                        WHEN lower(btrim(role)) = $3 THEN 2
+                        ELSE 3
+                    END,
                     created_at ASC
                 "#,
             )
@@ -173,12 +182,13 @@ impl Storage {
             .bind(account_id)
             .bind(role)
             .bind(&aliases)
+            .bind(display_name)
             .fetch_all(&mut **tx)
             .await?;
 
             if let Some(canonical_row) = rows.first() {
                 let canonical_id = canonical_row.try_get::<Uuid, _>("id")?;
-                if canonical_row.try_get::<String, _>("role")? != role {
+                if canonical_row.try_get::<String, _>("role")?.trim() != role {
                     sqlx::query(
                         r#"
                         UPDATE mailboxes
