@@ -525,6 +525,10 @@ function quarantineScoreValue(item) {
   return Number.isFinite(securityScore) ? securityScore : null;
 }
 
+function traceQueueCanBeDeleted(queue) {
+  return ["incoming", "outbound", "deferred", "held", "quarantine", "bounces"].includes(String(queue || "").toLowerCase());
+}
+
 function quarantineColumns(copy) {
   return [
     {
@@ -4520,7 +4524,7 @@ function renderTraceDrawer(trace, opener = document.activeElement) {
       <div class="record-actions">
         ${current.trace_id || trace.trace_id ? `<button class="list-action" type="button" data-action="trace-retry" data-trace-id="${escapeHtml(trace.trace_id)}">${copy.traceRetry}</button>` : ""}
         ${current.queue === "quarantine" || current.queue === "held" ? `<button class="list-action" type="button" data-action="trace-release" data-trace-id="${escapeHtml(trace.trace_id)}">${copy.traceRelease}</button>` : ""}
-        ${current.queue === "quarantine" ? `<button class="list-action" type="button" data-action="trace-delete" data-trace-id="${escapeHtml(trace.trace_id)}">${copy.traceDelete}</button>` : ""}
+        ${traceQueueCanBeDeleted(current.queue) ? `<button class="list-action danger-action" type="button" data-action="trace-delete" data-trace-id="${escapeHtml(trace.trace_id)}">${copy.traceDelete}</button>` : ""}
       </div>
       <section class="trace-section">
         <h4>${copy.traceSummaryTitle}</h4>

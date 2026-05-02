@@ -40,7 +40,7 @@ Those indexes exist only to improve sorting-center operations. They must stay re
 
 For the P1 management interface, those operator workflows are exposed as one coherent web surface instead of separate technical screens:
 
-- full-width quarantine and retained-history lists with search and trace drawers
+- full-width quarantine and retained-history lists with search and trace drawers, including delete actions for current queue-custody traces
 - full-width allow/block and attachment-rule lists with drawer-based create, edit, and delete flows
 - recipient-verification settings and status in the same policy workspace
 - DKIM signing profile plus per-domain selector and key-reference management in the same policy workspace

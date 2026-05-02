@@ -346,8 +346,8 @@ Permanent outbound failures are copied to `bounces/` while the operational queue
 The management API and UI now use the retained perimeter artifacts for these operational workflows:
 
 - search quarantine by trace, sender, recipient, subject, `Message-Id`, direction, and domain
-- inspect a quarantined or retained trace with headers, body excerpt, decision trace, and retained flow history
-- release, retry, or delete a quarantined trace while keeping retained perimeter audit evidence
+- inspect a quarantined, queued, or retained trace with headers, body excerpt, decision trace, and retained flow history
+- release, retry, or delete an eligible current queue-custody trace while keeping retained perimeter audit evidence
 - search inbound and outbound flow history by trace id, sender, recipient, subject, route, disposition, and policy evidence
 - operate sender and recipient allow/block rules from full-width policy lists with drawer-based create, edit, and delete flows
 - operate attachment-policy rules by extension, MIME type, and detected file type from the same policy workspace
@@ -526,6 +526,7 @@ Operator trace actions now behave defensively:
 - retry, release, or delete returns a conflict instead of a false success when the trace is not eligible for that action
 - retry and release clear stale relay-specific fields such as prior remote references, technical status, DSN, route, and throttle state before the message re-enters a live queue
 - retry, release, and delete each append retained transport-audit history so reporting and trace inspection stay consistent
+- delete is available from the quarantine list and from the mail-history trace drawer for current `incoming`, `outbound`, `deferred`, `held`, `quarantine`, and `bounces` spool items; retained `sent` history is not deleted from that action
 
 ## Operational recommendations
 

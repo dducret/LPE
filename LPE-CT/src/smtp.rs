@@ -6037,13 +6037,13 @@ async fn transition_trace(
     let Some((queue, mut message)) = find_message(spool_dir, trace_id)? else {
         return Ok(None);
     };
-    if matches!(action, TraceAction::Delete) && queue != "quarantine" {
+    if matches!(action, TraceAction::Delete) && !trace_queue_can_be_deleted(&queue) {
         return Ok(Some(TraceActionResult {
             trace_id: message.id.clone(),
             from_queue: queue,
             to_queue: String::new(),
             status: message.status.clone(),
-            detail: "only quarantined traces can be deleted".to_string(),
+            detail: "only active queue custody traces can be deleted".to_string(),
         }));
     }
     let Some(target_queue) = transition_target(&queue, &message.direction, action) else {
@@ -6072,7 +6072,7 @@ async fn transition_trace(
             TraceAction::Delete => "delete".to_string(),
         },
         detail: if matches!(action, TraceAction::Delete) {
-            "operator deleted quarantined trace".to_string()
+            format!("operator deleted trace from {queue}")
         } else {
             format!("operator moved trace into {target_queue}")
         },
@@ -6090,10 +6090,14 @@ async fn transition_trace(
     }
     Ok(Some(TraceActionResult {
         trace_id: message.id.clone(),
-        from_queue: queue,
+        from_queue: queue.clone(),
         to_queue: target_queue.to_string(),
         status: message.status.clone(),
-        detail: format!("trace moved into {target_queue}"),
+        detail: if matches!(action, TraceAction::Delete) {
+            format!("trace deleted from {}", queue)
+        } else {
+            format!("trace moved into {target_queue}")
+        },
     }))
 }
 
@@ -6108,8 +6112,20 @@ fn transition_target(queue: &str, direction: &str, action: TraceAction) -> Optio
         ("held", "outbound", TraceAction::Release) => Some("outbound"),
         ("held", "inbound", TraceAction::Release) => Some("incoming"),
         ("quarantine", _, TraceAction::Delete) => Some("deleted"),
+        ("incoming", _, TraceAction::Delete) => Some("incoming"),
+        ("outbound", _, TraceAction::Delete) => Some("outbound"),
+        ("deferred", _, TraceAction::Delete) => Some("deferred"),
+        ("held", _, TraceAction::Delete) => Some("held"),
+        ("bounces", _, TraceAction::Delete) => Some("bounces"),
         _ => None,
     }
+}
+
+fn trace_queue_can_be_deleted(queue: &str) -> bool {
+    matches!(
+        queue,
+        "incoming" | "outbound" | "deferred" | "held" | "quarantine" | "bounces"
+    )
 }
 
 fn evaluate_outbound_sender_policy(
@@ -9090,8 +9106,8 @@ pzqAuzRp69VoxDpO6hdx/Qc=
     }
 
     #[tokio::test]
-    async fn delete_trace_rejects_non_quarantine_items() {
-        let spool = temp_dir("trace-delete-conflict");
+    async fn delete_trace_removes_held_queue_items() {
+        let spool = temp_dir("trace-delete-held");
         initialize_spool(&spool).unwrap();
         let config = runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
         let message = QueuedMessage {
@@ -9127,10 +9143,62 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             .unwrap();
 
         assert_eq!(result.from_queue, "held");
+        assert_eq!(result.to_queue, "held");
+        assert_eq!(result.status, "deleted");
+        assert_eq!(result.detail, "trace deleted from held");
+        assert!(!spool.join("held").join("trace-delete-1.json").exists());
+        let audit =
+            std::fs::read_to_string(spool.join("policy").join("transport-audit.jsonl")).unwrap();
+        assert!(audit.contains("\"trace_id\":\"trace-delete-1\""));
+        assert!(audit.contains("\"queue\":\"deleted\""));
+        assert!(audit.contains("\"status\":\"deleted\""));
+    }
+
+    #[tokio::test]
+    async fn delete_trace_rejects_sent_history_items() {
+        let spool = temp_dir("trace-delete-sent-conflict");
+        initialize_spool(&spool).unwrap();
+        let config = runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+        let message = QueuedMessage {
+            id: "trace-delete-sent-1".to_string(),
+            direction: "outbound".to_string(),
+            received_at: "unix:1".to_string(),
+            peer: "lpe-core".to_string(),
+            helo: "lpe-core".to_string(),
+            mail_from: "sender@example.test".to_string(),
+            rcpt_to: vec!["dest@example.test".to_string()],
+            status: "sent".to_string(),
+            relay_error: None,
+            magika_summary: None,
+            magika_decision: None,
+            spam_score: 0.0,
+            security_score: 0.0,
+            reputation_score: 0,
+            dnsbl_hits: Vec::new(),
+            auth_summary: AuthSummary::default(),
+            decision_trace: Vec::new(),
+            remote_message_ref: None,
+            technical_status: None,
+            dsn: None,
+            route: None,
+            throttle: None,
+            data: b"Subject: Sent\r\n\r\nbody".to_vec(),
+        };
+        persist_message(&spool, "sent", &message).await.unwrap();
+
+        let result = delete_trace(&spool, &config, &message.id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.from_queue, "sent");
         assert!(result.to_queue.is_empty());
-        assert_eq!(result.status, "held");
-        assert_eq!(result.detail, "only quarantined traces can be deleted");
-        assert!(spool.join("held").join("trace-delete-1.json").exists());
+        assert_eq!(result.status, "sent");
+        assert_eq!(
+            result.detail,
+            "only active queue custody traces can be deleted"
+        );
+        assert!(spool.join("sent").join("trace-delete-sent-1.json").exists());
     }
 
     #[test]

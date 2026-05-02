@@ -1107,7 +1107,10 @@ async fn delete_trace(
         &state,
         &admin.email,
         "trace-delete",
-        &format!("deleted quarantined trace {}", result.trace_id),
+        &format!(
+            "deleted trace {} from {}",
+            result.trace_id, result.from_queue
+        ),
     )
     .await?;
     Ok(Json(result))
