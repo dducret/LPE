@@ -8,7 +8,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 
 ## Implemented scope
 
-- account authentication through `LOGIN` with the existing mailbox account credentials
+- account authentication through `LOGIN` and `AUTHENTICATE PLAIN` with the existing mailbox account credentials, for TLS-protected password clients such as Outlook desktop setup
 - `AUTHENTICATE XOAUTH2` with the mailbox `OAuth2` bearer access token
 - `CAPABILITY`, `NOOP`, `LOGOUT`
 - tolerant `ID`
@@ -63,7 +63,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 ## Current limitations
 
 - no message submission or `APPEND` to `Sent`; outbound submission remains canonical through `JMAP`, `ActiveSync`, and the web/API submission workflow
-- no durable subscribe state, hierarchy management, destructive `EXPUNGE`, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
+- no durable subscribe state, hierarchy management, destructive `EXPUNGE`, `QRESYNC`, or SASL mechanisms other than `PLAIN` and `XOAUTH2`
 - mailbox management remains a flat namespace for now; hierarchical folder trees are not implemented yet
 - `FETCH BODYSTRUCTURE` and MIME section rendering are compatibility projections over the canonical message text and sanitized HTML fields; attachment MIME reserialization remains deferred
 - `COPY` intentionally rejects `Sent` and `Drafts` as source or target mailboxes so the adapter cannot become an alternate sent-message or draft workflow

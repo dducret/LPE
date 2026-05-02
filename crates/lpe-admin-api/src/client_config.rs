@@ -177,6 +177,8 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
             "        <LoginName>{email}</LoginName>\n",
             "        <SPA>off</SPA>\n",
             "        <SSL>on</SSL>\n",
+            "        <Encryption>SSL</Encryption>\n",
+            "        <AuthPackage>Basic</AuthPackage>\n",
             "        <AuthRequired>on</AuthRequired>\n",
             "      </Protocol>\n"
         ),
@@ -187,6 +189,7 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
     );
 
     if let (Some(smtp_host), Some(smtp_port)) = (config.smtp_host.as_deref(), config.smtp_port) {
+        let smtp_encryption = config.smtp_socket_type.as_deref().unwrap_or("SSL");
         xml.push_str(&format!(
             concat!(
                 "      <Protocol>\n",
@@ -197,12 +200,17 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
                 "        <LoginName>{email}</LoginName>\n",
                 "        <SPA>off</SPA>\n",
                 "        <SSL>on</SSL>\n",
+                "        <Encryption>{smtp_encryption}</Encryption>\n",
+                "        <AuthPackage>Basic</AuthPackage>\n",
                 "        <AuthRequired>on</AuthRequired>\n",
+                "        <UsePOPAuth>on</UsePOPAuth>\n",
+                "        <SMTPLast>off</SMTPLast>\n",
                 "      </Protocol>\n"
             ),
             smtp_host = escape_xml(smtp_host),
             smtp_port = smtp_port,
             email = escape_xml(email),
+            smtp_encryption = escape_xml(smtp_encryption),
         ));
     }
 
@@ -367,6 +375,8 @@ mod tests {
         assert!(xml.contains("<Type>IMAP</Type>"));
         assert!(xml.contains("<Server>mail.example.test</Server>"));
         assert!(xml.contains("<Port>993</Port>"));
+        assert!(xml.contains("<Encryption>SSL</Encryption>"));
+        assert!(xml.contains("<AuthPackage>Basic</AuthPackage>"));
         assert!(!xml.contains("<Type>MobileSync</Type>"));
         assert!(!xml.contains("<ASUrl>"));
         assert!(xml.contains("<EMailAddress>alice@example.test</EMailAddress>"));
@@ -387,6 +397,8 @@ mod tests {
         assert!(xml.contains("<Type>SMTP</Type>"));
         assert!(xml.contains("<Server>submit.example.test</Server>"));
         assert!(xml.contains("<Port>465</Port>"));
+        assert!(xml.contains("<UsePOPAuth>on</UsePOPAuth>"));
+        assert!(xml.contains("<SMTPLast>off</SMTPLast>"));
     }
 
     #[test]

@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::{parse::parse_request_line, render::sanitize_imap_text, store::ImapStore};
 
 const CAPABILITIES: &str =
-    "IMAP4rev1 AUTH=XOAUTH2 SASL-IR ID IDLE MOVE NAMESPACE UIDPLUS CONDSTORE ACL SPECIAL-USE UNSELECT";
+    "IMAP4rev1 AUTH=PLAIN AUTH=XOAUTH2 SASL-IR ID IDLE MOVE NAMESPACE UIDPLUS CONDSTORE ACL SPECIAL-USE UNSELECT";
 pub(crate) const UID_VALIDITY: u32 = 1;
 
 #[derive(Clone)]
@@ -80,6 +80,13 @@ pub async fn serve(listener: TcpListener, store: impl ImapStore) -> Result<()> {
     ImapServer::new(store).serve(listener).await
 }
 
+fn log_safe_arguments(command: &str, arguments: &str) -> String {
+    match command {
+        "LOGIN" | "AUTHENTICATE" => "<redacted>".to_string(),
+        _ => arguments.to_string(),
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct Session<S, D> {
     pub(crate) store: S,
@@ -136,7 +143,7 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                     .await
             }
             "AUTHENTICATE" => {
-                self.handle_authenticate(&request.tag, &request.arguments, writer)
+                self.handle_authenticate(reader, &request.tag, &request.arguments, writer)
                     .await
             }
             "LIST" => {
@@ -282,9 +289,10 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         match result {
             Ok(keep_running) => Ok(keep_running),
             Err(error) => {
+                let log_arguments = log_safe_arguments(&request.command, &request.arguments);
                 warn!(
                     command = %request.command,
-                    arguments = %request.arguments,
+                    arguments = %log_arguments,
                     error = %sanitize_imap_text(&error.to_string()),
                     "IMAP command failed"
                 );
