@@ -55,6 +55,7 @@ use tracing::{info, warn};
 use crate::{dkim_signing, integration_shared_secret, observability, storage, transport_policy};
 
 const INBOUND_DELIVERY_PATH: &str = "/internal/lpe-ct/inbound-deliveries";
+const BAYESPAM_MIN_SCORING_TOKENS: usize = 3;
 
 static SMTP_ACTIVE_SESSIONS: AtomicU32 = AtomicU32::new(0);
 
@@ -3751,14 +3752,12 @@ async fn save_bayespam_corpus(
 fn tokenize_for_bayespam(
     subject: &str,
     visible_text: &str,
-    mail_from: &str,
-    helo: &str,
     min_token_length: usize,
     max_tokens: usize,
 ) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut tokens = Vec::new();
-    for token in [subject, visible_text, mail_from, helo]
+    for token in [subject, visible_text]
         .into_iter()
         .flat_map(|value| {
             value
@@ -3783,10 +3782,13 @@ fn bayespam_token_probability(corpus: &BayesCorpus, token: &str) -> Option<f64> 
     if corpus.ham_messages == 0 || corpus.spam_messages == 0 {
         return None;
     }
-    let spam = (*corpus.spam_tokens.get(token).unwrap_or(&0) as f64 + 1.0)
-        / (corpus.spam_messages as f64 + 2.0);
-    let ham = (*corpus.ham_tokens.get(token).unwrap_or(&0) as f64 + 1.0)
-        / (corpus.ham_messages as f64 + 2.0);
+    let spam_count = *corpus.spam_tokens.get(token).unwrap_or(&0);
+    let ham_count = *corpus.ham_tokens.get(token).unwrap_or(&0);
+    if spam_count == 0 && ham_count == 0 {
+        return None;
+    }
+    let spam = (spam_count as f64 + 1.0) / (corpus.spam_messages as f64 + 2.0);
+    let ham = (ham_count as f64 + 1.0) / (corpus.ham_messages as f64 + 2.0);
     let probability = spam / (spam + ham);
     Some(probability.clamp(0.01, 0.99))
 }
@@ -3815,6 +3817,13 @@ fn score_bayespam_tokens(
     if matched == 0 {
         return None;
     }
+    if matched < BAYESPAM_MIN_SCORING_TOKENS {
+        return Some(BayesOutcome {
+            probability: 0.5,
+            matched_tokens: matched,
+            contribution: 0.0,
+        });
+    }
 
     let probability = 1.0 / (1.0 + (log_ham - log_spam).exp());
     let contribution = ((probability as f32 - 0.5).max(0.0) * 2.0) * score_weight.max(0.0);
@@ -3830,8 +3839,8 @@ async fn score_bayespam(
     config: &RuntimeConfig,
     subject: &str,
     visible_text: &str,
-    mail_from: &str,
-    helo: &str,
+    _mail_from: &str,
+    _helo: &str,
 ) -> Result<Option<BayesOutcome>> {
     if !config.bayespam_enabled {
         return Ok(None);
@@ -3840,8 +3849,6 @@ async fn score_bayespam(
     let tokens = tokenize_for_bayespam(
         subject,
         visible_text,
-        mail_from,
-        helo,
         config.bayespam_min_token_length.max(2) as usize,
         config.bayespam_max_tokens.max(16) as usize,
     );
@@ -3867,8 +3874,6 @@ async fn train_bayespam(
     let tokens = tokenize_for_bayespam(
         &subject,
         &visible_text,
-        &message.mail_from,
-        &message.helo,
         config.bayespam_min_token_length.max(2) as usize,
         config.bayespam_max_tokens.max(16) as usize,
     );
@@ -6266,7 +6271,8 @@ mod tests {
         DecisionTraceEntry, DkimDisposition, FilterAction, GreylistEntry, OutboundRoutingRule,
         OutboundThrottleRule, QueuedMessage, RuntimeConfig, SmtpCommandOutcome, SmtpTransaction,
         SpfDisposition, TransportAuditEvent, TransportDsnReport, TransportRouteDecision,
-        TransportTechnicalStatus, TransportThrottleStatus, DEFAULT_GREYLIST_DELAY_SECONDS,
+        TransportTechnicalStatus, TransportThrottleStatus, BAYESPAM_MIN_SCORING_TOKENS,
+        DEFAULT_GREYLIST_DELAY_SECONDS,
     };
     use crate::env_test_lock;
     use axum::{routing::post, Json, Router};
@@ -8055,6 +8061,45 @@ pzqAuzRp69VoxDpO6hdx/Qc=
 
         assert!(score.probability > 0.80);
         assert!(score.contribution > 3.0);
+    }
+
+    #[tokio::test]
+    async fn bayespam_requires_enough_content_evidence_before_contributing() {
+        let spool = temp_dir("bayespam-short-message");
+        initialize_spool(&spool).unwrap();
+        let config = runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+
+        train_bayespam(
+            &spool,
+            &config,
+            &training_message("Weekly report", "meeting agenda project status"),
+            BayesLabel::Ham,
+        )
+        .await
+        .unwrap();
+        train_bayespam(
+            &spool,
+            &config,
+            &training_message("Test to Infomaniak", "test infomaniak"),
+            BayesLabel::Spam,
+        )
+        .await
+        .unwrap();
+
+        let score = score_bayespam(
+            &spool,
+            &config,
+            "Test to Infomaniak",
+            "test",
+            "test@l-p-e.ch",
+            "lpe-core",
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert!(score.matched_tokens < BAYESPAM_MIN_SCORING_TOKENS);
+        assert_eq!(score.contribution, 0.0);
     }
 
     #[tokio::test]

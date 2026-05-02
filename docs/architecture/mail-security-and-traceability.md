@@ -22,6 +22,10 @@ The inbound perimeter pipeline is now explicitly staged as:
 5. final score calculation
 6. accept, defer, reject, or quarantine
 
+Bayesian spam scoring is content evidence only.
+Envelope identity, `HELO`, and sender/IP history are handled by authentication and reputation checks, not by the Bayesian content classifier.
+The Bayesian classifier must not add spam score until enough learned content tokens are present, so very short operational messages are not quarantined from one or two weak token matches.
+
 Edge decisions now rely on structured outcomes:
 
 - `DMARC reject` can force SMTP reject
