@@ -395,10 +395,7 @@ fn render_header(email: &ImapEmail) -> String {
 
 fn render_header_lines(email: &ImapEmail) -> Vec<String> {
     let mut lines = Vec::new();
-    lines.push(format!(
-        "Date: {}",
-        email.sent_at.as_deref().unwrap_or(&email.received_at)
-    ));
+    lines.push(format!("Date: {}", format_message_date(email)));
     lines.push(format!(
         "From: {}",
         render_address_header(email.from_display.as_deref(), &email.from_address)
@@ -490,7 +487,7 @@ fn render_root_mime_header(email: &ImapEmail) -> String {
 fn render_envelope(email: &ImapEmail) -> String {
     format!(
         "({} {} {} {} {} {} {} {} {} {})",
-        nstring(Some(email.sent_at.as_deref().unwrap_or(&email.received_at))),
+        nstring(Some(&format_message_date(email))),
         nstring(Some(&email.subject)),
         render_address_list(email.from_display.as_deref(), Some(&email.from_address)),
         render_address_list(email.from_display.as_deref(), Some(&email.from_address)),
@@ -641,6 +638,51 @@ fn format_internal_date(email: &ImapEmail) -> String {
         &source[0..4],
         &source[11..19]
     )
+}
+
+fn format_message_date(email: &ImapEmail) -> String {
+    let source = email.sent_at.as_deref().unwrap_or(&email.received_at);
+    format_rfc5322_date(source).unwrap_or_else(|| source.to_string())
+}
+
+fn format_rfc5322_date(source: &str) -> Option<String> {
+    if source.len() < 19 {
+        return None;
+    }
+    let year = source.get(0..4)?;
+    let month_number = source.get(5..7)?;
+    let day = source.get(8..10)?;
+    let time = source.get(11..19)?;
+    if source.get(4..5)? != "-"
+        || source.get(7..8)? != "-"
+        || source.get(10..11)? != "T"
+        || !year.chars().all(|ch| ch.is_ascii_digit())
+        || !month_number.chars().all(|ch| ch.is_ascii_digit())
+        || !day.chars().all(|ch| ch.is_ascii_digit())
+        || !time.chars().all(|ch| ch.is_ascii_digit() || ch == ':')
+    {
+        return None;
+    }
+    let month = month_name(month_number)?;
+    Some(format!("{day} {month} {year} {time} +0000"))
+}
+
+fn month_name(value: &str) -> Option<&'static str> {
+    match value {
+        "01" => Some("Jan"),
+        "02" => Some("Feb"),
+        "03" => Some("Mar"),
+        "04" => Some("Apr"),
+        "05" => Some("May"),
+        "06" => Some("Jun"),
+        "07" => Some("Jul"),
+        "08" => Some("Aug"),
+        "09" => Some("Sep"),
+        "10" => Some("Oct"),
+        "11" => Some("Nov"),
+        "12" => Some("Dec"),
+        _ => None,
+    }
 }
 
 pub(crate) fn resolve_message_indexes(

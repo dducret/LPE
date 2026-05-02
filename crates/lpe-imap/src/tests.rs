@@ -932,6 +932,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
     )
     .await;
     assert!(fetch_headers.contains("BODY.PEEK[HEADER.FIELDS (DATE FROM TO SUBJECT MESSAGE-ID)]"));
+    assert!(fetch_headers.contains("Date: 19 Apr 2026 08:00:00 +0000"));
     assert!(fetch_headers.contains("Subject: Welcome"));
     assert!(
         fetch_headers.contains("Message-Id: <11111111-1111-1111-1111-111111111111@example.test>")
@@ -974,7 +975,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
     )
     .await;
     assert!(fetch_partial.contains("BODY.PEEK[]<0> {20}"));
-    assert!(fetch_partial.contains("Date: 2026-04-19T0"));
+    assert!(fetch_partial.contains("Date: 19 Apr 2026"));
 
     let check = send_command(&mut stream, "OL14 CHECK\r\n", "OL14").await;
     assert!(check.contains("OL14 OK CHECK completed"));
