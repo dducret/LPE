@@ -175,7 +175,6 @@ collect_runtime_values() {
   LPE_PUBLIC_SCHEME="${LPE_PUBLIC_SCHEME_DEFAULT}"
   LPE_PST_IMPORT_DIR="${LPE_PST_IMPORT_DIR_DEFAULT}"
   LPE_NGINX_CLIENT_MAX_BODY_SIZE="${LPE_NGINX_CLIENT_MAX_BODY_SIZE:-20g}"
-  LPE_AUTODISCOVER_ACTIVESYNC_URL="$(format_public_url "${LPE_PUBLIC_SCHEME}" "${LPE_PUBLIC_HOSTNAME}" "${LPE_NGINX_LISTEN_PORT}" "/Microsoft-Server-ActiveSync")"
 }
 
 validate_runtime_values() {
@@ -240,7 +239,6 @@ write_runtime_env_file() {
   write_env_value "${ENV_FILE}" "LPE_MAGIKA_MIN_SCORE" "${LPE_MAGIKA_MIN_SCORE:-0.80}"
   write_env_value "${ENV_FILE}" "LPE_PUBLIC_SCHEME" "${LPE_PUBLIC_SCHEME}"
   write_env_value "${ENV_FILE}" "LPE_PUBLIC_HOSTNAME" "${LPE_PUBLIC_HOSTNAME}"
-  write_env_value "${ENV_FILE}" "LPE_AUTODISCOVER_ACTIVESYNC_URL" "${LPE_AUTODISCOVER_ACTIVESYNC_URL}"
 }
 
 verify_runtime_env_file() {

@@ -544,18 +544,19 @@ and `/api/jmap/ws`.
 `LPE-CT` must also publish the public client configuration and ActiveSync paths:
 `/Microsoft-Server-ActiveSync`, `/autodiscover/`, `/Autodiscover/`,
 `/autoconfig/`, and `/.well-known/autoconfig/`. A healthy public publication
-returns an Outlook autodiscover XML response containing `MobileSync`, and
+returns an Outlook autodiscover XML response containing `IMAP`, and
 `OPTIONS /Microsoft-Server-ActiveSync` returns the
 `ms-asprotocolversions` and `ms-asprotocolcommands` headers.
 
 For public client auto-configuration, the exposed front end must remain `LPE-CT` or an equivalent HTTPS publication layer. In v1:
 
 - `Thunderbird` receives an `IMAP` profile
-- `Outlook` receives an `ActiveSync` profile
+- Outlook for Windows desktop receives an `IMAP` profile
+- `ActiveSync` remains exposed for mobile/native clients that actually support `Exchange ActiveSync`
 - no client `SMTP` endpoint should be advertised unless the authenticated `LPE-CT` submission listener is configured, exposed on `465`, and covered by the public certificate
 - the internal `LPE -> LPE-CT` relay must never be advertised as a client-submission endpoint
 
-The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, and `LPE_AUTODISCOVER_ACTIVESYNC_URL` variables let you align the published HTTP/XML settings with the real public hostname. The detailed behavior is documented in `docs/architecture/client-autoconfiguration.md`.
+The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, and `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE` variables let you align the published HTTP/XML settings with the real public hostname. The detailed behavior is documented in `docs/architecture/client-autoconfiguration.md`.
 
 If `LPE_BIND_ADDRESS` or `LPE_SERVER_NAME` changes in `/etc/lpe/lpe.env`, run `update-lpe.sh` again to regenerate the `nginx` configuration. If `LPE_IMAP_BIND_ADDRESS` changes, restart `lpe.service` and rerun `test-lpe-imap-listener.sh` on the core server, then rerun `test-lpe-ct-edge-ports.sh` on the `LPE-CT` server.
 

@@ -14,13 +14,16 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - tolerant `ID`
 - `NAMESPACE` for the flat personal namespace
 - `LIST` for the canonical system mailboxes `Inbox`, `Sent`, and `Drafts`
+- tolerant legacy `XLIST` for Outlook desktop compatibility
 - `SPECIAL-USE` folder flags on listed system mailboxes
 - tolerant `LSUB`, `SUBSCRIBE`, and `UNSUBSCRIBE` for Outlook compatibility; subscription state is not persisted yet
 - `STATUS` for mailbox counters and stable UID metadata
 - flat mailbox management through `CREATE`, `RENAME`, and `DELETE` for custom user mailboxes
 - `SELECT` on `Inbox`, `Sent`, and `Drafts`
+- `EXAMINE`, `CHECK`, `CLOSE`, `UNSELECT`, and no-op `EXPUNGE` for Outlook desktop synchronization flows
 - `FETCH` over canonical message state, including `ENVELOPE`, `BODYSTRUCTURE`,
-  `BODY.PEEK[HEADER.FIELDS (...)]`, body sections, and partial literals
+  `BODY`, `BODY.PEEK[HEADER.FIELDS (...)]`, `BODY.PEEK[HEADER.FIELDS.NOT (...)]`,
+  part-scoped header fields, body sections, MIME part headers, and partial literals
 - minimal `STORE` for `\Seen` and `\Flagged`
 - `IDLE` on a selected mailbox, with periodic refresh against canonical mailbox state
 - `CONDSTORE` mailbox sync primitives: `HIGHESTMODSEQ`, per-message `MODSEQ`, and conditional `STORE` with `UNCHANGEDSINCE`
@@ -54,12 +57,13 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 ## Current limitations
 
 - no message submission or `APPEND` to `Sent`; outbound submission remains canonical through `JMAP`, `ActiveSync`, and the web/API submission workflow
-- no durable subscribe state, hierarchy management, standalone `EXPUNGE`, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
+- no durable subscribe state, hierarchy management, destructive `EXPUNGE`, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
 - mailbox management remains a flat namespace for now; hierarchical folder trees are not implemented yet
 - `FETCH BODYSTRUCTURE` and MIME section rendering are compatibility projections over the canonical message text and sanitized HTML fields; attachment MIME reserialization remains deferred
 - `COPY` intentionally rejects `Sent` and `Drafts` as source or target mailboxes so the adapter cannot become an alternate sent-message or draft workflow
 - `MOVE` uses the same guardrail and only supports `Inbox` plus custom user mailboxes
 - `SEARCH` now supports `ALL`, `SEEN`, `UNSEEN`, `FLAGGED`, `UNFLAGGED`, `TEXT`, `SUBJECT`, `FROM`, `TO`, `CC`, `BODY`, `HEADER`, `BEFORE`, `ON`, `SINCE`, `LARGER`, `SMALLER`, `NOT`, `OR`, sequence-set criteria, and `UID`
+- `EXPUNGE` is accepted for client compatibility but is currently a no-op because the adapter does not yet expose `\Deleted` or permanent message deletion
 - `IDLE` currently refreshes by polling canonical mailbox state for the selected mailbox; it now coexists with a reusable canonical mail change watermark, but still does not publish `QRESYNC`-grade vanished history
 - the current `ACL` slice is administrative only for the authenticated owner mailbox namespace; delegated mailbox projection through IMAP remains deferred even though the grants are canonical today
 
@@ -74,7 +78,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `MOVE` updates the canonical message row in place but still assigns a new destination `UID`, preserving `UIDPLUS` mapping and keeping the destination mailbox append-like from an IMAP client perspective
 - `FETCH MODSEQ` and `STORE ... (UNCHANGEDSINCE n)` operate directly on those canonical values; mixed conditional `STORE` batches may partially apply and return `MODIFIED` for the stale subset
 - `IDLE` only reports selected-mailbox changes that can be observed from canonical mailbox refreshes, such as flag changes, additions, and removals
-- because there is still no canonical vanished-history journal, standalone `EXPUNGE` and `QRESYNC` stay deferred even though `CONDSTORE` now uses canonical first-class change anchors
+- because there is still no canonical vanished-history journal, destructive `EXPUNGE` and `QRESYNC` stay deferred even though `CONDSTORE` now uses canonical first-class change anchors
 - `ACL` rights are a truthful projection over canonical delegation: mailbox access rights map to mailbox visibility and mutation, `p` maps to canonical `send-as`, and `b` is an `LPE`-specific right for canonical `send-on-behalf`
 - `Bcc` remains protected in those tradeoffs as well: it is preserved in protected storage for owner reconstruction in `Drafts` and `Sent`, but never added to IMAP search matching
 

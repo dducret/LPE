@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::{parse::parse_request_line, render::sanitize_imap_text, store::ImapStore};
 
 const CAPABILITIES: &str =
-    "IMAP4rev1 AUTH=XOAUTH2 SASL-IR ID IDLE MOVE NAMESPACE UIDPLUS CONDSTORE ACL SPECIAL-USE";
+    "IMAP4rev1 AUTH=XOAUTH2 SASL-IR ID IDLE MOVE NAMESPACE UIDPLUS CONDSTORE ACL SPECIAL-USE UNSELECT";
 pub(crate) const UID_VALIDITY: u32 = 1;
 
 #[derive(Clone)]
@@ -93,6 +93,7 @@ pub(crate) struct SelectedMailbox {
     pub(crate) mailbox_name: String,
     pub(crate) mailbox_role: String,
     pub(crate) emails: Vec<ImapEmail>,
+    pub(crate) read_only: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -138,6 +139,7 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                     .await
             }
             "LIST" => self.handle_list(&request.tag, writer).await,
+            "XLIST" => self.handle_xlist(&request.tag, writer).await,
             "LSUB" => self.handle_lsub(&request.tag, writer).await,
             "SUBSCRIBE" => {
                 self.handle_subscribe(&request.tag, &request.arguments, writer)
@@ -169,6 +171,14 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                 self.handle_select(&request.tag, &request.arguments, writer)
                     .await
             }
+            "EXAMINE" => {
+                self.handle_examine(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "CHECK" => self.handle_check(&request.tag, writer).await,
+            "CLOSE" => self.handle_close(&request.tag, writer).await,
+            "UNSELECT" => self.handle_unselect(&request.tag, writer).await,
+            "EXPUNGE" => self.handle_expunge(&request.tag, writer).await,
             "GETACL" => {
                 self.handle_getacl(&request.tag, &request.arguments, writer)
                     .await
@@ -352,6 +362,7 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                 .store
                 .fetch_imap_emails(principal.account_id, selected.mailbox_id)
                 .await?,
+            read_only: selected.read_only,
         });
         Ok(())
     }

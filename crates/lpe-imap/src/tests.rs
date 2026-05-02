@@ -793,7 +793,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
     }
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let server = ImapServer::with_validator(store, Validator::new(FakeDetector, 0.8));
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
     let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
 
     let mut stream = TcpStream::connect(address).await.unwrap();
@@ -803,6 +803,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
     let capability = send_command(&mut stream, "OL1 CAPABILITY\r\n", "OL1").await;
     assert!(capability.contains("ID"));
     assert!(capability.contains("SPECIAL-USE"));
+    assert!(capability.contains("UNSELECT"));
 
     let id = send_command(
         &mut stream,
@@ -840,6 +841,20 @@ async fn outlook_first_login_list_select_sync_transcript() {
     assert!(list.contains("* LIST (\\HasNoChildren \\Sent) \"/\" \"Sent\""));
     assert!(list.contains("* LIST (\\HasNoChildren \\Drafts) \"/\" \"Drafts\""));
 
+    let xlist = send_command(&mut stream, "OL8X XLIST \"\" \"*\"\r\n", "OL8X").await;
+    assert!(xlist.contains("* XLIST (\\HasNoChildren \\Inbox) \"/\" \"Inbox\""));
+    assert!(xlist.contains("OL8X OK XLIST completed"));
+
+    let examine = send_command(&mut stream, "OL8E EXAMINE Inbox\r\n", "OL8E").await;
+    assert!(examine.contains("OL8E OK [READ-ONLY] EXAMINE completed"));
+
+    let examine_body = send_command(&mut stream, "OL8F UID FETCH 1 (BODY[])\r\n", "OL8F").await;
+    assert!(examine_body.contains("BODY[]"));
+    assert!(store.emails.lock().unwrap()[0].unread);
+
+    let unselect = send_command(&mut stream, "OL8U UNSELECT\r\n", "OL8U").await;
+    assert!(unselect.contains("OL8U OK UNSELECT completed"));
+
     let select = send_command(&mut stream, "OL9 SELECT Inbox\r\n", "OL9").await;
     assert!(select.contains("* 1 EXISTS"));
     assert!(select.contains("* OK [UIDVALIDITY 1]"));
@@ -858,6 +873,9 @@ async fn outlook_first_login_list_select_sync_transcript() {
     assert!(fetch_summary.contains("BODYSTRUCTURE ((\"TEXT\" \"PLAIN\""));
     assert!(fetch_summary.contains("\"ALTERNATIVE\""));
 
+    let fetch_body = send_command(&mut stream, "OL10B UID FETCH 1 (UID BODY)\r\n", "OL10B").await;
+    assert!(fetch_body.contains("UID 1 BODY ((\"TEXT\" \"PLAIN\""));
+
     let fetch_headers = send_command(
         &mut stream,
         "OL11 UID FETCH 1 (BODY.PEEK[HEADER.FIELDS (DATE FROM TO SUBJECT MESSAGE-ID)])\r\n",
@@ -870,6 +888,25 @@ async fn outlook_first_login_list_select_sync_transcript() {
         fetch_headers.contains("Message-Id: <11111111-1111-1111-1111-111111111111@example.test>")
     );
     assert!(!fetch_headers.contains("\r\nBcc:"));
+
+    let fetch_header_exclusion = send_command(
+        &mut stream,
+        "OL11B UID FETCH 1 (BODY.PEEK[HEADER.FIELDS.NOT (RECEIVED BCC)])\r\n",
+        "OL11B",
+    )
+    .await;
+    assert!(fetch_header_exclusion.contains("BODY.PEEK[HEADER.FIELDS.NOT (RECEIVED BCC)]"));
+    assert!(fetch_header_exclusion.contains("Subject: Welcome"));
+    assert!(!fetch_header_exclusion.contains("\r\nBcc:"));
+
+    let fetch_part_headers = send_command(
+        &mut stream,
+        "OL11C UID FETCH 1 (BODY.PEEK[1.HEADER.FIELDS (CONTENT-TYPE)])\r\n",
+        "OL11C",
+    )
+    .await;
+    assert!(fetch_part_headers.contains("BODY.PEEK[1.HEADER.FIELDS (CONTENT-TYPE)]"));
+    assert!(fetch_part_headers.contains("Content-Type: multipart/alternative"));
 
     let fetch_section =
         send_command(&mut stream, "OL12 UID FETCH 1 (BODY.PEEK[1])\r\n", "OL12").await;
@@ -889,6 +926,15 @@ async fn outlook_first_login_list_select_sync_transcript() {
     .await;
     assert!(fetch_partial.contains("BODY.PEEK[]<0> {20}"));
     assert!(fetch_partial.contains("Date: 2026-04-19T0"));
+
+    let check = send_command(&mut stream, "OL14 CHECK\r\n", "OL14").await;
+    assert!(check.contains("OL14 OK CHECK completed"));
+
+    let expunge = send_command(&mut stream, "OL15 EXPUNGE\r\n", "OL15").await;
+    assert!(expunge.contains("OL15 OK EXPUNGE completed"));
+
+    let close = send_command(&mut stream, "OL16 CLOSE\r\n", "OL16").await;
+    assert!(close.contains("OL16 OK CLOSE completed"));
 
     task.abort();
 }

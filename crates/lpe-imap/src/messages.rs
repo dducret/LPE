@@ -35,7 +35,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             let email = &selected.emails[index];
             let response = render_fetch_response(index + 1, email, &requested)?;
             writer.write_all(&response).await?;
-            if requested.mark_seen && email.unread {
+            if requested.mark_seen && email.unread && !selected.read_only {
                 mark_seen_ids.push(email.id);
             }
         }
@@ -77,6 +77,9 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         let mode = parse_store_mode(&mode_token)?;
         let flags = parse_flag_list(&flags_token)?;
         let selected = self.require_selected()?.clone();
+        if selected.read_only {
+            bail!("mailbox is read-only");
+        }
         let indices = resolve_message_indexes(&selected.emails, &set_token, ref_kind)?;
         let ids = indices
             .iter()

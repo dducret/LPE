@@ -81,10 +81,11 @@ The core `LPE` server remains responsible for the canonical sent-message copy in
 
 Native Outlook and mobile support is a first-class requirement.
 
-- `ActiveSync` is the first targeted native Outlook/mobile compatibility layer
-- protocol planning must treat `ActiveSync` compatibility labs, long-poll stability, send flow correctness, and folder sync edge cases as a flagship requirement before introducing new client protocols
+- `ActiveSync` targets mobile and native clients that actually support `Exchange ActiveSync`; do not try to force Outlook for Windows desktop to use `ActiveSync` as an Exchange account
+- Outlook for Windows desktop currently uses `IMAP` unless and until `EWS` or `MAPI` is implemented
+- protocol planning must treat both Outlook desktop `IMAP` interoperability and `ActiveSync` mobile compatibility labs as flagship requirements before introducing new client protocols
 - `EWS` stays a future extension
-- `IMAP` + `SMTP` + autodiscover must not be treated as sufficient for Outlook adoption
+- `IMAP` + `SMTP` + autodiscover is the current Outlook desktop path, but must not be treated as the final Outlook adoption story
 - every client layer must use the canonical `LPE` submission and synchronization model
 - no client layer may implement parallel `Sent` or `Outbox` logic
 

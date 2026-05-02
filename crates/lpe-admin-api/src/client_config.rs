@@ -57,8 +57,6 @@ struct PublishedEndpoints {
     smtp_host: Option<String>,
     smtp_port: Option<u16>,
     smtp_socket_type: Option<String>,
-    activesync_host: String,
-    activesync_url: String,
     jmap_session_url: String,
 }
 
@@ -86,9 +84,6 @@ impl PublishedEndpoints {
             env::var("LPE_AUTOCONFIG_SMTP_SOCKET_TYPE").unwrap_or_else(|_| "SSL".to_string())
         });
 
-        let activesync_url = env::var("LPE_AUTODISCOVER_ACTIVESYNC_URL").unwrap_or_else(|_| {
-            format!("{public_scheme}://{public_host}/Microsoft-Server-ActiveSync")
-        });
         let jmap_session_url = env::var("LPE_AUTOCONFIG_JMAP_SESSION_URL")
             .unwrap_or_else(|_| format!("{public_scheme}://{public_host}/api/jmap/session"));
 
@@ -99,8 +94,6 @@ impl PublishedEndpoints {
             smtp_host,
             smtp_port,
             smtp_socket_type,
-            activesync_host: public_host_name,
-            activesync_url,
             jmap_session_url,
         }
     }
@@ -164,7 +157,7 @@ fn render_thunderbird_autoconfig(config: &PublishedEndpoints) -> String {
 
 fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>) -> String {
     let email = email.unwrap_or_default();
-    format!(
+    let mut xml = format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n",
             "<Autodiscover xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006\">\n",
@@ -177,21 +170,48 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
             "      <AccountType>email</AccountType>\n",
             "      <Action>settings</Action>\n",
             "      <Protocol>\n",
-            "        <Type>MobileSync</Type>\n",
-            "        <Server>{server}</Server>\n",
-            "        <Name>{server}</Name>\n",
-            "        <ServerData>{url}</ServerData>\n",
-            "        <ASUrl>{url}</ASUrl>\n",
-            "      </Protocol>\n",
-            "    </Account>\n",
-            "  </Response>\n",
-            "</Autodiscover>\n"
+            "        <Type>IMAP</Type>\n",
+            "        <Server>{imap_host}</Server>\n",
+            "        <Port>{imap_port}</Port>\n",
+            "        <DomainRequired>off</DomainRequired>\n",
+            "        <LoginName>{email}</LoginName>\n",
+            "        <SPA>off</SPA>\n",
+            "        <SSL>on</SSL>\n",
+            "        <AuthRequired>on</AuthRequired>\n",
+            "      </Protocol>\n"
         ),
         display_domain = escape_xml(&config.display_domain),
         email = escape_xml(email),
-        server = escape_xml(&config.activesync_host),
-        url = escape_xml(&config.activesync_url),
-    )
+        imap_host = escape_xml(&config.imap_host),
+        imap_port = config.imap_port,
+    );
+
+    if let (Some(smtp_host), Some(smtp_port)) = (config.smtp_host.as_deref(), config.smtp_port) {
+        xml.push_str(&format!(
+            concat!(
+                "      <Protocol>\n",
+                "        <Type>SMTP</Type>\n",
+                "        <Server>{smtp_host}</Server>\n",
+                "        <Port>{smtp_port}</Port>\n",
+                "        <DomainRequired>off</DomainRequired>\n",
+                "        <LoginName>{email}</LoginName>\n",
+                "        <SPA>off</SPA>\n",
+                "        <SSL>on</SSL>\n",
+                "        <AuthRequired>on</AuthRequired>\n",
+                "      </Protocol>\n"
+            ),
+            smtp_host = escape_xml(smtp_host),
+            smtp_port = smtp_port,
+            email = escape_xml(email),
+        ));
+    }
+
+    xml.push_str(concat!(
+        "    </Account>\n",
+        "  </Response>\n",
+        "</Autodiscover>\n"
+    ));
+    xml
 }
 
 fn parse_autodiscover_email(body: &[u8]) -> Option<String> {
@@ -309,8 +329,6 @@ mod tests {
             smtp_host: None,
             smtp_port: None,
             smtp_socket_type: None,
-            activesync_host: "mail.example.test".to_string(),
-            activesync_url: "https://mail.example.test/Microsoft-Server-ActiveSync".to_string(),
             jmap_session_url: "https://mail.example.test/api/jmap/session".to_string(),
         }
     }
@@ -343,14 +361,32 @@ mod tests {
     }
 
     #[test]
-    fn outlook_autodiscover_publishes_activesync_only() {
+    fn outlook_autodiscover_publishes_imap_without_forcing_exchange_activesync() {
         let xml = render_outlook_autodiscover(&sample_config(), Some("alice@example.test"));
 
-        assert!(xml.contains("<Type>MobileSync</Type>"));
-        assert!(
-            xml.contains("<ASUrl>https://mail.example.test/Microsoft-Server-ActiveSync</ASUrl>")
-        );
+        assert!(xml.contains("<Type>IMAP</Type>"));
+        assert!(xml.contains("<Server>mail.example.test</Server>"));
+        assert!(xml.contains("<Port>993</Port>"));
+        assert!(!xml.contains("<Type>MobileSync</Type>"));
+        assert!(!xml.contains("<ASUrl>"));
         assert!(xml.contains("<EMailAddress>alice@example.test</EMailAddress>"));
+    }
+
+    #[test]
+    fn outlook_autodiscover_includes_smtp_only_when_explicitly_configured() {
+        let config = PublishedEndpoints {
+            smtp_host: Some("submit.example.test".to_string()),
+            smtp_port: Some(465),
+            smtp_socket_type: Some("SSL".to_string()),
+            ..sample_config()
+        };
+
+        let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(xml.contains("<Type>IMAP</Type>"));
+        assert!(xml.contains("<Type>SMTP</Type>"));
+        assert!(xml.contains("<Server>submit.example.test</Server>"));
+        assert!(xml.contains("<Port>465</Port>"));
     }
 
     #[test]

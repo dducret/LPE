@@ -17,6 +17,25 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     where
         W: AsyncWriteExt + Unpin,
     {
+        self.handle_mailbox_listing(tag, writer, "LIST").await
+    }
+
+    pub(crate) async fn handle_xlist<W>(&mut self, tag: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        self.handle_mailbox_listing(tag, writer, "XLIST").await
+    }
+
+    async fn handle_mailbox_listing<W>(
+        &mut self,
+        tag: &str,
+        writer: &mut W,
+        command_name: &str,
+    ) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
         let principal = self.require_auth()?;
         let mailboxes = self
             .store
@@ -26,7 +45,8 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             writer
                 .write_all(
                     format!(
-                        "* LIST {} \"/\" \"{}\"\r\n",
+                        "* {} {} \"/\" \"{}\"\r\n",
+                        command_name,
                         render_list_flags(&mailbox.role),
                         sanitize_imap_quoted(&mailbox.name)
                     )
@@ -35,7 +55,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                 .await?;
         }
         writer
-            .write_all(format!("{tag} OK LIST completed\r\n").as_bytes())
+            .write_all(format!("{tag} OK {command_name} completed\r\n").as_bytes())
             .await?;
         writer.flush().await?;
         Ok(true)
@@ -262,6 +282,31 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     where
         W: AsyncWriteExt + Unpin,
     {
+        self.handle_select_mode(tag, arguments, writer, false).await
+    }
+
+    pub(crate) async fn handle_examine<W>(
+        &mut self,
+        tag: &str,
+        arguments: &str,
+        writer: &mut W,
+    ) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        self.handle_select_mode(tag, arguments, writer, true).await
+    }
+
+    async fn handle_select_mode<W>(
+        &mut self,
+        tag: &str,
+        arguments: &str,
+        writer: &mut W,
+        read_only: bool,
+    ) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
         let principal = self.require_auth()?;
         let mailbox_name = tokenize(arguments)?
             .into_iter()
@@ -293,6 +338,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             mailbox_name: mailbox.name.clone(),
             mailbox_role: mailbox.role.clone(),
             emails,
+            read_only,
         });
 
         writer
@@ -328,8 +374,62 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                 format!("* OK [HIGHESTMODSEQ {}] highest modseq\r\n", highest_modseq).as_bytes(),
             )
             .await?;
+        let access = if read_only { "READ-ONLY" } else { "READ-WRITE" };
+        let command_name = if read_only { "EXAMINE" } else { "SELECT" };
         writer
-            .write_all(format!("{tag} OK [READ-WRITE] SELECT completed\r\n").as_bytes())
+            .write_all(format!("{tag} OK [{access}] {command_name} completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    pub(crate) async fn handle_check<W>(&mut self, tag: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        self.require_selected()?;
+        self.refresh_selected().await?;
+        writer
+            .write_all(format!("{tag} OK CHECK completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    pub(crate) async fn handle_close<W>(&mut self, tag: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        self.require_selected()?;
+        self.selected = None;
+        writer
+            .write_all(format!("{tag} OK CLOSE completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    pub(crate) async fn handle_unselect<W>(&mut self, tag: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        self.require_selected()?;
+        self.selected = None;
+        writer
+            .write_all(format!("{tag} OK UNSELECT completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    pub(crate) async fn handle_expunge<W>(&mut self, tag: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        self.require_selected()?;
+        self.refresh_selected().await?;
+        writer
+            .write_all(format!("{tag} OK EXPUNGE completed\r\n").as_bytes())
             .await?;
         writer.flush().await?;
         Ok(true)

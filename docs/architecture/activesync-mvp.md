@@ -4,7 +4,9 @@
 
 This document describes the first `ActiveSync` adapter implemented in `LPE`.
 
-The `crates/lpe-activesync` crate exposes a pragmatic subset of `Exchange ActiveSync` for the most important Outlook and mobile scenarios, without introducing any parallel `Sent`, `Outbox`, or direct `SMTP` bypass logic.
+The `crates/lpe-activesync` crate exposes a pragmatic subset of `Exchange ActiveSync` for mobile/native clients that actually support that protocol, such as Outlook mobile and iOS mail clients, without introducing any parallel `Sent`, `Outbox`, or direct `SMTP` bypass logic.
+
+Outlook for Windows desktop is not an `ActiveSync` target and must not be forced to use this endpoint as an Exchange account. Until `EWS` or `MAPI` is implemented, Outlook for Windows desktop compatibility is handled through the `IMAP` adapter documented in `docs/architecture/imap-mvp.md`.
 
 The concrete client interoperability matrix, prioritized defect risks, and automated test recommendations for this MVP are documented in `docs/architecture/activesync-interoperability-matrix.md`.
 
@@ -121,11 +123,11 @@ Those mutations still write directly into the canonical `contacts` and `calendar
 
 ### Current completion priorities
 
-`ActiveSync` is the current flagship compatibility story for native `Outlook` and mobile support.
+`ActiveSync` is the current flagship compatibility story for mobile/native clients that support `Exchange ActiveSync`.
 
 The next phase must prioritize:
 
-- structured `Outlook` and iOS compatibility labs over additional protocol surface area
+- structured Outlook mobile and iOS compatibility labs over additional protocol surface area
 - `Ping` and long-poll stability so device refresh behavior is dependable under long-lived sessions
 - `SendMail`, `SmartReply`, and `SmartForward` correctness so native-client submission always lands in canonical `Sent` without edge-case divergence
 - `FolderSync` and `Sync` edge cases, especially around first sync, continuation, shared-mailbox behavior, and mixed folder collections

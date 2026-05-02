@@ -204,9 +204,9 @@ probe_client_publication() {
     --data "<?xml version=\"1.0\" encoding=\"utf-8\"?><Autodiscover><Request><EMailAddress>${autodiscover_email}</EMailAddress></Request></Autodiscover>" \
     "${base_url}/autodiscover/autodiscover.xml")" \
     || fail "Autodiscover POST is not reachable through LPE-CT HTTPS publication"
-  [[ "$body" == *"<Type>MobileSync</Type>"* ]] \
-    || fail "Autodiscover POST did not publish MobileSync through LPE-CT"
-  pass "Autodiscover POST publishes MobileSync through LPE-CT"
+  [[ "$body" == *"<Type>IMAP</Type>"* ]] \
+    || fail "Autodiscover POST did not publish IMAP through LPE-CT"
+  pass "Autodiscover POST publishes IMAP through LPE-CT"
 
   headers_file="$(mktemp)"
   curl --silent --show-error --fail --insecure --http1.1 \

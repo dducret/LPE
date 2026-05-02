@@ -39,16 +39,27 @@ For `IMAP`, the public endpoint is `IMAPS` on `LPE-CT` port `993`. `LPE-CT`
 terminates the client `TLS` session with the configured public certificate and
 proxies the internal stream to the core `LPE` IMAP adapter.
 
-### Outlook
+### Outlook for Windows desktop
 
-Minimal Outlook autodiscovery publishes only:
+Minimal Outlook autodiscovery publishes:
 
-- `ActiveSync`
-- URL `https://<public-host>/Microsoft-Server-ActiveSync`
+- `IMAP` against the configured public host
+- port `993` by default
+- `SSL` enabled
+- username equal to the discovered email address
 
-The MVP does not advertise `EWS`.
+An `SMTP` protocol block is included only when a real authenticated client-submission endpoint is explicitly configured through the same environment variables used by Thunderbird autoconfig.
 
-That choice stays aligned with the `LPE` architecture: the first priority for native Outlook and mobile compatibility is `ActiveSync`.
+The MVP does not advertise `EWS`, `MAPI`, or `MobileSync` for Outlook desktop. Outlook for Windows desktop must not be forced to use `ActiveSync` as an Exchange account; it currently uses the `IMAP` compatibility layer unless and until `EWS` or `MAPI` is implemented.
+
+### ActiveSync clients
+
+`ActiveSync` remains exposed at:
+
+- `OPTIONS /Microsoft-Server-ActiveSync`
+- `POST /Microsoft-Server-ActiveSync`
+
+This endpoint targets mobile/native clients that actually support `Exchange ActiveSync`, such as Outlook mobile and iOS mail clients. Publishing that route does not make it an Outlook for Windows desktop Exchange endpoint.
 
 ### JMAP
 
@@ -81,7 +92,6 @@ workflow after loading a draft. It must not hand the message directly to
 - `LPE_AUTOCONFIG_SMTP_HOST`, optional; enables the published `SMTP` block
 - `LPE_AUTOCONFIG_SMTP_PORT`, default `465`
 - `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, default `SSL`
-- `LPE_AUTODISCOVER_ACTIVESYNC_URL`, optional
 - `LPE_AUTOCONFIG_JMAP_SESSION_URL`, optional
 
 ### Recommended DNS and HTTP publication
@@ -95,5 +105,6 @@ For a domain `example.test`:
 - publish `IMAPS` on the same hostname when native `IMAP` access is exposed
 - publish the authenticated `SMTPS` submission listener only when `LPE-CT` really exposes it
 - do not reuse the internal `LPE -> LPE-CT` relay as a client-submission endpoint
+- do not publish `ActiveSync` as the Outlook for Windows desktop Exchange route
 
 

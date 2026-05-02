@@ -19,6 +19,7 @@ pub(crate) enum FetchItem {
     InternalDate,
     Rfc822Size,
     Envelope,
+    Body,
     BodyStructure,
     BodySection(BodySectionFetch),
 }
@@ -118,6 +119,9 @@ pub(crate) fn render_fetch_response(
             FetchItem::Envelope => {
                 output.extend_from_slice(format!("ENVELOPE {}", render_envelope(email)).as_bytes())
             }
+            FetchItem::Body => {
+                output.extend_from_slice(format!("BODY {}", render_bodystructure(email)).as_bytes())
+            }
             FetchItem::BodyStructure => output.extend_from_slice(
                 format!("BODYSTRUCTURE {}", render_bodystructure(email)).as_bytes(),
             ),
@@ -196,6 +200,7 @@ fn parse_fetch_item(raw: &str) -> Result<FetchItem> {
         "INTERNALDATE" => FetchItem::InternalDate,
         "RFC822.SIZE" => FetchItem::Rfc822Size,
         "ENVELOPE" => FetchItem::Envelope,
+        "BODY" => FetchItem::Body,
         "BODYSTRUCTURE" => FetchItem::BodyStructure,
         "RFC822" => FetchItem::BodySection(BodySectionFetch {
             peek: false,
@@ -269,7 +274,7 @@ fn append_body_section(output: &mut Vec<u8>, email: &ImapEmail, section: &BodySe
     let normalized = normalize_body_section(&section.section);
     let value = match normalized.as_str() {
         "HEADER" | "0" | "0.HEADER" => render_header(email),
-        value if value.starts_with("HEADER.FIELDS") => render_header_fields(email, value),
+        value if is_header_fields_section(value) => render_header_fields(email, value),
         "TEXT" | "1" | "1.TEXT" => email.body_text.clone(),
         "2" | "2.TEXT" => email
             .body_html_sanitized
@@ -279,7 +284,8 @@ fn append_body_section(output: &mut Vec<u8>, email: &ImapEmail, section: &BodySe
         "" => render_full_message(email),
         "1.MIME" => render_text_part_mime_header("plain"),
         "2.MIME" => render_text_part_mime_header("html"),
-        "1.HEADER" => render_header(email),
+        "MIME" | "0.MIME" => render_root_mime_header(email),
+        "1.HEADER" | "2.HEADER" => render_header(email),
         _ => email.body_text.clone(),
     };
     let (partial_start, bytes) = apply_partial(value.as_bytes(), section.partial);
@@ -288,6 +294,13 @@ fn append_body_section(output: &mut Vec<u8>, email: &ImapEmail, section: &BodySe
 
 fn normalize_body_section(section: &str) -> String {
     section.trim().to_ascii_uppercase()
+}
+
+fn is_header_fields_section(section: &str) -> bool {
+    section.starts_with("HEADER.FIELDS")
+        || section
+            .split_once('.')
+            .is_some_and(|(_, rest)| rest.starts_with("HEADER.FIELDS"))
 }
 
 fn section_label(section: &BodySectionFetch, partial_start: Option<usize>) -> String {
@@ -385,10 +398,23 @@ fn render_header_lines(email: &ImapEmail) -> Vec<String> {
     if let Some(message_id) = email.internet_message_id.as_deref() {
         lines.push(format!("Message-Id: {}", message_id));
     }
+    lines.push("MIME-Version: 1.0".to_string());
+    lines.push(format!(
+        "Content-Type: {}",
+        if email.body_html_sanitized.is_some() {
+            "multipart/alternative"
+        } else {
+            "text/plain; charset=UTF-8"
+        }
+    ));
     lines
 }
 
 fn render_header_fields(email: &ImapEmail, section: &str) -> String {
+    let excluded = section.starts_with("HEADER.FIELDS.NOT")
+        || section
+            .split_once('.')
+            .is_some_and(|(_, rest)| rest.starts_with("HEADER.FIELDS.NOT"));
     let requested = section
         .split_once('(')
         .and_then(|(_, rest)| rest.rsplit_once(')').map(|(fields, _)| fields))
@@ -404,7 +430,14 @@ fn render_header_fields(email: &ImapEmail, section: &str) -> String {
         .into_iter()
         .filter(|line| {
             line.split_once(':')
-                .map(|(name, _)| requested.contains(&name.to_ascii_lowercase()))
+                .map(|(name, _)| {
+                    let contains = requested.contains(&name.to_ascii_lowercase());
+                    if excluded {
+                        !contains
+                    } else {
+                        contains
+                    }
+                })
                 .unwrap_or(false)
         })
         .collect::<Vec<_>>();
@@ -422,6 +455,17 @@ fn render_full_message(email: &ImapEmail) -> String {
 fn render_text_part_mime_header(subtype: &str) -> String {
     format!(
         "Content-Type: text/{subtype}; charset=UTF-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\n"
+    )
+}
+
+fn render_root_mime_header(email: &ImapEmail) -> String {
+    format!(
+        "MIME-Version: 1.0\r\nContent-Type: {}\r\n\r\n",
+        if email.body_html_sanitized.is_some() {
+            "multipart/alternative"
+        } else {
+            "text/plain; charset=UTF-8"
+        }
     )
 }
 

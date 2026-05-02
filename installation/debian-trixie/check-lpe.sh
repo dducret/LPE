@@ -124,8 +124,8 @@ autodiscover_body="$(curl --silent --show-error --fail \
   --data "<?xml version=\"1.0\" encoding=\"utf-8\"?><Autodiscover><Request><EMailAddress>${AUTODISCOVER_TEST_EMAIL}</EMailAddress></Request></Autodiscover>" \
   "http://127.0.0.1/autodiscover/autodiscover.xml")" \
   || fail "HTTP request failed: http://127.0.0.1/autodiscover/autodiscover.xml"
-[[ "$autodiscover_body" == *"<Type>MobileSync</Type>"* ]] \
-  || fail "Autodiscover endpoint does not publish ActiveSync"
+[[ "$autodiscover_body" == *"<Type>IMAP</Type>"* ]] \
+  || fail "Autodiscover endpoint does not publish IMAP"
 pass "Outlook autodiscover endpoint is published by nginx"
 
 admin_index="$(curl --silent --show-error --fail "http://127.0.0.1/")" \

@@ -123,9 +123,9 @@ autodiscover_body="$(curl --silent --show-error --fail --insecure \
   --data "<?xml version=\"1.0\" encoding=\"utf-8\"?><Autodiscover><Request><EMailAddress>${AUTODISCOVER_TEST_EMAIL}</EMailAddress></Request></Autodiscover>" \
   "${PUBLIC_HTTPS_BASE}/autodiscover/autodiscover.xml")" \
   || fail "Outlook autodiscover POST failed through LPE-CT public HTTPS edge"
-[[ "$autodiscover_body" == *"<Type>MobileSync</Type>"* ]] \
-  || fail "Autodiscover endpoint does not publish MobileSync through LPE-CT"
-pass "Outlook autodiscover POST publishes MobileSync through LPE-CT"
+[[ "$autodiscover_body" == *"<Type>IMAP</Type>"* ]] \
+  || fail "Autodiscover endpoint does not publish IMAP through LPE-CT"
+pass "Outlook autodiscover POST publishes IMAP through LPE-CT"
 
 autodiscover_upper_body="$(curl --silent --show-error --fail --insecure \
   --header "Host: ${PUBLIC_HOST_HEADER}" \
@@ -133,9 +133,9 @@ autodiscover_upper_body="$(curl --silent --show-error --fail --insecure \
   --data "<?xml version=\"1.0\" encoding=\"utf-8\"?><Autodiscover><Request><EMailAddress>${AUTODISCOVER_TEST_EMAIL}</EMailAddress></Request></Autodiscover>" \
   "${PUBLIC_HTTPS_BASE}/Autodiscover/Autodiscover.xml")" \
   || fail "Outlook uppercase Autodiscover POST failed through LPE-CT public HTTPS edge"
-[[ "$autodiscover_upper_body" == *"<Type>MobileSync</Type>"* ]] \
-  || fail "Uppercase Autodiscover endpoint does not publish MobileSync through LPE-CT"
-pass "Uppercase Outlook Autodiscover POST publishes MobileSync through LPE-CT"
+[[ "$autodiscover_upper_body" == *"<Type>IMAP</Type>"* ]] \
+  || fail "Uppercase Autodiscover endpoint does not publish IMAP through LPE-CT"
+pass "Uppercase Outlook Autodiscover POST publishes IMAP through LPE-CT"
 
 activesync_headers="$(mktemp)"
 curl --silent --show-error --fail --insecure --http1.1 \
