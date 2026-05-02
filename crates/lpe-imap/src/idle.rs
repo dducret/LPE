@@ -19,7 +19,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         W: AsyncWriteExt + Unpin,
     {
         self.require_auth()?;
-        let mut previous = self.require_selected()?.clone();
+        let mut previous = self.selected.clone();
         writer.write_all(b"+ idling\r\n").await?;
         writer.flush().await?;
 
@@ -38,14 +38,21 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                 }
                 Ok(Err(error)) => return Err(anyhow::Error::from(error)),
                 Err(_) => {
-                    self.refresh_selected().await?;
-                    let current = self.require_selected()?.clone();
-                    let updates = render_selected_updates(&previous, &current)?;
-                    if !updates.is_empty() {
-                        writer.write_all(updates.as_bytes()).await?;
-                        writer.flush().await?;
+                    if previous.is_some() {
+                        self.refresh_selected().await?;
+                        let current = self.selected.clone();
+                        if let (Some(previous_selected), Some(current_selected)) =
+                            (previous.as_ref(), current.as_ref())
+                        {
+                            let updates =
+                                render_selected_updates(previous_selected, current_selected)?;
+                            if !updates.is_empty() {
+                                writer.write_all(updates.as_bytes()).await?;
+                                writer.flush().await?;
+                            }
+                        }
+                        previous = current;
                     }
-                    previous = current;
                 }
             }
         }

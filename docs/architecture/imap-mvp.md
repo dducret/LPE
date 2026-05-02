@@ -28,7 +28,9 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
   `BODY`, `BODY.PEEK[HEADER.FIELDS (...)]`, `BODY.PEEK[HEADER.FIELDS.NOT (...)]`,
   part-scoped header fields, body sections, MIME part headers, and partial literals
 - minimal `STORE` for `\Seen` and `\Flagged`
-- `IDLE` on a selected mailbox, with periodic refresh against canonical mailbox state
+- `IDLE` on a selected mailbox, with periodic refresh against canonical mailbox
+  state; Outlook-style `IDLE` before mailbox selection is accepted as a no-op
+  idle window until `DONE`
 - `CONDSTORE` mailbox sync primitives: `HIGHESTMODSEQ`, per-message `MODSEQ`, and conditional `STORE` with `UNCHANGEDSINCE`
 - `COPY` and `UID COPY` into `Inbox` or custom mailboxes
 - `MOVE` and `UID MOVE` between `Inbox` and custom user mailboxes

@@ -1298,7 +1298,7 @@ async fn idle_reports_replacement_when_selected_mailbox_membership_changes_witho
 }
 
 #[tokio::test]
-async fn idle_requires_a_selected_mailbox() {
+async fn idle_without_selected_mailbox_is_noop_for_outlook() {
     let store = FakeStore::new();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -1309,8 +1309,11 @@ async fn idle_requires_a_selected_mailbox() {
     let _ = read_response(&mut stream, None).await;
     let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
 
-    let idle = send_command(&mut stream, "A2 IDLE\r\n", "A2").await;
-    assert!(idle.contains("A2 NO SELECT a mailbox first"));
+    let idle = send_partial_command(&mut stream, "A2 IDLE\r\n").await;
+    assert!(idle.contains("+ idling"));
+
+    let done = send_command(&mut stream, "DONE\r\n", "A2").await;
+    assert!(done.contains("A2 OK IDLE completed"));
 
     task.abort();
 }
