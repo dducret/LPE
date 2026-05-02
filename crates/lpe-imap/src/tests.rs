@@ -859,6 +859,10 @@ async fn outlook_first_login_list_select_sync_transcript() {
 
     let examine_body = send_command(&mut stream, "OL8F UID FETCH 1 (BODY[])\r\n", "OL8F").await;
     assert!(examine_body.contains("BODY[]"));
+    assert!(examine_body.contains("Content-Type: multipart/alternative; boundary=\"lpe-alt-"));
+    assert!(examine_body.contains("Content-Type: text/plain; charset=UTF-8"));
+    assert!(examine_body.contains("Content-Type: text/html; charset=UTF-8"));
+    assert!(examine_body.contains("--lpe-alt-"));
     assert!(store.emails.lock().unwrap()[0].unread);
 
     let unselect = send_command(&mut stream, "OL8U UNSELECT\r\n", "OL8U").await;
@@ -890,6 +894,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
     assert!(fetch_summary.contains("\"Welcome\""));
     assert!(fetch_summary.contains("BODYSTRUCTURE ((\"TEXT\" \"PLAIN\""));
     assert!(fetch_summary.contains("\"ALTERNATIVE\""));
+    assert!(fetch_summary.contains("(\"BOUNDARY\" \"lpe-alt-"));
 
     let fetch_body = send_command(&mut stream, "OL10B UID FETCH 1 (UID BODY)\r\n", "OL10B").await;
     assert!(fetch_body.contains("UID 1 BODY ((\"TEXT\" \"PLAIN\""));

@@ -414,14 +414,7 @@ fn render_header_lines(email: &ImapEmail) -> Vec<String> {
         lines.push(format!("Message-Id: {}", message_id));
     }
     lines.push("MIME-Version: 1.0".to_string());
-    lines.push(format!(
-        "Content-Type: {}",
-        if email.body_html_sanitized.is_some() {
-            "multipart/alternative"
-        } else {
-            "text/plain; charset=UTF-8"
-        }
-    ));
+    lines.push(format!("Content-Type: {}", root_content_type(email)));
     lines
 }
 
@@ -464,6 +457,9 @@ fn render_header_fields(email: &ImapEmail, section: &str) -> String {
 }
 
 fn render_full_message(email: &ImapEmail) -> String {
+    if email.body_html_sanitized.is_some() {
+        return format!("{}{}", render_header(email), render_multipart_body(email));
+    }
     format!("{}{}", render_header(email), email.body_text)
 }
 
@@ -476,12 +472,49 @@ fn render_text_part_mime_header(subtype: &str) -> String {
 fn render_root_mime_header(email: &ImapEmail) -> String {
     format!(
         "MIME-Version: 1.0\r\nContent-Type: {}\r\n\r\n",
-        if email.body_html_sanitized.is_some() {
-            "multipart/alternative"
-        } else {
-            "text/plain; charset=UTF-8"
-        }
+        root_content_type(email)
     )
+}
+
+fn root_content_type(email: &ImapEmail) -> String {
+    if email.body_html_sanitized.is_some() {
+        format!(
+            "multipart/alternative; boundary=\"{}\"",
+            multipart_boundary(email)
+        )
+    } else {
+        "text/plain; charset=UTF-8".to_string()
+    }
+}
+
+fn render_multipart_body(email: &ImapEmail) -> String {
+    let boundary = multipart_boundary(email);
+    let html = email
+        .body_html_sanitized
+        .as_deref()
+        .unwrap_or(&email.body_text);
+    format!(
+        concat!(
+            "--{boundary}\r\n",
+            "Content-Type: text/plain; charset=UTF-8\r\n",
+            "Content-Transfer-Encoding: 7bit\r\n",
+            "\r\n",
+            "{text}\r\n",
+            "--{boundary}\r\n",
+            "Content-Type: text/html; charset=UTF-8\r\n",
+            "Content-Transfer-Encoding: 7bit\r\n",
+            "\r\n",
+            "{html}\r\n",
+            "--{boundary}--\r\n"
+        ),
+        boundary = boundary,
+        text = email.body_text,
+        html = html
+    )
+}
+
+fn multipart_boundary(email: &ImapEmail) -> String {
+    format!("lpe-alt-{}", email.id)
 }
 
 fn render_envelope(email: &ImapEmail) -> String {
@@ -545,9 +578,10 @@ fn render_bodystructure(email: &ImapEmail) -> String {
     let text = render_text_bodystructure(&email.body_text, "PLAIN");
     if let Some(html) = email.body_html_sanitized.as_deref() {
         format!(
-            "({} {} \"ALTERNATIVE\" NIL NIL NIL)",
+            "({} {} \"ALTERNATIVE\" (\"BOUNDARY\" \"{}\") NIL NIL)",
             text,
-            render_text_bodystructure(html, "HTML")
+            render_text_bodystructure(html, "HTML"),
+            multipart_boundary(email)
         )
     } else {
         text
