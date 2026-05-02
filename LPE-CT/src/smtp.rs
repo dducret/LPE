@@ -1086,6 +1086,23 @@ pub(crate) async fn process_outbound_handoff(
     config: &RuntimeConfig,
     payload: OutboundMessageHandoffRequest,
 ) -> Result<OutboundMessageHandoffResponse> {
+    let trace_id = format!("lpe-ct-out-{}", payload.queue_id);
+    if let Some((queue, message)) = find_message(spool_dir, &trace_id)? {
+        if queue == "sent" {
+            return Ok(OutboundMessageHandoffResponse {
+                queue_id: payload.queue_id,
+                status: TransportDeliveryStatus::Relayed,
+                trace_id,
+                detail: message.relay_error,
+                remote_message_ref: message.remote_message_ref,
+                retry: None,
+                dsn: message.dsn,
+                technical: message.technical_status,
+                route: message.route,
+                throttle: message.throttle,
+            });
+        }
+    }
     let message_id = payload.message_id;
     let internet_message_id = payload.internet_message_id.clone();
     let route = resolve_outbound_route(config, &payload);
@@ -1095,7 +1112,7 @@ pub(crate) async fn process_outbound_handoff(
         &compose_rfc822_message(&payload),
     )?;
     let mut message = QueuedMessage {
-        id: format!("lpe-ct-out-{}", payload.queue_id),
+        id: trace_id,
         direction: "outbound".to_string(),
         received_at: current_timestamp(),
         peer: "lpe-core".to_string(),

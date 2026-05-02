@@ -44,6 +44,19 @@ fn would_regress_queue_status(current_status: &str, next_status: &str) -> bool {
     matches!((current_status, next_status), ("deferred", "queued"))
 }
 
+fn should_ignore_handoff_response(
+    current_status: &str,
+    current_trace_id: Option<&str>,
+    current_remote_message_ref: Option<&str>,
+    response: &OutboundMessageHandoffResponse,
+) -> bool {
+    (current_status == response.status.as_str()
+        && same_trace_id(current_trace_id, &response.trace_id))
+        || is_duplicate_terminal_handoff(current_status, current_remote_message_ref, response)
+        || queue_status_is_terminal(current_status)
+        || would_regress_queue_status(current_status, response.status.as_str())
+}
+
 fn synthesized_retry_policy(response: &OutboundMessageHandoffResponse) -> &'static str {
     if response.trace_id.trim().starts_with("lpe-dispatch-") {
         "dispatch-backoff"
@@ -241,15 +254,12 @@ impl Storage {
         .await?
         .ok_or_else(|| anyhow!("outbound queue item not found"))?;
 
-        if same_trace_id(current.last_trace_id.as_deref(), &response.trace_id)
-            || is_duplicate_terminal_handoff(
-                &current.status,
-                current.remote_message_ref.as_deref(),
-                response,
-            )
-            || queue_status_is_terminal(&current.status)
-            || would_regress_queue_status(&current.status, response.status.as_str())
-        {
+        if should_ignore_handoff_response(
+            &current.status,
+            current.last_trace_id.as_deref(),
+            current.remote_message_ref.as_deref(),
+            response,
+        ) {
             return Ok(OutboundQueueStatusUpdate {
                 queue_id: response.queue_id,
                 message_id: current.message_id,
@@ -456,6 +466,22 @@ mod tests {
         assert!(would_regress_queue_status("deferred", "queued"));
         assert!(!would_regress_queue_status("queued", "deferred"));
         assert!(!would_regress_queue_status("queued", "relayed"));
+    }
+
+    #[test]
+    fn same_trace_can_progress_from_deferred_to_relayed() {
+        let response = response(
+            TransportDeliveryStatus::Relayed,
+            "trace-1",
+            Some("remote-1"),
+        );
+
+        assert!(!should_ignore_handoff_response(
+            "deferred",
+            Some("trace-1"),
+            None,
+            &response
+        ));
     }
 
     #[test]
