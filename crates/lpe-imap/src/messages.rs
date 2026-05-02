@@ -7,7 +7,7 @@ use crate::{
     parse::{split_two, tokenize},
     render::{
         ensure_uid_fetch_attributes, parse_fetch_attributes, render_fetch_response, render_flags,
-        render_modified_set, resolve_message_indexes,
+        render_modified_set, resolve_message_indexes, FetchAttributes, FetchItem,
     },
     search::SearchExpression,
     store_args::{parse_flag_list, parse_store_arguments, parse_store_mode},
@@ -25,13 +25,21 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     where
         W: AsyncWriteExt + Unpin,
     {
-        let (set_token, attr_token) = split_two(arguments)?;
+        let (set_token, attr_token, changed_since) = parse_fetch_arguments(arguments)?;
         let mut requested = parse_fetch_attributes(attr_token)?;
         if matches!(ref_kind, MessageRefKind::Uid) {
             ensure_uid_fetch_attributes(&mut requested);
         }
+        ensure_condstore_fetch_attributes(&mut requested, changed_since);
         let selected = self.require_selected()?;
-        let indices = resolve_message_indexes(&selected.emails, set_token, ref_kind)?;
+        let indices = resolve_message_indexes(&selected.emails, set_token, ref_kind)?
+            .into_iter()
+            .filter(|index| {
+                changed_since
+                    .map(|modseq| selected.emails[*index].modseq > modseq)
+                    .unwrap_or(true)
+            })
+            .collect::<Vec<_>>();
         let mut mark_seen_ids = Vec::new();
 
         for index in indices {
@@ -333,6 +341,65 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         writer.write_all(response.as_bytes()).await?;
         writer.flush().await?;
         Ok(true)
+    }
+}
+
+fn parse_fetch_arguments(arguments: &str) -> Result<(&str, &str, Option<u64>)> {
+    let trimmed = arguments.trim();
+    let (set_token, rest) = split_two(trimmed)?;
+    let rest = rest.trim_start();
+    if !rest.starts_with('(') {
+        let (attr_token, modifier) = rest
+            .split_once(char::is_whitespace)
+            .map(|(attrs, modifier)| (attrs, modifier.trim()))
+            .unwrap_or((rest, ""));
+        return Ok((set_token, attr_token, parse_fetch_modifier(modifier)?));
+    }
+
+    let mut depth = 0usize;
+    let mut attr_end = None;
+    for (index, ch) in rest.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    attr_end = Some(index + ch.len_utf8());
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let attr_end = attr_end.ok_or_else(|| anyhow::anyhow!("invalid FETCH attribute list"))?;
+    let attr_token = &rest[..attr_end];
+    let modifier = rest[attr_end..].trim();
+    Ok((set_token, attr_token, parse_fetch_modifier(modifier)?))
+}
+
+fn parse_fetch_modifier(modifier: &str) -> Result<Option<u64>> {
+    if modifier.is_empty() {
+        return Ok(None);
+    }
+    let inner = modifier
+        .strip_prefix('(')
+        .and_then(|value| value.strip_suffix(')'))
+        .ok_or_else(|| anyhow::anyhow!("unsupported FETCH modifier {}", modifier))?;
+    let parts = inner.split_whitespace().collect::<Vec<_>>();
+    if parts.len() == 2 && parts[0].eq_ignore_ascii_case("CHANGEDSINCE") {
+        return Ok(Some(parts[1].parse()?));
+    }
+    bail!("unsupported FETCH modifier {}", modifier)
+}
+
+fn ensure_condstore_fetch_attributes(requested: &mut FetchAttributes, changed_since: Option<u64>) {
+    if changed_since.is_some()
+        && !requested
+            .items
+            .iter()
+            .any(|item| matches!(item, FetchItem::Modseq))
+    {
+        requested.items.push(FetchItem::Modseq);
     }
 }
 

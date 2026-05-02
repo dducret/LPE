@@ -36,7 +36,8 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `IDLE` on a selected mailbox, with periodic refresh against canonical mailbox
   state; Outlook-style `IDLE` before mailbox selection is accepted as a no-op
   idle window until `DONE`
-- `CONDSTORE` mailbox sync primitives: `HIGHESTMODSEQ`, per-message `MODSEQ`, and conditional `STORE` with `UNCHANGEDSINCE`
+- `CONDSTORE` mailbox sync primitives: `HIGHESTMODSEQ`, per-message `MODSEQ`,
+  `FETCH ... (CHANGEDSINCE n)`, and conditional `STORE` with `UNCHANGEDSINCE`
 - `COPY` and `UID COPY` into `Inbox` or custom mailboxes
 - `MOVE` and `UID MOVE` between `Inbox` and custom user mailboxes
 - richer `SEARCH`

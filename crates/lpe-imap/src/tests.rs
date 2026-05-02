@@ -1101,6 +1101,25 @@ async fn condstore_store_reports_modified_and_keeps_fresh_messages() {
     assert!(fetch_after.contains("* 1 FETCH (FLAGS (\\Seen) MODSEQ (7))"));
     assert!(fetch_after.contains("* 2 FETCH (FLAGS (\\Flagged) MODSEQ (6))"));
 
+    let changed_since = send_command(
+        &mut stream,
+        "A5 UID FETCH 1:* (UID FLAGS) (CHANGEDSINCE 6)\r\n",
+        "A5",
+    )
+    .await;
+    assert!(changed_since.contains("* 1 FETCH (UID 1 FLAGS (\\Seen) MODSEQ (7))"));
+    assert!(!changed_since.contains("UID 2"));
+    assert!(changed_since.contains("A5 OK FETCH completed"));
+
+    let no_changes = send_command(
+        &mut stream,
+        "A6 UID FETCH 1:* (UID FLAGS MODSEQ) (CHANGEDSINCE 7)\r\n",
+        "A6",
+    )
+    .await;
+    assert!(!no_changes.contains("* 1 FETCH"));
+    assert!(no_changes.contains("A6 OK FETCH completed"));
+
     task.abort();
 }
 
