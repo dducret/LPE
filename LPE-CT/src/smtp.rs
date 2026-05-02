@@ -56,6 +56,8 @@ use crate::{dkim_signing, integration_shared_secret, observability, storage, tra
 
 const INBOUND_DELIVERY_PATH: &str = "/internal/lpe-ct/inbound-deliveries";
 const BAYESPAM_MIN_SCORING_TOKENS: usize = 3;
+const MAX_SMTP_COMMAND_LINE_LEN: usize = 510;
+const MAX_SMTP_RCPT_PER_TRANSACTION: usize = 25;
 
 static SMTP_ACTIVE_SESSIONS: AtomicU32 = AtomicU32::new(0);
 
@@ -216,6 +218,27 @@ enum SmtpCommandOutcome {
     Continue,
     StartTls,
     Quit,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SmtpPathKind {
+    MailFrom,
+    RcptTo,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedSmtpPath {
+    address: String,
+    declared_size: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SmtpPathError {
+    MalformedPath,
+    InvalidAddress,
+    InvalidSize,
+    SizeTooLarge,
+    UnsupportedParameter(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1915,6 +1938,11 @@ where
     R: tokio::io::AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    if command.as_bytes().len() > MAX_SMTP_COMMAND_LINE_LEN {
+        write_smtp(writer, "500 command line too long").await?;
+        return Ok(SmtpCommandOutcome::Continue);
+    }
+
     let upper = command.to_ascii_uppercase();
     if upper.starts_with("EHLO ") || upper.starts_with("HELO ") {
         transaction.helo = command[5.min(command.len())..].trim().to_string();
@@ -1924,7 +1952,15 @@ where
         if starttls_available {
             write_smtp(writer, "250-STARTTLS").await?;
         }
-        write_smtp(writer, "250 SIZE").await?;
+        let config = runtime_config_from_store(dashboard_store)?;
+        write_smtp(
+            writer,
+            &format!(
+                "250 SIZE {}",
+                max_smtp_message_size_bytes(config.max_message_size_mb)
+            ),
+        )
+        .await?;
     } else if upper == "STARTTLS" {
         if starttls_available {
             if transaction.helo.is_empty() {
@@ -1939,8 +1975,18 @@ where
             write_smtp(writer, "503 send EHLO or HELO after STARTTLS first").await?;
             return Ok(SmtpCommandOutcome::Continue);
         }
-        let candidate = parse_smtp_path(command[10..].trim());
         let config = runtime_config_from_store(dashboard_store)?;
+        let candidate = match parse_smtp_path(
+            command[10..].trim(),
+            SmtpPathKind::MailFrom,
+            max_smtp_message_size_bytes(config.max_message_size_mb),
+        ) {
+            Ok(parsed) => parsed.address,
+            Err(error) => {
+                write_smtp(writer, &smtp_path_error_reply("MAIL FROM", error)).await?;
+                return Ok(SmtpCommandOutcome::Continue);
+            }
+        };
         if !candidate.is_empty() {
             if let transport_policy::AddressPolicyVerdict::Reject(reason) =
                 transport_policy::evaluate_address_policy_with_config(
@@ -1966,8 +2012,18 @@ where
             write_smtp(writer, "503 send MAIL FROM first").await?;
             return Ok(SmtpCommandOutcome::Continue);
         }
-        let recipient = parse_smtp_path(command[8..].trim());
         let config = runtime_config_from_store(dashboard_store)?;
+        let recipient = match parse_smtp_path(
+            command[8..].trim(),
+            SmtpPathKind::RcptTo,
+            max_smtp_message_size_bytes(config.max_message_size_mb),
+        ) {
+            Ok(parsed) => parsed.address,
+            Err(error) => {
+                write_smtp(writer, &smtp_path_error_reply("RCPT TO", error)).await?;
+                return Ok(SmtpCommandOutcome::Continue);
+            }
+        };
         if !recipient_domain_is_accepted(&config, &recipient) {
             write_smtp(
                 writer,
@@ -1994,6 +2050,10 @@ where
             )
         {
             write_smtp(writer, &format!("550 recipient rejected ({reason})")).await?;
+            return Ok(SmtpCommandOutcome::Continue);
+        }
+        if transaction.rcpt_to.len() >= MAX_SMTP_RCPT_PER_TRANSACTION {
+            write_smtp(writer, "452 too many recipients").await?;
             return Ok(SmtpCommandOutcome::Continue);
         }
         match transport_policy::verify_recipient_with_core(
@@ -3758,17 +3818,14 @@ fn tokenize_for_bayespam(
 ) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut tokens = Vec::new();
-    for token in [subject, visible_text]
-        .into_iter()
-        .flat_map(|value| {
-            value
-                .split(|ch: char| !ch.is_ascii_alphanumeric())
-                .map(str::trim)
-                .filter(|token| token.len() >= min_token_length)
-                .map(|token| token.to_ascii_lowercase())
-                .collect::<Vec<_>>()
-        })
-    {
+    for token in [subject, visible_text].into_iter().flat_map(|value| {
+        value
+            .split(|ch: char| !ch.is_ascii_alphanumeric())
+            .map(str::trim)
+            .filter(|token| token.len() >= min_token_length)
+            .map(|token| token.to_ascii_lowercase())
+            .collect::<Vec<_>>()
+    }) {
         if seen.insert(token.clone()) {
             tokens.push(token);
             if tokens.len() >= max_tokens {
@@ -4809,19 +4866,120 @@ where
     Ok(data)
 }
 
-fn parse_smtp_path(value: &str) -> String {
+fn max_smtp_message_size_bytes(max_mb: u32) -> u64 {
+    u64::from(max_mb.max(1)) * 1024 * 1024
+}
+
+fn parse_smtp_path(
+    value: &str,
+    kind: SmtpPathKind,
+    max_message_size_bytes: u64,
+) -> std::result::Result<ParsedSmtpPath, SmtpPathError> {
     let trimmed = value.trim();
-    if let Some(rest) = trimmed.strip_prefix('<') {
-        if let Some(end) = rest.find('>') {
-            return rest[..end].trim().to_string();
+    let Some(rest) = trimmed.strip_prefix('<') else {
+        return Err(SmtpPathError::MalformedPath);
+    };
+    let Some(end) = rest.find('>') else {
+        return Err(SmtpPathError::MalformedPath);
+    };
+    let path = &rest[..end];
+    if path.contains(['<', '>']) {
+        return Err(SmtpPathError::MalformedPath);
+    }
+
+    match kind {
+        SmtpPathKind::MailFrom if path.is_empty() => {}
+        SmtpPathKind::MailFrom | SmtpPathKind::RcptTo => {
+            if !is_valid_smtp_mailbox(path) {
+                return Err(SmtpPathError::InvalidAddress);
+            }
         }
     }
-    trimmed
-        .split_ascii_whitespace()
-        .next()
-        .unwrap_or_default()
-        .trim_matches(['<', '>'])
-        .to_string()
+    if matches!(kind, SmtpPathKind::RcptTo) && path.is_empty() {
+        return Err(SmtpPathError::InvalidAddress);
+    }
+
+    let mut declared_size = None;
+    for parameter in rest[end + 1..].split_ascii_whitespace() {
+        let (name, value) = parameter
+            .split_once('=')
+            .map(|(name, value)| (name.to_ascii_uppercase(), Some(value)))
+            .unwrap_or_else(|| (parameter.to_ascii_uppercase(), None));
+
+        match (kind, name.as_str(), value) {
+            (SmtpPathKind::MailFrom, "SIZE", Some(size)) => {
+                if declared_size.is_some() || size.is_empty() {
+                    return Err(SmtpPathError::InvalidSize);
+                }
+                let parsed = size
+                    .parse::<u64>()
+                    .map_err(|_| SmtpPathError::SizeTooLarge)?;
+                if parsed > max_message_size_bytes {
+                    return Err(SmtpPathError::SizeTooLarge);
+                }
+                declared_size = Some(parsed);
+            }
+            (SmtpPathKind::MailFrom, "SIZE", None) => {
+                return Err(SmtpPathError::InvalidSize);
+            }
+            _ => return Err(SmtpPathError::UnsupportedParameter(name)),
+        }
+    }
+
+    Ok(ParsedSmtpPath {
+        address: path.to_ascii_lowercase(),
+        declared_size,
+    })
+}
+
+fn is_valid_smtp_mailbox(address: &str) -> bool {
+    if address.is_empty()
+        || address.len() > 254
+        || address
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+        || address.contains(['<', '>', ',', ';'])
+    {
+        return false;
+    }
+
+    let Some((local, domain)) = address.rsplit_once('@') else {
+        return false;
+    };
+    if local.is_empty()
+        || local.len() > 64
+        || local.starts_with('.')
+        || local.ends_with('.')
+        || local.contains("..")
+        || domain.is_empty()
+        || domain.len() > 253
+        || domain.starts_with('.')
+        || domain.ends_with('.')
+    {
+        return false;
+    }
+
+    domain.split('.').all(|label| {
+        !label.is_empty()
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    })
+}
+
+fn smtp_path_error_reply(command: &str, error: SmtpPathError) -> String {
+    match error {
+        SmtpPathError::MalformedPath | SmtpPathError::InvalidAddress => {
+            format!("501 malformed {command} path")
+        }
+        SmtpPathError::InvalidSize => "501 invalid SIZE parameter".to_string(),
+        SmtpPathError::SizeTooLarge => "552 message size exceeds configured maximum".to_string(),
+        SmtpPathError::UnsupportedParameter(parameter) => {
+            format!("555 {command} parameter not supported ({parameter})")
+        }
+    }
 }
 
 async fn write_smtp<W>(writer: &mut W, line: &str) -> Result<()>
@@ -6048,7 +6206,7 @@ async fn remove_quarantine_metadata_or_warn(config: &RuntimeConfig, trace_id: &s
 
 fn recipient_domain_is_accepted(config: &RuntimeConfig, recipient: &str) -> bool {
     if config.accepted_domains.is_empty() {
-        return true;
+        return false;
     }
     let Some(domain) = domain_part(recipient) else {
         return false;
@@ -6061,7 +6219,7 @@ fn recipient_domain_is_accepted(config: &RuntimeConfig, recipient: &str) -> bool
 
 fn recipient_domain_accepts_null_reverse_path(config: &RuntimeConfig, recipient: &str) -> bool {
     if config.accepted_domains.is_empty() {
-        return true;
+        return false;
     }
     let Some(domain) = domain_part(recipient) else {
         return false;
@@ -6270,10 +6428,11 @@ mod tests {
         update_reputation, write_smtp, AcceptedDomainConfig, AntivirusProviderConfig,
         AntivirusProviderDecision, AuthSummary, AuthenticationAssessment, BayesLabel,
         DecisionTraceEntry, DkimDisposition, FilterAction, GreylistEntry, OutboundRoutingRule,
-        OutboundThrottleRule, QueuedMessage, RuntimeConfig, SmtpCommandOutcome, SmtpTransaction,
-        SpfDisposition, TransportAuditEvent, TransportDsnReport, TransportRouteDecision,
-        TransportTechnicalStatus, TransportThrottleStatus, BAYESPAM_MIN_SCORING_TOKENS,
-        DEFAULT_GREYLIST_DELAY_SECONDS,
+        OutboundThrottleRule, ParsedSmtpPath, QueuedMessage, RuntimeConfig, SmtpCommandOutcome,
+        SmtpPathError, SmtpPathKind, SmtpTransaction, SpfDisposition, TransportAuditEvent,
+        TransportDsnReport, TransportRouteDecision, TransportTechnicalStatus,
+        TransportThrottleStatus, BAYESPAM_MIN_SCORING_TOKENS, DEFAULT_GREYLIST_DELAY_SECONDS,
+        MAX_SMTP_COMMAND_LINE_LEN, MAX_SMTP_RCPT_PER_TRANSACTION,
     };
     use crate::env_test_lock;
     use axum::{routing::post, Json, Router};
@@ -6526,6 +6685,11 @@ pzqAuzRp69VoxDpO6hdx/Qc=
     fn recipient_domain_acceptance_is_exact_case_insensitive_and_verified() {
         let mut config =
             runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+        assert!(!super::recipient_domain_is_accepted(
+            &config,
+            "test@example.net"
+        ));
+
         config.accepted_domains = vec![AcceptedDomainConfig {
             domain: "l-p-e.ch".to_string(),
             rbl_checks: true,
@@ -6562,13 +6726,305 @@ pzqAuzRp69VoxDpO6hdx/Qc=
     #[test]
     fn smtp_path_parser_ignores_mail_parameters() {
         assert_eq!(
-            super::parse_smtp_path("<sender@example.test> SIZE=2048"),
-            "sender@example.test"
+            super::parse_smtp_path(
+                "<sender@example.test> SIZE=2048",
+                SmtpPathKind::MailFrom,
+                4096
+            )
+            .unwrap(),
+            ParsedSmtpPath {
+                address: "sender@example.test".to_string(),
+                declared_size: Some(2048)
+            }
         );
-        assert_eq!(super::parse_smtp_path("<> SIZE=2048"), "");
         assert_eq!(
-            super::parse_smtp_path("sender@example.test SIZE=2048"),
-            "sender@example.test"
+            super::parse_smtp_path("<> SIZE=2048", SmtpPathKind::MailFrom, 4096).unwrap(),
+            ParsedSmtpPath {
+                address: String::new(),
+                declared_size: Some(2048)
+            }
+        );
+        assert_eq!(
+            super::parse_smtp_path(
+                "sender@example.test SIZE=2048",
+                SmtpPathKind::MailFrom,
+                4096
+            )
+            .unwrap_err(),
+            SmtpPathError::MalformedPath
+        );
+        assert_eq!(
+            super::parse_smtp_path(
+                "<sender@example.test> BODY=8BITMIME",
+                SmtpPathKind::MailFrom,
+                4096
+            )
+            .unwrap_err(),
+            SmtpPathError::UnsupportedParameter("BODY".to_string())
+        );
+        assert_eq!(
+            super::parse_smtp_path("<bad", SmtpPathKind::RcptTo, 4096).unwrap_err(),
+            SmtpPathError::MalformedPath
+        );
+        assert_eq!(
+            super::parse_smtp_path("<bad>", SmtpPathKind::RcptTo, 4096).unwrap_err(),
+            SmtpPathError::InvalidAddress
+        );
+        assert_eq!(
+            super::parse_smtp_path(
+                "<sender@example.test> SIZE=999999999999",
+                SmtpPathKind::MailFrom,
+                4096
+            )
+            .unwrap_err(),
+            SmtpPathError::SizeTooLarge
+        );
+    }
+
+    #[tokio::test]
+    async fn smtp_mail_from_rejects_malformed_paths_unsupported_params_and_size_overflow() {
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(tokio::io::empty());
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let dashboard_store = runtime_store_with_accepted_domains(&[("l-p-e.ch", true)]);
+        let spool = temp_dir("mail-from-hardening");
+        let peer = "127.0.0.1:25".parse().unwrap();
+
+        for command in [
+            "MAIL FROM:probe@example.net",
+            "MAIL FROM:<bad",
+            "MAIL FROM:<sender@example.test> BODY=8BITMIME",
+            "MAIL FROM:<sender@example.test> SMTPUTF8",
+            "MAIL FROM:<sender@example.test> SIZE=999999999999",
+            "MAIL FROM:<sender@example.test> SIZE=1024",
+        ] {
+            handle_smtp_command(
+                &client,
+                &mut reader,
+                &mut writer,
+                &dashboard_store,
+                &spool,
+                peer,
+                &mut transaction,
+                command,
+                false,
+            )
+            .await
+            .unwrap();
+        }
+
+        let transcript = String::from_utf8(writer).unwrap();
+        assert!(transcript.contains("501 malformed MAIL FROM path\r\n"));
+        assert!(transcript.contains("555 MAIL FROM parameter not supported (BODY)\r\n"));
+        assert!(transcript.contains("555 MAIL FROM parameter not supported (SMTPUTF8)\r\n"));
+        assert!(transcript.contains("552 message size exceeds configured maximum\r\n"));
+        assert!(transcript.ends_with("250 sender accepted\r\n"));
+        assert_eq!(transaction.mail_from, "sender@example.test");
+    }
+
+    #[tokio::test]
+    async fn smtp_rcpt_to_rejects_malformed_paths_and_unsupported_params() {
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(tokio::io::empty());
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let dashboard_store = runtime_store_with_accepted_domains(&[("l-p-e.ch", true)]);
+        let spool = temp_dir("rcpt-to-hardening");
+        let peer = "127.0.0.1:25".parse().unwrap();
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "MAIL FROM:<sender@example.test>",
+            false,
+        )
+        .await
+        .unwrap();
+        for command in [
+            "RCPT TO:postmaster@l-p-e.ch",
+            "RCPT TO:<postmaster@l-p-e.ch> NOTIFY=SUCCESS",
+            "RCPT TO:<postmaster@l-p-e.ch> ORCPT=rfc822;probe@example.net",
+            "RCPT TO:<bad@l-p-e.ch",
+            "RCPT TO:<postmaster@l-p-e.ch>",
+        ] {
+            handle_smtp_command(
+                &client,
+                &mut reader,
+                &mut writer,
+                &dashboard_store,
+                &spool,
+                peer,
+                &mut transaction,
+                command,
+                false,
+            )
+            .await
+            .unwrap();
+        }
+
+        let transcript = String::from_utf8(writer).unwrap();
+        assert!(transcript.contains("501 malformed RCPT TO path\r\n"));
+        assert!(transcript.contains("555 RCPT TO parameter not supported (NOTIFY)\r\n"));
+        assert!(transcript.contains("555 RCPT TO parameter not supported (ORCPT)\r\n"));
+        assert!(transcript.ends_with("250 recipient accepted\r\n"));
+        assert_eq!(transaction.rcpt_to, vec!["postmaster@l-p-e.ch".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn smtp_rcpt_to_enforces_transaction_recipient_limit() {
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(tokio::io::empty());
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let dashboard_store = runtime_store_with_accepted_domains(&[("l-p-e.ch", true)]);
+        let spool = temp_dir("rcpt-limit");
+        let peer = "127.0.0.1:25".parse().unwrap();
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "MAIL FROM:<sender@example.test>",
+            false,
+        )
+        .await
+        .unwrap();
+        for index in 0..=MAX_SMTP_RCPT_PER_TRANSACTION {
+            handle_smtp_command(
+                &client,
+                &mut reader,
+                &mut writer,
+                &dashboard_store,
+                &spool,
+                peer,
+                &mut transaction,
+                &format!("RCPT TO:<user{index}@l-p-e.ch>"),
+                false,
+            )
+            .await
+            .unwrap();
+        }
+
+        let transcript = String::from_utf8(writer).unwrap();
+        assert_eq!(
+            transcript.matches("250 recipient accepted").count(),
+            MAX_SMTP_RCPT_PER_TRANSACTION
+        );
+        assert!(transcript.ends_with("452 too many recipients\r\n"));
+        assert_eq!(transaction.rcpt_to.len(), MAX_SMTP_RCPT_PER_TRANSACTION);
+    }
+
+    #[tokio::test]
+    async fn smtp_long_command_line_returns_line_length_error() {
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(tokio::io::empty());
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let dashboard_store = runtime_store_with_accepted_domains(&[("l-p-e.ch", true)]);
+        let spool = temp_dir("long-command");
+        let command = format!("NOOP {}", "A".repeat(MAX_SMTP_COMMAND_LINE_LEN));
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            "127.0.0.1:25".parse().unwrap(),
+            &mut transaction,
+            &command,
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(writer).unwrap(),
+            "500 command line too long\r\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn smtp_command_sequence_requires_mail_and_recipient_before_data() {
+        let client = reqwest::Client::new();
+        let mut reader = BufReader::new(tokio::io::empty());
+        let mut writer = Vec::new();
+        let mut transaction = SmtpTransaction::default();
+        let dashboard_store = runtime_store_with_accepted_domains(&[("l-p-e.ch", true)]);
+        let spool = temp_dir("command-sequence");
+        let peer = "127.0.0.1:25".parse().unwrap();
+
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "DATA",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "RCPT TO:<test@l-p-e.ch>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "MAIL FROM:<sender@example.test>",
+            false,
+        )
+        .await
+        .unwrap();
+        handle_smtp_command(
+            &client,
+            &mut reader,
+            &mut writer,
+            &dashboard_store,
+            &spool,
+            peer,
+            &mut transaction,
+            "DATA",
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            String::from_utf8(writer).unwrap(),
+            concat!(
+                "503 sender and recipient required\r\n",
+                "503 send MAIL FROM first\r\n",
+                "250 sender accepted\r\n",
+                "503 sender and recipient required\r\n"
+            )
         );
     }
 
@@ -6750,7 +7206,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         assert_eq!(line, "250-LPE-CT\r\n");
         line.clear();
         reader.read_line(&mut line).await.unwrap();
-        assert_eq!(line, "250 SIZE\r\n");
+        assert_eq!(line, "250 SIZE 67108864\r\n");
 
         writer
             .write_all(b"MAIL FROM:<smtp-test@l-p-e.ch>\r\n")
@@ -7184,7 +7640,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
 
         assert_eq!(
             String::from_utf8(writer).unwrap(),
-            "250-LPE-CT\r\n250-STARTTLS\r\n250 SIZE\r\n"
+            "250-LPE-CT\r\n250-STARTTLS\r\n250 SIZE 67108864\r\n"
         );
     }
 
@@ -7212,7 +7668,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
 
         assert_eq!(
             String::from_utf8(writer).unwrap(),
-            "250-LPE-CT\r\n250 SIZE\r\n"
+            "250-LPE-CT\r\n250 SIZE 67108864\r\n"
         );
     }
 
@@ -7280,7 +7736,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
 
         assert_eq!(
             String::from_utf8(writer).unwrap(),
-            "250-LPE-CT\r\n250 SIZE\r\n"
+            "250-LPE-CT\r\n250 SIZE 67108864\r\n"
         );
     }
 
@@ -7346,7 +7802,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             .await
             .unwrap();
         let ehlo = read_test_smtp_reply(&mut reader).await;
-        assert_eq!(ehlo, "250-LPE-CT\r\n250-STARTTLS\r\n250 SIZE\r\n");
+        assert_eq!(ehlo, "250-LPE-CT\r\n250-STARTTLS\r\n250 SIZE 67108864\r\n");
 
         reader.get_mut().write_all(b"STARTTLS\r\n").await.unwrap();
         assert_eq!(
@@ -7387,7 +7843,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             .unwrap();
         assert_eq!(
             read_test_smtp_reply(&mut tls_reader).await,
-            "250-LPE-CT\r\n250 SIZE\r\n"
+            "250-LPE-CT\r\n250 SIZE 67108864\r\n"
         );
         tls_reader
             .get_mut()

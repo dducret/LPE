@@ -202,6 +202,8 @@ Additional command-style providers can be chained after `takeri` with:
 
 - default: `false`
 - when enabled, inbound `SMTP` recipient acceptance is checked against an internal `LPE` verification API and cached locally
+- when disabled, `LPE-CT` intentionally uses deferred local-part validation for verified accepted domains: any syntactically valid recipient at a verified accepted domain is accepted at `RCPT TO`, and final mailbox existence is left to the private `LPE` final-delivery bridge
+- if no accepted domains are configured and verified, inbound `RCPT TO` is rejected so the edge cannot become an open relay
 
 `LPE_CT_RECIPIENT_VERIFICATION_FAIL_CLOSED`
 
@@ -424,6 +426,15 @@ Retention is explicit and bounded:
 Those retention rules apply only to sorting-center-owned technical evidence and reporting artifacts. They do not change queue custody or make the private database canonical.
 
 ## SMTP outcomes
+
+SMTP envelope parsing is strict for the currently implemented ESMTP surface:
+
+- command lines longer than the SMTP command limit return `500 command line too long`
+- `MAIL FROM` and `RCPT TO` require bracketed reverse-path or forward-path syntax such as `MAIL FROM:<sender@example.test>`
+- malformed envelope paths return `501`
+- unsupported `MAIL FROM` or `RCPT TO` parameters return `555`
+- only the `MAIL FROM` `SIZE=` parameter is implemented; values larger than `LPE_CT_MAX_MESSAGE_SIZE_MB` return `552`
+- each transaction accepts at most 25 recipients before returning `452 too many recipients`
 
 Typical inbound outcomes are:
 
