@@ -62,6 +62,7 @@ static SMTP_ACTIVE_SESSIONS: AtomicU32 = AtomicU32::new(0);
 pub(crate) struct RuntimeConfig {
     pub(crate) primary_upstream: String,
     pub(crate) secondary_upstream: String,
+    pub(crate) outbound_ehlo_name: String,
     pub(crate) core_delivery_base_url: String,
     pub(crate) mutual_tls_required: bool,
     pub(crate) fallback_to_hold_queue: bool,
@@ -841,6 +842,7 @@ pub(crate) fn runtime_config_from_dashboard(dashboard: &super::DashboardState) -
     RuntimeConfig {
         primary_upstream: dashboard.relay.primary_upstream.clone(),
         secondary_upstream: dashboard.relay.secondary_upstream.clone(),
+        outbound_ehlo_name: sanitize_outbound_ehlo_name(&dashboard.relay.outbound_ehlo_name),
         core_delivery_base_url: dashboard.relay.core_delivery_base_url.clone(),
         mutual_tls_required: dashboard.relay.mutual_tls_required,
         fallback_to_hold_queue: dashboard.relay.fallback_to_hold_queue,
@@ -4182,12 +4184,21 @@ async fn relay_message(
     }
 
     if targets.is_empty() {
-        return relay_message_direct_mx(message, route, attempt_count).await;
+        return relay_message_direct_mx(message, route, attempt_count, &config.outbound_ehlo_name)
+            .await;
     }
 
     let mut last_error = None;
     for target in targets {
-        match relay_message_to_target(&target, message, route, attempt_count).await {
+        match relay_message_to_target(
+            &target,
+            message,
+            route,
+            attempt_count,
+            &config.outbound_ehlo_name,
+        )
+        .await
+        {
             Ok(execution) => return execution,
             Err(error) => last_error = Some((target, error)),
         }
@@ -4259,6 +4270,7 @@ async fn relay_message_direct_mx(
     message: &QueuedMessage,
     route: &TransportRouteDecision,
     attempt_count: u32,
+    ehlo_name: &str,
 ) -> OutboundExecution {
     let resolver = match SystemDnsResolver::new() {
         Ok(resolver) => resolver,
@@ -4315,6 +4327,7 @@ async fn relay_message_direct_mx(
                 route,
                 attempt_count,
                 &recipients,
+                ehlo_name,
             )
             .await
             {
@@ -4456,14 +4469,46 @@ fn is_permanent_direct_mx_error(detail: &str) -> bool {
         || lower.contains("no outbound recipients")
 }
 
+fn sanitize_outbound_ehlo_name(value: &str) -> String {
+    let normalized = value.trim().trim_end_matches('.').to_ascii_lowercase();
+    if is_valid_ehlo_hostname(&normalized) {
+        normalized
+    } else {
+        "lpe-ct.local".to_string()
+    }
+}
+
+fn is_valid_ehlo_hostname(value: &str) -> bool {
+    if value.is_empty() || value.len() > 253 || !value.contains('.') {
+        return false;
+    }
+    value.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+    })
+}
+
 async fn relay_message_to_target(
     target: &str,
     message: &QueuedMessage,
     route: &TransportRouteDecision,
     attempt_count: u32,
+    ehlo_name: &str,
 ) -> Result<OutboundExecution> {
-    relay_message_to_target_for_recipients(target, message, route, attempt_count, &message.rcpt_to)
-        .await
+    relay_message_to_target_for_recipients(
+        target,
+        message,
+        route,
+        attempt_count,
+        &message.rcpt_to,
+        ehlo_name,
+    )
+    .await
 }
 
 async fn relay_message_to_target_for_recipients(
@@ -4472,6 +4517,7 @@ async fn relay_message_to_target_for_recipients(
     route: &TransportRouteDecision,
     attempt_count: u32,
     recipients: &[String],
+    ehlo_name: &str,
 ) -> Result<OutboundExecution> {
     let address = normalize_smtp_target(target);
     let stream = TcpStream::connect(&address)
@@ -4481,7 +4527,13 @@ async fn relay_message_to_target_for_recipients(
     let mut reader = BufReader::new(reader);
 
     expect_smtp(&mut reader, 220).await?;
-    smtp_command(&mut reader, &mut writer, "EHLO lpe-ct", 250).await?;
+    smtp_command(
+        &mut reader,
+        &mut writer,
+        &format!("EHLO {}", sanitize_outbound_ehlo_name(ehlo_name)),
+        250,
+    )
+    .await?;
     smtp_command(
         &mut reader,
         &mut writer,
@@ -6351,6 +6403,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         RuntimeConfig {
             primary_upstream,
             secondary_upstream: String::new(),
+            outbound_ehlo_name: "mx.lpe.example".to_string(),
             core_delivery_base_url,
             mutual_tls_required: false,
             fallback_to_hold_queue: false,
@@ -7389,7 +7442,13 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         let spool = temp_dir("outbound-relay");
         initialize_spool(&spool).unwrap();
         let captured = Arc::new(Mutex::new(String::new()));
-        let smtp_address = spawn_dummy_smtp(captured.clone()).await;
+        let captured_commands = Arc::new(Mutex::new(Vec::<String>::new()));
+        let smtp_address = spawn_dummy_smtp_with_profile(DummySmtpProfile {
+            captured: Some(captured.clone()),
+            captured_commands: Some(captured_commands.clone()),
+            ..DummySmtpProfile::default()
+        })
+        .await;
 
         let response = process_outbound_handoff(
             &spool,
@@ -7450,6 +7509,14 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         assert!(raw.contains("Subject: Relay test"));
         assert!(raw.contains("Content-Type: text/plain; charset=utf-8"));
         assert!(raw.contains("Content-Transfer-Encoding: quoted-printable"));
+        assert_eq!(
+            captured_commands
+                .lock()
+                .unwrap()
+                .first()
+                .map(String::as_str),
+            Some("EHLO mx.lpe.example")
+        );
     }
 
     #[tokio::test]
@@ -8575,6 +8642,7 @@ pzqAuzRp69VoxDpO6hdx/Qc=
     #[derive(Clone, Default)]
     struct DummySmtpProfile {
         captured: Option<Arc<Mutex<String>>>,
+        captured_commands: Option<Arc<Mutex<Vec<String>>>>,
         rcpt_reply: String,
         final_reply: String,
     }
@@ -8601,6 +8669,9 @@ pzqAuzRp69VoxDpO6hdx/Qc=
                 break;
             }
             let trimmed = line.trim_end().to_string();
+            if let Some(captured_commands) = &profile.captured_commands {
+                captured_commands.lock().unwrap().push(trimmed.clone());
+            }
             if trimmed == "DATA" {
                 writer.write_all(b"354 data\r\n").await.unwrap();
                 let mut data = String::new();

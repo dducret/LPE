@@ -82,6 +82,8 @@ struct SiteProfile {
 struct RelaySettings {
     primary_upstream: String,
     secondary_upstream: String,
+    #[serde(default)]
+    outbound_ehlo_name: String,
     #[serde(default = "default_core_delivery_base_url")]
     core_delivery_base_url: String,
     mutual_tls_required: bool,
@@ -568,6 +570,8 @@ async fn main() -> Result<()> {
     normalize_public_tls_settings(&mut dashboard.network.public_tls);
     normalize_local_data_stores(&mut dashboard.local_data_stores);
     reporting::normalize_reporting_settings(&mut dashboard.reporting);
+    let site_profile = dashboard.site.clone();
+    normalize_relay_settings(&mut dashboard.relay, &site_profile);
     let runtime = smtp::runtime_config_from_dashboard(&dashboard);
     if let Err(error) = smtp::prepare_local_store(&spool_dir, &runtime).await {
         if dashboard.local_data_stores.dedicated_postgres.enabled {
@@ -1497,9 +1501,10 @@ async fn update_site(
 async fn update_relay(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(payload): Json<RelaySettings>,
+    Json(mut payload): Json<RelaySettings>,
 ) -> Result<Json<DashboardState>, ApiError> {
     let admin = require_management_admin(&state, &headers)?;
+    validate_relay_settings(&mut payload)?;
     mutate_state(&state, &admin.email, "update-relay", move |dashboard| {
         dashboard.relay = payload;
     })
@@ -2642,6 +2647,28 @@ fn normalize_policy_settings(policies: &mut PolicySettings) {
     });
 }
 
+fn validate_relay_settings(settings: &mut RelaySettings) -> Result<(), ApiError> {
+    settings.outbound_ehlo_name = normalize_outbound_ehlo_name(&settings.outbound_ehlo_name);
+    if !is_valid_domain_name(&settings.outbound_ehlo_name) {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "outbound EHLO name must be a fully-qualified hostname such as mx.example.com",
+        ));
+    }
+    settings.primary_upstream = settings.primary_upstream.trim().to_string();
+    settings.secondary_upstream = settings.secondary_upstream.trim().to_string();
+    settings.core_delivery_base_url = settings.core_delivery_base_url.trim().to_string();
+    settings.sync_interval_seconds = settings.sync_interval_seconds.max(1);
+    Ok(())
+}
+
+fn normalize_relay_settings(settings: &mut RelaySettings, site: &SiteProfile) {
+    if validate_relay_settings(settings).is_err() {
+        settings.outbound_ehlo_name = default_outbound_ehlo_name_for_site(site);
+        let _ = validate_relay_settings(settings);
+    }
+}
+
 fn accepted_domain_from_input(
     input: AcceptedDomainInput,
     existing_id: Option<String>,
@@ -2693,6 +2720,10 @@ fn normalize_accepted_domains(domains: &mut Vec<AcceptedDomain>) {
 
 fn normalize_domain_name(value: &str) -> String {
     value.trim().trim_start_matches('@').to_ascii_lowercase()
+}
+
+fn normalize_outbound_ehlo_name(value: &str) -> String {
+    value.trim().trim_end_matches('.').to_ascii_lowercase()
 }
 
 fn is_valid_domain_name(value: &str) -> bool {
@@ -3059,6 +3090,7 @@ fn default_state() -> DashboardState {
         relay: RelaySettings {
             primary_upstream: String::new(),
             secondary_upstream: String::new(),
+            outbound_ehlo_name: default_outbound_ehlo_name(),
             core_delivery_base_url: default_core_delivery_base_url(),
             mutual_tls_required: false,
             fallback_to_hold_queue: false,
@@ -3184,6 +3216,27 @@ fn default_state() -> DashboardState {
 fn default_core_delivery_base_url() -> String {
     env_value("LPE_CT_CORE_DELIVERY_BASE_URL")
         .unwrap_or_else(|| "http://127.0.0.1:8080".to_string())
+}
+
+fn default_outbound_ehlo_name() -> String {
+    [
+        "LPE_CT_PUBLISHED_MX",
+        "LPE_CT_MANAGEMENT_FQDN",
+        "LPE_CT_SERVER_NAME",
+    ]
+    .into_iter()
+    .filter_map(env_value)
+    .map(|value| normalize_outbound_ehlo_name(&value))
+    .find(|value| is_valid_domain_name(value))
+    .unwrap_or_else(|| "lpe-ct.local".to_string())
+}
+
+fn default_outbound_ehlo_name_for_site(site: &SiteProfile) -> String {
+    [&site.published_mx, &site.management_fqdn]
+        .into_iter()
+        .map(|value| normalize_outbound_ehlo_name(value))
+        .find(|value| is_valid_domain_name(value))
+        .unwrap_or_else(default_outbound_ehlo_name)
 }
 
 fn default_recipient_verification_cache_ttl_seconds() -> u32 {

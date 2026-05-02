@@ -1,4 +1,4 @@
-import { i18n, getCopy, translate } from './modules/i18n/index.js?v=20260501-health-check-output';
+import { i18n, getCopy, translate } from './modules/i18n/index.js?v=20260502-outbound-ehlo';
 import { DEFAULT_PAGE_ID, activatePageView, pageIdFromHash, renderPageModules } from "./modules/pages/index.js?v=20260501-health-check-output";
 
 // DOM References
@@ -189,6 +189,20 @@ function escapeHtml(value) {
 
 function formatList(values) {
   return (values ?? []).filter(Boolean).join(", ") || getCopy().unset;
+}
+
+function isValidHostname(value) {
+  const normalized = String(value ?? "").trim().replace(/\.$/, "").toLowerCase();
+  if (!normalized || normalized.length > 253 || !normalized.includes(".")) {
+    return false;
+  }
+  return normalized.split(".").every((label) => (
+    label.length > 0
+      && label.length <= 63
+      && /^[a-z0-9-]+$/.test(label)
+      && !label.startsWith("-")
+      && !label.endsWith("-")
+  ));
 }
 
 function parseProviderChain(value) {
@@ -2321,6 +2335,7 @@ function renderMailRelaySetup(activeTab, dashboard, copy) {
       renderSystemSetupSummary([
         { label: copy.relayPrimaryLabel, value: dashboard.relay.primary_upstream },
         { label: copy.relaySecondaryLabel, value: dashboard.relay.secondary_upstream },
+        { label: copy.relayOutboundEhloLabel, value: dashboard.relay.outbound_ehlo_name },
         { label: copy.relaySyncLabel, value: formatNumber(dashboard.relay.sync_interval_seconds) },
       ]),
       editRelay,
@@ -2991,6 +3006,11 @@ function renderOverview() {
       label: copy.relayHealthSecondary,
       value: relay.secondary_upstream ? copy.enabled : copy.unset,
       detail: relay.secondary_upstream || copy.unset,
+    },
+    {
+      label: copy.relayOutboundEhloLabel,
+      value: relay.outbound_ehlo_name || copy.unset,
+      detail: copy.systemSetupRelayOutbound,
     },
     { label: copy.relayHealthManagement, value: site.management_bind || copy.unset, detail: site.management_fqdn || copy.unset },
     {
@@ -4113,6 +4133,7 @@ function getPlatformDrawerConfigs(dashboard, copy) {
       content: `
         <label><span>${copy.relayPrimaryLabel}</span><input name="primary_upstream" value="${escapeHtml(dashboard.relay.primary_upstream)}" /></label>
         <label><span>${copy.relaySecondaryLabel}</span><input name="secondary_upstream" value="${escapeHtml(dashboard.relay.secondary_upstream)}" /></label>
+        <label><span>${copy.relayOutboundEhloLabel}</span><input name="outbound_ehlo_name" required placeholder="mx.example.com" value="${escapeHtml(dashboard.relay.outbound_ehlo_name)}" /></label>
         <label><span>${copy.relayCoreDeliveryLabel}</span><input name="core_delivery_base_url" value="${escapeHtml(dashboard.relay.core_delivery_base_url)}" /></label>
         <label class="toggle-field"><span>${copy.relayMutualTlsLabel}</span><input name="mutual_tls_required" type="checkbox"${dashboard.relay.mutual_tls_required ? " checked" : ""} /></label>
         <label class="toggle-field"><span>${copy.relayFallbackLabel}</span><input name="fallback_to_hold_queue" type="checkbox"${dashboard.relay.fallback_to_hold_queue ? " checked" : ""} /></label>
@@ -4122,6 +4143,7 @@ function getPlatformDrawerConfigs(dashboard, copy) {
       payload: (form) => ({
         primary_upstream: form.elements.namedItem("primary_upstream").value.trim(),
         secondary_upstream: form.elements.namedItem("secondary_upstream").value.trim(),
+        outbound_ehlo_name: form.elements.namedItem("outbound_ehlo_name").value.trim(),
         core_delivery_base_url: form.elements.namedItem("core_delivery_base_url").value,
         mutual_tls_required: form.elements.namedItem("mutual_tls_required").checked,
         fallback_to_hold_queue: form.elements.namedItem("fallback_to_hold_queue").checked,
@@ -4129,8 +4151,16 @@ function getPlatformDrawerConfigs(dashboard, copy) {
         lan_dependency_note: form.elements.namedItem("lan_dependency_note").value,
       }),
       validate: (form) => {
-        const value = Number(form.elements.namedItem("sync_interval_seconds").value);
-        return !Number.isInteger(value) || value < 1 ? [{ field: "sync_interval_seconds", message: copy.validationPositiveInteger }] : [];
+        const errors = [];
+        const syncInterval = Number(form.elements.namedItem("sync_interval_seconds").value);
+        if (!Number.isInteger(syncInterval) || syncInterval < 1) {
+          errors.push({ field: "sync_interval_seconds", message: copy.validationPositiveInteger });
+        }
+        const ehloName = form.elements.namedItem("outbound_ehlo_name").value.trim();
+        if (!isValidHostname(ehloName)) {
+          errors.push({ field: "outbound_ehlo_name", message: copy.validationFqdn });
+        }
+        return errors;
       },
     },
     network: {

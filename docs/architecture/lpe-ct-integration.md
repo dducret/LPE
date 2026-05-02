@@ -200,6 +200,11 @@ General Settings` and persisted in the private `LPE-CT` PostgreSQL dashboard
 state. The default mode has no upstream gateway because `LPE-CT` is the
 outbound gateway and uses recipient-domain `MX` routing.
 
+The outbound `EHLO` / `HELO` hostname is also managed in the same `LPE-CT` Web
+GUI relay settings. It must be a fully-qualified hostname, normally the
+published `MX` name for the sorting-center node, because external MTAs may
+reject short names such as `lpe-ct`.
+
 `LPE_CT_PUBLIC_TLS_CERT_PATH` and `LPE_CT_PUBLIC_TLS_KEY_PATH` are accepted as
 an installation bootstrap path for the public inbound `SMTP` `STARTTLS`
 identity. Runtime management is through `LPE-CT` `System Setup -> Mail relay ->
