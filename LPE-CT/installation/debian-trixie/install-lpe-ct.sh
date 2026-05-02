@@ -17,6 +17,7 @@ ENV_FILE="${ENV_FILE:-$ENV_DIR/lpe-ct.env}"
 INSTALL_ENV_FILE="${INSTALL_ENV_FILE:-$ENV_DIR/install.env}"
 STATE_DIR="${STATE_DIR:-/var/lib/lpe-ct}"
 SPOOL_DIR="${SPOOL_DIR:-/var/spool/lpe-ct}"
+LOG_DIR="${LOG_DIR:-/var/log/lpe-ct}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 SERVICE_USER="${SERVICE_USER:-lpe-ct}"
 SERVICE_GROUP="${SERVICE_GROUP:-lpe-ct}"
@@ -186,6 +187,7 @@ write_install_layout_file() {
   write_env_value "${INSTALL_ENV_FILE}" "INSTALL_ENV_FILE" "${INSTALL_ENV_FILE}"
   write_env_value "${INSTALL_ENV_FILE}" "STATE_DIR" "${STATE_DIR}"
   write_env_value "${INSTALL_ENV_FILE}" "SPOOL_DIR" "${SPOOL_DIR}"
+  write_env_value "${INSTALL_ENV_FILE}" "LOG_DIR" "${LOG_DIR}"
   write_env_value "${INSTALL_ENV_FILE}" "SYSTEMD_DIR" "${SYSTEMD_DIR}"
   write_env_value "${INSTALL_ENV_FILE}" "SERVICE_USER" "${SERVICE_USER}"
   write_env_value "${INSTALL_ENV_FILE}" "SERVICE_GROUP" "${SERVICE_GROUP}"
@@ -219,6 +221,9 @@ write_runtime_env_file() {
   write_env_value "${ENV_FILE}" "LPE_CT_SUBMISSION_TLS_KEY_PATH" "${LPE_CT_PUBLIC_TLS_KEY_PATH}"
   write_env_value "${ENV_FILE}" "LPE_CT_STATE_FILE" "${STATE_DIR}/state.json"
   write_env_value "${ENV_FILE}" "LPE_CT_SPOOL_DIR" "${SPOOL_DIR}"
+  write_env_value "${ENV_FILE}" "LPE_CT_HOST_LOG_DIR" "${LOG_DIR}"
+  write_env_value "${ENV_FILE}" "LPE_CT_POSTFIX_MAIL_LOG_ENABLED" "true"
+  write_env_value "${ENV_FILE}" "LPE_CT_MAIL_LOG_PATH" "${LOG_DIR}/mail.log"
   write_env_value "${ENV_FILE}" "LPE_CT_LOCAL_DB_ENABLED" "${LPE_CT_LOCAL_DB_ENABLED}"
   write_env_value "${ENV_FILE}" "LPE_CT_LOCAL_DB_HOST" "${LPE_CT_LOCAL_DB_HOST}"
   write_env_value "${ENV_FILE}" "LPE_CT_LOCAL_DB_PORT" "${LPE_CT_LOCAL_DB_PORT}"
@@ -305,7 +310,7 @@ ensure_service_user() {
 }
 
 prepare_directories() {
-  install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${INSTALL_ROOT}" "${SRC_DIR}" "${BIN_DIR}" "${VENDOR_DIR}" "${STATE_DIR}" "${SPOOL_DIR}"
+  install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" "${INSTALL_ROOT}" "${SRC_DIR}" "${BIN_DIR}" "${VENDOR_DIR}" "${STATE_DIR}" "${SPOOL_DIR}" "${LOG_DIR}"
   install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" \
     "${SPOOL_DIR}/incoming" \
     "${SPOOL_DIR}/outbound" \
@@ -396,7 +401,8 @@ render_service_files() {
     "LPE_CT_BIN_DIR=${BIN_DIR}" \
     "LPE_CT_INSTALL_ROOT=${INSTALL_ROOT}" \
     "LPE_CT_STATE_DIR=${STATE_DIR}" \
-    "LPE_CT_SPOOL_DIR=${SPOOL_DIR}"
+    "LPE_CT_SPOOL_DIR=${SPOOL_DIR}" \
+    "LPE_CT_LOG_DIR=${LOG_DIR}"
 
   render_template \
     "${SCRIPT_DIR}/lpe-ct.nginx.conf" \
@@ -415,7 +421,7 @@ activate_services() {
   rm -f "${NGINX_ENABLED_DIR}/default"
   nginx -t
 
-  chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${STATE_DIR}" "${SPOOL_DIR}" "${VENDOR_DIR}"
+  chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${STATE_DIR}" "${SPOOL_DIR}" "${LOG_DIR}" "${VENDOR_DIR}"
   systemctl daemon-reload
 
   if [[ "${LPE_CT_ENABLE_SERVICES}" == "yes" ]]; then

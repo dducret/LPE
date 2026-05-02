@@ -27,7 +27,30 @@ When the optional local PostgreSQL store is enabled, quarantined messages are al
 
 `LPE-CT` now also retains perimeter mail-flow history in `policy/transport-audit.jsonl` and mirrors that retained stream into a dedicated private `mail_flow_history` database index for management-side history search, quarantine inspection, and retained reporting artifacts without creating a canonical mailbox search index.
 
+For fast live troubleshooting, Debian deployments also enable a Postfix-style
+operator log at `/var/log/lpe-ct/mail.log` through `LPE_CT_MAIL_LOG_PATH`.
+Those lines are derived from the same transport audit events and include
+`trace_id`, queue, status, sender, recipients, peer, `Message-Id`, size, relay,
+`DSN`, reason, reply, and subject. Use this file for quick `tail -f` diagnosis;
+use `transport-audit.jsonl` or the local `mail_flow_history` index for complete
+retained evidence.
+
 ## Main environment variables
+
+`LPE_CT_POSTFIX_MAIL_LOG_ENABLED`
+
+- default: `true` in the Debian example environment
+- writes a human-readable Postfix-style diagnostic line for each retained transport audit event
+
+`LPE_CT_MAIL_LOG_PATH`
+
+- default: `/var/log/lpe-ct/mail.log` in Debian installs
+- file path used by the Postfix-style diagnostic stream
+
+`LPE_CT_HOST_LOG_DIR`
+
+- default: `/var/log/lpe-ct` in Debian installs
+- host-log browser directory for `mail.log` and rotated `mail.log.*` files
 
 `LPE_CT_GREYLISTING_ENABLED`
 

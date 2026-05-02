@@ -4914,10 +4914,126 @@ async fn append_transport_audit(
         .open(path)?;
     use std::io::Write;
     file.write_all(line.as_bytes())?;
+    if let Err(error) = append_postfix_style_mail_log(&event) {
+        warn!(
+            trace_id = %event.trace_id,
+            error = %error,
+            "unable to append postfix-style mail log"
+        );
+    }
     if let Some(pool) = ensure_local_db_schema(config).await? {
         persist_transport_audit_db_event(pool, &event).await?;
     }
     Ok(())
+}
+
+fn append_postfix_style_mail_log(event: &TransportAuditEvent) -> Result<()> {
+    let Some(path) = postfix_style_mail_log_path() else {
+        return Ok(());
+    };
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    use std::io::Write;
+    file.write_all(postfix_style_mail_log_line(event).as_bytes())?;
+    file.write_all(b"\n")?;
+    Ok(())
+}
+
+fn postfix_style_mail_log_path() -> Option<PathBuf> {
+    let enabled = env::var("LPE_CT_POSTFIX_MAIL_LOG_ENABLED")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        })
+        .unwrap_or(false);
+    if !enabled {
+        return None;
+    }
+
+    env::var("LPE_CT_MAIL_LOG_PATH")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var("LPE_CT_HOST_LOG_DIR")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .map(|dir| PathBuf::from(dir).join("mail.log"))
+        })
+}
+
+fn postfix_style_mail_log_line(event: &TransportAuditEvent) -> String {
+    let pid = std::process::id();
+    let host = env::var("LPE_CT_SERVER_NAME")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "lpe-ct".to_string());
+    let recipients = event
+        .rcpt_to
+        .iter()
+        .map(|recipient| sanitize_mail_log_value(recipient))
+        .collect::<Vec<_>>()
+        .join(",");
+    let dsn_status = event
+        .dsn
+        .as_ref()
+        .and_then(|value| value.get("status"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let technical_detail = event
+        .technical_status
+        .as_ref()
+        .and_then(|value| value.get("detail"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+
+    format!(
+        "{} {} lpe-ct/smtp[{}]: {}: direction={}, queue={}, status={}, from=<{}>, to=<{}>, peer={}, message-id=<{}>, size={}, relay={}, dsn={}, reason=\"{}\", reply=\"{}\", subject=\"{}\"",
+        event.timestamp,
+        sanitize_mail_log_value(&host),
+        pid,
+        sanitize_mail_log_value(&event.trace_id),
+        sanitize_mail_log_value(&event.direction),
+        sanitize_mail_log_value(&event.queue),
+        sanitize_mail_log_value(&event.status),
+        sanitize_mail_log_value(&event.mail_from),
+        recipients,
+        sanitize_mail_log_value(&event.peer),
+        sanitize_mail_log_value(event.internet_message_id.as_deref().unwrap_or("")),
+        event.message_size_bytes.unwrap_or(0),
+        sanitize_mail_log_value(event.route_target.as_deref().unwrap_or("")),
+        sanitize_mail_log_value(dsn_status),
+        sanitize_mail_log_value(event.reason.as_deref().unwrap_or("")),
+        sanitize_mail_log_value(technical_detail),
+        sanitize_mail_log_value(&event.subject),
+    )
+}
+
+fn sanitize_mail_log_value(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_control() || matches!(ch, '"' | '\r' | '\n') {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 async fn persist_transport_audit_db_event(
@@ -6058,15 +6174,16 @@ mod tests {
         evaluate_greylisting, finalize_policy_decision, handle_smtp_command, handle_smtp_session,
         initialize_spool, load_antivirus_providers, load_bayespam_corpus, load_reputation_score,
         load_trace_details, parse_antivirus_output, parse_peer_ip, persist_message,
-        process_outbound_handoff, receive_message, receive_message_with_validator, release_trace,
-        resolve_outbound_route, retry_after_seconds, retry_trace, score_bayespam,
-        smtp_starttls_acceptor_for_paths, spf_disposition, stable_key_id, summarize_dkim,
-        summarize_dmarc, summarize_spf, train_bayespam, unix_now, update_reputation, write_smtp,
-        AcceptedDomainConfig, AntivirusProviderConfig, AntivirusProviderDecision, AuthSummary,
-        AuthenticationAssessment, BayesLabel, DecisionTraceEntry, DkimDisposition, FilterAction,
-        GreylistEntry, OutboundRoutingRule, OutboundThrottleRule, QueuedMessage, RuntimeConfig,
-        SmtpCommandOutcome, SmtpTransaction, SpfDisposition, TransportDsnReport,
-        TransportRouteDecision, TransportTechnicalStatus, TransportThrottleStatus,
+        postfix_style_mail_log_line, process_outbound_handoff, receive_message,
+        receive_message_with_validator, release_trace, resolve_outbound_route, retry_after_seconds,
+        retry_trace, score_bayespam, smtp_starttls_acceptor_for_paths, spf_disposition,
+        stable_key_id, summarize_dkim, summarize_dmarc, summarize_spf, train_bayespam, unix_now,
+        update_reputation, write_smtp, AcceptedDomainConfig, AntivirusProviderConfig,
+        AntivirusProviderDecision, AuthSummary, AuthenticationAssessment, BayesLabel,
+        DecisionTraceEntry, DkimDisposition, FilterAction, GreylistEntry, OutboundRoutingRule,
+        OutboundThrottleRule, QueuedMessage, RuntimeConfig, SmtpCommandOutcome, SmtpTransaction,
+        SpfDisposition, TransportAuditEvent, TransportDsnReport, TransportRouteDecision,
+        TransportTechnicalStatus, TransportThrottleStatus,
     };
     use crate::env_test_lock;
     use axum::{routing::post, Json, Router};
@@ -6076,6 +6193,7 @@ mod tests {
         TransportDeliveryStatus, TransportRecipient,
     };
     use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
+    use serde_json::json;
     use std::{
         io::{BufReader as StdIoBufReader, Cursor},
         net::IpAddr,
@@ -6095,6 +6213,51 @@ mod tests {
         TlsConnector,
     };
     use uuid::Uuid;
+
+    #[test]
+    fn postfix_style_mail_log_line_keeps_operator_correlation_fields() {
+        let event = TransportAuditEvent {
+            timestamp: "unix:1700000000".to_string(),
+            trace_id: "trace-123".to_string(),
+            direction: "inbound".to_string(),
+            queue: "sent".to_string(),
+            status: "sent".to_string(),
+            peer: "203.0.113.10:25".to_string(),
+            mail_from: "sender@example.net".to_string(),
+            rcpt_to: vec!["user@example.test".to_string()],
+            subject: "hello\r\nbad".to_string(),
+            internet_message_id: Some("mid@example.net".to_string()),
+            reason: Some("core delivery accepted".to_string()),
+            route_target: Some("mx.example.test".to_string()),
+            remote_message_ref: Some("250 2.0.0 queued".to_string()),
+            spam_score: 0.0,
+            security_score: 0.0,
+            reputation_score: 0,
+            dnsbl_hits: Vec::new(),
+            auth_summary: json!({"spf":"pass"}),
+            magika_summary: None,
+            magika_decision: None,
+            technical_status: Some(json!({"detail":"250 2.0.0 ok"})),
+            dsn: Some(json!({"status":"2.0.0"})),
+            throttle: None,
+            message_size_bytes: Some(42),
+            decision_trace: Vec::new(),
+        };
+
+        let line = postfix_style_mail_log_line(&event);
+
+        assert!(line.contains("lpe-ct/smtp["));
+        assert!(line.contains("trace-123:"));
+        assert!(line.contains("direction=inbound"));
+        assert!(line.contains("status=sent"));
+        assert!(line.contains("from=<sender@example.net>"));
+        assert!(line.contains("to=<user@example.test>"));
+        assert!(line.contains("message-id=<mid@example.net>"));
+        assert!(line.contains("dsn=2.0.0"));
+        assert!(line.contains("subject=\"hello bad\""));
+        assert!(!line.contains('\n'));
+        assert!(!line.contains('\r'));
+    }
 
     const TEST_STARTTLS_CERT: &str = r#"-----BEGIN CERTIFICATE-----
 MIICwzCCAaugAwIBAgIJAJuoO4jMAtuIMA0GCSqGSIb3DQEBCwUAMBQxEjAQBgNV

@@ -65,7 +65,8 @@ These identifiers should be attached to logs and spans as fields, not exploded i
 The `LPE-CT` management console also exposes a narrow host-log browser for
 operator diagnostics. The supported host-log categories are:
 
-- `Mail`: `/var/log/mail.log` and rotated `mail.log.*` files
+- `Mail`: `mail.log` and rotated `mail.log.*` files under the configured
+  `LPE_CT_HOST_LOG_DIR` (`/var/log/lpe-ct` in Debian installs)
 - `Interface`: `CFMA.log`, reserved for the future console/interface logger
 - `Messages`: `/var/log/dmesg` and rotated `dmesg.*` files
 
@@ -75,6 +76,16 @@ must not become a source of canonical mailbox, collaboration, rights, or
 user-visible state. When a current log file is not present yet, the console may
 show an empty virtual row so the intended stream remains visible during early
 deployment.
+
+Debian `LPE-CT` deployments write a Postfix-style diagnostic stream to
+`${LPE_CT_MAIL_LOG_PATH}` when `LPE_CT_POSTFIX_MAIL_LOG_ENABLED=true`; the
+installer defaults that path to `/var/log/lpe-ct/mail.log` and points the host
+log browser at `/var/log/lpe-ct`. This log is derived from the transport audit
+event and is not authoritative state. Each line includes the transport
+`trace_id`, direction, queue, status, envelope sender, recipients, peer,
+`Message-Id`, message size, relay target, `DSN` status, reason, remote reply,
+and subject so operators can tail one file during an outside-send plus reply
+test while still using the structured audit or local DB for complete history.
 
 The `Reporting -> System Information` page in the `LPE-CT` management console
 is the supported v1 host diagnostics surface for the sorting-center node. It
@@ -291,6 +302,15 @@ Alert when:
   Persistent management-state file.
 - `LPE_CT_SPOOL_DIR`
   Root directory for spool queues used by live spool gauges.
+- `LPE_CT_HOST_LOG_DIR`
+  Directory exposed by the host-log browser for whitelisted logs. Debian
+  installs default to `/var/log/lpe-ct`.
+- `LPE_CT_POSTFIX_MAIL_LOG_ENABLED`
+  Enables the human-readable Postfix-style mail log. Defaults to disabled when
+  unset.
+- `LPE_CT_MAIL_LOG_PATH`
+  File path for the Postfix-style mail log. Debian installs default this to
+  `/var/log/lpe-ct/mail.log`.
 - `LPE_CT_CORE_DELIVERY_BASE_URL`
   Base URL used for final inbound delivery toward `LPE`.
 - `LPE_INTEGRATION_SHARED_SECRET`

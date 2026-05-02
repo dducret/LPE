@@ -29,7 +29,7 @@ LockPersonality=true
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-ReadWritePaths=__LPE_CT_INSTALL_ROOT__ __LPE_CT_STATE_DIR__ __LPE_CT_SPOOL_DIR__
+ReadWritePaths=__LPE_CT_INSTALL_ROOT__ __LPE_CT_STATE_DIR__ __LPE_CT_SPOOL_DIR__ __LPE_CT_LOG_DIR__
 
 [Install]
 WantedBy=multi-user.target
