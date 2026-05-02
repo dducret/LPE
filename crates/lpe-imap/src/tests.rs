@@ -773,6 +773,28 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     let drafts = send_command(&mut stream, "A18 UID SEARCH TEXT Draft\r\n", "A18").await;
     assert!(drafts.contains("* SEARCH 5"));
 
+    let sent_literal = concat!(
+        "From: Alice <alice@example.test>\r\n",
+        "To: Bob <bob@example.test>\r\n",
+        "Subject: Outlook sent append\r\n",
+        "\r\n",
+        "Sent body"
+    );
+    let append_sent_prelude = send_partial_command(
+        &mut stream,
+        &format!(
+            "A18S APPEND Sent (\\Seen) \" 2-May-2026 21:44:00 +0200\" {{{}}}\r\n",
+            sent_literal.as_bytes().len()
+        ),
+    )
+    .await;
+    assert!(append_sent_prelude.contains("+ Ready for literal data"));
+    let append_sent = send_command(&mut stream, &format!("{sent_literal}\r\n"), "A18S").await;
+    assert!(append_sent.contains("A18S OK APPEND completed"));
+    assert!(!append_sent.contains("APPENDUID"));
+    let sent_status = send_command(&mut stream, "A18T STATUS Sent (MESSAGES)\r\n", "A18T").await;
+    assert!(sent_status.contains("* STATUS \"Sent\" (MESSAGES 1)"));
+
     let delete_archive = send_command(&mut stream, "A19 DELETE Archive\r\n", "A19").await;
     assert!(delete_archive.contains("A19 OK DELETE completed"));
 

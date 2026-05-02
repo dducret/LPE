@@ -30,8 +30,10 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             bail!("APPEND expects mailbox and literal size");
         }
         let mailbox_name = &tokens[0];
-        if !mailbox_name_matches("Drafts", "drafts", mailbox_name) {
-            bail!("APPEND is only allowed for Drafts");
+        let append_to_drafts = mailbox_name_matches("Drafts", "drafts", mailbox_name);
+        let append_to_sent = mailbox_name_matches("Sent", "sent", mailbox_name);
+        if !(append_to_drafts || append_to_sent) {
+            bail!("APPEND is only allowed for Drafts or Sent");
         }
         let literal_size = parse_literal_size(tokens.last().unwrap())?;
 
@@ -44,6 +46,15 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         reader.read_exact(&mut line_end).await?;
 
         validate_append_attachments(&self.validator, &literal)?;
+        if append_to_sent {
+            self.require_auth()?;
+            writer
+                .write_all(format!("{tag} OK APPEND completed\r\n").as_bytes())
+                .await?;
+            writer.flush().await?;
+            return Ok(true);
+        }
+
         let parsed = parse_rfc822_message(&literal)?;
         let principal = self.require_auth()?;
         let from_display = parsed

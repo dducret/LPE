@@ -40,7 +40,10 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - richer `SEARCH`
 - `UID FETCH`, `UID STORE`, and `UID SEARCH`
 - tolerant no-op `UID EXPUNGE` while destructive expunge remains deferred
-- `APPEND` to `Drafts` only, persisted through the canonical draft workflow
+- `APPEND` to `Drafts`, persisted through the canonical draft workflow
+- Outlook-style `APPEND` to `Sent` is accepted as a compatibility acknowledgement
+  after client `SMTP` submission, but it does not persist another message or create
+  an alternate sent-message path
 - `UIDPLUS` response codes where the current canonical workflow can supply them directly
 - `ACL` admin commands `GETACL`, `MYRIGHTS`, `LISTRIGHTS`, `SETACL`, and `DELETEACL` projected from canonical mailbox and sender delegation grants
 
@@ -61,11 +64,12 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 
 ## File validation
 
-`APPEND` validates MIME attachments with Google `Magika` before the draft is persisted, following the same architecture rule already applied to `JMAP` uploads and `ActiveSync` MIME submission.
+`APPEND` validates MIME attachments with Google `Magika` before the draft is persisted or a `Sent` compatibility append is acknowledged, following the same architecture rule already applied to `JMAP` uploads and `ActiveSync` MIME submission.
 
 ## Current limitations
 
-- no message submission or `APPEND` to `Sent`; outbound submission remains canonical through `JMAP`, `ActiveSync`, and the web/API submission workflow
+- no message submission through `IMAP APPEND`; outbound submission remains canonical through `JMAP`, `ActiveSync`, `SMTP` submission, and the web/API submission workflow
+- `APPEND` to `Sent` is an Outlook interoperability acknowledgement only; it intentionally does not create a second `Sent` copy because the authenticated `SMTP` submission path writes the authoritative copy
 - no durable subscribe state, hierarchy management, destructive `EXPUNGE`, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
 - mailbox management remains a flat namespace for now; hierarchical folder trees are not implemented yet
 - `FETCH BODYSTRUCTURE` and MIME section rendering are compatibility projections over the canonical message text and sanitized HTML fields; attachment MIME reserialization remains deferred
