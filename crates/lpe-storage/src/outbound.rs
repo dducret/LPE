@@ -115,13 +115,13 @@ impl Storage {
                 m.sender_display,
                 m.sender_authorization_kind,
                 m.subject_normalized AS subject,
-                b.body_text,
+                COALESCE(b.body_text, '') AS body_text,
                 b.body_html_sanitized,
                 m.internet_message_id,
                 q.last_error
             FROM outbound_message_queue q
             JOIN messages m ON m.id = q.message_id
-            JOIN message_bodies b ON b.message_id = m.id
+            LEFT JOIN message_bodies b ON b.message_id = m.id
             WHERE q.status IN ('queued', 'deferred')
               AND q.next_attempt_at <= NOW()
             ORDER BY q.created_at ASC, q.id ASC
