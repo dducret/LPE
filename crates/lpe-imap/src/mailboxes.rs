@@ -41,6 +41,68 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         Ok(true)
     }
 
+    pub(crate) async fn handle_lsub<W>(&mut self, tag: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        let principal = self.require_auth()?;
+        let mailboxes = self
+            .store
+            .ensure_imap_mailboxes(principal.account_id)
+            .await?;
+        for mailbox in mailboxes {
+            writer
+                .write_all(
+                    format!(
+                        "* LSUB {} \"/\" \"{}\"\r\n",
+                        render_list_flags(&mailbox.role),
+                        sanitize_imap_quoted(&mailbox.name)
+                    )
+                    .as_bytes(),
+                )
+                .await?;
+        }
+        writer
+            .write_all(format!("{tag} OK LSUB completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    pub(crate) async fn handle_subscribe<W>(
+        &mut self,
+        tag: &str,
+        arguments: &str,
+        writer: &mut W,
+    ) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        self.resolve_mailbox_by_name(arguments).await?;
+        writer
+            .write_all(format!("{tag} OK SUBSCRIBE completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    pub(crate) async fn handle_unsubscribe<W>(
+        &mut self,
+        tag: &str,
+        arguments: &str,
+        writer: &mut W,
+    ) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        self.resolve_mailbox_by_name(arguments).await?;
+        writer
+            .write_all(format!("{tag} OK UNSUBSCRIBE completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
     pub(crate) async fn handle_namespace<W>(&self, tag: &str, writer: &mut W) -> Result<bool>
     where
         W: AsyncWriteExt + Unpin,

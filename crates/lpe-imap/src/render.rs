@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -7,8 +7,33 @@ use lpe_storage::{ImapEmail, JmapEmailAddress, JmapMailbox};
 use crate::{parse::tokenize, MessageRefKind, SelectedMailbox, UID_VALIDITY};
 
 pub(crate) struct FetchAttributes {
-    pub(crate) items: Vec<String>,
+    pub(crate) items: Vec<FetchItem>,
     pub(crate) mark_seen: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FetchItem {
+    Uid,
+    Flags,
+    Modseq,
+    InternalDate,
+    Rfc822Size,
+    Envelope,
+    BodyStructure,
+    BodySection(BodySectionFetch),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BodySectionFetch {
+    pub(crate) peek: bool,
+    pub(crate) section: String,
+    pub(crate) partial: Option<PartialRange>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PartialRange {
+    pub(crate) start: usize,
+    pub(crate) length: usize,
 }
 
 pub(crate) fn mailbox_name_matches(display_name: &str, role: &str, requested: &str) -> bool {
@@ -16,53 +41,48 @@ pub(crate) fn mailbox_name_matches(display_name: &str, role: &str, requested: &s
         || (role == "inbox" && requested.eq_ignore_ascii_case("INBOX"))
 }
 
-pub(crate) fn render_list_flags(role: &str) -> &'static str {
+pub(crate) fn render_list_flags(role: &str) -> String {
+    let mut flags = vec!["\\HasNoChildren"];
     match role {
-        "inbox" => "(\\Inbox)",
-        "sent" => "(\\Sent)",
-        "drafts" => "(\\Drafts)",
-        _ => "()",
+        "inbox" => flags.push("\\Inbox"),
+        "sent" => flags.push("\\Sent"),
+        "drafts" => flags.push("\\Drafts"),
+        _ => {}
     }
+    format!("({})", flags.join(" "))
 }
 
 pub(crate) fn parse_fetch_attributes(input: &str) -> Result<FetchAttributes> {
     let upper = input.trim().to_ascii_uppercase();
     let expanded = match upper.as_str() {
         "ALL" => vec![
-            "FLAGS".to_string(),
-            "INTERNALDATE".to_string(),
-            "RFC822.SIZE".to_string(),
-            "UID".to_string(),
+            FetchItem::Flags,
+            FetchItem::InternalDate,
+            FetchItem::Rfc822Size,
+            FetchItem::Uid,
         ],
         "FAST" => vec![
-            "FLAGS".to_string(),
-            "INTERNALDATE".to_string(),
-            "RFC822.SIZE".to_string(),
+            FetchItem::Flags,
+            FetchItem::InternalDate,
+            FetchItem::Rfc822Size,
         ],
         "FULL" => vec![
-            "FLAGS".to_string(),
-            "INTERNALDATE".to_string(),
-            "RFC822.SIZE".to_string(),
-            "BODY[]".to_string(),
-            "UID".to_string(),
+            FetchItem::Flags,
+            FetchItem::InternalDate,
+            FetchItem::Rfc822Size,
+            FetchItem::BodySection(BodySectionFetch {
+                peek: false,
+                section: String::new(),
+                partial: None,
+            }),
+            FetchItem::Uid,
         ],
-        _ => {
-            let source = input.trim().trim_start_matches('(').trim_end_matches(')');
-            source
-                .split_whitespace()
-                .map(|item| item.to_ascii_uppercase())
-                .collect()
-        }
+        _ => parse_fetch_item_list(input)?,
     };
     if expanded.is_empty() {
         bail!("FETCH expects at least one attribute");
     }
-    let mark_seen = expanded.iter().any(|item| {
-        matches!(
-            item.as_str(),
-            "BODY[]" | "BODY[TEXT]" | "RFC822" | "RFC822.TEXT"
-        )
-    });
+    let mark_seen = expanded.iter().any(fetch_item_marks_seen);
     Ok(FetchAttributes {
         items: expanded,
         mark_seen,
@@ -82,31 +102,210 @@ pub(crate) fn render_fetch_response(
             output.extend_from_slice(b" ");
         }
         first = false;
-        match item.as_str() {
-            "UID" => output.extend_from_slice(format!("UID {}", email.uid).as_bytes()),
-            "FLAGS" => output.extend_from_slice(
+        match item {
+            FetchItem::Uid => output.extend_from_slice(format!("UID {}", email.uid).as_bytes()),
+            FetchItem::Flags => output.extend_from_slice(
                 format!("FLAGS ({})", render_flags(email, &email.mailbox_name)).as_bytes(),
             ),
-            "MODSEQ" => output.extend_from_slice(format!("MODSEQ ({})", email.modseq).as_bytes()),
-            "INTERNALDATE" => output.extend_from_slice(
+            FetchItem::Modseq => {
+                output.extend_from_slice(format!("MODSEQ ({})", email.modseq).as_bytes())
+            }
+            FetchItem::InternalDate => output.extend_from_slice(
                 format!("INTERNALDATE \"{}\"", format_internal_date(email)).as_bytes(),
             ),
-            "RFC822.SIZE" => output
+            FetchItem::Rfc822Size => output
                 .extend_from_slice(format!("RFC822.SIZE {}", email.size_octets.max(0)).as_bytes()),
-            "BODY[HEADER]" | "BODY.PEEK[HEADER]" => {
-                append_literal(&mut output, item, render_header(email).as_bytes());
+            FetchItem::Envelope => {
+                output.extend_from_slice(format!("ENVELOPE {}", render_envelope(email)).as_bytes())
             }
-            "BODY[TEXT]" | "BODY.PEEK[TEXT]" | "RFC822.TEXT" => {
-                append_literal(&mut output, item, email.body_text.as_bytes());
-            }
-            "BODY[]" | "BODY.PEEK[]" | "RFC822" => {
-                append_literal(&mut output, item, render_full_message(email).as_bytes());
-            }
-            other => bail!("unsupported FETCH attribute {}", other),
+            FetchItem::BodyStructure => output.extend_from_slice(
+                format!("BODYSTRUCTURE {}", render_bodystructure(email)).as_bytes(),
+            ),
+            FetchItem::BodySection(section) => append_body_section(&mut output, email, section),
         }
     }
     output.extend_from_slice(b")\r\n");
     Ok(output)
+}
+
+fn parse_fetch_item_list(input: &str) -> Result<Vec<FetchItem>> {
+    let source = strip_wrapping_parens(input.trim());
+    let chars = source.chars().collect::<Vec<_>>();
+    let mut cursor = 0usize;
+    let mut items = Vec::new();
+
+    while cursor < chars.len() {
+        while cursor < chars.len() && chars[cursor].is_whitespace() {
+            cursor += 1;
+        }
+        if cursor >= chars.len() {
+            break;
+        }
+
+        let start = cursor;
+        let mut bracket_depth = 0usize;
+        let mut paren_depth = 0usize;
+        while cursor < chars.len() {
+            match chars[cursor] {
+                '[' => bracket_depth += 1,
+                ']' => bracket_depth = bracket_depth.saturating_sub(1),
+                '(' => paren_depth += 1,
+                ')' if paren_depth > 0 => paren_depth -= 1,
+                ch if ch.is_whitespace() && bracket_depth == 0 && paren_depth == 0 => break,
+                _ => {}
+            }
+            cursor += 1;
+        }
+
+        items.push(parse_fetch_item(
+            &chars[start..cursor].iter().collect::<String>(),
+        )?);
+    }
+
+    Ok(items)
+}
+
+fn strip_wrapping_parens(value: &str) -> &str {
+    let trimmed = value.trim();
+    if !(trimmed.starts_with('(') && trimmed.ends_with(')')) {
+        return trimmed;
+    }
+
+    let mut depth = 0usize;
+    for (index, ch) in trimmed.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 && index != trimmed.len() - 1 {
+                    return trimmed;
+                }
+            }
+            _ => {}
+        }
+    }
+    &trimmed[1..trimmed.len() - 1]
+}
+
+fn parse_fetch_item(raw: &str) -> Result<FetchItem> {
+    let upper = raw.to_ascii_uppercase();
+    Ok(match upper.as_str() {
+        "UID" => FetchItem::Uid,
+        "FLAGS" => FetchItem::Flags,
+        "MODSEQ" => FetchItem::Modseq,
+        "INTERNALDATE" => FetchItem::InternalDate,
+        "RFC822.SIZE" => FetchItem::Rfc822Size,
+        "ENVELOPE" => FetchItem::Envelope,
+        "BODYSTRUCTURE" => FetchItem::BodyStructure,
+        "RFC822" => FetchItem::BodySection(BodySectionFetch {
+            peek: false,
+            section: String::new(),
+            partial: None,
+        }),
+        "RFC822.HEADER" => FetchItem::BodySection(BodySectionFetch {
+            peek: true,
+            section: "HEADER".to_string(),
+            partial: None,
+        }),
+        "RFC822.TEXT" => FetchItem::BodySection(BodySectionFetch {
+            peek: false,
+            section: "TEXT".to_string(),
+            partial: None,
+        }),
+        _ => parse_body_fetch_item(raw)?,
+    })
+}
+
+fn parse_body_fetch_item(raw: &str) -> Result<FetchItem> {
+    let upper = raw.to_ascii_uppercase();
+    let (peek, rest) = if upper.starts_with("BODY.PEEK[") {
+        (true, &raw["BODY.PEEK".len()..])
+    } else if upper.starts_with("BODY[") {
+        (false, &raw["BODY".len()..])
+    } else {
+        bail!("unsupported FETCH attribute {}", raw);
+    };
+
+    let close = rest
+        .find(']')
+        .ok_or_else(|| anyhow!("invalid BODY section"))?;
+    let section = rest[1..close].trim().to_ascii_uppercase();
+    let partial = parse_partial_range(rest[close + 1..].trim())?;
+    Ok(FetchItem::BodySection(BodySectionFetch {
+        peek,
+        section,
+        partial,
+    }))
+}
+
+fn parse_partial_range(value: &str) -> Result<Option<PartialRange>> {
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let inner = value
+        .strip_prefix('<')
+        .and_then(|value| value.strip_suffix('>'))
+        .ok_or_else(|| anyhow!("invalid partial FETCH range"))?;
+    let (start, length) = inner
+        .split_once('.')
+        .ok_or_else(|| anyhow!("invalid partial FETCH range"))?;
+    Ok(Some(PartialRange {
+        start: start.parse()?,
+        length: length.parse()?,
+    }))
+}
+
+fn fetch_item_marks_seen(item: &FetchItem) -> bool {
+    match item {
+        FetchItem::BodySection(section) if !section.peek => {
+            let normalized = normalize_body_section(&section.section);
+            matches!(normalized.as_str(), "" | "TEXT" | "1" | "1.TEXT")
+        }
+        _ => false,
+    }
+}
+
+fn append_body_section(output: &mut Vec<u8>, email: &ImapEmail, section: &BodySectionFetch) {
+    let normalized = normalize_body_section(&section.section);
+    let value = match normalized.as_str() {
+        "HEADER" | "0" | "0.HEADER" => render_header(email),
+        value if value.starts_with("HEADER.FIELDS") => render_header_fields(email, value),
+        "TEXT" | "1" | "1.TEXT" => email.body_text.clone(),
+        "2" | "2.TEXT" => email
+            .body_html_sanitized
+            .as_deref()
+            .unwrap_or(&email.body_text)
+            .to_string(),
+        "" => render_full_message(email),
+        "1.MIME" => render_text_part_mime_header("plain"),
+        "2.MIME" => render_text_part_mime_header("html"),
+        "1.HEADER" => render_header(email),
+        _ => email.body_text.clone(),
+    };
+    let (partial_start, bytes) = apply_partial(value.as_bytes(), section.partial);
+    append_literal(output, &section_label(section, partial_start), bytes);
+}
+
+fn normalize_body_section(section: &str) -> String {
+    section.trim().to_ascii_uppercase()
+}
+
+fn section_label(section: &BodySectionFetch, partial_start: Option<usize>) -> String {
+    let prefix = if section.peek { "BODY.PEEK" } else { "BODY" };
+    let mut label = format!("{prefix}[{}]", section.section);
+    if let Some(start) = partial_start {
+        label.push_str(&format!("<{}>", start));
+    }
+    label
+}
+
+fn apply_partial(value: &[u8], partial: Option<PartialRange>) -> (Option<usize>, &[u8]) {
+    let Some(partial) = partial else {
+        return (None, value);
+    };
+    let start = partial.start.min(value.len());
+    let end = start.saturating_add(partial.length).min(value.len());
+    (Some(partial.start), &value[start..end])
 }
 
 fn append_literal(output: &mut Vec<u8>, label: &str, value: &[u8]) {
@@ -160,6 +359,10 @@ pub(crate) fn render_status_response(
 }
 
 fn render_header(email: &ImapEmail) -> String {
+    render_header_lines(email).join("\r\n") + "\r\n\r\n"
+}
+
+fn render_header_lines(email: &ImapEmail) -> Vec<String> {
     let mut lines = Vec::new();
     lines.push(format!(
         "Date: {}",
@@ -182,11 +385,131 @@ fn render_header(email: &ImapEmail) -> String {
     if let Some(message_id) = email.internet_message_id.as_deref() {
         lines.push(format!("Message-Id: {}", message_id));
     }
-    lines.join("\r\n") + "\r\n\r\n"
+    lines
+}
+
+fn render_header_fields(email: &ImapEmail, section: &str) -> String {
+    let requested = section
+        .split_once('(')
+        .and_then(|(_, rest)| rest.rsplit_once(')').map(|(fields, _)| fields))
+        .unwrap_or_default()
+        .split_whitespace()
+        .map(|field| field.trim_end_matches(':').to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    if requested.is_empty() {
+        return "\r\n".to_string();
+    }
+
+    let lines = render_header_lines(email)
+        .into_iter()
+        .filter(|line| {
+            line.split_once(':')
+                .map(|(name, _)| requested.contains(&name.to_ascii_lowercase()))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        "\r\n".to_string()
+    } else {
+        lines.join("\r\n") + "\r\n\r\n"
+    }
 }
 
 fn render_full_message(email: &ImapEmail) -> String {
     format!("{}{}", render_header(email), email.body_text)
+}
+
+fn render_text_part_mime_header(subtype: &str) -> String {
+    format!(
+        "Content-Type: text/{subtype}; charset=UTF-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\n"
+    )
+}
+
+fn render_envelope(email: &ImapEmail) -> String {
+    format!(
+        "({} {} {} {} {} {} {} {} {} {})",
+        nstring(Some(email.sent_at.as_deref().unwrap_or(&email.received_at))),
+        nstring(Some(&email.subject)),
+        render_address_list(email.from_display.as_deref(), Some(&email.from_address)),
+        render_address_list(email.from_display.as_deref(), Some(&email.from_address)),
+        render_address_list(email.from_display.as_deref(), Some(&email.from_address)),
+        render_recipients(&email.to),
+        render_recipients(&email.cc),
+        render_recipients(visible_bcc(email)),
+        "NIL",
+        nstring(email.internet_message_id.as_deref()),
+    )
+}
+
+fn visible_bcc(email: &ImapEmail) -> &[JmapEmailAddress] {
+    if matches!(email.mailbox_role.as_str(), "drafts" | "sent") {
+        &email.bcc
+    } else {
+        &[]
+    }
+}
+
+fn render_recipients(recipients: &[JmapEmailAddress]) -> String {
+    if recipients.is_empty() {
+        return "NIL".to_string();
+    }
+    format!(
+        "({})",
+        recipients
+            .iter()
+            .map(|recipient| {
+                render_single_address(recipient.display_name.as_deref(), &recipient.address)
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
+}
+
+fn render_address_list(display_name: Option<&str>, address: Option<&str>) -> String {
+    let Some(address) = address.filter(|value| !value.trim().is_empty()) else {
+        return "NIL".to_string();
+    };
+    format!("({})", render_single_address(display_name, address.trim()))
+}
+
+fn render_single_address(display_name: Option<&str>, address: &str) -> String {
+    let (mailbox, host) = address.split_once('@').unwrap_or((address, ""));
+    format!(
+        "({} NIL {} {})",
+        nstring(display_name),
+        nstring(Some(mailbox)),
+        nstring(Some(host))
+    )
+}
+
+fn render_bodystructure(email: &ImapEmail) -> String {
+    let text = render_text_bodystructure(&email.body_text, "PLAIN");
+    if let Some(html) = email.body_html_sanitized.as_deref() {
+        format!(
+            "({} {} \"ALTERNATIVE\" NIL NIL NIL)",
+            text,
+            render_text_bodystructure(html, "HTML")
+        )
+    } else {
+        text
+    }
+}
+
+fn render_text_bodystructure(value: &str, subtype: &str) -> String {
+    format!(
+        "(\"TEXT\" \"{}\" (\"CHARSET\" \"UTF-8\") NIL NIL \"7BIT\" {} {} NIL NIL NIL)",
+        subtype,
+        value.len(),
+        value.lines().count().max(1)
+    )
+}
+
+fn nstring(value: Option<&str>) -> String {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("\"{}\"", sanitize_imap_quoted(value)))
+        .unwrap_or_else(|| "NIL".to_string())
 }
 
 pub(crate) fn render_visible_header(email: &ImapEmail) -> String {

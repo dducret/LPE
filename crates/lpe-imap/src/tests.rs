@@ -655,9 +655,11 @@ async fn login_list_select_fetch_store_search_and_append_work() {
 
     let capability = send_command(&mut stream, "A0 CAPABILITY\r\n", "A0").await;
     assert!(capability.contains("CONDSTORE"));
+    assert!(capability.contains("ID"));
     assert!(capability.contains("IDLE"));
     assert!(capability.contains("MOVE"));
     assert!(capability.contains("NAMESPACE"));
+    assert!(capability.contains("SPECIAL-USE"));
     assert!(capability.contains("UIDPLUS"));
 
     let login = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
@@ -667,9 +669,9 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     assert!(namespace.contains("* NAMESPACE ((\"\" \"/\")) NIL NIL"));
 
     let list = send_command(&mut stream, "A2 LIST \"\" \"*\"\r\n", "A2").await;
-    assert!(list.contains("* LIST (\\Inbox) \"/\" \"Inbox\""));
-    assert!(list.contains("* LIST (\\Sent) \"/\" \"Sent\""));
-    assert!(list.contains("* LIST (\\Drafts) \"/\" \"Drafts\""));
+    assert!(list.contains("* LIST (\\HasNoChildren \\Inbox) \"/\" \"Inbox\""));
+    assert!(list.contains("* LIST (\\HasNoChildren \\Sent) \"/\" \"Sent\""));
+    assert!(list.contains("* LIST (\\HasNoChildren \\Drafts) \"/\" \"Drafts\""));
 
     let select = send_command(&mut stream, "A3 SELECT Inbox\r\n", "A3").await;
     assert!(select.contains("* 1 EXISTS"));
@@ -778,6 +780,115 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     assert!(select_inbox.contains("* 2 EXISTS"));
     let rejected_move = send_command(&mut stream, "A21 MOVE 1 Drafts\r\n", "A21").await;
     assert!(rejected_move.contains("A21 NO MOVE does not support Sent or Drafts"));
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn outlook_first_login_list_select_sync_transcript() {
+    let store = FakeStore::new();
+    {
+        let mut emails = store.emails.lock().unwrap();
+        emails[0].body_html_sanitized = Some("<p>Body Welcome</p>".to_string());
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store, Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let greeting = read_response(&mut stream, None).await;
+    assert!(greeting.contains("* OK LPE IMAP ready"));
+
+    let capability = send_command(&mut stream, "OL1 CAPABILITY\r\n", "OL1").await;
+    assert!(capability.contains("ID"));
+    assert!(capability.contains("SPECIAL-USE"));
+
+    let id = send_command(
+        &mut stream,
+        "OL2 ID (\"name\" \"Microsoft Outlook\" \"version\" \"16.0\")\r\n",
+        "OL2",
+    )
+    .await;
+    assert!(id.contains("* ID (\"name\" \"LPE\" \"vendor\" \"LPE\")"));
+    assert!(id.contains("OL2 OK ID completed"));
+
+    let login = send_command(
+        &mut stream,
+        "OL3 LOGIN alice@example.test secret\r\n",
+        "OL3",
+    )
+    .await;
+    assert!(login.contains("OL3 OK LOGIN completed"));
+
+    let namespace = send_command(&mut stream, "OL4 NAMESPACE\r\n", "OL4").await;
+    assert!(namespace.contains("* NAMESPACE ((\"\" \"/\")) NIL NIL"));
+
+    let subscribe = send_command(&mut stream, "OL5 SUBSCRIBE Inbox\r\n", "OL5").await;
+    assert!(subscribe.contains("OL5 OK SUBSCRIBE completed"));
+
+    let lsub = send_command(&mut stream, "OL6 LSUB \"\" \"*\"\r\n", "OL6").await;
+    assert!(lsub.contains("* LSUB (\\HasNoChildren \\Inbox) \"/\" \"Inbox\""));
+    assert!(lsub.contains("* LSUB (\\HasNoChildren \\Sent) \"/\" \"Sent\""));
+    assert!(lsub.contains("* LSUB (\\HasNoChildren \\Drafts) \"/\" \"Drafts\""));
+
+    let unsubscribe = send_command(&mut stream, "OL7 UNSUBSCRIBE Inbox\r\n", "OL7").await;
+    assert!(unsubscribe.contains("OL7 OK UNSUBSCRIBE completed"));
+
+    let list = send_command(&mut stream, "OL8 LIST \"\" \"*\"\r\n", "OL8").await;
+    assert!(list.contains("* LIST (\\HasNoChildren \\Inbox) \"/\" \"Inbox\""));
+    assert!(list.contains("* LIST (\\HasNoChildren \\Sent) \"/\" \"Sent\""));
+    assert!(list.contains("* LIST (\\HasNoChildren \\Drafts) \"/\" \"Drafts\""));
+
+    let select = send_command(&mut stream, "OL9 SELECT Inbox\r\n", "OL9").await;
+    assert!(select.contains("* 1 EXISTS"));
+    assert!(select.contains("* OK [UIDVALIDITY 1]"));
+    assert!(select.contains("* OK [UIDNEXT 2]"));
+    assert!(select.contains("* OK [HIGHESTMODSEQ 3]"));
+
+    let fetch_summary = send_command(
+        &mut stream,
+        "OL10 UID FETCH 1:* (UID FLAGS INTERNALDATE RFC822.SIZE ENVELOPE BODYSTRUCTURE)\r\n",
+        "OL10",
+    )
+    .await;
+    assert!(fetch_summary.contains("UID 1"));
+    assert!(fetch_summary.contains("ENVELOPE"));
+    assert!(fetch_summary.contains("\"Welcome\""));
+    assert!(fetch_summary.contains("BODYSTRUCTURE ((\"TEXT\" \"PLAIN\""));
+    assert!(fetch_summary.contains("\"ALTERNATIVE\""));
+
+    let fetch_headers = send_command(
+        &mut stream,
+        "OL11 UID FETCH 1 (BODY.PEEK[HEADER.FIELDS (DATE FROM TO SUBJECT MESSAGE-ID)])\r\n",
+        "OL11",
+    )
+    .await;
+    assert!(fetch_headers.contains("BODY.PEEK[HEADER.FIELDS (DATE FROM TO SUBJECT MESSAGE-ID)]"));
+    assert!(fetch_headers.contains("Subject: Welcome"));
+    assert!(
+        fetch_headers.contains("Message-Id: <11111111-1111-1111-1111-111111111111@example.test>")
+    );
+    assert!(!fetch_headers.contains("\r\nBcc:"));
+
+    let fetch_section =
+        send_command(&mut stream, "OL12 UID FETCH 1 (BODY.PEEK[1])\r\n", "OL12").await;
+    assert!(fetch_section.contains("BODY.PEEK[1]"));
+    assert!(fetch_section.contains("Body Welcome"));
+
+    let fetch_html_section =
+        send_command(&mut stream, "OL12B UID FETCH 1 (BODY.PEEK[2])\r\n", "OL12B").await;
+    assert!(fetch_html_section.contains("BODY.PEEK[2]"));
+    assert!(fetch_html_section.contains("<p>Body Welcome</p>"));
+
+    let fetch_partial = send_command(
+        &mut stream,
+        "OL13 UID FETCH 1 (BODY.PEEK[]<0.20>)\r\n",
+        "OL13",
+    )
+    .await;
+    assert!(fetch_partial.contains("BODY.PEEK[]<0> {20}"));
+    assert!(fetch_partial.contains("Date: 2026-04-19T0"));
 
     task.abort();
 }

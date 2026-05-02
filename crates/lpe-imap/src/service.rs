@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::{parse::parse_request_line, render::sanitize_imap_text, store::ImapStore};
 
 const CAPABILITIES: &str =
-    "IMAP4rev1 AUTH=XOAUTH2 SASL-IR IDLE MOVE NAMESPACE UIDPLUS CONDSTORE ACL";
+    "IMAP4rev1 AUTH=XOAUTH2 SASL-IR ID IDLE MOVE NAMESPACE UIDPLUS CONDSTORE ACL SPECIAL-USE";
 pub(crate) const UID_VALIDITY: u32 = 1;
 
 #[derive(Clone)]
@@ -138,6 +138,16 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                     .await
             }
             "LIST" => self.handle_list(&request.tag, writer).await,
+            "LSUB" => self.handle_lsub(&request.tag, writer).await,
+            "SUBSCRIBE" => {
+                self.handle_subscribe(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "UNSUBSCRIBE" => {
+                self.handle_unsubscribe(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "ID" => self.handle_id(&request.tag, writer).await,
             "NAMESPACE" => self.handle_namespace(&request.tag, writer).await,
             "STATUS" => {
                 self.handle_status(&request.tag, &request.arguments, writer)
@@ -286,6 +296,20 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
     {
         writer
             .write_all(format!("{tag} OK NOOP completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    async fn handle_id<W>(&self, tag: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        writer
+            .write_all(
+                format!("* ID (\"name\" \"LPE\" \"vendor\" \"LPE\")\r\n{tag} OK ID completed\r\n")
+                    .as_bytes(),
+            )
             .await?;
         writer.flush().await?;
         Ok(true)

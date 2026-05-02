@@ -11,12 +11,16 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - account authentication through `LOGIN` with the existing mailbox account credentials
 - `AUTHENTICATE XOAUTH2` with the mailbox `OAuth2` bearer access token
 - `CAPABILITY`, `NOOP`, `LOGOUT`
+- tolerant `ID`
 - `NAMESPACE` for the flat personal namespace
 - `LIST` for the canonical system mailboxes `Inbox`, `Sent`, and `Drafts`
+- `SPECIAL-USE` folder flags on listed system mailboxes
+- tolerant `LSUB`, `SUBSCRIBE`, and `UNSUBSCRIBE` for Outlook compatibility; subscription state is not persisted yet
 - `STATUS` for mailbox counters and stable UID metadata
 - flat mailbox management through `CREATE`, `RENAME`, and `DELETE` for custom user mailboxes
 - `SELECT` on `Inbox`, `Sent`, and `Drafts`
-- minimal `FETCH` over canonical message state
+- `FETCH` over canonical message state, including `ENVELOPE`, `BODYSTRUCTURE`,
+  `BODY.PEEK[HEADER.FIELDS (...)]`, body sections, and partial literals
 - minimal `STORE` for `\Seen` and `\Flagged`
 - `IDLE` on a selected mailbox, with periodic refresh against canonical mailbox state
 - `CONDSTORE` mailbox sync primitives: `HIGHESTMODSEQ`, per-message `MODSEQ`, and conditional `STORE` with `UNCHANGEDSINCE`
@@ -50,9 +54,9 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 ## Current limitations
 
 - no message submission or `APPEND` to `Sent`; outbound submission remains canonical through `JMAP`, `ActiveSync`, and the web/API submission workflow
-- no subscribe state, hierarchy management, standalone `EXPUNGE`, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
+- no durable subscribe state, hierarchy management, standalone `EXPUNGE`, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
 - mailbox management remains a flat namespace for now; hierarchical folder trees are not implemented yet
-- the supported `FETCH` body sections are limited to header, text body, and reconstructed full message body without attachment MIME reserialization
+- `FETCH BODYSTRUCTURE` and MIME section rendering are compatibility projections over the canonical message text and sanitized HTML fields; attachment MIME reserialization remains deferred
 - `COPY` intentionally rejects `Sent` and `Drafts` as source or target mailboxes so the adapter cannot become an alternate sent-message or draft workflow
 - `MOVE` uses the same guardrail and only supports `Inbox` plus custom user mailboxes
 - `SEARCH` now supports `ALL`, `SEEN`, `UNSEEN`, `FLAGGED`, `UNFLAGGED`, `TEXT`, `SUBJECT`, `FROM`, `TO`, `CC`, `BODY`, `HEADER`, `BEFORE`, `ON`, `SINCE`, `LARGER`, `SMALLER`, `NOT`, `OR`, sequence-set criteria, and `UID`
