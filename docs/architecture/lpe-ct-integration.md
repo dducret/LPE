@@ -34,6 +34,15 @@ canonical bridge from `LPE` to `LPE-CT`.
 8. `LPE` updates `outbound_message_queue.status`, `messages.delivery_status`, `remote_message_ref`, `attempts`, `last_error`, `next_attempt_at`, and the latest structured transport result
 9. `LPE` persists the latest `trace_id` returned by `LPE-CT`, exposes that traceability through the admin mail-flow view, and treats repeated handoff results with the same queue item plus the same `trace_id` as idempotent
 
+When an outbound handoff contains recipients in verified `LPE-CT` accepted
+domains, those local recipients are delivered back to the core `LPE` final
+delivery bridge instead of being sent through public `MX` routing. This keeps
+self-mail and same-domain client test messages inside the canonical
+`LPE -> LPE-CT -> LPE` flow and prevents loops where `LPE-CT` attempts to
+connect to its own public `MX` host on port `25`. Recipients outside verified
+accepted domains continue to use configured outbound routes or direct `MX`
+delivery.
+
 Minimum supported statuses:
 
 - `queued`: message prepared in `LPE` before handoff

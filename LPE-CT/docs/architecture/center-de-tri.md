@@ -65,6 +65,7 @@ For outbound `LPE -> LPE-CT` handoff, the sorting center now also covers:
 - local outbound throttling
 - outbound DKIM signing for configured sender domains
 - sender and recipient allow/block policy enforcement
+- local delivery of outbound recipients whose domains are verified accepted domains, through the core `LPE` final-delivery bridge instead of public `MX` routing
 - retry backoff informed by the upstream attempt count supplied by `LPE`
 - classification of `SMTP` replies into `relayed`, `deferred`, `bounced`, or `failed`
 - structured technical and `DSN` detail for the latest attempt

@@ -4249,8 +4249,7 @@ async fn relay_message(
     }
 
     if targets.is_empty() {
-        return relay_message_direct_mx(message, route, attempt_count, &config.outbound_ehlo_name)
-            .await;
+        return relay_message_direct_mx(config, message, route, attempt_count).await;
     }
 
     let mut last_error = None;
@@ -4332,10 +4331,10 @@ async fn relay_message(
 }
 
 async fn relay_message_direct_mx(
+    config: &RuntimeConfig,
     message: &QueuedMessage,
     route: &TransportRouteDecision,
     attempt_count: u32,
-    ehlo_name: &str,
 ) -> OutboundExecution {
     let resolver = match SystemDnsResolver::new() {
         Ok(resolver) => resolver,
@@ -4369,6 +4368,30 @@ async fn relay_message_direct_mx(
 
     let mut relayed = Vec::new();
     let mut last_execution = None;
+    let local_domains = recipients_by_domain
+        .keys()
+        .filter(|domain| accepted_domain_is_verified(config, domain))
+        .cloned()
+        .collect::<Vec<_>>();
+    for domain in local_domains {
+        let Some(recipients) = recipients_by_domain.remove(&domain) else {
+            continue;
+        };
+        let execution = deliver_outbound_to_local_recipients(
+            config,
+            message,
+            route,
+            attempt_count,
+            &recipients,
+        )
+        .await;
+        if execution.status != TransportDeliveryStatus::Relayed {
+            return execution;
+        }
+        relayed.push(format!("{domain} via local-core"));
+        last_execution = Some(execution);
+    }
+
     for (domain, recipients) in recipients_by_domain {
         let targets = match direct_mx_targets(&resolver, &domain).await {
             Ok(targets) => targets,
@@ -4392,7 +4415,7 @@ async fn relay_message_direct_mx(
                 route,
                 attempt_count,
                 &recipients,
-                ehlo_name,
+                &config.outbound_ehlo_name,
             )
             .await
             {
@@ -4429,18 +4452,97 @@ async fn relay_message_direct_mx(
     };
 
     if relayed.len() > 1 {
+        let has_local = relayed
+            .iter()
+            .any(|entry| entry.ends_with(" via local-core"));
+        let relay_target = if has_local {
+            "mixed-local-direct-mx"
+        } else {
+            "direct-mx"
+        };
         execution.detail = Some(format!(
-            "direct MX delivery completed for {} recipient domains",
+            "outbound delivery completed for {} recipient domain groups",
             relayed.len()
         ));
         execution.remote_message_ref = Some(relayed.join("; "));
         execution.route = Some(TransportRouteDecision {
             rule_id: route.rule_id.clone(),
-            relay_target: Some("direct-mx".to_string()),
+            relay_target: Some(relay_target.to_string()),
             queue: "sent".to_string(),
         });
     }
     execution
+}
+
+async fn deliver_outbound_to_local_recipients(
+    config: &RuntimeConfig,
+    message: &QueuedMessage,
+    route: &TransportRouteDecision,
+    attempt_count: u32,
+    recipients: &[String],
+) -> OutboundExecution {
+    let mut local_message = message.clone();
+    local_message.rcpt_to = recipients.to_vec();
+    match deliver_inbound_message(config, &local_message).await {
+        Ok(delivery) => OutboundExecution {
+            status: TransportDeliveryStatus::Relayed,
+            detail: Some(format!(
+                "delivered to local accepted domain through core delivery bridge: {} mailbox(es)",
+                delivery.delivered_mailboxes.len()
+            )),
+            remote_message_ref: Some(format!("local-core:{}", message.id)),
+            retry: None,
+            dsn: None,
+            technical: Some(TransportTechnicalStatus {
+                phase: "local-delivery".to_string(),
+                smtp_code: None,
+                enhanced_code: Some("2.0.0".to_string()),
+                remote_host: Some(config.core_delivery_base_url.clone()),
+                detail: Some("delivered through LPE core final-delivery API".to_string()),
+            }),
+            route: Some(TransportRouteDecision {
+                rule_id: route.rule_id.clone(),
+                relay_target: Some("local-core".to_string()),
+                queue: "sent".to_string(),
+            }),
+            throttle: None,
+        },
+        Err(error) => {
+            let detail = format!("local core delivery failed: {error}");
+            OutboundExecution {
+                status: TransportDeliveryStatus::Deferred,
+                detail: Some(detail.clone()),
+                remote_message_ref: None,
+                retry: Some(TransportRetryAdvice {
+                    retry_after_seconds: retry_after_seconds(
+                        DEFAULT_OUTBOUND_RETRY_AFTER_SECONDS,
+                        attempt_count,
+                    ),
+                    policy: "local-core-delivery".to_string(),
+                    reason: Some(detail.clone()),
+                }),
+                dsn: Some(TransportDsnReport {
+                    action: "delayed".to_string(),
+                    status: "4.4.1".to_string(),
+                    diagnostic_code: Some(format!("smtp; {detail}")),
+                    remote_mta: Some("local-core".to_string()),
+                }),
+                technical: Some(TransportTechnicalStatus {
+                    phase: "local-delivery".to_string(),
+                    smtp_code: None,
+                    enhanced_code: Some("4.4.1".to_string()),
+                    remote_host: Some(config.core_delivery_base_url.clone()),
+                    detail: Some(detail.clone()),
+                }),
+                route: Some(TransportRouteDecision {
+                    rule_id: route.rule_id.clone(),
+                    relay_target: Some("local-core".to_string()),
+                    queue: "deferred".to_string(),
+                }),
+                throttle: None,
+            }
+        }
+    }
 }
 
 async fn direct_mx_targets(resolver: &SystemDnsResolver, domain: &str) -> Result<Vec<String>> {
@@ -6213,6 +6315,10 @@ fn recipient_domain_is_accepted(config: &RuntimeConfig, recipient: &str) -> bool
     let Some(domain) = domain_part(recipient) else {
         return false;
     };
+    accepted_domain_is_verified(config, &domain)
+}
+
+fn accepted_domain_is_verified(config: &RuntimeConfig, domain: &str) -> bool {
     config
         .accepted_domains
         .iter()
@@ -8319,6 +8425,64 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         assert_eq!(route.rule_id, None);
         assert_eq!(route.relay_target, None);
         assert_eq!(route.queue, "outbound");
+    }
+
+    #[tokio::test]
+    #[ignore = "env-sensitive"]
+    async fn outbound_handoff_delivers_accepted_domain_locally_without_direct_mx() {
+        let _guard = env_test_lock();
+        let spool = temp_dir("outbound-local-domain");
+        initialize_spool(&spool).unwrap();
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
+        let captured = Arc::new(Mutex::new(None::<InboundDeliveryRequest>));
+        let core_base_url = spawn_dummy_core(captured.clone()).await;
+        let mut config = runtime_config(String::new(), core_base_url);
+        config.accepted_domains = vec![AcceptedDomainConfig {
+            domain: "l-p-e.ch".to_string(),
+            rbl_checks: false,
+            spf_checks: false,
+            greylisting: false,
+            accept_null_reverse_path: true,
+            verified: true,
+        }];
+        let mut request = outbound_request("Microsoft Outlook Test Message");
+        request.from_address = "test@l-p-e.ch".to_string();
+        request.to = vec![TransportRecipient {
+            address: "test@l-p-e.ch".to_string(),
+            display_name: None,
+        }];
+
+        let response = process_outbound_handoff(&spool, &config, request)
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, TransportDeliveryStatus::Relayed);
+        assert_eq!(
+            response
+                .route
+                .as_ref()
+                .and_then(|route| route.relay_target.as_deref()),
+            Some("local-core")
+        );
+        assert_eq!(
+            response
+                .technical
+                .as_ref()
+                .map(|status| status.phase.as_str()),
+            Some("local-delivery")
+        );
+        let delivered = captured.lock().unwrap().clone().unwrap();
+        assert_eq!(delivered.mail_from, "test@l-p-e.ch");
+        assert_eq!(delivered.rcpt_to, vec!["test@l-p-e.ch".to_string()]);
+        assert_eq!(delivered.subject, "Microsoft Outlook Test Message");
+        assert!(spool
+            .join("sent")
+            .join(format!("{}.json", response.trace_id))
+            .exists());
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 
     #[tokio::test]
