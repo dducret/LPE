@@ -15,6 +15,7 @@ VENDOR_DIR="${VENDOR_DIR:-$INSTALL_ROOT/vendor}"
 ENV_FILE="${ENV_FILE:-/etc/lpe-ct/lpe-ct.env}"
 INSTALL_ENV_FILE="${INSTALL_ENV_FILE:-/etc/lpe-ct/install.env}"
 SPOOL_DIR="${SPOOL_DIR:-/var/spool/lpe-ct}"
+LOG_DIR="${LOG_DIR:-/var/log/lpe-ct}"
 SERVICE_NAME="${SERVICE_NAME:-lpe-ct.service}"
 SERVICE_USER="${SERVICE_USER:-lpe-ct}"
 SERVICE_GROUP="${SERVICE_GROUP:-lpe-ct}"
@@ -46,6 +47,10 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   exit 1
 fi
 load_env_file_if_present "${ENV_FILE}"
+LOG_DIR="${LOG_DIR:-${LPE_CT_HOST_LOG_DIR:-/var/log/lpe-ct}}"
+LPE_CT_HOST_LOG_DIR="${LPE_CT_HOST_LOG_DIR:-${LOG_DIR}}"
+LPE_CT_POSTFIX_MAIL_LOG_ENABLED="${LPE_CT_POSTFIX_MAIL_LOG_ENABLED:-true}"
+LPE_CT_MAIL_LOG_PATH="${LPE_CT_MAIL_LOG_PATH:-${LPE_CT_HOST_LOG_DIR}/mail.log}"
 LPE_CT_CORE_DELIVERY_BASE_URL="${LPE_CT_CORE_DELIVERY_BASE_URL:-http://127.0.0.1:8080}"
 LPE_CT_CORE_DELIVERY_BASE_URL="${LPE_CT_CORE_DELIVERY_BASE_URL%/}"
 LPE_CT_PUBLIC_TLS_CERT_PATH="${LPE_CT_PUBLIC_TLS_CERT_PATH:-/etc/lpe-ct/tls/fullchain.pem}"
@@ -128,6 +133,11 @@ if [[ -x "${ENV_CHECK_SCRIPT}" || -f "${ENV_CHECK_SCRIPT}" ]]; then
   fi
 fi
 
+write_env_value "${INSTALL_ENV_FILE}" "LOG_DIR" "${LOG_DIR}"
+write_env_value "${ENV_FILE}" "LPE_CT_HOST_LOG_DIR" "${LPE_CT_HOST_LOG_DIR}"
+write_env_value "${ENV_FILE}" "LPE_CT_POSTFIX_MAIL_LOG_ENABLED" "${LPE_CT_POSTFIX_MAIL_LOG_ENABLED}"
+write_env_value "${ENV_FILE}" "LPE_CT_MAIL_LOG_PATH" "${LPE_CT_MAIL_LOG_PATH}"
+
 "${RUSTUP_BIN}" default stable
 export PATH="/root/.cargo/bin:${PATH}"
 
@@ -185,6 +195,7 @@ install_magika "${MAGIKA_VERSION}" "${MAGIKA_LINUX_X86_64_SHA256}"
 install -d -o root -g root "${WEB_ROOT}"
 install -d -o "${SERVICE_USER}" -g "${SERVICE_GROUP}" \
   "${VENDOR_DIR}" \
+  "${LOG_DIR}" \
   "${SPOOL_DIR}" \
   "${SPOOL_DIR}/incoming" \
   "${SPOOL_DIR}/outbound" \
@@ -206,7 +217,8 @@ render_template \
   "LPE_CT_BIN_DIR=${BIN_DIR}" \
   "LPE_CT_INSTALL_ROOT=${INSTALL_ROOT}" \
   "LPE_CT_STATE_DIR=${STATE_DIR}" \
-  "LPE_CT_SPOOL_DIR=${SPOOL_DIR}"
+  "LPE_CT_SPOOL_DIR=${SPOOL_DIR}" \
+  "LPE_CT_LOG_DIR=${LOG_DIR}"
 render_template \
   "${SRC_DIR}/LPE-CT/installation/debian-trixie/lpe-ct.nginx.conf" \
   "${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}" \
@@ -223,7 +235,7 @@ rm -f "${NGINX_ENABLED_DIR}/default"
 nginx -t
 
 systemctl daemon-reload
-chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${VENDOR_DIR}"
+chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${VENDOR_DIR}" "${LOG_DIR}"
 systemctl restart "${SERVICE_NAME}"
 systemctl restart nginx
 
