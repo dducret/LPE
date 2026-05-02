@@ -191,6 +191,50 @@ probe_imaps_upstream() {
   pass "LPE IMAP upstream ${upstream} is reachable from LPE-CT"
 }
 
+probe_client_publication() {
+  local base_url="https://${HOST}:${HTTPS_PORT}"
+  local host_header="${LPE_CT_PUBLICATION_TEST_HOST:-${LPE_CT_PUBLIC_HOSTNAME:-${LPE_CT_SERVER_NAME:-localhost}}}"
+  local autodiscover_email="${LPE_CT_AUTODISCOVER_TEST_EMAIL:-${LPE_CT_BOOTSTRAP_ADMIN_EMAIL:-admin@example.test}}"
+  local body
+  local headers_file
+
+  body="$(curl --silent --show-error --fail --insecure \
+    --header "Host: ${host_header}" \
+    --header 'Content-Type: application/xml' \
+    --data "<?xml version=\"1.0\" encoding=\"utf-8\"?><Autodiscover><Request><EMailAddress>${autodiscover_email}</EMailAddress></Request></Autodiscover>" \
+    "${base_url}/autodiscover/autodiscover.xml")" \
+    || fail "Autodiscover POST is not reachable through LPE-CT HTTPS publication"
+  [[ "$body" == *"<Type>MobileSync</Type>"* ]] \
+    || fail "Autodiscover POST did not publish MobileSync through LPE-CT"
+  pass "Autodiscover POST publishes MobileSync through LPE-CT"
+
+  headers_file="$(mktemp)"
+  curl --silent --show-error --fail --insecure --http1.1 \
+    --request OPTIONS \
+    --header "Host: ${host_header}" \
+    --dump-header "${headers_file}" \
+    --output /dev/null \
+    "${base_url}/Microsoft-Server-ActiveSync" \
+    || {
+      rm -f "${headers_file}"
+      fail "ActiveSync OPTIONS is not reachable through LPE-CT HTTPS publication"
+    }
+  grep -qi '^ms-asprotocolversions:' "${headers_file}" \
+    || {
+      sed -n '1,40p' "${headers_file}" || true
+      rm -f "${headers_file}"
+      fail "ActiveSync OPTIONS response is missing ms-asprotocolversions"
+    }
+  grep -qi '^ms-asprotocolcommands:' "${headers_file}" \
+    || {
+      sed -n '1,40p' "${headers_file}" || true
+      rm -f "${headers_file}"
+      fail "ActiveSync OPTIONS response is missing ms-asprotocolcommands"
+    }
+  rm -f "${headers_file}"
+  pass "ActiveSync OPTIONS exposes ms-asprotocolversions and ms-asprotocolcommands through LPE-CT"
+}
+
 SMTP_BIND="${LPE_CT_SMTP_BIND_ADDRESS:-}"
 if [[ -n "${LPE_CT_SMTP_PORT:-}" ]]; then
   SMTP_PORT="${LPE_CT_SMTP_PORT}"
@@ -227,6 +271,7 @@ curl --silent --show-error --fail --insecure "https://${HOST}:${HTTPS_PORT}/" >/
   || fail "HTTPS management edge is not reachable on ${HOST}:${HTTPS_PORT}"
 pass "HTTPS management edge is reachable on ${HOST}:${HTTPS_PORT}"
 tls_probe_if_possible "$HOST" "$HTTPS_PORT" "HTTPS"
+probe_client_publication
 
 if [[ -n "${LPE_CT_SUBMISSION_BIND_ADDRESS:-}" ]]; then
   tls_probe_if_possible "$HOST" "$SUBMISSION_PORT" "SMTPS submission"

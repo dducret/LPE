@@ -57,6 +57,25 @@ LPE_CT_GREYLIST_DELAY_SECONDS="${LPE_CT_GREYLIST_DELAY_SECONDS:-30}"
 LPE_CT_PUBLIC_TLS_CERT_PATH="${LPE_CT_PUBLIC_TLS_CERT_PATH:-/etc/lpe-ct/tls/fullchain.pem}"
 LPE_CT_PUBLIC_TLS_KEY_PATH="${LPE_CT_PUBLIC_TLS_KEY_PATH:-/etc/lpe-ct/tls/privkey.pem}"
 
+validate_publication_config() {
+  local nginx_site="${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}"
+  local required_patterns=(
+    "location = /Microsoft-Server-ActiveSync"
+    "proxy_read_timeout 1800s;"
+    "proxy_send_timeout 1800s;"
+    "location /autodiscover/"
+    "location /Autodiscover/"
+    "location /autoconfig/"
+    "location /.well-known/autoconfig/"
+  )
+  local pattern
+
+  for pattern in "${required_patterns[@]}"; do
+    grep -Fq "${pattern}" "${nginx_site}" \
+      || fail_install "Generated nginx site is missing required public LPE-CT publication setting: ${pattern}"
+  done
+}
+
 install_host_action_prerequisites() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
@@ -234,6 +253,7 @@ render_template \
 
 ln -sfn "${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}" "${NGINX_ENABLED_DIR}/${NGINX_SITE_NAME}"
 rm -f "${NGINX_ENABLED_DIR}/default"
+validate_publication_config
 nginx -t
 
 systemctl daemon-reload

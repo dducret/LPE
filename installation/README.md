@@ -50,6 +50,15 @@ For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trix
 
 The `LPE-CT` scripts also install the SMTP ingress listener on `25`, publish the HTTPS edge through `nginx` on `443`, redirect plain `HTTP` on `80` to `HTTPS`, configure authenticated implicit-TLS client submission on `465`, configure the IMAPS TLS proxy on `993`, create the full runtime spool layout in `/var/spool/lpe-ct`, and provide these validation scripts:
 
+The generated `LPE-CT` `nginx` site also re-exposes the core client publication
+routes on the public HTTPS edge: `/Microsoft-Server-ActiveSync`,
+`/autodiscover/`, `/Autodiscover/`, `/autoconfig/`, and
+`/.well-known/autoconfig/`. ActiveSync uses long proxy timeouts so mobile and
+Outlook long-poll requests are not cut off by the edge proxy. The
+`install-lpe-ct.sh` and `update-lpe-ct.sh` scripts validate the rendered nginx
+publication settings, while `check-lpe-ct.sh` and `test-lpe-ct-edge-ports.sh`
+validate the live autodiscover and ActiveSync responses through the public edge.
+
 They also install `/opt/lpe-ct/bin/lpe-ct-host-action` with a narrow sudoers policy for management-console host maintenance actions. The `lpe-ct` service still runs as the non-root `lpe-ct` user, but NTP changes, manual time sync, `apt update && apt upgrade -y`, restart, and shutdown are delegated to that root-owned helper. Existing nodes must rerun `LPE-CT/installation/debian-trixie/update-lpe-ct.sh` to receive the helper, sudoers file, and refreshed service hardening settings.
 
 For the first `active/passive` `DMZ` deployment step, `LPE-CT/installation/debian-trixie` also provides `check-lpe-ct-ready.sh`, `lpe-ct-ha-set-role.sh`, and `keepalived-lpe-ct.conf.example`.
@@ -531,6 +540,13 @@ hostname used by clients.
 them to the core `LPE` service: `/api/jmap/session`, `/api/jmap/api`,
 `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`,
 and `/api/jmap/ws`.
+
+`LPE-CT` must also publish the public client configuration and ActiveSync paths:
+`/Microsoft-Server-ActiveSync`, `/autodiscover/`, `/Autodiscover/`,
+`/autoconfig/`, and `/.well-known/autoconfig/`. A healthy public publication
+returns an Outlook autodiscover XML response containing `MobileSync`, and
+`OPTIONS /Microsoft-Server-ActiveSync` returns the
+`ms-asprotocolversions` and `ms-asprotocolcommands` headers.
 
 For public client auto-configuration, the exposed front end must remain `LPE-CT` or an equivalent HTTPS publication layer. In v1:
 

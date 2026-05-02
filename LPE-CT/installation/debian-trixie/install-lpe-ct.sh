@@ -419,9 +419,29 @@ render_service_files() {
     "LPE_CT_WEB_ROOT=${WEB_ROOT}"
 }
 
+validate_publication_config() {
+  local nginx_site="${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}"
+  local required_patterns=(
+    "location = /Microsoft-Server-ActiveSync"
+    "proxy_read_timeout 1800s;"
+    "proxy_send_timeout 1800s;"
+    "location /autodiscover/"
+    "location /Autodiscover/"
+    "location /autoconfig/"
+    "location /.well-known/autoconfig/"
+  )
+  local pattern
+
+  for pattern in "${required_patterns[@]}"; do
+    grep -Fq "${pattern}" "${nginx_site}" \
+      || fail_install "Generated nginx site is missing required public LPE-CT publication setting: ${pattern}"
+  done
+}
+
 activate_services() {
   ln -sfn "${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}" "${NGINX_ENABLED_DIR}/${NGINX_SITE_NAME}"
   rm -f "${NGINX_ENABLED_DIR}/default"
+  validate_publication_config
   nginx -t
 
   chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${STATE_DIR}" "${SPOOL_DIR}" "${LOG_DIR}" "${VENDOR_DIR}"

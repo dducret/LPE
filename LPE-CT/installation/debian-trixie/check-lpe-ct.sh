@@ -68,10 +68,13 @@ fi
 API_HEALTH_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/health"
 API_DASHBOARD_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/api/v1/dashboard"
 CONSOLE_URL="${LPE_CT_CONSOLE_TEST_URL:-https://127.0.0.1:${LPE_CT_NGINX_LISTEN_PORT:-443}/}"
+PUBLIC_HTTPS_BASE="${LPE_CT_PUBLICATION_TEST_URL:-https://127.0.0.1:${LPE_CT_NGINX_LISTEN_PORT:-443}}"
+PUBLIC_HOST_HEADER="${LPE_CT_PUBLICATION_TEST_HOST:-${LPE_CT_PUBLIC_HOSTNAME:-${LPE_CT_SERVER_NAME:-localhost}}}"
+AUTODISCOVER_TEST_EMAIL="${LPE_CT_AUTODISCOVER_TEST_EMAIL:-${LPE_CT_BOOTSTRAP_ADMIN_EMAIL:-admin@example.test}}"
 SMTP_HOST="${LPE_CT_SMTP_TEST_HOST:-127.0.0.1}"
 SMTP_PORT="${LPE_CT_SMTP_TEST_PORT:-${LPE_CT_SMTP_BIND_ADDRESS##*:}}"
-SMTP_TEST_SENDER="${LPE_CT_SMTP_TEST_SENDER:?Set LPE_CT_SMTP_TEST_SENDER in $ENV_FILE or the shell environment}"
-SMTP_TEST_RECIPIENT="${LPE_CT_SMTP_TEST_RECIPIENT:?Set LPE_CT_SMTP_TEST_RECIPIENT in $ENV_FILE or the shell environment}"
+SMTP_TEST_SENDER="${LPE_CT_SMTP_TEST_SENDER:-}"
+SMTP_TEST_RECIPIENT="${LPE_CT_SMTP_TEST_RECIPIENT:-}"
 
 systemctl is-enabled "$SERVICE_NAME" >/dev/null 2>&1 || fail "Service is not enabled: $SERVICE_NAME"
 pass "Service enabled: $SERVICE_NAME"
@@ -97,6 +100,71 @@ pass "Management API readiness endpoint responded correctly"
 dashboard_body="$(curl --silent --show-error --fail "$API_DASHBOARD_URL")" || fail "Dashboard request failed: $API_DASHBOARD_URL"
 [[ "$dashboard_body" == *"dmz-sorting-center"* ]] || fail "Unexpected dashboard response: $dashboard_body"
 pass "Dashboard endpoint responded correctly"
+
+autoconfig_body="$(curl --silent --show-error --fail --insecure \
+  --header "Host: ${PUBLIC_HOST_HEADER}" \
+  "${PUBLIC_HTTPS_BASE}/autoconfig/mail/config-v1.1.xml")" \
+  || fail "Thunderbird autoconfig request failed through LPE-CT public HTTPS edge"
+[[ "$autoconfig_body" == *"<incomingServer type=\"imap\">"* ]] \
+  || fail "Thunderbird autoconfig endpoint does not publish IMAP through LPE-CT"
+pass "Thunderbird autoconfig endpoint is published by LPE-CT"
+
+well_known_autoconfig_body="$(curl --silent --show-error --fail --insecure \
+  --header "Host: ${PUBLIC_HOST_HEADER}" \
+  "${PUBLIC_HTTPS_BASE}/.well-known/autoconfig/mail/config-v1.1.xml")" \
+  || fail "Thunderbird well-known autoconfig request failed through LPE-CT public HTTPS edge"
+[[ "$well_known_autoconfig_body" == *"<clientConfig version=\"1.1\">"* ]] \
+  || fail "Unexpected Thunderbird well-known autoconfig content through LPE-CT"
+pass "Thunderbird well-known autoconfig endpoint is published by LPE-CT"
+
+autodiscover_body="$(curl --silent --show-error --fail --insecure \
+  --header "Host: ${PUBLIC_HOST_HEADER}" \
+  --header 'Content-Type: application/xml' \
+  --data "<?xml version=\"1.0\" encoding=\"utf-8\"?><Autodiscover><Request><EMailAddress>${AUTODISCOVER_TEST_EMAIL}</EMailAddress></Request></Autodiscover>" \
+  "${PUBLIC_HTTPS_BASE}/autodiscover/autodiscover.xml")" \
+  || fail "Outlook autodiscover POST failed through LPE-CT public HTTPS edge"
+[[ "$autodiscover_body" == *"<Type>MobileSync</Type>"* ]] \
+  || fail "Autodiscover endpoint does not publish MobileSync through LPE-CT"
+pass "Outlook autodiscover POST publishes MobileSync through LPE-CT"
+
+autodiscover_upper_body="$(curl --silent --show-error --fail --insecure \
+  --header "Host: ${PUBLIC_HOST_HEADER}" \
+  --header 'Content-Type: application/xml' \
+  --data "<?xml version=\"1.0\" encoding=\"utf-8\"?><Autodiscover><Request><EMailAddress>${AUTODISCOVER_TEST_EMAIL}</EMailAddress></Request></Autodiscover>" \
+  "${PUBLIC_HTTPS_BASE}/Autodiscover/Autodiscover.xml")" \
+  || fail "Outlook uppercase Autodiscover POST failed through LPE-CT public HTTPS edge"
+[[ "$autodiscover_upper_body" == *"<Type>MobileSync</Type>"* ]] \
+  || fail "Uppercase Autodiscover endpoint does not publish MobileSync through LPE-CT"
+pass "Uppercase Outlook Autodiscover POST publishes MobileSync through LPE-CT"
+
+activesync_headers="$(mktemp)"
+curl --silent --show-error --fail --insecure --http1.1 \
+  --request OPTIONS \
+  --header "Host: ${PUBLIC_HOST_HEADER}" \
+  --dump-header "$activesync_headers" \
+  --output /dev/null \
+  "${PUBLIC_HTTPS_BASE}/Microsoft-Server-ActiveSync" \
+  || {
+    rm -f "$activesync_headers"
+    fail "ActiveSync OPTIONS failed through LPE-CT public HTTPS edge"
+  }
+grep -qi '^ms-asprotocolversions:' "$activesync_headers" \
+  || {
+    sed -n '1,40p' "$activesync_headers" >&2 || true
+    rm -f "$activesync_headers"
+    fail "ActiveSync OPTIONS response is missing ms-asprotocolversions"
+  }
+grep -qi '^ms-asprotocolcommands:' "$activesync_headers" \
+  || {
+    sed -n '1,40p' "$activesync_headers" >&2 || true
+    rm -f "$activesync_headers"
+    fail "ActiveSync OPTIONS response is missing ms-asprotocolcommands"
+  }
+rm -f "$activesync_headers"
+pass "ActiveSync OPTIONS exposes ms-asprotocolversions and ms-asprotocolcommands through LPE-CT"
+
+[[ -n "$SMTP_TEST_SENDER" ]] || fail "Set LPE_CT_SMTP_TEST_SENDER in $ENV_FILE or the shell environment"
+[[ -n "$SMTP_TEST_RECIPIENT" ]] || fail "Set LPE_CT_SMTP_TEST_RECIPIENT in $ENV_FILE or the shell environment"
 
 smtp_response="$({
   printf 'EHLO check-lpe-ct.local\r\n'
