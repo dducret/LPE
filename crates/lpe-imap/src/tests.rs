@@ -1114,7 +1114,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
         "OL11",
     )
     .await;
-    assert!(fetch_headers.contains("BODY.PEEK[HEADER.FIELDS (DATE FROM TO SUBJECT MESSAGE-ID)]"));
+    assert!(fetch_headers.contains("BODY[HEADER.FIELDS (DATE FROM TO SUBJECT MESSAGE-ID)]"));
     assert!(fetch_headers.contains("Date: 19 Apr 2026 08:00:00 +0000"));
     assert!(fetch_headers.contains("Subject: Welcome"));
     assert!(
@@ -1128,7 +1128,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
         "OL11B",
     )
     .await;
-    assert!(fetch_header_exclusion.contains("BODY.PEEK[HEADER.FIELDS.NOT (RECEIVED BCC)]"));
+    assert!(fetch_header_exclusion.contains("BODY[HEADER.FIELDS.NOT (RECEIVED BCC)]"));
     assert!(fetch_header_exclusion.contains("Subject: Welcome"));
     assert!(!fetch_header_exclusion.contains("\r\nBcc:"));
 
@@ -1138,17 +1138,17 @@ async fn outlook_first_login_list_select_sync_transcript() {
         "OL11C",
     )
     .await;
-    assert!(fetch_part_headers.contains("BODY.PEEK[1.HEADER.FIELDS (CONTENT-TYPE)]"));
+    assert!(fetch_part_headers.contains("BODY[1.HEADER.FIELDS (CONTENT-TYPE)]"));
     assert!(fetch_part_headers.contains("Content-Type: multipart/alternative"));
 
     let fetch_section =
         send_command(&mut stream, "OL12 UID FETCH 1 (BODY.PEEK[1])\r\n", "OL12").await;
-    assert!(fetch_section.contains("BODY.PEEK[1]"));
+    assert!(fetch_section.contains("BODY[1]"));
     assert!(fetch_section.contains("Body Welcome"));
 
     let fetch_html_section =
         send_command(&mut stream, "OL12B UID FETCH 1 (BODY.PEEK[2])\r\n", "OL12B").await;
-    assert!(fetch_html_section.contains("BODY.PEEK[2]"));
+    assert!(fetch_html_section.contains("BODY[2]"));
     assert!(fetch_html_section.contains("<p>Body Welcome</p>"));
 
     let fetch_partial = send_command(
@@ -1157,7 +1157,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
         "OL13",
     )
     .await;
-    assert!(fetch_partial.contains("BODY.PEEK[]<0> {20}"));
+    assert!(fetch_partial.contains("BODY[]<0> {20}"));
     assert!(fetch_partial.contains("Date: 19 Apr 2026"));
 
     let check = send_command(&mut stream, "OL14 CHECK\r\n", "OL14").await;

@@ -330,10 +330,10 @@ fn is_header_fields_section(section: &str) -> bool {
 }
 
 fn section_label(section: &BodySectionFetch, partial_start: Option<usize>) -> String {
-    let mut label = section.response_label.clone().unwrap_or_else(|| {
-        let prefix = if section.peek { "BODY.PEEK" } else { "BODY" };
-        format!("{prefix}[{}]", section.section)
-    });
+    let mut label = section
+        .response_label
+        .clone()
+        .unwrap_or_else(|| format!("BODY[{}]", section.section));
     if let Some(start) = partial_start {
         label.push_str(&format!("<{}>", start));
     }
@@ -1063,5 +1063,56 @@ mod tests {
         assert!(response.contains("To: recipient@example.test"));
         assert!(!response.contains("sender@example.test <sender@example.test>"));
         assert!(!response.contains("recipient@example.test <recipient@example.test>"));
+    }
+
+    #[test]
+    fn body_peek_fetch_response_uses_body_label() {
+        let email = ImapEmail {
+            id: Uuid::new_v4(),
+            uid: 1,
+            modseq: 1,
+            thread_id: Uuid::new_v4(),
+            mailbox_id: Uuid::new_v4(),
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            received_at: "2026-05-03T10:00:00Z".to_string(),
+            sent_at: None,
+            from_address: "sender@example.test".to_string(),
+            from_display: None,
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Message".to_string(),
+            preview: String::new(),
+            body_text: "Body".to_string(),
+            body_html_sanitized: None,
+            unread: true,
+            flagged: false,
+            has_attachments: false,
+            size_octets: 4,
+            internet_message_id: None,
+            delivery_status: "stored".to_string(),
+        };
+
+        let response = String::from_utf8(
+            render_fetch_response(
+                1,
+                &email,
+                &FetchAttributes {
+                    items: vec![FetchItem::BodySection(super::BodySectionFetch {
+                        peek: true,
+                        section: "HEADER.FIELDS (FROM TO SUBJECT)".to_string(),
+                        partial: None,
+                        response_label: None,
+                    })],
+                    mark_seen: false,
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(response.contains("BODY[HEADER.FIELDS (FROM TO SUBJECT)]"));
+        assert!(!response.contains("BODY.PEEK["));
     }
 }
