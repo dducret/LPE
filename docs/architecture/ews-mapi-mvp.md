@@ -45,8 +45,8 @@ The first `EWS` slice supports the read/sync surface needed to begin mailbox, co
 - `FindItem`
 - `GetItem`
 - `SyncFolderItems`
-- `CreateItem` for `Message` and `Contact` items
-- `DeleteItem` for canonical `Message` and `Contact` ids
+- `CreateItem` for `Message`, `Contact`, and `CalendarItem` items
+- `DeleteItem` for canonical `Message`, `Contact`, and `CalendarItem` ids
 - `CreateFolder` and `DeleteFolder` for canonical custom mailbox folders
 
 The adapter currently exposes:
@@ -56,6 +56,7 @@ The adapter currently exposes:
 - contact items from `contacts`
 - contact creation and deletion through the canonical contacts model
 - calendar items from `calendar_events`
+- calendar item creation and deletion through the canonical calendar model
 - message creation through the canonical draft and submission model
 - mailbox read and sync through the canonical JMAP mailbox model
 - mailbox deletion through canonical hard-delete or move-to-trash behavior
@@ -75,9 +76,9 @@ When a client requests unsupported distinguished folders such as `tasks` through
 
 The adapter also answers early client bootstrap probes for `GetServerTimeZones`, `ResolveNames`, and `GetUserAvailability`. `GetServerTimeZones` returns minimal `UTC` and `W. Europe Standard Time` definitions. `ResolveNames` returns an EWS no-results error because GAL resolution is not implemented. `GetUserAvailability` returns an EWS free/busy generation error because free/busy remains outside the current MVP.
 
-`CreateItem` supports `Message` and `Contact` items. `Message` `SaveOnly` writes through the canonical Drafts path. `Message` `SendOnly` and `SendAndSaveCopy` write through the canonical submission path, which persists the canonical `Sent` copy before queueing outbound transport for `LPE-CT`. `Contact` creation writes to the requested canonical contacts collection, defaulting to the owned `default` address book. `CreateItem` does not implement calendar, task, attachment, meeting, or folder writes.
+`CreateItem` supports `Message`, `Contact`, and `CalendarItem` items. `Message` `SaveOnly` writes through the canonical Drafts path. `Message` `SendOnly` and `SendAndSaveCopy` write through the canonical submission path, which persists the canonical `Sent` copy before queueing outbound transport for `LPE-CT`. `Contact` creation writes to the requested canonical contacts collection, defaulting to the owned `default` address book. `CalendarItem` creation writes to the requested canonical calendar collection, defaulting to the owned `default` calendar. `CreateItem` does not implement task, attachment, meeting invitation, or folder writes.
 
-Message ids returned by `CreateItem` and mail read operations are canonical mailbox ids wrapped in an EWS id prefix. Contact ids are canonical contact ids wrapped in the `contact:` EWS id prefix. `DeleteItem DeleteType="HardDelete"` permanently deletes the canonical message. `DeleteItem` without `HardDelete`, including `MoveToDeletedItems`, moves the canonical message to the `trash` mailbox when that mailbox exists; deleting a message that is already in `trash` permanently deletes it. `DeleteItem` for contact ids deletes through canonical contacts rights and storage. This uses the same canonical mailbox and collaboration primitives as the other protocol layers and must not create EWS-only deletion state.
+Message ids returned by `CreateItem` and mail read operations are canonical mailbox ids wrapped in an EWS id prefix. Contact ids are canonical contact ids wrapped in the `contact:` EWS id prefix. Calendar item ids are canonical event ids wrapped in the `event:` EWS id prefix. `DeleteItem DeleteType="HardDelete"` permanently deletes the canonical message. `DeleteItem` without `HardDelete`, including `MoveToDeletedItems`, moves the canonical message to the `trash` mailbox when that mailbox exists; deleting a message that is already in `trash` permanently deletes it. `DeleteItem` for contact and event ids deletes through canonical collaboration rights and storage. This uses the same canonical mailbox and collaboration primitives as the other protocol layers and must not create EWS-only deletion state.
 
 Write operations that are outside the current MVP, including `UpdateItem`, return EWS-shaped `ErrorInvalidOperation` responses. Those unsupported operations must not mutate canonical contacts or calendar data until write support is explicitly designed and routed through canonical collaboration rights.
 

@@ -6,6 +6,7 @@ use lpe_storage::{
     CollaborationCollection, CollaborationRights, JmapEmail, JmapEmailAddress, JmapEmailQuery,
     JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
     StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
+    UpsertClientEventInput,
 };
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -23,6 +24,7 @@ struct FakeStore {
     contacts: Arc<Mutex<Vec<AccessibleContact>>>,
     deleted_contacts: Arc<Mutex<Vec<Uuid>>>,
     events: Arc<Mutex<Vec<AccessibleEvent>>>,
+    deleted_events: Arc<Mutex<Vec<Uuid>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
     emails: Arc<Mutex<Vec<JmapEmail>>>,
@@ -272,6 +274,50 @@ impl ExchangeStore for FakeStore {
             .cloned()
             .collect();
         Box::pin(async move { Ok(events) })
+    }
+
+    fn create_accessible_event<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: Option<&'a str>,
+        input: UpsertClientEventInput,
+    ) -> StoreFuture<'a, AccessibleEvent> {
+        let account = Self::account();
+        let event = AccessibleEvent {
+            id: input.id.unwrap_or_else(|| {
+                Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap()
+            }),
+            collection_id: collection_id.unwrap_or("default").to_string(),
+            owner_account_id: principal_account_id,
+            owner_email: account.email,
+            owner_display_name: account.display_name,
+            rights: Self::rights(),
+            date: input.date,
+            time: input.time,
+            time_zone: input.time_zone,
+            duration_minutes: input.duration_minutes,
+            recurrence_rule: input.recurrence_rule,
+            title: input.title,
+            location: input.location,
+            attendees: input.attendees,
+            attendees_json: input.attendees_json,
+            notes: input.notes,
+        };
+        self.events.lock().unwrap().push(event.clone());
+        Box::pin(async move { Ok(event) })
+    }
+
+    fn delete_accessible_event<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        event_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        self.deleted_events.lock().unwrap().push(event_id);
+        self.events
+            .lock()
+            .unwrap()
+            .retain(|event| event.id != event_id);
+        Box::pin(async move { Ok(()) })
     }
 
     fn fetch_jmap_mailboxes<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
@@ -861,7 +907,7 @@ async fn delete_item_rejects_unsupported_item_ids() {
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:DeleteItem><m:ItemIds><t:ItemId Id="event:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+            br#"<s:Envelope><s:Body><m:DeleteItem><m:ItemIds><t:ItemId Id="task:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
         )
         .await
         .unwrap();
@@ -1287,6 +1333,96 @@ async fn create_delete_contact_round_trips_through_sync_folder_items() {
         body.contains("<t:Delete><t:ItemId Id=\"contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\"")
     );
     assert!(body.contains("<m:SyncState>contacts:default:0</m:SyncState>"));
+}
+
+#[tokio::test]
+async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        ..Default::default()
+    };
+    let deleted_events = store.deleted_events.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Header>
+                <t:TimeZoneContext><t:TimeZoneDefinition Id="UTC" /></t:TimeZoneContext>
+              </s:Header>
+              <s:Body>
+                <m:CreateItem>
+                  <m:SavedItemFolderId><t:FolderId Id="default"/></m:SavedItemFolderId>
+                  <m:Items>
+                    <t:CalendarItem>
+                      <t:Subject>RCA Calendar</t:Subject>
+                      <t:Location>Room 1</t:Location>
+                      <t:Start>2026-05-04T09:30:00Z</t:Start>
+                      <t:End>2026-05-04T10:15:00Z</t:End>
+                      <t:RequiredAttendees>
+                        <t:Attendee><t:Mailbox><t:Name>Bob</t:Name><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox></t:Attendee>
+                      </t:RequiredAttendees>
+                      <t:Body BodyType="Text">Created by RCA</t:Body>
+                    </t:CalendarItem>
+                  </m:Items>
+                </m:CreateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("event:cccccccc-cccc-cccc-cccc-cccccccccccc"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:ItemShape><t:BaseShape>AllProperties</t:BaseShape></m:ItemShape><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>calendar:default:0</m:SyncState><m:MaxChangesReturned>10</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Create><t:CalendarItem>"));
+    assert!(body.contains("event:cccccccc-cccc-cccc-cccc-cccccccccccc"));
+    assert!(body.contains("<t:Subject>RCA Calendar</t:Subject>"));
+    assert!(body.contains("<t:Start>2026-05-04T09:30:00Z</t:Start>"));
+    assert!(body.contains("<t:End>2026-05-04T10:15:00Z</t:End>"));
+    assert!(body.contains(
+        "<m:SyncState>calendar:default:cccccccc-cccc-cccc-cccc-cccccccccccc</m:SyncState>"
+    ));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:DeleteItem DeleteType="HardDelete"><m:ItemIds><t:ItemId Id="event:cccccccc-cccc-cccc-cccc-cccccccccccc"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteItemResponse>"));
+    assert_eq!(
+        deleted_events.lock().unwrap().as_slice(),
+        &[Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap()]
+    );
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>calendar:default:cccccccc-cccc-cccc-cccc-cccccccccccc</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Delete><t:ItemId Id=\"event:cccccccc-cccc-cccc-cccc-cccccccccccc\""));
+    assert!(body.contains("<m:SyncState>calendar:default:0</m:SyncState>"));
 }
 
 #[tokio::test]

@@ -14,7 +14,7 @@ use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AuditEntryInput, CollaborationCollection, JmapEmail,
     JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, Storage, SubmitMessageInput,
-    SubmittedRecipientInput, UpsertClientContactInput,
+    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
 };
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -589,6 +589,18 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     .await?;
                 return Ok(create_contact_success_response(&contact));
             }
+            if element_content(request, "CalendarItem").is_some() {
+                let collection_id = requested_collection_id(request);
+                let event = self
+                    .store
+                    .create_accessible_event(
+                        principal.account_id,
+                        collection_id,
+                        parse_create_event_input(principal, request)?,
+                    )
+                    .await?;
+                return Ok(create_event_success_response(&event));
+            }
 
             let input = parse_create_message_input(principal, request)?;
             let subject_for_audit = input.subject.clone();
@@ -668,22 +680,34 @@ impl<S: ExchangeStore> ExchangeService<S> {
                 .filter_map(|id| id.strip_prefix("contact:"))
                 .map(Uuid::parse_str)
                 .collect::<std::result::Result<Vec<_>, _>>()?;
+            let event_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("event:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
             let message_ids = ids
                 .iter()
                 .filter_map(|id| id.strip_prefix("message:"))
                 .map(Uuid::parse_str)
                 .collect::<std::result::Result<Vec<_>, _>>()?;
 
-            if ids.is_empty() || contact_ids.len() + message_ids.len() != ids.len() {
+            if ids.is_empty()
+                || contact_ids.len() + event_ids.len() + message_ids.len() != ids.len()
+            {
                 return Ok(operation_error_response(
                     "DeleteItem",
                     "ErrorInvalidOperation",
-                    "DeleteItem currently supports only contact and message ids.",
+                    "DeleteItem currently supports only contact, calendar, and message ids.",
                 ));
             }
             for contact_id in contact_ids {
                 self.store
                     .delete_accessible_contact(principal.account_id, contact_id)
+                    .await?;
+            }
+            for event_id in event_ids {
+                self.store
+                    .delete_accessible_event(principal.account_id, event_id)
                     .await?;
             }
             let delete_type = attribute_value_after(request, "DeleteItem", "DeleteType")
@@ -999,6 +1023,93 @@ fn parse_create_contact_input(
     })
 }
 
+fn parse_create_event_input(
+    principal: &AccountPrincipal,
+    request: &str,
+) -> Result<UpsertClientEventInput> {
+    let event = element_content(request, "CalendarItem")
+        .ok_or_else(|| anyhow!("CreateItem is missing CalendarItem"))?;
+    let start = element_text(event, "Start").unwrap_or_default();
+    let end = element_text(event, "End").unwrap_or_default();
+    let (date, time) = ews_datetime_parts(&start)
+        .ok_or_else(|| anyhow!("CalendarItem is missing a valid Start value"))?;
+    let duration_minutes = ews_duration_minutes(&start, &end).unwrap_or(60);
+    let body_tag = open_tag_text(event, "Body").unwrap_or_default();
+    let body_type = attribute_value(body_tag, "BodyType").unwrap_or("Text");
+    let body_value = element_text(event, "Body").unwrap_or_default();
+    let notes = if body_type.eq_ignore_ascii_case("HTML") {
+        html_to_text(&body_value)
+    } else {
+        body_value
+    };
+    let attendees = parse_event_attendees(event);
+
+    Ok(UpsertClientEventInput {
+        id: None,
+        account_id: principal.account_id,
+        date,
+        time,
+        time_zone: requested_time_zone(request).unwrap_or_else(|| "UTC".to_string()),
+        duration_minutes,
+        recurrence_rule: String::new(),
+        title: element_text(event, "Subject").unwrap_or_else(|| "Untitled event".to_string()),
+        location: element_text(event, "Location").unwrap_or_default(),
+        attendees: attendees.join(", "),
+        attendees_json: "[]".to_string(),
+        notes,
+    })
+}
+
+fn parse_event_attendees(event: &str) -> Vec<String> {
+    ["RequiredAttendees", "OptionalAttendees"]
+        .into_iter()
+        .filter_map(|collection_name| element_content(event, collection_name))
+        .flat_map(|collection| {
+            element_contents(collection, "Attendee")
+                .into_iter()
+                .filter_map(parse_attendee)
+        })
+        .collect()
+}
+
+fn parse_attendee(attendee: &str) -> Option<String> {
+    let mailbox = element_content(attendee, "Mailbox").and_then(parse_mailbox)?;
+    Some(match mailbox.display_name {
+        Some(display_name) if !display_name.trim().is_empty() => {
+            format!("{display_name} <{}>", mailbox.address)
+        }
+        _ => mailbox.address,
+    })
+}
+
+fn requested_time_zone(request: &str) -> Option<String> {
+    let time_zone = open_tag_text(request, "TimeZoneDefinition")?;
+    attribute_value(time_zone, "Id").map(str::to_string)
+}
+
+fn ews_datetime_parts(value: &str) -> Option<(String, String)> {
+    let trimmed = value.trim();
+    if trimmed.len() < 16 {
+        return None;
+    }
+    let date = trimmed.get(0..10)?;
+    let time = trimmed.get(11..16)?;
+    Some((date.to_string(), time.to_string()))
+}
+
+fn ews_duration_minutes(start: &str, end: &str) -> Option<i32> {
+    let (_, start_time) = ews_datetime_parts(start)?;
+    let (_, end_time) = ews_datetime_parts(end)?;
+    let start_minutes = time_minutes(&start_time)?;
+    let end_minutes = time_minutes(&end_time)?;
+    (end_minutes > start_minutes).then_some(end_minutes - start_minutes)
+}
+
+fn time_minutes(value: &str) -> Option<i32> {
+    let (hour, minute) = value.split_once(':')?;
+    Some(hour.parse::<i32>().ok()? * 60 + minute.parse::<i32>().ok()?)
+}
+
 fn contact_entry_value(contact: &str, collection_name: &str, key: &str) -> Option<String> {
     let collection = element_content(contact, collection_name)?;
     let mut rest = collection;
@@ -1133,6 +1244,11 @@ fn operation_name(body: &str) -> Option<String> {
 }
 
 fn requested_folder_kind(request: &str) -> Option<FolderKind> {
+    if let Some(kind) =
+        requested_sync_state(request).and_then(|state| sync_state_folder_kind(&state))
+    {
+        return Some(kind);
+    }
     if request.contains("DistinguishedFolderId Id=\"msgfolderroot\"")
         || request.contains("DistinguishedFolderId Id='msgfolderroot'")
         || request.contains("DistinguishedFolderId Id=\"root\"")
@@ -1177,6 +1293,20 @@ fn requested_folder_kind(request: &str) -> Option<FolderKind> {
             None
         }
     })
+}
+
+fn sync_state_folder_kind(sync_state: &str) -> Option<FolderKind> {
+    if sync_state.starts_with("contacts:") {
+        Some(FolderKind::Contacts)
+    } else if sync_state.starts_with("calendar:") {
+        Some(FolderKind::Calendar)
+    } else if sync_state.starts_with("mailbox:") {
+        Some(FolderKind::Mailbox)
+    } else if sync_state.starts_with("root:") {
+        Some(FolderKind::Root)
+    } else {
+        None
+    }
 }
 
 fn requested_folder_kinds(request: &str) -> Vec<FolderKind> {
@@ -1614,6 +1744,34 @@ fn create_contact_success_response(contact: &AccessibleContact) -> String {
         id = contact.id,
         folder_id = escape_xml(&contact.collection_id),
         name = escape_xml(&contact.name),
+    )
+}
+
+fn create_event_success_response(event: &AccessibleEvent) -> String {
+    format!(
+        concat!(
+            "<m:CreateItemResponse>",
+            "<m:ResponseMessages>",
+            "<m:CreateItemResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Items>",
+            "<t:CalendarItem>",
+            "<t:ItemId Id=\"event:{id}\" ChangeKey=\"created\"/>",
+            "<t:ParentFolderId Id=\"{folder_id}\"/>",
+            "<t:Subject>{title}</t:Subject>",
+            "<t:Start>{start}</t:Start>",
+            "<t:End>{end}</t:End>",
+            "</t:CalendarItem>",
+            "</m:Items>",
+            "</m:CreateItemResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:CreateItemResponse>"
+        ),
+        id = event.id,
+        folder_id = escape_xml(&event.collection_id),
+        title = escape_xml(&event.title),
+        start = escape_xml(&ews_datetime(&event.date, &event.time)),
+        end = escape_xml(&event_end_datetime(event)),
     )
 }
 
