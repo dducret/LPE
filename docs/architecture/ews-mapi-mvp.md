@@ -46,7 +46,7 @@ Implemented request types:
 - NSPI `Unbind`: consumes the authenticated NSPI session cookie and expires it
 - `PING`: returns a transport success response on either endpoint
 
-Other request types currently return MAPI/HTTP diagnostic responses with non-zero `X-ResponseCode` values instead of HTTP text placeholders. `Execute`, mailbox ROPs, and NSPI table/query operations are not implemented yet.
+`Execute` currently parses the EMSMDB Execute request body and validates the session cookie. It supports `RopRelease`, which intentionally emits no ROP response, and the first private-mailbox `RopLogon` response with canonical account identity and fixed special-folder ids. Other ROPs currently return MAPI ROP error buffers with `MAPI_E_NO_SUPPORT`. NSPI table/query operations are not implemented yet.
 
 ### Authentication
 
@@ -130,6 +130,6 @@ The next EWS phase should focus on:
 The next MAPI phase should focus on:
 
 - autodiscover design for `EXHTTP` / `MapiHttp` that remains disabled until real Outlook login succeeds
-- EMSMDB `Execute` parsing and the first read-only ROPs required for Outlook mailbox logon
+- read-only mailbox ROPs after logon, starting with `RopOpenFolder`, `RopGetHierarchyTable`, `RopSetColumns`, `RopQueryRows`, and `RopGetPropertiesSpecific`
 - NSPI `GetSpecialTable`, `QueryRows`, `GetProps`, and `ResolveNames` without introducing a parallel GAL store
 - binary protocol parsing and response serialization with focused conformance fixtures before any route is advertised to Outlook

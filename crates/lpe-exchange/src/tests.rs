@@ -516,6 +516,26 @@ fn mapi_headers(request_type: &str) -> HeaderMap {
     headers
 }
 
+fn execute_body(rop_buffer: &[u8]) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&0u32.to_le_bytes());
+    body.extend_from_slice(&(rop_buffer.len() as u32).to_le_bytes());
+    body.extend_from_slice(rop_buffer);
+    body.extend_from_slice(&4096u32.to_le_bytes());
+    body.extend_from_slice(&0u32.to_le_bytes());
+    body
+}
+
+fn rop_buffer(rops: &[u8], handles: &[u32]) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    buffer.extend_from_slice(&(rops.len() as u16).to_le_bytes());
+    buffer.extend_from_slice(rops);
+    for handle in handles {
+        buffer.extend_from_slice(&handle.to_le_bytes());
+    }
+    buffer
+}
+
 async fn response_text(response: axum::response::Response) -> String {
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     String::from_utf8(bytes.to_vec()).unwrap()
@@ -602,6 +622,109 @@ async fn mapi_over_http_disconnect_consumes_emsmdb_session() {
         .to_str()
         .unwrap()
         .contains("Max-Age=0"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_execute_accepts_release_rop() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&[0x01, 0x00, 0x00], &[1]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Execute");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 2);
+    assert_eq!(&body[16..18], &[0, 0]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_execute_returns_private_mailbox_logon() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let legacy_dn = b"/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice\0";
+    let mut logon_rop = vec![0xFE, 0x00, 0x00, 0x01];
+    logon_rop.extend_from_slice(&0x0100_0004u32.to_le_bytes());
+    logon_rop.extend_from_slice(&0u32.to_le_bytes());
+    logon_rop.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
+    logon_rop.extend_from_slice(legacy_dn);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&logon_rop, &[]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rop = &rop_buffer[2..2 + response_rop_size];
+
+    assert_eq!(response_rop[0], 0xFE);
+    assert_eq!(response_rop[1], 0x00);
+    assert_eq!(
+        u32::from_le_bytes(response_rop[2..6].try_into().unwrap()),
+        0
+    );
+    assert_eq!(response_rop[6] & 0x01, 0x01);
+    assert_eq!(response_rop_size, 166);
+    assert_eq!(
+        u32::from_le_bytes(
+            rop_buffer[2 + response_rop_size..6 + response_rop_size]
+                .try_into()
+                .unwrap()
+        ),
+        1
+    );
 }
 
 #[tokio::test]

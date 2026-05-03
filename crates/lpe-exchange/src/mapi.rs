@@ -32,6 +32,7 @@ pub(crate) enum MapiEndpoint {
 enum MapiRequestType {
     Connect,
     Disconnect,
+    Execute,
     Bind,
     Unbind,
     Ping,
@@ -68,6 +69,9 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
         }
         (MapiEndpoint::Emsmdb, MapiRequestType::Disconnect) => {
             disconnect_response(endpoint, &principal, headers, &request_id, "Disconnect")
+        }
+        (MapiEndpoint::Emsmdb, MapiRequestType::Execute) => {
+            execute_response(endpoint, &principal, headers, _body, &request_id)
         }
         (MapiEndpoint::Nspi, MapiRequestType::Bind) => {
             bind_response(endpoint, &principal, &request_id)
@@ -147,6 +151,54 @@ fn bind_response(
     mapi_response("Bind", request_id, 0, body, Some(cookie))
 }
 
+fn execute_response(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    headers: &HeaderMap,
+    body: &[u8],
+    request_id: &str,
+) -> Response {
+    let Some(session_id) = request_cookie(endpoint, headers) else {
+        return execute_failure_response(request_id, 13, "missing MAPI session cookie", None);
+    };
+    let Some(session) = get_session(&session_id) else {
+        return execute_failure_response(request_id, 10, "MAPI session context not found", None);
+    };
+    if session.endpoint != endpoint
+        || session.tenant_id != principal.tenant_id
+        || session.account_id != principal.account_id
+        || session.email != principal.email
+    {
+        return execute_failure_response(
+            request_id,
+            10,
+            "MAPI authentication context changed",
+            None,
+        );
+    }
+
+    let execute = match parse_execute_request(body) {
+        Ok(execute) => execute,
+        Err(error) => {
+            return execute_failure_response(
+                request_id,
+                4,
+                &format!("invalid Execute request body: {error}"),
+                Some(session_cookie(endpoint, &session_id, false)),
+            );
+        }
+    };
+    let rop_buffer = execute_rops(principal, &execute.rop_buffer);
+    let response_body = execute_success_body(rop_buffer, Vec::new());
+    mapi_response(
+        "Execute",
+        request_id,
+        0,
+        response_body,
+        Some(session_cookie(endpoint, &session_id, false)),
+    )
+}
+
 fn disconnect_response(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
@@ -218,6 +270,14 @@ fn remove_session(session_id: &str) -> Option<MapiSession> {
         .remove(session_id)
 }
 
+fn get_session(session_id: &str) -> Option<MapiSession> {
+    sessions()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(session_id)
+        .cloned()
+}
+
 fn request_type(headers: &HeaderMap) -> Result<MapiRequestType> {
     let value = headers
         .get("x-requesttype")
@@ -228,6 +288,7 @@ fn request_type(headers: &HeaderMap) -> Result<MapiRequestType> {
     Ok(match value.to_ascii_lowercase().as_str() {
         "connect" => MapiRequestType::Connect,
         "disconnect" => MapiRequestType::Disconnect,
+        "execute" => MapiRequestType::Execute,
         "bind" => MapiRequestType::Bind,
         "unbind" => MapiRequestType::Unbind,
         "ping" => MapiRequestType::Ping,
@@ -287,6 +348,121 @@ fn mapi_response(
     response
 }
 
+struct ExecuteRequest {
+    rop_buffer: Vec<u8>,
+}
+
+fn parse_execute_request(body: &[u8]) -> Result<ExecuteRequest> {
+    let mut cursor = Cursor::new(body);
+    let _flags = cursor.read_u32()?;
+    let rop_buffer_size = cursor.read_u32()? as usize;
+    let rop_buffer = cursor.read_bytes(rop_buffer_size)?.to_vec();
+    let _max_rop_out = cursor.read_u32()?;
+    let auxiliary_buffer_size = cursor.read_u32()? as usize;
+    let _auxiliary_buffer = cursor.read_bytes(auxiliary_buffer_size)?;
+    Ok(ExecuteRequest { rop_buffer })
+}
+
+fn execute_rops(principal: &AccountPrincipal, rop_buffer: &[u8]) -> Vec<u8> {
+    let Some((requests, _handle_table)) = split_rop_buffer(rop_buffer) else {
+        return rop_buffer_with_response(unsupported_rop_response(0, 0), None);
+    };
+    if requests.is_empty() {
+        return rop_buffer_with_response(Vec::new(), None);
+    }
+
+    match requests[0] {
+        0x01 => rop_buffer_with_response(Vec::new(), None),
+        0xFE => rop_logon_response(principal, requests),
+        rop_id => {
+            let handle_index = requests.get(2).copied().unwrap_or(0);
+            rop_buffer_with_response(unsupported_rop_response(rop_id, handle_index), None)
+        }
+    }
+}
+
+fn split_rop_buffer(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
+    if buffer.len() < 2 {
+        return None;
+    }
+    let rop_size = u16::from_le_bytes([buffer[0], buffer[1]]) as usize;
+    if buffer.len() < 2 + rop_size {
+        return None;
+    }
+    Some((&buffer[2..2 + rop_size], &buffer[2 + rop_size..]))
+}
+
+fn rop_logon_response(principal: &AccountPrincipal, request: &[u8]) -> Vec<u8> {
+    if request.len() < 14 {
+        return rop_buffer_with_response(rop_logon_failure_response(0, 0x8004_0102), None);
+    }
+    let output_handle_index = request[2];
+    let logon_flags = request[3] | 0x01;
+    let mut response = Vec::new();
+    response.push(0xFE);
+    response.push(output_handle_index);
+    write_u32(&mut response, 0);
+    response.push(logon_flags);
+    for folder_id in 1..=13u64 {
+        write_u64(&mut response, folder_id);
+    }
+    response.push(0x03);
+    response.extend_from_slice(principal.account_id.as_bytes());
+    response.extend_from_slice(&1u16.to_le_bytes());
+    response.extend_from_slice(principal.account_id.as_bytes());
+    response.extend_from_slice(&[0u8; 8]);
+    response.extend_from_slice(&[0u8; 8]);
+    write_u32(&mut response, 0);
+    rop_buffer_with_response(response, Some(1))
+}
+
+fn rop_logon_failure_response(output_handle_index: u8, return_value: u32) -> Vec<u8> {
+    let mut response = vec![0xFE, output_handle_index];
+    write_u32(&mut response, return_value);
+    response
+}
+
+fn unsupported_rop_response(rop_id: u8, handle_index: u8) -> Vec<u8> {
+    let mut response = vec![rop_id, handle_index];
+    write_u32(&mut response, 0x8004_0102);
+    response
+}
+
+fn rop_buffer_with_response(response: Vec<u8>, output_handle: Option<u32>) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    buffer.extend_from_slice(&(response.len() as u16).to_le_bytes());
+    buffer.extend_from_slice(&response);
+    if let Some(handle) = output_handle {
+        buffer.extend_from_slice(&handle.to_le_bytes());
+    }
+    buffer
+}
+
+fn execute_success_body(rop_buffer: Vec<u8>, auxiliary_buffer: Vec<u8>) -> Vec<u8> {
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    write_u32(&mut body, rop_buffer.len() as u32);
+    body.extend_from_slice(&rop_buffer);
+    write_u32(&mut body, auxiliary_buffer.len() as u32);
+    body.extend_from_slice(&auxiliary_buffer);
+    body
+}
+
+fn execute_failure_response(
+    request_id: &str,
+    status_code: u32,
+    message: &str,
+    cookie: Option<String>,
+) -> Response {
+    let mut body = Vec::new();
+    write_u32(&mut body, status_code);
+    write_u32(&mut body, message.len() as u32);
+    body.extend_from_slice(message.as_bytes());
+    mapi_response("Execute", request_id, status_code as u16, body, cookie)
+}
+
 fn insert_header(response: &mut Response, name: &'static str, value: &str) {
     if let Ok(value) = HeaderValue::from_str(value) {
         response.headers_mut().insert(name, value);
@@ -334,6 +510,10 @@ fn write_u32(body: &mut Vec<u8>, value: u32) {
     body.extend_from_slice(&value.to_le_bytes());
 }
 
+fn write_u64(body: &mut Vec<u8>, value: u64) {
+    body.extend_from_slice(&value.to_le_bytes());
+}
+
 fn write_utf16z(body: &mut Vec<u8>, value: &str) {
     for unit in value.encode_utf16() {
         body.extend_from_slice(&unit.to_le_bytes());
@@ -353,10 +533,40 @@ impl MapiRequestType {
         match self {
             MapiRequestType::Connect => "Connect",
             MapiRequestType::Disconnect => "Disconnect",
+            MapiRequestType::Execute => "Execute",
             MapiRequestType::Bind => "Bind",
             MapiRequestType::Unbind => "Unbind",
             MapiRequestType::Ping => "PING",
             MapiRequestType::Unsupported(value) => value,
         }
+    }
+}
+
+struct Cursor<'a> {
+    bytes: &'a [u8],
+    position: usize,
+}
+
+impl<'a> Cursor<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, position: 0 }
+    }
+
+    fn read_u32(&mut self) -> Result<u32> {
+        let bytes = self.read_bytes(4)?;
+        Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    }
+
+    fn read_bytes(&mut self, len: usize) -> Result<&'a [u8]> {
+        let end = self
+            .position
+            .checked_add(len)
+            .ok_or_else(|| anyhow!("request body offset overflow"))?;
+        let bytes = self
+            .bytes
+            .get(self.position..end)
+            .ok_or_else(|| anyhow!("request body is truncated"))?;
+        self.position = end;
+        Ok(bytes)
     }
 }
