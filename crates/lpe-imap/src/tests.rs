@@ -1051,6 +1051,62 @@ async fn outlook_first_login_list_select_sync_transcript() {
 }
 
 #[tokio::test]
+async fn outlook_uid_search_refreshes_selected_mailbox_before_fetch() {
+    let store = FakeStore::new();
+    {
+        let mut emails = store.emails.lock().unwrap();
+        emails.retain(|email| email.mailbox_role != "inbox");
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(
+        &mut stream,
+        "OL1 LOGIN alice@example.test secret\r\n",
+        "OL1",
+    )
+    .await;
+    let select = send_command(&mut stream, "OL2 SELECT Inbox\r\n", "OL2").await;
+    assert!(select.contains("* 0 EXISTS"));
+
+    {
+        let mut emails = store.emails.lock().unwrap();
+        emails.push(email(
+            "33333333-3333-3333-3333-333333333333",
+            3,
+            4,
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "inbox",
+            "Inbox",
+            "Arrived after select",
+            true,
+            false,
+        ));
+    }
+    *store.highest_modseq.lock().unwrap() = 4;
+
+    let search = send_command(&mut stream, "OL3 UID SEARCH SINCE 13-Dec-2016\r\n", "OL3").await;
+    assert!(search.contains("* SEARCH 3"));
+    assert!(search.contains("OL3 OK SEARCH completed"));
+
+    let fetch = send_command(&mut stream, "OL4 UID FETCH 3 (RFC822.PEEK)\r\n", "OL4").await;
+    assert!(fetch.contains("UID 3 RFC822.PEEK"));
+    assert!(fetch.contains("Subject: Arrived after select"));
+    assert!(store
+        .emails
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|email| email.subject == "Arrived after select" && email.unread));
+
+    task.abort();
+}
+
+#[tokio::test]
 async fn condstore_store_reports_modified_and_keeps_fresh_messages() {
     let store = FakeStore::new();
     let archive_id = Uuid::new_v4();

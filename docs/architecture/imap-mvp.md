@@ -32,6 +32,9 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `FETCH` over canonical message state, including `ENVELOPE`, `BODYSTRUCTURE`,
   `BODY`, `BODY.PEEK[HEADER.FIELDS (...)]`, `BODY.PEEK[HEADER.FIELDS.NOT (...)]`,
   part-scoped header fields, body sections, MIME part headers, and partial literals
+- `SEARCH` and `FETCH` refresh the selected mailbox from canonical storage before
+  evaluating message sets so Outlook-style `UID SEARCH SINCE ...` and follow-up
+  fetches do not use a stale selected-folder snapshot
 - RFC 3501 `FETCH` macros `FAST`, `ALL`, and `FULL`, with `ALL` and `FULL`
   including `ENVELOPE` as required for clients that use macro fetches during
   initial folder population

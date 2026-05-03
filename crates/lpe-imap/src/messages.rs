@@ -32,6 +32,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             ensure_uid_fetch_attributes(&mut requested);
         }
         ensure_condstore_fetch_attributes(&mut requested, changed_since);
+        self.refresh_selected().await?;
         let selected = self.require_selected()?;
         let indices = resolve_message_indexes(&selected.emails, set_token, ref_kind)?
             .into_iter()
@@ -218,6 +219,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             }
             tokens.drain(0..2);
         }
+        self.refresh_selected().await?;
         let selected = self.require_selected()?;
         let criteria = SearchExpression::from_tokens(&tokens)?;
 

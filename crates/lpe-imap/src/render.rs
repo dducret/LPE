@@ -29,6 +29,7 @@ pub(crate) struct BodySectionFetch {
     pub(crate) peek: bool,
     pub(crate) section: String,
     pub(crate) partial: Option<PartialRange>,
+    pub(crate) response_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,16 +222,25 @@ fn parse_fetch_item(raw: &str) -> Result<FetchItem> {
             peek: false,
             section: String::new(),
             partial: None,
+            response_label: Some("RFC822".to_string()),
+        }),
+        "RFC822.PEEK" => FetchItem::BodySection(BodySectionFetch {
+            peek: true,
+            section: String::new(),
+            partial: None,
+            response_label: Some("RFC822.PEEK".to_string()),
         }),
         "RFC822.HEADER" => FetchItem::BodySection(BodySectionFetch {
             peek: true,
             section: "HEADER".to_string(),
             partial: None,
+            response_label: Some("RFC822.HEADER".to_string()),
         }),
         "RFC822.TEXT" => FetchItem::BodySection(BodySectionFetch {
             peek: false,
             section: "TEXT".to_string(),
             partial: None,
+            response_label: Some("RFC822.TEXT".to_string()),
         }),
         _ => parse_body_fetch_item(raw)?,
     })
@@ -255,6 +265,7 @@ fn parse_body_fetch_item(raw: &str) -> Result<FetchItem> {
         peek,
         section,
         partial,
+        response_label: None,
     }))
 }
 
@@ -319,8 +330,10 @@ fn is_header_fields_section(section: &str) -> bool {
 }
 
 fn section_label(section: &BodySectionFetch, partial_start: Option<usize>) -> String {
-    let prefix = if section.peek { "BODY.PEEK" } else { "BODY" };
-    let mut label = format!("{prefix}[{}]", section.section);
+    let mut label = section.response_label.clone().unwrap_or_else(|| {
+        let prefix = if section.peek { "BODY.PEEK" } else { "BODY" };
+        format!("{prefix}[{}]", section.section)
+    });
     if let Some(start) = partial_start {
         label.push_str(&format!("<{}>", start));
     }
