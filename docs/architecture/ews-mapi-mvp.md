@@ -59,6 +59,7 @@ The adapter currently exposes:
 - mail, tasks, free/busy, recurrence expansion, alarms, meeting scheduling, extended properties, attachments, and GAL are not implemented through `EWS` yet
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
 - enabled `EWS` autodiscover publishes `EXCH` and `EXPR` protocol blocks only as discovery containers for the configured `EwsUrl` / `EmwsUrl`; this does not add `MAPI`, `RPC`, mail, submission, or outbox support
+- SOAP `GetUserSettings` autodiscover publishes the same configured `EWS` endpoint as `ExternalEwsUrl` and `InternalEwsUrl` for EWS clients that prefer SOAP autodiscover over POX
 - `MAPI` is not implemented and must not be advertised
 
 ### Completion priorities

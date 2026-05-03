@@ -62,6 +62,8 @@ When `EWS` autodiscovery is enabled, the Outlook POX response includes both `EXC
 
 Autodiscover responses include the POX `Response`, `User`, `Account`, and `Protocol` shape expected by Microsoft clients. The request parser accepts both unprefixed and namespace-prefixed request elements, including the `a:EMailAddress` form used by Microsoft connectivity tooling.
 
+Autodiscover also accepts SOAP `GetUserSettings` requests and returns an Exchange-style SOAP response with `ExternalEwsUrl`, `InternalEwsUrl`, mailbox-server identity, user identity, deployment id, and `EwsSupportedSchemas`. The SOAP path publishes the same opt-in contacts/calendar `EWS` endpoint and does not advertise `MAPI`, `RPC`, mail, submission, or any unsupported Exchange surface.
+
 When the request asks for the `mobilesync` response schema, Autodiscover returns an `ActiveSync`-specific `MobileSync` server response that points at `/Microsoft-Server-ActiveSync`. That response is reserved for ActiveSync clients and tests; Outlook desktop autodiscover must continue to avoid advertising `MobileSync` as an Exchange desktop route.
 
 ### ActiveSync clients

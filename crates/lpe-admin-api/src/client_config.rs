@@ -44,7 +44,9 @@ async fn outlook_autodiscover_get(headers: HeaderMap) -> Response {
 async fn outlook_autodiscover_post(headers: HeaderMap, body: Bytes) -> Response {
     let email = parse_autodiscover_email(body.as_ref());
     let endpoints = PublishedEndpoints::from_headers(&headers, email.as_deref());
-    let response = if requested_mobilesync_schema(body.as_ref()) {
+    let response = if requested_soap_user_settings(body.as_ref()) {
+        render_soap_user_settings_autodiscover(&endpoints, email.as_deref())
+    } else if requested_mobilesync_schema(body.as_ref()) {
         render_mobilesync_autodiscover(&endpoints, email.as_deref())
     } else {
         render_outlook_autodiscover(&endpoints, email.as_deref())
@@ -295,11 +297,122 @@ fn render_mobilesync_autodiscover(config: &PublishedEndpoints, email: Option<&st
     )
 }
 
+fn render_soap_user_settings_autodiscover(
+    config: &PublishedEndpoints,
+    email: Option<&str>,
+) -> String {
+    let email = email.unwrap_or_default();
+    let ews_url = if config.ews_enabled {
+        config.ews_url.as_str()
+    } else {
+        ""
+    };
+    let mailbox_server = ews_host(ews_url).unwrap_or(&config.imap_host);
+    let legacy_dn = format!(
+        "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={}",
+        legacy_user(email, &config.display_domain)
+    );
+    format!(
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n",
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" ",
+            "xmlns:a=\"http://schemas.microsoft.com/exchange/2010/Autodiscover\" ",
+            "xmlns:i=\"http://www.w3.org/2001/XMLSchema-instance\">\n",
+            "  <s:Header>\n",
+            "    <a:ServerVersionInfo MajorVersion=\"15\" MinorVersion=\"0\" MajorBuildNumber=\"0\" MinorBuildNumber=\"0\" Version=\"Exchange2013\"/>\n",
+            "  </s:Header>\n",
+            "  <s:Body>\n",
+            "    <a:GetUserSettingsResponseMessage>\n",
+            "      <a:Response>\n",
+            "        <a:ErrorCode>NoError</a:ErrorCode>\n",
+            "        <a:ErrorMessage>No error.</a:ErrorMessage>\n",
+            "        <a:UserResponses>\n",
+            "          <a:UserResponse>\n",
+            "            <a:ErrorCode>NoError</a:ErrorCode>\n",
+            "            <a:ErrorMessage>No error.</a:ErrorMessage>\n",
+            "            <a:RedirectTarget/>\n",
+            "            <a:UserSettings>\n",
+            "{settings}",
+            "            </a:UserSettings>\n",
+            "          </a:UserResponse>\n",
+            "        </a:UserResponses>\n",
+            "      </a:Response>\n",
+            "    </a:GetUserSettingsResponseMessage>\n",
+            "  </s:Body>\n",
+            "</s:Envelope>\n"
+        ),
+        settings = [
+            soap_string_user_setting("UserDisplayName", &config.display_domain),
+            soap_string_user_setting("UserDN", &legacy_dn),
+            soap_string_user_setting("UserDeploymentId", &deployment_id(&config.display_domain)),
+            soap_string_user_setting("ExternalMailboxServer", mailbox_server),
+            soap_string_user_setting("InternalMailboxServer", mailbox_server),
+            soap_string_user_setting("ExternalEwsUrl", ews_url),
+            soap_string_user_setting("InternalEwsUrl", ews_url),
+            soap_string_list_user_setting(
+                "EwsSupportedSchemas",
+                &[
+                    "Exchange2007",
+                    "Exchange2007_SP1",
+                    "Exchange2010",
+                    "Exchange2010_SP1",
+                    "Exchange2010_SP2",
+                    "Exchange2013",
+                ],
+            ),
+        ]
+        .join("")
+    )
+}
+
+fn soap_string_user_setting(name: &str, value: &str) -> String {
+    format!(
+        concat!(
+            "              <a:UserSetting i:type=\"a:StringSetting\">\n",
+            "                <a:Name>{name}</a:Name>\n",
+            "                <a:Value>{value}</a:Value>\n",
+            "              </a:UserSetting>\n",
+        ),
+        name = escape_xml(name),
+        value = escape_xml(value),
+    )
+}
+
+fn soap_string_list_user_setting(name: &str, values: &[&str]) -> String {
+    let values = values
+        .iter()
+        .map(|value| {
+            format!(
+                "                  <a:Value>{}</a:Value>\n",
+                escape_xml(value)
+            )
+        })
+        .collect::<String>();
+    format!(
+        concat!(
+            "              <a:UserSetting i:type=\"a:StringListSetting\">\n",
+            "                <a:Name>{name}</a:Name>\n",
+            "                <a:Values>\n",
+            "{values}",
+            "                </a:Values>\n",
+            "              </a:UserSetting>\n",
+        ),
+        name = escape_xml(name),
+        values = values,
+    )
+}
+
 fn parse_autodiscover_email(body: &[u8]) -> Option<String> {
     let body = String::from_utf8_lossy(body);
     xml_tag_value(&body, "EMailAddress")
+        .or_else(|| xml_tag_value(&body, "Mailbox"))
         .or_else(|| xml_tag_value(&body, "EMail"))
         .filter(|value| value.contains('@'))
+}
+
+fn requested_soap_user_settings(body: &[u8]) -> bool {
+    let body = String::from_utf8_lossy(body).to_ascii_lowercase();
+    body.contains("getusersettingsrequestmessage") || body.contains("getusersettings")
 }
 
 fn requested_mobilesync_schema(body: &[u8]) -> bool {
@@ -493,7 +606,8 @@ fn xml_response(body: String) -> Response {
 mod tests {
     use super::{
         parse_autodiscover_email, render_mobilesync_autodiscover, render_outlook_autodiscover,
-        render_thunderbird_autoconfig, requested_mobilesync_schema, PublishedEndpoints,
+        render_soap_user_settings_autodiscover, render_thunderbird_autoconfig,
+        requested_mobilesync_schema, requested_soap_user_settings, PublishedEndpoints,
     };
     use axum::http::HeaderMap;
     use std::sync::Mutex;
@@ -642,6 +756,18 @@ mod tests {
     }
 
     #[test]
+    fn autodiscover_request_parser_extracts_soap_mailbox() {
+        let email = parse_autodiscover_email(
+            br#"<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:a="http://schemas.microsoft.com/exchange/2010/Autodiscover" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Body><a:GetUserSettingsRequestMessage><a:Request><a:Users><a:User><a:Mailbox>test@l-p-e.ch</a:Mailbox></a:User></a:Users></a:Request></a:GetUserSettingsRequestMessage></s:Body>
+</s:Envelope>"#,
+        );
+
+        assert_eq!(email.as_deref(), Some("test@l-p-e.ch"));
+    }
+
+    #[test]
     fn autodiscover_detects_mobilesync_response_schema_request() {
         assert!(requested_mobilesync_schema(
             br#"<?xml version="1.0" encoding="utf-8"?>
@@ -665,6 +791,36 @@ mod tests {
         assert!(xml.contains("<Url>https://mail.example.test/Microsoft-Server-ActiveSync</Url>"));
         assert!(xml.contains("<EMailAddress>alice@example.test</EMailAddress>"));
         assert!(!xml.contains("<Type>IMAP</Type>"));
+    }
+
+    #[test]
+    fn soap_autodiscover_publishes_ews_user_settings_when_enabled() {
+        let config = PublishedEndpoints {
+            ews_enabled: true,
+            ews_url: "https://mail.example.test/EWS/Exchange.asmx".to_string(),
+            ..sample_config()
+        };
+
+        let xml = render_soap_user_settings_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(xml.contains("<s:Envelope"));
+        assert!(xml.contains("<a:GetUserSettingsResponseMessage>"));
+        assert!(xml.contains("<a:Name>ExternalEwsUrl</a:Name>"));
+        assert!(xml.contains("<a:Value>https://mail.example.test/EWS/Exchange.asmx</a:Value>"));
+        assert!(xml.contains("<a:Name>InternalEwsUrl</a:Name>"));
+        assert!(xml.contains("<a:Name>EwsSupportedSchemas</a:Name>"));
+        assert!(xml.contains("<a:Value>Exchange2013</a:Value>"));
+        assert!(!xml.contains("<Type>MAPI</Type>"));
+    }
+
+    #[test]
+    fn autodiscover_detects_soap_get_user_settings_request() {
+        assert!(requested_soap_user_settings(
+            br#"<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:a="http://schemas.microsoft.com/exchange/2010/Autodiscover" xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+  <s:Body><a:GetUserSettingsRequestMessage><a:Request><a:Users><a:User><a:Mailbox>test@l-p-e.ch</a:Mailbox></a:User></a:Users></a:Request></a:GetUserSettingsRequestMessage></s:Body>
+</s:Envelope>"#
+        ));
     }
 
     #[test]
