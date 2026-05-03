@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 use crate::{
+    mapi::MapiEndpoint,
     service::{error_response, ExchangeService},
     store::ExchangeStore,
 };
@@ -505,32 +506,181 @@ fn bearer_headers() -> HeaderMap {
     headers
 }
 
+fn mapi_headers(request_type: &str) -> HeaderMap {
+    let mut headers = bearer_headers();
+    headers.insert(
+        "x-requesttype",
+        HeaderValue::from_str(request_type).unwrap(),
+    );
+    headers.insert("x-requestid", HeaderValue::from_static("request-1"));
+    headers
+}
+
 async fn response_text(response: axum::response::Response) -> String {
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
+async fn response_bytes(response: axum::response::Response) -> Vec<u8> {
+    to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec()
+}
+
 #[tokio::test]
-async fn mapi_over_http_is_authenticated_but_not_implemented() {
+async fn mapi_over_http_connect_creates_emsmdb_session() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
 
-    let response = service.handle_mapi(&bearer_headers(), b"").await.unwrap();
-
-    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
-    assert_eq!(
-        response.headers().get("x-lpe-mapi-status").unwrap(),
-        "not-implemented"
-    );
-    assert!(response_text(response)
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
-        .contains("MAPI over HTTP is not implemented by LPE yet."));
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "application/mapi-http"
+    );
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    assert!(response
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("lpe_mapi_emsmdb="));
+
+    let body = response_bytes(response).await;
+    assert_eq!(&body[0..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_disconnect_consumes_emsmdb_session() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut disconnect_headers = mapi_headers("Disconnect");
+    disconnect_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &disconnect_headers, b"")
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-requesttype").unwrap(),
+        "Disconnect"
+    );
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    assert!(response
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("Max-Age=0"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_bind_creates_nspi_session() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("Bind"), b"")
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Bind");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    assert!(response
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("lpe_mapi_nspi="));
+
+    let body = response_bytes(response).await;
+    assert_eq!(body.len(), 28);
+    assert_eq!(&body[0..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_unbind_consumes_nspi_session() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let bind = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("Bind"), b"")
+        .await
+        .unwrap();
+    let cookie = bind
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut unbind_headers = mapi_headers("Unbind");
+    unbind_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &unbind_headers, b"")
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Unbind");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    assert!(response
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("Max-Age=0"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_rejects_missing_authentication() {
+    let store = FakeStore::default();
+    let service = ExchangeService::new(store);
 
     let error = service
-        .handle_mapi(&HeaderMap::new(), b"")
+        .handle_mapi(MapiEndpoint::Emsmdb, &HeaderMap::new(), b"")
         .await
         .unwrap_err();
     assert!(error.to_string().contains("missing account authentication"));

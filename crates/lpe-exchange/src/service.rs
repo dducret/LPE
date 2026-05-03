@@ -19,7 +19,10 @@ use lpe_storage::{
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use crate::store::ExchangeStore;
+use crate::{
+    mapi::{self, MapiEndpoint},
+    store::ExchangeStore,
+};
 
 const EWS_PATH: &str = "/EWS/Exchange.asmx";
 const EWS_LOWER_PATH: &str = "/ews/exchange.asmx";
@@ -42,11 +45,11 @@ pub fn router() -> Router<Storage> {
         )
         .route(
             MAPI_EMSMDB_PATH,
-            on(MethodFilter::OPTIONS, mapi_options_handler).post(mapi_post_handler),
+            on(MethodFilter::OPTIONS, mapi_options_handler).post(mapi_emsmdb_post_handler),
         )
         .route(
             MAPI_NSPI_PATH,
-            on(MethodFilter::OPTIONS, mapi_options_handler).post(mapi_post_handler),
+            on(MethodFilter::OPTIONS, mapi_options_handler).post(mapi_nspi_post_handler),
         )
 }
 
@@ -84,20 +87,37 @@ async fn mapi_options_handler() -> Response {
         .insert("allow", HeaderValue::from_static("OPTIONS, POST"));
     response.headers_mut().insert(
         "x-lpe-mapi-status",
-        HeaderValue::from_static("not-implemented"),
+        HeaderValue::from_static("transport-session-ready"),
     );
     response
 }
 
-async fn mapi_post_handler(
+async fn mapi_emsmdb_post_handler(
     State(storage): State<Storage>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    mapi_post_handler(MapiEndpoint::Emsmdb, storage, headers, body).await
+}
+
+async fn mapi_nspi_post_handler(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    mapi_post_handler(MapiEndpoint::Nspi, storage, headers, body).await
+}
+
+async fn mapi_post_handler(
+    endpoint: MapiEndpoint,
+    storage: Storage,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     let service = ExchangeService::new(storage);
-    match service.handle_mapi(&headers, body.as_ref()).await {
+    match service.handle_mapi(endpoint, &headers, body.as_ref()).await {
         Ok(response) => response,
-        Err(error) => mapi_error_response(&error),
+        Err(error) => mapi::mapi_error_response(&error),
     }
 }
 
@@ -149,9 +169,13 @@ impl<S: ExchangeStore> ExchangeService<S> {
         Ok(soap_response(payload))
     }
 
-    pub(crate) async fn handle_mapi(&self, headers: &HeaderMap, _body: &[u8]) -> Result<Response> {
-        authenticate_account(&self.store, None, headers, "mapi").await?;
-        Ok(mapi_not_implemented_response())
+    pub(crate) async fn handle_mapi(
+        &self,
+        endpoint: MapiEndpoint,
+        headers: &HeaderMap,
+        body: &[u8],
+    ) -> Result<Response> {
+        mapi::handle_mapi(&self.store, endpoint, headers, body).await
     }
 
     async fn find_folder(&self, principal: &AccountPrincipal) -> Result<String> {
@@ -2236,46 +2260,6 @@ pub(crate) fn error_response(error: &anyhow::Error) -> Response {
         return soap_auth_challenge(&message);
     }
     soap_error(StatusCode::BAD_REQUEST, &message)
-}
-
-fn mapi_not_implemented_response() -> Response {
-    let mut response = (
-        StatusCode::NOT_IMPLEMENTED,
-        "MAPI over HTTP is not implemented by LPE yet.",
-    )
-        .into_response();
-    response.headers_mut().insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/plain; charset=utf-8"),
-    );
-    response.headers_mut().insert(
-        "x-lpe-mapi-status",
-        HeaderValue::from_static("not-implemented"),
-    );
-    response
-}
-
-fn mapi_error_response(error: &anyhow::Error) -> Response {
-    let message = error.to_string();
-    if is_authentication_error(&message) {
-        let mut response = (StatusCode::UNAUTHORIZED, message).into_response();
-        response.headers_mut().insert(
-            CONTENT_TYPE,
-            HeaderValue::from_static("text/plain; charset=utf-8"),
-        );
-        response.headers_mut().insert(
-            WWW_AUTHENTICATE,
-            HeaderValue::from_static("Basic realm=\"LPE MAPI\""),
-        );
-        return response;
-    }
-
-    let mut response = (StatusCode::BAD_REQUEST, message).into_response();
-    response.headers_mut().insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static("text/plain; charset=utf-8"),
-    );
-    response
 }
 
 fn is_authentication_error(message: &str) -> bool {

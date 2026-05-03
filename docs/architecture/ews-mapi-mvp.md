@@ -6,7 +6,7 @@ This document describes the `0.1.3` `Exchange` compatibility work in `LPE`.
 
 The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchange`. `IMAP` carried the initial desktop compatibility work through `0.1.2`; `0.1.3` moves the Exchange-style compatibility focus to `EWS`. Its goal is to let Exchange-style clients read and synchronize canonical mailbox, `Contacts`, and `Calendar` data from the `LPE` server without introducing a second collaboration or mailbox store.
 
-`MAPI` implementation has started as a guarded `MAPI over HTTP` foundation for future Outlook desktop support. It is not Outlook-ready, is not advertised by autodiscover, and currently returns explicit not-implemented responses after mailbox authentication.
+`MAPI` implementation has started as a guarded `MAPI over HTTP` foundation for future Outlook desktop support. It is not Outlook-ready and is not advertised by autodiscover. The current slice implements authenticated transport request classification and session-context cookies for the first mailbox and address book request types.
 
 ### Architectural principles
 
@@ -29,14 +29,24 @@ The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchang
 
 The lowercase path is accepted for tolerant reverse-proxy and client behavior. The canonical public path is `/EWS/Exchange.asmx`.
 
-The first `MAPI over HTTP` implementation surface exists only as non-advertised authenticated route wiring:
+The first `MAPI over HTTP` implementation surface exists only as non-advertised authenticated transport and session wiring:
 
 - `OPTIONS /mapi/emsmdb`
 - `POST /mapi/emsmdb`
 - `OPTIONS /mapi/nspi`
 - `POST /mapi/nspi`
 
-`/mapi/emsmdb` is reserved for future mailbox ROP processing. `/mapi/nspi` is reserved for future address book and name service provider interface behavior. `OPTIONS` returns the supported HTTP methods with `x-lpe-mapi-status: not-implemented`. `POST` requires mailbox authentication and returns `501 Not Implemented` with the same status marker until real `MAPI over HTTP` semantics exist.
+`/mapi/emsmdb` is reserved for mailbox ROP processing. `/mapi/nspi` is reserved for address book and name service provider interface behavior. `OPTIONS` returns the supported HTTP methods with `x-lpe-mapi-status: transport-session-ready`. `POST` requires mailbox authentication and returns `application/mapi-http` responses with `X-RequestType`, `X-ResponseCode`, `X-RequestId`, and `X-ServerApplication`.
+
+Implemented request types:
+
+- EMSMDB `Connect`: creates an authenticated MAPI session context and returns an EMSMDB connect success body plus an implementation-owned session cookie
+- EMSMDB `Disconnect`: consumes the authenticated EMSMDB session cookie and expires it
+- NSPI `Bind`: creates an authenticated address book session context and returns an NSPI bind success body plus an implementation-owned session cookie
+- NSPI `Unbind`: consumes the authenticated NSPI session cookie and expires it
+- `PING`: returns a transport success response on either endpoint
+
+Other request types currently return MAPI/HTTP diagnostic responses with non-zero `X-ResponseCode` values instead of HTTP text placeholders. `Execute`, mailbox ROPs, and NSPI table/query operations are not implemented yet.
 
 ### Authentication
 
@@ -107,7 +117,7 @@ Request element names ending in `Request`, such as `GetUserOofSettingsRequest`, 
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
 - enabled `EWS` POX autodiscover publishes the configured EWS URL through a `WEB` protocol block with `ASUrl` for EWS-aware clients; it intentionally does not publish top-level `EXCH` or `EXPR` mailbox protocol blocks because those imply a full Outlook desktop Exchange/MAPI route that is not implemented
 - SOAP `GetUserSettings` autodiscover publishes the same configured `EWS` endpoint as `ExternalEwsUrl` and `InternalEwsUrl` for EWS clients that prefer SOAP autodiscover over POX
-- `MAPI over HTTP` currently has authenticated route wiring only; it is not an Outlook-ready mailbox service and must not be advertised
+- `MAPI over HTTP` currently has authenticated transport and session-context wiring only; it is not an Outlook-ready mailbox service and must not be advertised
 
 ### Completion priorities
 
@@ -120,7 +130,6 @@ The next EWS phase should focus on:
 The next MAPI phase should focus on:
 
 - autodiscover design for `EXHTTP` / `MapiHttp` that remains disabled until real Outlook login succeeds
-- authenticated `MAPI over HTTP` session context creation and cookie handling
-- initial EMSMDB connect and disconnect semantics against canonical mailbox account state
-- initial NSPI bind/unbind and minimal address book discovery without introducing a parallel GAL store
+- EMSMDB `Execute` parsing and the first read-only ROPs required for Outlook mailbox logon
+- NSPI `GetSpecialTable`, `QueryRows`, `GetProps`, and `ResolveNames` without introducing a parallel GAL store
 - binary protocol parsing and response serialization with focused conformance fixtures before any route is advertised to Outlook

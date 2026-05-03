@@ -1,3 +1,4 @@
+mod mapi;
 mod service;
 mod store;
 

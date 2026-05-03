@@ -23,7 +23,7 @@ Without a reverse proxy, these routes are exposed directly by the Rust `LPE` ser
 
 With the documented Debian reverse proxy, those routes are published as-is by `nginx` and should then be re-exposed by `LPE-CT` on the public client hostname.
 
-The Rust service also mounts the first guarded `MAPI over HTTP` implementation routes at `/mapi/emsmdb` and `/mapi/nspi`. These are not client-autoconfiguration endpoints, are not published by autodiscover, and currently return explicit not-implemented responses after mailbox authentication.
+The Rust service also mounts the first guarded `MAPI over HTTP` implementation routes at `/mapi/emsmdb` and `/mapi/nspi`. These are not client-autoconfiguration endpoints, are not published by autodiscover, and currently provide authenticated transport/session handling only.
 
 ### Thunderbird
 
@@ -58,7 +58,7 @@ An `SMTP` protocol block is included only when a real authenticated client-submi
 
 The MVP does not advertise `MAPI` or `MobileSync` for Outlook desktop. Outlook for Windows desktop must not be forced to use `ActiveSync` as an Exchange account.
 
-`MAPI over HTTP` implementation has started for the future Outlook desktop Exchange path, but autodiscover must not publish it until the service implements real EMSMDB, NSPI, session context, and mailbox bootstrap behavior.
+`MAPI over HTTP` implementation has started for the future Outlook desktop Exchange path, but autodiscover must not publish it until the service implements real EMSMDB `Execute`, NSPI address book operations, and mailbox bootstrap behavior.
 
 The `0.1.3` `EWS` endpoint is the Exchange-style compatibility focus for mailbox, contacts, and calendar synchronization. Autodiscovery publishes it only when `LPE_AUTOCONFIG_EWS_ENABLED` is explicitly set to a true value. This keeps `EWS` publication an administrator choice until the deployment accepts the current MVP limits.
 
