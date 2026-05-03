@@ -8,7 +8,9 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 
 ## Implemented scope
 
-- account authentication through `LOGIN` with the existing mailbox account credentials
+- account authentication through `LOGIN` or `AUTHENTICATE PLAIN` with the
+  existing mailbox account credentials, supporting Outlook-style SASL initial
+  response and challenge/response flows
 - `AUTHENTICATE XOAUTH2` with the mailbox `OAuth2` bearer access token
 - `CAPABILITY`, `NOOP`, `LOGOUT`
 - `ENABLE CONDSTORE` for clients that explicitly enable conditional-store
