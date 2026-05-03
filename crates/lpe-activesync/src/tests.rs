@@ -855,7 +855,7 @@ async fn options_returns_capabilities_after_authentication() {
             .get("ms-asprotocolcommands")
             .and_then(|value| value.to_str().ok()),
         Some(
-            "FolderSync,ItemOperations,Ping,Provision,Search,SendMail,SmartForward,SmartReply,Sync"
+            "FolderSync,GetItemEstimate,ItemOperations,Ping,Provision,Search,SendMail,SmartForward,SmartReply,Sync"
         )
     );
 }
@@ -906,6 +906,41 @@ fn wbxml_roundtrip_preserves_tokens_and_text() {
     assert_eq!(decoded.name, "FolderSync");
     assert_eq!(decoded.child("SyncKey").unwrap().text_value(), "1");
     assert_eq!(decoded.child("WindowSize").unwrap().text_value(), "10");
+}
+
+#[test]
+fn wbxml_roundtrip_preserves_get_item_estimate_tokens() {
+    let mut root = WbxmlNode::new(6, "GetItemEstimate");
+    let mut collections = WbxmlNode::new(6, "Collections");
+    let mut collection = WbxmlNode::new(6, "Collection");
+    collection.push(WbxmlNode::with_text(0, "SyncKey", "key1"));
+    collection.push(WbxmlNode::with_text(
+        6,
+        "CollectionId",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    ));
+    collections.push(collection);
+    root.push(collections);
+
+    let decoded = decode_wbxml(&encode_wbxml(&root)).unwrap();
+    let decoded_collection = decoded
+        .child("Collections")
+        .unwrap()
+        .child("Collection")
+        .unwrap();
+
+    assert_eq!(decoded.name, "GetItemEstimate");
+    assert_eq!(
+        decoded_collection.child("SyncKey").unwrap().text_value(),
+        "key1"
+    );
+    assert_eq!(
+        decoded_collection
+            .child("CollectionId")
+            .unwrap()
+            .text_value(),
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    );
 }
 
 #[tokio::test]
@@ -1253,6 +1288,115 @@ async fn sync_key_zero_primes_then_returns_paged_more_available_changes() {
         .unwrap();
     assert!(stable_collection.child("Commands").is_none());
     assert!(stable_collection.child("MoreAvailable").is_none());
+}
+
+#[tokio::test]
+async fn get_item_estimate_returns_pending_sync_count() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::inbox_email(
+                "11111111-1111-1111-1111-111111111111",
+                inbox.id,
+                "inbox",
+                "One",
+            ),
+            FakeStore::inbox_email(
+                "22222222-2222-2222-2222-222222222222",
+                inbox.id,
+                "inbox",
+                "Two",
+            ),
+            FakeStore::inbox_email(
+                "33333333-3333-3333-3333-333333333333",
+                inbox.id,
+                "inbox",
+                "Three",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let priming_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", "0"));
+        collection.push(WbxmlNode::with_text(
+            0,
+            "CollectionId",
+            inbox.id.to_string(),
+        ));
+        collection.push(WbxmlNode::with_text(0, "WindowSize", "2"));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+    let priming_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &priming_request,
+        )
+        .await
+        .unwrap();
+    let priming_sync = decode_response_body(priming_response).await;
+    let sync_key = collection_sync_key(&priming_sync, &inbox.id.to_string());
+
+    let estimate_request = encode_wbxml(&{
+        let mut root = WbxmlNode::new(6, "GetItemEstimate");
+        let mut collections = WbxmlNode::new(6, "Collections");
+        let mut collection = WbxmlNode::new(6, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", sync_key));
+        collection.push(WbxmlNode::with_text(
+            6,
+            "CollectionId",
+            inbox.id.to_string(),
+        ));
+        collections.push(collection);
+        root.push(collections);
+        root
+    });
+
+    let estimate_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("GetItemEstimate".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &estimate_request,
+        )
+        .await
+        .unwrap();
+    assert_eq!(estimate_response.status(), StatusCode::OK);
+
+    let estimate = decode_response_body(estimate_response).await;
+    let response = estimate.child("Response").unwrap();
+    let response_collection = response.child("Collection").unwrap();
+    assert_eq!(estimate.child("Status").unwrap().text_value(), "1");
+    assert_eq!(response.child("Status").unwrap().text_value(), "1");
+    assert_eq!(
+        response_collection
+            .child("CollectionId")
+            .unwrap()
+            .text_value(),
+        inbox.id.to_string()
+    );
+    assert_eq!(
+        response_collection.child("Estimate").unwrap().text_value(),
+        "3"
+    );
 }
 
 #[tokio::test]

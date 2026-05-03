@@ -47,6 +47,7 @@ The MVP implements a focused `WBXML` codec for the code pages needed by the curr
 
 - `Provision`
 - `FolderSync`
+- `GetItemEstimate`
 - `Sync`
 - `SendMail`
 - `Search`
@@ -84,6 +85,7 @@ The MVP implements a focused `WBXML` codec for the code pages needed by the curr
 - guarantee that a message sent from a native client becomes visible in the authoritative `Sent` view
 - delegated mailbox submission through the same canonical sender-authorization model used by `JMAP`
 - persistent `SyncKey` storage in `PostgreSQL` per account, device, and collection
+- `GetItemEstimate` responses from persisted `SyncKey` state so clients can estimate pending collection deltas before fetching them
 - complete `Sync` pagination with `WindowSize` and `MoreAvailable`, including continuation of a server batch across multiple `SyncKey` values
 - incremental `Sync` state tracking with compact per-item fingerprints instead of full serialized `ApplicationData` snapshots for large mailbox collections
 - hardened `SendMail` parsing for native clients: folded headers, RFC 2047 encoded subjects and display names, `quoted-printable`, `base64`, and `multipart/alternative` text bodies
