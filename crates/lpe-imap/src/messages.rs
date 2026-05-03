@@ -93,6 +93,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                     Some(false),
                     None,
                     None,
+                    None,
                 )
                 .await?;
             self.refresh_selected().await?;
@@ -135,6 +136,12 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             false if mode_token.starts_with("-") && flags.contains("\\Flagged") => Some(false),
             _ => None,
         };
+        let deleted = match mode.replace {
+            true => Some(flags.contains("\\Deleted")),
+            false if mode_token.starts_with("+") && flags.contains("\\Deleted") => Some(true),
+            false if mode_token.starts_with("-") && flags.contains("\\Deleted") => Some(false),
+            _ => None,
+        };
 
         let principal = self.require_auth()?;
         let modified_ids = self
@@ -145,6 +152,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                 &ids,
                 unread,
                 flagged,
+                deleted,
                 condstore.unchanged_since,
             )
             .await?;

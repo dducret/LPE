@@ -87,7 +87,7 @@ const DEFAULT_COLLECTION_ID: &str = "default";
 const DEFAULT_TASK_LIST_NAME: &str = "Tasks";
 const DEFAULT_TASK_LIST_ROLE: &str = "inbox";
 const CANONICAL_CHANGE_CHANNEL: &str = "lpe_canonical_changes";
-const EXPECTED_SCHEMA_VERSION: &str = "0.1.8";
+const EXPECTED_SCHEMA_VERSION: &str = "0.1.9";
 
 impl Storage {
     pub(crate) async fn allocate_mail_modseq_in_tx(

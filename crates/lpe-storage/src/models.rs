@@ -110,6 +110,7 @@ pub(crate) struct ImapEmailRow {
     pub(crate) body_html_sanitized: Option<String>,
     pub(crate) unread: bool,
     pub(crate) flagged: bool,
+    pub(crate) imap_deleted: bool,
     pub(crate) has_attachments: bool,
     pub(crate) size_octets: i64,
     pub(crate) internet_message_id: Option<String>,

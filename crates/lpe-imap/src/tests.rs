@@ -212,6 +212,7 @@ impl ImapStore for FakeStore {
         message_ids: &'a [Uuid],
         unread: Option<bool>,
         flagged: Option<bool>,
+        deleted: Option<bool>,
         unchanged_since: Option<u64>,
     ) -> StoreFuture<'a, Vec<Uuid>> {
         let mut emails = self.emails.lock().unwrap();
@@ -242,6 +243,9 @@ impl ImapStore for FakeStore {
             if let Some(flagged) = flagged {
                 email.flagged = flagged;
             }
+            if let Some(deleted) = deleted {
+                email.deleted = deleted;
+            }
             if let Some(modseq) = next_modseq {
                 email.modseq = modseq;
             }
@@ -251,6 +255,20 @@ impl ImapStore for FakeStore {
             self.apply_post_flag_update_action(action);
         }
         Box::pin(async move { Ok(modified_ids) })
+    }
+
+    fn expunge_imap_deleted<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_id: Uuid,
+        message_ids: &'a [Uuid],
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        let mut emails = self.emails.lock().unwrap();
+        emails.retain(|email| {
+            email.mailbox_id != mailbox_id || !email.deleted || !message_ids.contains(&email.id)
+        });
+        Box::pin(async move { Ok(()) })
     }
 
     fn query_jmap_email_ids<'a>(
@@ -379,6 +397,7 @@ impl ImapStore for FakeStore {
             body_html_sanitized: source.body_html_sanitized,
             unread: source.unread,
             flagged: source.flagged,
+            deleted: false,
             has_attachments: source.has_attachments,
             size_octets: source.size_octets,
             internet_message_id: source.internet_message_id,
@@ -477,6 +496,7 @@ impl ImapStore for FakeStore {
             body_html_sanitized: None,
             unread: false,
             flagged: false,
+            deleted: false,
             has_attachments: !input.attachments.is_empty(),
             size_octets: input.size_octets,
             internet_message_id: input.internet_message_id,
@@ -552,6 +572,7 @@ impl ImapStore for FakeStore {
             body_html_sanitized: input.body_html_sanitized,
             unread: false,
             flagged: false,
+            deleted: false,
             has_attachments: !input.attachments.is_empty(),
             size_octets: input.size_octets,
             internet_message_id: input.internet_message_id,
@@ -1023,7 +1044,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
 
     let select = send_command(&mut stream, "OL9 SELECT Inbox\r\n", "OL9").await;
     assert!(select.contains("* 1 EXISTS"));
-    assert!(select.contains("* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Draft)]"));
+    assert!(select.contains("* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Deleted \\Draft)]"));
     assert!(select.contains("* OK [UIDVALIDITY 1]"));
     assert!(select.contains("* OK [UIDNEXT 2]"));
     assert!(select.contains("* OK [HIGHESTMODSEQ 3]"));
@@ -1168,6 +1189,55 @@ async fn outlook_first_login_list_select_sync_transcript() {
 
     let close = send_command(&mut stream, "OL16 CLOSE\r\n", "OL16").await;
     assert!(close.contains("OL16 OK CLOSE completed"));
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn thunderbird_copy_to_trash_then_expunge_removes_source_only() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    let create_trash = send_command(&mut stream, "A2 CREATE \"Deleted Items\"\r\n", "A2").await;
+    assert!(create_trash.contains("A2 OK CREATE completed"));
+
+    let select_inbox = send_command(&mut stream, "A3 SELECT Inbox\r\n", "A3").await;
+    assert!(select_inbox.contains("* 1 EXISTS"));
+
+    let copy_to_trash =
+        send_command(&mut stream, "A4 UID COPY 1 \"Deleted Items\"\r\n", "A4").await;
+    assert!(copy_to_trash.contains("A4 OK [COPYUID 1 1 "));
+
+    let mark_deleted = send_command(
+        &mut stream,
+        "A5 UID STORE 1 +FLAGS.SILENT (\\Deleted)\r\n",
+        "A5",
+    )
+    .await;
+    assert!(mark_deleted.contains("A5 OK STORE completed"));
+
+    let search_deleted = send_command(&mut stream, "A6 UID SEARCH DELETED\r\n", "A6").await;
+    assert!(search_deleted.contains("* SEARCH 1"));
+
+    let uid_expunge = send_command(&mut stream, "A7 UID EXPUNGE 1\r\n", "A7").await;
+    assert!(uid_expunge.contains("* 1 EXPUNGE"));
+    assert!(uid_expunge.contains("A7 OK UID EXPUNGE completed"));
+
+    let search_after = send_command(&mut stream, "A8 UID SEARCH ALL\r\n", "A8").await;
+    assert!(search_after.contains("* SEARCH"));
+    assert!(!search_after.contains("* SEARCH 1"));
+
+    let select_trash = send_command(&mut stream, "A9 SELECT \"Deleted Items\"\r\n", "A9").await;
+    assert!(select_trash.contains("* 1 EXISTS"));
+    let trash_fetch = send_command(&mut stream, "A10 UID FETCH 3:* (FLAGS)\r\n", "A10").await;
+    assert!(trash_fetch.contains("FLAGS ("));
+    assert!(!trash_fetch.contains("\\Deleted"));
 
     task.abort();
 }
@@ -1740,6 +1810,7 @@ fn email(
         body_html_sanitized: None,
         unread,
         flagged,
+        deleted: false,
         has_attachments: false,
         size_octets: 64,
         internet_message_id: Some(format!("<{}@example.test>", id)),

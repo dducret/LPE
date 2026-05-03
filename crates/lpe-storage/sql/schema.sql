@@ -21,7 +21,7 @@ CREATE SEQUENCE message_modseq_seq START WITH 2;
 
 CREATE TABLE schema_metadata (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
-    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.8'),
+    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.9'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -119,6 +119,7 @@ CREATE TABLE messages (
         CHECK (delivery_status IN ('stored', 'draft', 'queued', 'relayed', 'deferred', 'quarantined', 'bounced', 'failed')),
     unread BOOLEAN NOT NULL DEFAULT TRUE,
     flagged BOOLEAN NOT NULL DEFAULT FALSE,
+    imap_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     has_attachments BOOLEAN NOT NULL DEFAULT FALSE,
     size_octets BIGINT NOT NULL DEFAULT 0 CHECK (size_octets >= 0),
     mime_blob_ref TEXT NOT NULL CHECK (btrim(mime_blob_ref) <> ''),
@@ -151,6 +152,10 @@ CREATE INDEX messages_unread_partial_idx
 CREATE INDEX messages_flagged_partial_idx
     ON messages (tenant_id, account_id, mailbox_id, received_at DESC)
     WHERE flagged = TRUE;
+
+CREATE INDEX messages_imap_deleted_partial_idx
+    ON messages (tenant_id, account_id, mailbox_id, imap_uid ASC)
+    WHERE imap_deleted = TRUE;
 
 CREATE UNIQUE INDEX messages_mailbox_imap_uid_idx
     ON messages (mailbox_id, imap_uid);
@@ -986,7 +991,7 @@ LEFT JOIN attachments a
 GROUP BY m.id, m.account_id, m.mailbox_id, m.received_at, m.subject_normalized, mb.search_vector;
 
 INSERT INTO schema_metadata (singleton, schema_version)
-VALUES (TRUE, '0.1.8');
+VALUES (TRUE, '0.1.9');
 
 INSERT INTO security_settings (
     tenant_id,

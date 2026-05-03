@@ -8,9 +8,9 @@ use crate::{
     parse::{first_token, tokenize},
     render::{
         first_unseen_sequence, mailbox_name_matches, parse_status_items, render_list_flags,
-        render_mailbox_name, render_status_response, sanitize_imap_quoted,
+        render_mailbox_name, render_status_response, resolve_message_indexes, sanitize_imap_quoted,
     },
-    SelectedMailbox, Session, UID_VALIDITY,
+    MessageRefKind, SelectedMailbox, Session, UID_VALIDITY,
 };
 
 impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
@@ -406,10 +406,12 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         });
 
         writer
-            .write_all(b"* FLAGS (\\Seen \\Flagged \\Draft)\r\n")
+            .write_all(b"* FLAGS (\\Seen \\Flagged \\Deleted \\Draft)\r\n")
             .await?;
         writer
-            .write_all(b"* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Draft)] supported flags\r\n")
+            .write_all(
+                b"* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Deleted \\Draft)] supported flags\r\n",
+            )
             .await?;
         writer
             .write_all(format!("* {} EXISTS\r\n", exists).as_bytes())
@@ -503,13 +505,87 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     where
         W: AsyncWriteExt + Unpin,
     {
-        self.require_selected()?;
+        let selected = self.require_selected()?.clone();
+        let indices = selected
+            .emails
+            .iter()
+            .enumerate()
+            .filter_map(|(index, email)| email.deleted.then_some(index))
+            .collect::<Vec<_>>();
+        self.expunge_selected_indices(&selected, &indices, writer)
+            .await?;
         self.refresh_selected().await?;
         writer
             .write_all(format!("{tag} OK EXPUNGE completed\r\n").as_bytes())
             .await?;
         writer.flush().await?;
         Ok(true)
+    }
+
+    pub(crate) async fn handle_uid_expunge<W>(
+        &mut self,
+        tag: &str,
+        arguments: &str,
+        writer: &mut W,
+    ) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        let selected = self.require_selected()?.clone();
+        let indices =
+            resolve_message_indexes(&selected.emails, arguments.trim(), MessageRefKind::Uid)?
+                .into_iter()
+                .filter(|index| selected.emails[*index].deleted)
+                .collect::<Vec<_>>();
+        self.expunge_selected_indices(&selected, &indices, writer)
+            .await?;
+        self.refresh_selected().await?;
+        writer
+            .write_all(format!("{tag} OK UID EXPUNGE completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    async fn expunge_selected_indices<W>(
+        &mut self,
+        selected: &SelectedMailbox,
+        indices: &[usize],
+        writer: &mut W,
+    ) -> Result<()>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        if indices.is_empty() {
+            return Ok(());
+        }
+        let principal = self.require_auth()?;
+        let ids = indices
+            .iter()
+            .map(|index| selected.emails[*index].id)
+            .collect::<Vec<_>>();
+        self.store
+            .expunge_imap_deleted(
+                principal.account_id,
+                selected.mailbox_id,
+                &ids,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "imap-expunge".to_string(),
+                    subject: format!(
+                        "expunge {} messages from {}",
+                        ids.len(),
+                        selected.mailbox_name
+                    ),
+                },
+            )
+            .await?;
+        for index in indices.iter().rev() {
+            writer
+                .write_all(format!("* {} EXPUNGE\r\n", index + 1).as_bytes())
+                .await?;
+        }
+        Ok(())
     }
 
     pub(crate) async fn resolve_mailbox_by_name(&self, arguments: &str) -> Result<JmapMailbox> {

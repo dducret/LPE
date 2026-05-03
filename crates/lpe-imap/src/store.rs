@@ -26,8 +26,16 @@ pub trait ImapStore: AccountAuthStore {
         message_ids: &'a [Uuid],
         unread: Option<bool>,
         flagged: Option<bool>,
+        deleted: Option<bool>,
         unchanged_since: Option<u64>,
     ) -> StoreFuture<'a, Vec<Uuid>>;
+    fn expunge_imap_deleted<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        message_ids: &'a [Uuid],
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
     fn query_jmap_email_ids<'a>(
         &'a self,
         account_id: Uuid,
@@ -140,6 +148,7 @@ impl ImapStore for Storage {
         message_ids: &'a [Uuid],
         unread: Option<bool>,
         flagged: Option<bool>,
+        deleted: Option<bool>,
         unchanged_since: Option<u64>,
     ) -> StoreFuture<'a, Vec<Uuid>> {
         Box::pin(async move {
@@ -149,9 +158,23 @@ impl ImapStore for Storage {
                 message_ids,
                 unread,
                 flagged,
+                deleted,
                 unchanged_since,
             )
             .await
+        })
+    }
+
+    fn expunge_imap_deleted<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        message_ids: &'a [Uuid],
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.expunge_imap_deleted(account_id, mailbox_id, message_ids, audit)
+                .await
         })
     }
 

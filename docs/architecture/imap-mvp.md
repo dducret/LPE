@@ -32,7 +32,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - Outlook-style slash-delimited custom folder names such as `Projects/2026`
   are accepted and stored as canonical custom mailbox display names
 - `SELECT` on `Inbox`, `Sent`, and `Drafts`
-- `EXAMINE`, `CHECK`, `CLOSE`, `UNSELECT`, and no-op `EXPUNGE` for Outlook desktop synchronization flows
+- `EXAMINE`, `CHECK`, `CLOSE`, `UNSELECT`, and `EXPUNGE` for Outlook desktop synchronization flows
 - `FETCH` over canonical message state, including `ENVELOPE`, `BODYSTRUCTURE`,
   `BODY`, `BODY.PEEK[HEADER.FIELDS (...)]`, `BODY.PEEK[HEADER.FIELDS.NOT (...)]`,
   part-scoped header fields, body sections, MIME part headers, and partial literals
@@ -42,7 +42,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - RFC 3501 `FETCH` macros `FAST`, `ALL`, and `FULL`, with `ALL` and `FULL`
   including `ENVELOPE` as required for clients that use macro fetches during
   initial folder population
-- minimal `STORE` for `\Seen` and `\Flagged`
+- minimal `STORE` for `\Seen`, `\Flagged`, and `\Deleted`
 - `IDLE` on a selected mailbox, with periodic refresh against canonical mailbox
   state; Outlook-style `IDLE` before mailbox selection is accepted as a no-op
   idle window until `DONE`
@@ -52,7 +52,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `MOVE` and `UID MOVE` between `Inbox` and custom user mailboxes
 - richer `SEARCH`
 - `UID FETCH`, `UID STORE`, and `UID SEARCH`
-- tolerant no-op `UID EXPUNGE` while destructive expunge remains deferred
+- `UID EXPUNGE` for messages already marked `\Deleted`
 - `APPEND` to `Drafts`, persisted through the canonical draft workflow
 - Outlook-style `APPEND` to `Sent` is accepted as a compatibility acknowledgement
   after client `SMTP` submission, but it does not persist another message or create
@@ -67,6 +67,8 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - mailbox reads are served from the canonical `messages`, `message_bodies`, `message_recipients`, and protected `message_bcc_recipients` data already used by `JMAP` and `ActiveSync`
 - `\Seen` maps to the canonical `unread` flag
 - `\Flagged` maps to the canonical `flagged` flag
+- `\Deleted` maps to a canonical pending-IMAP-deletion flag and `EXPUNGE`
+  permanently removes only those marked messages
 - `SELECT` / `EXAMINE` publishes `PERMANENTFLAGS` for the writable canonical
   flag subset so Outlook can identify the flags it may persist
 - `APPEND` to `Drafts` reuses `save_draft_message`
@@ -91,7 +93,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 
 - no outbound message submission through `IMAP APPEND`; outbound submission remains canonical through `JMAP`, `ActiveSync`, `SMTP` submission, and the web/API submission workflow
 - `APPEND` to `Sent` is an Outlook interoperability acknowledgement only; it intentionally does not create a second `Sent` copy because the authenticated `SMTP` submission path writes the authoritative copy
-- no durable subscribe state, parent/child hierarchy metadata, destructive `EXPUNGE`, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
+- no durable subscribe state, parent/child hierarchy metadata, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
 - mailbox management accepts slash-delimited Outlook folder names, but true parent/child hierarchy metadata is not implemented yet
 - `FETCH BODYSTRUCTURE` and MIME section rendering are compatibility projections over the canonical message text and sanitized HTML fields; attachment MIME reserialization remains deferred
 - `RFC822.SIZE` reports the byte length of the RFC822 projection returned by `BODY[]`, not the original raw ingest size, so size metadata stays consistent with what IMAP clients fetch
@@ -103,7 +105,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
   `KEYWORD`, `UNKEYWORD`, `TEXT`, `SUBJECT`, `FROM`, `TO`, `CC`, `BODY`,
   `HEADER`, `BEFORE`, `ON`, `SINCE`, `SENTBEFORE`, `SENTON`, `SENTSINCE`,
   `LARGER`, `SMALLER`, `NOT`, `OR`, sequence-set criteria, and `UID`
-- `EXPUNGE` is accepted for client compatibility but is currently a no-op because the adapter does not yet expose `\Deleted` or permanent message deletion
+- `EXPUNGE` permanently removes messages that were already marked `\Deleted`, which supports Thunderbird and Outlook copy-to-trash deletion workflows without leaving the source message behind
 - `IDLE` currently refreshes by polling canonical mailbox state for the selected mailbox; it now coexists with a reusable canonical mail change watermark, but still does not publish `QRESYNC`-grade vanished history
 - the current `ACL` slice is administrative only for the authenticated owner mailbox namespace; delegated mailbox projection through IMAP remains deferred even though the grants are canonical today
 
@@ -118,7 +120,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `MOVE` updates the canonical message row in place but still assigns a new destination `UID`, preserving `UIDPLUS` mapping and keeping the destination mailbox append-like from an IMAP client perspective
 - `FETCH MODSEQ` and `STORE ... (UNCHANGEDSINCE n)` operate directly on those canonical values; mixed conditional `STORE` batches may partially apply and return `MODIFIED` for the stale subset
 - `IDLE` only reports selected-mailbox changes that can be observed from canonical mailbox refreshes, such as flag changes, additions, and removals
-- because there is still no canonical vanished-history journal, destructive `EXPUNGE` and `QRESYNC` stay deferred even though `CONDSTORE` now uses canonical first-class change anchors
+- because there is still no canonical vanished-history journal, `QRESYNC` stays deferred even though `CONDSTORE` now uses canonical first-class change anchors
 - `ACL` rights are a truthful projection over canonical delegation: mailbox access rights map to mailbox visibility and mutation, `p` maps to canonical `send-as`, and `b` is an `LPE`-specific right for canonical `send-on-behalf`
 - `Bcc` remains protected in those tradeoffs as well: it is preserved in protected storage for owner reconstruction in `Drafts` and `Sent`, but never added to IMAP search matching
 

@@ -14,6 +14,7 @@ SERVICE_NAME="${SERVICE_NAME:-lpe.service}"
 NGINX_SERVICE_NAME="${NGINX_SERVICE_NAME:-nginx}"
 NGINX_SITE_PATH="${NGINX_SITE_PATH:-/etc/nginx/sites-available/lpe.conf}"
 EXPECTED_FORMATS="${EXPECTED_FORMATS:-pdf docx odt}"
+SCHEMA_FILE="${SCHEMA_FILE:-$SRC_DIR/crates/lpe-storage/sql/schema.sql}"
 
 fail() {
   echo "[FAIL] $*" >&2
@@ -94,8 +95,12 @@ pass "Found view public.searchable_mail_documents"
 
 schema_version="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE;")" \
   || fail "Schema metadata is missing. Run /opt/lpe/src/installation/debian-trixie/init-schema.sh"
-[[ "$schema_version" == "0.1.3" ]] || fail "Unexpected schema version: $schema_version"
-pass "Schema version is 0.1.3"
+expected_schema_version="$(
+  awk -F"'" '/schema_version TEXT NOT NULL CHECK/ { print $2; exit }' "$SCHEMA_FILE"
+)"
+[[ -n "$expected_schema_version" ]] || fail "Unable to read expected schema version from $SCHEMA_FILE"
+[[ "$schema_version" == "$expected_schema_version" ]] || fail "Unexpected schema version: $schema_version; expected $expected_schema_version"
+pass "Schema version is $expected_schema_version"
 
 check_http_json_field "$HTTP_BASE/health" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/live" '"status":"ok"'

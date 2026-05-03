@@ -362,6 +362,9 @@ pub(crate) fn render_flags(email: &ImapEmail, mailbox_name: &str) -> String {
     if email.flagged {
         flags.push("\\Flagged");
     }
+    if email.deleted {
+        flags.push("\\Deleted");
+    }
     if mailbox_name.eq_ignore_ascii_case("Drafts") {
         flags.push("\\Draft");
     }
@@ -984,6 +987,7 @@ mod tests {
             body_html_sanitized: None,
             unread: true,
             flagged: false,
+            deleted: false,
             has_attachments: false,
             size_octets: 4,
             internet_message_id: None,
@@ -1031,6 +1035,7 @@ mod tests {
             body_html_sanitized: None,
             unread: true,
             flagged: false,
+            deleted: false,
             has_attachments: false,
             size_octets: 4,
             internet_message_id: None,
@@ -1088,6 +1093,7 @@ mod tests {
             body_html_sanitized: None,
             unread: true,
             flagged: false,
+            deleted: false,
             has_attachments: false,
             size_octets: 4,
             internet_message_id: None,

@@ -110,6 +110,7 @@ pub struct ImapEmail {
     pub body_html_sanitized: Option<String>,
     pub unread: bool,
     pub flagged: bool,
+    pub deleted: bool,
     pub has_attachments: bool,
     pub size_octets: i64,
     pub internet_message_id: Option<String>,
@@ -714,6 +715,7 @@ impl Storage {
                 b.body_html_sanitized,
                 m.unread,
                 m.flagged,
+                m.imap_deleted,
                 m.has_attachments,
                 m.size_octets,
                 m.internet_message_id,
@@ -973,6 +975,7 @@ impl Storage {
                     body_html_sanitized: row.body_html_sanitized,
                     unread: row.unread,
                     flagged: row.flagged,
+                    deleted: row.imap_deleted,
                     has_attachments: row.has_attachments,
                     size_octets: row.size_octets,
                     internet_message_id: row.internet_message_id,
@@ -989,6 +992,7 @@ impl Storage {
         message_ids: &[Uuid],
         unread: Option<bool>,
         flagged: Option<bool>,
+        deleted: Option<bool>,
         unchanged_since: Option<u64>,
     ) -> Result<Vec<Uuid>> {
         if message_ids.is_empty() {
@@ -1038,12 +1042,13 @@ impl Storage {
             SET
                 unread = COALESCE($4, unread),
                 flagged = COALESCE($5, flagged),
-                imap_modseq = $6
+                imap_deleted = COALESCE($6, imap_deleted),
+                imap_modseq = $7
             WHERE tenant_id = $1
               AND account_id = $2
               AND mailbox_id = $3
-              AND id = ANY($7)
-              AND ($8::bigint IS NULL OR imap_modseq <= $8)
+              AND id = ANY($8)
+              AND ($9::bigint IS NULL OR imap_modseq <= $9)
             "#,
         )
         .bind(&tenant_id)
@@ -1051,6 +1056,7 @@ impl Storage {
         .bind(mailbox_id)
         .bind(unread)
         .bind(flagged)
+        .bind(deleted)
         .bind(modseq)
         .bind(message_ids)
         .bind(unchanged_since_i64)
@@ -1061,6 +1067,45 @@ impl Storage {
         tx.commit().await?;
 
         Ok(modified_ids)
+    }
+
+    pub async fn expunge_imap_deleted(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        message_ids: &[Uuid],
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        if message_ids.is_empty() {
+            return Ok(());
+        }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+
+        let deleted = sqlx::query(
+            r#"
+            DELETE FROM messages
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND mailbox_id = $3
+              AND id = ANY($4)
+              AND imap_deleted = TRUE
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(message_ids)
+        .execute(&mut *tx)
+        .await?;
+
+        if deleted.rows_affected() > 0 {
+            self.insert_audit(&mut tx, &tenant_id, audit).await?;
+            Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        }
+        tx.commit().await?;
+
+        Ok(())
     }
 
     pub async fn fetch_jmap_draft(&self, account_id: Uuid, id: Uuid) -> Result<Option<JmapEmail>> {

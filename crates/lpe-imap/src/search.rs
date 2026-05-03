@@ -65,7 +65,7 @@ impl SearchExpression {
             Self::All => true,
             Self::Seen(expected) => !email.unread == *expected,
             Self::Flagged(expected) => email.flagged == *expected,
-            Self::Deleted(expected) => !*expected,
+            Self::Deleted(expected) => email.deleted == *expected,
             Self::Answered(expected) => !*expected,
             Self::Draft(expected) => (email.mailbox_role == "drafts") == *expected,
             Self::Recent(expected) => !*expected,
