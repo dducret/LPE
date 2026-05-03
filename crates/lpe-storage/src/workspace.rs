@@ -273,7 +273,7 @@ impl Storage {
                 time_zone, duration_minutes, recurrence_rule,
                 title, location, attendees, attendees_json, notes
             )
-            VALUES ($1, $2, $3, $4::date, $5::time, $6, $7, $8, $9, $10, $11, $12)
+            VALUES ($1, $2, $3, $4::date, $5::time, $6, $7, $8, $9, $10, $11, $12, $13)
             ON CONFLICT (id) DO UPDATE SET
                 event_date = EXCLUDED.event_date,
                 event_time = EXCLUDED.event_time,
