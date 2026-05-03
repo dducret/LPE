@@ -435,6 +435,13 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
         "FindPeople",
         "ExpandDL",
         "Subscribe",
+        "GetDelegate",
+        "GetUserConfiguration",
+        "GetSharingMetadata",
+        "GetSharingFolder",
+        "GetAttachment",
+        "Unsubscribe",
+        "GetEvents",
     ] {
         let request = format!("<s:Envelope><s:Body><m:{operation} /></s:Body></s:Envelope>");
         let response = service
