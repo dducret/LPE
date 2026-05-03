@@ -65,6 +65,7 @@ struct PublishedEndpoints {
     ews_enabled: bool,
     ews_url: String,
     mapi_enabled: bool,
+    mapi_http_requested: bool,
     mapi_emsmdb_url: String,
     mapi_nspi_url: String,
     activesync_url: String,
@@ -101,6 +102,10 @@ impl PublishedEndpoints {
         let ews_url = env::var("LPE_AUTOCONFIG_EWS_URL")
             .unwrap_or_else(|_| format!("{public_scheme}://{public_host}/EWS/Exchange.asmx"));
         let mapi_enabled = env_flag("LPE_AUTOCONFIG_MAPI_ENABLED");
+        let mapi_http_requested = headers
+            .get("x-mapihttpcapability")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| !value.trim().is_empty());
         let mapi_mailbox_id = email_hint.unwrap_or_default();
         let mapi_emsmdb_url = env::var("LPE_AUTOCONFIG_MAPI_EMSMDB_URL").unwrap_or_else(|_| {
             format!("{public_scheme}://{public_host}/mapi/emsmdb/?MailboxId={mapi_mailbox_id}")
@@ -122,6 +127,7 @@ impl PublishedEndpoints {
             ews_enabled,
             ews_url,
             mapi_enabled,
+            mapi_http_requested,
             mapi_emsmdb_url,
             mapi_nspi_url,
             activesync_url,
@@ -242,10 +248,15 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
         ));
     }
 
+    if config.mapi_enabled && !config.mapi_http_requested {
+        xml.push_str(&render_exchange_provider_autodiscover_protocols(
+            config, email,
+        ));
+    }
     if config.ews_enabled && !config.mapi_enabled {
         xml.push_str(&render_ews_web_autodiscover_protocol(config, email));
     }
-    if config.mapi_enabled {
+    if config.mapi_enabled && config.mapi_http_requested {
         xml.push_str(&render_mapi_http_autodiscover_protocol(config));
     }
 
@@ -255,6 +266,80 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
         "</Autodiscover>\n"
     ));
     xml
+}
+
+fn render_exchange_provider_autodiscover_protocols(
+    config: &PublishedEndpoints,
+    email: &str,
+) -> String {
+    let mailbox_server = ews_host(&config.ews_url).unwrap_or(&config.imap_host);
+    let server_dn = format!(
+        "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Servers/cn={mailbox_server}"
+    );
+    let mdb_dn = format!("{server_dn}/cn=LPE Private MDB");
+    let cert_principal = format!("msstd:{mailbox_server}");
+    format!(
+        concat!(
+            "      <Protocol>\n",
+            "        <Type>EXCH</Type>\n",
+            "        <Server>{mailbox_server}</Server>\n",
+            "        <ServerDN>{server_dn}</ServerDN>\n",
+            "        <MdbDN>{mdb_dn}</MdbDN>\n",
+            "        <ASUrl>{ews_url}</ASUrl>\n",
+            "        <OOFUrl>{ews_url}</OOFUrl>\n",
+            "        <EwsUrl>{ews_url}</EwsUrl>\n",
+            "        <Port>0</Port>\n",
+            "        <DirectoryPort>0</DirectoryPort>\n",
+            "        <ReferralPort>0</ReferralPort>\n",
+            "        <AD>{mailbox_server}</AD>\n",
+            "        <PublicFolderServer>{mailbox_server}</PublicFolderServer>\n",
+            "        <ServerExclusiveConnect>off</ServerExclusiveConnect>\n",
+            "      </Protocol>\n",
+            "      <Protocol>\n",
+            "        <Type>EXPR</Type>\n",
+            "        <Server>{mailbox_server}</Server>\n",
+            "        <ServerDN>{server_dn}</ServerDN>\n",
+            "        <MdbDN>{mdb_dn}</MdbDN>\n",
+            "        <ASUrl>{ews_url}</ASUrl>\n",
+            "        <OOFUrl>{ews_url}</OOFUrl>\n",
+            "        <EwsUrl>{ews_url}</EwsUrl>\n",
+            "        <Port>0</Port>\n",
+            "        <DirectoryPort>0</DirectoryPort>\n",
+            "        <ReferralPort>0</ReferralPort>\n",
+            "        <SSL>On</SSL>\n",
+            "        <AuthPackage>Basic</AuthPackage>\n",
+            "        <CertPrincipalName>{cert_principal}</CertPrincipalName>\n",
+            "        <LoginName>{email}</LoginName>\n",
+            "      </Protocol>\n",
+            "      <Protocol>\n",
+            "        <Type>WEB</Type>\n",
+            "        <Server>{mailbox_server}</Server>\n",
+            "        <LoginName>{email}</LoginName>\n",
+            "        <SSL>on</SSL>\n",
+            "        <AuthPackage>Basic</AuthPackage>\n",
+            "        <External>\n",
+            "          <OWAUrl AuthenticationMethod=\"Basic\">{ews_url}</OWAUrl>\n",
+            "          <Protocol>\n",
+            "            <Type>EXPR</Type>\n",
+            "            <ASUrl>{ews_url}</ASUrl>\n",
+            "          </Protocol>\n",
+            "        </External>\n",
+            "        <Internal>\n",
+            "          <OWAUrl AuthenticationMethod=\"Basic\">{ews_url}</OWAUrl>\n",
+            "          <Protocol>\n",
+            "            <Type>EXCH</Type>\n",
+            "            <ASUrl>{ews_url}</ASUrl>\n",
+            "          </Protocol>\n",
+            "        </Internal>\n",
+            "      </Protocol>\n"
+        ),
+        mailbox_server = escape_xml(mailbox_server),
+        server_dn = escape_xml(&server_dn),
+        mdb_dn = escape_xml(&mdb_dn),
+        ews_url = escape_xml(&config.ews_url),
+        cert_principal = escape_xml(&cert_principal),
+        email = escape_xml(email),
+    )
 }
 
 fn render_mapi_http_autodiscover_protocol(config: &PublishedEndpoints) -> String {
@@ -678,6 +763,7 @@ mod tests {
             ews_enabled: false,
             ews_url: "https://mail.example.test/EWS/Exchange.asmx".to_string(),
             mapi_enabled: false,
+            mapi_http_requested: false,
             mapi_emsmdb_url: "https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test"
                 .to_string(),
             mapi_nspi_url: "https://mail.example.test/mapi/nspi/?MailboxId=alice@example.test"
@@ -773,6 +859,7 @@ mod tests {
     fn outlook_autodiscover_can_publish_explicit_mapi_http_protocol() {
         let config = PublishedEndpoints {
             mapi_enabled: true,
+            mapi_http_requested: true,
             mapi_emsmdb_url: "https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test"
                 .to_string(),
             mapi_nspi_url: "https://mail.example.test/mapi/nspi/?MailboxId=alice@example.test"
@@ -794,6 +881,26 @@ mod tests {
     }
 
     #[test]
+    fn outlook_autodiscover_can_publish_exchange_providers_for_legacy_mapi_probe() {
+        let config = PublishedEndpoints {
+            mapi_enabled: true,
+            mapi_http_requested: false,
+            ..sample_config()
+        };
+
+        let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+        assert!(xml.contains("<ServerDN>/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Servers/cn=mail.example.test</ServerDN>"));
+        assert!(xml.contains("<MdbDN>/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Servers/cn=mail.example.test/cn=LPE Private MDB</MdbDN>"));
+        assert!(xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+        assert!(xml.contains("<AuthPackage>Basic</AuthPackage>"));
+        assert!(xml.contains("<CertPrincipalName>msstd:mail.example.test</CertPrincipalName>"));
+        assert!(xml.contains("<EwsUrl>https://mail.example.test/EWS/Exchange.asmx</EwsUrl>"));
+        assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
+    }
+
+    #[test]
     fn mapi_autodiscover_publication_is_env_opt_in() {
         let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("LPE_AUTOCONFIG_MAPI_ENABLED", "true");
@@ -804,10 +911,12 @@ mod tests {
 
         let mut headers = HeaderMap::new();
         headers.insert("host", "mail.example.test".parse().unwrap());
+        headers.insert("x-mapihttpcapability", "1".parse().unwrap());
         let config = PublishedEndpoints::from_headers(&headers, Some("alice@example.test"));
         let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
 
         assert!(config.mapi_enabled);
+        assert!(config.mapi_http_requested);
         assert_eq!(
             config.mapi_emsmdb_url,
             "https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test"
