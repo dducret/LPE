@@ -22,6 +22,9 @@ const EMSMDB_COOKIE: &str = "lpe_mapi_emsmdb";
 const NSPI_COOKIE: &str = "lpe_mapi_nspi";
 const EMSMDB_COOKIE_PATH: &str = "/mapi/emsmdb";
 const NSPI_COOKIE_PATH: &str = "/mapi/nspi";
+const NSPI_SERVER_GUID: [u8; 16] = [
+    0x4c, 0x50, 0x45, 0x00, 0x4d, 0x41, 0x50, 0x49, 0x4e, 0x53, 0x50, 0x49, 0x00, 0x00, 0x00, 0x01,
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MapiEndpoint {
@@ -156,7 +159,7 @@ fn bind_response(
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
-    body.extend_from_slice(Uuid::nil().as_bytes());
+    body.extend_from_slice(&NSPI_SERVER_GUID);
     write_u32(&mut body, 0);
     mapi_response("Bind", request_id, 0, body, Some(cookie))
 }
@@ -388,7 +391,16 @@ fn mapi_response(
     body: Vec<u8>,
     cookie: Option<String>,
 ) -> Response {
-    let mut response = (StatusCode::OK, body).into_response();
+    let mut framed_body = Vec::new();
+    framed_body.extend_from_slice(b"PROCESSING\r\n");
+    framed_body.extend_from_slice(b"DONE\r\n");
+    framed_body.extend_from_slice(format!("X-ResponseCode: {response_code}\r\n").as_bytes());
+    framed_body.extend_from_slice(b"X-ElapsedTime: 0\r\n");
+    framed_body.extend_from_slice(b"X-StartTime: Mon, 01 Jan 2001 00:00:00 GMT\r\n");
+    framed_body.extend_from_slice(b"\r\n");
+    framed_body.extend_from_slice(&body);
+
+    let mut response = (StatusCode::OK, framed_body).into_response();
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static(MAPI_CONTENT_TYPE));

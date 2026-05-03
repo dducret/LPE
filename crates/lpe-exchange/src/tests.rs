@@ -542,10 +542,21 @@ async fn response_text(response: axum::response::Response) -> String {
 }
 
 async fn response_bytes(response: axum::response::Response) -> Vec<u8> {
-    to_bytes(response.into_body(), usize::MAX)
+    let bytes = to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap()
-        .to_vec()
+        .to_vec();
+    strip_mapi_http_envelope(bytes)
+}
+
+fn strip_mapi_http_envelope(bytes: Vec<u8>) -> Vec<u8> {
+    if !bytes.starts_with(b"PROCESSING\r\nDONE\r\n") {
+        return bytes;
+    }
+    let Some(offset) = bytes.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return bytes;
+    };
+    bytes[offset + 4..].to_vec()
 }
 
 fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
@@ -591,7 +602,12 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
         .unwrap()
         .starts_with("lpe_mapi_emsmdb="));
 
-    let body = response_bytes(response).await;
+    let raw_body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap()
+        .to_vec();
+    assert!(raw_body.starts_with(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 0\r\n"));
+    let body = strip_mapi_http_envelope(raw_body);
     assert_eq!(&body[0..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
 }
 
@@ -1067,6 +1083,7 @@ async fn mapi_over_http_bind_creates_nspi_session() {
     let body = response_bytes(response).await;
     assert_eq!(body.len(), 28);
     assert_eq!(&body[0..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
+    assert_ne!(&body[8..24], &[0; 16]);
 }
 
 #[tokio::test]

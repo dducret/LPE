@@ -36,13 +36,13 @@ The first `MAPI over HTTP` implementation surface exists as authenticated transp
 - `OPTIONS /mapi/nspi`
 - `POST /mapi/nspi`
 
-`/mapi/emsmdb` is reserved for mailbox ROP processing. `/mapi/nspi` is reserved for address book and name service provider interface behavior. `OPTIONS` returns the supported HTTP methods with `x-lpe-mapi-status: transport-session-ready`. `POST` requires mailbox authentication and returns `application/mapi-http` responses with `X-RequestType`, `X-ResponseCode`, `X-RequestId`, and `X-ServerApplication`.
+`/mapi/emsmdb` is reserved for mailbox ROP processing. `/mapi/nspi` is reserved for address book and name service provider interface behavior. `OPTIONS` returns the supported HTTP methods with `x-lpe-mapi-status: transport-session-ready`. `POST` requires mailbox authentication and returns `application/mapi-http` responses with `X-RequestType`, `X-ResponseCode`, `X-RequestId`, and `X-ServerApplication`. Response bodies use the MAPI/HTTP common response framing, including the `PROCESSING` and `DONE` meta-tags before the request-specific binary response body, so strict Outlook and Remote Connectivity Analyzer clients do not parse raw binary as the transport envelope.
 
 Implemented request types:
 
 - EMSMDB `Connect`: creates an authenticated MAPI session context and returns an EMSMDB connect success body plus an implementation-owned session cookie
 - EMSMDB `Disconnect`: consumes the authenticated EMSMDB session cookie and expires it
-- NSPI `Bind`: creates an authenticated address book session context and returns an NSPI bind success body plus an implementation-owned session cookie
+- NSPI `Bind`: creates an authenticated address book session context and returns an NSPI bind success body with a stable non-zero server GUID plus an implementation-owned session cookie
 - NSPI `Unbind`: consumes the authenticated NSPI session cookie and expires it
 - `PING`: returns a transport success response on either endpoint
 
