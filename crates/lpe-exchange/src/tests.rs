@@ -544,6 +544,7 @@ async fn find_folder_lists_contact_and_calendar_folders() {
     assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
     assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
     assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\"/>"));
+    assert!(body.contains("<t:ParentFolderId Id=\"msgfolderroot\"/>"));
     assert!(body.contains("<t:DisplayName>RCA Sync</t:DisplayName>"));
     assert!(body.contains("<t:TotalCount>0</t:TotalCount>"));
     assert!(body.contains("<t:ChildFolderCount>0</t:ChildFolderCount>"));
@@ -584,6 +585,7 @@ async fn sync_folder_hierarchy_lists_contact_and_calendar_folders() {
     assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
     assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
     assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\"/>"));
+    assert!(body.contains("<t:ParentFolderId Id=\"msgfolderroot\"/>"));
     assert!(body.contains("<t:DisplayName>RCA Sync</t:DisplayName>"));
 }
 
@@ -611,6 +613,41 @@ async fn get_folder_returns_msgfolderroot() {
     assert!(body.contains("<t:DisplayName>Root</t:DisplayName>"));
     assert!(body.contains("<t:TotalCount>0</t:TotalCount>"));
     assert!(body.contains("<t:ChildFolderCount>0</t:ChildFolderCount>"));
+}
+
+#[tokio::test]
+async fn get_folder_root_reports_child_folders_for_client_bootstrap() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:DistinguishedFolderId Id="msgfolderroot"/></m:FolderIds></m:GetFolder></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:FolderId Id=\"msgfolderroot\"/>"));
+    assert!(body.contains("<t:ChildFolderCount>3</t:ChildFolderCount>"));
 }
 
 #[tokio::test]

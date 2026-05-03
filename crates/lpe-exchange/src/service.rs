@@ -257,7 +257,11 @@ impl<S: ExchangeStore> ExchangeService<S> {
         let mut folders = String::new();
         for kind in requested {
             match kind {
-                FolderKind::Root => folders.push_str(&root_folder_xml()),
+                FolderKind::Root => {
+                    folders.push_str(&root_folder_xml(
+                        self.root_child_folder_count(principal).await?,
+                    ));
+                }
                 FolderKind::Contacts => {
                     folders.push_str(
                         &self
@@ -446,6 +450,24 @@ impl<S: ExchangeStore> ExchangeService<S> {
             ),
             items = items,
         ))
+    }
+
+    async fn root_child_folder_count(&self, principal: &AccountPrincipal) -> Result<usize> {
+        Ok(self
+            .store
+            .fetch_accessible_contact_collections(principal.account_id)
+            .await?
+            .len()
+            + self
+                .store
+                .fetch_accessible_calendar_collections(principal.account_id)
+                .await?
+                .len()
+            + self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?
+                .len())
     }
 
     async fn sync_folder_items(
@@ -1931,18 +1953,20 @@ fn operation_error_response(operation: &str, code: &str, message: &str) -> Strin
     )
 }
 
-fn root_folder_xml() -> String {
-    concat!(
-        "<t:Folder>",
-        "<t:FolderId Id=\"msgfolderroot\"/>",
-        "<t:DisplayName>Root</t:DisplayName>",
-        "<t:FolderClass>IPF.Note</t:FolderClass>",
-        "<t:TotalCount>0</t:TotalCount>",
-        "<t:ChildFolderCount>0</t:ChildFolderCount>",
-        "<t:DistinguishedFolderId Id=\"msgfolderroot\"/>",
-        "</t:Folder>"
+fn root_folder_xml(child_folder_count: usize) -> String {
+    format!(
+        concat!(
+            "<t:Folder>",
+            "<t:FolderId Id=\"msgfolderroot\"/>",
+            "<t:DisplayName>Root</t:DisplayName>",
+            "<t:FolderClass>IPF.Note</t:FolderClass>",
+            "<t:TotalCount>0</t:TotalCount>",
+            "<t:ChildFolderCount>{child_folder_count}</t:ChildFolderCount>",
+            "<t:DistinguishedFolderId Id=\"msgfolderroot\"/>",
+            "</t:Folder>"
+        ),
+        child_folder_count = child_folder_count,
     )
-    .to_string()
 }
 
 fn folder_xml(collection: &CollaborationCollection, distinguished_id: &str, class: &str) -> String {
@@ -1950,6 +1974,7 @@ fn folder_xml(collection: &CollaborationCollection, distinguished_id: &str, clas
         concat!(
             "<t:Folder>",
             "<t:FolderId Id=\"{id}\"/>",
+            "<t:ParentFolderId Id=\"msgfolderroot\"/>",
             "<t:DisplayName>{display}</t:DisplayName>",
             "<t:FolderClass>IPF.{class}</t:FolderClass>",
             "<t:TotalCount>0</t:TotalCount>",
@@ -1969,6 +1994,7 @@ fn mailbox_folder_xml(mailbox: &JmapMailbox) -> String {
         concat!(
             "<t:Folder>",
             "<t:FolderId Id=\"mailbox:{id}\"/>",
+            "<t:ParentFolderId Id=\"msgfolderroot\"/>",
             "<t:DisplayName>{display}</t:DisplayName>",
             "<t:FolderClass>IPF.Note</t:FolderClass>",
             "<t:TotalCount>{total_count}</t:TotalCount>",
