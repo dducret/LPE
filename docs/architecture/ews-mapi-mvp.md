@@ -61,6 +61,8 @@ When a client requests unsupported distinguished folders such as `inbox` or `tas
 
 The adapter also answers early client bootstrap probes for `GetServerTimeZones`, `ResolveNames`, and `GetUserAvailability`. `GetServerTimeZones` returns minimal `UTC` and `W. Europe Standard Time` definitions. `ResolveNames` returns an EWS no-results error because GAL resolution is not implemented. `GetUserAvailability` returns an EWS free/busy generation error because free/busy remains outside the current MVP.
 
+Write operations that are outside the current read/sync MVP, including `CreateItem`, `UpdateItem`, and `DeleteItem`, return EWS-shaped `ErrorUnsupportedOperation` responses. They must not mutate canonical contacts or calendar data until write support is explicitly designed and routed through canonical collaboration rights.
+
 ### Current limitations
 
 - the first `SyncFolderItems` implementation returns a full create-style snapshot for the requested folder and a compact server `SyncState`; it does not yet maintain a full EWS incremental change ledger

@@ -77,6 +77,9 @@ impl<S: ExchangeStore> ExchangeService<S> {
             "GetServerTimeZones" => get_server_time_zones_response(),
             "ResolveNames" => resolve_names_no_results_response(),
             "GetUserAvailability" => get_user_availability_unavailable_response(),
+            "CreateItem" => unsupported_operation_response("CreateItem"),
+            "UpdateItem" => unsupported_operation_response("UpdateItem"),
+            "DeleteItem" => unsupported_operation_response("DeleteItem"),
             _ => bail!("unsupported EWS operation {operation}"),
         };
 
@@ -361,6 +364,9 @@ fn operation_name(body: &str) -> Option<&'static str> {
         "GetServerTimeZones",
         "GetUserAvailability",
         "ResolveNames",
+        "CreateItem",
+        "UpdateItem",
+        "DeleteItem",
         "FindFolder",
         "GetFolder",
         "FindItem",
@@ -577,6 +583,23 @@ fn get_user_availability_unavailable_response() -> String {
         "</m:GetUserAvailabilityResponse>"
     )
     .to_string()
+}
+
+fn unsupported_operation_response(operation: &str) -> String {
+    format!(
+        concat!(
+            "<m:{operation}Response>",
+            "<m:ResponseMessages>",
+            "<m:{operation}ResponseMessage ResponseClass=\"Error\">",
+            "<m:MessageText>{operation} is not implemented by the EWS MVP.</m:MessageText>",
+            "<m:ResponseCode>ErrorUnsupportedOperation</m:ResponseCode>",
+            "<m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>",
+            "</m:{operation}ResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:{operation}Response>"
+        ),
+        operation = escape_xml(operation),
+    )
 }
 
 fn root_folder_xml() -> String {
