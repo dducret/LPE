@@ -543,11 +543,15 @@ async fn find_folder_lists_contact_and_calendar_folders() {
     assert!(body.contains("<m:FindFolderResponse>"));
     assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
     assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
-    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\"/>"));
-    assert!(body.contains("<t:ParentFolderId Id=\"msgfolderroot\"/>"));
+    assert!(body.contains("<t:ContactsFolder>"));
+    assert!(body.contains("<t:CalendarFolder>"));
+    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-44444444-4444-4444-4444-444444444444\"/>"));
+    assert!(body.contains("<t:ParentFolderId Id=\"msgfolderroot\" ChangeKey=\"root\"/>"));
     assert!(body.contains("<t:DisplayName>RCA Sync</t:DisplayName>"));
     assert!(body.contains("<t:TotalCount>0</t:TotalCount>"));
     assert!(body.contains("<t:ChildFolderCount>0</t:ChildFolderCount>"));
+    assert!(body.contains("<t:EffectiveRights>"));
+    assert!(body.contains("<t:UnreadCount>0</t:UnreadCount>"));
 }
 
 #[tokio::test]
@@ -581,12 +585,15 @@ async fn sync_folder_hierarchy_lists_contact_and_calendar_folders() {
     let body = response_text(response).await;
     assert!(body.contains("<m:SyncFolderHierarchyResponse>"));
     assert!(body.contains("<m:IncludesLastFolderInRange>true</m:IncludesLastFolderInRange>"));
+    assert!(body.contains("<t:Create><t:ContactsFolder>"));
+    assert!(body.contains("<t:Create><t:CalendarFolder>"));
     assert!(body.contains("<t:Create><t:Folder>"));
     assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
     assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
-    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\"/>"));
-    assert!(body.contains("<t:ParentFolderId Id=\"msgfolderroot\"/>"));
+    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-44444444-4444-4444-4444-444444444444\"/>"));
+    assert!(body.contains("<t:ParentFolderId Id=\"msgfolderroot\" ChangeKey=\"root\"/>"));
     assert!(body.contains("<t:DisplayName>RCA Sync</t:DisplayName>"));
+    assert!(body.contains("<t:UnreadCount>0</t:UnreadCount>"));
 }
 
 #[tokio::test]
@@ -609,10 +616,12 @@ async fn get_folder_returns_msgfolderroot() {
     let body = response_text(response).await;
     assert!(body.contains("<m:GetFolderResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("<t:FolderId Id=\"msgfolderroot\"/>"));
+    assert!(body.contains("<t:FolderId Id=\"msgfolderroot\" ChangeKey=\"root\"/>"));
     assert!(body.contains("<t:DisplayName>Root</t:DisplayName>"));
     assert!(body.contains("<t:TotalCount>0</t:TotalCount>"));
     assert!(body.contains("<t:ChildFolderCount>0</t:ChildFolderCount>"));
+    assert!(body.contains("<t:EffectiveRights>"));
+    assert!(body.contains("<t:UnreadCount>0</t:UnreadCount>"));
 }
 
 #[tokio::test]
@@ -646,7 +655,7 @@ async fn get_folder_root_reports_child_folders_for_client_bootstrap() {
     let body = response_text(response).await;
     assert!(body.contains("<m:GetFolderResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("<t:FolderId Id=\"msgfolderroot\"/>"));
+    assert!(body.contains("<t:FolderId Id=\"msgfolderroot\" ChangeKey=\"root\"/>"));
     assert!(body.contains("<t:ChildFolderCount>3</t:ChildFolderCount>"));
 }
 
@@ -709,7 +718,7 @@ async fn create_folder_uses_canonical_mailbox_store() {
     let body = response_text(response).await;
     assert!(body.contains("<m:CreateFolderResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\"/>"));
+    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-44444444-4444-4444-4444-444444444444\"/>"));
     assert!(body.contains("<t:TotalCount>0</t:TotalCount>"));
     assert_eq!(created_mailboxes.lock().unwrap()[0].name, "RCA Sync");
 }
@@ -796,7 +805,7 @@ async fn get_folder_returns_system_mailbox_by_distinguished_id() {
     let body = response_text(response).await;
     assert!(body.contains("<m:GetFolderResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("<t:FolderId Id=\"mailbox:55555555-5555-5555-5555-555555555555\"/>"));
+    assert!(body.contains("<t:FolderId Id=\"mailbox:55555555-5555-5555-5555-555555555555\" ChangeKey=\"ck-55555555-5555-5555-5555-555555555555\"/>"));
     assert!(body.contains("<t:DisplayName>Inbox</t:DisplayName>"));
 }
 

@@ -153,7 +153,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
                 "</m:FindFolderResponse>"
             ),
             folders = folders,
-            count = count_tag_occurrences(&folders, "<t:Folder>"),
+            count = count_folder_elements(&folders),
         ))
     }
 
@@ -1957,12 +1957,21 @@ fn root_folder_xml(child_folder_count: usize) -> String {
     format!(
         concat!(
             "<t:Folder>",
-            "<t:FolderId Id=\"msgfolderroot\"/>",
-            "<t:DisplayName>Root</t:DisplayName>",
+            "<t:FolderId Id=\"msgfolderroot\" ChangeKey=\"root\"/>",
             "<t:FolderClass>IPF.Note</t:FolderClass>",
+            "<t:DisplayName>Root</t:DisplayName>",
             "<t:TotalCount>0</t:TotalCount>",
             "<t:ChildFolderCount>{child_folder_count}</t:ChildFolderCount>",
-            "<t:DistinguishedFolderId Id=\"msgfolderroot\"/>",
+            "<t:EffectiveRights>",
+            "<t:CreateAssociated>true</t:CreateAssociated>",
+            "<t:CreateContents>true</t:CreateContents>",
+            "<t:CreateHierarchy>true</t:CreateHierarchy>",
+            "<t:Delete>true</t:Delete>",
+            "<t:Modify>true</t:Modify>",
+            "<t:Read>true</t:Read>",
+            "<t:ViewPrivateItems>true</t:ViewPrivateItems>",
+            "</t:EffectiveRights>",
+            "<t:UnreadCount>0</t:UnreadCount>",
             "</t:Folder>"
         ),
         child_folder_count = child_folder_count,
@@ -1970,22 +1979,37 @@ fn root_folder_xml(child_folder_count: usize) -> String {
 }
 
 fn folder_xml(collection: &CollaborationCollection, distinguished_id: &str, class: &str) -> String {
+    let element = match distinguished_id {
+        CONTACTS_FOLDER_ID => "ContactsFolder",
+        CALENDAR_FOLDER_ID => "CalendarFolder",
+        _ => "Folder",
+    };
     format!(
         concat!(
-            "<t:Folder>",
-            "<t:FolderId Id=\"{id}\"/>",
-            "<t:ParentFolderId Id=\"msgfolderroot\"/>",
-            "<t:DisplayName>{display}</t:DisplayName>",
+            "<t:{element}>",
+            "<t:FolderId Id=\"{id}\" ChangeKey=\"{change_key}\"/>",
+            "<t:ParentFolderId Id=\"msgfolderroot\" ChangeKey=\"root\"/>",
             "<t:FolderClass>IPF.{class}</t:FolderClass>",
+            "<t:DisplayName>{display}</t:DisplayName>",
             "<t:TotalCount>0</t:TotalCount>",
             "<t:ChildFolderCount>0</t:ChildFolderCount>",
-            "<t:DistinguishedFolderId Id=\"{distinguished_id}\"/>",
-            "</t:Folder>"
+            "<t:EffectiveRights>",
+            "<t:CreateAssociated>true</t:CreateAssociated>",
+            "<t:CreateContents>true</t:CreateContents>",
+            "<t:CreateHierarchy>true</t:CreateHierarchy>",
+            "<t:Delete>true</t:Delete>",
+            "<t:Modify>true</t:Modify>",
+            "<t:Read>true</t:Read>",
+            "<t:ViewPrivateItems>true</t:ViewPrivateItems>",
+            "</t:EffectiveRights>",
+            "<t:UnreadCount>0</t:UnreadCount>",
+            "</t:{element}>"
         ),
+        element = element,
         id = escape_xml(&collection.id),
+        change_key = escape_xml(&folder_change_key(&collection.id)),
         display = escape_xml(&collection.display_name),
         class = class,
-        distinguished_id = distinguished_id,
     )
 }
 
@@ -1993,18 +2017,40 @@ fn mailbox_folder_xml(mailbox: &JmapMailbox) -> String {
     format!(
         concat!(
             "<t:Folder>",
-            "<t:FolderId Id=\"mailbox:{id}\"/>",
-            "<t:ParentFolderId Id=\"msgfolderroot\"/>",
-            "<t:DisplayName>{display}</t:DisplayName>",
+            "<t:FolderId Id=\"mailbox:{id}\" ChangeKey=\"{change_key}\"/>",
+            "<t:ParentFolderId Id=\"msgfolderroot\" ChangeKey=\"root\"/>",
             "<t:FolderClass>IPF.Note</t:FolderClass>",
+            "<t:DisplayName>{display}</t:DisplayName>",
             "<t:TotalCount>{total_count}</t:TotalCount>",
             "<t:ChildFolderCount>0</t:ChildFolderCount>",
+            "<t:EffectiveRights>",
+            "<t:CreateAssociated>true</t:CreateAssociated>",
+            "<t:CreateContents>true</t:CreateContents>",
+            "<t:CreateHierarchy>true</t:CreateHierarchy>",
+            "<t:Delete>true</t:Delete>",
+            "<t:Modify>true</t:Modify>",
+            "<t:Read>true</t:Read>",
+            "<t:ViewPrivateItems>true</t:ViewPrivateItems>",
+            "</t:EffectiveRights>",
+            "<t:UnreadCount>{unread_count}</t:UnreadCount>",
             "</t:Folder>"
         ),
         id = mailbox.id,
+        change_key = folder_change_key(&mailbox.id.to_string()),
         display = escape_xml(&mailbox.name),
         total_count = mailbox.total_emails,
+        unread_count = mailbox.unread_emails,
     )
+}
+
+fn folder_change_key(id: &str) -> String {
+    format!("ck-{id}")
+}
+
+fn count_folder_elements(value: &str) -> usize {
+    count_tag_occurrences(value, "<t:Folder>")
+        + count_tag_occurrences(value, "<t:ContactsFolder>")
+        + count_tag_occurrences(value, "<t:CalendarFolder>")
 }
 
 fn contact_summary_xml(contact: &AccessibleContact) -> String {

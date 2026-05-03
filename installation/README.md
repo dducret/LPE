@@ -545,8 +545,8 @@ and `/api/jmap/ws`.
 EWS paths: `/Microsoft-Server-ActiveSync`, `/EWS/Exchange.asmx`,
 `/ews/exchange.asmx`, `/autodiscover/`, `/Autodiscover/`, `/autoconfig/`, and
 `/.well-known/autoconfig/`. A healthy public publication returns an Outlook
-autodiscover XML response containing `IMAP`, or opt-in `EWS` protocol blocks
-when `LPE_AUTOCONFIG_EWS_ENABLED` is enabled. `OPTIONS
+autodiscover XML response containing `IMAP`, or an opt-in `WEB` EWS discovery
+block when `LPE_AUTOCONFIG_EWS_ENABLED` is enabled. `OPTIONS
 /Microsoft-Server-ActiveSync` returns the `ms-asprotocolversions` and
 `ms-asprotocolcommands` headers.
 

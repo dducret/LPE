@@ -56,9 +56,9 @@ An `SMTP` protocol block is included only when a real authenticated client-submi
 
 The MVP does not advertise `MAPI` or `MobileSync` for Outlook desktop. Outlook for Windows desktop must not be forced to use `ActiveSync` as an Exchange account.
 
-The `0.1.3` `EWS` endpoint is the Exchange-style compatibility focus for mailbox, contacts, and calendar synchronization. Outlook autodiscovery publishes it only when `LPE_AUTOCONFIG_EWS_ENABLED` is explicitly set to a true value. This keeps `EWS` publication an administrator choice until the deployment accepts the current MVP limits.
+The `0.1.3` `EWS` endpoint is the Exchange-style compatibility focus for mailbox, contacts, and calendar synchronization. Autodiscovery publishes it only when `LPE_AUTOCONFIG_EWS_ENABLED` is explicitly set to a true value. This keeps `EWS` publication an administrator choice until the deployment accepts the current MVP limits.
 
-When `EWS` autodiscovery is enabled, the Outlook POX response includes both `EXCH` and `EXPR` protocol blocks that carry the same configured `EwsUrl` and `EmwsUrl`. These blocks exist only to let Exchange-style clients discover the published `/EWS/Exchange.asmx` endpoint. They must not be treated as a `MAPI`, `RPC`, or authenticated client-submission publication.
+When `EWS` autodiscovery is enabled, the POX response publishes the configured `/EWS/Exchange.asmx` URL through a `WEB` protocol block with an `ASUrl`. This gives EWS-aware clients such as Thunderbird a discovery path without advertising top-level `EXCH` or `EXPR` mailbox protocols that Outlook for Windows desktop treats as a full Exchange/MAPI route.
 
 Autodiscover responses include the POX `Response`, `User`, `Account`, and `Protocol` shape expected by Microsoft clients. The request parser accepts both unprefixed and namespace-prefixed request elements, including the `a:EMailAddress` form used by Microsoft connectivity tooling.
 
@@ -106,7 +106,7 @@ workflow after loading a draft. It must not hand the message directly to
 - `LPE_AUTOCONFIG_SMTP_HOST`, optional; enables the published `SMTP` block
 - `LPE_AUTOCONFIG_SMTP_PORT`, default `465`
 - `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, default `SSL`
-- `LPE_AUTOCONFIG_EWS_ENABLED`, optional; set to `true`, `1`, `yes`, or `on` to publish the contacts/calendar `EWS` endpoint in Outlook autodiscover
+- `LPE_AUTOCONFIG_EWS_ENABLED`, optional; set to `true`, `1`, `yes`, or `on` to publish the `EWS` endpoint through EWS-aware autodiscover responses
 - `LPE_AUTOCONFIG_EWS_URL`, optional; default `{public_scheme}://{public_host}/EWS/Exchange.asmx`
 - `LPE_AUTOCONFIG_ACTIVESYNC_URL`, optional; default `{public_scheme}://{public_host}/Microsoft-Server-ActiveSync`
 - `LPE_AUTOCONFIG_JMAP_SESSION_URL`, optional

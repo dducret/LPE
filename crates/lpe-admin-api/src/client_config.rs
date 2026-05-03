@@ -229,8 +229,7 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
     }
 
     if config.ews_enabled {
-        xml.push_str(&render_ews_autodiscover_protocol("EXCH", config, email));
-        xml.push_str(&render_ews_autodiscover_protocol("EXPR", config, email));
+        xml.push_str(&render_ews_web_autodiscover_protocol(config, email));
     }
 
     xml.push_str(concat!(
@@ -241,26 +240,23 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
     xml
 }
 
-fn render_ews_autodiscover_protocol(
-    protocol_type: &str,
-    config: &PublishedEndpoints,
-    email: &str,
-) -> String {
+fn render_ews_web_autodiscover_protocol(config: &PublishedEndpoints, email: &str) -> String {
     format!(
         concat!(
             "      <Protocol>\n",
-            "        <Type>{protocol_type}</Type>\n",
+            "        <Type>WEB</Type>\n",
             "        <Server>{public_host}</Server>\n",
             "        <LoginName>{email}</LoginName>\n",
             "        <SSL>on</SSL>\n",
             "        <AuthPackage>Basic</AuthPackage>\n",
-            "        <ASUrl>{ews_url}</ASUrl>\n",
-            "        <EwsUrl>{ews_url}</EwsUrl>\n",
-            "        <EmwsUrl>{ews_url}</EmwsUrl>\n",
-            "        <OOFUrl>{ews_url}</OOFUrl>\n",
+            "        <External>\n",
+            "          <OWAUrl AuthenticationMethod=\"Basic\">{ews_url}</OWAUrl>\n",
+            "          <Protocol>\n",
+            "            <ASUrl>{ews_url}</ASUrl>\n",
+            "          </Protocol>\n",
+            "        </External>\n",
             "      </Protocol>\n"
         ),
-        protocol_type = escape_xml(protocol_type),
         public_host = escape_xml(&ews_host(&config.ews_url).unwrap_or(&config.imap_host)),
         email = escape_xml(email),
         ews_url = escape_xml(&config.ews_url),
@@ -689,7 +685,7 @@ mod tests {
     }
 
     #[test]
-    fn outlook_autodiscover_can_publish_explicit_ews_endpoint() {
+    fn outlook_autodiscover_can_publish_explicit_ews_web_endpoint() {
         let config = PublishedEndpoints {
             ews_enabled: true,
             ews_url: "https://mail.example.test/EWS/Exchange.asmx".to_string(),
@@ -698,11 +694,12 @@ mod tests {
 
         let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
 
-        assert!(xml.contains("<Type>EXCH</Type>"));
-        assert!(xml.contains("<Type>EXPR</Type>"));
-        assert!(xml.contains("<EwsUrl>https://mail.example.test/EWS/Exchange.asmx</EwsUrl>"));
-        assert!(xml.contains("<EmwsUrl>https://mail.example.test/EWS/Exchange.asmx</EmwsUrl>"));
+        assert!(xml.contains("<Type>WEB</Type>"));
+        assert!(xml.contains("<OWAUrl AuthenticationMethod=\"Basic\">https://mail.example.test/EWS/Exchange.asmx</OWAUrl>"));
+        assert!(xml.contains("<ASUrl>https://mail.example.test/EWS/Exchange.asmx</ASUrl>"));
         assert!(xml.contains("<Server>mail.example.test</Server>"));
+        assert!(!xml.contains("<Type>EXCH</Type>"));
+        assert!(!xml.contains("<Type>EXPR</Type>"));
         assert!(!xml.contains("<Type>MobileSync</Type>"));
         assert!(!xml.contains("<Type>MAPI</Type>"));
     }
@@ -725,8 +722,10 @@ mod tests {
             config.ews_url,
             "https://mail.example.test/EWS/Exchange.asmx"
         );
-        assert!(xml.contains("<Type>EXCH</Type>"));
-        assert!(xml.contains("<Type>EXPR</Type>"));
+        assert!(xml.contains("<Type>WEB</Type>"));
+        assert!(xml.contains("<ASUrl>https://mail.example.test/EWS/Exchange.asmx</ASUrl>"));
+        assert!(!xml.contains("<Type>EXCH</Type>"));
+        assert!(!xml.contains("<Type>EXPR</Type>"));
 
         std::env::remove_var("LPE_AUTOCONFIG_EWS_ENABLED");
     }
