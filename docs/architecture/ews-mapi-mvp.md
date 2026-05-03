@@ -46,6 +46,7 @@ The first `EWS` slice supports only the collaboration read/sync surface needed t
 - `GetItem`
 - `SyncFolderItems`
 - `CreateItem` for `Message` items only
+- `DeleteItem` for canonical draft `Message` ids only
 
 The adapter currently exposes:
 
@@ -65,9 +66,9 @@ The adapter also answers early client bootstrap probes for `GetServerTimeZones`,
 
 `CreateItem` supports `Message` items only. `SaveOnly` writes through the canonical Drafts path. `SendOnly` and `SendAndSaveCopy` write through the canonical submission path, which persists the canonical `Sent` copy before queueing outbound transport for `LPE-CT`. `CreateItem` does not implement contact, calendar, task, attachment, meeting, or folder writes.
 
-Message ids returned by `CreateItem` are canonical mailbox ids wrapped in an EWS id prefix. Until EWS mail read/sync is explicitly implemented, `GetItem` for those `message:*` ids returns an EWS-shaped `ErrorItemNotFound` instead of a misleading empty success.
+Message ids returned by `CreateItem` are canonical mailbox ids wrapped in an EWS id prefix. Until EWS mail read/sync is explicitly implemented, `GetItem` for those `message:*` ids returns an EWS-shaped `ErrorItemNotFound` instead of a misleading empty success. `DeleteItem` supports those ids only when they still refer to canonical draft messages; deleting sent or queued messages through EWS is not implemented until a canonical move-to-trash/delete model is designed for this adapter.
 
-Write operations that are outside the current MVP, including `UpdateItem` and `DeleteItem`, return EWS-shaped `ErrorInvalidOperation` responses. They must not mutate canonical contacts or calendar data until write support is explicitly designed and routed through canonical collaboration rights.
+Write operations that are outside the current MVP, including `UpdateItem`, return EWS-shaped `ErrorInvalidOperation` responses. They must not mutate canonical contacts or calendar data until write support is explicitly designed and routed through canonical collaboration rights.
 
 Other out-of-scope client bootstrap operations, including `GetUserOofSettings`, `GetRoomLists`, `FindPeople`, `ExpandDL`, `Subscribe`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, `GetSharingFolder`, `GetAttachment`, `Unsubscribe`, and `GetEvents`, also return EWS-shaped `ErrorInvalidOperation` responses instead of generic SOAP transport faults.
 
@@ -76,7 +77,7 @@ Any other unsupported EWS operation that can be identified as the first request 
 ### Current limitations
 
 - the first `SyncFolderItems` implementation returns a full create-style snapshot for the requested folder and a compact server `SyncState`; it does not yet maintain a full EWS incremental change ledger
-- write operations such as `UpdateItem` and `DeleteItem` are not implemented yet
+- write operations such as `UpdateItem` are not implemented yet
 - mail read/sync, tasks, free/busy, recurrence expansion, alarms, meeting scheduling, extended properties, attachments, and GAL are not implemented through `EWS` yet
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
 - enabled `EWS` autodiscover publishes `EXCH` and `EXPR` protocol blocks only as discovery containers for the configured `EwsUrl` / `EmwsUrl`; this does not add `MAPI`, `RPC`, mail, submission, or outbox support

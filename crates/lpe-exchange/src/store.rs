@@ -51,6 +51,13 @@ pub trait ExchangeStore: AccountAuthStore {
         input: SubmitMessageInput,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, SubmittedMessage>;
+
+    fn delete_draft_message<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
 }
 
 impl ExchangeStore for Storage {
@@ -132,5 +139,17 @@ impl ExchangeStore for Storage {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, SubmittedMessage> {
         Box::pin(async move { self.submit_message(input, audit).await })
+    }
+
+    fn delete_draft_message<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.delete_draft_message(account_id, message_id, audit)
+                .await
+        })
     }
 }

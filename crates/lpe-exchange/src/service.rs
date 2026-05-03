@@ -82,7 +82,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
             "GetUserAvailability" => get_user_availability_unavailable_response(),
             "CreateItem" => self.create_item(&principal, body).await?,
             "UpdateItem" => unsupported_operation_response("UpdateItem"),
-            "DeleteItem" => unsupported_operation_response("DeleteItem"),
+            "DeleteItem" => self.delete_item(&principal, body).await?,
             "GetUserOofSettings" => unsupported_operation_response("GetUserOofSettings"),
             "GetRoomLists" => unsupported_operation_response("GetRoomLists"),
             "FindPeople" => unsupported_operation_response("FindPeople"),
@@ -422,6 +422,46 @@ impl<S: ExchangeStore> ExchangeService<S> {
 
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
             operation_error_response("CreateItem", "ErrorInvalidOperation", &error.to_string())
+        }))
+    }
+
+    async fn delete_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let result = async {
+            let ids = requested_item_ids(request);
+            let message_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("message:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+
+            if ids.is_empty() || message_ids.len() != ids.len() {
+                return Ok(operation_error_response(
+                    "DeleteItem",
+                    "ErrorInvalidOperation",
+                    "DeleteItem currently supports only message draft ids.",
+                ));
+            }
+
+            for message_id in message_ids {
+                self.store
+                    .delete_draft_message(
+                        principal.account_id,
+                        message_id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-delete-draft-message".to_string(),
+                            subject: message_id.to_string(),
+                        },
+                    )
+                    .await?;
+            }
+
+            Ok(delete_item_success_response())
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("DeleteItem", "ErrorItemNotFound", &error.to_string())
         }))
     }
 }
@@ -809,6 +849,19 @@ fn create_item_success_response(message_id: Uuid, delivery_status: &str) -> Stri
         message_id = message_id,
         delivery_status = escape_xml(delivery_status),
     )
+}
+
+fn delete_item_success_response() -> String {
+    concat!(
+        "<m:DeleteItemResponse>",
+        "<m:ResponseMessages>",
+        "<m:DeleteItemResponseMessage ResponseClass=\"Success\">",
+        "<m:ResponseCode>NoError</m:ResponseCode>",
+        "</m:DeleteItemResponseMessage>",
+        "</m:ResponseMessages>",
+        "</m:DeleteItemResponse>"
+    )
+    .to_string()
 }
 
 fn get_item_error_response(code: &str, message: &str) -> String {

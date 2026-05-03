@@ -23,6 +23,7 @@ struct FakeStore {
     events: Arc<Mutex<Vec<AccessibleEvent>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
+    deleted_drafts: Arc<Mutex<Vec<Uuid>>>,
 }
 
 impl FakeStore {
@@ -214,6 +215,16 @@ impl ExchangeStore for FakeStore {
                 delivery_status: "queued".to_string(),
             })
         })
+    }
+
+    fn delete_draft_message<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        self.deleted_drafts.lock().unwrap().push(message_id);
+        Box::pin(async move { Ok(()) })
     }
 }
 
@@ -446,7 +457,7 @@ async fn write_operations_return_ews_unsupported_errors() {
     };
     let service = ExchangeService::new(store);
 
-    for operation in ["UpdateItem", "DeleteItem"] {
+    for operation in ["UpdateItem"] {
         let request = format!("<s:Envelope><s:Body><m:{operation} /></s:Body></s:Envelope>");
         let response = service
             .handle(&bearer_headers(), request.as_bytes())
@@ -460,6 +471,64 @@ async fn write_operations_return_ews_unsupported_errors() {
         assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
         assert!(body.contains("<t:ServerVersionInfo"));
     }
+}
+
+#[tokio::test]
+async fn delete_item_removes_canonical_draft_message() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let deleted_drafts = store.deleted_drafts.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:DeleteItem DeleteType="HardDelete">
+                  <m:ItemIds><t:ItemId Id="message:dddddddd-dddd-dddd-dddd-dddddddddddd"/></m:ItemIds>
+                </m:DeleteItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(
+        deleted_drafts.lock().unwrap().as_slice(),
+        &[Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap()]
+    );
+}
+
+#[tokio::test]
+async fn delete_item_rejects_non_message_ids() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:DeleteItem><m:ItemIds><t:ItemId Id="contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteItemResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
 }
 
 #[tokio::test]
