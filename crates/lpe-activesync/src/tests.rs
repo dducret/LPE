@@ -2267,7 +2267,11 @@ async fn benchmark_sync_refresh_and_submission_paths() {
         ping.push(WbxmlNode::with_text(13, "HeartbeatInterval", "60"));
         let mut folders = WbxmlNode::new(13, "Folders");
         let mut folder = WbxmlNode::new(13, "Folder");
-        folder.push(WbxmlNode::with_text(13, "Id", &FakeStore::inbox_mailbox().id.to_string()));
+        folder.push(WbxmlNode::with_text(
+            13,
+            "Id",
+            &FakeStore::inbox_mailbox().id.to_string(),
+        ));
         folders.push(folder);
         ping.push(folders);
         ping

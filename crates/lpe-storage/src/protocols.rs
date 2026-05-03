@@ -375,7 +375,7 @@ impl Storage {
         .ok_or_else(|| anyhow!("mailbox not found"))?;
 
         let role = current.try_get::<String, _>("role")?;
-        if !role.trim().is_empty() {
+        if is_system_mailbox_role(&role) {
             bail!("system mailbox cannot be modified through JMAP");
         }
 
@@ -459,7 +459,7 @@ impl Storage {
         .ok_or_else(|| anyhow!("mailbox not found"))?;
 
         let role = current.try_get::<String, _>("role")?;
-        if !role.trim().is_empty() {
+        if is_system_mailbox_role(&role) {
             bail!("system mailbox cannot be deleted through JMAP");
         }
 
@@ -1661,5 +1661,25 @@ impl Storage {
             media_type: row.try_get("media_type").unwrap_or_default(),
             blob_bytes: row.try_get("blob_bytes").unwrap_or_default(),
         }))
+    }
+}
+
+fn is_system_mailbox_role(role: &str) -> bool {
+    let role = role.trim();
+    !role.is_empty() && !role.eq_ignore_ascii_case("custom")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_system_mailbox_role;
+
+    #[test]
+    fn custom_mailbox_role_is_user_managed() {
+        assert!(!is_system_mailbox_role(""));
+        assert!(!is_system_mailbox_role("custom"));
+        assert!(!is_system_mailbox_role(" CUSTOM "));
+        assert!(is_system_mailbox_role("inbox"));
+        assert!(is_system_mailbox_role("sent"));
+        assert!(is_system_mailbox_role("drafts"));
     }
 }

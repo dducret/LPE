@@ -242,12 +242,12 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         W: AsyncWriteExt + Unpin,
     {
         let mailbox_name = first_token(arguments, "CREATE expects a mailbox name")?;
-        validate_flat_mailbox_name(&mailbox_name)?;
+        let mailbox_name = normalize_imap_mailbox_name(&mailbox_name)?;
         let principal = self.require_auth()?;
         self.store
             .create_imap_mailbox(
                 principal.account_id,
-                &mailbox_name,
+                mailbox_name.as_str(),
                 AuditEntryInput {
                     actor: principal.email.clone(),
                     action: "imap-create-mailbox".to_string(),
@@ -310,23 +310,23 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             bail!("RENAME expects source and target mailbox names");
         }
         let mailbox = self.resolve_mailbox_by_name(&tokens[0]).await?;
-        validate_flat_mailbox_name(&tokens[1])?;
+        let target_name = normalize_imap_mailbox_name(&tokens[1])?;
         let principal = self.require_auth()?;
         self.store
             .rename_imap_mailbox(
                 principal.account_id,
                 mailbox.id,
-                &tokens[1],
+                target_name.as_str(),
                 AuditEntryInput {
                     actor: principal.email.clone(),
                     action: "imap-rename-mailbox".to_string(),
-                    subject: format!("rename mailbox {} to {}", mailbox.name, tokens[1]),
+                    subject: format!("rename mailbox {} to {}", mailbox.name, target_name),
                 },
             )
             .await?;
         if let Some(selected) = self.selected.as_mut() {
             if selected.mailbox_id == mailbox.id {
-                selected.mailbox_name = tokens[1].clone();
+                selected.mailbox_name = target_name;
             }
         }
 
@@ -526,15 +526,31 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     }
 }
 
-fn validate_flat_mailbox_name(value: &str) -> Result<()> {
-    let trimmed = value.trim();
+fn normalize_imap_mailbox_name(value: &str) -> Result<String> {
+    let trimmed = value.trim().trim_matches('/').trim();
     if trimmed.is_empty() {
         bail!("mailbox name is required");
     }
-    if trimmed.contains('/') {
-        bail!("hierarchical mailbox names are not supported yet");
+    if trimmed.len() > 255 {
+        bail!("mailbox name is too long");
     }
-    Ok(())
+
+    let mut segments = Vec::new();
+    for segment in trimmed.split('/') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            bail!("mailbox path contains an empty segment");
+        }
+        if segment.len() > 64 {
+            bail!("mailbox path segment is too long");
+        }
+        segments.push(segment);
+    }
+    if segments.len() > 16 {
+        bail!("mailbox path is too deep");
+    }
+
+    Ok(segments.join("/"))
 }
 
 fn parse_list_pattern(arguments: &str) -> Result<String> {

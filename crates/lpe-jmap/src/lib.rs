@@ -3998,7 +3998,10 @@ mod tests {
                 Uuid::from_u128(0x2000_0000_0000_0000_0000_0000_0000_0000 + index as u128)
             }))
             .collect::<Vec<_>>();
-        let mailbox_id_set = mailboxes.iter().map(|mailbox| mailbox.id).collect::<HashSet<_>>();
+        let mailbox_id_set = mailboxes
+            .iter()
+            .map(|mailbox| mailbox.id)
+            .collect::<HashSet<_>>();
 
         let legacy_start = Instant::now();
         let mut legacy_missing = 0usize;

@@ -33,7 +33,10 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let account_id = account_access.account_id;
         let properties = mailbox_properties(arguments.properties);
         let mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
-        let mailbox_ids = mailboxes.iter().map(|mailbox| mailbox.id).collect::<HashSet<_>>();
+        let mailbox_ids = mailboxes
+            .iter()
+            .map(|mailbox| mailbox.id)
+            .collect::<HashSet<_>>();
 
         let requested_ids = parse_uuid_list(arguments.ids)?;
         let requested_set = requested_ids

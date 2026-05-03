@@ -9,8 +9,8 @@ use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_mail_auth::{issue_oauth_access_token, AccountAuthStore, StoreFuture};
 use lpe_storage::{
     AccountLogin, AuditEntryInput, AuthenticatedAccount, ImapEmail, JmapEmailAddress,
-    JmapEmailQuery, JmapMailbox, MailboxAccountAccess, MailboxDelegationGrant,
-    MailboxDelegationGrantInput, SavedDraftMessage, SenderDelegationGrant,
+    JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, MailboxAccountAccess,
+    MailboxDelegationGrant, MailboxDelegationGrantInput, SavedDraftMessage, SenderDelegationGrant,
     SenderDelegationGrantInput, SenderDelegationRight, SubmitMessageInput,
 };
 use tokio::{
@@ -494,6 +494,73 @@ impl ImapStore for FakeStore {
         })
     }
 
+    fn import_imap_email<'a>(
+        &'a self,
+        input: JmapImportedEmailInput,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ImapEmail> {
+        let mailboxes = self.mailboxes.lock().unwrap();
+        let mailbox = mailboxes
+            .iter()
+            .find(|mailbox| mailbox.id == input.mailbox_id)
+            .unwrap()
+            .clone();
+        drop(mailboxes);
+
+        let mut emails = self.emails.lock().unwrap();
+        let next_uid = emails.iter().map(|email| email.uid).max().unwrap_or(0) + 1;
+        let modseq = self.next_modseq();
+        let message = ImapEmail {
+            id: Uuid::new_v4(),
+            uid: next_uid,
+            modseq,
+            thread_id: Uuid::new_v4(),
+            mailbox_id: mailbox.id,
+            mailbox_role: mailbox.role,
+            mailbox_name: mailbox.name,
+            received_at: "2026-04-19T11:00:00Z".to_string(),
+            sent_at: None,
+            from_address: input.from_address,
+            from_display: input.from_display,
+            to: input
+                .to
+                .into_iter()
+                .map(|recipient| JmapEmailAddress {
+                    address: recipient.address,
+                    display_name: recipient.display_name,
+                })
+                .collect(),
+            cc: input
+                .cc
+                .into_iter()
+                .map(|recipient| JmapEmailAddress {
+                    address: recipient.address,
+                    display_name: recipient.display_name,
+                })
+                .collect(),
+            bcc: input
+                .bcc
+                .into_iter()
+                .map(|recipient| JmapEmailAddress {
+                    address: recipient.address,
+                    display_name: recipient.display_name,
+                })
+                .collect(),
+            subject: input.subject,
+            preview: "imported".to_string(),
+            body_text: input.body_text,
+            body_html_sanitized: input.body_html_sanitized,
+            unread: false,
+            flagged: false,
+            has_attachments: !input.attachments.is_empty(),
+            size_octets: input.size_octets,
+            internet_message_id: input.internet_message_id,
+            delivery_status: "stored".to_string(),
+        };
+        emails.push(message.clone());
+        Box::pin(async move { Ok(message) })
+    }
+
     fn fetch_account_identity<'a>(
         &'a self,
         account_id: Uuid,
@@ -713,10 +780,57 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     let create_junk_email = send_command(&mut stream, "A7C CREATE \"Junk Email\"\r\n", "A7C").await;
     assert!(create_junk_email.contains("A7C OK CREATE completed"));
 
+    let create_outlook_child = send_command(
+        &mut stream,
+        "A7D CREATE \"Outlook Parent/Child\"\r\n",
+        "A7D",
+    )
+    .await;
+    assert!(create_outlook_child.contains("A7D OK CREATE completed"));
+    let create_invalid_child = send_command(
+        &mut stream,
+        "A7E CREATE \"Outlook Parent//Broken\"\r\n",
+        "A7E",
+    )
+    .await;
+    assert!(create_invalid_child.contains("A7E NO mailbox path contains an empty segment"));
+
     let list_custom = send_command(&mut stream, "A8 LIST \"\" \"*\"\r\n", "A8").await;
     assert!(list_custom.contains("\"Projects\""));
     assert!(list_custom.contains("\"Deleted Items\""));
     assert!(list_custom.contains("\"Junk Email\""));
+    assert!(list_custom.contains("\"Outlook Parent/Child\""));
+
+    let select_outlook_child = send_command(
+        &mut stream,
+        "A8H SELECT \"Outlook Parent/Child\"\r\n",
+        "A8H",
+    )
+    .await;
+    assert!(select_outlook_child.contains("* 0 EXISTS"));
+
+    let select_junk = send_command(&mut stream, "A8J SELECT \"Junk Email\"\r\n", "A8J").await;
+    assert!(select_junk.contains("* 0 EXISTS"));
+    let junk_literal = concat!(
+        "From: Bob <bob@example.test>\r\n",
+        "To: Alice <alice@example.test>\r\n",
+        "Subject: Junk probe\r\n",
+        "\r\n",
+        "Junk body"
+    );
+    let append_junk_prelude = send_partial_command(
+        &mut stream,
+        &format!(
+            "A8K APPEND \"Junk Email\" (\\Seen) {{{}}}\r\n",
+            junk_literal.as_bytes().len()
+        ),
+    )
+    .await;
+    assert!(append_junk_prelude.contains("+ Ready for literal data"));
+    let append_junk = send_command(&mut stream, &format!("{junk_literal}\r\n"), "A8K").await;
+    assert!(append_junk.contains("A8K OK [APPENDUID 1 3] APPEND completed"));
+    let search_junk = send_command(&mut stream, "A8L UID SEARCH SUBJECT Junk\r\n", "A8L").await;
+    assert!(search_junk.contains("* SEARCH 3"));
 
     let create_temp = send_command(&mut stream, "A8B CREATE Temp\r\n", "A8B").await;
     assert!(create_temp.contains("A8B OK CREATE completed"));
@@ -730,14 +844,17 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     )
     .await;
     assert!(status.contains(
-        "* STATUS \"Projects\" (MESSAGES 0 UIDNEXT 1 UIDVALIDITY 1 UNSEEN 0 HIGHESTMODSEQ 4)"
+        "* STATUS \"Projects\" (MESSAGES 0 UIDNEXT 1 UIDVALIDITY 1 UNSEEN 0 HIGHESTMODSEQ 5)"
     ));
 
     let rename_projects = send_command(&mut stream, "A10 RENAME Projects Archive\r\n", "A10").await;
     assert!(rename_projects.contains("A10 OK RENAME completed"));
 
+    let select_inbox_for_copy = send_command(&mut stream, "A10B SELECT Inbox\r\n", "A10B").await;
+    assert!(select_inbox_for_copy.contains("* 1 EXISTS"));
+
     let copy = send_command(&mut stream, "A11 COPY 1 Archive\r\n", "A11").await;
-    assert!(copy.contains("A11 OK [COPYUID 1 1 3] COPY completed"));
+    assert!(copy.contains("A11 OK [COPYUID 1 1 4] COPY completed"));
 
     let select_archive = send_command(&mut stream, "A12 SELECT Archive\r\n", "A12").await;
     assert!(select_archive.contains("* 1 EXISTS"));
@@ -750,10 +867,10 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     .await;
     assert!(richer_search.contains("* SEARCH 1"));
 
-    let move_response = send_command(&mut stream, "A14 UID MOVE 3 Inbox\r\n", "A14").await;
+    let move_response = send_command(&mut stream, "A14 UID MOVE 4 Inbox\r\n", "A14").await;
     assert!(move_response.contains("* 1 EXPUNGE"));
     assert!(move_response.contains("* 0 EXISTS"));
-    assert!(move_response.contains("A14 OK [COPYUID 1 3 4] MOVE completed"));
+    assert!(move_response.contains("A14 OK [COPYUID 1 4 5] MOVE completed"));
 
     let select_archive_after_move =
         send_command(&mut stream, "A15 SELECT Archive\r\n", "A15").await;
@@ -777,10 +894,10 @@ async fn login_list_select_fetch_store_search_and_append_work() {
         "A17",
     )
     .await;
-    assert!(append.contains("A17 OK [APPENDUID 1 5] APPEND completed"));
+    assert!(append.contains("A17 OK [APPENDUID 1 6] APPEND completed"));
 
     let drafts = send_command(&mut stream, "A18 UID SEARCH TEXT Draft\r\n", "A18").await;
-    assert!(drafts.contains("* SEARCH 5"));
+    assert!(drafts.contains("* SEARCH 6"));
 
     let sent_literal = concat!(
         "From: Alice <alice@example.test>\r\n",

@@ -26,9 +26,11 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
   non-standard `\Inbox` flag
 - tolerant `LSUB`, `SUBSCRIBE`, and `UNSUBSCRIBE` for Outlook compatibility; subscription state is not persisted yet
 - `STATUS` for mailbox counters and stable UID metadata
-- flat mailbox management through `CREATE`, `RENAME`, and `DELETE` for custom user mailboxes
+- mailbox management through `CREATE`, `RENAME`, and `DELETE` for custom user mailboxes
 - custom `CREATE` folders, including Outlook defaults such as `Deleted Items` and
   `Junk Email`, are stored with the neutral canonical role `custom`
+- Outlook-style slash-delimited custom folder names such as `Projects/2026`
+  are accepted and stored as canonical custom mailbox display names
 - `SELECT` on `Inbox`, `Sent`, and `Drafts`
 - `EXAMINE`, `CHECK`, `CLOSE`, `UNSELECT`, and no-op `EXPUNGE` for Outlook desktop synchronization flows
 - `FETCH` over canonical message state, including `ENVELOPE`, `BODYSTRUCTURE`,
@@ -55,6 +57,8 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - Outlook-style `APPEND` to `Sent` is accepted as a compatibility acknowledgement
   after client `SMTP` submission, but it does not persist another message or create
   an alternate sent-message path
+- `APPEND` to `Inbox` and custom folders such as `Junk Email`, persisted through
+  the canonical message import workflow for Outlook local-folder change sync
 - `UIDPLUS` response codes where the current canonical workflow can supply them directly
 - `ACL` admin commands `GETACL`, `MYRIGHTS`, `LISTRIGHTS`, `SETACL`, and `DELETEACL` projected from canonical mailbox and sender delegation grants
 
@@ -67,7 +71,11 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
   flag subset so Outlook can identify the flags it may persist
 - `APPEND` to `Drafts` reuses `save_draft_message`
 - `APPEND` returns `APPENDUID` using the canonical draft row written into `messages`
+- `APPEND` to `Inbox` and custom folders reuses canonical message import and
+  never performs outbound delivery
 - custom IMAP mailbox creation and rename reuse the canonical mailbox records already exposed through `JMAP`
+- slash-delimited IMAP folder names are a compatibility projection over the
+  current canonical mailbox record; they do not add a separate IMAP hierarchy store
 - `COPY` reuses canonical message-copy persistence and creates a new canonical message row in the target mailbox instead of introducing mailbox replication state
 - `MOVE` reuses a canonical mailbox move on the existing message row, updates the target mailbox projection, and allocates a fresh destination `UID` so the destination mailbox still receives the moved message at the tail of its IMAP order
 - `CONDSTORE` reuses a canonical account-level mail change watermark plus canonical per-message `imap_modseq` values stored on `messages`; the adapter does not maintain an `IMAP`-only sync journal
@@ -81,10 +89,10 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 
 ## Current limitations
 
-- no message submission through `IMAP APPEND`; outbound submission remains canonical through `JMAP`, `ActiveSync`, `SMTP` submission, and the web/API submission workflow
+- no outbound message submission through `IMAP APPEND`; outbound submission remains canonical through `JMAP`, `ActiveSync`, `SMTP` submission, and the web/API submission workflow
 - `APPEND` to `Sent` is an Outlook interoperability acknowledgement only; it intentionally does not create a second `Sent` copy because the authenticated `SMTP` submission path writes the authoritative copy
-- no durable subscribe state, hierarchy management, destructive `EXPUNGE`, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
-- mailbox management remains a flat namespace for now; hierarchical folder trees are not implemented yet
+- no durable subscribe state, parent/child hierarchy metadata, destructive `EXPUNGE`, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
+- mailbox management accepts slash-delimited Outlook folder names, but true parent/child hierarchy metadata is not implemented yet
 - `FETCH BODYSTRUCTURE` and MIME section rendering are compatibility projections over the canonical message text and sanitized HTML fields; attachment MIME reserialization remains deferred
 - `RFC822.SIZE` reports the byte length of the RFC822 projection returned by `BODY[]`, not the original raw ingest size, so size metadata stays consistent with what IMAP clients fetch
 - `COPY` intentionally rejects `Sent` and `Drafts` as source or target mailboxes so the adapter cannot become an alternate sent-message or draft workflow

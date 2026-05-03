@@ -1,8 +1,8 @@
 use anyhow::Result;
 use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
-    AuditEntryInput, ImapEmail, JmapEmailQuery, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, MailboxAccountAccess, MailboxDelegationGrant,
+    AuditEntryInput, ImapEmail, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, MailboxAccountAccess, MailboxDelegationGrant,
     MailboxDelegationGrantInput, SavedDraftMessage, SenderDelegationGrant,
     SenderDelegationGrantInput, SenderDelegationRight, Storage, SubmitMessageInput,
 };
@@ -74,6 +74,11 @@ pub trait ImapStore: AccountAuthStore {
         input: SubmitMessageInput,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, SavedDraftMessage>;
+    fn import_imap_email<'a>(
+        &'a self,
+        input: JmapImportedEmailInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ImapEmail>;
     fn fetch_account_identity<'a>(
         &'a self,
         account_id: Uuid,
@@ -260,6 +265,21 @@ impl ImapStore for Storage {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, SavedDraftMessage> {
         Box::pin(async move { self.save_draft_message(input, audit).await })
+    }
+
+    fn import_imap_email<'a>(
+        &'a self,
+        input: JmapImportedEmailInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ImapEmail> {
+        Box::pin(async move {
+            let imported = self.import_jmap_email(input.clone(), audit).await?;
+            self.fetch_imap_emails(input.account_id, input.mailbox_id)
+                .await?
+                .into_iter()
+                .find(|email| email.id == imported.id)
+                .ok_or_else(|| anyhow::anyhow!("imported IMAP message not found"))
+        })
     }
 
     fn fetch_account_identity<'a>(

@@ -3,7 +3,10 @@ use lpe_magika::{
     collect_mime_attachment_parts, Detector, ExpectedKind, IngressContext, PolicyDecision,
     ValidationRequest, Validator,
 };
-use lpe_storage::{mail::parse_rfc822_message, AuditEntryInput, SubmitMessageInput};
+use lpe_storage::{
+    mail::parse_rfc822_message, AuditEntryInput, JmapImportedEmailInput, JmapMailbox,
+    SubmitMessageInput,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use uuid::Uuid;
 
@@ -29,12 +32,11 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         if tokens.len() < 2 {
             bail!("APPEND expects mailbox and literal size");
         }
+        let principal = self.require_auth()?.clone();
         let mailbox_name = &tokens[0];
-        let append_to_drafts = mailbox_name_matches("Drafts", "drafts", mailbox_name);
-        let append_to_sent = mailbox_name_matches("Sent", "sent", mailbox_name);
-        if !(append_to_drafts || append_to_sent) {
-            bail!("APPEND is only allowed for Drafts or Sent");
-        }
+        let mailbox = self.resolve_append_mailbox(mailbox_name).await?;
+        let append_to_drafts = mailbox.role == "drafts";
+        let append_to_sent = mailbox.role == "sent";
         let literal_size = parse_literal_size(tokens.last().unwrap())?;
 
         writer.write_all(b"+ Ready for literal data\r\n").await?;
@@ -47,7 +49,6 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
 
         validate_append_attachments(&self.validator, &literal)?;
         if append_to_sent {
-            self.require_auth()?;
             writer
                 .write_all(format!("{tag} OK APPEND completed\r\n").as_bytes())
                 .await?;
@@ -56,7 +57,6 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         }
 
         let parsed = parse_rfc822_message(&literal)?;
-        let principal = self.require_auth()?;
         let from_display = parsed
             .from
             .as_ref()
@@ -67,13 +67,87 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .map(|address| address.email)
             .unwrap_or_else(|| principal.email.clone());
 
-        let saved = self
+        if append_to_drafts {
+            let saved = self
+                .store
+                .save_draft_message(
+                    SubmitMessageInput {
+                        draft_message_id: None,
+                        account_id: principal.account_id,
+                        submitted_by_account_id: principal.account_id,
+                        source: "imap-append".to_string(),
+                        from_display,
+                        from_address,
+                        sender_display: None,
+                        sender_address: None,
+                        to: parsed
+                            .to
+                            .into_iter()
+                            .map(|recipient| lpe_storage::SubmittedRecipientInput {
+                                address: recipient.email,
+                                display_name: recipient.display_name,
+                            })
+                            .collect(),
+                        cc: parsed
+                            .cc
+                            .into_iter()
+                            .map(|recipient| lpe_storage::SubmittedRecipientInput {
+                                address: recipient.email,
+                                display_name: recipient.display_name,
+                            })
+                            .collect(),
+                        bcc: Vec::new(),
+                        subject: parsed.subject,
+                        body_text: parsed.body_text,
+                        body_html_sanitized: None,
+                        internet_message_id: parsed.message_id,
+                        mime_blob_ref: Some(format!("imap-append:{}", Uuid::new_v4())),
+                        size_octets: literal.len() as i64,
+                        unread: Some(false),
+                        flagged: Some(false),
+                        attachments: parsed.attachments,
+                    },
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "imap-append".to_string(),
+                        subject: "draft message append".to_string(),
+                    },
+                )
+                .await?;
+
+            let appended = self
+                .store
+                .fetch_imap_emails(principal.account_id, saved.draft_mailbox_id)
+                .await?
+                .into_iter()
+                .find(|email| email.id == saved.message_id)
+                .ok_or_else(|| anyhow!("saved draft message not found"))?;
+
+            if matches!(self.selected.as_ref(), Some(selected) if selected.mailbox_id == saved.draft_mailbox_id)
+            {
+                self.refresh_selected().await?;
+            }
+
+            writer
+                .write_all(
+                    format!(
+                        "{tag} OK [APPENDUID {} {}] APPEND completed\r\n",
+                        UID_VALIDITY, appended.uid
+                    )
+                    .as_bytes(),
+                )
+                .await?;
+            writer.flush().await?;
+            return Ok(true);
+        }
+
+        let appended = self
             .store
-            .save_draft_message(
-                SubmitMessageInput {
-                    draft_message_id: None,
+            .import_imap_email(
+                JmapImportedEmailInput {
                     account_id: principal.account_id,
                     submitted_by_account_id: principal.account_id,
+                    mailbox_id: mailbox.id,
                     source: "imap-append".to_string(),
                     from_display,
                     from_address,
@@ -100,30 +174,20 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                     body_text: parsed.body_text,
                     body_html_sanitized: None,
                     internet_message_id: parsed.message_id,
-                    mime_blob_ref: Some(format!("imap-append:{}", Uuid::new_v4())),
+                    mime_blob_ref: format!("imap-append:{}", Uuid::new_v4()),
                     size_octets: literal.len() as i64,
-                    unread: Some(false),
-                    flagged: Some(false),
+                    received_at: None,
                     attachments: parsed.attachments,
                 },
                 AuditEntryInput {
                     actor: principal.email.clone(),
                     action: "imap-append".to_string(),
-                    subject: "draft message append".to_string(),
+                    subject: format!("append message to mailbox {}", mailbox.name),
                 },
             )
             .await?;
 
-        let appended = self
-            .store
-            .fetch_imap_emails(principal.account_id, saved.draft_mailbox_id)
-            .await?
-            .into_iter()
-            .find(|email| email.id == saved.message_id)
-            .ok_or_else(|| anyhow!("saved draft message not found"))?;
-
-        if matches!(self.selected.as_ref(), Some(selected) if selected.mailbox_name.eq_ignore_ascii_case("Drafts"))
-        {
+        if matches!(self.selected.as_ref(), Some(selected) if selected.mailbox_id == mailbox.id) {
             self.refresh_selected().await?;
         }
 
@@ -138,6 +202,16 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .await?;
         writer.flush().await?;
         Ok(true)
+    }
+
+    async fn resolve_append_mailbox(&self, mailbox_name: &str) -> Result<JmapMailbox> {
+        let principal = self.require_auth()?;
+        self.store
+            .ensure_imap_mailboxes(principal.account_id)
+            .await?
+            .into_iter()
+            .find(|candidate| mailbox_name_matches(&candidate.name, &candidate.role, mailbox_name))
+            .ok_or_else(|| anyhow!("mailbox not found"))
     }
 }
 
