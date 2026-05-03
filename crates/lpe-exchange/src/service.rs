@@ -27,7 +27,9 @@ use crate::{
 const EWS_PATH: &str = "/EWS/Exchange.asmx";
 const EWS_LOWER_PATH: &str = "/ews/exchange.asmx";
 const MAPI_EMSMDB_PATH: &str = "/mapi/emsmdb";
+const MAPI_EMSMDB_TRAILING_PATH: &str = "/mapi/emsmdb/";
 const MAPI_NSPI_PATH: &str = "/mapi/nspi";
+const MAPI_NSPI_TRAILING_PATH: &str = "/mapi/nspi/";
 const CONTACTS_FOLDER_ID: &str = "contacts";
 const CALENDAR_FOLDER_ID: &str = "calendar";
 const DEFAULT_COLLECTION_ID: &str = "default";
@@ -48,7 +50,15 @@ pub fn router() -> Router<Storage> {
             on(MethodFilter::OPTIONS, mapi_options_handler).post(mapi_emsmdb_post_handler),
         )
         .route(
+            MAPI_EMSMDB_TRAILING_PATH,
+            on(MethodFilter::OPTIONS, mapi_options_handler).post(mapi_emsmdb_post_handler),
+        )
+        .route(
             MAPI_NSPI_PATH,
+            on(MethodFilter::OPTIONS, mapi_options_handler).post(mapi_nspi_post_handler),
+        )
+        .route(
+            MAPI_NSPI_TRAILING_PATH,
             on(MethodFilter::OPTIONS, mapi_options_handler).post(mapi_nspi_post_handler),
         )
 }

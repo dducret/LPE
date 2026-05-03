@@ -163,6 +163,26 @@ grep -qi '^ms-asprotocolcommands:' "$activesync_headers" \
 rm -f "$activesync_headers"
 pass "ActiveSync OPTIONS exposes ms-asprotocolversions and ms-asprotocolcommands through LPE-CT"
 
+mapi_headers="$(mktemp)"
+curl --silent --show-error --fail --insecure --http1.1 \
+  --request OPTIONS \
+  --header "Host: ${PUBLIC_HOST_HEADER}" \
+  --dump-header "$mapi_headers" \
+  --output /dev/null \
+  "${PUBLIC_HTTPS_BASE}/mapi/emsmdb" \
+  || {
+    rm -f "$mapi_headers"
+    fail "MAPI EMSMDB OPTIONS failed through LPE-CT public HTTPS edge"
+  }
+grep -qi '^x-lpe-mapi-status: transport-session-ready' "$mapi_headers" \
+  || {
+    sed -n '1,40p' "$mapi_headers" >&2 || true
+    rm -f "$mapi_headers"
+    fail "MAPI EMSMDB OPTIONS response is missing transport-session-ready status"
+  }
+rm -f "$mapi_headers"
+pass "MAPI EMSMDB OPTIONS is published through LPE-CT"
+
 [[ -n "$SMTP_TEST_SENDER" ]] || fail "Set LPE_CT_SMTP_TEST_SENDER in $ENV_FILE or the shell environment"
 [[ -n "$SMTP_TEST_RECIPIENT" ]] || fail "Set LPE_CT_SMTP_TEST_RECIPIENT in $ENV_FILE or the shell environment"
 

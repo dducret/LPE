@@ -18,12 +18,16 @@ The guiding principle is strict: publish only what is actually implemented and e
 - `POST /EWS/Exchange.asmx`
 - `OPTIONS /ews/exchange.asmx`
 - `POST /ews/exchange.asmx`
+- `OPTIONS /mapi/emsmdb`
+- `POST /mapi/emsmdb`
+- `OPTIONS /mapi/nspi`
+- `POST /mapi/nspi`
 
 Without a reverse proxy, these routes are exposed directly by the Rust `LPE` service.
 
 With the documented Debian reverse proxy, those routes are published as-is by `nginx` and should then be re-exposed by `LPE-CT` on the public client hostname.
 
-The Rust service also mounts the first guarded `MAPI over HTTP` implementation routes at `/mapi/emsmdb` and `/mapi/nspi`. These are not client-autoconfiguration endpoints, are not published by autodiscover, and currently provide authenticated transport/session handling only.
+The Rust service also mounts the first guarded `MAPI over HTTP` implementation routes at `/mapi/emsmdb` and `/mapi/nspi`. They provide authenticated transport/session handling and early mailbox-folder bootstrap behavior. They are published by autodiscover only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled for Outlook interoperability testing.
 
 ### Thunderbird
 
@@ -56,9 +60,9 @@ Minimal Outlook autodiscovery publishes:
 
 An `SMTP` protocol block is included only when a real authenticated client-submission endpoint is explicitly configured through the same environment variables used by Thunderbird autoconfig.
 
-The MVP does not advertise `MAPI` or `MobileSync` for Outlook desktop. Outlook for Windows desktop must not be forced to use `ActiveSync` as an Exchange account.
+The default MVP does not advertise `MAPI` or `MobileSync` for Outlook desktop. Outlook for Windows desktop must not be forced to use `ActiveSync` as an Exchange account.
 
-`MAPI over HTTP` implementation has started for the future Outlook desktop Exchange path, but autodiscover must not publish it until the service implements populated EMSMDB folder/table rows, NSPI address book operations, and enough mailbox bootstrap behavior for real Outlook profile creation.
+`MAPI over HTTP` implementation has started for the future Outlook desktop Exchange path. It can now be advertised only through the explicit `LPE_AUTOCONFIG_MAPI_ENABLED` interoperability-test switch. When enabled, POX autodiscover publishes a `Protocol Type="mapiHttp" Version="1"` block with `MailStore` and `AddressBook` URLs pointing at `/mapi/emsmdb/` and `/mapi/nspi/`, and SOAP autodiscover returns `MapiHttpEnabled` as `True`. This is intentionally not the default because message tables, NSPI address book operations, and full Outlook profile creation are still being implemented.
 
 The `0.1.3` `EWS` endpoint is the Exchange-style compatibility focus for mailbox, contacts, and calendar synchronization. Autodiscovery publishes it only when `LPE_AUTOCONFIG_EWS_ENABLED` is explicitly set to a true value. This keeps `EWS` publication an administrator choice until the deployment accepts the current MVP limits.
 
@@ -66,7 +70,7 @@ When `EWS` autodiscovery is enabled, the POX response publishes the configured `
 
 Autodiscover responses include the POX `Response`, `User`, `Account`, and `Protocol` shape expected by Microsoft clients. The `User` block stays limited to the POX fields Microsoft documents for Outlook responses: `DisplayName`, `LegacyDN`, `AutoDiscoverSMTPAddress`, and `DeploymentId`. The request parser accepts both unprefixed and namespace-prefixed request elements, including the `a:EMailAddress` form used by Microsoft connectivity tooling.
 
-Autodiscover also accepts SOAP `GetUserSettings` requests and returns an Exchange-style SOAP response with user identity, mailbox-server identity, mailbox DN, SSL and authentication metadata, `CasVersion`, `ExternalEwsUrl`, `InternalEwsUrl`, and `EwsSupportedSchemas`. The SOAP path publishes the same opt-in `EWS` endpoint and does not advertise `MAPI`, `RPC`, client `SMTP` submission, or any unsupported Exchange surface. Until the real `MAPI over HTTP` service is implemented, SOAP Autodiscover returns `MapiHttpEnabled` as `False`.
+Autodiscover also accepts SOAP `GetUserSettings` requests and returns an Exchange-style SOAP response with user identity, mailbox-server identity, mailbox DN, SSL and authentication metadata, `CasVersion`, `ExternalEwsUrl`, `InternalEwsUrl`, and `EwsSupportedSchemas`. The SOAP path publishes the same opt-in `EWS` endpoint and does not advertise `RPC`, client `SMTP` submission, or any unsupported Exchange surface. Unless `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled, SOAP Autodiscover returns `MapiHttpEnabled` as `False`.
 
 When the request asks for the `mobilesync` response schema, Autodiscover returns an `ActiveSync`-specific `MobileSync` server response that points at `/Microsoft-Server-ActiveSync`. That response is reserved for ActiveSync clients and tests; Outlook desktop autodiscover must continue to avoid advertising `MobileSync` as an Exchange desktop route.
 
@@ -112,6 +116,9 @@ workflow after loading a draft. It must not hand the message directly to
 - `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, default `SSL`
 - `LPE_AUTOCONFIG_EWS_ENABLED`, optional; set to `true`, `1`, `yes`, or `on` to publish the `EWS` endpoint through EWS-aware autodiscover responses
 - `LPE_AUTOCONFIG_EWS_URL`, optional; default `{public_scheme}://{public_host}/EWS/Exchange.asmx`
+- `LPE_AUTOCONFIG_MAPI_ENABLED`, optional; set to `true`, `1`, `yes`, or `on` to publish `MAPI over HTTP` autodiscover for Outlook interoperability testing
+- `LPE_AUTOCONFIG_MAPI_EMSMDB_URL`, optional; default `{public_scheme}://{public_host}/mapi/emsmdb/?MailboxId={email}`
+- `LPE_AUTOCONFIG_MAPI_NSPI_URL`, optional; default `{public_scheme}://{public_host}/mapi/nspi/?MailboxId={email}`
 - `LPE_AUTOCONFIG_ACTIVESYNC_URL`, optional; default `{public_scheme}://{public_host}/Microsoft-Server-ActiveSync`
 - `LPE_AUTOCONFIG_JMAP_SESSION_URL`, optional
 
@@ -121,12 +128,12 @@ For a domain `example.test`:
 
 - publish `autoconfig.example.test` or `mail.example.test` toward the public `LPE-CT` front end
 - publish `autodiscover.example.test` or reuse `mail.example.test` toward the same front end
-- re-expose the `/autoconfig/...`, `/.well-known/autoconfig/...`, `/autodiscover/...`, `/Autodiscover/...`, `/Microsoft-Server-ActiveSync`, `/EWS/Exchange.asmx`, and `/ews/exchange.asmx` routes over HTTPS
+- re-expose the `/autoconfig/...`, `/.well-known/autoconfig/...`, `/autodiscover/...`, `/Autodiscover/...`, `/Microsoft-Server-ActiveSync`, `/EWS/Exchange.asmx`, `/ews/exchange.asmx`, and `/mapi/...` routes over HTTPS
 - re-expose `/api/jmap/session`, `/api/jmap/api`, `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`, and `/api/jmap/ws` from `LPE-CT` to the core `LPE` service
 - publish `IMAPS` on the same hostname when native `IMAP` access is exposed
 - publish the authenticated `SMTPS` submission listener only when `LPE-CT` really exposes it
 - do not reuse the internal `LPE -> LPE-CT` relay as a client-submission endpoint
 - do not publish `ActiveSync` as the Outlook for Windows desktop Exchange route
-- do not publish `MAPI` until the guarded `MAPI over HTTP` routes become a real Outlook-usable service
+- publish `MAPI` autodiscover only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled for Outlook interoperability testing
 
 

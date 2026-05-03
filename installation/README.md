@@ -51,10 +51,10 @@ For a separate sorting server in the `DMZ`, use `LPE-CT/installation/debian-trix
 The `LPE-CT` scripts also install the SMTP ingress listener on `25`, publish the HTTPS edge through `nginx` on `443`, redirect plain `HTTP` on `80` to `HTTPS`, configure authenticated implicit-TLS client submission on `465`, configure the IMAPS TLS proxy on `993`, create the full runtime spool layout in `/var/spool/lpe-ct`, and provide these validation scripts:
 
 The generated `LPE-CT` `nginx` site also re-exposes the core client publication
-routes on the public HTTPS edge: `/Microsoft-Server-ActiveSync`,
+routes on the public HTTPS edge: `/Microsoft-Server-ActiveSync`, `/mapi/`,
 `/autodiscover/`, `/Autodiscover/`, `/autoconfig/`, and
-`/.well-known/autoconfig/`. ActiveSync uses long proxy timeouts so mobile and
-Outlook long-poll requests are not cut off by the edge proxy. The
+`/.well-known/autoconfig/`. ActiveSync and MAPI use long proxy timeouts so
+mobile and Outlook long-poll requests are not cut off by the edge proxy. The
 `install-lpe-ct.sh` and `update-lpe-ct.sh` scripts validate the rendered nginx
 publication settings, while `check-lpe-ct.sh` and `test-lpe-ct-edge-ports.sh`
 validate the live autodiscover and ActiveSync responses through the public edge.
@@ -541,14 +541,17 @@ them to the core `LPE` service: `/api/jmap/session`, `/api/jmap/api`,
 `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`,
 and `/api/jmap/ws`.
 
-`LPE-CT` must also publish the public client configuration, `ActiveSync`, and
-EWS paths: `/Microsoft-Server-ActiveSync`, `/EWS/Exchange.asmx`,
-`/ews/exchange.asmx`, `/autodiscover/`, `/Autodiscover/`, `/autoconfig/`, and
-`/.well-known/autoconfig/`. A healthy public publication returns an Outlook
-autodiscover XML response containing `IMAP`, or an opt-in `WEB` EWS discovery
-block when `LPE_AUTOCONFIG_EWS_ENABLED` is enabled. `OPTIONS
+`LPE-CT` must also publish the public client configuration, `ActiveSync`, EWS,
+and guarded MAPI paths: `/Microsoft-Server-ActiveSync`, `/mapi/`,
+`/EWS/Exchange.asmx`, `/ews/exchange.asmx`, `/autodiscover/`,
+`/Autodiscover/`, `/autoconfig/`, and `/.well-known/autoconfig/`. A healthy
+public publication returns an Outlook autodiscover XML response containing
+`IMAP`, an opt-in `WEB` EWS discovery block when
+`LPE_AUTOCONFIG_EWS_ENABLED` is enabled, or an opt-in `mapiHttp` block when
+`LPE_AUTOCONFIG_MAPI_ENABLED` is enabled. `OPTIONS
 /Microsoft-Server-ActiveSync` returns the `ms-asprotocolversions` and
-`ms-asprotocolcommands` headers.
+`ms-asprotocolcommands` headers. `OPTIONS /mapi/emsmdb` returns
+`x-lpe-mapi-status: transport-session-ready`.
 
 For public client auto-configuration, the exposed front end must remain `LPE-CT` or an equivalent HTTPS publication layer. In v1:
 
@@ -556,11 +559,11 @@ For public client auto-configuration, the exposed front end must remain `LPE-CT`
 - Outlook for Windows desktop receives an `IMAP` profile by default; `IMAP` remains a supported mailbox-access communication protocol, while `0.1.3` deployments may explicitly enable EWS autodiscovery for the implemented Exchange-style compatibility surface
 - `ActiveSync` remains exposed for mobile/native clients that actually support `Exchange ActiveSync`
 - `EWS` remains opt-in through `LPE_AUTOCONFIG_EWS_ENABLED` and must not be treated as `MAPI`, `RPC`, or client `SMTP`
-- `MAPI over HTTP` routes are implementation groundwork only and should not be published by the public edge or autodiscover until they become a real Outlook-usable service
+- `MAPI over HTTP` routes are guarded implementation groundwork; the public edge publishes `/mapi/` so Outlook can reach the authenticated endpoints, but autodiscover publishes `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled for interoperability testing
 - no client `SMTP` endpoint should be advertised unless the authenticated `LPE-CT` submission listener is configured, exposed on `465`, and covered by the public certificate
 - the internal `LPE -> LPE-CT` relay must never be advertised as a client-submission endpoint
 
-The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, `LPE_AUTOCONFIG_EWS_ENABLED`, and `LPE_AUTOCONFIG_EWS_URL` variables let you align the published HTTP/XML settings with the real public hostname. The detailed behavior is documented in `docs/architecture/client-autoconfiguration.md`.
+The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, `LPE_AUTOCONFIG_EWS_ENABLED`, `LPE_AUTOCONFIG_EWS_URL`, `LPE_AUTOCONFIG_MAPI_ENABLED`, `LPE_AUTOCONFIG_MAPI_EMSMDB_URL`, and `LPE_AUTOCONFIG_MAPI_NSPI_URL` variables let you align the published HTTP/XML settings with the real public hostname. The detailed behavior is documented in `docs/architecture/client-autoconfiguration.md`.
 
 If `LPE_BIND_ADDRESS` or `LPE_SERVER_NAME` changes in `/etc/lpe/lpe.env`, run `update-lpe.sh` again to regenerate the `nginx` configuration. If `LPE_IMAP_BIND_ADDRESS` changes, restart `lpe.service` and rerun `test-lpe-imap-listener.sh` on the core server, then rerun `test-lpe-ct-edge-ports.sh` on the `LPE-CT` server.
 

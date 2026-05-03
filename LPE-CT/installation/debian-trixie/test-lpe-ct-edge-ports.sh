@@ -233,6 +233,26 @@ probe_client_publication() {
     }
   rm -f "${headers_file}"
   pass "ActiveSync OPTIONS exposes ms-asprotocolversions and ms-asprotocolcommands through LPE-CT"
+
+  headers_file="$(mktemp)"
+  curl --silent --show-error --fail --insecure --http1.1 \
+    --request OPTIONS \
+    --header "Host: ${host_header}" \
+    --dump-header "${headers_file}" \
+    --output /dev/null \
+    "${base_url}/mapi/emsmdb" \
+    || {
+      rm -f "${headers_file}"
+      fail "MAPI EMSMDB OPTIONS is not reachable through LPE-CT HTTPS publication"
+    }
+  grep -qi '^x-lpe-mapi-status: transport-session-ready' "${headers_file}" \
+    || {
+      sed -n '1,40p' "${headers_file}" || true
+      rm -f "${headers_file}"
+      fail "MAPI EMSMDB OPTIONS response is missing transport-session-ready status"
+    }
+  rm -f "${headers_file}"
+  pass "MAPI EMSMDB OPTIONS is published through LPE-CT"
 }
 
 SMTP_BIND="${LPE_CT_SMTP_BIND_ADDRESS:-}"

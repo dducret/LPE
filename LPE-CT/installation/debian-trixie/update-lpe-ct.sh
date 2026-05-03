@@ -67,6 +67,7 @@ validate_publication_config() {
     "location /Autodiscover/"
     "location /autoconfig/"
     "location /.well-known/autoconfig/"
+    "location /mapi/"
   )
   local pattern
 

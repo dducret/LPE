@@ -64,6 +64,9 @@ struct PublishedEndpoints {
     smtp_socket_type: Option<String>,
     ews_enabled: bool,
     ews_url: String,
+    mapi_enabled: bool,
+    mapi_emsmdb_url: String,
+    mapi_nspi_url: String,
     activesync_url: String,
     jmap_session_url: String,
 }
@@ -97,6 +100,14 @@ impl PublishedEndpoints {
         let ews_enabled = env_flag("LPE_AUTOCONFIG_EWS_ENABLED");
         let ews_url = env::var("LPE_AUTOCONFIG_EWS_URL")
             .unwrap_or_else(|_| format!("{public_scheme}://{public_host}/EWS/Exchange.asmx"));
+        let mapi_enabled = env_flag("LPE_AUTOCONFIG_MAPI_ENABLED");
+        let mapi_mailbox_id = email_hint.unwrap_or_default();
+        let mapi_emsmdb_url = env::var("LPE_AUTOCONFIG_MAPI_EMSMDB_URL").unwrap_or_else(|_| {
+            format!("{public_scheme}://{public_host}/mapi/emsmdb/?MailboxId={mapi_mailbox_id}")
+        });
+        let mapi_nspi_url = env::var("LPE_AUTOCONFIG_MAPI_NSPI_URL").unwrap_or_else(|_| {
+            format!("{public_scheme}://{public_host}/mapi/nspi/?MailboxId={mapi_mailbox_id}")
+        });
         let activesync_url = env::var("LPE_AUTOCONFIG_ACTIVESYNC_URL").unwrap_or_else(|_| {
             format!("{public_scheme}://{public_host}/Microsoft-Server-ActiveSync")
         });
@@ -110,6 +121,9 @@ impl PublishedEndpoints {
             smtp_socket_type,
             ews_enabled,
             ews_url,
+            mapi_enabled,
+            mapi_emsmdb_url,
+            mapi_nspi_url,
             activesync_url,
             jmap_session_url,
         }
@@ -228,8 +242,11 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
         ));
     }
 
-    if config.ews_enabled {
+    if config.ews_enabled && !config.mapi_enabled {
         xml.push_str(&render_ews_web_autodiscover_protocol(config, email));
+    }
+    if config.mapi_enabled {
+        xml.push_str(&render_mapi_http_autodiscover_protocol(config));
     }
 
     xml.push_str(concat!(
@@ -238,6 +255,25 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
         "</Autodiscover>\n"
     ));
     xml
+}
+
+fn render_mapi_http_autodiscover_protocol(config: &PublishedEndpoints) -> String {
+    format!(
+        concat!(
+            "      <Protocol Type=\"mapiHttp\" Version=\"1\">\n",
+            "        <MailStore>\n",
+            "          <InternalUrl>{emsmdb_url}</InternalUrl>\n",
+            "          <ExternalUrl>{emsmdb_url}</ExternalUrl>\n",
+            "        </MailStore>\n",
+            "        <AddressBook>\n",
+            "          <InternalUrl>{nspi_url}</InternalUrl>\n",
+            "          <ExternalUrl>{nspi_url}</ExternalUrl>\n",
+            "        </AddressBook>\n",
+            "      </Protocol>\n"
+        ),
+        emsmdb_url = escape_xml(&config.mapi_emsmdb_url),
+        nspi_url = escape_xml(&config.mapi_nspi_url),
+    )
 }
 
 fn render_ews_web_autodiscover_protocol(config: &PublishedEndpoints, email: &str) -> String {
@@ -359,7 +395,10 @@ fn render_soap_user_settings_autodiscover(
             soap_string_user_setting("CasVersion", "15.00.0000.000"),
             soap_string_user_setting("GroupingInformation", &deployment_id(&config.display_domain)),
             soap_string_user_setting("UserMSOnline", "False"),
-            soap_string_user_setting("MapiHttpEnabled", "False"),
+            soap_string_user_setting(
+                "MapiHttpEnabled",
+                if config.mapi_enabled { "True" } else { "False" },
+            ),
             soap_string_list_user_setting("ExternalMailboxServerAuthenticationMethods", &["Basic"]),
             soap_string_user_setting("ExternalEwsUrl", ews_url),
             soap_string_user_setting("InternalEwsUrl", ews_url),
@@ -638,6 +677,11 @@ mod tests {
             smtp_socket_type: None,
             ews_enabled: false,
             ews_url: "https://mail.example.test/EWS/Exchange.asmx".to_string(),
+            mapi_enabled: false,
+            mapi_emsmdb_url: "https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test"
+                .to_string(),
+            mapi_nspi_url: "https://mail.example.test/mapi/nspi/?MailboxId=alice@example.test"
+                .to_string(),
             activesync_url: "https://mail.example.test/Microsoft-Server-ActiveSync".to_string(),
             jmap_session_url: "https://mail.example.test/api/jmap/session".to_string(),
         }
@@ -680,6 +724,7 @@ mod tests {
         assert!(xml.contains("<MicrosoftOnline>False</MicrosoftOnline>"));
         assert!(!xml.contains("<Type>MobileSync</Type>"));
         assert!(!xml.contains("<ASUrl>"));
+        assert!(!xml.contains("Type=\"mapiHttp\""));
         assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
         assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
         assert!(!xml.contains("<EwsUrl>"));
@@ -722,6 +767,58 @@ mod tests {
         assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
         assert!(!xml.contains("<Type>MobileSync</Type>"));
         assert!(!xml.contains("<Type>MAPI</Type>"));
+    }
+
+    #[test]
+    fn outlook_autodiscover_can_publish_explicit_mapi_http_protocol() {
+        let config = PublishedEndpoints {
+            mapi_enabled: true,
+            mapi_emsmdb_url: "https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test"
+                .to_string(),
+            mapi_nspi_url: "https://mail.example.test/mapi/nspi/?MailboxId=alice@example.test"
+                .to_string(),
+            ..sample_config()
+        };
+
+        let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
+        assert!(xml.contains("<MailStore>"));
+        assert!(xml.contains("<InternalUrl>https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test</InternalUrl>"));
+        assert!(xml.contains("<ExternalUrl>https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test</ExternalUrl>"));
+        assert!(xml.contains("<AddressBook>"));
+        assert!(xml.contains("<InternalUrl>https://mail.example.test/mapi/nspi/?MailboxId=alice@example.test</InternalUrl>"));
+        assert!(xml.contains("<ExternalUrl>https://mail.example.test/mapi/nspi/?MailboxId=alice@example.test</ExternalUrl>"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+    }
+
+    #[test]
+    fn mapi_autodiscover_publication_is_env_opt_in() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("LPE_AUTOCONFIG_MAPI_ENABLED", "true");
+        std::env::remove_var("LPE_AUTOCONFIG_MAPI_EMSMDB_URL");
+        std::env::remove_var("LPE_AUTOCONFIG_MAPI_NSPI_URL");
+        std::env::remove_var("LPE_PUBLIC_HOSTNAME");
+        std::env::remove_var("LPE_PUBLIC_SCHEME");
+
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "mail.example.test".parse().unwrap());
+        let config = PublishedEndpoints::from_headers(&headers, Some("alice@example.test"));
+        let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(config.mapi_enabled);
+        assert_eq!(
+            config.mapi_emsmdb_url,
+            "https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test"
+        );
+        assert_eq!(
+            config.mapi_nspi_url,
+            "https://mail.example.test/mapi/nspi/?MailboxId=alice@example.test"
+        );
+        assert!(xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
+
+        std::env::remove_var("LPE_AUTOCONFIG_MAPI_ENABLED");
     }
 
     #[test]
@@ -836,6 +933,19 @@ mod tests {
         assert!(xml.contains("<a:Name>EwsSupportedSchemas</a:Name>"));
         assert!(xml.contains("<a:Value>Exchange2013</a:Value>"));
         assert!(!xml.contains("<Type>MAPI</Type>"));
+    }
+
+    #[test]
+    fn soap_autodiscover_reports_mapi_http_enabled_when_opted_in() {
+        let config = PublishedEndpoints {
+            mapi_enabled: true,
+            ..sample_config()
+        };
+
+        let xml = render_soap_user_settings_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(xml.contains("<a:Name>MapiHttpEnabled</a:Name>"));
+        assert!(xml.contains("<a:Value>True</a:Value>"));
     }
 
     #[test]
