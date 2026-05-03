@@ -80,6 +80,11 @@ impl<S: ExchangeStore> ExchangeService<S> {
             "CreateItem" => unsupported_operation_response("CreateItem"),
             "UpdateItem" => unsupported_operation_response("UpdateItem"),
             "DeleteItem" => unsupported_operation_response("DeleteItem"),
+            "GetUserOofSettings" => unsupported_operation_response("GetUserOofSettings"),
+            "GetRoomLists" => unsupported_operation_response("GetRoomLists"),
+            "FindPeople" => unsupported_operation_response("FindPeople"),
+            "ExpandDL" => unsupported_operation_response("ExpandDL"),
+            "Subscribe" => unsupported_operation_response("Subscribe"),
             _ => bail!("unsupported EWS operation {operation}"),
         };
 
@@ -367,6 +372,11 @@ fn operation_name(body: &str) -> Option<&'static str> {
         "CreateItem",
         "UpdateItem",
         "DeleteItem",
+        "GetUserOofSettings",
+        "GetRoomLists",
+        "FindPeople",
+        "ExpandDL",
+        "Subscribe",
         "FindFolder",
         "GetFolder",
         "FindItem",

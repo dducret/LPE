@@ -63,6 +63,8 @@ The adapter also answers early client bootstrap probes for `GetServerTimeZones`,
 
 Write operations that are outside the current read/sync MVP, including `CreateItem`, `UpdateItem`, and `DeleteItem`, return EWS-shaped `ErrorUnsupportedOperation` responses. They must not mutate canonical contacts or calendar data until write support is explicitly designed and routed through canonical collaboration rights.
 
+Other out-of-scope client bootstrap operations, including `GetUserOofSettings`, `GetRoomLists`, `FindPeople`, `ExpandDL`, and `Subscribe`, also return EWS-shaped `ErrorUnsupportedOperation` responses instead of generic SOAP transport faults.
+
 ### Current limitations
 
 - the first `SyncFolderItems` implementation returns a full create-style snapshot for the requested folder and a compact server `SyncState`; it does not yet maintain a full EWS incremental change ledger

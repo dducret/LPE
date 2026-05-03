@@ -422,6 +422,36 @@ async fn write_operations_return_ews_unsupported_errors() {
 }
 
 #[tokio::test]
+async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    for operation in [
+        "GetUserOofSettings",
+        "GetRoomLists",
+        "FindPeople",
+        "ExpandDL",
+        "Subscribe",
+    ] {
+        let request = format!("<s:Envelope><s:Body><m:{operation} /></s:Body></s:Envelope>");
+        let response = service
+            .handle(&bearer_headers(), request.as_bytes())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_text(response).await;
+        assert!(body.contains(&format!("<m:{operation}Response>")));
+        assert!(body.contains("ResponseClass=\"Error\""));
+        assert!(body.contains("<m:ResponseCode>ErrorUnsupportedOperation</m:ResponseCode>"));
+        assert!(body.contains("<t:ServerVersionInfo"));
+    }
+}
+
+#[tokio::test]
 async fn authentication_errors_return_basic_challenge() {
     let response = error_response(&anyhow::anyhow!("missing account authentication"));
 
