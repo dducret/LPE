@@ -58,7 +58,7 @@ An `SMTP` protocol block is included only when a real authenticated client-submi
 
 The MVP does not advertise `MAPI` or `MobileSync` for Outlook desktop. Outlook for Windows desktop must not be forced to use `ActiveSync` as an Exchange account.
 
-`MAPI over HTTP` implementation has started for the future Outlook desktop Exchange path, but autodiscover must not publish it until the service implements enough EMSMDB `Execute` ROPs, NSPI address book operations, and mailbox bootstrap behavior for real Outlook profile creation.
+`MAPI over HTTP` implementation has started for the future Outlook desktop Exchange path, but autodiscover must not publish it until the service implements populated EMSMDB folder/table rows, NSPI address book operations, and enough mailbox bootstrap behavior for real Outlook profile creation.
 
 The `0.1.3` `EWS` endpoint is the Exchange-style compatibility focus for mailbox, contacts, and calendar synchronization. Autodiscovery publishes it only when `LPE_AUTOCONFIG_EWS_ENABLED` is explicitly set to a true value. This keeps `EWS` publication an administrator choice until the deployment accepts the current MVP limits.
 

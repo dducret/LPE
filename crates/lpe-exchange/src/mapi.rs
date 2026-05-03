@@ -365,20 +365,43 @@ fn parse_execute_request(body: &[u8]) -> Result<ExecuteRequest> {
 
 fn execute_rops(principal: &AccountPrincipal, rop_buffer: &[u8]) -> Vec<u8> {
     let Some((requests, _handle_table)) = split_rop_buffer(rop_buffer) else {
-        return rop_buffer_with_response(unsupported_rop_response(0, 0), None);
+        return rop_buffer_with_response(unsupported_rop_response(0, 0), &[]);
     };
-    if requests.is_empty() {
-        return rop_buffer_with_response(Vec::new(), None);
-    }
 
-    match requests[0] {
-        0x01 => rop_buffer_with_response(Vec::new(), None),
-        0xFE => rop_logon_response(principal, requests),
-        rop_id => {
-            let handle_index = requests.get(2).copied().unwrap_or(0);
-            rop_buffer_with_response(unsupported_rop_response(rop_id, handle_index), None)
+    let mut cursor = Cursor::new(requests);
+    let mut responses = Vec::new();
+    let mut output_handles = Vec::new();
+    while cursor.remaining() > 0 {
+        let request = match read_rop_request(&mut cursor) {
+            Ok(request) => request,
+            Err(_) => {
+                responses.extend_from_slice(&unsupported_rop_response(0, 0));
+                break;
+            }
+        };
+        match request.rop_id {
+            0x01 => {}
+            0x02 => {
+                responses.extend_from_slice(&rop_open_folder_response(&request));
+                output_handles.push(2);
+            }
+            0x04 => {
+                responses.extend_from_slice(&rop_get_hierarchy_table_response(&request));
+                output_handles.push(3);
+            }
+            0x12 => responses.extend_from_slice(&rop_set_columns_response(&request)),
+            0x15 => responses.extend_from_slice(&rop_query_rows_response(&request)),
+            0xFE => {
+                responses.extend_from_slice(&rop_logon_response_body(principal, &request));
+                output_handles.push(1);
+            }
+            rop_id => responses.extend_from_slice(&unsupported_rop_response(
+                rop_id,
+                request.input_handle_index(),
+            )),
         }
     }
+    rop_buffer_with_response(responses, &output_handles)
 }
 
 fn split_rop_buffer(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
@@ -392,12 +415,9 @@ fn split_rop_buffer(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
     Some((&buffer[2..2 + rop_size], &buffer[2 + rop_size..]))
 }
 
-fn rop_logon_response(principal: &AccountPrincipal, request: &[u8]) -> Vec<u8> {
-    if request.len() < 14 {
-        return rop_buffer_with_response(rop_logon_failure_response(0, 0x8004_0102), None);
-    }
-    let output_handle_index = request[2];
-    let logon_flags = request[3] | 0x01;
+fn rop_logon_response_body(principal: &AccountPrincipal, request: &RopRequest) -> Vec<u8> {
+    let output_handle_index = request.output_handle_index.unwrap_or(0);
+    let logon_flags = request.payload.first().copied().unwrap_or(0x01) | 0x01;
     let mut response = Vec::new();
     response.push(0xFE);
     response.push(output_handle_index);
@@ -413,12 +433,36 @@ fn rop_logon_response(principal: &AccountPrincipal, request: &[u8]) -> Vec<u8> {
     response.extend_from_slice(&[0u8; 8]);
     response.extend_from_slice(&[0u8; 8]);
     write_u32(&mut response, 0);
-    rop_buffer_with_response(response, Some(1))
+    response
 }
 
-fn rop_logon_failure_response(output_handle_index: u8, return_value: u32) -> Vec<u8> {
-    let mut response = vec![0xFE, output_handle_index];
-    write_u32(&mut response, return_value);
+fn rop_open_folder_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![0x02, request.output_handle_index.unwrap_or(0)];
+    write_u32(&mut response, 0);
+    response.push(0);
+    response.push(0);
+    response
+}
+
+fn rop_get_hierarchy_table_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![0x04, request.output_handle_index.unwrap_or(0)];
+    write_u32(&mut response, 0);
+    write_u32(&mut response, 0);
+    response
+}
+
+fn rop_set_columns_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![0x12, request.input_handle_index()];
+    write_u32(&mut response, 0);
+    response.push(0);
+    response
+}
+
+fn rop_query_rows_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![0x15, request.input_handle_index()];
+    write_u32(&mut response, 0);
+    response.push(0x02);
+    response.extend_from_slice(&0u16.to_le_bytes());
     response
 }
 
@@ -428,11 +472,11 @@ fn unsupported_rop_response(rop_id: u8, handle_index: u8) -> Vec<u8> {
     response
 }
 
-fn rop_buffer_with_response(response: Vec<u8>, output_handle: Option<u32>) -> Vec<u8> {
+fn rop_buffer_with_response(response: Vec<u8>, output_handles: &[u32]) -> Vec<u8> {
     let mut buffer = Vec::new();
     buffer.extend_from_slice(&(response.len() as u16).to_le_bytes());
     buffer.extend_from_slice(&response);
-    if let Some(handle) = output_handle {
+    for handle in output_handles {
         buffer.extend_from_slice(&handle.to_le_bytes());
     }
     buffer
@@ -557,6 +601,16 @@ impl<'a> Cursor<'a> {
         Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 
+    fn read_u16(&mut self) -> Result<u16> {
+        let bytes = self.read_bytes(2)?;
+        Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
+    }
+
+    fn read_u8(&mut self) -> Result<u8> {
+        let bytes = self.read_bytes(1)?;
+        Ok(bytes[0])
+    }
+
     fn read_bytes(&mut self, len: usize) -> Result<&'a [u8]> {
         let end = self
             .position
@@ -568,5 +622,119 @@ impl<'a> Cursor<'a> {
             .ok_or_else(|| anyhow!("request body is truncated"))?;
         self.position = end;
         Ok(bytes)
+    }
+
+    fn remaining(&self) -> usize {
+        self.bytes.len().saturating_sub(self.position)
+    }
+}
+
+struct RopRequest {
+    rop_id: u8,
+    input_handle_index: Option<u8>,
+    output_handle_index: Option<u8>,
+    payload: Vec<u8>,
+}
+
+impl RopRequest {
+    fn input_handle_index(&self) -> u8 {
+        self.input_handle_index
+            .unwrap_or(self.output_handle_index.unwrap_or(0))
+    }
+}
+
+fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
+    let rop_id = cursor.read_u8()?;
+    let _logon_id = cursor.read_u8()?;
+    match rop_id {
+        0x01 => {
+            let input_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload: Vec::new(),
+            })
+        }
+        0x02 => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(cursor.read_bytes(8)?);
+            payload.push(cursor.read_u8()?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
+        0x04 => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            let payload = vec![cursor.read_u8()?];
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
+        0x12 => {
+            let input_handle_index = cursor.read_u8()?;
+            let set_columns_flags = cursor.read_u8()?;
+            let property_tag_count = cursor.read_u16()? as usize;
+            let mut payload = vec![set_columns_flags];
+            payload.extend_from_slice(&(property_tag_count as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(property_tag_count * 4)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x15 => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.push(cursor.read_u8()?);
+            payload.push(cursor.read_u8()?);
+            payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0xFE => {
+            let output_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.push(cursor.read_u8()?);
+            payload.extend_from_slice(cursor.read_bytes(4)?);
+            payload.extend_from_slice(cursor.read_bytes(4)?);
+            let essdn_size = cursor.read_u16()? as usize;
+            payload.extend_from_slice(&(essdn_size as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(essdn_size)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: None,
+                output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
+        _ => {
+            let input_handle_index = if cursor.remaining() > 0 {
+                Some(cursor.read_u8()?)
+            } else {
+                None
+            };
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index,
+                output_handle_index: None,
+                payload: Vec::new(),
+            })
+        }
     }
 }
