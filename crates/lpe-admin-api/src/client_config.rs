@@ -181,7 +181,6 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
             "  <Response xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a\">\n",
             "    <User>\n",
             "      <DisplayName>{display_domain}</DisplayName>\n",
-            "      <EMailAddress>{email}</EMailAddress>\n",
             "      <LegacyDN>/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={legacy_user}</LegacyDN>\n",
             "      <AutoDiscoverSMTPAddress>{email}</AutoDiscoverSMTPAddress>\n",
             "      <DeploymentId>{deployment_id}</DeploymentId>\n",
@@ -189,6 +188,7 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
             "    <Account>\n",
             "      <AccountType>email</AccountType>\n",
             "      <Action>settings</Action>\n",
+            "      <MicrosoftOnline>False</MicrosoftOnline>\n",
             "      <Protocol>\n",
             "        <Type>IMAP</Type>\n",
             "        <Server>{imap_host}</Server>\n",
@@ -252,6 +252,7 @@ fn render_ews_web_autodiscover_protocol(config: &PublishedEndpoints, email: &str
             "        <External>\n",
             "          <OWAUrl AuthenticationMethod=\"Basic\">{ews_url}</OWAUrl>\n",
             "          <Protocol>\n",
+            "            <Type>EXPR</Type>\n",
             "            <ASUrl>{ews_url}</ASUrl>\n",
             "          </Protocol>\n",
             "        </External>\n",
@@ -659,12 +660,13 @@ mod tests {
         assert!(xml.contains("<Type>IMAP</Type>"));
         assert!(xml.contains("<Server>mail.example.test</Server>"));
         assert!(xml.contains("<Port>993</Port>"));
+        assert!(xml.contains("<MicrosoftOnline>False</MicrosoftOnline>"));
         assert!(!xml.contains("<Type>MobileSync</Type>"));
         assert!(!xml.contains("<ASUrl>"));
-        assert!(!xml.contains("<Type>EXCH</Type>"));
-        assert!(!xml.contains("<Type>EXPR</Type>"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
         assert!(!xml.contains("<EwsUrl>"));
-        assert!(xml.contains("<EMailAddress>alice@example.test</EMailAddress>"));
+        assert!(!xml.contains("<EMailAddress>alice@example.test</EMailAddress>"));
     }
 
     #[test]
@@ -696,10 +698,11 @@ mod tests {
 
         assert!(xml.contains("<Type>WEB</Type>"));
         assert!(xml.contains("<OWAUrl AuthenticationMethod=\"Basic\">https://mail.example.test/EWS/Exchange.asmx</OWAUrl>"));
+        assert!(xml.contains("<Type>EXPR</Type>"));
         assert!(xml.contains("<ASUrl>https://mail.example.test/EWS/Exchange.asmx</ASUrl>"));
         assert!(xml.contains("<Server>mail.example.test</Server>"));
-        assert!(!xml.contains("<Type>EXCH</Type>"));
-        assert!(!xml.contains("<Type>EXPR</Type>"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
         assert!(!xml.contains("<Type>MobileSync</Type>"));
         assert!(!xml.contains("<Type>MAPI</Type>"));
     }
@@ -723,9 +726,10 @@ mod tests {
             "https://mail.example.test/EWS/Exchange.asmx"
         );
         assert!(xml.contains("<Type>WEB</Type>"));
+        assert!(xml.contains("<Type>EXPR</Type>"));
         assert!(xml.contains("<ASUrl>https://mail.example.test/EWS/Exchange.asmx</ASUrl>"));
-        assert!(!xml.contains("<Type>EXCH</Type>"));
-        assert!(!xml.contains("<Type>EXPR</Type>"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
 
         std::env::remove_var("LPE_AUTOCONFIG_EWS_ENABLED");
     }
@@ -831,5 +835,6 @@ mod tests {
             xml.contains("<AutoDiscoverSMTPAddress>alice@example.test</AutoDiscoverSMTPAddress>")
         );
         assert!(xml.contains("<DeploymentId>lpe-example-test</DeploymentId>"));
+        assert!(!xml.contains("<EMailAddress>alice@example.test</EMailAddress>"));
     }
 }
