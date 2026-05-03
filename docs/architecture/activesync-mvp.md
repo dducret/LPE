@@ -20,7 +20,7 @@ The concrete client interoperability matrix, prioritized defect risks, and autom
 - message submission reuses `submit_message`, which writes the authoritative `Sent` copy and then appends the `outbound_message_queue` row
 - no `ActiveSync` endpoint performs direct Internet-facing `SMTP`
 - `LPE-CT` remains the only component responsible for outbound `SMTP` relay
-- `EWS` is not implemented
+- `EWS` is implemented separately as a narrow contacts/calendar adapter and is not part of `ActiveSync`
 
 ### Endpoints
 
@@ -107,7 +107,7 @@ Those mutations still write directly into the canonical `contacts` and `calendar
 
 ### Known limitations
 
-- the MVP does not implement `EWS`
+- the MVP does not implement `EWS`; `EWS` lives in `lpe-exchange` and currently covers only contacts and calendar synchronization
 - the MVP does not expose the `Tasks` class yet; future task support must build on `docs/architecture/tasks-mvp.md`
 - the `WBXML` parser is intentionally limited to the tags used by this MVP
 - `Search` is intentionally limited to the canonical mailbox store; it does not cover `GAL`, `DocumentLibrary`, or richer search operators yet

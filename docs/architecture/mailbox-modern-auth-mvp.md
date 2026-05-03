@@ -76,7 +76,7 @@ The mailbox `OAuth2` MVP is intentionally bounded:
 - `LPE` does not yet expose a full public OAuth authorization server for mailbox clients
 - an already authenticated mailbox session may mint a short-lived bearer access token through `/api/mail/auth/oauth/access-token`
 - the token is signed server-side, scope-limited, and validated by mailbox protocol adapters without introducing a second account store
-- the default scope covers `mail`, `imap`, `dav`, `activesync`, and `managesieve`
+- the default scope covers `mail`, `imap`, `dav`, `activesync`, `ews`, `managesieve`, and `smtp`
 - the default lifetime is one hour and is controlled through `LPE_MAIL_OAUTH_ACCESS_TOKEN_SECONDS`
 
 This is sufficient to reduce the modern-auth gap for native and compatibility clients while keeping the v1 design small and internally consistent.

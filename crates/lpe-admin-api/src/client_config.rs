@@ -57,6 +57,8 @@ struct PublishedEndpoints {
     smtp_host: Option<String>,
     smtp_port: Option<u16>,
     smtp_socket_type: Option<String>,
+    ews_enabled: bool,
+    ews_url: String,
     jmap_session_url: String,
 }
 
@@ -86,6 +88,9 @@ impl PublishedEndpoints {
 
         let jmap_session_url = env::var("LPE_AUTOCONFIG_JMAP_SESSION_URL")
             .unwrap_or_else(|_| format!("{public_scheme}://{public_host}/api/jmap/session"));
+        let ews_enabled = env_flag("LPE_AUTOCONFIG_EWS_ENABLED");
+        let ews_url = env::var("LPE_AUTOCONFIG_EWS_URL")
+            .unwrap_or_else(|_| format!("{public_scheme}://{public_host}/EWS/Exchange.asmx"));
 
         Self {
             display_domain,
@@ -94,6 +99,8 @@ impl PublishedEndpoints {
             smtp_host,
             smtp_port,
             smtp_socket_type,
+            ews_enabled,
+            ews_url,
             jmap_session_url,
         }
     }
@@ -206,6 +213,24 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
         ));
     }
 
+    if config.ews_enabled {
+        xml.push_str(&format!(
+            concat!(
+                "      <Protocol>\n",
+                "        <Type>EXCH</Type>\n",
+                "        <Server>{imap_host}</Server>\n",
+                "        <LoginName>{email}</LoginName>\n",
+                "        <SSL>on</SSL>\n",
+                "        <AuthPackage>Basic</AuthPackage>\n",
+                "        <EwsUrl>{ews_url}</EwsUrl>\n",
+                "      </Protocol>\n"
+            ),
+            imap_host = escape_xml(&config.imap_host),
+            email = escape_xml(email),
+            ews_url = escape_xml(&config.ews_url),
+        ));
+    }
+
     xml.push_str(concat!(
         "    </Account>\n",
         "  </Response>\n",
@@ -286,6 +311,18 @@ fn read_u16_env(name: &str, default: u16) -> u16 {
         .unwrap_or(default)
 }
 
+fn env_flag(name: &str) -> bool {
+    env::var(name)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
 fn email_domain(email: &str) -> Option<String> {
     email
         .rsplit_once('@')
@@ -329,6 +366,8 @@ mod tests {
             smtp_host: None,
             smtp_port: None,
             smtp_socket_type: None,
+            ews_enabled: false,
+            ews_url: "https://mail.example.test/EWS/Exchange.asmx".to_string(),
             jmap_session_url: "https://mail.example.test/api/jmap/session".to_string(),
         }
     }
@@ -369,6 +408,8 @@ mod tests {
         assert!(xml.contains("<Port>993</Port>"));
         assert!(!xml.contains("<Type>MobileSync</Type>"));
         assert!(!xml.contains("<ASUrl>"));
+        assert!(!xml.contains("<Type>EXCH</Type>"));
+        assert!(!xml.contains("<EwsUrl>"));
         assert!(xml.contains("<EMailAddress>alice@example.test</EMailAddress>"));
     }
 
@@ -387,6 +428,22 @@ mod tests {
         assert!(xml.contains("<Type>SMTP</Type>"));
         assert!(xml.contains("<Server>submit.example.test</Server>"));
         assert!(xml.contains("<Port>465</Port>"));
+    }
+
+    #[test]
+    fn outlook_autodiscover_can_publish_explicit_ews_endpoint() {
+        let config = PublishedEndpoints {
+            ews_enabled: true,
+            ews_url: "https://mail.example.test/EWS/Exchange.asmx".to_string(),
+            ..sample_config()
+        };
+
+        let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(xml.contains("<Type>EXCH</Type>"));
+        assert!(xml.contains("<EwsUrl>https://mail.example.test/EWS/Exchange.asmx</EwsUrl>"));
+        assert!(!xml.contains("<Type>MobileSync</Type>"));
+        assert!(!xml.contains("<Type>MAPI</Type>"));
     }
 
     #[test]

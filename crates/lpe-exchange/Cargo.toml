@@ -1,0 +1,15 @@
+[package]
+name = "lpe-exchange"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+lpe-mail-auth = { path = "../lpe-mail-auth" }
+lpe-storage = { path = "../lpe-storage" }
+uuid.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

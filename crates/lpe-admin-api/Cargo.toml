@@ -13,6 +13,7 @@ lpe-attachments = { path = "../lpe-attachments" }
 lpe-core = { path = "../lpe-core" }
 lpe-dav = { path = "../lpe-dav" }
 lpe-domain = { path = "../lpe-domain" }
+lpe-exchange = { path = "../lpe-exchange" }
 lpe-jmap = { path = "../lpe-jmap" }
 lpe-magika = { path = "../lpe-magika" }
 lpe-mail-auth = { path = "../lpe-mail-auth" }

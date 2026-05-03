@@ -50,7 +50,9 @@ Minimal Outlook autodiscovery publishes:
 
 An `SMTP` protocol block is included only when a real authenticated client-submission endpoint is explicitly configured through the same environment variables used by Thunderbird autoconfig.
 
-The MVP does not advertise `EWS`, `MAPI`, or `MobileSync` for Outlook desktop. Outlook for Windows desktop must not be forced to use `ActiveSync` as an Exchange account; it currently uses the `IMAP` compatibility layer unless and until `EWS` or `MAPI` is implemented.
+The MVP does not advertise `MAPI` or `MobileSync` for Outlook desktop. Outlook for Windows desktop must not be forced to use `ActiveSync` as an Exchange account.
+
+The first `EWS` endpoint is contacts/calendar-only. Outlook autodiscovery publishes it only when `LPE_AUTOCONFIG_EWS_ENABLED` is explicitly set to a true value. This keeps default desktop configuration on `IMAP` until an administrator opts into the limited `EWS` surface.
 
 ### ActiveSync clients
 
@@ -92,6 +94,8 @@ workflow after loading a draft. It must not hand the message directly to
 - `LPE_AUTOCONFIG_SMTP_HOST`, optional; enables the published `SMTP` block
 - `LPE_AUTOCONFIG_SMTP_PORT`, default `465`
 - `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, default `SSL`
+- `LPE_AUTOCONFIG_EWS_ENABLED`, optional; set to `true`, `1`, `yes`, or `on` to publish the contacts/calendar `EWS` endpoint in Outlook autodiscover
+- `LPE_AUTOCONFIG_EWS_URL`, optional; default `{public_scheme}://{public_host}/EWS/Exchange.asmx`
 - `LPE_AUTOCONFIG_JMAP_SESSION_URL`, optional
 
 ### Recommended DNS and HTTP publication
@@ -106,5 +110,6 @@ For a domain `example.test`:
 - publish the authenticated `SMTPS` submission listener only when `LPE-CT` really exposes it
 - do not reuse the internal `LPE -> LPE-CT` relay as a client-submission endpoint
 - do not publish `ActiveSync` as the Outlook for Windows desktop Exchange route
+- do not publish `MAPI` until a real `MAPI` service exists
 
 

@@ -235,6 +235,7 @@ pub fn router(storage: Storage) -> Router {
         .route("/console/settings/antispam", put(update_antispam_settings))
         .merge(client_config::router())
         .nest("/jmap", lpe_jmap::router())
+        .merge(lpe_exchange::router())
         .merge(lpe_activesync::router())
         .merge(lpe_dav::router())
         .layer(middleware::from_fn(observability::observe_http))

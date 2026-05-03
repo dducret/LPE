@@ -284,4 +284,10 @@ mod tests {
         let scope = normalize_scope("smtp mail").unwrap();
         assert_eq!(scope, "mail smtp");
     }
+
+    #[test]
+    fn normalize_scope_accepts_ews_surface() {
+        let scope = normalize_scope("ews mail").unwrap();
+        assert_eq!(scope, "ews mail");
+    }
 }

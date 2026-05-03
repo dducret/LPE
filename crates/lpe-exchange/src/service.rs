@@ -1,0 +1,571 @@
+use anyhow::{anyhow, bail, Result};
+use axum::{
+    body::Bytes,
+    extract::State,
+    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
+    routing::{on, MethodFilter},
+    Router,
+};
+use lpe_mail_auth::{authenticate_account, AccountPrincipal};
+use lpe_storage::{AccessibleContact, AccessibleEvent, CollaborationCollection, Storage};
+use uuid::Uuid;
+
+use crate::store::ExchangeStore;
+
+const EWS_PATH: &str = "/EWS/Exchange.asmx";
+const EWS_LOWER_PATH: &str = "/ews/exchange.asmx";
+const CONTACTS_FOLDER_ID: &str = "contacts";
+const CALENDAR_FOLDER_ID: &str = "calendar";
+
+pub fn router() -> Router<Storage> {
+    Router::new()
+        .route(
+            EWS_PATH,
+            on(MethodFilter::OPTIONS, options_handler).post(post_handler),
+        )
+        .route(
+            EWS_LOWER_PATH,
+            on(MethodFilter::OPTIONS, options_handler).post(post_handler),
+        )
+}
+
+#[derive(Clone)]
+pub(crate) struct ExchangeService<S> {
+    store: S,
+}
+
+impl<S> ExchangeService<S> {
+    pub(crate) fn new(store: S) -> Self {
+        Self { store }
+    }
+}
+
+async fn options_handler() -> Response {
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    response
+        .headers_mut()
+        .insert("allow", HeaderValue::from_static("OPTIONS, POST"));
+    response
+}
+
+async fn post_handler(State(storage): State<Storage>, headers: HeaderMap, body: Bytes) -> Response {
+    let service = ExchangeService::new(storage);
+    match service.handle(&headers, body.as_ref()).await {
+        Ok(response) => response,
+        Err(error) => soap_error(StatusCode::BAD_REQUEST, &error.to_string()),
+    }
+}
+
+impl<S: ExchangeStore> ExchangeService<S> {
+    pub(crate) async fn handle(&self, headers: &HeaderMap, body: &[u8]) -> Result<Response> {
+        let principal = authenticate_account(&self.store, None, headers, "ews").await?;
+        let body = std::str::from_utf8(body).map_err(|_| anyhow!("EWS request is not UTF-8"))?;
+        let operation = operation_name(body).ok_or_else(|| anyhow!("unsupported EWS request"))?;
+
+        let payload = match operation {
+            "FindFolder" => self.find_folder(&principal).await?,
+            "GetFolder" => self.get_folder(&principal, body).await?,
+            "FindItem" => self.find_item(&principal, body).await?,
+            "GetItem" => self.get_item(&principal, body).await?,
+            "SyncFolderItems" => self.sync_folder_items(&principal, body).await?,
+            _ => bail!("unsupported EWS operation {operation}"),
+        };
+
+        Ok(soap_response(payload))
+    }
+
+    async fn find_folder(&self, principal: &AccountPrincipal) -> Result<String> {
+        let mut folders = String::new();
+        for collection in self
+            .store
+            .fetch_accessible_contact_collections(principal.account_id)
+            .await?
+        {
+            folders.push_str(&folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts"));
+        }
+        for collection in self
+            .store
+            .fetch_accessible_calendar_collections(principal.account_id)
+            .await?
+        {
+            folders.push_str(&folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar"));
+        }
+
+        Ok(format!(
+            concat!(
+                "<m:FindFolderResponse>",
+                "<m:ResponseMessages>",
+                "<m:FindFolderResponseMessage ResponseClass=\"Success\">",
+                "<m:ResponseCode>NoError</m:ResponseCode>",
+                "<m:RootFolder TotalItemsInView=\"{count}\" IncludesLastItemInRange=\"true\">",
+                "<t:Folders>{folders}</t:Folders>",
+                "</m:RootFolder>",
+                "</m:FindFolderResponseMessage>",
+                "</m:ResponseMessages>",
+                "</m:FindFolderResponse>"
+            ),
+            folders = folders,
+            count = count_tag_occurrences(&folders, "<t:Folder>"),
+        ))
+    }
+
+    async fn get_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let requested = requested_folder_kind(request);
+        let folders = match requested {
+            Some(FolderKind::Contacts) => self
+                .store
+                .fetch_accessible_contact_collections(principal.account_id)
+                .await?
+                .into_iter()
+                .map(|collection| folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts"))
+                .collect::<String>(),
+            Some(FolderKind::Calendar) => self
+                .store
+                .fetch_accessible_calendar_collections(principal.account_id)
+                .await?
+                .into_iter()
+                .map(|collection| folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar"))
+                .collect::<String>(),
+            None => String::new(),
+        };
+
+        if folders.is_empty() {
+            bail!("folder not found");
+        }
+
+        Ok(format!(
+            concat!(
+                "<m:GetFolderResponse>",
+                "<m:ResponseMessages>",
+                "<m:GetFolderResponseMessage ResponseClass=\"Success\">",
+                "<m:ResponseCode>NoError</m:ResponseCode>",
+                "<m:Folders>{folders}</m:Folders>",
+                "</m:GetFolderResponseMessage>",
+                "</m:ResponseMessages>",
+                "</m:GetFolderResponse>"
+            ),
+            folders = folders,
+        ))
+    }
+
+    async fn find_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        match requested_folder_kind(request).unwrap_or(FolderKind::Contacts) {
+            FolderKind::Contacts => {
+                let collection_id = requested_collection_id(request).unwrap_or(CONTACTS_FOLDER_ID);
+                let contacts = self
+                    .store
+                    .fetch_accessible_contacts_in_collection(principal.account_id, collection_id)
+                    .await?;
+                Ok(find_item_response(
+                    contacts.iter().map(contact_summary_xml).collect(),
+                ))
+            }
+            FolderKind::Calendar => {
+                let collection_id = requested_collection_id(request).unwrap_or(CALENDAR_FOLDER_ID);
+                let events = self
+                    .store
+                    .fetch_accessible_events_in_collection(principal.account_id, collection_id)
+                    .await?;
+                Ok(find_item_response(
+                    events.iter().map(calendar_item_summary_xml).collect(),
+                ))
+            }
+        }
+    }
+
+    async fn get_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let ids = requested_item_ids(request);
+        let contact_ids = ids
+            .iter()
+            .filter_map(|id| id.strip_prefix("contact:"))
+            .filter_map(|id| Uuid::parse_str(id).ok())
+            .collect::<Vec<_>>();
+        let event_ids = ids
+            .iter()
+            .filter_map(|id| id.strip_prefix("event:"))
+            .filter_map(|id| Uuid::parse_str(id).ok())
+            .collect::<Vec<_>>();
+
+        let mut items = String::new();
+        for contact in self
+            .store
+            .fetch_accessible_contacts_by_ids(principal.account_id, &contact_ids)
+            .await?
+        {
+            items.push_str(&contact_item_xml(&contact));
+        }
+        for event in self
+            .store
+            .fetch_accessible_events_by_ids(principal.account_id, &event_ids)
+            .await?
+        {
+            items.push_str(&calendar_item_xml(&event));
+        }
+
+        Ok(format!(
+            concat!(
+                "<m:GetItemResponse>",
+                "<m:ResponseMessages>",
+                "<m:GetItemResponseMessage ResponseClass=\"Success\">",
+                "<m:ResponseCode>NoError</m:ResponseCode>",
+                "<m:Items>{items}</m:Items>",
+                "</m:GetItemResponseMessage>",
+                "</m:ResponseMessages>",
+                "</m:GetItemResponse>"
+            ),
+            items = items,
+        ))
+    }
+
+    async fn sync_folder_items(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let mut changes = String::new();
+        let sync_state = match requested_folder_kind(request).unwrap_or(FolderKind::Contacts) {
+            FolderKind::Contacts => {
+                let collection_id = requested_collection_id(request).unwrap_or(CONTACTS_FOLDER_ID);
+                let contacts = self
+                    .store
+                    .fetch_accessible_contacts_in_collection(principal.account_id, collection_id)
+                    .await?;
+                for contact in &contacts {
+                    changes.push_str("<t:Create>");
+                    changes.push_str(&contact_item_xml(contact));
+                    changes.push_str("</t:Create>");
+                }
+                format!("contacts:{collection_id}:{}", contacts.len())
+            }
+            FolderKind::Calendar => {
+                let collection_id = requested_collection_id(request).unwrap_or(CALENDAR_FOLDER_ID);
+                let events = self
+                    .store
+                    .fetch_accessible_events_in_collection(principal.account_id, collection_id)
+                    .await?;
+                for event in &events {
+                    changes.push_str("<t:Create>");
+                    changes.push_str(&calendar_item_xml(event));
+                    changes.push_str("</t:Create>");
+                }
+                format!("calendar:{collection_id}:{}", events.len())
+            }
+        };
+
+        Ok(format!(
+            concat!(
+                "<m:SyncFolderItemsResponse>",
+                "<m:ResponseMessages>",
+                "<m:SyncFolderItemsResponseMessage ResponseClass=\"Success\">",
+                "<m:ResponseCode>NoError</m:ResponseCode>",
+                "<m:SyncState>{sync_state}</m:SyncState>",
+                "<m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>",
+                "<m:Changes>{changes}</m:Changes>",
+                "</m:SyncFolderItemsResponseMessage>",
+                "</m:ResponseMessages>",
+                "</m:SyncFolderItemsResponse>"
+            ),
+            sync_state = escape_xml(&sync_state),
+            changes = changes,
+        ))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FolderKind {
+    Contacts,
+    Calendar,
+}
+
+fn operation_name(body: &str) -> Option<&'static str> {
+    [
+        "SyncFolderItems",
+        "FindFolder",
+        "GetFolder",
+        "FindItem",
+        "GetItem",
+    ]
+    .into_iter()
+    .find(|name| {
+        body.contains(&format!("<m:{name}"))
+            || body.contains(&format!("<{name}"))
+            || body.contains(&format!(":{name}"))
+    })
+}
+
+fn requested_folder_kind(request: &str) -> Option<FolderKind> {
+    if request.contains("DistinguishedFolderId Id=\"calendar\"")
+        || request.contains("DistinguishedFolderId Id='calendar'")
+        || request.contains("FolderId Id=\"calendar\"")
+        || request.contains("FolderId Id='calendar'")
+    {
+        return Some(FolderKind::Calendar);
+    }
+    if request.contains("DistinguishedFolderId Id=\"contacts\"")
+        || request.contains("DistinguishedFolderId Id='contacts'")
+        || request.contains("FolderId Id=\"contacts\"")
+        || request.contains("FolderId Id='contacts'")
+    {
+        return Some(FolderKind::Contacts);
+    }
+    requested_collection_id(request).and_then(|id| {
+        if id.starts_with("shared-calendar-") {
+            Some(FolderKind::Calendar)
+        } else if id.starts_with("shared-contacts-") {
+            Some(FolderKind::Contacts)
+        } else {
+            None
+        }
+    })
+}
+
+fn requested_collection_id(request: &str) -> Option<&str> {
+    attribute_value_after(request, "FolderId", "Id")
+        .or_else(|| attribute_value_after(request, "DistinguishedFolderId", "Id"))
+        .map(|value| match value {
+            "contacts" => CONTACTS_FOLDER_ID,
+            "calendar" => CALENDAR_FOLDER_ID,
+            other => other,
+        })
+}
+
+fn requested_item_ids(request: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut rest = request;
+    while let Some(index) = rest.find("<t:ItemId").or_else(|| rest.find("<ItemId")) {
+        rest = &rest[index..];
+        if let Some(id) = attribute_value_after(rest, "ItemId", "Id") {
+            ids.push(id.to_string());
+        }
+        rest = &rest[1..];
+    }
+    ids
+}
+
+fn attribute_value_after<'a>(body: &'a str, tag: &str, attr: &str) -> Option<&'a str> {
+    let index = body.find(tag)?;
+    let rest = &body[index..];
+    let end = rest.find('>')?;
+    let tag_text = &rest[..end];
+    attribute_value(tag_text, attr)
+}
+
+fn attribute_value<'a>(tag_text: &'a str, attr: &str) -> Option<&'a str> {
+    let pattern = format!("{attr}=");
+    let start = tag_text.find(&pattern)? + pattern.len();
+    let quote = tag_text[start..].chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let value_start = start + quote.len_utf8();
+    let value_end = tag_text[value_start..].find(quote)? + value_start;
+    Some(&tag_text[value_start..value_end])
+}
+
+fn find_item_response(items: String) -> String {
+    format!(
+        concat!(
+            "<m:FindItemResponse>",
+            "<m:ResponseMessages>",
+            "<m:FindItemResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:RootFolder TotalItemsInView=\"{count}\" IncludesLastItemInRange=\"true\">",
+            "<t:Items>{items}</t:Items>",
+            "</m:RootFolder>",
+            "</m:FindItemResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:FindItemResponse>"
+        ),
+        items = items,
+        count = count_tag_occurrences(&items, "<t:ItemId")
+    )
+}
+
+fn folder_xml(collection: &CollaborationCollection, distinguished_id: &str, class: &str) -> String {
+    format!(
+        concat!(
+            "<t:Folder>",
+            "<t:FolderId Id=\"{id}\"/>",
+            "<t:DisplayName>{display}</t:DisplayName>",
+            "<t:FolderClass>IPF.{class}</t:FolderClass>",
+            "<t:DistinguishedFolderId Id=\"{distinguished_id}\"/>",
+            "</t:Folder>"
+        ),
+        id = escape_xml(&collection.id),
+        display = escape_xml(&collection.display_name),
+        class = class,
+        distinguished_id = distinguished_id,
+    )
+}
+
+fn contact_summary_xml(contact: &AccessibleContact) -> String {
+    format!(
+        concat!(
+            "<t:Contact>",
+            "<t:ItemId Id=\"contact:{id}\"/>",
+            "<t:Subject>{name}</t:Subject>",
+            "<t:DisplayName>{name}</t:DisplayName>",
+            "</t:Contact>"
+        ),
+        id = contact.id,
+        name = escape_xml(&contact.name),
+    )
+}
+
+fn contact_item_xml(contact: &AccessibleContact) -> String {
+    format!(
+        concat!(
+            "<t:Contact>",
+            "<t:ItemId Id=\"contact:{id}\"/>",
+            "<t:ParentFolderId Id=\"{folder_id}\"/>",
+            "<t:Subject>{name}</t:Subject>",
+            "<t:DisplayName>{name}</t:DisplayName>",
+            "<t:GivenName>{given}</t:GivenName>",
+            "<t:Surname>{surname}</t:Surname>",
+            "<t:JobTitle>{role}</t:JobTitle>",
+            "<t:CompanyName>{team}</t:CompanyName>",
+            "<t:EmailAddresses><t:Entry Key=\"EmailAddress1\">{email}</t:Entry></t:EmailAddresses>",
+            "<t:PhoneNumbers><t:Entry Key=\"MobilePhone\">{phone}</t:Entry></t:PhoneNumbers>",
+            "<t:Body BodyType=\"Text\">{notes}</t:Body>",
+            "</t:Contact>"
+        ),
+        id = contact.id,
+        folder_id = escape_xml(&contact.collection_id),
+        name = escape_xml(&contact.name),
+        given = escape_xml(&first_name(&contact.name)),
+        surname = escape_xml(&last_name(&contact.name)),
+        role = escape_xml(&contact.role),
+        team = escape_xml(&contact.team),
+        email = escape_xml(&contact.email),
+        phone = escape_xml(&contact.phone),
+        notes = escape_xml(&contact.notes),
+    )
+}
+
+fn calendar_item_summary_xml(event: &AccessibleEvent) -> String {
+    format!(
+        concat!(
+            "<t:CalendarItem>",
+            "<t:ItemId Id=\"event:{id}\"/>",
+            "<t:Subject>{title}</t:Subject>",
+            "<t:Start>{start}</t:Start>",
+            "<t:End>{end}</t:End>",
+            "</t:CalendarItem>"
+        ),
+        id = event.id,
+        title = escape_xml(&event.title),
+        start = escape_xml(&ews_datetime(&event.date, &event.time)),
+        end = escape_xml(&event_end_datetime(event)),
+    )
+}
+
+fn calendar_item_xml(event: &AccessibleEvent) -> String {
+    format!(
+        concat!(
+            "<t:CalendarItem>",
+            "<t:ItemId Id=\"event:{id}\"/>",
+            "<t:ParentFolderId Id=\"{folder_id}\"/>",
+            "<t:Subject>{title}</t:Subject>",
+            "<t:Location>{location}</t:Location>",
+            "<t:Start>{start}</t:Start>",
+            "<t:End>{end}</t:End>",
+            "<t:LegacyFreeBusyStatus>Busy</t:LegacyFreeBusyStatus>",
+            "<t:Body BodyType=\"Text\">{notes}</t:Body>",
+            "</t:CalendarItem>"
+        ),
+        id = event.id,
+        folder_id = escape_xml(&event.collection_id),
+        title = escape_xml(&event.title),
+        location = escape_xml(&event.location),
+        start = escape_xml(&ews_datetime(&event.date, &event.time)),
+        end = escape_xml(&event_end_datetime(event)),
+        notes = escape_xml(&event.notes),
+    )
+}
+
+fn ews_datetime(date: &str, time: &str) -> String {
+    format!("{}T{}:00Z", date.trim(), time.trim())
+}
+
+fn event_end_datetime(event: &AccessibleEvent) -> String {
+    let (hour, minute) = event
+        .time
+        .split_once(':')
+        .and_then(|(hour, minute)| Some((hour.parse::<i32>().ok()?, minute.parse::<i32>().ok()?)))
+        .unwrap_or((0, 0));
+    let total = hour
+        .saturating_mul(60)
+        .saturating_add(minute)
+        .saturating_add(event.duration_minutes.max(0));
+    let end_hour = (total / 60).min(23);
+    let end_minute = total % 60;
+    ews_datetime(&event.date, &format!("{end_hour:02}:{end_minute:02}"))
+}
+
+fn first_name(name: &str) -> String {
+    name.split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn last_name(name: &str) -> String {
+    name.split_whitespace()
+        .skip(1)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn count_tag_occurrences(value: &str, needle: &str) -> usize {
+    value.match_indices(needle).count()
+}
+
+fn soap_response(body: String) -> Response {
+    let envelope = format!(
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" ",
+            "xmlns:m=\"http://schemas.microsoft.com/exchange/services/2006/messages\" ",
+            "xmlns:t=\"http://schemas.microsoft.com/exchange/services/2006/types\">",
+            "<s:Body>{body}</s:Body>",
+            "</s:Envelope>"
+        ),
+        body = body,
+    );
+    xml_response(StatusCode::OK, envelope)
+}
+
+fn soap_error(status: StatusCode, message: &str) -> Response {
+    let envelope = format!(
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>",
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\">",
+            "<s:Body><s:Fault>",
+            "<faultcode>s:Client</faultcode>",
+            "<faultstring>{}</faultstring>",
+            "</s:Fault></s:Body>",
+            "</s:Envelope>"
+        ),
+        escape_xml(message)
+    );
+    xml_response(status, envelope)
+}
+
+fn xml_response(status: StatusCode, body: String) -> Response {
+    let mut response = (status, body).into_response();
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/xml; charset=utf-8"),
+    );
+    response
+}
+
+fn escape_xml(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}

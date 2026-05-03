@@ -1392,6 +1392,7 @@ dependencies = [
  "lpe-core",
  "lpe-dav",
  "lpe-domain",
+ "lpe-exchange",
  "lpe-jmap",
  "lpe-magika",
  "lpe-mail-auth",
@@ -1480,6 +1481,18 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "uuid",
+]
+
+[[package]]
+name = "lpe-exchange"
+version = "0.1.3"
+dependencies = [
+ "anyhow",
+ "axum",
+ "lpe-mail-auth",
+ "lpe-storage",
+ "tokio",
  "uuid",
 ]
 

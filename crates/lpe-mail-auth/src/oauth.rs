@@ -18,7 +18,7 @@ type HmacSha256 = Hmac<Sha256>;
 
 const MAIL_OAUTH_SIGNING_SECRET_ENV: &str = "LPE_MAIL_OAUTH_SIGNING_SECRET";
 const MIN_OAUTH_SIGNING_SECRET_LEN: usize = 32;
-pub const DEFAULT_OAUTH_ACCESS_SCOPE: &str = "mail imap dav activesync managesieve smtp";
+pub const DEFAULT_OAUTH_ACCESS_SCOPE: &str = "mail imap dav activesync ews managesieve smtp";
 pub const DEFAULT_OAUTH_ACCESS_TOKEN_SECONDS: u32 = 3600;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,7 +101,7 @@ pub fn normalize_scope(scope: &str) -> Result<String> {
     for value in &values {
         if !matches!(
             value.as_str(),
-            "mail" | "imap" | "dav" | "activesync" | "managesieve" | "smtp"
+            "mail" | "imap" | "dav" | "activesync" | "ews" | "managesieve" | "smtp"
         ) {
             bail!("unsupported oauth access token scope {value}");
         }

@@ -18,7 +18,7 @@ Native clients remain an important goal. A user must be able to connect an `LPE`
 
 This implies that every supported client submission path, especially `JMAP`, `IMAP`, or `ActiveSync`, feeds the same canonical message representation in `LPE`, including the authoritative `Sent` mailbox view. Inbound and outbound `SMTP` transport execution remains a sorting-center responsibility.
 
-`ActiveSync` is the first targeted mobile/native compatibility layer for clients that actually support `Exchange ActiveSync`, such as Outlook mobile and iOS mail clients. Outlook for Windows desktop must not be forced into `ActiveSync` as an Exchange account; it currently uses the `IMAP` compatibility layer unless and until `EWS` or `MAPI` is implemented. `EWS` remains a future extension to evaluate after the canonical submission and synchronization model is stabilized.
+`ActiveSync` is the first targeted mobile/native compatibility layer for clients that actually support `Exchange ActiveSync`, such as Outlook mobile and iOS mail clients. Outlook for Windows desktop must not be forced into `ActiveSync` as an Exchange account. The default Outlook for Windows desktop path remains `IMAP`; a first `EWS` adapter now exists only for contacts and calendar synchronization and is not published through autodiscover unless explicitly enabled. `MAPI` remains deferred.
 
 `CalDAV` and `CardDAV` are standards-based compatibility adapters for collaboration data. They must remain layered over the canonical `LPE` contact and calendar models, without introducing a separate DAV storage or rights model.
 
@@ -65,7 +65,9 @@ The current `Sieve` / `ManageSieve` MVP follows the same rule. `ManageSieve` onl
 
 The current `ActiveSync` MVP in `lpe-activesync` follows the same rule. `Provision`, `FolderSync`, `Sync`, and `SendMail` are implemented as an adapter over the same account authentication, draft persistence, mailbox synchronization, and canonical submission model. `SendMail` does not bypass the core mailbox workflow or `LPE-CT`; it reuses the canonical submission path so the authoritative `Sent` copy exists before outbound relay. The supported scope is detailed in `docs/architecture/activesync-mvp.md`.
 
-Client auto-configuration must publish only real endpoints. In v1, `Thunderbird` and Outlook for Windows desktop may receive `IMAP` settings and must advertise `SMTP` submission only when an authenticated client-submission endpoint is explicitly exposed; the internal `LPE -> LPE-CT` relay must never be described as a client-submission service. Outlook autodiscover must not advertise `EWS`, `MAPI`, or `ActiveSync` as a desktop Exchange route until those desktop-compatible protocols are actually implemented and exposed.
+The first `EWS` adapter in `lpe-exchange` follows the same rule for contacts and calendar synchronization. `FindFolder`, `GetFolder`, `FindItem`, `GetItem`, and `SyncFolderItems` read canonical contact and calendar collections without introducing Exchange-specific storage or rights. It is not a complete Exchange server and does not implement `MAPI`. The supported scope is detailed in `docs/architecture/ews-mapi-mvp.md`.
+
+Client auto-configuration must publish only real endpoints. In v1, `Thunderbird` and Outlook for Windows desktop may receive `IMAP` settings and must advertise `SMTP` submission only when an authenticated client-submission endpoint is explicitly exposed; the internal `LPE -> LPE-CT` relay must never be described as a client-submission service. Outlook autodiscover must not advertise `MAPI` or `ActiveSync` as a desktop Exchange route. `EWS` may be advertised only when the administrator explicitly enables the narrow contacts/calendar EWS endpoint and accepts its MVP limits.
 
 The current `DAV` MVP in `lpe-dav` follows the same adapter approach for collaboration compatibility. `CardDAV`, `CalDAV`, and the first `VTODO` layer reuse the same mailbox-account authentication, expose canonical `contacts`, `calendar_events`, and `tasks` through a minimal DAV collection model, and update those canonical tables directly instead of introducing DAV-only business logic. The supported scope is detailed in `docs/architecture/dav-mvp.md`.
 
@@ -114,7 +116,7 @@ Separate sorting center for exposed `SMTP` ingress, outbound relay, perimeter fi
 - IMAP
 - inbound and outbound `SMTP` transport through `LPE-CT`
 - mobile/native compatibility through `ActiveSync` as the first target for clients that support `Exchange ActiveSync`
-- Outlook for Windows desktop compatibility through `IMAP` until `EWS` or `MAPI` is implemented
+- Outlook for Windows desktop compatibility through `IMAP` by default, plus opt-in EWS contacts/calendar synchronization as the first Exchange-compatible slice
 - contacts and calendar compatibility through `CardDAV` and `CalDAV`
 - a canonical personal-tasks model prepared for future `JMAP Tasks`, `DAV`, and mobile adapters
 - `EWS` as a future extension after stabilization of the canonical submission and synchronization model
@@ -135,6 +137,7 @@ This phase is explicitly depth-first:
 - `JMAP`: complete canonical `state` and `changes` semantics, WebSocket reliability, mailbox delegation behavior, and shared collection consistency
 - `IMAP`: improve synchronization correctness, `UID` behavior, flag handling, and compatibility coverage under realistic mailbox operations
 - `ActiveSync`: treat Outlook mobile and iOS compatibility as a strategic flagship, with emphasis on long-poll stability, send-flow correctness, and `FolderSync` plus `Sync` edge cases
+- `EWS`: stabilize contacts and calendar synchronization before any mail or MAPI surface is introduced
 - `DAV`: focus on `CardDAV`, `CalDAV`, and `VTODO` correctness plus client-matrix interoperability instead of broader DAV surface expansion
 - `ManageSieve` and mailbox `Sieve`: focus on script correctness, canonical execution during final delivery, and interoperability of mailbox-side filtering rather than additional extension breadth
 

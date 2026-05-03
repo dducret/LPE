@@ -16,7 +16,8 @@ Its stable architectural base is:
 - `JMAP` as the primary modern protocol axis
 - `IMAP` as a compatibility mailbox-access layer
 - `ActiveSync` as the first mobile/native compatibility target for clients that support `Exchange ActiveSync`
-- `EWS` kept as a future extension
+- `EWS` started as a narrow contacts/calendar adapter and not advertised by default
+- `MAPI` kept as a future extension
 - `LPE-CT` as the distinct DMZ sorting center for external exposure, inbound `SMTP`, outbound relay, quarantine, and perimeter enforcement
 - `LPE` as the system of record for mailboxes, contacts, calendars, tasks, rights, and user-visible state
 - future local AI supported without requiring data to leave the server
@@ -30,7 +31,7 @@ That means:
 - `JMAP` first: complete state or change semantics, WebSocket reliability, and shared-mailbox behavior
 - `IMAP` next: improve sync correctness, `UID` behavior, flag handling, and real-client compatibility
 - `ActiveSync` as the flagship mobile/native-client story for clients that support `Exchange ActiveSync`: prioritize Outlook mobile and iOS compatibility labs, long-poll stability, send-flow correctness, and folder-sync edge cases
-- Outlook for Windows desktop currently uses the `IMAP` compatibility layer unless and until `EWS` or `MAPI` is implemented
+- Outlook for Windows desktop currently uses the `IMAP` compatibility layer by default; the initial `EWS` adapter is contacts/calendar-only and must be explicitly published before clients discover it
 - `DAV` and `ManageSieve` after that: focus on correctness, canonical execution, and client-matrix interoperability rather than feature sprawl
 
 Any proposal to add protocol breadth must be weighed against unfinished interoperability, sync, and canonical-state work in these existing adapters.
@@ -76,6 +77,7 @@ The important non-negotiable rules are:
 - `docs/architecture/jmap-mail-mvp.md`
 - `docs/architecture/jmap-contacts-calendars-mvp.md`
 - `docs/architecture/activesync-mvp.md`
+- `docs/architecture/ews-mapi-mvp.md`
 - `docs/architecture/imap-mvp.md`
 - `docs/architecture/sieve-managesieve-mvp.md`
 - `docs/architecture/dav-mvp.md`
