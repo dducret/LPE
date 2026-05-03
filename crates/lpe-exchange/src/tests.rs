@@ -416,7 +416,7 @@ async fn write_operations_return_ews_unsupported_errors() {
         let body = response_text(response).await;
         assert!(body.contains(&format!("<m:{operation}Response>")));
         assert!(body.contains("ResponseClass=\"Error\""));
-        assert!(body.contains("<m:ResponseCode>ErrorUnsupportedOperation</m:ResponseCode>"));
+        assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
         assert!(body.contains("<t:ServerVersionInfo"));
     }
 }
@@ -453,7 +453,7 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
         let body = response_text(response).await;
         assert!(body.contains(&format!("<m:{operation}Response>")));
         assert!(body.contains("ResponseClass=\"Error\""));
-        assert!(body.contains("<m:ResponseCode>ErrorUnsupportedOperation</m:ResponseCode>"));
+        assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
         assert!(body.contains("<t:ServerVersionInfo"));
     }
 }

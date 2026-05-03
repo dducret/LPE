@@ -616,7 +616,7 @@ fn unsupported_operation_response(operation: &str) -> String {
             "<m:ResponseMessages>",
             "<m:{operation}ResponseMessage ResponseClass=\"Error\">",
             "<m:MessageText>{operation} is not implemented by the EWS MVP.</m:MessageText>",
-            "<m:ResponseCode>ErrorUnsupportedOperation</m:ResponseCode>",
+            "<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>",
             "<m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>",
             "</m:{operation}ResponseMessage>",
             "</m:ResponseMessages>",
