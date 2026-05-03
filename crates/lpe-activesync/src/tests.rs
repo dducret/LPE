@@ -836,6 +836,13 @@ async fn options_returns_capabilities_after_authentication() {
     assert_eq!(
         response
             .headers()
+            .get("ms-server-activesync")
+            .and_then(|value| value.to_str().ok()),
+        Some("16.1")
+    );
+    assert_eq!(
+        response
+            .headers()
             .get("ms-asprotocolversions")
             .and_then(|value| value.to_str().ok()),
         Some("16.1")

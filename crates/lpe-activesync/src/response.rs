@@ -46,6 +46,10 @@ pub(crate) fn wbxml_response(protocol_version: &str, body: Vec<u8>) -> Result<Re
 fn add_common_headers(headers: &mut HeaderMap) {
     headers.insert("allow", HeaderValue::from_static("OPTIONS, POST"));
     headers.insert(
+        "ms-server-activesync",
+        HeaderValue::from_static(ACTIVE_SYNC_VERSION),
+    );
+    headers.insert(
         "ms-asprotocolversions",
         HeaderValue::from_static(ACTIVE_SYNC_VERSION),
     );

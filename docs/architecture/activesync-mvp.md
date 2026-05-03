@@ -37,6 +37,7 @@ With the documented Debian reverse proxy, they are published on `/Microsoft-Serv
 - mailbox `OAuth2` bearer access tokens are accepted through `Authorization: Bearer` when the token scope includes `activesync`
 - existing mailbox bearer-session authentication is still supported for tests and internal integration
 - anonymous `OPTIONS` and `POST` requests must not be accepted; capability discovery is returned only after mailbox authentication succeeds
+- authenticated `OPTIONS` responses publish the `MS-Server-ActiveSync`, `MS-ASProtocolVersions`, and `MS-ASProtocolCommands` headers expected by ActiveSync client probes
 - there is no separate `ActiveSync` account model outside the normal `LPE` mailbox account
 
 ### Supported protocol commands
