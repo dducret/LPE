@@ -66,6 +66,8 @@ Folder responses include EWS `TotalCount` and `ChildFolderCount` properties so s
 
 `CreateFolder` creates canonical custom mailbox folders, primarily for strict client connectivity tests that need temporary sync folders. `DeleteFolder` removes those custom mailbox folders through the canonical JMAP mailbox deletion path, which rejects system folders and non-empty folders. These operations do not add EWS mail read/sync support.
 
+`SyncFolderItems` on a custom mailbox folder returns an empty successful sync response so connectivity tests can bind and sync a temporary folder without exposing mailbox messages through EWS.
+
 When a client requests unsupported distinguished folders such as `inbox` or `tasks` through this narrow EWS adapter, the response remains an EWS-shaped `GetFolder` error with `ErrorFolderNotFound` instead of an HTTP transport failure. This keeps clients on the EWS negotiation path without advertising unsupported mail or task synchronization through EWS.
 
 The adapter also answers early client bootstrap probes for `GetServerTimeZones`, `ResolveNames`, and `GetUserAvailability`. `GetServerTimeZones` returns minimal `UTC` and `W. Europe Standard Time` definitions. `ResolveNames` returns an EWS no-results error because GAL resolution is not implemented. `GetUserAvailability` returns an EWS free/busy generation error because free/busy remains outside the current MVP.

@@ -922,6 +922,37 @@ async fn sync_folder_items_returns_contacts_from_canonical_store() {
 }
 
 #[tokio::test]
+async fn sync_folder_items_returns_empty_sync_for_custom_mailbox_folder() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA Sync",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SyncFolderItemsResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(
+        body.contains("<m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:0</m:SyncState>")
+    );
+    assert!(body.contains("<m:Changes></m:Changes>"));
+}
+
+#[tokio::test]
 async fn find_item_returns_calendar_items_from_canonical_store() {
     let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
     let collection = FakeStore::collection("default", "calendar", "Calendar");

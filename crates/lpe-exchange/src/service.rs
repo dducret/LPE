@@ -262,6 +262,18 @@ impl<S: ExchangeStore> ExchangeService<S> {
                             .collect::<String>(),
                     );
                 }
+                FolderKind::Mailbox => {
+                    let mailbox_ids = requested_mailbox_folder_ids(request);
+                    let mailboxes = self
+                        .store
+                        .fetch_jmap_mailboxes(principal.account_id)
+                        .await?;
+                    for mailbox in mailboxes.into_iter().filter(|mailbox| {
+                        mailbox_ids.is_empty() || mailbox_ids.contains(&mailbox.id)
+                    }) {
+                        folders.push_str(&mailbox_folder_xml(&mailbox));
+                    }
+                }
             }
         }
 
@@ -307,6 +319,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     events.iter().map(calendar_item_summary_xml).collect(),
                 ))
             }
+            FolderKind::Mailbox => Ok(find_item_response(String::new())),
         }
     }
 
@@ -398,6 +411,13 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     changes.push_str("</t:Create>");
                 }
                 format!("calendar:{collection_id}:{}", events.len())
+            }
+            FolderKind::Mailbox => {
+                let folder_id = requested_folder_ids(request)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| "mailbox".to_string());
+                format!("{folder_id}:0")
             }
         };
 
@@ -666,6 +686,7 @@ enum FolderKind {
     Root,
     Contacts,
     Calendar,
+    Mailbox,
 }
 
 fn operation_name(body: &str) -> Option<String> {
@@ -728,11 +749,16 @@ fn requested_folder_kind(request: &str) -> Option<FolderKind> {
     {
         return Some(FolderKind::Contacts);
     }
+    if request.contains("mailbox:") || !requested_mailbox_folder_ids(request).is_empty() {
+        return Some(FolderKind::Mailbox);
+    }
     requested_collection_id(request).and_then(|id| {
         if id.starts_with("shared-calendar-") {
             Some(FolderKind::Calendar)
         } else if id.starts_with("shared-contacts-") {
             Some(FolderKind::Contacts)
+        } else if id.starts_with("mailbox:") || Uuid::parse_str(id).is_ok() {
+            Some(FolderKind::Mailbox)
         } else if id == "msgfolderroot" || id == "root" {
             Some(FolderKind::Root)
         } else {
@@ -769,6 +795,9 @@ fn requested_folder_kinds(request: &str) -> Vec<FolderKind> {
         || request.contains("shared-calendar-")
     {
         kinds.push(FolderKind::Calendar);
+    }
+    if request.contains("mailbox:") || !requested_mailbox_folder_ids(request).is_empty() {
+        kinds.push(FolderKind::Mailbox);
     }
     kinds.dedup();
     kinds
