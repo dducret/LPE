@@ -35,7 +35,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - Outlook-style slash-delimited custom folder names such as `Projects/2026`
   are accepted and stored as canonical custom mailbox display names
 - `SELECT` on `Inbox`, `Sent`, `Drafts`, and the canonical `Deleted` trash mailbox
-- `EXAMINE`, `CHECK`, `CLOSE`, `UNSELECT`, and `EXPUNGE` for Outlook desktop synchronization flows
+- `EXAMINE`, `CHECK`, `CLOSE`, `UNSELECT`, and `EXPUNGE` for Outlook desktop synchronization flows, with `CLOSE` silently expunging `\Deleted` messages from read-write selected mailboxes as required by `IMAP`
 - `FETCH` over canonical message state, including `ENVELOPE`, `BODYSTRUCTURE`,
   `BODY`, `BODY.PEEK[HEADER.FIELDS (...)]`, `BODY.PEEK[HEADER.FIELDS.NOT (...)]`,
   part-scoped header fields, body sections, MIME part headers, and partial literals
@@ -111,7 +111,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
   `KEYWORD`, `UNKEYWORD`, `TEXT`, `SUBJECT`, `FROM`, `TO`, `CC`, `BODY`,
   `HEADER`, `BEFORE`, `ON`, `SINCE`, `SENTBEFORE`, `SENTON`, `SENTSINCE`,
   `LARGER`, `SMALLER`, `NOT`, `OR`, sequence-set criteria, and `UID`
-- `EXPUNGE` permanently removes messages that were already marked `\Deleted`, which supports Thunderbird and Outlook copy-to-trash deletion workflows without leaving the source message behind
+- `EXPUNGE` and read-write `CLOSE` permanently remove messages that were already marked `\Deleted`, which supports Thunderbird and Outlook copy-to-trash deletion workflows without leaving the source message behind
 - `IDLE` currently refreshes by polling canonical mailbox state for the selected mailbox; it now coexists with a reusable canonical mail change watermark, but still does not publish `QRESYNC`-grade vanished history
 - the current `ACL` slice is administrative only for the authenticated owner mailbox namespace; delegated mailbox projection through IMAP remains deferred even though the grants are canonical today
 

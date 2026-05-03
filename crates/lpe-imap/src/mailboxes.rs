@@ -479,7 +479,18 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     where
         W: AsyncWriteExt + Unpin,
     {
-        self.require_selected()?;
+        let selected = self.require_selected()?.clone();
+        if !selected.read_only {
+            let indices = selected
+                .emails
+                .iter()
+                .enumerate()
+                .filter_map(|(index, email)| email.deleted.then_some(index))
+                .collect::<Vec<_>>();
+            if !indices.is_empty() {
+                self.delete_selected_indices(&selected, &indices).await?;
+            }
+        }
         self.selected = None;
         writer
             .write_all(format!("{tag} OK CLOSE completed\r\n").as_bytes())
@@ -559,6 +570,23 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         if indices.is_empty() {
             return Ok(());
         }
+        self.delete_selected_indices(selected, indices).await?;
+        for index in indices.iter().rev() {
+            writer
+                .write_all(format!("* {} EXPUNGE\r\n", index + 1).as_bytes())
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn delete_selected_indices(
+        &mut self,
+        selected: &SelectedMailbox,
+        indices: &[usize],
+    ) -> Result<()> {
+        if indices.is_empty() {
+            return Ok(());
+        }
         let principal = self.require_auth()?;
         let ids = indices
             .iter()
@@ -580,11 +608,6 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                 },
             )
             .await?;
-        for index in indices.iter().rev() {
-            writer
-                .write_all(format!("* {} EXPUNGE\r\n", index + 1).as_bytes())
-                .await?;
-        }
         Ok(())
     }
 

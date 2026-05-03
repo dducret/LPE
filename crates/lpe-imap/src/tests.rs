@@ -1274,6 +1274,44 @@ async fn thunderbird_copy_to_trash_then_expunge_removes_source_only() {
 }
 
 #[tokio::test]
+async fn close_expunges_deleted_in_read_write_mailbox_without_untagged_expunge() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    let select_inbox = send_command(&mut stream, "A2 SELECT Inbox\r\n", "A2").await;
+    assert!(select_inbox.contains("* 1 EXISTS"));
+
+    let mark_deleted = send_command(
+        &mut stream,
+        "A3 UID STORE 1 +FLAGS.SILENT (\\Deleted)\r\n",
+        "A3",
+    )
+    .await;
+    assert!(mark_deleted.contains("A3 OK STORE completed"));
+
+    let close = send_command(&mut stream, "A4 CLOSE\r\n", "A4").await;
+    assert!(!close.contains("EXPUNGE"));
+    assert!(close.contains("A4 OK CLOSE completed"));
+
+    let select_after = send_command(&mut stream, "A5 SELECT Inbox\r\n", "A5").await;
+    assert!(select_after.contains("* 0 EXISTS"));
+    assert!(store
+        .emails
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|email| email.mailbox_role != "inbox"));
+
+    task.abort();
+}
+
+#[tokio::test]
 async fn outlook_uid_search_refreshes_selected_mailbox_before_fetch() {
     let store = FakeStore::new();
     {
