@@ -283,20 +283,20 @@ impl Storage {
             .next()
             .ok_or_else(|| anyhow::anyhow!("message not found"))?;
 
-        let target_mailbox_exists = sqlx::query_scalar::<_, i64>(
+        let target_mailbox_exists = sqlx::query_scalar::<_, bool>(
             r#"
-            SELECT 1
-            FROM mailboxes
-            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
-            LIMIT 1
+            SELECT EXISTS (
+                SELECT 1
+                FROM mailboxes
+                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            )
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
         .bind(target_mailbox_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .is_some();
+        .fetch_one(&self.pool)
+        .await?;
         if !target_mailbox_exists {
             bail!("target mailbox not found");
         }
