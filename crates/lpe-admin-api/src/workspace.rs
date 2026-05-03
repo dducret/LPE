@@ -219,6 +219,23 @@ pub(crate) async fn upsert_client_contact(
     }))
 }
 
+pub(crate) async fn delete_client_contact(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(contact_id): AxumPath<Uuid>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    storage
+        .delete_accessible_contact(account.account_id, contact_id)
+        .await
+        .map_err(bad_request_error)?;
+
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
 pub(crate) async fn upsert_client_event(
     State(storage): State<Storage>,
     headers: HeaderMap,
@@ -262,6 +279,23 @@ pub(crate) async fn upsert_client_event(
         attendees: event.attendees,
         attendees_json: event.attendees_json,
         notes: event.notes,
+    }))
+}
+
+pub(crate) async fn delete_client_event(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(event_id): AxumPath<Uuid>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    storage
+        .delete_accessible_event(account.account_id, event_id)
+        .await
+        .map_err(bad_request_error)?;
+
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
     }))
 }
 

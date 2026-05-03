@@ -77,9 +77,10 @@ use crate::{
     },
     util::{parse_collaboration_kind, parse_sender_delegation_right},
     workspace::{
-        client_workspace, delete_client_task, delete_draft_message, get_client_task,
-        list_client_task_lists, list_client_tasks, save_draft_message, submit_message,
-        upsert_client_contact, upsert_client_event, upsert_client_task,
+        client_workspace, delete_client_contact, delete_client_event, delete_client_task,
+        delete_draft_message, get_client_task, list_client_task_lists, list_client_tasks,
+        save_draft_message, submit_message, upsert_client_contact, upsert_client_event,
+        upsert_client_task,
     },
 };
 
@@ -181,7 +182,12 @@ pub fn router(storage: Storage) -> Router {
             delete(delete_draft_message),
         )
         .route("/mail/contacts", post(upsert_client_contact))
+        .route("/mail/contacts/{contact_id}", delete(delete_client_contact))
         .route("/mail/calendar/events", post(upsert_client_event))
+        .route(
+            "/mail/calendar/events/{event_id}",
+            delete(delete_client_event),
+        )
         .route(
             "/mail/shares",
             get(list_collaboration_overview).put(upsert_collaboration_grant),

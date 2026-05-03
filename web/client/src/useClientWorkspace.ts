@@ -445,6 +445,20 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     }
   }, [authToken, contactForm, copy, currentContact, loadWorkspace, pushNotice]);
 
+  const deleteContact = React.useCallback(async () => {
+    if (!authToken || !currentContact) return;
+    if (!window.confirm(copy.contactDeleteConfirm)) return;
+    try {
+      await apiJson(`mail/contacts/${currentContact.id}`, authToken, { method: "DELETE" });
+      setContactId("");
+      setContactForm(blankContact());
+      await loadWorkspace();
+      pushNotice(copy.noticeContactDeleted);
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    }
+  }, [authToken, copy.contactDeleteConfirm, copy.noticeContactDeleted, copy.saveError, currentContact, loadWorkspace, pushNotice]);
+
   const resetContactForm = React.useCallback(() => {
     setContactId("");
     setContactForm(blankContact());
@@ -465,6 +479,20 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       pushNotice(copy.saveError);
     }
   }, [authToken, copy, currentEvent, eventForm, loadWorkspace, pushNotice]);
+
+  const deleteEvent = React.useCallback(async () => {
+    if (!authToken || !currentEvent) return;
+    if (!window.confirm(copy.calendarDeleteConfirm)) return;
+    try {
+      await apiJson(`mail/calendar/events/${currentEvent.id}`, authToken, { method: "DELETE" });
+      setEventId("");
+      setEventForm(blankEvent());
+      await loadWorkspace();
+      pushNotice(copy.noticeCalendarDeleted);
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    }
+  }, [authToken, copy.calendarDeleteConfirm, copy.noticeCalendarDeleted, copy.saveError, currentEvent, loadWorkspace, pushNotice]);
 
   const resetEventForm = React.useCallback(() => {
     setEventId("");
@@ -663,6 +691,8 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     refreshWorkspace,
     saveContact,
     saveEvent,
+    deleteContact,
+    deleteEvent,
     resources,
     collaboration,
     mailboxDelegation,

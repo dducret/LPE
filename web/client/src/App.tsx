@@ -359,6 +359,7 @@ export function App() {
                 resources={workspace.resources}
                 onNew={workspace.resetEventForm}
                 onSave={() => void workspace.saveEvent()}
+                onDelete={() => void workspace.deleteEvent()}
               />
             </section>
             ) : null}
@@ -372,6 +373,7 @@ export function App() {
                 setContactForm={workspace.setContactForm}
                 onNew={workspace.resetContactForm}
                 onSave={() => void workspace.saveContact()}
+                onDelete={() => void workspace.deleteContact()}
               />
             </section>
             ) : null}
