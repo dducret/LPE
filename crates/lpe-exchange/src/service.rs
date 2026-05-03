@@ -706,6 +706,13 @@ impl<S: ExchangeStore> ExchangeService<S> {
     ) -> Result<Vec<Uuid>> {
         let mut ids = requested_mailbox_folder_ids(request);
         if ids.is_empty() {
+            if let Some(mailbox_id) =
+                requested_sync_state(request).and_then(|state| mailbox_sync_state_folder_id(&state))
+            {
+                ids.push(mailbox_id);
+            }
+        }
+        if ids.is_empty() {
             if let Some(role) = requested_mailbox_role(request) {
                 ids.extend(
                     self.store
@@ -1082,8 +1089,14 @@ fn request_contains_folder_reference(request: &str) -> bool {
 }
 
 fn requested_collection_id(request: &str) -> Option<&str> {
-    attribute_value_after(request, "FolderId", "Id")
-        .or_else(|| attribute_value_after(request, "DistinguishedFolderId", "Id"))
+    attribute_values_for_tag(request, "FolderId", "Id")
+        .into_iter()
+        .next()
+        .or_else(|| {
+            attribute_values_for_tag(request, "DistinguishedFolderId", "Id")
+                .into_iter()
+                .next()
+        })
         .map(|value| match value {
             "contacts" | "calendar" => DEFAULT_COLLECTION_ID,
             other => other,
@@ -1095,8 +1108,14 @@ fn requested_mailbox_role(request: &str) -> Option<&'static str> {
 }
 
 fn requested_distinguished_folder_id(request: &str) -> Option<&str> {
-    attribute_value_after(request, "DistinguishedFolderId", "Id")
-        .or_else(|| attribute_value_after(request, "FolderId", "Id"))
+    attribute_values_for_tag(request, "DistinguishedFolderId", "Id")
+        .into_iter()
+        .next()
+        .or_else(|| {
+            attribute_values_for_tag(request, "FolderId", "Id")
+                .into_iter()
+                .next()
+        })
 }
 
 fn ews_distinguished_mailbox_role(value: &str) -> Option<&'static str> {
@@ -1135,6 +1154,12 @@ fn mailbox_sync_state_ids(sync_state: &str, mailbox_id: Uuid) -> Vec<Uuid> {
         .collect()
 }
 
+fn mailbox_sync_state_folder_id(sync_state: &str) -> Option<Uuid> {
+    let rest = sync_state.strip_prefix("mailbox:")?;
+    let folder_id = rest.split_once(':')?.0;
+    Uuid::parse_str(folder_id).ok()
+}
+
 fn requested_item_ids(request: &str) -> Vec<String> {
     let mut ids = Vec::new();
     let mut rest = request;
@@ -1160,16 +1185,40 @@ fn requested_mailbox_folder_ids(request: &str) -> Vec<Uuid> {
 }
 
 fn requested_folder_ids(request: &str) -> Vec<String> {
-    let mut ids = Vec::new();
-    let mut rest = request;
-    while let Some(index) = rest.find("<t:FolderId").or_else(|| rest.find("<FolderId")) {
-        rest = &rest[index..];
-        if let Some(id) = attribute_value_after(rest, "FolderId", "Id") {
-            ids.push(id.to_string());
+    attribute_values_for_tag(request, "FolderId", "Id")
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
+fn attribute_values_for_tag<'a>(xml: &'a str, local_name: &str, attr: &str) -> Vec<&'a str> {
+    let mut values = Vec::new();
+    let mut rest = xml;
+    while let Some(tag_start) = rest.find('<') {
+        let tag_text = rest[tag_start + 1..].trim_start();
+        if tag_text.starts_with('/') || tag_text.starts_with('?') || tag_text.starts_with('!') {
+            rest = &tag_text[1..];
+            continue;
         }
-        rest = &rest[1..];
+        let Some(tag_end) = tag_text.find('>') else {
+            break;
+        };
+        let open_tag = &tag_text[..tag_end];
+        let Some(qualified_name) = open_tag
+            .split(|value: char| value.is_whitespace() || value == '/')
+            .next()
+        else {
+            rest = &tag_text[tag_end + 1..];
+            continue;
+        };
+        if qualified_name.rsplit(':').next() == Some(local_name) {
+            if let Some(value) = attribute_value(open_tag, attr) {
+                values.push(value);
+            }
+        }
+        rest = &tag_text[tag_end + 1..];
     }
-    ids
+    values
 }
 
 fn attribute_value_after<'a>(body: &'a str, tag: &str, attr: &str) -> Option<&'a str> {

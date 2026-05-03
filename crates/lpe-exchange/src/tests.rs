@@ -1189,6 +1189,68 @@ async fn sync_folder_items_returns_empty_sync_for_custom_mailbox_folder() {
 }
 
 #[tokio::test]
+async fn sync_folder_items_accepts_any_folder_id_namespace_prefix() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA Sync",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><x:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SyncFolderItemsResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(
+        body.contains("<m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:</m:SyncState>")
+    );
+}
+
+#[tokio::test]
+async fn sync_folder_items_uses_mailbox_id_from_sync_state_when_folder_id_is_omitted() {
+    let emails = Arc::new(Mutex::new(vec![FakeStore::email(
+        "99999999-9999-9999-9999-999999999999",
+        "44444444-4444-4444-4444-444444444444",
+        "custom",
+        "RCA folder item",
+    )]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA Sync",
+        )])),
+        emails,
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Create><t:Message>"));
+    assert!(body.contains("message:99999999-9999-9999-9999-999999999999"));
+}
+
+#[tokio::test]
 async fn sync_folder_items_accepts_utf16_soap_requests() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
