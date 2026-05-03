@@ -278,6 +278,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
             .filter_map(|id| id.strip_prefix("event:"))
             .filter_map(|id| Uuid::parse_str(id).ok())
             .collect::<Vec<_>>();
+        let supported_id_count = contact_ids.len() + event_ids.len();
 
         let mut items = String::new();
         for contact in self
@@ -293,6 +294,16 @@ impl<S: ExchangeStore> ExchangeService<S> {
             .await?
         {
             items.push_str(&calendar_item_xml(&event));
+        }
+
+        if !ids.is_empty()
+            && (supported_id_count != ids.len()
+                || count_tag_occurrences(&items, "<t:ItemId") != supported_id_count)
+        {
+            return Ok(get_item_error_response(
+                "ErrorItemNotFound",
+                "The requested item was not found or is not exposed by the EWS MVP.",
+            ));
         }
 
         Ok(format!(
@@ -797,6 +808,25 @@ fn create_item_success_response(message_id: Uuid, delivery_status: &str) -> Stri
         ),
         message_id = message_id,
         delivery_status = escape_xml(delivery_status),
+    )
+}
+
+fn get_item_error_response(code: &str, message: &str) -> String {
+    format!(
+        concat!(
+            "<m:GetItemResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetItemResponseMessage ResponseClass=\"Error\">",
+            "<m:MessageText>{message}</m:MessageText>",
+            "<m:ResponseCode>{code}</m:ResponseCode>",
+            "<m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>",
+            "<m:Items/>",
+            "</m:GetItemResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetItemResponse>"
+        ),
+        code = escape_xml(code),
+        message = escape_xml(message),
     )
 }
 

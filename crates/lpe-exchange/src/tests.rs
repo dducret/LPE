@@ -558,6 +558,39 @@ async fn create_item_send_and_save_uses_canonical_submission() {
 }
 
 #[tokio::test]
+async fn get_item_returns_ews_error_for_unsupported_message_ids() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:GetItem>
+                  <m:ItemShape><t:BaseShape>Default</t:BaseShape></m:ItemShape>
+                  <m:ItemIds><t:ItemId Id="message:dddddddd-dddd-dddd-dddd-dddddddddddd"/></m:ItemIds>
+                </m:GetItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetItemResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
+    assert!(body.contains("<t:ServerVersionInfo"));
+}
+
+#[tokio::test]
 async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

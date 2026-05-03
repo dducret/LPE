@@ -65,6 +65,8 @@ The adapter also answers early client bootstrap probes for `GetServerTimeZones`,
 
 `CreateItem` supports `Message` items only. `SaveOnly` writes through the canonical Drafts path. `SendOnly` and `SendAndSaveCopy` write through the canonical submission path, which persists the canonical `Sent` copy before queueing outbound transport for `LPE-CT`. `CreateItem` does not implement contact, calendar, task, attachment, meeting, or folder writes.
 
+Message ids returned by `CreateItem` are canonical mailbox ids wrapped in an EWS id prefix. Until EWS mail read/sync is explicitly implemented, `GetItem` for those `message:*` ids returns an EWS-shaped `ErrorItemNotFound` instead of a misleading empty success.
+
 Write operations that are outside the current MVP, including `UpdateItem` and `DeleteItem`, return EWS-shaped `ErrorInvalidOperation` responses. They must not mutate canonical contacts or calendar data until write support is explicitly designed and routed through canonical collaboration rights.
 
 Other out-of-scope client bootstrap operations, including `GetUserOofSettings`, `GetRoomLists`, `FindPeople`, `ExpandDL`, `Subscribe`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, `GetSharingFolder`, `GetAttachment`, `Unsubscribe`, and `GetEvents`, also return EWS-shaped `ErrorInvalidOperation` responses instead of generic SOAP transport faults.
