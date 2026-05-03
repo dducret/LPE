@@ -2,7 +2,10 @@ use anyhow::{anyhow, bail, Result};
 use axum::{
     body::Bytes,
     extract::State,
-    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode},
+    http::{
+        header::{CONTENT_TYPE, WWW_AUTHENTICATE},
+        HeaderMap, HeaderValue, StatusCode,
+    },
     response::{IntoResponse, Response},
     routing::{on, MethodFilter},
     Router,
@@ -54,7 +57,7 @@ async fn post_handler(State(storage): State<Storage>, headers: HeaderMap, body: 
     let service = ExchangeService::new(storage);
     match service.handle(&headers, body.as_ref()).await {
         Ok(response) => response,
-        Err(error) => soap_error(StatusCode::BAD_REQUEST, &error.to_string()),
+        Err(error) => error_response(&error),
     }
 }
 
@@ -158,6 +161,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
     async fn get_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let requested = requested_folder_kind(request);
         let folders = match requested {
+            Some(FolderKind::Root) => root_folder_xml(),
             Some(FolderKind::Contacts) => self
                 .store
                 .fetch_accessible_contact_collections(principal.account_id)
@@ -196,6 +200,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
 
     async fn find_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         match requested_folder_kind(request).unwrap_or(FolderKind::Contacts) {
+            FolderKind::Root => Ok(find_item_response(String::new())),
             FolderKind::Contacts => {
                 let collection_id = requested_collection_id(request).unwrap_or(CONTACTS_FOLDER_ID);
                 let contacts = self
@@ -270,6 +275,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
     ) -> Result<String> {
         let mut changes = String::new();
         let sync_state = match requested_folder_kind(request).unwrap_or(FolderKind::Contacts) {
+            FolderKind::Root => "root:0".to_string(),
             FolderKind::Contacts => {
                 let collection_id = requested_collection_id(request).unwrap_or(CONTACTS_FOLDER_ID);
                 let contacts = self
@@ -319,6 +325,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FolderKind {
+    Root,
     Contacts,
     Calendar,
 }
@@ -341,6 +348,17 @@ fn operation_name(body: &str) -> Option<&'static str> {
 }
 
 fn requested_folder_kind(request: &str) -> Option<FolderKind> {
+    if request.contains("DistinguishedFolderId Id=\"msgfolderroot\"")
+        || request.contains("DistinguishedFolderId Id='msgfolderroot'")
+        || request.contains("DistinguishedFolderId Id=\"root\"")
+        || request.contains("DistinguishedFolderId Id='root'")
+        || request.contains("FolderId Id=\"msgfolderroot\"")
+        || request.contains("FolderId Id='msgfolderroot'")
+        || request.contains("FolderId Id=\"root\"")
+        || request.contains("FolderId Id='root'")
+    {
+        return Some(FolderKind::Root);
+    }
     if request.contains("DistinguishedFolderId Id=\"calendar\"")
         || request.contains("DistinguishedFolderId Id='calendar'")
         || request.contains("FolderId Id=\"calendar\"")
@@ -360,6 +378,8 @@ fn requested_folder_kind(request: &str) -> Option<FolderKind> {
             Some(FolderKind::Calendar)
         } else if id.starts_with("shared-contacts-") {
             Some(FolderKind::Contacts)
+        } else if id == "msgfolderroot" || id == "root" {
+            Some(FolderKind::Root)
         } else {
             None
         }
@@ -425,6 +445,18 @@ fn find_item_response(items: String) -> String {
         items = items,
         count = count_tag_occurrences(&items, "<t:ItemId")
     )
+}
+
+fn root_folder_xml() -> String {
+    concat!(
+        "<t:Folder>",
+        "<t:FolderId Id=\"msgfolderroot\"/>",
+        "<t:DisplayName>Root</t:DisplayName>",
+        "<t:FolderClass>IPF.Note</t:FolderClass>",
+        "<t:DistinguishedFolderId Id=\"msgfolderroot\"/>",
+        "</t:Folder>"
+    )
+    .to_string()
 }
 
 fn folder_xml(collection: &CollaborationCollection, distinguished_id: &str, class: &str) -> String {
@@ -580,6 +612,30 @@ fn soap_response(body: String) -> Response {
         body = body,
     );
     xml_response(StatusCode::OK, envelope)
+}
+
+pub(crate) fn error_response(error: &anyhow::Error) -> Response {
+    let message = error.to_string();
+    if is_authentication_error(&message) {
+        return soap_auth_challenge(&message);
+    }
+    soap_error(StatusCode::BAD_REQUEST, &message)
+}
+
+fn is_authentication_error(message: &str) -> bool {
+    matches!(
+        message,
+        "missing account authentication" | "invalid credentials"
+    ) || message.contains("oauth access token")
+}
+
+fn soap_auth_challenge(message: &str) -> Response {
+    let mut response = soap_error(StatusCode::UNAUTHORIZED, message);
+    response.headers_mut().insert(
+        WWW_AUTHENTICATE,
+        HeaderValue::from_static("Basic realm=\"LPE EWS\""),
+    );
+    response
 }
 
 fn soap_error(status: StatusCode, message: &str) -> Response {

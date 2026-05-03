@@ -8,7 +8,10 @@ use lpe_storage::{
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-use crate::{service::ExchangeService, store::ExchangeStore};
+use crate::{
+    service::{error_response, ExchangeService},
+    store::ExchangeStore,
+};
 
 #[derive(Clone, Default)]
 struct FakeStore {
@@ -246,6 +249,47 @@ async fn sync_folder_hierarchy_lists_contact_and_calendar_folders() {
     assert!(body.contains("<t:Create><t:Folder>"));
     assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
     assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
+}
+
+#[tokio::test]
+async fn get_folder_returns_msgfolderroot() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:DistinguishedFolderId Id="msgfolderroot"/></m:FolderIds></m:GetFolder></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:FolderId Id=\"msgfolderroot\"/>"));
+    assert!(body.contains("<t:DisplayName>Root</t:DisplayName>"));
+}
+
+#[tokio::test]
+async fn authentication_errors_return_basic_challenge() {
+    let response = error_response(&anyhow::anyhow!("missing account authentication"));
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get("www-authenticate")
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic realm=\"LPE EWS\"")
+    );
+    let body = response_text(response).await;
+    assert!(body.contains("<s:Fault>"));
+    assert!(body.contains("missing account authentication"));
 }
 
 #[tokio::test]
