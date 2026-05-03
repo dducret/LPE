@@ -58,6 +58,8 @@ The MVP does not advertise `MAPI` or `MobileSync` for Outlook desktop. Outlook f
 
 The first `EWS` endpoint is contacts/calendar-only. Outlook autodiscovery publishes it only when `LPE_AUTOCONFIG_EWS_ENABLED` is explicitly set to a true value. This keeps default desktop configuration on `IMAP` until an administrator opts into the limited `EWS` surface.
 
+When `EWS` autodiscovery is enabled, the Outlook POX response includes both `EXCH` and `EXPR` protocol blocks that carry the same configured `EwsUrl` and `EmwsUrl`. These blocks exist only to let Exchange-style clients discover the published `/EWS/Exchange.asmx` endpoint. They must not be treated as a `MAPI`, `RPC`, or authenticated client-submission publication.
+
 Autodiscover responses include the POX `Response`, `User`, `Account`, and `Protocol` shape expected by Microsoft clients. The request parser accepts both unprefixed and namespace-prefixed request elements, including the `a:EMailAddress` form used by Microsoft connectivity tooling.
 
 When the request asks for the `mobilesync` response schema, Autodiscover returns an `ActiveSync`-specific `MobileSync` server response that points at `/Microsoft-Server-ActiveSync`. That response is reserved for ActiveSync clients and tests; Outlook desktop autodiscover must continue to avoid advertising `MobileSync` as an Exchange desktop route.

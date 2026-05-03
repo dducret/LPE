@@ -227,23 +227,8 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
     }
 
     if config.ews_enabled {
-        xml.push_str(&format!(
-            concat!(
-                "      <Protocol>\n",
-                "        <Type>EXCH</Type>\n",
-                "        <Server>{imap_host}</Server>\n",
-                "        <LoginName>{email}</LoginName>\n",
-                "        <SSL>on</SSL>\n",
-                "        <AuthPackage>Basic</AuthPackage>\n",
-                "        <ASUrl>{ews_url}</ASUrl>\n",
-                "        <EwsUrl>{ews_url}</EwsUrl>\n",
-                "        <OOFUrl>{ews_url}</OOFUrl>\n",
-                "      </Protocol>\n"
-            ),
-            imap_host = escape_xml(&config.imap_host),
-            email = escape_xml(email),
-            ews_url = escape_xml(&config.ews_url),
-        ));
+        xml.push_str(&render_ews_autodiscover_protocol("EXCH", config, email));
+        xml.push_str(&render_ews_autodiscover_protocol("EXPR", config, email));
     }
 
     xml.push_str(concat!(
@@ -252,6 +237,32 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
         "</Autodiscover>\n"
     ));
     xml
+}
+
+fn render_ews_autodiscover_protocol(
+    protocol_type: &str,
+    config: &PublishedEndpoints,
+    email: &str,
+) -> String {
+    format!(
+        concat!(
+            "      <Protocol>\n",
+            "        <Type>{protocol_type}</Type>\n",
+            "        <Server>{public_host}</Server>\n",
+            "        <LoginName>{email}</LoginName>\n",
+            "        <SSL>on</SSL>\n",
+            "        <AuthPackage>Basic</AuthPackage>\n",
+            "        <ASUrl>{ews_url}</ASUrl>\n",
+            "        <EwsUrl>{ews_url}</EwsUrl>\n",
+            "        <EmwsUrl>{ews_url}</EmwsUrl>\n",
+            "        <OOFUrl>{ews_url}</OOFUrl>\n",
+            "      </Protocol>\n"
+        ),
+        protocol_type = escape_xml(protocol_type),
+        public_host = escape_xml(&ews_host(&config.ews_url).unwrap_or(&config.imap_host)),
+        email = escape_xml(email),
+        ews_url = escape_xml(&config.ews_url),
+    )
 }
 
 fn render_mobilesync_autodiscover(config: &PublishedEndpoints, email: Option<&str>) -> String {
@@ -427,6 +438,15 @@ fn email_domain(email: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn ews_host(ews_url: &str) -> Option<&str> {
+    let after_scheme = ews_url.split_once("://").map(|(_, rest)| rest)?;
+    after_scheme
+        .split('/')
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
 fn legacy_user(email: &str, display_domain: &str) -> String {
     let source = if email.trim().is_empty() {
         display_domain
@@ -475,6 +495,7 @@ mod tests {
         parse_autodiscover_email, render_mobilesync_autodiscover, render_outlook_autodiscover,
         render_thunderbird_autoconfig, requested_mobilesync_schema, PublishedEndpoints,
     };
+    use axum::http::HeaderMap;
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -531,6 +552,7 @@ mod tests {
         assert!(!xml.contains("<Type>MobileSync</Type>"));
         assert!(!xml.contains("<ASUrl>"));
         assert!(!xml.contains("<Type>EXCH</Type>"));
+        assert!(!xml.contains("<Type>EXPR</Type>"));
         assert!(!xml.contains("<EwsUrl>"));
         assert!(xml.contains("<EMailAddress>alice@example.test</EMailAddress>"));
     }
@@ -563,9 +585,36 @@ mod tests {
         let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
 
         assert!(xml.contains("<Type>EXCH</Type>"));
+        assert!(xml.contains("<Type>EXPR</Type>"));
         assert!(xml.contains("<EwsUrl>https://mail.example.test/EWS/Exchange.asmx</EwsUrl>"));
+        assert!(xml.contains("<EmwsUrl>https://mail.example.test/EWS/Exchange.asmx</EmwsUrl>"));
+        assert!(xml.contains("<Server>mail.example.test</Server>"));
         assert!(!xml.contains("<Type>MobileSync</Type>"));
         assert!(!xml.contains("<Type>MAPI</Type>"));
+    }
+
+    #[test]
+    fn outlook_autodiscover_ews_publication_is_env_opt_in() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("LPE_AUTOCONFIG_EWS_ENABLED", "true");
+        std::env::remove_var("LPE_AUTOCONFIG_EWS_URL");
+        std::env::remove_var("LPE_PUBLIC_HOSTNAME");
+        std::env::remove_var("LPE_PUBLIC_SCHEME");
+
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "mail.example.test".parse().unwrap());
+        let config = PublishedEndpoints::from_headers(&headers, Some("alice@example.test"));
+        let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(config.ews_enabled);
+        assert_eq!(
+            config.ews_url,
+            "https://mail.example.test/EWS/Exchange.asmx"
+        );
+        assert!(xml.contains("<Type>EXCH</Type>"));
+        assert!(xml.contains("<Type>EXPR</Type>"));
+
+        std::env::remove_var("LPE_AUTOCONFIG_EWS_ENABLED");
     }
 
     #[test]
