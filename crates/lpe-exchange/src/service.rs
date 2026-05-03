@@ -728,6 +728,9 @@ fn operation_name(body: &str) -> Option<String> {
         {
             return Some(match local_name {
                 "GetUserAvailabilityRequest" => "GetUserAvailability".to_string(),
+                value if value.ends_with("Request") => {
+                    value.trim_end_matches("Request").to_string()
+                }
                 _ => local_name.to_string(),
             });
         }

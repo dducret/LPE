@@ -832,6 +832,30 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
 }
 
 #[tokio::test]
+async fn request_suffixed_operations_use_canonical_response_names() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetUserOofSettingsRequest /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetUserOofSettingsResponse>"));
+    assert!(!body.contains("<m:GetUserOofSettingsRequestResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("<t:ServerVersionInfo"));
+}
+
+#[tokio::test]
 async fn unknown_ews_operations_return_parseable_invalid_operation_errors() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
