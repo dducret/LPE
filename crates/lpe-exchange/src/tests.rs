@@ -3,7 +3,8 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, AuthenticatedAccount,
-    CollaborationCollection, CollaborationRights, StoredAccountAppPassword,
+    CollaborationCollection, CollaborationRights, SavedDraftMessage, StoredAccountAppPassword,
+    SubmitMessageInput, SubmittedMessage,
 };
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -20,6 +21,8 @@ struct FakeStore {
     calendar_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
     contacts: Arc<Mutex<Vec<AccessibleContact>>>,
     events: Arc<Mutex<Vec<AccessibleEvent>>>,
+    saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
+    submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
 }
 
 impl FakeStore {
@@ -173,6 +176,44 @@ impl ExchangeStore for FakeStore {
             .cloned()
             .collect();
         Box::pin(async move { Ok(events) })
+    }
+
+    fn save_draft_message<'a>(
+        &'a self,
+        input: SubmitMessageInput,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, SavedDraftMessage> {
+        self.saved_drafts.lock().unwrap().push(input);
+        Box::pin(async move {
+            Ok(SavedDraftMessage {
+                message_id: Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap(),
+                account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
+                submitted_by_account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+                    .unwrap(),
+                draft_mailbox_id: Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap(),
+                delivery_status: "draft".to_string(),
+            })
+        })
+    }
+
+    fn submit_message<'a>(
+        &'a self,
+        input: SubmitMessageInput,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, SubmittedMessage> {
+        self.submitted_messages.lock().unwrap().push(input);
+        Box::pin(async move {
+            Ok(SubmittedMessage {
+                message_id: Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap(),
+                thread_id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+                account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
+                submitted_by_account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+                    .unwrap(),
+                sent_mailbox_id: Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
+                outbound_queue_id: Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
+                delivery_status: "queued".to_string(),
+            })
+        })
     }
 }
 
@@ -405,7 +446,7 @@ async fn write_operations_return_ews_unsupported_errors() {
     };
     let service = ExchangeService::new(store);
 
-    for operation in ["CreateItem", "UpdateItem", "DeleteItem"] {
+    for operation in ["UpdateItem", "DeleteItem"] {
         let request = format!("<s:Envelope><s:Body><m:{operation} /></s:Body></s:Envelope>");
         let response = service
             .handle(&bearer_headers(), request.as_bytes())
@@ -419,6 +460,101 @@ async fn write_operations_return_ews_unsupported_errors() {
         assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
         assert!(body.contains("<t:ServerVersionInfo"));
     }
+}
+
+#[tokio::test]
+async fn create_item_saveonly_stores_message_as_canonical_draft() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let saved_drafts = store.saved_drafts.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:CreateItem MessageDisposition="SaveOnly">
+                  <m:SavedItemFolderId><t:DistinguishedFolderId Id="drafts"/></m:SavedItemFolderId>
+                  <m:Items>
+                    <t:Message>
+                      <t:Subject>Draft from EWS</t:Subject>
+                      <t:Body BodyType="Text">Hello from EWS</t:Body>
+                      <t:ToRecipients>
+                        <t:Mailbox><t:Name>Bob</t:Name><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox>
+                      </t:ToRecipients>
+                    </t:Message>
+                  </m:Items>
+                </m:CreateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("message:dddddddd-dddd-dddd-dddd-dddddddddddd"));
+    let recorded = saved_drafts.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].source, "ews-createitem");
+    assert_eq!(recorded[0].subject, "Draft from EWS");
+    assert_eq!(recorded[0].body_text, "Hello from EWS");
+    assert_eq!(recorded[0].from_address, "alice@example.test");
+    assert_eq!(recorded[0].to[0].address, "bob@example.test");
+    assert_eq!(recorded[0].to[0].display_name.as_deref(), Some("Bob"));
+}
+
+#[tokio::test]
+async fn create_item_send_and_save_uses_canonical_submission() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let submitted_messages = store.submitted_messages.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:CreateItem MessageDisposition="SendAndSaveCopy">
+                  <m:Items>
+                    <t:Message>
+                      <t:Subject>Send from EWS</t:Subject>
+                      <t:Body BodyType="HTML">&lt;p&gt;Hello&lt;/p&gt;</t:Body>
+                      <t:ToRecipients>
+                        <t:Mailbox><t:EmailAddress>carol@example.test</t:EmailAddress></t:Mailbox>
+                      </t:ToRecipients>
+                    </t:Message>
+                  </m:Items>
+                </m:CreateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("message:ffffffff-ffff-ffff-ffff-ffffffffffff"));
+    let recorded = submitted_messages.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].source, "ews-createitem");
+    assert_eq!(recorded[0].subject, "Send from EWS");
+    assert_eq!(recorded[0].body_text, "Hello");
+    assert_eq!(recorded[0].to[0].address, "carol@example.test");
 }
 
 #[tokio::test]

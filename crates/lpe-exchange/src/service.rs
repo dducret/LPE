@@ -11,7 +11,10 @@ use axum::{
     Router,
 };
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
-use lpe_storage::{AccessibleContact, AccessibleEvent, CollaborationCollection, Storage};
+use lpe_storage::{
+    AccessibleContact, AccessibleEvent, AuditEntryInput, CollaborationCollection, Storage,
+    SubmitMessageInput, SubmittedRecipientInput,
+};
 use uuid::Uuid;
 
 use crate::store::ExchangeStore;
@@ -77,7 +80,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
             "GetServerTimeZones" => get_server_time_zones_response(),
             "ResolveNames" => resolve_names_no_results_response(),
             "GetUserAvailability" => get_user_availability_unavailable_response(),
-            "CreateItem" => unsupported_operation_response("CreateItem"),
+            "CreateItem" => self.create_item(&principal, body).await?,
             "UpdateItem" => unsupported_operation_response("UpdateItem"),
             "DeleteItem" => unsupported_operation_response("DeleteItem"),
             "GetUserOofSettings" => unsupported_operation_response("GetUserOofSettings"),
@@ -360,6 +363,144 @@ impl<S: ExchangeStore> ExchangeService<S> {
             changes = changes,
         ))
     }
+
+    async fn create_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let result = async {
+            let input = parse_create_message_input(principal, request)?;
+            let subject_for_audit = input.subject.clone();
+            let disposition = attribute_value_after(request, "CreateItem", "MessageDisposition")
+                .unwrap_or("SaveOnly");
+
+            match disposition {
+                "SaveOnly" => {
+                    let draft = self
+                        .store
+                        .save_draft_message(
+                            input,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-save-draft-message".to_string(),
+                                subject: subject_for_audit,
+                            },
+                        )
+                        .await?;
+                    Ok(create_item_success_response(draft.message_id, "draft"))
+                }
+                "SendOnly" | "SendAndSaveCopy" => {
+                    let submitted = self
+                        .store
+                        .submit_message(
+                            input,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-submit-message".to_string(),
+                                subject: subject_for_audit,
+                            },
+                        )
+                        .await?;
+                    Ok(create_item_success_response(submitted.message_id, "queued"))
+                }
+                other => Ok(operation_error_response(
+                    "CreateItem",
+                    "ErrorInvalidOperation",
+                    &format!("unsupported CreateItem MessageDisposition {other}"),
+                )),
+            }
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("CreateItem", "ErrorInvalidOperation", &error.to_string())
+        }))
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ParsedMailbox {
+    address: String,
+    display_name: Option<String>,
+}
+
+fn parse_create_message_input(
+    principal: &AccountPrincipal,
+    request: &str,
+) -> Result<SubmitMessageInput> {
+    let message = element_content(request, "Message")
+        .ok_or_else(|| anyhow!("CreateItem currently supports only Message items"))?;
+    let body_tag = open_tag_text(message, "Body").unwrap_or_default();
+    let body_type = attribute_value(body_tag, "BodyType").unwrap_or("Text");
+    let body_value = element_text(message, "Body").unwrap_or_default();
+    let body_text = if body_type.eq_ignore_ascii_case("HTML") {
+        html_to_text(&body_value)
+    } else {
+        body_value
+    };
+    let from = element_content(message, "From").and_then(parse_first_mailbox);
+    let sender = element_content(message, "Sender").and_then(parse_first_mailbox);
+    let from_display = from
+        .as_ref()
+        .and_then(|mailbox| mailbox.display_name.clone())
+        .or_else(|| Some(principal.display_name.clone()));
+    let from_address = from
+        .map(|mailbox| mailbox.address)
+        .unwrap_or_else(|| principal.email.clone());
+
+    Ok(SubmitMessageInput {
+        draft_message_id: None,
+        account_id: principal.account_id,
+        submitted_by_account_id: principal.account_id,
+        source: "ews-createitem".to_string(),
+        from_display,
+        from_address,
+        sender_display: sender
+            .as_ref()
+            .and_then(|mailbox| mailbox.display_name.clone()),
+        sender_address: sender.map(|mailbox| mailbox.address),
+        to: parse_recipients(message, "ToRecipients"),
+        cc: parse_recipients(message, "CcRecipients"),
+        bcc: parse_recipients(message, "BccRecipients"),
+        subject: element_text(message, "Subject").unwrap_or_default(),
+        body_text,
+        body_html_sanitized: None,
+        internet_message_id: element_text(message, "InternetMessageId"),
+        mime_blob_ref: Some(format!("ews-createitem:{}", Uuid::new_v4())),
+        size_octets: message.len() as i64,
+        unread: Some(false),
+        flagged: Some(false),
+        attachments: Vec::new(),
+    })
+}
+
+fn parse_recipients(message: &str, collection_name: &str) -> Vec<SubmittedRecipientInput> {
+    element_content(message, collection_name)
+        .map(|collection| {
+            element_contents(collection, "Mailbox")
+                .into_iter()
+                .filter_map(parse_mailbox)
+                .map(|mailbox| SubmittedRecipientInput {
+                    address: mailbox.address,
+                    display_name: mailbox.display_name,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn parse_first_mailbox(value: &str) -> Option<ParsedMailbox> {
+    element_contents(value, "Mailbox")
+        .into_iter()
+        .find_map(parse_mailbox)
+}
+
+fn parse_mailbox(value: &str) -> Option<ParsedMailbox> {
+    let address = element_text(value, "EmailAddress")?;
+    if address.trim().is_empty() {
+        return None;
+    }
+    Some(ParsedMailbox {
+        address: address.trim().to_string(),
+        display_name: element_text(value, "Name").filter(|name| !name.trim().is_empty()),
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -521,6 +662,104 @@ fn attribute_value<'a>(tag_text: &'a str, attr: &str) -> Option<&'a str> {
     Some(&tag_text[value_start..value_end])
 }
 
+fn open_tag_text<'a>(xml: &'a str, local_name: &str) -> Option<&'a str> {
+    let mut rest = xml;
+    while let Some(tag_start) = rest.find('<') {
+        let tag_text = rest[tag_start + 1..].trim_start();
+        if tag_text.starts_with('/') || tag_text.starts_with('?') || tag_text.starts_with('!') {
+            rest = &tag_text[1..];
+            continue;
+        }
+        let tag_end = tag_text.find('>')?;
+        let open_tag = &tag_text[..tag_end];
+        let qualified_name = open_tag
+            .split(|value: char| value.is_whitespace() || value == '/')
+            .next()?;
+        if qualified_name.rsplit(':').next()? == local_name {
+            return Some(open_tag);
+        }
+        rest = &tag_text[tag_end + 1..];
+    }
+    None
+}
+
+fn element_text(xml: &str, local_name: &str) -> Option<String> {
+    element_content(xml, local_name).map(xml_text)
+}
+
+fn element_content<'a>(xml: &'a str, local_name: &str) -> Option<&'a str> {
+    element_contents(xml, local_name).into_iter().next()
+}
+
+fn element_contents<'a>(xml: &'a str, local_name: &str) -> Vec<&'a str> {
+    let mut values = Vec::new();
+    let mut rest = xml;
+    while let Some(tag_start) = rest.find('<') {
+        let tag_text = rest[tag_start + 1..].trim_start();
+        if tag_text.starts_with('/') || tag_text.starts_with('?') || tag_text.starts_with('!') {
+            rest = &tag_text[1..];
+            continue;
+        }
+        let Some(tag_end) = tag_text.find('>') else {
+            break;
+        };
+        let open_tag = &tag_text[..tag_end];
+        let Some(qualified_name) = open_tag
+            .split(|value: char| value.is_whitespace() || value == '/')
+            .next()
+        else {
+            break;
+        };
+        if qualified_name.rsplit(':').next() != Some(local_name) {
+            rest = &tag_text[tag_end + 1..];
+            continue;
+        }
+        if open_tag.trim_end().ends_with('/') {
+            values.push("");
+            rest = &tag_text[tag_end + 1..];
+            continue;
+        }
+
+        let content_start = tag_start + 1 + tag_text[..tag_end + 1].len();
+        let closing_tag = format!("</{qualified_name}>");
+        let Some(relative_end) = rest[content_start..].find(&closing_tag) else {
+            break;
+        };
+        let content_end = content_start + relative_end;
+        values.push(&rest[content_start..content_end]);
+        rest = &rest[content_end + closing_tag.len()..];
+    }
+    values
+}
+
+fn xml_text(value: &str) -> String {
+    value
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .trim()
+        .to_string()
+}
+
+fn html_to_text(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut in_tag = false;
+    for ch in value.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                output.push(' ');
+            }
+            _ if !in_tag => output.push(ch),
+            _ => {}
+        }
+    }
+    output.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 fn find_item_response(items: String) -> String {
     format!(
         concat!(
@@ -537,6 +776,27 @@ fn find_item_response(items: String) -> String {
         ),
         items = items,
         count = count_tag_occurrences(&items, "<t:ItemId")
+    )
+}
+
+fn create_item_success_response(message_id: Uuid, delivery_status: &str) -> String {
+    format!(
+        concat!(
+            "<m:CreateItemResponse>",
+            "<m:ResponseMessages>",
+            "<m:CreateItemResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Items>",
+            "<t:Message>",
+            "<t:ItemId Id=\"message:{message_id}\" ChangeKey=\"{delivery_status}\"/>",
+            "</t:Message>",
+            "</m:Items>",
+            "</m:CreateItemResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:CreateItemResponse>"
+        ),
+        message_id = message_id,
+        delivery_status = escape_xml(delivery_status),
     )
 }
 
@@ -609,19 +869,29 @@ fn get_user_availability_unavailable_response() -> String {
 }
 
 fn unsupported_operation_response(operation: &str) -> String {
+    operation_error_response(
+        operation,
+        "ErrorInvalidOperation",
+        &format!("{operation} is not implemented by the EWS MVP."),
+    )
+}
+
+fn operation_error_response(operation: &str, code: &str, message: &str) -> String {
     format!(
         concat!(
             "<m:{operation}Response>",
             "<m:ResponseMessages>",
             "<m:{operation}ResponseMessage ResponseClass=\"Error\">",
-            "<m:MessageText>{operation} is not implemented by the EWS MVP.</m:MessageText>",
-            "<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>",
+            "<m:MessageText>{message}</m:MessageText>",
+            "<m:ResponseCode>{code}</m:ResponseCode>",
             "<m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>",
             "</m:{operation}ResponseMessage>",
             "</m:ResponseMessages>",
             "</m:{operation}Response>"
         ),
         operation = escape_xml(operation),
+        code = escape_xml(code),
+        message = escape_xml(message),
     )
 }
 
