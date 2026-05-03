@@ -70,24 +70,33 @@ async fn post_handler(State(storage): State<Storage>, headers: HeaderMap, body: 
 impl<S: ExchangeStore> ExchangeService<S> {
     pub(crate) async fn handle(&self, headers: &HeaderMap, body: &[u8]) -> Result<Response> {
         let principal = authenticate_account(&self.store, None, headers, "ews").await?;
-        let body = std::str::from_utf8(body).map_err(|_| anyhow!("EWS request is not UTF-8"))?;
-        let operation = operation_name(body).ok_or_else(|| anyhow!("unsupported EWS request"))?;
+        let body = decode_ews_body(headers, body)?;
+        let operation = operation_name(&body).ok_or_else(|| anyhow!("unsupported EWS request"))?;
 
         let payload = match operation.as_str() {
             "SyncFolderHierarchy" => self.sync_folder_hierarchy(&principal).await?,
             "FindFolder" => self.find_folder(&principal).await?,
-            "GetFolder" => self.get_folder(&principal, body).await?,
-            "FindItem" => self.find_item(&principal, body).await?,
-            "GetItem" => self.get_item(&principal, body).await?,
-            "SyncFolderItems" => self.sync_folder_items(&principal, body).await?,
+            "GetFolder" => self.get_folder(&principal, &body).await?,
+            "FindItem" => self.find_item(&principal, &body).await?,
+            "GetItem" => self.get_item(&principal, &body).await?,
+            "SyncFolderItems" => self
+                .sync_folder_items(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "SyncFolderItems",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    )
+                }),
             "GetServerTimeZones" => get_server_time_zones_response(),
             "ResolveNames" => resolve_names_no_results_response(),
             "GetUserAvailability" => get_user_availability_unavailable_response(),
-            "CreateItem" => self.create_item(&principal, body).await?,
+            "CreateItem" => self.create_item(&principal, &body).await?,
             "UpdateItem" => unsupported_operation_response("UpdateItem"),
-            "DeleteItem" => self.delete_item(&principal, body).await?,
-            "CreateFolder" => self.create_folder(&principal, body).await?,
-            "DeleteFolder" => self.delete_folder(&principal, body).await?,
+            "DeleteItem" => self.delete_item(&principal, &body).await?,
+            "CreateFolder" => self.create_folder(&principal, &body).await?,
+            "DeleteFolder" => self.delete_folder(&principal, &body).await?,
             "GetUserOofSettings" => unsupported_operation_response("GetUserOofSettings"),
             "GetRoomLists" => unsupported_operation_response("GetRoomLists"),
             "FindPeople" => unsupported_operation_response("FindPeople"),
@@ -773,6 +782,54 @@ impl<S: ExchangeStore> ExchangeService<S> {
             operation_error_response("DeleteFolder", "ErrorFolderNotFound", &error.to_string())
         }))
     }
+}
+
+fn decode_ews_body(headers: &HeaderMap, body: &[u8]) -> Result<String> {
+    let content_type = headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|character| {
+            !character.is_ascii_whitespace() && *character != '"' && *character != '\''
+        })
+        .collect::<String>();
+
+    if body.starts_with(&[0xff, 0xfe]) {
+        return decode_utf16_body(&body[2..], true);
+    }
+    if body.starts_with(&[0xfe, 0xff]) {
+        return decode_utf16_body(&body[2..], false);
+    }
+    if content_type.contains("charset=utf-16be") {
+        return decode_utf16_body(body, false);
+    }
+    if content_type.contains("charset=utf-16le") || content_type.contains("charset=utf-16") {
+        return decode_utf16_body(body, true);
+    }
+
+    std::str::from_utf8(body)
+        .map(str::to_string)
+        .map_err(|_| anyhow!("EWS request body is not valid UTF-8 or UTF-16"))
+}
+
+fn decode_utf16_body(body: &[u8], little_endian: bool) -> Result<String> {
+    let mut chunks = body.chunks_exact(2);
+    let words = chunks
+        .by_ref()
+        .map(|chunk| {
+            if little_endian {
+                u16::from_le_bytes([chunk[0], chunk[1]])
+            } else {
+                u16::from_be_bytes([chunk[0], chunk[1]])
+            }
+        })
+        .collect::<Vec<_>>();
+    if !chunks.remainder().is_empty() {
+        return Err(anyhow!("EWS UTF-16 request body has an odd byte length"));
+    }
+    String::from_utf16(&words).map_err(|_| anyhow!("EWS request body is not valid UTF-16"))
 }
 
 #[derive(Debug, Clone)]

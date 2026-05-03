@@ -1189,6 +1189,35 @@ async fn sync_folder_items_returns_empty_sync_for_custom_mailbox_folder() {
 }
 
 #[tokio::test]
+async fn sync_folder_items_accepts_utf16_soap_requests() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA Sync",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let mut headers = bearer_headers();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("text/xml; charset=utf-16"),
+    );
+    let request = r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"><s:Body><m:SyncFolderItems><m:ItemShape><t:BaseShape>IdOnly</t:BaseShape></m:ItemShape><m:SyncFolderId><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:SyncFolderId><m:MaxChangesReturned>512</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#;
+    let mut body = vec![0xff, 0xfe];
+    body.extend(request.encode_utf16().flat_map(u16::to_le_bytes));
+
+    let response = service.handle(&headers, &body).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SyncFolderItemsResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+}
+
+#[tokio::test]
 async fn create_item_saveonly_imports_message_into_custom_mailbox_folder() {
     let mailbox_id = Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
     let store = FakeStore {
