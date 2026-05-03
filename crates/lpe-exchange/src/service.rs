@@ -17,6 +17,7 @@ const EWS_PATH: &str = "/EWS/Exchange.asmx";
 const EWS_LOWER_PATH: &str = "/ews/exchange.asmx";
 const CONTACTS_FOLDER_ID: &str = "contacts";
 const CALENDAR_FOLDER_ID: &str = "calendar";
+const DEFAULT_COLLECTION_ID: &str = "default";
 
 pub fn router() -> Router<Storage> {
     Router::new()
@@ -64,6 +65,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
         let operation = operation_name(body).ok_or_else(|| anyhow!("unsupported EWS request"))?;
 
         let payload = match operation {
+            "SyncFolderHierarchy" => self.sync_folder_hierarchy(&principal).await?,
             "FindFolder" => self.find_folder(&principal).await?,
             "GetFolder" => self.get_folder(&principal, body).await?,
             "FindItem" => self.find_item(&principal, body).await?,
@@ -107,6 +109,49 @@ impl<S: ExchangeStore> ExchangeService<S> {
             ),
             folders = folders,
             count = count_tag_occurrences(&folders, "<t:Folder>"),
+        ))
+    }
+
+    async fn sync_folder_hierarchy(&self, principal: &AccountPrincipal) -> Result<String> {
+        let mut changes = String::new();
+        let mut count = 0;
+        for collection in self
+            .store
+            .fetch_accessible_contact_collections(principal.account_id)
+            .await?
+        {
+            changes.push_str("<t:Create>");
+            changes.push_str(&folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts"));
+            changes.push_str("</t:Create>");
+            count += 1;
+        }
+        for collection in self
+            .store
+            .fetch_accessible_calendar_collections(principal.account_id)
+            .await?
+        {
+            changes.push_str("<t:Create>");
+            changes.push_str(&folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar"));
+            changes.push_str("</t:Create>");
+            count += 1;
+        }
+        let sync_state = format!("folder-hierarchy:{count}");
+
+        Ok(format!(
+            concat!(
+                "<m:SyncFolderHierarchyResponse>",
+                "<m:ResponseMessages>",
+                "<m:SyncFolderHierarchyResponseMessage ResponseClass=\"Success\">",
+                "<m:ResponseCode>NoError</m:ResponseCode>",
+                "<m:SyncState>{sync_state}</m:SyncState>",
+                "<m:IncludesLastFolderInRange>true</m:IncludesLastFolderInRange>",
+                "<m:Changes>{changes}</m:Changes>",
+                "</m:SyncFolderHierarchyResponseMessage>",
+                "</m:ResponseMessages>",
+                "</m:SyncFolderHierarchyResponse>"
+            ),
+            sync_state = escape_xml(&sync_state),
+            changes = changes,
         ))
     }
 
@@ -281,6 +326,7 @@ enum FolderKind {
 fn operation_name(body: &str) -> Option<&'static str> {
     [
         "SyncFolderItems",
+        "SyncFolderHierarchy",
         "FindFolder",
         "GetFolder",
         "FindItem",
@@ -324,8 +370,7 @@ fn requested_collection_id(request: &str) -> Option<&str> {
     attribute_value_after(request, "FolderId", "Id")
         .or_else(|| attribute_value_after(request, "DistinguishedFolderId", "Id"))
         .map(|value| match value {
-            "contacts" => CONTACTS_FOLDER_ID,
-            "calendar" => CALENDAR_FOLDER_ID,
+            "contacts" | "calendar" => DEFAULT_COLLECTION_ID,
             other => other,
         })
 }
@@ -528,6 +573,7 @@ fn soap_response(body: String) -> Response {
             "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" ",
             "xmlns:m=\"http://schemas.microsoft.com/exchange/services/2006/messages\" ",
             "xmlns:t=\"http://schemas.microsoft.com/exchange/services/2006/types\">",
+            "<s:Header><t:ServerVersionInfo MajorVersion=\"15\" MinorVersion=\"0\" MajorBuildNumber=\"0\" MinorBuildNumber=\"0\" Version=\"Exchange2013\"/></s:Header>",
             "<s:Body>{body}</s:Body>",
             "</s:Envelope>"
         ),

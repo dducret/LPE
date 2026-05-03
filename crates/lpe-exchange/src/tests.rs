@@ -192,10 +192,10 @@ async fn find_folder_lists_contact_and_calendar_folders() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
-            "contacts", "contacts", "Contacts",
+            "default", "contacts", "Contacts",
         )])),
         calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
-            "calendar", "calendar", "Calendar",
+            "default", "calendar", "Calendar",
         )])),
         ..Default::default()
     };
@@ -211,7 +211,39 @@ async fn find_folder_lists_contact_and_calendar_folders() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
+    assert!(body.contains("<t:ServerVersionInfo"));
     assert!(body.contains("<m:FindFolderResponse>"));
+    assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
+    assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
+}
+
+#[tokio::test]
+async fn sync_folder_hierarchy_lists_contact_and_calendar_folders() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderHierarchy /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SyncFolderHierarchyResponse>"));
+    assert!(body.contains("<m:IncludesLastFolderInRange>true</m:IncludesLastFolderInRange>"));
+    assert!(body.contains("<t:Create><t:Folder>"));
     assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
     assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
 }
@@ -219,7 +251,7 @@ async fn find_folder_lists_contact_and_calendar_folders() {
 #[tokio::test]
 async fn sync_folder_items_returns_contacts_from_canonical_store() {
     let contact_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
-    let collection = FakeStore::collection("contacts", "contacts", "Contacts");
+    let collection = FakeStore::collection("default", "contacts", "Contacts");
     let store = FakeStore {
         session: Some(FakeStore::account()),
         contact_collections: Arc::new(Mutex::new(vec![collection.clone()])),
@@ -259,7 +291,7 @@ async fn sync_folder_items_returns_contacts_from_canonical_store() {
 #[tokio::test]
 async fn find_item_returns_calendar_items_from_canonical_store() {
     let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
-    let collection = FakeStore::collection("calendar", "calendar", "Calendar");
+    let collection = FakeStore::collection("default", "calendar", "Calendar");
     let store = FakeStore {
         session: Some(FakeStore::account()),
         calendar_collections: Arc::new(Mutex::new(vec![collection.clone()])),

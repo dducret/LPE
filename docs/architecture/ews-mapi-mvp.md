@@ -41,6 +41,7 @@ The first `EWS` slice supports only the collaboration read/sync surface needed t
 
 - `FindFolder`
 - `GetFolder`
+- `SyncFolderHierarchy`
 - `FindItem`
 - `GetItem`
 - `SyncFolderItems`
@@ -51,6 +52,8 @@ The adapter currently exposes:
 - canonical owned and same-tenant shared calendar collections as `Calendar` folders
 - contact items from `contacts`
 - calendar items from `calendar_events`
+
+The EWS distinguished folder ids `contacts` and `calendar` map to the canonical owned `default` contact and calendar collections. Shared collections keep explicit synthetic ids such as `shared-contacts-{owner_account_id}` and `shared-calendar-{owner_account_id}`.
 
 ### Current limitations
 
