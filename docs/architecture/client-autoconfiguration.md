@@ -60,6 +60,8 @@ The first `EWS` endpoint is contacts/calendar-only. Outlook autodiscovery publis
 
 Autodiscover responses include the POX `Response`, `User`, `Account`, and `Protocol` shape expected by Microsoft clients. The request parser accepts both unprefixed and namespace-prefixed request elements, including the `a:EMailAddress` form used by Microsoft connectivity tooling.
 
+When the request asks for the `mobilesync` response schema, Autodiscover returns an `ActiveSync`-specific `MobileSync` server response that points at `/Microsoft-Server-ActiveSync`. That response is reserved for ActiveSync clients and tests; Outlook desktop autodiscover must continue to avoid advertising `MobileSync` as an Exchange desktop route.
+
 ### ActiveSync clients
 
 `ActiveSync` remains exposed at:
@@ -102,6 +104,7 @@ workflow after loading a draft. It must not hand the message directly to
 - `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, default `SSL`
 - `LPE_AUTOCONFIG_EWS_ENABLED`, optional; set to `true`, `1`, `yes`, or `on` to publish the contacts/calendar `EWS` endpoint in Outlook autodiscover
 - `LPE_AUTOCONFIG_EWS_URL`, optional; default `{public_scheme}://{public_host}/EWS/Exchange.asmx`
+- `LPE_AUTOCONFIG_ACTIVESYNC_URL`, optional; default `{public_scheme}://{public_host}/Microsoft-Server-ActiveSync`
 - `LPE_AUTOCONFIG_JMAP_SESSION_URL`, optional
 
 ### Recommended DNS and HTTP publication

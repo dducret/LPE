@@ -43,10 +43,13 @@ async fn outlook_autodiscover_get(headers: HeaderMap) -> Response {
 
 async fn outlook_autodiscover_post(headers: HeaderMap, body: Bytes) -> Response {
     let email = parse_autodiscover_email(body.as_ref());
-    xml_response(render_outlook_autodiscover(
-        &PublishedEndpoints::from_headers(&headers, email.as_deref()),
-        email.as_deref(),
-    ))
+    let endpoints = PublishedEndpoints::from_headers(&headers, email.as_deref());
+    let response = if requested_mobilesync_schema(body.as_ref()) {
+        render_mobilesync_autodiscover(&endpoints, email.as_deref())
+    } else {
+        render_outlook_autodiscover(&endpoints, email.as_deref())
+    };
+    xml_response(response)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +62,7 @@ struct PublishedEndpoints {
     smtp_socket_type: Option<String>,
     ews_enabled: bool,
     ews_url: String,
+    activesync_url: String,
     jmap_session_url: String,
 }
 
@@ -91,6 +95,9 @@ impl PublishedEndpoints {
         let ews_enabled = env_flag("LPE_AUTOCONFIG_EWS_ENABLED");
         let ews_url = env::var("LPE_AUTOCONFIG_EWS_URL")
             .unwrap_or_else(|_| format!("{public_scheme}://{public_host}/EWS/Exchange.asmx"));
+        let activesync_url = env::var("LPE_AUTOCONFIG_ACTIVESYNC_URL").unwrap_or_else(|_| {
+            format!("{public_scheme}://{public_host}/Microsoft-Server-ActiveSync")
+        });
 
         Self {
             display_domain,
@@ -101,6 +108,7 @@ impl PublishedEndpoints {
             smtp_socket_type,
             ews_enabled,
             ews_url,
+            activesync_url,
             jmap_session_url,
         }
     }
@@ -246,11 +254,47 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
     xml
 }
 
+fn render_mobilesync_autodiscover(config: &PublishedEndpoints, email: Option<&str>) -> String {
+    let email = email.unwrap_or_default();
+    format!(
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n",
+            "<Autodiscover xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006\">\n",
+            "  <Response xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/mobilesync/responseschema/2006\">\n",
+            "    <Culture>en:us</Culture>\n",
+            "    <User>\n",
+            "      <DisplayName>{display_domain}</DisplayName>\n",
+            "      <EMailAddress>{email}</EMailAddress>\n",
+            "    </User>\n",
+            "    <Action>\n",
+            "      <Settings>\n",
+            "        <Server>\n",
+            "          <Type>MobileSync</Type>\n",
+            "          <Url>{activesync_url}</Url>\n",
+            "          <Name>{activesync_url}</Name>\n",
+            "        </Server>\n",
+            "      </Settings>\n",
+            "    </Action>\n",
+            "  </Response>\n",
+            "</Autodiscover>\n"
+        ),
+        display_domain = escape_xml(&config.display_domain),
+        email = escape_xml(email),
+        activesync_url = escape_xml(&config.activesync_url),
+    )
+}
+
 fn parse_autodiscover_email(body: &[u8]) -> Option<String> {
     let body = String::from_utf8_lossy(body);
     xml_tag_value(&body, "EMailAddress")
         .or_else(|| xml_tag_value(&body, "EMail"))
         .filter(|value| value.contains('@'))
+}
+
+fn requested_mobilesync_schema(body: &[u8]) -> bool {
+    String::from_utf8_lossy(body)
+        .to_ascii_lowercase()
+        .contains("autodiscover/mobilesync/responseschema/2006")
 }
 
 fn xml_tag_value(body: &str, tag: &str) -> Option<String> {
@@ -420,7 +464,7 @@ fn xml_response(body: String) -> Response {
     let mut response = (StatusCode::OK, body).into_response();
     response.headers_mut().insert(
         CONTENT_TYPE,
-        HeaderValue::from_static("application/xml; charset=utf-8"),
+        HeaderValue::from_static("text/xml; charset=utf-8"),
     );
     response
 }
@@ -428,8 +472,8 @@ fn xml_response(body: String) -> Response {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_autodiscover_email, render_outlook_autodiscover, render_thunderbird_autoconfig,
-        PublishedEndpoints,
+        parse_autodiscover_email, render_mobilesync_autodiscover, render_outlook_autodiscover,
+        render_thunderbird_autoconfig, requested_mobilesync_schema, PublishedEndpoints,
     };
     use std::sync::Mutex;
 
@@ -445,6 +489,7 @@ mod tests {
             smtp_socket_type: None,
             ews_enabled: false,
             ews_url: "https://mail.example.test/EWS/Exchange.asmx".to_string(),
+            activesync_url: "https://mail.example.test/Microsoft-Server-ActiveSync".to_string(),
             jmap_session_url: "https://mail.example.test/api/jmap/session".to_string(),
         }
     }
@@ -545,6 +590,32 @@ mod tests {
         );
 
         assert_eq!(email.as_deref(), Some("test@l-p-e.ch"));
+    }
+
+    #[test]
+    fn autodiscover_detects_mobilesync_response_schema_request() {
+        assert!(requested_mobilesync_schema(
+            br#"<?xml version="1.0" encoding="utf-8"?>
+<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/mobilesync/requestschema/2006">
+  <Request>
+    <EMailAddress>test@l-p-e.ch</EMailAddress>
+    <AcceptableResponseSchema>http://schemas.microsoft.com/exchange/autodiscover/mobilesync/responseschema/2006</AcceptableResponseSchema>
+  </Request>
+</Autodiscover>"#
+        ));
+    }
+
+    #[test]
+    fn mobilesync_autodiscover_publishes_activesync_endpoint() {
+        let xml = render_mobilesync_autodiscover(&sample_config(), Some("alice@example.test"));
+
+        assert!(xml.contains(
+            "<Response xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/mobilesync/responseschema/2006\">"
+        ));
+        assert!(xml.contains("<Type>MobileSync</Type>"));
+        assert!(xml.contains("<Url>https://mail.example.test/Microsoft-Server-ActiveSync</Url>"));
+        assert!(xml.contains("<EMailAddress>alice@example.test</EMailAddress>"));
+        assert!(!xml.contains("<Type>IMAP</Type>"));
     }
 
     #[test]
