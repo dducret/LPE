@@ -14,6 +14,10 @@ The guiding principle is strict: publish only what is actually implemented and e
 - `POST /autodiscover/autodiscover.xml`
 - `GET /Autodiscover/Autodiscover.xml`
 - `POST /Autodiscover/Autodiscover.xml`
+- `OPTIONS /EWS/Exchange.asmx`
+- `POST /EWS/Exchange.asmx`
+- `OPTIONS /ews/exchange.asmx`
+- `POST /ews/exchange.asmx`
 
 Without a reverse proxy, these routes are exposed directly by the Rust `LPE` service.
 
@@ -53,6 +57,8 @@ An `SMTP` protocol block is included only when a real authenticated client-submi
 The MVP does not advertise `MAPI` or `MobileSync` for Outlook desktop. Outlook for Windows desktop must not be forced to use `ActiveSync` as an Exchange account.
 
 The first `EWS` endpoint is contacts/calendar-only. Outlook autodiscovery publishes it only when `LPE_AUTOCONFIG_EWS_ENABLED` is explicitly set to a true value. This keeps default desktop configuration on `IMAP` until an administrator opts into the limited `EWS` surface.
+
+Autodiscover responses include the POX `Response`, `User`, `Account`, and `Protocol` shape expected by Microsoft clients. The request parser accepts both unprefixed and namespace-prefixed request elements, including the `a:EMailAddress` form used by Microsoft connectivity tooling.
 
 ### ActiveSync clients
 
@@ -104,7 +110,7 @@ For a domain `example.test`:
 
 - publish `autoconfig.example.test` or `mail.example.test` toward the public `LPE-CT` front end
 - publish `autodiscover.example.test` or reuse `mail.example.test` toward the same front end
-- re-expose the `/autoconfig/...`, `/.well-known/autoconfig/...`, `/autodiscover/...`, `/Autodiscover/...`, and `/Microsoft-Server-ActiveSync` routes over HTTPS
+- re-expose the `/autoconfig/...`, `/.well-known/autoconfig/...`, `/autodiscover/...`, `/Autodiscover/...`, `/Microsoft-Server-ActiveSync`, `/EWS/Exchange.asmx`, and `/ews/exchange.asmx` routes over HTTPS
 - re-expose `/api/jmap/session`, `/api/jmap/api`, `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`, and `/api/jmap/ws` from `LPE-CT` to the core `LPE` service
 - publish `IMAPS` on the same hostname when native `IMAP` access is exposed
 - publish the authenticated `SMTPS` submission listener only when `LPE-CT` really exposes it

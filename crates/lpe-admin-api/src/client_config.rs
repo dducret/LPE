@@ -167,11 +167,14 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
     let mut xml = format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n",
-            "<Autodiscover xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006\">\n",
+            "<Autodiscover xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\" xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006\">\n",
             "  <Response xmlns=\"http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a\">\n",
             "    <User>\n",
             "      <DisplayName>{display_domain}</DisplayName>\n",
             "      <EMailAddress>{email}</EMailAddress>\n",
+            "      <LegacyDN>/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={legacy_user}</LegacyDN>\n",
+            "      <AutoDiscoverSMTPAddress>{email}</AutoDiscoverSMTPAddress>\n",
+            "      <DeploymentId>{deployment_id}</DeploymentId>\n",
             "    </User>\n",
             "    <Account>\n",
             "      <AccountType>email</AccountType>\n",
@@ -189,6 +192,8 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
         ),
         display_domain = escape_xml(&config.display_domain),
         email = escape_xml(email),
+        legacy_user = escape_xml(&legacy_user(email, &config.display_domain)),
+        deployment_id = escape_xml(&deployment_id(&config.display_domain)),
         imap_host = escape_xml(&config.imap_host),
         imap_port = config.imap_port,
     );
@@ -222,7 +227,9 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
                 "        <LoginName>{email}</LoginName>\n",
                 "        <SSL>on</SSL>\n",
                 "        <AuthPackage>Basic</AuthPackage>\n",
+                "        <ASUrl>{ews_url}</ASUrl>\n",
                 "        <EwsUrl>{ews_url}</EwsUrl>\n",
+                "        <OOFUrl>{ews_url}</OOFUrl>\n",
                 "      </Protocol>\n"
             ),
             imap_host = escape_xml(&config.imap_host),
@@ -241,16 +248,62 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
 
 fn parse_autodiscover_email(body: &[u8]) -> Option<String> {
     let body = String::from_utf8_lossy(body);
-    xml_tag_value(&body, "EMailAddress").filter(|value| value.contains('@'))
+    xml_tag_value(&body, "EMailAddress")
+        .or_else(|| xml_tag_value(&body, "EMail"))
+        .filter(|value| value.contains('@'))
 }
 
 fn xml_tag_value(body: &str, tag: &str) -> Option<String> {
     let lower_body = body.to_ascii_lowercase();
-    let open_tag = format!("<{}>", tag.to_ascii_lowercase());
-    let close_tag = format!("</{}>", tag.to_ascii_lowercase());
-    let start = lower_body.find(&open_tag)? + open_tag.len();
-    let end = lower_body[start..].find(&close_tag)? + start;
-    Some(body[start..end].trim().to_string())
+    let tag = tag.to_ascii_lowercase();
+    let mut search_start = 0;
+
+    while let Some(relative_open) = lower_body[search_start..].find('<') {
+        let open = search_start + relative_open;
+        if lower_body[open + 1..].starts_with('/') {
+            search_start = open + 1;
+            continue;
+        }
+        let Some(relative_close) = lower_body[open..].find('>') else {
+            return None;
+        };
+        let open_end = open + relative_close;
+        let element_name = lower_body[open + 1..open_end]
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .rsplit(':')
+            .next()
+            .unwrap_or_default();
+        if element_name != tag {
+            search_start = open_end + 1;
+            continue;
+        }
+
+        let close_marker = format!("</");
+        let mut close_search_start = open_end + 1;
+        while let Some(relative_end_open) = lower_body[close_search_start..].find(&close_marker) {
+            let end_open = close_search_start + relative_end_open;
+            let Some(relative_end_close) = lower_body[end_open..].find('>') else {
+                return None;
+            };
+            let end_close = end_open + relative_end_close;
+            let closing_name = lower_body[end_open + 2..end_close]
+                .split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .rsplit(':')
+                .next()
+                .unwrap_or_default();
+            if closing_name == tag {
+                return Some(body[open_end + 1..end_open].trim().to_string());
+            }
+            close_search_start = end_close + 1;
+        }
+        return None;
+    }
+
+    None
 }
 
 fn public_host(headers: &HeaderMap) -> String {
@@ -328,6 +381,30 @@ fn email_domain(email: &str) -> Option<String> {
         .rsplit_once('@')
         .map(|(_, domain)| domain.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+fn legacy_user(email: &str, display_domain: &str) -> String {
+    let source = if email.trim().is_empty() {
+        display_domain
+    } else {
+        email
+    };
+    source
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string()
+}
+
+fn deployment_id(display_domain: &str) -> String {
+    format!("lpe-{}", legacy_user(display_domain, display_domain))
 }
 
 fn escape_xml(value: &str) -> String {
@@ -453,5 +530,31 @@ mod tests {
         );
 
         assert_eq!(email.as_deref(), Some("alice@example.test"));
+    }
+
+    #[test]
+    fn autodiscover_request_parser_extracts_namespaced_email_address() {
+        let email = parse_autodiscover_email(
+            br#"<?xml version="1.0" encoding="utf-8"?>
+<a:Autodiscover xmlns:a="http://schemas.microsoft.com/exchange/autodiscover/outlook/requestschema/2006">
+  <a:Request>
+    <a:EMailAddress>test@l-p-e.ch</a:EMailAddress>
+    <a:AcceptableResponseSchema>http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a</a:AcceptableResponseSchema>
+  </a:Request>
+</a:Autodiscover>"#,
+        );
+
+        assert_eq!(email.as_deref(), Some("test@l-p-e.ch"));
+    }
+
+    #[test]
+    fn outlook_autodiscover_includes_required_pox_user_fields() {
+        let xml = render_outlook_autodiscover(&sample_config(), Some("alice@example.test"));
+
+        assert!(xml.contains("<LegacyDN>/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice-example-test</LegacyDN>"));
+        assert!(
+            xml.contains("<AutoDiscoverSMTPAddress>alice@example.test</AutoDiscoverSMTPAddress>")
+        );
+        assert!(xml.contains("<DeploymentId>lpe-example-test</DeploymentId>"));
     }
 }
