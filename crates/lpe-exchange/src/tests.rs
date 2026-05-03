@@ -5,7 +5,7 @@ use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, AuthenticatedAccount,
     CollaborationCollection, CollaborationRights, JmapEmail, JmapEmailAddress, JmapEmailQuery,
     JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
-    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
+    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
 };
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -21,6 +21,7 @@ struct FakeStore {
     contact_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
     calendar_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
     contacts: Arc<Mutex<Vec<AccessibleContact>>>,
+    deleted_contacts: Arc<Mutex<Vec<Uuid>>>,
     events: Arc<Mutex<Vec<AccessibleEvent>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
@@ -215,6 +216,46 @@ impl ExchangeStore for FakeStore {
             .cloned()
             .collect();
         Box::pin(async move { Ok(contacts) })
+    }
+
+    fn create_accessible_contact<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: Option<&'a str>,
+        input: UpsertClientContactInput,
+    ) -> StoreFuture<'a, AccessibleContact> {
+        let account = Self::account();
+        let contact = AccessibleContact {
+            id: input.id.unwrap_or_else(|| {
+                Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap()
+            }),
+            collection_id: collection_id.unwrap_or("default").to_string(),
+            owner_account_id: principal_account_id,
+            owner_email: account.email,
+            owner_display_name: account.display_name,
+            rights: Self::rights(),
+            name: input.name,
+            role: input.role,
+            email: input.email,
+            phone: input.phone,
+            team: input.team,
+            notes: input.notes,
+        };
+        self.contacts.lock().unwrap().push(contact.clone());
+        Box::pin(async move { Ok(contact) })
+    }
+
+    fn delete_accessible_contact<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        contact_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        self.deleted_contacts.lock().unwrap().push(contact_id);
+        self.contacts
+            .lock()
+            .unwrap()
+            .retain(|contact| contact.id != contact_id);
+        Box::pin(async move { Ok(()) })
     }
 
     fn fetch_accessible_events_by_ids<'a>(
@@ -810,7 +851,7 @@ async fn delete_item_hard_deletes_canonical_message() {
 }
 
 #[tokio::test]
-async fn delete_item_rejects_non_message_ids() {
+async fn delete_item_rejects_unsupported_item_ids() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -820,7 +861,7 @@ async fn delete_item_rejects_non_message_ids() {
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:DeleteItem><m:ItemIds><t:ItemId Id="contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+            br#"<s:Envelope><s:Body><m:DeleteItem><m:ItemIds><t:ItemId Id="event:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
         )
         .await
         .unwrap();
@@ -1155,6 +1196,97 @@ async fn sync_folder_items_returns_contacts_from_canonical_store() {
     assert!(body.contains("<t:Contact>"));
     assert!(body.contains("contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
     assert!(body.contains("bob@example.test"));
+}
+
+#[tokio::test]
+async fn create_delete_contact_round_trips_through_sync_folder_items() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        ..Default::default()
+    };
+    let deleted_contacts = store.deleted_contacts.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:CreateItem>
+                  <m:SavedItemFolderId><t:FolderId Id="default"/></m:SavedItemFolderId>
+                  <m:Items>
+                    <t:Contact>
+                      <t:DisplayName>RCA Contact</t:DisplayName>
+                      <t:GivenName>RCA</t:GivenName>
+                      <t:Surname>Contact</t:Surname>
+                      <t:EmailAddresses>
+                        <t:Entry Key="EmailAddress1">rca@example.test</t:Entry>
+                      </t:EmailAddresses>
+                      <t:PhoneNumbers>
+                        <t:Entry Key="MobilePhone">+41000000000</t:Entry>
+                      </t:PhoneNumbers>
+                      <t:CompanyName>LPE</t:CompanyName>
+                      <t:JobTitle>Tester</t:JobTitle>
+                      <t:Body BodyType="Text">Created by RCA</t:Body>
+                    </t:Contact>
+                  </m:Items>
+                </m:CreateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:ItemShape><t:BaseShape>AllProperties</t:BaseShape></m:ItemShape><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>contacts:default:0</m:SyncState><m:MaxChangesReturned>10</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Create><t:Contact>"));
+    assert!(body.contains("contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
+    assert!(body.contains("<t:DisplayName>RCA Contact</t:DisplayName>"));
+    assert!(body.contains(
+        "<m:SyncState>contacts:default:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb</m:SyncState>"
+    ));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:DeleteItem DeleteType="HardDelete"><m:ItemIds><t:ItemId Id="contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteItemResponse>"));
+    assert_eq!(
+        deleted_contacts.lock().unwrap().as_slice(),
+        &[Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap()]
+    );
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>contacts:default:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(
+        body.contains("<t:Delete><t:ItemId Id=\"contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\"")
+    );
+    assert!(body.contains("<m:SyncState>contacts:default:0</m:SyncState>"));
 }
 
 #[tokio::test]

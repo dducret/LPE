@@ -14,7 +14,7 @@ use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AuditEntryInput, CollaborationCollection, JmapEmail,
     JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, Storage, SubmitMessageInput,
-    SubmittedRecipientInput,
+    SubmittedRecipientInput, UpsertClientContactInput,
 };
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -462,12 +462,32 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     .store
                     .fetch_accessible_contacts_in_collection(principal.account_id, collection_id)
                     .await?;
+                let current_ids = contacts
+                    .iter()
+                    .map(|contact| contact.id)
+                    .collect::<Vec<_>>();
+                let current_set = current_ids.iter().copied().collect::<HashSet<_>>();
+                let previous_ids = requested_sync_state(request)
+                    .map(|state| collaboration_sync_state_ids(&state, "contacts", collection_id))
+                    .unwrap_or_default();
+                let previous_set = previous_ids.iter().copied().collect::<HashSet<_>>();
                 for contact in &contacts {
-                    changes.push_str("<t:Create>");
-                    changes.push_str(&contact_item_xml(contact));
-                    changes.push_str("</t:Create>");
+                    if !previous_set.contains(&contact.id) {
+                        changes.push_str("<t:Create>");
+                        changes.push_str(&contact_item_xml(contact));
+                        changes.push_str("</t:Create>");
+                    }
                 }
-                format!("contacts:{collection_id}:{}", contacts.len())
+                for contact_id in previous_ids {
+                    if !current_set.contains(&contact_id) {
+                        changes.push_str("<t:Delete>");
+                        changes.push_str(&format!(
+                            "<t:ItemId Id=\"contact:{contact_id}\" ChangeKey=\"deleted\"/>"
+                        ));
+                        changes.push_str("</t:Delete>");
+                    }
+                }
+                collaboration_sync_state("contacts", collection_id, &current_ids)
             }
             FolderKind::Calendar => {
                 let collection_id = requested_collection_id(request).unwrap_or(CALENDAR_FOLDER_ID);
@@ -475,12 +495,29 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     .store
                     .fetch_accessible_events_in_collection(principal.account_id, collection_id)
                     .await?;
+                let current_ids = events.iter().map(|event| event.id).collect::<Vec<_>>();
+                let current_set = current_ids.iter().copied().collect::<HashSet<_>>();
+                let previous_ids = requested_sync_state(request)
+                    .map(|state| collaboration_sync_state_ids(&state, "calendar", collection_id))
+                    .unwrap_or_default();
+                let previous_set = previous_ids.iter().copied().collect::<HashSet<_>>();
                 for event in &events {
-                    changes.push_str("<t:Create>");
-                    changes.push_str(&calendar_item_xml(event));
-                    changes.push_str("</t:Create>");
+                    if !previous_set.contains(&event.id) {
+                        changes.push_str("<t:Create>");
+                        changes.push_str(&calendar_item_xml(event));
+                        changes.push_str("</t:Create>");
+                    }
                 }
-                format!("calendar:{collection_id}:{}", events.len())
+                for event_id in previous_ids {
+                    if !current_set.contains(&event_id) {
+                        changes.push_str("<t:Delete>");
+                        changes.push_str(&format!(
+                            "<t:ItemId Id=\"event:{event_id}\" ChangeKey=\"deleted\"/>"
+                        ));
+                        changes.push_str("</t:Delete>");
+                    }
+                }
+                collaboration_sync_state("calendar", collection_id, &current_ids)
             }
             FolderKind::Mailbox => {
                 let Some(mailbox_id) = self
@@ -540,6 +577,19 @@ impl<S: ExchangeStore> ExchangeService<S> {
 
     async fn create_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let result = async {
+            if element_content(request, "Contact").is_some() {
+                let collection_id = requested_collection_id(request);
+                let contact = self
+                    .store
+                    .create_accessible_contact(
+                        principal.account_id,
+                        collection_id,
+                        parse_create_contact_input(principal, request)?,
+                    )
+                    .await?;
+                return Ok(create_contact_success_response(&contact));
+            }
+
             let input = parse_create_message_input(principal, request)?;
             let subject_for_audit = input.subject.clone();
             let disposition = attribute_value_after(request, "CreateItem", "MessageDisposition")
@@ -613,18 +663,28 @@ impl<S: ExchangeStore> ExchangeService<S> {
     async fn delete_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let result = async {
             let ids = requested_item_ids(request);
+            let contact_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("contact:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
             let message_ids = ids
                 .iter()
                 .filter_map(|id| id.strip_prefix("message:"))
                 .map(Uuid::parse_str)
                 .collect::<std::result::Result<Vec<_>, _>>()?;
 
-            if ids.is_empty() || message_ids.len() != ids.len() {
+            if ids.is_empty() || contact_ids.len() + message_ids.len() != ids.len() {
                 return Ok(operation_error_response(
                     "DeleteItem",
                     "ErrorInvalidOperation",
-                    "DeleteItem currently supports only message ids.",
+                    "DeleteItem currently supports only contact and message ids.",
                 ));
+            }
+            for contact_id in contact_ids {
+                self.store
+                    .delete_accessible_contact(principal.account_id, contact_id)
+                    .await?;
             }
             let delete_type = attribute_value_after(request, "DeleteItem", "DeleteType")
                 .unwrap_or("MoveToDeletedItems");
@@ -895,6 +955,80 @@ fn parse_create_message_input(
     })
 }
 
+fn parse_create_contact_input(
+    principal: &AccountPrincipal,
+    request: &str,
+) -> Result<UpsertClientContactInput> {
+    let contact = element_content(request, "Contact")
+        .ok_or_else(|| anyhow!("CreateItem is missing Contact"))?;
+    let email = contact_entry_value(contact, "EmailAddresses", "EmailAddress1")
+        .or_else(|| element_text(contact, "EmailAddress"))
+        .unwrap_or_else(|| principal.email.clone());
+    let given_name = element_text(contact, "GivenName").unwrap_or_default();
+    let surname = element_text(contact, "Surname").unwrap_or_default();
+    let fallback_name = [given_name.as_str(), surname.as_str()]
+        .into_iter()
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let name = element_text(contact, "DisplayName")
+        .or_else(|| element_text(contact, "FileAs"))
+        .or_else(|| (!fallback_name.trim().is_empty()).then_some(fallback_name))
+        .unwrap_or_else(|| email.clone());
+    let body_tag = open_tag_text(contact, "Body").unwrap_or_default();
+    let body_type = attribute_value(body_tag, "BodyType").unwrap_or("Text");
+    let body_value = element_text(contact, "Body").unwrap_or_default();
+    let notes = if body_type.eq_ignore_ascii_case("HTML") {
+        html_to_text(&body_value)
+    } else {
+        body_value
+    };
+
+    Ok(UpsertClientContactInput {
+        id: None,
+        account_id: principal.account_id,
+        name,
+        role: element_text(contact, "JobTitle").unwrap_or_default(),
+        email,
+        phone: contact_entry_value(contact, "PhoneNumbers", "MobilePhone")
+            .or_else(|| contact_entry_value(contact, "PhoneNumbers", "BusinessPhone"))
+            .or_else(|| contact_entry_value(contact, "PhoneNumbers", "HomePhone"))
+            .unwrap_or_default(),
+        team: element_text(contact, "CompanyName").unwrap_or_default(),
+        notes,
+    })
+}
+
+fn contact_entry_value(contact: &str, collection_name: &str, key: &str) -> Option<String> {
+    let collection = element_content(contact, collection_name)?;
+    let mut rest = collection;
+    while let Some(tag_start) = rest.find('<') {
+        let raw_tag_text = &rest[tag_start + 1..];
+        let tag_text = raw_tag_text.trim_start();
+        let open_tag_start = tag_start + 1 + (raw_tag_text.len() - tag_text.len());
+        if tag_text.starts_with('/') || tag_text.starts_with('?') || tag_text.starts_with('!') {
+            rest = &tag_text[1..];
+            continue;
+        }
+        let tag_end = tag_text.find('>')?;
+        let open_tag = &tag_text[..tag_end];
+        let qualified_name = open_tag
+            .split(|value: char| value.is_whitespace() || value == '/')
+            .next()?;
+        let content_start = open_tag_start + tag_end + 1;
+        if qualified_name.rsplit(':').next() == Some("Entry")
+            && attribute_value(open_tag, "Key") == Some(key)
+        {
+            let close_pattern = format!("</{qualified_name}>");
+            let content = &rest[content_start..];
+            let content_end = content.find(&close_pattern)?;
+            return Some(xml_text(&content[..content_end]));
+        }
+        rest = &rest[content_start..];
+    }
+    element_text(collection, "Entry")
+}
+
 fn imported_email_input(input: SubmitMessageInput, mailbox_id: Uuid) -> JmapImportedEmailInput {
     JmapImportedEmailInput {
         account_id: input.account_id,
@@ -1141,6 +1275,30 @@ fn mailbox_sync_state(mailbox_id: Uuid, message_ids: &[Uuid]) -> String {
             .collect::<Vec<_>>()
             .join(",")
     )
+}
+
+fn collaboration_sync_state(kind: &str, collection_id: &str, item_ids: &[Uuid]) -> String {
+    let id_list = item_ids
+        .iter()
+        .map(Uuid::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    if id_list.is_empty() {
+        format!("{kind}:{collection_id}:0")
+    } else {
+        format!("{kind}:{collection_id}:{id_list}")
+    }
+}
+
+fn collaboration_sync_state_ids(sync_state: &str, kind: &str, collection_id: &str) -> Vec<Uuid> {
+    let prefix = format!("{kind}:{collection_id}:");
+    sync_state
+        .strip_prefix(&prefix)
+        .unwrap_or_default()
+        .split(',')
+        .filter(|value| !value.is_empty() && *value != "0")
+        .filter_map(|value| Uuid::parse_str(value).ok())
+        .collect()
 }
 
 fn mailbox_sync_state_ids(sync_state: &str, mailbox_id: Uuid) -> Vec<Uuid> {
@@ -1431,6 +1589,31 @@ fn create_item_success_response(message_id: Uuid, delivery_status: &str) -> Stri
         ),
         message_id = message_id,
         delivery_status = escape_xml(delivery_status),
+    )
+}
+
+fn create_contact_success_response(contact: &AccessibleContact) -> String {
+    format!(
+        concat!(
+            "<m:CreateItemResponse>",
+            "<m:ResponseMessages>",
+            "<m:CreateItemResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Items>",
+            "<t:Contact>",
+            "<t:ItemId Id=\"contact:{id}\" ChangeKey=\"created\"/>",
+            "<t:ParentFolderId Id=\"{folder_id}\"/>",
+            "<t:Subject>{name}</t:Subject>",
+            "<t:DisplayName>{name}</t:DisplayName>",
+            "</t:Contact>",
+            "</m:Items>",
+            "</m:CreateItemResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:CreateItemResponse>"
+        ),
+        id = contact.id,
+        folder_id = escape_xml(&contact.collection_id),
+        name = escape_xml(&contact.name),
     )
 }
 

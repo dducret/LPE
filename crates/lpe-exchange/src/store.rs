@@ -2,7 +2,7 @@ use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AuditEntryInput, CollaborationCollection, JmapEmail,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
-    Storage, SubmitMessageInput, SubmittedMessage,
+    Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
 };
 use uuid::Uuid;
 
@@ -34,6 +34,19 @@ pub trait ExchangeStore: AccountAuthStore {
         principal_account_id: Uuid,
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<AccessibleContact>>;
+
+    fn create_accessible_contact<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: Option<&'a str>,
+        input: UpsertClientContactInput,
+    ) -> StoreFuture<'a, AccessibleContact>;
+
+    fn delete_accessible_contact<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        contact_id: Uuid,
+    ) -> StoreFuture<'a, ()>;
 
     fn fetch_accessible_events_by_ids<'a>(
         &'a self,
@@ -155,6 +168,29 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, Vec<AccessibleContact>> {
         Box::pin(async move {
             self.fetch_accessible_contacts_by_ids(principal_account_id, ids)
+                .await
+        })
+    }
+
+    fn create_accessible_contact<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: Option<&'a str>,
+        input: UpsertClientContactInput,
+    ) -> StoreFuture<'a, AccessibleContact> {
+        Box::pin(async move {
+            self.create_accessible_contact(principal_account_id, collection_id, input)
+                .await
+        })
+    }
+
+    fn delete_accessible_contact<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        contact_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.delete_accessible_contact(principal_account_id, contact_id)
                 .await
         })
     }
