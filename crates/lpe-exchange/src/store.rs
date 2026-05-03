@@ -1,7 +1,8 @@
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, AuditEntryInput, CollaborationCollection, JmapMailbox,
-    JmapMailboxCreateInput, SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage,
+    AccessibleContact, AccessibleEvent, AuditEntryInput, CollaborationCollection, JmapEmail,
+    JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
+    Storage, SubmitMessageInput, SubmittedMessage,
 };
 use uuid::Uuid;
 
@@ -52,6 +53,34 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         account_id: Uuid,
         mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
+
+    fn query_jmap_email_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        search_text: Option<&'a str>,
+        position: u64,
+        limit: u64,
+    ) -> StoreFuture<'a, JmapEmailQuery>;
+
+    fn fetch_jmap_emails<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<JmapEmail>>;
+
+    fn import_jmap_email<'a>(
+        &'a self,
+        input: JmapImportedEmailInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail>;
+
+    fn delete_custom_jmap_email<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()>;
 
@@ -160,6 +189,48 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, ()> {
         Box::pin(async move {
             self.destroy_jmap_mailbox(account_id, mailbox_id, audit)
+                .await
+        })
+    }
+
+    fn query_jmap_email_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        search_text: Option<&'a str>,
+        position: u64,
+        limit: u64,
+    ) -> StoreFuture<'a, JmapEmailQuery> {
+        Box::pin(async move {
+            self.query_jmap_email_ids(account_id, mailbox_id, search_text, position, limit)
+                .await
+        })
+    }
+
+    fn fetch_jmap_emails<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<JmapEmail>> {
+        Box::pin(async move { self.fetch_jmap_emails(account_id, ids).await })
+    }
+
+    fn import_jmap_email<'a>(
+        &'a self,
+        input: JmapImportedEmailInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        Box::pin(async move { self.import_jmap_email(input, audit).await })
+    }
+
+    fn delete_custom_jmap_email<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.delete_custom_jmap_email(account_id, message_id, audit)
                 .await
         })
     }

@@ -12,9 +12,11 @@ use axum::{
 };
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, AuditEntryInput, CollaborationCollection, JmapMailbox,
-    JmapMailboxCreateInput, Storage, SubmitMessageInput, SubmittedRecipientInput,
+    AccessibleContact, AccessibleEvent, AuditEntryInput, CollaborationCollection, JmapEmail,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, Storage, SubmitMessageInput,
+    SubmittedRecipientInput,
 };
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::store::ExchangeStore;
@@ -331,7 +333,29 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     events.iter().map(calendar_item_summary_xml).collect(),
                 ))
             }
-            FolderKind::Mailbox => Ok(find_item_response(String::new())),
+            FolderKind::Mailbox => {
+                let Some(mailbox_id) = requested_mailbox_folder_ids(request).into_iter().next()
+                else {
+                    return Ok(find_item_response(String::new()));
+                };
+                let query = self
+                    .store
+                    .query_jmap_email_ids(principal.account_id, Some(mailbox_id), None, 0, 200)
+                    .await?;
+                let emails = self
+                    .store
+                    .fetch_jmap_emails(principal.account_id, &query.ids)
+                    .await?;
+                Ok(find_item_response(
+                    emails
+                        .iter()
+                        .filter(|email| {
+                            email.mailbox_id == mailbox_id && email.mailbox_role == "custom"
+                        })
+                        .map(message_summary_xml)
+                        .collect(),
+                ))
+            }
         }
     }
 
@@ -347,7 +371,12 @@ impl<S: ExchangeStore> ExchangeService<S> {
             .filter_map(|id| id.strip_prefix("event:"))
             .filter_map(|id| Uuid::parse_str(id).ok())
             .collect::<Vec<_>>();
-        let supported_id_count = contact_ids.len() + event_ids.len();
+        let message_ids = ids
+            .iter()
+            .filter_map(|id| id.strip_prefix("message:"))
+            .filter_map(|id| Uuid::parse_str(id).ok())
+            .collect::<Vec<_>>();
+        let supported_id_count = contact_ids.len() + event_ids.len() + message_ids.len();
 
         let mut items = String::new();
         for contact in self
@@ -363,6 +392,15 @@ impl<S: ExchangeStore> ExchangeService<S> {
             .await?
         {
             items.push_str(&calendar_item_xml(&event));
+        }
+        for email in self
+            .store
+            .fetch_jmap_emails(principal.account_id, &message_ids)
+            .await?
+            .into_iter()
+            .filter(|email| email.mailbox_role == "custom")
+        {
+            items.push_str(&message_item_xml(&email));
         }
 
         if !ids.is_empty()
@@ -425,30 +463,51 @@ impl<S: ExchangeStore> ExchangeService<S> {
                 format!("calendar:{collection_id}:{}", events.len())
             }
             FolderKind::Mailbox => {
-                let folder_id = requested_folder_ids(request)
+                let Some(mailbox_id) = requested_mailbox_folder_ids(request).into_iter().next()
+                else {
+                    return Ok(sync_folder_items_response("mailbox:0", String::new()));
+                };
+                let query = self
+                    .store
+                    .query_jmap_email_ids(principal.account_id, Some(mailbox_id), None, 0, 200)
+                    .await?;
+                let emails = self
+                    .store
+                    .fetch_jmap_emails(principal.account_id, &query.ids)
+                    .await?
                     .into_iter()
-                    .next()
-                    .unwrap_or_else(|| "mailbox".to_string());
-                format!("{folder_id}:0")
+                    .filter(|email| {
+                        email.mailbox_id == mailbox_id && email.mailbox_role == "custom"
+                    })
+                    .collect::<Vec<_>>();
+                let current_ids = emails.iter().map(|email| email.id).collect::<Vec<_>>();
+                let current_set = current_ids.iter().copied().collect::<HashSet<_>>();
+                let previous_ids = requested_sync_state(request)
+                    .map(|state| mailbox_sync_state_ids(&state, mailbox_id))
+                    .unwrap_or_default();
+                let previous_set = previous_ids.iter().copied().collect::<HashSet<_>>();
+
+                for email in &emails {
+                    if !previous_set.contains(&email.id) {
+                        changes.push_str("<t:Create>");
+                        changes.push_str(&message_summary_xml(email));
+                        changes.push_str("</t:Create>");
+                    }
+                }
+                for message_id in previous_ids {
+                    if !current_set.contains(&message_id) {
+                        changes.push_str("<t:Delete>");
+                        changes.push_str(&format!(
+                            "<t:ItemId Id=\"message:{message_id}\" ChangeKey=\"deleted\"/>"
+                        ));
+                        changes.push_str("</t:Delete>");
+                    }
+                }
+                mailbox_sync_state(mailbox_id, &current_ids)
             }
         };
 
-        Ok(format!(
-            concat!(
-                "<m:SyncFolderItemsResponse>",
-                "<m:ResponseMessages>",
-                "<m:SyncFolderItemsResponseMessage ResponseClass=\"Success\">",
-                "<m:ResponseCode>NoError</m:ResponseCode>",
-                "<m:SyncState>{sync_state}</m:SyncState>",
-                "<m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>",
-                "<m:Changes>{changes}</m:Changes>",
-                "</m:SyncFolderItemsResponseMessage>",
-                "</m:ResponseMessages>",
-                "</m:SyncFolderItemsResponse>"
-            ),
-            sync_state = escape_xml(&sync_state),
-            changes = changes,
-        ))
+        Ok(sync_folder_items_response(&sync_state, changes))
     }
 
     async fn create_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
@@ -460,6 +519,25 @@ impl<S: ExchangeStore> ExchangeService<S> {
 
             match disposition {
                 "SaveOnly" => {
+                    if let Some(mailbox_id) =
+                        requested_mailbox_folder_ids(request).into_iter().next()
+                    {
+                        let imported = self
+                            .store
+                            .import_jmap_email(
+                                imported_email_input(input, mailbox_id),
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "ews-import-custom-mailbox-message".to_string(),
+                                    subject: subject_for_audit,
+                                },
+                            )
+                            .await?;
+                        return Ok(create_item_success_response(
+                            imported.id,
+                            &imported.delivery_status,
+                        ));
+                    }
                     let draft = self
                         .store
                         .save_draft_message(
@@ -519,17 +597,35 @@ impl<S: ExchangeStore> ExchangeService<S> {
             }
 
             for message_id in message_ids {
-                self.store
-                    .delete_draft_message(
-                        principal.account_id,
-                        message_id,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-delete-draft-message".to_string(),
-                            subject: message_id.to_string(),
-                        },
-                    )
+                let existing = self
+                    .store
+                    .fetch_jmap_emails(principal.account_id, &[message_id])
                     .await?;
+                if existing.iter().any(|email| email.mailbox_role == "custom") {
+                    self.store
+                        .delete_custom_jmap_email(
+                            principal.account_id,
+                            message_id,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-delete-custom-mailbox-message".to_string(),
+                                subject: message_id.to_string(),
+                            },
+                        )
+                        .await?;
+                } else {
+                    self.store
+                        .delete_draft_message(
+                            principal.account_id,
+                            message_id,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-delete-draft-message".to_string(),
+                                subject: message_id.to_string(),
+                            },
+                        )
+                        .await?;
+                }
             }
 
             Ok(delete_item_success_response())
@@ -659,6 +755,32 @@ fn parse_create_message_input(
         flagged: Some(false),
         attachments: Vec::new(),
     })
+}
+
+fn imported_email_input(input: SubmitMessageInput, mailbox_id: Uuid) -> JmapImportedEmailInput {
+    JmapImportedEmailInput {
+        account_id: input.account_id,
+        submitted_by_account_id: input.submitted_by_account_id,
+        mailbox_id,
+        source: input.source,
+        from_display: input.from_display,
+        from_address: input.from_address,
+        sender_display: input.sender_display,
+        sender_address: input.sender_address,
+        to: input.to,
+        cc: input.cc,
+        bcc: input.bcc,
+        subject: input.subject,
+        body_text: input.body_text,
+        body_html_sanitized: input.body_html_sanitized,
+        internet_message_id: input.internet_message_id,
+        mime_blob_ref: input
+            .mime_blob_ref
+            .unwrap_or_else(|| format!("ews-createitem:{}", Uuid::new_v4())),
+        size_octets: input.size_octets,
+        received_at: None,
+        attachments: input.attachments,
+    }
 }
 
 fn parse_recipients(message: &str, collection_name: &str) -> Vec<SubmittedRecipientInput> {
@@ -829,6 +951,32 @@ fn requested_collection_id(request: &str) -> Option<&str> {
             "contacts" | "calendar" => DEFAULT_COLLECTION_ID,
             other => other,
         })
+}
+
+fn requested_sync_state(request: &str) -> Option<String> {
+    element_text(request, "SyncState").filter(|value| !value.trim().is_empty())
+}
+
+fn mailbox_sync_state(mailbox_id: Uuid, message_ids: &[Uuid]) -> String {
+    format!(
+        "mailbox:{mailbox_id}:{}",
+        message_ids
+            .iter()
+            .map(Uuid::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+fn mailbox_sync_state_ids(sync_state: &str, mailbox_id: Uuid) -> Vec<Uuid> {
+    let prefix = format!("mailbox:{mailbox_id}:");
+    sync_state
+        .strip_prefix(&prefix)
+        .unwrap_or_default()
+        .split(',')
+        .filter(|value| !value.is_empty() && *value != "0")
+        .filter_map(|value| Uuid::parse_str(value).ok())
+        .collect()
 }
 
 fn requested_item_ids(request: &str) -> Vec<String> {
@@ -1003,6 +1151,61 @@ fn find_item_response(items: String) -> String {
         items = items,
         count = count_tag_occurrences(&items, "<t:ItemId")
     )
+}
+
+fn sync_folder_items_response(sync_state: &str, changes: String) -> String {
+    format!(
+        concat!(
+            "<m:SyncFolderItemsResponse>",
+            "<m:ResponseMessages>",
+            "<m:SyncFolderItemsResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:SyncState>{sync_state}</m:SyncState>",
+            "<m:IncludesLastItemInRange>true</m:IncludesLastItemInRange>",
+            "<m:Changes>{changes}</m:Changes>",
+            "</m:SyncFolderItemsResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:SyncFolderItemsResponse>"
+        ),
+        sync_state = escape_xml(sync_state),
+        changes = changes,
+    )
+}
+
+fn message_summary_xml(email: &JmapEmail) -> String {
+    format!(
+        concat!(
+            "<t:Message>",
+            "<t:ItemId Id=\"message:{id}\" ChangeKey=\"{change_key}\"/>",
+            "<t:ParentFolderId Id=\"mailbox:{mailbox_id}\"/>",
+            "<t:Subject>{subject}</t:Subject>",
+            "<t:DateTimeReceived>{received_at}</t:DateTimeReceived>",
+            "<t:Size>{size}</t:Size>",
+            "<t:HasAttachments>{has_attachments}</t:HasAttachments>",
+            "<t:IsRead>{is_read}</t:IsRead>",
+            "</t:Message>"
+        ),
+        id = email.id,
+        change_key = escape_xml(&email.delivery_status),
+        mailbox_id = email.mailbox_id,
+        subject = escape_xml(&email.subject),
+        received_at = escape_xml(&email.received_at),
+        size = email.size_octets.max(0),
+        has_attachments = email.has_attachments,
+        is_read = !email.unread,
+    )
+}
+
+fn message_item_xml(email: &JmapEmail) -> String {
+    let mut xml = message_summary_xml(email);
+    xml.insert_str(
+        xml.len() - "</t:Message>".len(),
+        &format!(
+            "<t:Body BodyType=\"Text\">{}</t:Body>",
+            escape_xml(&email.body_text)
+        ),
+    );
+    xml
 }
 
 fn create_item_success_response(message_id: Uuid, delivery_status: &str) -> String {

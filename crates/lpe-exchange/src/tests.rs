@@ -3,8 +3,9 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, AuthenticatedAccount,
-    CollaborationCollection, CollaborationRights, JmapMailbox, JmapMailboxCreateInput,
-    SavedDraftMessage, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
+    CollaborationCollection, CollaborationRights, JmapEmail, JmapEmailAddress, JmapEmailQuery,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
+    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
 };
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -22,8 +23,11 @@ struct FakeStore {
     contacts: Arc<Mutex<Vec<AccessibleContact>>>,
     events: Arc<Mutex<Vec<AccessibleEvent>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
+    imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
+    emails: Arc<Mutex<Vec<JmapEmail>>>,
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
     deleted_drafts: Arc<Mutex<Vec<Uuid>>>,
+    deleted_custom_emails: Arc<Mutex<Vec<Uuid>>>,
     mailboxes: Arc<Mutex<Vec<JmapMailbox>>>,
     created_mailboxes: Arc<Mutex<Vec<JmapMailboxCreateInput>>>,
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
@@ -71,6 +75,42 @@ impl FakeStore {
             sort_order: 40,
             total_emails: 0,
             unread_emails: 0,
+        }
+    }
+
+    fn email(id: &str, mailbox_id: &str, mailbox_role: &str, subject: &str) -> JmapEmail {
+        let account = Self::account();
+        JmapEmail {
+            id: Uuid::parse_str(id).unwrap(),
+            thread_id: Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap(),
+            mailbox_id: Uuid::parse_str(mailbox_id).unwrap(),
+            mailbox_role: mailbox_role.to_string(),
+            mailbox_name: "RCA Sync".to_string(),
+            received_at: "2026-05-03T12:00:00Z".to_string(),
+            sent_at: None,
+            from_address: account.email,
+            from_display: Some(account.display_name),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            submitted_by_account_id: account.account_id,
+            to: vec![JmapEmailAddress {
+                address: "bob@example.test".to_string(),
+                display_name: Some("Bob".to_string()),
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: subject.to_string(),
+            preview: "Hello".to_string(),
+            body_text: "Hello".to_string(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: false,
+            has_attachments: false,
+            size_octets: 128,
+            internet_message_id: None,
+            mime_blob_ref: Some(format!("test:{id}")),
+            delivery_status: "stored".to_string(),
         }
     }
 }
@@ -223,6 +263,76 @@ impl ExchangeStore for FakeStore {
         _audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
         self.destroyed_mailboxes.lock().unwrap().push(mailbox_id);
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn query_jmap_email_ids<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        _search_text: Option<&'a str>,
+        _position: u64,
+        _limit: u64,
+    ) -> StoreFuture<'a, JmapEmailQuery> {
+        let ids = self
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|email| mailbox_id.map_or(true, |mailbox_id| email.mailbox_id == mailbox_id))
+            .map(|email| email.id)
+            .collect::<Vec<_>>();
+        Box::pin(async move {
+            Ok(JmapEmailQuery {
+                total: ids.len() as u64,
+                ids,
+            })
+        })
+    }
+
+    fn fetch_jmap_emails<'a>(
+        &'a self,
+        _account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<JmapEmail>> {
+        let emails = self
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|email| ids.contains(&email.id))
+            .cloned()
+            .collect();
+        Box::pin(async move { Ok(emails) })
+    }
+
+    fn import_jmap_email<'a>(
+        &'a self,
+        input: JmapImportedEmailInput,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        self.imported_emails.lock().unwrap().push(input.clone());
+        let email = FakeStore::email(
+            "99999999-9999-9999-9999-999999999999",
+            &input.mailbox_id.to_string(),
+            "custom",
+            &input.subject,
+        );
+        self.emails.lock().unwrap().push(email.clone());
+        Box::pin(async move { Ok(email) })
+    }
+
+    fn delete_custom_jmap_email<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        self.deleted_custom_emails.lock().unwrap().push(message_id);
+        self.emails
+            .lock()
+            .unwrap()
+            .retain(|email| email.id != message_id);
         Box::pin(async move { Ok(()) })
     }
 
@@ -978,9 +1088,189 @@ async fn sync_folder_items_returns_empty_sync_for_custom_mailbox_folder() {
     assert!(body.contains("<m:SyncFolderItemsResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(
-        body.contains("<m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:0</m:SyncState>")
+        body.contains("<m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:</m:SyncState>")
     );
     assert!(body.contains("<m:Changes></m:Changes>"));
+}
+
+#[tokio::test]
+async fn create_item_saveonly_imports_message_into_custom_mailbox_folder() {
+    let mailbox_id = Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA Sync",
+        )])),
+        ..Default::default()
+    };
+    let imported_emails = store.imported_emails.clone();
+    let saved_drafts = store.saved_drafts.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:CreateItem MessageDisposition="SaveOnly">
+                  <m:SavedItemFolderId><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:SavedItemFolderId>
+                  <m:Items>
+                    <t:Message>
+                      <t:Subject>RCA folder item</t:Subject>
+                      <t:Body BodyType="Text">Hello from EWS</t:Body>
+                    </t:Message>
+                  </m:Items>
+                </m:CreateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("message:99999999-9999-9999-9999-999999999999"));
+    assert!(saved_drafts.lock().unwrap().is_empty());
+    let recorded = imported_emails.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].mailbox_id, mailbox_id);
+    assert_eq!(recorded[0].subject, "RCA folder item");
+}
+
+#[tokio::test]
+async fn find_item_lists_custom_mailbox_messages() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "99999999-9999-9999-9999-999999999999",
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA folder item",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:FindItem><m:ParentFolderIds><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:ParentFolderIds></m:FindItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:FindItemResponse>"));
+    assert!(body.contains("<t:Message>"));
+    assert!(body.contains("message:99999999-9999-9999-9999-999999999999"));
+    assert!(body.contains("<t:Subject>RCA folder item</t:Subject>"));
+}
+
+#[tokio::test]
+async fn sync_folder_items_reports_custom_mailbox_create_and_delete_changes() {
+    let emails = Arc::new(Mutex::new(vec![FakeStore::email(
+        "99999999-9999-9999-9999-999999999999",
+        "44444444-4444-4444-4444-444444444444",
+        "custom",
+        "RCA folder item",
+    )]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: emails.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Create><t:Message>"));
+    assert!(body.contains("message:99999999-9999-9999-9999-999999999999"));
+    assert!(body.contains("<m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:99999999-9999-9999-9999-999999999999</m:SyncState>"));
+
+    emails.lock().unwrap().clear();
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncState>mailbox:44444444-4444-4444-4444-444444444444:99999999-9999-9999-9999-999999999999</m:SyncState><m:SyncFolderId><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(
+        body.contains("<t:Delete><t:ItemId Id=\"message:99999999-9999-9999-9999-999999999999\"")
+    );
+}
+
+#[tokio::test]
+async fn get_item_returns_custom_mailbox_message_body() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "99999999-9999-9999-9999-999999999999",
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA folder item",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetItem><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:Body BodyType=\"Text\">Hello</t:Body>"));
+}
+
+#[tokio::test]
+async fn delete_item_removes_custom_mailbox_message() {
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "99999999-9999-9999-9999-999999999999",
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA folder item",
+        )])),
+        ..Default::default()
+    };
+    let deleted_custom_emails = store.deleted_custom_emails.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:DeleteItem DeleteType="HardDelete"><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(
+        deleted_custom_emails.lock().unwrap().as_slice(),
+        &[message_id]
+    );
 }
 
 #[tokio::test]

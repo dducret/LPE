@@ -46,7 +46,7 @@ The first `EWS` slice supports only the collaboration read/sync surface needed t
 - `GetItem`
 - `SyncFolderItems`
 - `CreateItem` for `Message` items only
-- `DeleteItem` for canonical draft `Message` ids only
+- `DeleteItem` for canonical draft `Message` ids and canonical custom-folder test messages only
 - `CreateFolder` and `DeleteFolder` for canonical custom mailbox folders
 
 The adapter currently exposes:
@@ -56,7 +56,7 @@ The adapter currently exposes:
 - contact items from `contacts`
 - calendar items from `calendar_events`
 - message creation through the canonical draft and submission model
-- temporary/custom mailbox folder creation through the canonical JMAP mailbox model
+- temporary/custom mailbox folder creation and test-message synchronization through the canonical JMAP mailbox model
 
 The EWS distinguished folder ids `contacts` and `calendar` map to the canonical owned `default` contact and calendar collections. Shared collections keep explicit synthetic ids such as `shared-contacts-{owner_account_id}` and `shared-calendar-{owner_account_id}`.
 
@@ -64,9 +64,9 @@ The adapter returns a Basic authentication challenge for unauthenticated EWS req
 
 Folder responses include EWS `TotalCount` and `ChildFolderCount` properties so strict EWS clients can read requested folder properties during bootstrap. The current MVP returns conservative zero counts for these compatibility properties instead of deriving full mailbox-style counters for collaboration folders.
 
-`CreateFolder` creates canonical custom mailbox folders, primarily for strict client connectivity tests that need temporary sync folders. `FindFolder` and `SyncFolderHierarchy` expose those custom mailbox folders. `DeleteFolder` removes those custom mailbox folders through the canonical JMAP mailbox deletion path, which rejects system folders and non-empty folders. These operations do not add EWS mail read/sync support.
+`CreateFolder` creates canonical custom mailbox folders, primarily for strict client connectivity tests that need temporary sync folders. `FindFolder` and `SyncFolderHierarchy` expose those custom mailbox folders. `DeleteFolder` removes those custom mailbox folders through the canonical JMAP mailbox deletion path, which rejects system folders and non-empty folders.
 
-`SyncFolderItems` on a custom mailbox folder returns an empty successful sync response so connectivity tests can bind and sync a temporary folder without exposing mailbox messages through EWS.
+For those temporary custom mailbox folders, `CreateItem SaveOnly` can import a `Message` into the requested canonical custom mailbox folder, `FindItem` and `GetItem` can return that custom-folder message, `SyncFolderItems` reports create/delete changes using a compact stateless sync token, and `DeleteItem` can hard-delete that custom-folder message. This exists to satisfy strict EWS connectivity tests that create and delete items inside temporary folders; it is not general EWS mailbox synchronization.
 
 When a client requests unsupported distinguished folders such as `inbox` or `tasks` through this narrow EWS adapter, the response remains an EWS-shaped `GetFolder` error with `ErrorFolderNotFound` instead of an HTTP transport failure. This keeps clients on the EWS negotiation path without advertising unsupported mail or task synchronization through EWS.
 
@@ -74,7 +74,7 @@ The adapter also answers early client bootstrap probes for `GetServerTimeZones`,
 
 `CreateItem` supports `Message` items only. `SaveOnly` writes through the canonical Drafts path. `SendOnly` and `SendAndSaveCopy` write through the canonical submission path, which persists the canonical `Sent` copy before queueing outbound transport for `LPE-CT`. `CreateItem` does not implement contact, calendar, task, attachment, meeting, or folder writes.
 
-Message ids returned by `CreateItem` are canonical mailbox ids wrapped in an EWS id prefix. Until EWS mail read/sync is explicitly implemented, `GetItem` for those `message:*` ids returns an EWS-shaped `ErrorItemNotFound` instead of a misleading empty success. `DeleteItem` supports those ids only when they still refer to canonical draft messages; deleting sent or queued messages through EWS is not implemented until a canonical move-to-trash/delete model is designed for this adapter.
+Message ids returned by `CreateItem` are canonical mailbox ids wrapped in an EWS id prefix. `GetItem` for `message:*` ids is exposed only for messages in canonical custom mailbox folders created for the temporary-folder test path; other mailbox messages still return an EWS-shaped `ErrorItemNotFound`. `DeleteItem` supports those ids only when they still refer to canonical draft messages or canonical custom-folder test messages; deleting sent or queued messages through EWS is not implemented until a canonical move-to-trash/delete model is designed for this adapter.
 
 Write operations that are outside the current MVP, including `UpdateItem`, return EWS-shaped `ErrorInvalidOperation` responses. They must not mutate canonical contacts or calendar data until write support is explicitly designed and routed through canonical collaboration rights.
 
