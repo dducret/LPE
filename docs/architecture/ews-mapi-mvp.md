@@ -2,9 +2,9 @@
 
 ### Objective
 
-This document describes the first `Exchange` compatibility work in `LPE`.
+This document describes the `0.1.3` `Exchange` compatibility work in `LPE`.
 
-The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchange`. Its first goal is to let Exchange-style clients read and synchronize canonical mailbox, `Contacts`, and `Calendar` data from the `LPE` server without introducing a second collaboration or mailbox store.
+The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchange`. `IMAP` carried the initial desktop compatibility work through `0.1.2`; `0.1.3` moves the Exchange-style compatibility focus to `EWS`. Its goal is to let Exchange-style clients read and synchronize canonical mailbox, `Contacts`, and `Calendar` data from the `LPE` server without introducing a second collaboration or mailbox store.
 
 `MAPI` is not implemented in this phase.
 

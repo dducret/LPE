@@ -4,7 +4,7 @@
 
 The repository is aligned for release `0.1.3`.
 
-Release `0.1.3` is a breaking change. Legacy updates are not supported. A fresh install and database recreation are required.
+Release `0.1.3` is the EWS implementation release and remains a breaking change. Legacy updates are not supported. A fresh install and database recreation are required.
 
 See `docs/releases/0.1.3.md` for the short release note.
 
@@ -14,20 +14,21 @@ See `docs/releases/0.1.3.md` for the short release note.
 - `MIT` dependencies are allowed only when no reasonable `Apache-2.0` alternative exists
 - `PostgreSQL` is the primary metadata store
 - `JMAP` is the main modern protocol axis
-- `IMAP` is a mailbox compatibility layer
+- `IMAP` is a permanently supported mailbox-access communication protocol and compatibility layer, with the first major development push completed through `0.1.2`
 - inbound and outbound `SMTP` transport is handled by the `LPE-CT` sorting center
-- `ActiveSync` is the first targeted native Outlook and mobile compatibility layer
-- `EWS` remains a future extension after the canonical submission and synchronization model is stable
+- `ActiveSync` is the first targeted native mobile compatibility layer for clients that support `Exchange ActiveSync`
+- `EWS` is the `0.1.3` Exchange compatibility implementation, with `MAPI` still deferred
 - the architecture remains compatible with future local AI without data leaving the server
 
 ## Current Priority
 
-The current repository priority is to finish the coherence of the implemented protocol set before adding new protocols.
+The current repository priority is implementing `EWS` in `0.1.3` while preserving the canonical `LPE` mailbox, contacts, calendar, and submission model.
 
 The near-term order is:
 
 - `JMAP` depth first: state or change semantics, WebSocket reliability, delegation, and shared-collection consistency
-- `IMAP` correctness next: sync behavior, `UID` handling, flags, and client compatibility
+- `IMAP` support as a continuing client communication protocol: sync behavior, `UID` handling, flags, and client compatibility
+- `EWS` in `0.1.3`: Exchange-style folder, mail, contacts, and calendar synchronization without `MAPI`, `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox`
 - `ActiveSync` as the flagship compatibility target for `Outlook` and mobile clients
 - `DAV` and `ManageSieve` interoperability work after the higher-priority mail protocols are stable
 
@@ -49,9 +50,9 @@ The current repository already contains:
 - a persistent administration console backed by `PostgreSQL`
 - a canonical message submission flow with protected `Bcc` handling and outbound queueing toward `LPE-CT`
 - an explicit internal `LPE` / `LPE-CT` HTTP integration contract
-- MVP protocol adapters for `JMAP Mail`, `JMAP Contacts`, `JMAP Calendars`, `IMAP`, `ActiveSync`, `Sieve` / `ManageSieve`, `CardDAV`, and `CalDAV`
+- MVP protocol adapters for `JMAP Mail`, `JMAP Contacts`, `JMAP Calendars`, `IMAP`, `ActiveSync`, `EWS`, `Sieve` / `ManageSieve`, `CardDAV`, and `CalDAV`
 - canonical personal tasks exposed through the account workspace model
-- public client autoconfiguration for `Thunderbird` and minimal `Outlook` autodiscovery for `ActiveSync`
+- public client autoconfiguration for `Thunderbird`, `Outlook`, `ActiveSync`, and opt-in `EWS`
 - a web client backed by persistent account authentication and mailbox/workspace APIs
 - first observability foundations with metrics and structured tracing
 

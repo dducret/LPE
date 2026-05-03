@@ -14,9 +14,9 @@ Its stable architectural base is:
 - project source code under `Apache-2.0`
 - `PostgreSQL` as the main persistent store
 - `JMAP` as the primary modern protocol axis
-- `IMAP` as a compatibility mailbox-access layer
+- `IMAP` as a permanently supported mailbox-access communication protocol and compatibility layer, with the first major development push completed through `0.1.2`
 - `ActiveSync` as the first mobile/native compatibility target for clients that support `Exchange ActiveSync`
-- `EWS` started as a narrow contacts/calendar adapter and not advertised by default
+- `EWS` as the active `0.1.3` Exchange compatibility implementation, without `MAPI` and without moving `SMTP` or canonical mailbox state out of `LPE`
 - `MAPI` kept as a future extension
 - `LPE-CT` as the distinct DMZ sorting center for external exposure, inbound `SMTP`, outbound relay, quarantine, and perimeter enforcement
 - `LPE` as the system of record for mailboxes, contacts, calendars, tasks, rights, and user-visible state
@@ -24,14 +24,18 @@ Its stable architectural base is:
 
 ## Current Delivery Priority
 
-The current product priority is to finish the depth, correctness, and interoperability of the already selected protocol set before adding new protocols.
+`IMAP` was the development-start compatibility layer through `0.1.2` and remains a supported communication protocol for mailbox access.
+The current `0.1.3` product priority is implementing the selected `EWS` adapter
+for Exchange-style clients while preserving the canonical mailbox, contacts, and
+calendar model.
 
 That means:
 
 - `JMAP` first: complete state or change semantics, WebSocket reliability, and shared-mailbox behavior
-- `IMAP` next: improve sync correctness, `UID` behavior, flag handling, and real-client compatibility
+- `IMAP` remains a supported client communication protocol and should receive correctness fixes for sync, `UID` behavior, flags, and real-client compatibility, but it is no longer the main `0.1.3` release driver
 - `ActiveSync` as the flagship mobile/native-client story for clients that support `Exchange ActiveSync`: prioritize Outlook mobile and iOS compatibility labs, long-poll stability, send-flow correctness, and folder-sync edge cases
-- Outlook for Windows desktop currently uses the `IMAP` compatibility layer by default; the initial `EWS` adapter is contacts/calendar-only and must be explicitly published before clients discover it
+- `EWS` is the `0.1.3` Exchange compatibility focus for Exchange-style folder, mail, contacts, and calendar synchronization; it must not imply `MAPI`, `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox` model
+- Outlook for Windows desktop can continue to use the supported `IMAP` communication path when configured that way; `EWS` publication remains an explicit administrator choice until its limits are acceptable for the deployment
 - `DAV` and `ManageSieve` after that: focus on correctness, canonical execution, and client-matrix interoperability rather than feature sprawl
 
 Any proposal to add protocol breadth must be weighed against unfinished interoperability, sync, and canonical-state work in these existing adapters.

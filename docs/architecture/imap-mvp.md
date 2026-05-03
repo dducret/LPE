@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The first `IMAP` server in `LPE` is a mailbox compatibility adapter over the canonical mailbox model already used by `JMAP`, `ActiveSync`, and the web client.
+The first `IMAP` server in `LPE` is a permanently supported mailbox-access communication protocol and compatibility adapter. Its first major development push carried `LPE` through `0.1.2`, and it sits over the canonical mailbox model already used by `JMAP`, `ActiveSync`, `EWS`, and the web client.
 
 It does not introduce a parallel mailbox store, a parallel sent-message workflow, or a protocol-specific draft model.
 
@@ -152,7 +152,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 
 ## Current completion priorities
 
-Before expanding `IMAP` breadth, the current priority is to improve correctness and interoperability of the implemented slice:
+`IMAP` remains supported as the `0.1.2` compatibility foundation and as an ongoing mailbox-access communication protocol while `0.1.3` focuses on the `EWS` implementation. Before expanding `IMAP` breadth, the priority remains improving correctness and interoperability of the implemented slice:
 
 - tighten sync correctness across `SELECT`, `FETCH`, `STORE`, `COPY`, `MOVE`, `IDLE`, and `CONDSTORE`
 - validate that `UID`, `UIDNEXT`, `UIDVALIDITY`, and `MODSEQ` behavior remain coherent under realistic mailbox operations
