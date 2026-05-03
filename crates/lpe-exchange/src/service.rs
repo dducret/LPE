@@ -67,7 +67,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
         let body = std::str::from_utf8(body).map_err(|_| anyhow!("EWS request is not UTF-8"))?;
         let operation = operation_name(body).ok_or_else(|| anyhow!("unsupported EWS request"))?;
 
-        let payload = match operation {
+        let payload = match operation.as_str() {
             "SyncFolderHierarchy" => self.sync_folder_hierarchy(&principal).await?,
             "FindFolder" => self.find_folder(&principal).await?,
             "GetFolder" => self.get_folder(&principal, body).await?,
@@ -92,7 +92,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
             "GetAttachment" => unsupported_operation_response("GetAttachment"),
             "Unsubscribe" => unsupported_operation_response("Unsubscribe"),
             "GetEvents" => unsupported_operation_response("GetEvents"),
-            _ => bail!("unsupported EWS operation {operation}"),
+            _ => unsupported_operation_response(&operation),
         };
 
         Ok(soap_response(payload))
@@ -369,39 +369,38 @@ enum FolderKind {
     Calendar,
 }
 
-fn operation_name(body: &str) -> Option<&'static str> {
-    [
-        "SyncFolderItems",
-        "SyncFolderHierarchy",
-        "GetServerTimeZones",
-        "GetUserAvailability",
-        "ResolveNames",
-        "CreateItem",
-        "UpdateItem",
-        "DeleteItem",
-        "GetUserOofSettings",
-        "GetRoomLists",
-        "FindPeople",
-        "ExpandDL",
-        "Subscribe",
-        "GetDelegate",
-        "GetUserConfiguration",
-        "GetSharingMetadata",
-        "GetSharingFolder",
-        "GetAttachment",
-        "Unsubscribe",
-        "GetEvents",
-        "FindFolder",
-        "GetFolder",
-        "FindItem",
-        "GetItem",
-    ]
-    .into_iter()
-    .find(|name| {
-        body.contains(&format!("<m:{name}"))
-            || body.contains(&format!("<{name}"))
-            || body.contains(&format!(":{name}"))
-    })
+fn operation_name(body: &str) -> Option<String> {
+    let body_start = body.find(":Body").or_else(|| body.find("<Body"))?;
+    let body_content_start = body[body_start..].find('>')? + body_start + 1;
+    let mut remaining = &body[body_content_start..];
+
+    loop {
+        let tag_start = remaining.find('<')?;
+        let tag_text = remaining[tag_start + 1..].trim_start();
+        if tag_text.starts_with('/') {
+            return None;
+        }
+        if tag_text.starts_with('?') || tag_text.starts_with('!') {
+            remaining = &tag_text[1..];
+            continue;
+        }
+
+        let tag_end = tag_text
+            .find(|value: char| value.is_whitespace() || value == '/' || value == '>')
+            .unwrap_or(tag_text.len());
+        let qualified_name = &tag_text[..tag_end];
+        let local_name = qualified_name.rsplit(':').next()?;
+        if local_name
+            .chars()
+            .all(|value| value.is_ascii_alphanumeric() || value == '_')
+        {
+            return Some(match local_name {
+                "GetUserAvailabilityRequest" => "GetUserAvailability".to_string(),
+                _ => local_name.to_string(),
+            });
+        }
+        return None;
+    }
 }
 
 fn requested_folder_kind(request: &str) -> Option<FolderKind> {

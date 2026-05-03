@@ -459,6 +459,47 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
 }
 
 #[tokio::test]
+async fn unknown_ews_operations_return_parseable_invalid_operation_errors() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    for operation in [
+        "SendItem",
+        "CreateFolder",
+        "GetMailTips",
+        "GetInboxRules",
+        "ConvertId",
+        "FindConversation",
+        "GetConversationItems",
+        "GetStreamingEvents",
+    ] {
+        let request = format!(
+            concat!(
+                "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" ",
+                "xmlns:m=\"http://schemas.microsoft.com/exchange/services/2006/messages\">",
+                "<s:Body><m:{operation} /></s:Body>",
+                "</s:Envelope>"
+            ),
+            operation = operation
+        );
+        let response = service
+            .handle(&bearer_headers(), request.as_bytes())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_text(response).await;
+        assert!(body.contains(&format!("<m:{operation}Response>")));
+        assert!(body.contains("ResponseClass=\"Error\""));
+        assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+        assert!(body.contains("<t:ServerVersionInfo"));
+    }
+}
+
+#[tokio::test]
 async fn authentication_errors_return_basic_challenge() {
     let response = error_response(&anyhow::anyhow!("missing account authentication"));
 
