@@ -309,6 +309,10 @@ fn render_soap_user_settings_autodiscover(
         "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={}",
         legacy_user(email, &config.display_domain)
     );
+    let mailbox_dn = format!(
+        "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Servers/cn={}/cn=LPE Private MDB",
+        mailbox_server
+    );
     format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n",
@@ -328,6 +332,7 @@ fn render_soap_user_settings_autodiscover(
             "            <a:ErrorCode>NoError</a:ErrorCode>\n",
             "            <a:ErrorMessage>No error.</a:ErrorMessage>\n",
             "            <a:RedirectTarget/>\n",
+            "            <a:UserSettingErrors/>\n",
             "            <a:UserSettings>\n",
             "{settings}",
             "            </a:UserSettings>\n",
@@ -342,8 +347,20 @@ fn render_soap_user_settings_autodiscover(
             soap_string_user_setting("UserDisplayName", &config.display_domain),
             soap_string_user_setting("UserDN", &legacy_dn),
             soap_string_user_setting("UserDeploymentId", &deployment_id(&config.display_domain)),
+            soap_string_user_setting("AutoDiscoverSMTPAddress", email),
             soap_string_user_setting("ExternalMailboxServer", mailbox_server),
             soap_string_user_setting("InternalMailboxServer", mailbox_server),
+            soap_string_user_setting("InternalRpcClientServer", mailbox_server),
+            soap_string_user_setting("MailboxDN", &mailbox_dn),
+            soap_string_user_setting("ActiveDirectoryServer", mailbox_server),
+            soap_string_user_setting("PublicFolderServer", mailbox_server),
+            soap_string_user_setting("ExternalMailboxServerRequiresSSL", "On"),
+            soap_string_user_setting("ExternalServerExclusiveConnect", "On"),
+            soap_string_user_setting("CasVersion", "15.00.0000.000"),
+            soap_string_user_setting("GroupingInformation", &deployment_id(&config.display_domain)),
+            soap_string_user_setting("UserMSOnline", "False"),
+            soap_string_user_setting("MapiHttpEnabled", "False"),
+            soap_string_list_user_setting("ExternalMailboxServerAuthenticationMethods", &["Basic"]),
             soap_string_user_setting("ExternalEwsUrl", ews_url),
             soap_string_user_setting("InternalEwsUrl", ews_url),
             soap_string_list_user_setting(
@@ -811,6 +828,11 @@ mod tests {
         assert!(xml.contains("<a:Name>ExternalEwsUrl</a:Name>"));
         assert!(xml.contains("<a:Value>https://mail.example.test/EWS/Exchange.asmx</a:Value>"));
         assert!(xml.contains("<a:Name>InternalEwsUrl</a:Name>"));
+        assert!(xml.contains("<a:Name>MailboxDN</a:Name>"));
+        assert!(xml.contains("<a:Name>ExternalMailboxServerRequiresSSL</a:Name>"));
+        assert!(xml.contains("<a:Name>ExternalMailboxServerAuthenticationMethods</a:Name>"));
+        assert!(xml.contains("<a:Name>MapiHttpEnabled</a:Name>"));
+        assert!(xml.contains("<a:Value>False</a:Value>"));
         assert!(xml.contains("<a:Name>EwsSupportedSchemas</a:Name>"));
         assert!(xml.contains("<a:Value>Exchange2013</a:Value>"));
         assert!(!xml.contains("<Type>MAPI</Type>"));
