@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use axum::{
     body::Bytes,
     extract::State,
@@ -26,6 +26,7 @@ const EWS_LOWER_PATH: &str = "/ews/exchange.asmx";
 const CONTACTS_FOLDER_ID: &str = "contacts";
 const CALENDAR_FOLDER_ID: &str = "calendar";
 const DEFAULT_COLLECTION_ID: &str = "default";
+const MAILBOX_QUERY_LIMIT: u64 = 200;
 
 pub fn router() -> Router<Storage> {
     Router::new()
@@ -125,8 +126,6 @@ impl<S: ExchangeStore> ExchangeService<S> {
             .store
             .fetch_jmap_mailboxes(principal.account_id)
             .await?
-            .into_iter()
-            .filter(|mailbox| mailbox.role == "custom")
         {
             folders.push_str(&mailbox_folder_xml(&mailbox));
         }
@@ -176,8 +175,6 @@ impl<S: ExchangeStore> ExchangeService<S> {
             .store
             .fetch_jmap_mailboxes(principal.account_id)
             .await?
-            .into_iter()
-            .filter(|mailbox| mailbox.role == "custom")
         {
             changes.push_str("<t:Create>");
             changes.push_str(&mailbox_folder_xml(&mailbox));
@@ -205,7 +202,9 @@ impl<S: ExchangeStore> ExchangeService<S> {
     }
 
     async fn get_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
-        let mailbox_ids = requested_mailbox_folder_ids(request);
+        let mailbox_ids = self
+            .requested_mailbox_folder_ids(principal, request)
+            .await?;
         if !mailbox_ids.is_empty() {
             let mailboxes = self
                 .store
@@ -277,7 +276,9 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     );
                 }
                 FolderKind::Mailbox => {
-                    let mailbox_ids = requested_mailbox_folder_ids(request);
+                    let mailbox_ids = self
+                        .requested_mailbox_folder_ids(principal, request)
+                        .await?;
                     let mailboxes = self
                         .store
                         .fetch_jmap_mailboxes(principal.account_id)
@@ -292,7 +293,10 @@ impl<S: ExchangeStore> ExchangeService<S> {
         }
 
         if folders.is_empty() {
-            bail!("folder not found");
+            return Ok(get_folder_error_response(
+                "ErrorFolderNotFound",
+                "folder not found",
+            ));
         }
 
         Ok(format!(
@@ -334,13 +338,23 @@ impl<S: ExchangeStore> ExchangeService<S> {
                 ))
             }
             FolderKind::Mailbox => {
-                let Some(mailbox_id) = requested_mailbox_folder_ids(request).into_iter().next()
+                let Some(mailbox_id) = self
+                    .requested_mailbox_folder_ids(principal, request)
+                    .await?
+                    .into_iter()
+                    .next()
                 else {
                     return Ok(find_item_response(String::new()));
                 };
                 let query = self
                     .store
-                    .query_jmap_email_ids(principal.account_id, Some(mailbox_id), None, 0, 200)
+                    .query_jmap_email_ids(
+                        principal.account_id,
+                        Some(mailbox_id),
+                        None,
+                        0,
+                        MAILBOX_QUERY_LIMIT,
+                    )
                     .await?;
                 let emails = self
                     .store
@@ -349,9 +363,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
                 Ok(find_item_response(
                     emails
                         .iter()
-                        .filter(|email| {
-                            email.mailbox_id == mailbox_id && email.mailbox_role == "custom"
-                        })
+                        .filter(|email| email.mailbox_id == mailbox_id)
                         .map(message_summary_xml)
                         .collect(),
                 ))
@@ -398,7 +410,6 @@ impl<S: ExchangeStore> ExchangeService<S> {
             .fetch_jmap_emails(principal.account_id, &message_ids)
             .await?
             .into_iter()
-            .filter(|email| email.mailbox_role == "custom")
         {
             items.push_str(&message_item_xml(&email));
         }
@@ -463,22 +474,30 @@ impl<S: ExchangeStore> ExchangeService<S> {
                 format!("calendar:{collection_id}:{}", events.len())
             }
             FolderKind::Mailbox => {
-                let Some(mailbox_id) = requested_mailbox_folder_ids(request).into_iter().next()
+                let Some(mailbox_id) = self
+                    .requested_mailbox_folder_ids(principal, request)
+                    .await?
+                    .into_iter()
+                    .next()
                 else {
                     return Ok(sync_folder_items_response("mailbox:0", String::new()));
                 };
                 let query = self
                     .store
-                    .query_jmap_email_ids(principal.account_id, Some(mailbox_id), None, 0, 200)
+                    .query_jmap_email_ids(
+                        principal.account_id,
+                        Some(mailbox_id),
+                        None,
+                        0,
+                        MAILBOX_QUERY_LIMIT,
+                    )
                     .await?;
                 let emails = self
                     .store
                     .fetch_jmap_emails(principal.account_id, &query.ids)
                     .await?
                     .into_iter()
-                    .filter(|email| {
-                        email.mailbox_id == mailbox_id && email.mailbox_role == "custom"
-                    })
+                    .filter(|email| email.mailbox_id == mailbox_id)
                     .collect::<Vec<_>>();
                 let current_ids = emails.iter().map(|email| email.id).collect::<Vec<_>>();
                 let current_set = current_ids.iter().copied().collect::<HashSet<_>>();
@@ -519,8 +538,11 @@ impl<S: ExchangeStore> ExchangeService<S> {
 
             match disposition {
                 "SaveOnly" => {
-                    if let Some(mailbox_id) =
-                        requested_mailbox_folder_ids(request).into_iter().next()
+                    if let Some(mailbox_id) = self
+                        .requested_mailbox_folder_ids(principal, request)
+                        .await?
+                        .into_iter()
+                        .next()
                     {
                         let imported = self
                             .store
@@ -592,35 +614,66 @@ impl<S: ExchangeStore> ExchangeService<S> {
                 return Ok(operation_error_response(
                     "DeleteItem",
                     "ErrorInvalidOperation",
-                    "DeleteItem currently supports only message draft ids.",
+                    "DeleteItem currently supports only message ids.",
                 ));
             }
+            let delete_type = attribute_value_after(request, "DeleteItem", "DeleteType")
+                .unwrap_or("MoveToDeletedItems");
+            let mailboxes = self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?;
+            let trash_mailbox_id = mailboxes
+                .iter()
+                .find(|mailbox| mailbox.role == "trash")
+                .map(|mailbox| mailbox.id);
 
             for message_id in message_ids {
                 let existing = self
                     .store
                     .fetch_jmap_emails(principal.account_id, &[message_id])
                     .await?;
-                if existing.iter().any(|email| email.mailbox_role == "custom") {
+                let Some(email) = existing.into_iter().next() else {
+                    return Ok(operation_error_response(
+                        "DeleteItem",
+                        "ErrorItemNotFound",
+                        "message not found",
+                    ));
+                };
+
+                if delete_type == "HardDelete" || email.mailbox_role == "trash" {
                     self.store
-                        .delete_custom_jmap_email(
+                        .delete_jmap_email(
                             principal.account_id,
                             message_id,
                             AuditEntryInput {
                                 actor: principal.email.clone(),
-                                action: "ews-delete-custom-mailbox-message".to_string(),
+                                action: "ews-delete-message".to_string(),
+                                subject: message_id.to_string(),
+                            },
+                        )
+                        .await?;
+                } else if let Some(trash_mailbox_id) = trash_mailbox_id {
+                    self.store
+                        .move_jmap_email(
+                            principal.account_id,
+                            message_id,
+                            trash_mailbox_id,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-move-message-to-trash".to_string(),
                                 subject: message_id.to_string(),
                             },
                         )
                         .await?;
                 } else {
                     self.store
-                        .delete_draft_message(
+                        .delete_jmap_email(
                             principal.account_id,
                             message_id,
                             AuditEntryInput {
                                 actor: principal.email.clone(),
-                                action: "ews-delete-draft-message".to_string(),
+                                action: "ews-delete-message-without-trash".to_string(),
                                 subject: message_id.to_string(),
                             },
                         )
@@ -635,6 +688,27 @@ impl<S: ExchangeStore> ExchangeService<S> {
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
             operation_error_response("DeleteItem", "ErrorItemNotFound", &error.to_string())
         }))
+    }
+
+    async fn requested_mailbox_folder_ids(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<Vec<Uuid>> {
+        let mut ids = requested_mailbox_folder_ids(request);
+        if ids.is_empty() {
+            if let Some(role) = requested_mailbox_role(request) {
+                ids.extend(
+                    self.store
+                        .fetch_jmap_mailboxes(principal.account_id)
+                        .await?
+                        .into_iter()
+                        .filter(|mailbox| mailbox.role == role)
+                        .map(|mailbox| mailbox.id),
+                );
+            }
+        }
+        Ok(ids)
     }
 
     async fn create_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
@@ -889,6 +963,9 @@ fn requested_folder_kind(request: &str) -> Option<FolderKind> {
     if request.contains("mailbox:") || !requested_mailbox_folder_ids(request).is_empty() {
         return Some(FolderKind::Mailbox);
     }
+    if requested_mailbox_role(request).is_some() {
+        return Some(FolderKind::Mailbox);
+    }
     requested_collection_id(request).and_then(|id| {
         if id.starts_with("shared-calendar-") {
             Some(FolderKind::Calendar)
@@ -936,6 +1013,9 @@ fn requested_folder_kinds(request: &str) -> Vec<FolderKind> {
     if request.contains("mailbox:") || !requested_mailbox_folder_ids(request).is_empty() {
         kinds.push(FolderKind::Mailbox);
     }
+    if requested_mailbox_role(request).is_some() {
+        kinds.push(FolderKind::Mailbox);
+    }
     kinds.dedup();
     kinds
 }
@@ -951,6 +1031,25 @@ fn requested_collection_id(request: &str) -> Option<&str> {
             "contacts" | "calendar" => DEFAULT_COLLECTION_ID,
             other => other,
         })
+}
+
+fn requested_mailbox_role(request: &str) -> Option<&'static str> {
+    requested_distinguished_folder_id(request).and_then(ews_distinguished_mailbox_role)
+}
+
+fn requested_distinguished_folder_id(request: &str) -> Option<&str> {
+    attribute_value_after(request, "DistinguishedFolderId", "Id")
+        .or_else(|| attribute_value_after(request, "FolderId", "Id"))
+}
+
+fn ews_distinguished_mailbox_role(value: &str) -> Option<&'static str> {
+    match value.to_ascii_lowercase().as_str() {
+        "inbox" => Some("inbox"),
+        "drafts" => Some("drafts"),
+        "sentitems" | "sent" => Some("sent"),
+        "deleteditems" | "trash" => Some("trash"),
+        _ => None,
+    }
 }
 
 fn requested_sync_state(request: &str) -> Option<String> {

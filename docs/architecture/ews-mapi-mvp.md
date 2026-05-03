@@ -4,7 +4,7 @@
 
 This document describes the first `Exchange` compatibility work in `LPE`.
 
-The initial implementation is a deliberately narrow `EWS` adapter in `crates/lpe-exchange`. Its first goal is to let Exchange-style clients read and synchronize canonical `Contacts` and `Calendar` data from the `LPE` server without introducing a second collaboration store.
+The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchange`. Its first goal is to let Exchange-style clients read and synchronize canonical mailbox, `Contacts`, and `Calendar` data from the `LPE` server without introducing a second collaboration or mailbox store.
 
 `MAPI` is not implemented in this phase.
 
@@ -12,7 +12,7 @@ The initial implementation is a deliberately narrow `EWS` adapter in `crates/lpe
 
 - `JMAP` remains the primary modern protocol
 - `ActiveSync` remains the flagship mobile/native-client layer for clients that actually support `Exchange ActiveSync`
-- `EWS` is an adapter over canonical `contacts` and `calendar_events`
+- `EWS` is an adapter over canonical mailbox, `contacts`, and `calendar_events` storage
 - `MAPI` remains deferred because it is a separate, much larger protocol surface
 - `EWS` must not introduce parallel contact, calendar, mailbox, rights, `Sent`, or `Outbox` state
 - `EWS` authentication reuses mailbox-account authentication
@@ -37,7 +37,7 @@ The lowercase path is accepted for tolerant reverse-proxy and client behavior. T
 
 ### Supported EWS operations
 
-The first `EWS` slice supports only the collaboration read/sync surface needed to begin contacts and calendar interoperability:
+The first `EWS` slice supports the read/sync surface needed to begin mailbox, contacts, and calendar interoperability:
 
 - `FindFolder`
 - `GetFolder`
@@ -46,7 +46,7 @@ The first `EWS` slice supports only the collaboration read/sync surface needed t
 - `GetItem`
 - `SyncFolderItems`
 - `CreateItem` for `Message` items only
-- `DeleteItem` for canonical draft `Message` ids and canonical custom-folder test messages only
+- `DeleteItem` for canonical `Message` ids
 - `CreateFolder` and `DeleteFolder` for canonical custom mailbox folders
 
 The adapter currently exposes:
@@ -56,7 +56,9 @@ The adapter currently exposes:
 - contact items from `contacts`
 - calendar items from `calendar_events`
 - message creation through the canonical draft and submission model
-- temporary/custom mailbox folder creation and test-message synchronization through the canonical JMAP mailbox model
+- mailbox read and sync through the canonical JMAP mailbox model
+- mailbox deletion through canonical hard-delete or move-to-trash behavior
+- temporary/custom mailbox folder creation through the canonical JMAP mailbox model
 
 The EWS distinguished folder ids `contacts` and `calendar` map to the canonical owned `default` contact and calendar collections. Shared collections keep explicit synthetic ids such as `shared-contacts-{owner_account_id}` and `shared-calendar-{owner_account_id}`.
 
@@ -66,15 +68,15 @@ Folder responses include EWS `TotalCount` and `ChildFolderCount` properties so s
 
 `CreateFolder` creates canonical custom mailbox folders, primarily for strict client connectivity tests that need temporary sync folders. `FindFolder` and `SyncFolderHierarchy` expose those custom mailbox folders. `DeleteFolder` removes those custom mailbox folders through the canonical JMAP mailbox deletion path, which rejects system folders and non-empty folders.
 
-For those temporary custom mailbox folders, `CreateItem SaveOnly` can import a `Message` into the requested canonical custom mailbox folder, `FindItem` and `GetItem` can return that custom-folder message, `SyncFolderItems` reports create/delete changes using a compact stateless sync token, and `DeleteItem` can hard-delete that custom-folder message. This exists to satisfy strict EWS connectivity tests that create and delete items inside temporary folders; it is not general EWS mailbox synchronization.
+Mailbox folders, including system folders such as `Inbox`, `Drafts`, `Sent`, and `Deleted`, are exposed through canonical JMAP mailboxes. `FindItem`, `GetItem`, and `SyncFolderItems` return canonical messages from the requested mailbox. For temporary custom mailbox folders, `CreateItem SaveOnly` can import a `Message` into the requested canonical custom mailbox folder, so strict EWS connectivity tests can create, sync, read, delete, and resync items inside a temporary folder.
 
-When a client requests unsupported distinguished folders such as `inbox` or `tasks` through this narrow EWS adapter, the response remains an EWS-shaped `GetFolder` error with `ErrorFolderNotFound` instead of an HTTP transport failure. This keeps clients on the EWS negotiation path without advertising unsupported mail or task synchronization through EWS.
+When a client requests unsupported distinguished folders such as `tasks` through this EWS adapter, the response remains an EWS-shaped `GetFolder` error with `ErrorFolderNotFound` instead of an HTTP transport failure. This keeps clients on the EWS negotiation path without advertising unsupported task synchronization through EWS.
 
 The adapter also answers early client bootstrap probes for `GetServerTimeZones`, `ResolveNames`, and `GetUserAvailability`. `GetServerTimeZones` returns minimal `UTC` and `W. Europe Standard Time` definitions. `ResolveNames` returns an EWS no-results error because GAL resolution is not implemented. `GetUserAvailability` returns an EWS free/busy generation error because free/busy remains outside the current MVP.
 
 `CreateItem` supports `Message` items only. `SaveOnly` writes through the canonical Drafts path. `SendOnly` and `SendAndSaveCopy` write through the canonical submission path, which persists the canonical `Sent` copy before queueing outbound transport for `LPE-CT`. `CreateItem` does not implement contact, calendar, task, attachment, meeting, or folder writes.
 
-Message ids returned by `CreateItem` are canonical mailbox ids wrapped in an EWS id prefix. `GetItem` for `message:*` ids is exposed only for messages in canonical custom mailbox folders created for the temporary-folder test path; other mailbox messages still return an EWS-shaped `ErrorItemNotFound`. `DeleteItem` supports those ids only when they still refer to canonical draft messages or canonical custom-folder test messages; deleting sent or queued messages through EWS is not implemented until a canonical move-to-trash/delete model is designed for this adapter.
+Message ids returned by `CreateItem` and mail read operations are canonical mailbox ids wrapped in an EWS id prefix. `DeleteItem DeleteType="HardDelete"` permanently deletes the canonical message. `DeleteItem` without `HardDelete`, including `MoveToDeletedItems`, moves the canonical message to the `trash` mailbox when that mailbox exists; deleting a message that is already in `trash` permanently deletes it. This uses the same canonical mailbox move/delete primitives as the other protocol layers and must not create EWS-only deletion state.
 
 Write operations that are outside the current MVP, including `UpdateItem`, return EWS-shaped `ErrorInvalidOperation` responses. They must not mutate canonical contacts or calendar data until write support is explicitly designed and routed through canonical collaboration rights.
 
@@ -88,7 +90,7 @@ Request element names ending in `Request`, such as `GetUserOofSettingsRequest`, 
 
 - the first `SyncFolderItems` implementation returns a full create-style snapshot for the requested folder and a compact server `SyncState`; it does not yet maintain a full EWS incremental change ledger
 - write operations such as `UpdateItem` are not implemented yet
-- mail read/sync, tasks, free/busy, recurrence expansion, alarms, meeting scheduling, extended properties, attachments, and GAL are not implemented through `EWS` yet
+- tasks, free/busy, recurrence expansion, alarms, meeting scheduling, extended properties, attachments, and GAL are not implemented through `EWS` yet
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
 - enabled `EWS` autodiscover publishes `EXCH` and `EXPR` protocol blocks only as discovery containers for the configured `EwsUrl` / `EmwsUrl`; this does not add `MAPI`, `RPC`, mail, submission, or outbox support
 - SOAP `GetUserSettings` autodiscover publishes the same configured `EWS` endpoint as `ExternalEwsUrl` and `InternalEwsUrl` for EWS clients that prefer SOAP autodiscover over POX

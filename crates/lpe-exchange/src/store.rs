@@ -77,7 +77,15 @@ pub trait ExchangeStore: AccountAuthStore {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapEmail>;
 
-    fn delete_custom_jmap_email<'a>(
+    fn move_jmap_email<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail>;
+
+    fn delete_jmap_email<'a>(
         &'a self,
         account_id: Uuid,
         message_id: Uuid,
@@ -95,13 +103,6 @@ pub trait ExchangeStore: AccountAuthStore {
         input: SubmitMessageInput,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, SubmittedMessage>;
-
-    fn delete_draft_message<'a>(
-        &'a self,
-        account_id: Uuid,
-        message_id: Uuid,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, ()>;
 }
 
 impl ExchangeStore for Storage {
@@ -223,16 +224,26 @@ impl ExchangeStore for Storage {
         Box::pin(async move { self.import_jmap_email(input, audit).await })
     }
 
-    fn delete_custom_jmap_email<'a>(
+    fn move_jmap_email<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        Box::pin(async move {
+            self.move_jmap_email(account_id, message_id, target_mailbox_id, audit)
+                .await
+        })
+    }
+
+    fn delete_jmap_email<'a>(
         &'a self,
         account_id: Uuid,
         message_id: Uuid,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
-        Box::pin(async move {
-            self.delete_custom_jmap_email(account_id, message_id, audit)
-                .await
-        })
+        Box::pin(async move { self.delete_jmap_email(account_id, message_id, audit).await })
     }
 
     fn save_draft_message<'a>(
@@ -249,17 +260,5 @@ impl ExchangeStore for Storage {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, SubmittedMessage> {
         Box::pin(async move { self.submit_message(input, audit).await })
-    }
-
-    fn delete_draft_message<'a>(
-        &'a self,
-        account_id: Uuid,
-        message_id: Uuid,
-        audit: AuditEntryInput,
-    ) -> StoreFuture<'a, ()> {
-        Box::pin(async move {
-            self.delete_draft_message(account_id, message_id, audit)
-                .await
-        })
     }
 }

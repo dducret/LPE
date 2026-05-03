@@ -26,8 +26,8 @@ struct FakeStore {
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
     emails: Arc<Mutex<Vec<JmapEmail>>>,
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
-    deleted_drafts: Arc<Mutex<Vec<Uuid>>>,
-    deleted_custom_emails: Arc<Mutex<Vec<Uuid>>>,
+    deleted_emails: Arc<Mutex<Vec<Uuid>>>,
+    moved_emails: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
     mailboxes: Arc<Mutex<Vec<JmapMailbox>>>,
     created_mailboxes: Arc<Mutex<Vec<JmapMailboxCreateInput>>>,
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
@@ -322,13 +322,47 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(email) })
     }
 
-    fn delete_custom_jmap_email<'a>(
+    fn move_jmap_email<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        self.moved_emails
+            .lock()
+            .unwrap()
+            .push((message_id, target_mailbox_id));
+        let target = self
+            .mailboxes
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|mailbox| mailbox.id == target_mailbox_id)
+            .cloned();
+        let mut emails = self.emails.lock().unwrap();
+        let email = emails
+            .iter_mut()
+            .find(|email| email.id == message_id)
+            .unwrap();
+        if let Some(target) = target {
+            email.mailbox_id = target.id;
+            email.mailbox_role = target.role;
+            email.mailbox_name = target.name;
+        } else {
+            email.mailbox_id = target_mailbox_id;
+        }
+        let moved = email.clone();
+        Box::pin(async move { Ok(moved) })
+    }
+
+    fn delete_jmap_email<'a>(
         &'a self,
         _account_id: Uuid,
         message_id: Uuid,
         _audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
-        self.deleted_custom_emails.lock().unwrap().push(message_id);
+        self.deleted_emails.lock().unwrap().push(message_id);
         self.emails
             .lock()
             .unwrap()
@@ -372,16 +406,6 @@ impl ExchangeStore for FakeStore {
                 delivery_status: "queued".to_string(),
             })
         })
-    }
-
-    fn delete_draft_message<'a>(
-        &'a self,
-        _account_id: Uuid,
-        message_id: Uuid,
-        _audit: lpe_storage::AuditEntryInput,
-    ) -> StoreFuture<'a, ()> {
-        self.deleted_drafts.lock().unwrap().push(message_id);
-        Box::pin(async move { Ok(()) })
     }
 }
 
@@ -625,6 +649,34 @@ async fn get_folder_returns_ews_error_for_unsupported_folder_ids() {
 }
 
 #[tokio::test]
+async fn get_folder_returns_system_mailbox_by_distinguished_id() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:DistinguishedFolderId Id="inbox"/></m:FolderIds></m:GetFolder></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:FolderId Id=\"mailbox:55555555-5555-5555-5555-555555555555\"/>"));
+    assert!(body.contains("<t:DisplayName>Inbox</t:DisplayName>"));
+}
+
+#[tokio::test]
 async fn get_server_time_zones_returns_minimal_definitions() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -719,12 +771,19 @@ async fn write_operations_return_ews_unsupported_errors() {
 }
 
 #[tokio::test]
-async fn delete_item_removes_canonical_draft_message() {
+async fn delete_item_hard_deletes_canonical_message() {
+    let message_id = Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap();
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "dddddddd-dddd-dddd-dddd-dddddddddddd",
+            "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+            "drafts",
+            "Draft from EWS",
+        )])),
         ..Default::default()
     };
-    let deleted_drafts = store.deleted_drafts.clone();
+    let deleted_emails = store.deleted_emails.clone();
     let service = ExchangeService::new(store);
 
     let response = service
@@ -747,10 +806,7 @@ async fn delete_item_removes_canonical_draft_message() {
     let body = response_text(response).await;
     assert!(body.contains("<m:DeleteItemResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert_eq!(
-        deleted_drafts.lock().unwrap().as_slice(),
-        &[Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap()]
-    );
+    assert_eq!(deleted_emails.lock().unwrap().as_slice(), &[message_id]);
 }
 
 #[tokio::test]
@@ -774,6 +830,45 @@ async fn delete_item_rejects_non_message_ids() {
     assert!(body.contains("<m:DeleteItemResponse>"));
     assert!(body.contains("ResponseClass=\"Error\""));
     assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+}
+
+#[tokio::test]
+async fn delete_item_moves_canonical_message_to_trash_by_default() {
+    let message_id = Uuid::parse_str("88888888-8888-8888-8888-888888888888").unwrap();
+    let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "77777777-7777-7777-7777-777777777777",
+            "trash",
+            "Deleted",
+        )])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "88888888-8888-8888-8888-888888888888",
+            "66666666-6666-6666-6666-666666666666",
+            "inbox",
+            "Inbox message",
+        )])),
+        ..Default::default()
+    };
+    let moved_emails = store.moved_emails.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:DeleteItem><m:ItemIds><t:ItemId Id="message:88888888-8888-8888-8888-888888888888"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(
+        moved_emails.lock().unwrap().as_slice(),
+        &[(message_id, trash_id)]
+    );
 }
 
 #[tokio::test]
@@ -1172,6 +1267,40 @@ async fn find_item_lists_custom_mailbox_messages() {
 }
 
 #[tokio::test]
+async fn find_item_lists_system_mailbox_messages_by_distinguished_id() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "88888888-8888-8888-8888-888888888888",
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox message",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:FindItem><m:ParentFolderIds><t:DistinguishedFolderId Id="inbox"/></m:ParentFolderIds></m:FindItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:FindItemResponse>"));
+    assert!(body.contains("<t:Message>"));
+    assert!(body.contains("message:88888888-8888-8888-8888-888888888888"));
+    assert!(body.contains("<t:Subject>Inbox message</t:Subject>"));
+}
+
+#[tokio::test]
 async fn sync_folder_items_reports_custom_mailbox_create_and_delete_changes() {
     let emails = Arc::new(Mutex::new(vec![FakeStore::email(
         "99999999-9999-9999-9999-999999999999",
@@ -1213,6 +1342,40 @@ async fn sync_folder_items_reports_custom_mailbox_create_and_delete_changes() {
 }
 
 #[tokio::test]
+async fn sync_folder_items_reports_system_mailbox_messages() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "88888888-8888-8888-8888-888888888888",
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox message",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:DistinguishedFolderId Id="inbox"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SyncFolderItemsResponse>"));
+    assert!(body.contains("<t:Create><t:Message>"));
+    assert!(body.contains("message:88888888-8888-8888-8888-888888888888"));
+    assert!(body.contains("<m:SyncState>mailbox:55555555-5555-5555-5555-555555555555:88888888-8888-8888-8888-888888888888</m:SyncState>"));
+}
+
+#[tokio::test]
 async fn get_item_returns_custom_mailbox_message_body() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -1241,6 +1404,35 @@ async fn get_item_returns_custom_mailbox_message_body() {
 }
 
 #[tokio::test]
+async fn get_item_returns_system_mailbox_message_body() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "88888888-8888-8888-8888-888888888888",
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox message",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetItem><m:ItemIds><t:ItemId Id="message:88888888-8888-8888-8888-888888888888"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:Subject>Inbox message</t:Subject>"));
+    assert!(body.contains("<t:Body BodyType=\"Text\">Hello</t:Body>"));
+}
+
+#[tokio::test]
 async fn delete_item_removes_custom_mailbox_message() {
     let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
     let store = FakeStore {
@@ -1253,7 +1445,7 @@ async fn delete_item_removes_custom_mailbox_message() {
         )])),
         ..Default::default()
     };
-    let deleted_custom_emails = store.deleted_custom_emails.clone();
+    let deleted_emails = store.deleted_emails.clone();
     let service = ExchangeService::new(store);
 
     let response = service
@@ -1267,10 +1459,7 @@ async fn delete_item_removes_custom_mailbox_message() {
     let body = response_text(response).await;
     assert!(body.contains("<m:DeleteItemResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert_eq!(
-        deleted_custom_emails.lock().unwrap().as_slice(),
-        &[message_id]
-    );
+    assert_eq!(deleted_emails.lock().unwrap().as_slice(), &[message_id]);
 }
 
 #[tokio::test]

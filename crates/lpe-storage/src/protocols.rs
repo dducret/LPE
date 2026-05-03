@@ -1184,6 +1184,42 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn delete_jmap_email(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        self.allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+
+        let deleted = sqlx::query(
+            r#"
+            DELETE FROM messages
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .execute(&mut *tx)
+        .await?;
+
+        if deleted.rows_affected() == 0 {
+            bail!("message not found");
+        }
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
+
+        Ok(())
+    }
+
     pub async fn fetch_jmap_draft(&self, account_id: Uuid, id: Uuid) -> Result<Option<JmapEmail>> {
         let emails = self.fetch_jmap_emails(account_id, &[id]).await?;
         Ok(emails
