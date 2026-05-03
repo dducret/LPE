@@ -57,6 +57,8 @@ The EWS distinguished folder ids `contacts` and `calendar` map to the canonical 
 
 The adapter returns a Basic authentication challenge for unauthenticated EWS requests and accepts `msgfolderroot` / `root` as lightweight root-folder discovery ids so clients can bootstrap folder traversal before requesting the supported contacts and calendar folders.
 
+When a client requests unsupported distinguished folders such as `inbox` or `tasks` through this narrow EWS adapter, the response remains an EWS-shaped `GetFolder` error with `ErrorFolderNotFound` instead of an HTTP transport failure. This keeps clients on the EWS negotiation path without advertising unsupported mail or task synchronization through EWS.
+
 ### Current limitations
 
 - the first `SyncFolderItems` implementation returns a full create-style snapshot for the requested folder and a compact server `SyncState`; it does not yet maintain a full EWS incremental change ledger

@@ -159,25 +159,46 @@ impl<S: ExchangeStore> ExchangeService<S> {
     }
 
     async fn get_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
-        let requested = requested_folder_kind(request);
-        let folders = match requested {
-            Some(FolderKind::Root) => root_folder_xml(),
-            Some(FolderKind::Contacts) => self
-                .store
-                .fetch_accessible_contact_collections(principal.account_id)
-                .await?
-                .into_iter()
-                .map(|collection| folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts"))
-                .collect::<String>(),
-            Some(FolderKind::Calendar) => self
-                .store
-                .fetch_accessible_calendar_collections(principal.account_id)
-                .await?
-                .into_iter()
-                .map(|collection| folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar"))
-                .collect::<String>(),
-            None => String::new(),
-        };
+        let requested = requested_folder_kinds(request);
+        if requested.is_empty() && request_contains_folder_reference(request) {
+            return Ok(get_folder_error_response(
+                "ErrorFolderNotFound",
+                "folder not found",
+            ));
+        }
+
+        let mut folders = String::new();
+        for kind in requested {
+            match kind {
+                FolderKind::Root => folders.push_str(&root_folder_xml()),
+                FolderKind::Contacts => {
+                    folders.push_str(
+                        &self
+                            .store
+                            .fetch_accessible_contact_collections(principal.account_id)
+                            .await?
+                            .into_iter()
+                            .map(|collection| {
+                                folder_xml(&collection, CONTACTS_FOLDER_ID, "Contacts")
+                            })
+                            .collect::<String>(),
+                    );
+                }
+                FolderKind::Calendar => {
+                    folders.push_str(
+                        &self
+                            .store
+                            .fetch_accessible_calendar_collections(principal.account_id)
+                            .await?
+                            .into_iter()
+                            .map(|collection| {
+                                folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar")
+                            })
+                            .collect::<String>(),
+                    );
+                }
+            }
+        }
 
         if folders.is_empty() {
             bail!("folder not found");
@@ -386,6 +407,43 @@ fn requested_folder_kind(request: &str) -> Option<FolderKind> {
     })
 }
 
+fn requested_folder_kinds(request: &str) -> Vec<FolderKind> {
+    let mut kinds = Vec::new();
+    if request.contains("DistinguishedFolderId Id=\"msgfolderroot\"")
+        || request.contains("DistinguishedFolderId Id='msgfolderroot'")
+        || request.contains("DistinguishedFolderId Id=\"root\"")
+        || request.contains("DistinguishedFolderId Id='root'")
+        || request.contains("FolderId Id=\"msgfolderroot\"")
+        || request.contains("FolderId Id='msgfolderroot'")
+        || request.contains("FolderId Id=\"root\"")
+        || request.contains("FolderId Id='root'")
+    {
+        kinds.push(FolderKind::Root);
+    }
+    if request.contains("DistinguishedFolderId Id=\"contacts\"")
+        || request.contains("DistinguishedFolderId Id='contacts'")
+        || request.contains("FolderId Id=\"contacts\"")
+        || request.contains("FolderId Id='contacts'")
+        || request.contains("shared-contacts-")
+    {
+        kinds.push(FolderKind::Contacts);
+    }
+    if request.contains("DistinguishedFolderId Id=\"calendar\"")
+        || request.contains("DistinguishedFolderId Id='calendar'")
+        || request.contains("FolderId Id=\"calendar\"")
+        || request.contains("FolderId Id='calendar'")
+        || request.contains("shared-calendar-")
+    {
+        kinds.push(FolderKind::Calendar);
+    }
+    kinds.dedup();
+    kinds
+}
+
+fn request_contains_folder_reference(request: &str) -> bool {
+    request.contains("FolderId") || request.contains("DistinguishedFolderId")
+}
+
 fn requested_collection_id(request: &str) -> Option<&str> {
     attribute_value_after(request, "FolderId", "Id")
         .or_else(|| attribute_value_after(request, "DistinguishedFolderId", "Id"))
@@ -444,6 +502,25 @@ fn find_item_response(items: String) -> String {
         ),
         items = items,
         count = count_tag_occurrences(&items, "<t:ItemId")
+    )
+}
+
+fn get_folder_error_response(code: &str, message: &str) -> String {
+    format!(
+        concat!(
+            "<m:GetFolderResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetFolderResponseMessage ResponseClass=\"Error\">",
+            "<m:MessageText>{message}</m:MessageText>",
+            "<m:ResponseCode>{code}</m:ResponseCode>",
+            "<m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>",
+            "<m:Folders/>",
+            "</m:GetFolderResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetFolderResponse>"
+        ),
+        code = escape_xml(code),
+        message = escape_xml(message),
     )
 }
 

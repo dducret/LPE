@@ -276,6 +276,58 @@ async fn get_folder_returns_msgfolderroot() {
 }
 
 #[tokio::test]
+async fn get_folder_returns_multiple_supported_folder_kinds() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:DistinguishedFolderId Id="contacts"/><t:DistinguishedFolderId Id="calendar"/></m:FolderIds></m:GetFolder></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
+    assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
+}
+
+#[tokio::test]
+async fn get_folder_returns_ews_error_for_unsupported_folder_ids() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetFolder><m:FolderIds><t:DistinguishedFolderId Id="inbox"/></m:FolderIds></m:GetFolder></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetFolderResponseMessage ResponseClass=\"Error\">"));
+    assert!(body.contains("<m:ResponseCode>ErrorFolderNotFound</m:ResponseCode>"));
+    assert!(body.contains("<t:ServerVersionInfo"));
+}
+
+#[tokio::test]
 async fn authentication_errors_return_basic_challenge() {
     let response = error_response(&anyhow::anyhow!("missing account authentication"));
 
