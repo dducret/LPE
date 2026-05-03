@@ -408,7 +408,10 @@ fn render_header_lines(email: &ImapEmail) -> Vec<String> {
     lines.push(format!("Date: {}", format_message_date(email)));
     lines.push(format!(
         "From: {}",
-        render_address_header(email.from_display.as_deref(), &email.from_address)
+        render_address_header(
+            normalized_display_name(email.from_display.as_deref(), &email.from_address),
+            fallback_address(&email.from_address),
+        )
     ));
     if !email.to.is_empty() {
         lines.push(format!("To: {}", render_recipient_header(&email.to)));
@@ -532,13 +535,15 @@ fn multipart_boundary(email: &ImapEmail) -> String {
 }
 
 fn render_envelope(email: &ImapEmail) -> String {
+    let from_address = fallback_address(&email.from_address);
+    let from_display = normalized_display_name(email.from_display.as_deref(), from_address);
     format!(
         "({} {} {} {} {} {} {} {} {} {})",
         nstring(Some(&format_message_date(email))),
         nstring(Some(&email.subject)),
-        render_address_list(email.from_display.as_deref(), Some(&email.from_address)),
-        render_address_list(email.from_display.as_deref(), Some(&email.from_address)),
-        render_address_list(email.from_display.as_deref(), Some(&email.from_address)),
+        render_address_list(from_display, Some(from_address)),
+        render_address_list(from_display, Some(from_address)),
+        render_address_list(from_display, Some(from_address)),
         render_recipients(&email.to),
         render_recipients(&email.cc),
         render_recipients(visible_bcc(email)),
@@ -564,7 +569,10 @@ fn render_recipients(recipients: &[JmapEmailAddress]) -> String {
         recipients
             .iter()
             .map(|recipient| {
-                render_single_address(recipient.display_name.as_deref(), &recipient.address)
+                render_single_address(
+                    normalized_display_name(recipient.display_name.as_deref(), &recipient.address),
+                    fallback_address(&recipient.address),
+                )
             })
             .collect::<Vec<_>>()
             .join(" ")
@@ -575,11 +583,18 @@ fn render_address_list(display_name: Option<&str>, address: Option<&str>) -> Str
     let Some(address) = address.filter(|value| !value.trim().is_empty()) else {
         return "NIL".to_string();
     };
-    format!("({})", render_single_address(display_name, address.trim()))
+    format!(
+        "({})",
+        render_single_address(
+            normalized_display_name(display_name, address),
+            address.trim()
+        )
+    )
 }
 
 fn render_single_address(display_name: Option<&str>, address: &str) -> String {
-    let (mailbox, host) = address.split_once('@').unwrap_or((address, ""));
+    let address = fallback_address(address);
+    let (mailbox, host) = address.split_once('@').unwrap_or((address, "localhost"));
     format!(
         "({} NIL {} {})",
         nstring(display_name),
@@ -653,12 +668,32 @@ pub(crate) fn render_recipient_header(recipients: &[JmapEmailAddress]) -> String
 }
 
 pub(crate) fn render_address_header(display_name: Option<&str>, address: &str) -> String {
+    let address = fallback_address(address);
+    let display_name = normalized_display_name(display_name, address);
     match display_name
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
         Some(display) => format!("{} <{}>", display, address),
         None => address.to_string(),
+    }
+}
+
+fn fallback_address(address: &str) -> &str {
+    let address = address.trim();
+    if address.is_empty() {
+        "unknown@localhost"
+    } else {
+        address
+    }
+}
+
+fn normalized_display_name<'a>(display_name: Option<&'a str>, address: &str) -> Option<&'a str> {
+    let display_name = display_name?.trim();
+    if display_name.is_empty() || display_name.eq_ignore_ascii_case(address.trim()) {
+        None
+    } else {
+        Some(display_name)
     }
 }
 
@@ -918,4 +953,115 @@ pub(crate) fn first_unseen_sequence(selected: &SelectedMailbox) -> usize {
         .position(|email| email.unread)
         .map(|index| index + 1)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{render_fetch_response, FetchAttributes, FetchItem};
+    use lpe_storage::ImapEmail;
+    use uuid::Uuid;
+
+    #[test]
+    fn fetch_envelope_uses_parseable_sender_fallback() {
+        let email = ImapEmail {
+            id: Uuid::new_v4(),
+            uid: 1,
+            modseq: 1,
+            thread_id: Uuid::new_v4(),
+            mailbox_id: Uuid::new_v4(),
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            received_at: "2026-05-03T10:00:00Z".to_string(),
+            sent_at: None,
+            from_address: String::new(),
+            from_display: None,
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Delivery report".to_string(),
+            preview: String::new(),
+            body_text: "Body".to_string(),
+            body_html_sanitized: None,
+            unread: true,
+            flagged: false,
+            has_attachments: false,
+            size_octets: 4,
+            internet_message_id: None,
+            delivery_status: "stored".to_string(),
+        };
+
+        let response = String::from_utf8(
+            render_fetch_response(
+                1,
+                &email,
+                &FetchAttributes {
+                    items: vec![FetchItem::Envelope],
+                    mark_seen: false,
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(response.contains("(NIL NIL \"unknown\" \"localhost\")"));
+        assert!(!response
+            .contains("ENVELOPE (\"03 May 2026 10:00:00 +0000\" \"Delivery report\" NIL NIL NIL"));
+    }
+
+    #[test]
+    fn fetch_header_does_not_duplicate_address_as_display_name() {
+        let mut email = ImapEmail {
+            id: Uuid::new_v4(),
+            uid: 1,
+            modseq: 1,
+            thread_id: Uuid::new_v4(),
+            mailbox_id: Uuid::new_v4(),
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            received_at: "2026-05-03T10:00:00Z".to_string(),
+            sent_at: None,
+            from_address: "sender@example.test".to_string(),
+            from_display: Some("sender@example.test".to_string()),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Message".to_string(),
+            preview: String::new(),
+            body_text: "Body".to_string(),
+            body_html_sanitized: None,
+            unread: true,
+            flagged: false,
+            has_attachments: false,
+            size_octets: 4,
+            internet_message_id: None,
+            delivery_status: "stored".to_string(),
+        };
+        email.to.push(lpe_storage::JmapEmailAddress {
+            address: "recipient@example.test".to_string(),
+            display_name: Some("recipient@example.test".to_string()),
+        });
+
+        let response = String::from_utf8(
+            render_fetch_response(
+                1,
+                &email,
+                &FetchAttributes {
+                    items: vec![FetchItem::BodySection(super::BodySectionFetch {
+                        peek: true,
+                        section: "HEADER".to_string(),
+                        partial: None,
+                        response_label: None,
+                    })],
+                    mark_seen: false,
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(response.contains("From: sender@example.test"));
+        assert!(response.contains("To: recipient@example.test"));
+        assert!(!response.contains("sender@example.test <sender@example.test>"));
+        assert!(!response.contains("recipient@example.test <recipient@example.test>"));
+    }
 }
