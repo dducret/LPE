@@ -2,6 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use lpe_magika::Detector;
 use lpe_storage::{AuditEntryInput, JmapMailbox};
 use tokio::io::AsyncWriteExt;
+use tracing::info;
 
 use crate::{
     parse::{first_token, tokenize},
@@ -67,6 +68,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .store
             .ensure_imap_mailboxes(principal.account_id)
             .await?;
+        let mut matched = 0usize;
         for mailbox in mailboxes {
             let mailbox_name = render_mailbox_name(&mailbox);
             if !mailbox_pattern_matches(&mailbox_name, &pattern)
@@ -74,6 +76,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             {
                 continue;
             }
+            matched += 1;
             writer
                 .write_all(
                     format!(
@@ -90,6 +93,12 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .write_all(format!("{tag} OK {command_name} completed\r\n").as_bytes())
             .await?;
         writer.flush().await?;
+        info!(
+            command = %command_name,
+            pattern = %pattern,
+            matched,
+            "IMAP mailbox listing completed"
+        );
         Ok(true)
     }
 
@@ -108,6 +117,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .store
             .ensure_imap_mailboxes(principal.account_id)
             .await?;
+        let mut matched = 0usize;
         for mailbox in mailboxes {
             let mailbox_name = render_mailbox_name(&mailbox);
             if !mailbox_pattern_matches(&mailbox_name, &pattern)
@@ -115,6 +125,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             {
                 continue;
             }
+            matched += 1;
             writer
                 .write_all(
                     format!(
@@ -130,6 +141,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .write_all(format!("{tag} OK LSUB completed\r\n").as_bytes())
             .await?;
         writer.flush().await?;
+        info!(pattern = %pattern, matched, "IMAP LSUB completed");
         Ok(true)
     }
 
@@ -209,6 +221,14 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .write_all(format!("{tag} OK STATUS completed\r\n").as_bytes())
             .await?;
         writer.flush().await?;
+        info!(
+            mailbox = %render_mailbox_name(&mailbox),
+            mailbox_role = %mailbox.role,
+            messages = emails.len(),
+            highest_modseq,
+            requested = %requested.join(" "),
+            "IMAP STATUS completed"
+        );
         Ok(true)
     }
 
@@ -389,6 +409,9 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .write_all(b"* FLAGS (\\Seen \\Flagged \\Draft)\r\n")
             .await?;
         writer
+            .write_all(b"* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Draft)] supported flags\r\n")
+            .await?;
+        writer
             .write_all(format!("* {} EXISTS\r\n", exists).as_bytes())
             .await?;
         writer.write_all(b"* 0 RECENT\r\n").await?;
@@ -424,6 +447,16 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .write_all(format!("{tag} OK [{access}] {command_name} completed\r\n").as_bytes())
             .await?;
         writer.flush().await?;
+        info!(
+            command = %command_name,
+            mailbox = %render_mailbox_name(&mailbox),
+            mailbox_role = %mailbox.role,
+            exists,
+            uid_next,
+            highest_modseq,
+            read_only,
+            "IMAP mailbox selected"
+        );
         Ok(true)
     }
 

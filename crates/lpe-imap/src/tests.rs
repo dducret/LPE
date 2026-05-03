@@ -901,6 +901,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
 
     let select = send_command(&mut stream, "OL9 SELECT Inbox\r\n", "OL9").await;
     assert!(select.contains("* 1 EXISTS"));
+    assert!(select.contains("* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Draft)]"));
     assert!(select.contains("* OK [UIDVALIDITY 1]"));
     assert!(select.contains("* OK [UIDNEXT 2]"));
     assert!(select.contains("* OK [HIGHESTMODSEQ 3]"));
@@ -939,6 +940,20 @@ async fn outlook_first_login_list_select_sync_transcript() {
 
     let fetch_body = send_command(&mut stream, "OL10B UID FETCH 1 (UID BODY)\r\n", "OL10B").await;
     assert!(fetch_body.contains("UID 1 BODY ((\"TEXT\" \"PLAIN\""));
+
+    let fetch_all = send_command(&mut stream, "OL10A1 UID FETCH 1 ALL\r\n", "OL10A1").await;
+    assert!(fetch_all.contains("UID 1"));
+    assert!(fetch_all.contains("FLAGS ("));
+    assert!(fetch_all.contains("INTERNALDATE"));
+    assert!(fetch_all.contains("RFC822.SIZE"));
+    assert!(fetch_all.contains("ENVELOPE"));
+    assert!(!fetch_all.contains("BODY[]"));
+
+    let fetch_full = send_command(&mut stream, "OL10A2 UID FETCH 1 FULL\r\n", "OL10A2").await;
+    assert!(fetch_full.contains("UID 1"));
+    assert!(fetch_full.contains("ENVELOPE"));
+    assert!(fetch_full.contains(" BODY ("));
+    assert!(!fetch_full.contains("BODY[]"));
 
     let search_undeleted = send_command(
         &mut stream,

@@ -2,6 +2,7 @@ use anyhow::{bail, Result};
 use lpe_magika::Detector;
 use lpe_storage::{AuditEntryInput, JmapMailbox};
 use tokio::io::AsyncWriteExt;
+use tracing::info;
 
 use crate::{
     parse::{split_two, tokenize},
@@ -41,10 +42,18 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             })
             .collect::<Vec<_>>();
         let mut mark_seen_ids = Vec::new();
+        let mut response_count = 0usize;
+        let mut response_bytes = 0usize;
+        let mut first_uid = None;
+        let mut last_uid = None;
 
         for index in indices {
             let email = &selected.emails[index];
             let response = render_fetch_response(index + 1, email, &requested)?;
+            response_count += 1;
+            response_bytes += response.len();
+            first_uid.get_or_insert(email.uid);
+            last_uid = Some(email.uid);
             writer.write_all(&response).await?;
             if requested.mark_seen && email.unread && !selected.read_only {
                 mark_seen_ids.push(email.id);
@@ -54,6 +63,23 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .write_all(format!("{tag} OK FETCH completed\r\n").as_bytes())
             .await?;
         writer.flush().await?;
+
+        info!(
+            mailbox = %selected.mailbox_name,
+            mailbox_role = %selected.mailbox_role,
+            ref_kind = %message_ref_kind_name(ref_kind),
+            set = %set_token,
+            attributes = %attr_token,
+            changed_since = ?changed_since,
+            total_messages = selected.emails.len(),
+            responses = response_count,
+            response_bytes,
+            first_uid = ?first_uid,
+            last_uid = ?last_uid,
+            mark_seen = requested.mark_seen,
+            marked_seen = mark_seen_ids.len(),
+            "IMAP FETCH completed"
+        );
 
         if !mark_seen_ids.is_empty() {
             let principal = self.require_auth()?;
@@ -213,6 +239,15 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .write_all(format!("{tag} OK SEARCH completed\r\n").as_bytes())
             .await?;
         writer.flush().await?;
+        info!(
+            mailbox = %selected.mailbox_name,
+            mailbox_role = %selected.mailbox_role,
+            ref_kind = %message_ref_kind_name(ref_kind),
+            criteria_count = tokens.len(),
+            matches = matches.len(),
+            total_messages = selected.emails.len(),
+            "IMAP SEARCH completed"
+        );
         Ok(true)
     }
 
@@ -341,6 +376,13 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         writer.write_all(response.as_bytes()).await?;
         writer.flush().await?;
         Ok(true)
+    }
+}
+
+fn message_ref_kind_name(kind: MessageRefKind) -> &'static str {
+    match kind {
+        MessageRefKind::Sequence => "sequence",
+        MessageRefKind::Uid => "uid",
     }
 }
 

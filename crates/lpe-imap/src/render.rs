@@ -68,7 +68,7 @@ pub(crate) fn parse_fetch_attributes(input: &str) -> Result<FetchAttributes> {
             FetchItem::Flags,
             FetchItem::InternalDate,
             FetchItem::Rfc822Size,
-            FetchItem::Uid,
+            FetchItem::Envelope,
         ],
         "FAST" => vec![
             FetchItem::Flags,
@@ -79,12 +79,8 @@ pub(crate) fn parse_fetch_attributes(input: &str) -> Result<FetchAttributes> {
             FetchItem::Flags,
             FetchItem::InternalDate,
             FetchItem::Rfc822Size,
-            FetchItem::BodySection(BodySectionFetch {
-                peek: false,
-                section: String::new(),
-                partial: None,
-            }),
-            FetchItem::Uid,
+            FetchItem::Envelope,
+            FetchItem::Body,
         ],
         _ => parse_fetch_item_list(input)?,
     };

@@ -32,6 +32,9 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `FETCH` over canonical message state, including `ENVELOPE`, `BODYSTRUCTURE`,
   `BODY`, `BODY.PEEK[HEADER.FIELDS (...)]`, `BODY.PEEK[HEADER.FIELDS.NOT (...)]`,
   part-scoped header fields, body sections, MIME part headers, and partial literals
+- RFC 3501 `FETCH` macros `FAST`, `ALL`, and `FULL`, with `ALL` and `FULL`
+  including `ENVELOPE` as required for clients that use macro fetches during
+  initial folder population
 - minimal `STORE` for `\Seen` and `\Flagged`
 - `IDLE` on a selected mailbox, with periodic refresh against canonical mailbox
   state; Outlook-style `IDLE` before mailbox selection is accepted as a no-op
@@ -55,6 +58,8 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - mailbox reads are served from the canonical `messages`, `message_bodies`, `message_recipients`, and protected `message_bcc_recipients` data already used by `JMAP` and `ActiveSync`
 - `\Seen` maps to the canonical `unread` flag
 - `\Flagged` maps to the canonical `flagged` flag
+- `SELECT` / `EXAMINE` publishes `PERMANENTFLAGS` for the writable canonical
+  flag subset so Outlook can identify the flags it may persist
 - `APPEND` to `Drafts` reuses `save_draft_message`
 - `APPEND` returns `APPENDUID` using the canonical draft row written into `messages`
 - custom IMAP mailbox creation and rename reuse the canonical mailbox records already exposed through `JMAP`
@@ -103,6 +108,16 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - because there is still no canonical vanished-history journal, destructive `EXPUNGE` and `QRESYNC` stay deferred even though `CONDSTORE` now uses canonical first-class change anchors
 - `ACL` rights are a truthful projection over canonical delegation: mailbox access rights map to mailbox visibility and mutation, `p` maps to canonical `send-as`, and `b` is an `LPE`-specific right for canonical `send-on-behalf`
 - `Bcc` remains protected in those tradeoffs as well: it is preserved in protected storage for owner reconstruction in `Drafts` and `Sent`, but never added to IMAP search matching
+
+## Operational diagnostics
+
+- successful `LIST` / `LSUB`, `STATUS`, `SELECT` / `EXAMINE`, `FETCH`, and
+  `SEARCH` operations emit `info` logs with mailbox names, counts, UID ranges,
+  response counts, and response byte totals, but not message bodies, passwords,
+  or search text
+- these logs are intended for Outlook empty-folder investigations where the
+  client receives tagged `OK` responses and `journalctl -u lpe.service` has no
+  command-failure warnings
 
 ## Runtime
 
