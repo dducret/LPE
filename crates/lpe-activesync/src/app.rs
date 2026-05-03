@@ -1,7 +1,7 @@
 use axum::{
     body::Bytes,
     extract::{Query, State},
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::Response,
     routing::{on, MethodFilter},
     Router,
@@ -11,7 +11,7 @@ use lpe_storage::Storage;
 
 use crate::{
     constants::ACTIVE_SYNC_PATH,
-    response::{auth_challenge_response, empty_response, http_error},
+    response::{auth_challenge_response, empty_response, error_response},
     service::ActiveSyncService,
     store::ActiveSyncStore,
     types::ActiveSyncQuery,
@@ -48,10 +48,10 @@ async fn post_handler(
     Query(query): Query<ActiveSyncQuery>,
     headers: HeaderMap,
     body: Bytes,
-) -> Result<Response, (StatusCode, String)> {
+) -> Response {
     let service = ActiveSyncService::new(storage);
-    service
-        .handle_request(query, &headers, body.as_ref())
-        .await
-        .map_err(http_error)
+    match service.handle_request(query, &headers, body.as_ref()).await {
+        Ok(response) => response,
+        Err(error) => error_response(error),
+    }
 }

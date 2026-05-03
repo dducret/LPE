@@ -3,6 +3,7 @@ use std::{
     time::Instant,
 };
 
+use anyhow::anyhow;
 use argon2::{
     password_hash::{rand_core::OsRng, SaltString},
     Argon2, PasswordHasher,
@@ -21,6 +22,7 @@ use uuid::Uuid;
 
 use crate::{
     app::options_response_for_store,
+    response::error_response,
     service::ActiveSyncService,
     store::{ActiveSyncStore, StoreFuture},
     types::ActiveSyncQuery,
@@ -855,6 +857,20 @@ async fn options_returns_capabilities_after_authentication() {
         Some(
             "FolderSync,ItemOperations,Ping,Provision,Search,SendMail,SmartForward,SmartReply,Sync"
         )
+    );
+}
+
+#[test]
+fn post_authentication_errors_return_http_challenge() {
+    let response = error_response(anyhow!("missing account authentication"));
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(axum::http::header::WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic realm=\"LPE ActiveSync\"")
     );
 }
 

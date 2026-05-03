@@ -1,6 +1,9 @@
 use anyhow::Result;
 use axum::{
-    http::{header::WWW_AUTHENTICATE, HeaderMap, HeaderValue, StatusCode},
+    http::{
+        header::{CONTENT_TYPE, WWW_AUTHENTICATE},
+        HeaderMap, HeaderValue, StatusCode,
+    },
     response::Response,
 };
 use uuid::Uuid;
@@ -61,8 +64,26 @@ fn add_common_headers(headers: &mut HeaderMap) {
     headers.insert("dav", HeaderValue::from_static("1,2"));
 }
 
-pub(crate) fn http_error(error: anyhow::Error) -> (StatusCode, String) {
-    (StatusCode::BAD_REQUEST, error.to_string())
+pub(crate) fn error_response(error: anyhow::Error) -> Response {
+    let message = error.to_string();
+    if is_authentication_error(&message) {
+        return auth_challenge_response();
+    }
+
+    let mut response = Response::new(axum::body::Body::from(message));
+    *response.status_mut() = StatusCode::BAD_REQUEST;
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response
+}
+
+fn is_authentication_error(message: &str) -> bool {
+    message == "missing account authentication"
+        || message == "invalid credentials"
+        || message.starts_with("oauth access token ")
+        || message.contains(" credentials")
 }
 
 pub(crate) fn sync_status_node(collection_id: &str, status: &str) -> WbxmlNode {
