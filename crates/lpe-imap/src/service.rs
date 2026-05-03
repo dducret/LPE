@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::{parse::parse_request_line, render::sanitize_imap_text, store::ImapStore};
 
 const CAPABILITIES: &str =
-    "IMAP4rev1 AUTH=XOAUTH2 SASL-IR ID IDLE MOVE NAMESPACE UIDPLUS CONDSTORE ACL SPECIAL-USE UNSELECT";
+    "IMAP4rev1 AUTH=XOAUTH2 SASL-IR ID IDLE MOVE NAMESPACE UIDPLUS CONDSTORE ENABLE ACL SPECIAL-USE UNSELECT";
 pub(crate) const UID_VALIDITY: u32 = 1;
 
 #[derive(Clone)]
@@ -161,6 +161,10 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             }
             "ID" => self.handle_id(&request.tag, writer).await,
             "NAMESPACE" => self.handle_namespace(&request.tag, writer).await,
+            "ENABLE" => {
+                self.handle_enable(&request.tag, &request.arguments, writer)
+                    .await
+            }
             "STATUS" => {
                 self.handle_status(&request.tag, &request.arguments, writer)
                     .await
@@ -341,6 +345,34 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                 format!("* ID (\"name\" \"LPE\" \"vendor\" \"LPE\")\r\n{tag} OK ID completed\r\n")
                     .as_bytes(),
             )
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    async fn handle_enable<W>(&self, tag: &str, arguments: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        self.require_auth()?;
+        let enabled = arguments
+            .split_whitespace()
+            .filter_map(|capability| {
+                if capability.eq_ignore_ascii_case("CONDSTORE") {
+                    Some("CONDSTORE")
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        let enabled_response = if enabled.is_empty() {
+            "* ENABLED\r\n".to_string()
+        } else {
+            format!("* ENABLED {}\r\n", enabled.join(" "))
+        };
+        writer.write_all(enabled_response.as_bytes()).await?;
+        writer
+            .write_all(format!("{tag} OK ENABLE completed\r\n").as_bytes())
             .await?;
         writer.flush().await?;
         Ok(true)

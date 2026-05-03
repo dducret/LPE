@@ -832,6 +832,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
     assert!(greeting.contains("* OK LPE IMAP ready"));
 
     let capability = send_command(&mut stream, "OL1 CAPABILITY\r\n", "OL1").await;
+    assert!(capability.contains("ENABLE"));
     assert!(capability.contains("ID"));
     assert!(capability.contains("SPECIAL-USE"));
     assert!(capability.contains("UNSELECT"));
@@ -855,6 +856,10 @@ async fn outlook_first_login_list_select_sync_transcript() {
 
     let namespace = send_command(&mut stream, "OL4 NAMESPACE\r\n", "OL4").await;
     assert!(namespace.contains("* NAMESPACE ((\"\" \"/\")) NIL NIL"));
+
+    let enable = send_command(&mut stream, "OL4E ENABLE CONDSTORE\r\n", "OL4E").await;
+    assert!(enable.contains("* ENABLED CONDSTORE"));
+    assert!(enable.contains("OL4E OK ENABLE completed"));
 
     let subscribe = send_command(&mut stream, "OL5 SUBSCRIBE Inbox\r\n", "OL5").await;
     assert!(subscribe.contains("OL5 OK SUBSCRIBE completed"));

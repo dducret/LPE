@@ -11,6 +11,8 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - account authentication through `LOGIN` with the existing mailbox account credentials
 - `AUTHENTICATE XOAUTH2` with the mailbox `OAuth2` bearer access token
 - `CAPABILITY`, `NOOP`, `LOGOUT`
+- `ENABLE CONDSTORE` for clients that explicitly enable conditional-store
+  synchronization before fetching mailbox state
 - tolerant `ID`
 - `NAMESPACE` for the flat personal namespace
 - `LIST` for the canonical system mailboxes, rendering the inbox as the single
