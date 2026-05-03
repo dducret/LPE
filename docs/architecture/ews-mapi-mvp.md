@@ -46,7 +46,7 @@ Implemented request types:
 - NSPI `Unbind`: consumes the authenticated NSPI session cookie and expires it
 - `PING`: returns a transport success response on either endpoint
 
-`Execute` currently parses the EMSMDB Execute request body and validates the session cookie. It supports `RopRelease`, which intentionally emits no ROP response, the first private-mailbox `RopLogon` response with canonical account identity and fixed special-folder ids, `RopOpenFolder`, `RopGetHierarchyTable`, `RopSetColumns`, and `RopQueryRows`. The folder and table responses are read-only and currently return empty hierarchy rows rather than canonical mailbox rows. Other ROPs currently return MAPI ROP error buffers with `MAPI_E_NO_SUPPORT`. NSPI table/query operations are not implemented yet.
+`Execute` currently parses the EMSMDB Execute request body and validates the session cookie. It supports `RopRelease`, which intentionally emits no ROP response, the first private-mailbox `RopLogon` response with canonical account identity and fixed special-folder ids, `RopOpenFolder`, `RopGetHierarchyTable`, `RopSetColumns`, `RopQueryRows`, and `RopGetPropertiesSpecific` for opened folder handles. The implementation now keeps per-session ROP handle state and populates root and IPM-subtree hierarchy table rows from canonical JMAP mailbox folders, including display name, folder id, parent folder id, content count, unread count, and subfolder flags for the supported property tags. The common special-folder ids for `Inbox`, `Drafts`, `Sent`, and `Deleted` are also mapped back to canonical mailbox roles for opened-folder property reads. Other ROPs currently return MAPI ROP error buffers with `MAPI_E_NO_SUPPORT`. NSPI table/query operations are not implemented yet.
 
 ### Authentication
 
@@ -117,7 +117,7 @@ Request element names ending in `Request`, such as `GetUserOofSettingsRequest`, 
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
 - enabled `EWS` POX autodiscover publishes the configured EWS URL through a `WEB` protocol block with `ASUrl` for EWS-aware clients; it intentionally does not publish top-level `EXCH` or `EXPR` mailbox protocol blocks because those imply a full Outlook desktop Exchange/MAPI route that is not implemented
 - SOAP `GetUserSettings` autodiscover publishes the same configured `EWS` endpoint as `ExternalEwsUrl` and `InternalEwsUrl` for EWS clients that prefer SOAP autodiscover over POX
-- `MAPI over HTTP` currently has authenticated transport and session-context wiring only; it is not an Outlook-ready mailbox service and must not be advertised
+- `MAPI over HTTP` currently has authenticated transport, session-context wiring, a private-mailbox logon skeleton, and read-only canonical mailbox-folder bootstrap ROPs; it is not an Outlook-ready mailbox service and must not be advertised
 
 ### Completion priorities
 
@@ -130,6 +130,6 @@ The next EWS phase should focus on:
 The next MAPI phase should focus on:
 
 - autodiscover design for `EXHTTP` / `MapiHttp` that remains disabled until real Outlook login succeeds
-- populate `RopQueryRows` from canonical mailbox folders and add `RopGetPropertiesSpecific` for opened folders and messages
+- extend `RopGetPropertiesSpecific` from opened folders to opened messages and add message table bootstrap ROPs over canonical mailbox data
 - NSPI `GetSpecialTable`, `QueryRows`, `GetProps`, and `ResolveNames` without introducing a parallel GAL store
 - binary protocol parsing and response serialization with focused conformance fixtures before any route is advertised to Outlook
