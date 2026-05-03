@@ -290,4 +290,10 @@ mod tests {
         let scope = normalize_scope("ews mail").unwrap();
         assert_eq!(scope, "ews mail");
     }
+
+    #[test]
+    fn normalize_scope_accepts_mapi_surface() {
+        let scope = normalize_scope("mapi mail").unwrap();
+        assert_eq!(scope, "mail mapi");
+    }
 }

@@ -556,6 +556,7 @@ For public client auto-configuration, the exposed front end must remain `LPE-CT`
 - Outlook for Windows desktop receives an `IMAP` profile by default; `IMAP` remains a supported mailbox-access communication protocol, while `0.1.3` deployments may explicitly enable EWS autodiscovery for the implemented Exchange-style compatibility surface
 - `ActiveSync` remains exposed for mobile/native clients that actually support `Exchange ActiveSync`
 - `EWS` remains opt-in through `LPE_AUTOCONFIG_EWS_ENABLED` and must not be treated as `MAPI`, `RPC`, or client `SMTP`
+- `MAPI over HTTP` routes are implementation groundwork only and should not be published by the public edge or autodiscover until they become a real Outlook-usable service
 - no client `SMTP` endpoint should be advertised unless the authenticated `LPE-CT` submission listener is configured, exposed on `465`, and covered by the public certificate
 - the internal `LPE -> LPE-CT` relay must never be advertised as a client-submission endpoint
 

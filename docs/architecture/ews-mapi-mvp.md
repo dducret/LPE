@@ -6,17 +6,18 @@ This document describes the `0.1.3` `Exchange` compatibility work in `LPE`.
 
 The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchange`. `IMAP` carried the initial desktop compatibility work through `0.1.2`; `0.1.3` moves the Exchange-style compatibility focus to `EWS`. Its goal is to let Exchange-style clients read and synchronize canonical mailbox, `Contacts`, and `Calendar` data from the `LPE` server without introducing a second collaboration or mailbox store.
 
-`MAPI` is not implemented in this phase.
+`MAPI` implementation has started as a guarded `MAPI over HTTP` foundation for future Outlook desktop support. It is not Outlook-ready, is not advertised by autodiscover, and currently returns explicit not-implemented responses after mailbox authentication.
 
 ### Architectural principles
 
 - `JMAP` remains the primary modern protocol
 - `ActiveSync` remains the flagship mobile/native-client layer for clients that actually support `Exchange ActiveSync`
 - `EWS` is an adapter over canonical mailbox, `contacts`, and `calendar_events` storage
-- `MAPI` remains deferred because it is a separate, much larger protocol surface
+- `MAPI` is being introduced incrementally through `MAPI over HTTP`, starting with authenticated, non-advertised route and scope wiring
 - `EWS` must not introduce parallel contact, calendar, mailbox, rights, `Sent`, or `Outbox` state
-- `EWS` authentication reuses mailbox-account authentication
+- `EWS` and `MAPI` authentication reuse mailbox-account authentication
 - `EWS` must not perform or advertise `SMTP`; outbound transport remains in `LPE-CT`
+- `MAPI` must not be advertised to Outlook until EMSMDB, NSPI, session context, and mailbox synchronization semantics are implemented against canonical `LPE` state
 - no `Stalwart` code is reused
 
 ### Endpoints
@@ -28,10 +29,20 @@ The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchang
 
 The lowercase path is accepted for tolerant reverse-proxy and client behavior. The canonical public path is `/EWS/Exchange.asmx`.
 
+The first `MAPI over HTTP` implementation surface exists only as non-advertised authenticated route wiring:
+
+- `OPTIONS /mapi/emsmdb`
+- `POST /mapi/emsmdb`
+- `OPTIONS /mapi/nspi`
+- `POST /mapi/nspi`
+
+`/mapi/emsmdb` is reserved for future mailbox ROP processing. `/mapi/nspi` is reserved for future address book and name service provider interface behavior. `OPTIONS` returns the supported HTTP methods with `x-lpe-mapi-status: not-implemented`. `POST` requires mailbox authentication and returns `501 Not Implemented` with the same status marker until real `MAPI over HTTP` semantics exist.
+
 ### Authentication
 
 - mailbox-account `Basic` authentication is accepted
 - mailbox `OAuth2` bearer access tokens are accepted through `Authorization: Bearer` when the token scope includes `ews`
+- `MAPI over HTTP` bearer tokens require the separate `mapi` scope
 - existing mailbox bearer-session authentication is accepted for internal integration and tests
 - there is no separate Exchange account model outside the normal `LPE` mailbox account
 
@@ -96,7 +107,7 @@ Request element names ending in `Request`, such as `GetUserOofSettingsRequest`, 
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
 - enabled `EWS` POX autodiscover publishes the configured EWS URL through a `WEB` protocol block with `ASUrl` for EWS-aware clients; it intentionally does not publish top-level `EXCH` or `EXPR` mailbox protocol blocks because those imply a full Outlook desktop Exchange/MAPI route that is not implemented
 - SOAP `GetUserSettings` autodiscover publishes the same configured `EWS` endpoint as `ExternalEwsUrl` and `InternalEwsUrl` for EWS clients that prefer SOAP autodiscover over POX
-- `MAPI` is not implemented and must not be advertised
+- `MAPI over HTTP` currently has authenticated route wiring only; it is not an Outlook-ready mailbox service and must not be advertised
 
 ### Completion priorities
 
@@ -105,4 +116,11 @@ The next EWS phase should focus on:
 - real Outlook desktop compatibility testing for contacts and calendar discovery
 - persistent incremental `SyncFolderItems` state over canonical contact and calendar change notifications
 - `CreateItem`, `UpdateItem`, and `DeleteItem` for contacts and calendar events, routed through canonical collaboration rights
-- explicit documentation before any mail or MAPI surface is introduced
+
+The next MAPI phase should focus on:
+
+- autodiscover design for `EXHTTP` / `MapiHttp` that remains disabled until real Outlook login succeeds
+- authenticated `MAPI over HTTP` session context creation and cookie handling
+- initial EMSMDB connect and disconnect semantics against canonical mailbox account state
+- initial NSPI bind/unbind and minimal address book discovery without introducing a parallel GAL store
+- binary protocol parsing and response serialization with focused conformance fixtures before any route is advertised to Outlook

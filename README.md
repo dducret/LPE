@@ -17,7 +17,7 @@ See `docs/releases/0.1.3.md` for the short release note.
 - `IMAP` is a permanently supported mailbox-access communication protocol and compatibility layer, with the first major development push completed through `0.1.2`
 - inbound and outbound `SMTP` transport is handled by the `LPE-CT` sorting center
 - `ActiveSync` is the first targeted native mobile compatibility layer for clients that support `Exchange ActiveSync`
-- `EWS` is the `0.1.3` Exchange compatibility implementation, with `MAPI` still deferred
+- `EWS` is the `0.1.3` Exchange compatibility implementation, with guarded `MAPI over HTTP` groundwork started for future Outlook desktop support
 - the architecture remains compatible with future local AI without data leaving the server
 
 ## Current Priority
@@ -28,7 +28,8 @@ The near-term order is:
 
 - `JMAP` depth first: state or change semantics, WebSocket reliability, delegation, and shared-collection consistency
 - `IMAP` support as a continuing client communication protocol: sync behavior, `UID` handling, flags, and client compatibility
-- `EWS` in `0.1.3`: Exchange-style folder, mail, contacts, and calendar synchronization without `MAPI`, `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox`
+- `EWS` in `0.1.3`: Exchange-style folder, mail, contacts, and calendar synchronization without `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox`
+- `MAPI over HTTP` groundwork in `0.1.3`: authenticated, non-advertised `/mapi/emsmdb` and `/mapi/nspi` routes that return explicit not-implemented responses until real Outlook-usable EMSMDB and NSPI behavior exists
 - `ActiveSync` as the flagship compatibility target for `Outlook` and mobile clients
 - `DAV` and `ManageSieve` interoperability work after the higher-priority mail protocols are stable
 

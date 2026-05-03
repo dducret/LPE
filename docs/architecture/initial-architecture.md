@@ -5,7 +5,8 @@
 - primary store: `PostgreSQL`
 - modern protocol axis: `JMAP`
 - initial compatibility through `0.1.2`: `IMAP`, which remains a permanently supported mailbox-access communication protocol; exposed `SMTP` transport handled by the `LPE-CT` sorting center
-- current `0.1.3` Exchange compatibility focus: `EWS`, implemented without `MAPI` and without moving `SMTP` or canonical mailbox state out of `LPE`
+- current `0.1.3` Exchange compatibility focus: `EWS`, implemented without moving `SMTP` or canonical mailbox state out of `LPE`
+- `MAPI over HTTP` implementation starts as guarded, non-advertised route and authentication wiring for future Outlook desktop support
 - LPE code: `Apache-2.0`
 - dependencies: prefer `Apache-2.0`, allow `MIT` only with a documented exception
 - data architecture prepared for future local AI
@@ -19,7 +20,7 @@ Native clients remain an important goal. A user must be able to connect an `LPE`
 
 This implies that every supported client submission path, especially `JMAP`, `IMAP`, or `ActiveSync`, feeds the same canonical message representation in `LPE`, including the authoritative `Sent` mailbox view. Inbound and outbound `SMTP` transport execution remains a sorting-center responsibility.
 
-`ActiveSync` is the first targeted mobile/native compatibility layer for clients that actually support `Exchange ActiveSync`, such as Outlook mobile and iOS mail clients. Outlook for Windows desktop must not be forced into `ActiveSync` as an Exchange account. `IMAP` was the development-start compatibility path through `0.1.2` and remains a supported mailbox-access communication protocol for desktop and other IMAP clients. Release `0.1.3` moves the Exchange-style desktop compatibility focus to the `EWS` adapter while keeping `MAPI` deferred.
+`ActiveSync` is the first targeted mobile/native compatibility layer for clients that actually support `Exchange ActiveSync`, such as Outlook mobile and iOS mail clients. Outlook for Windows desktop must not be forced into `ActiveSync` as an Exchange account. `IMAP` was the development-start compatibility path through `0.1.2` and remains a supported mailbox-access communication protocol for desktop and other IMAP clients. Release `0.1.3` moves the Exchange-style desktop compatibility focus to the `EWS` adapter while starting guarded, non-advertised `MAPI over HTTP` foundation work for the future Outlook desktop Exchange route.
 
 `CalDAV` and `CardDAV` are standards-based compatibility adapters for collaboration data. They must remain layered over the canonical `LPE` contact and calendar models, without introducing a separate DAV storage or rights model.
 
@@ -66,9 +67,9 @@ The current `Sieve` / `ManageSieve` MVP follows the same rule. `ManageSieve` onl
 
 The current `ActiveSync` MVP in `lpe-activesync` follows the same rule. `Provision`, `FolderSync`, `Sync`, and `SendMail` are implemented as an adapter over the same account authentication, draft persistence, mailbox synchronization, and canonical submission model. `SendMail` does not bypass the core mailbox workflow or `LPE-CT`; it reuses the canonical submission path so the authoritative `Sent` copy exists before outbound relay. The supported scope is detailed in `docs/architecture/activesync-mvp.md`.
 
-The `0.1.3` `EWS` adapter in `lpe-exchange` follows the same rule for mailbox, contacts, and calendar synchronization. `FindFolder`, `GetFolder`, `SyncFolderHierarchy`, `FindItem`, `GetItem`, `SyncFolderItems`, selected `CreateItem`, selected `DeleteItem`, `CreateFolder`, and `DeleteFolder` reuse canonical `LPE` storage and submission paths without introducing Exchange-specific storage or rights. It is not a complete Exchange server and does not implement `MAPI`. The supported scope is detailed in `docs/architecture/ews-mapi-mvp.md`.
+The `0.1.3` `EWS` adapter in `lpe-exchange` follows the same rule for mailbox, contacts, and calendar synchronization. `FindFolder`, `GetFolder`, `SyncFolderHierarchy`, `FindItem`, `GetItem`, `SyncFolderItems`, selected `CreateItem`, selected `DeleteItem`, `CreateFolder`, and `DeleteFolder` reuse canonical `LPE` storage and submission paths without introducing Exchange-specific storage or rights. It is not a complete Exchange server. `MAPI over HTTP` currently has only authenticated, non-advertised route wiring and explicit not-implemented responses. The supported scope is detailed in `docs/architecture/ews-mapi-mvp.md`.
 
-Client auto-configuration must publish only real endpoints. In v1, `Thunderbird` and Outlook for Windows desktop may receive `IMAP` settings and must advertise `SMTP` submission only when an authenticated client-submission endpoint is explicitly exposed; the internal `LPE -> LPE-CT` relay must never be described as a client-submission service. Outlook autodiscover must not advertise `MAPI` or `ActiveSync` as a desktop Exchange route. `EWS` may be advertised only when the administrator explicitly enables the narrow contacts/calendar EWS endpoint and accepts its MVP limits.
+Client auto-configuration must publish only real endpoints. In v1, `Thunderbird` and Outlook for Windows desktop may receive `IMAP` settings and must advertise `SMTP` submission only when an authenticated client-submission endpoint is explicitly exposed; the internal `LPE -> LPE-CT` relay must never be described as a client-submission service. Outlook autodiscover must not advertise `MAPI` or `ActiveSync` as a desktop Exchange route. `EWS` may be advertised only when the administrator explicitly enables the narrow contacts/calendar EWS endpoint and accepts its MVP limits. `MAPI over HTTP` must remain absent from autodiscover until real Outlook desktop login and mailbox bootstrap semantics are implemented.
 
 The current `DAV` MVP in `lpe-dav` follows the same adapter approach for collaboration compatibility. `CardDAV`, `CalDAV`, and the first `VTODO` layer reuse the same mailbox-account authentication, expose canonical `contacts`, `calendar_events`, and `tasks` through a minimal DAV collection model, and update those canonical tables directly instead of introducing DAV-only business logic. The supported scope is detailed in `docs/architecture/dav-mvp.md`.
 
@@ -117,7 +118,7 @@ Separate sorting center for exposed `SMTP` ingress, outbound relay, perimeter fi
 - IMAP compatibility, established through `0.1.2` and permanently supported as a mailbox-access communication protocol
 - inbound and outbound `SMTP` transport through `LPE-CT`
 - mobile/native compatibility through `ActiveSync` as the first target for clients that support `Exchange ActiveSync`
-- Outlook for Windows desktop compatibility through the supported `IMAP` path when configured that way, with `0.1.3` now implementing `EWS` as an additional Exchange-style compatibility path
+- Outlook for Windows desktop compatibility through the supported `IMAP` path when configured that way, with `0.1.3` now implementing `EWS` as an additional Exchange-style compatibility path and starting non-advertised `MAPI over HTTP` groundwork
 - contacts and calendar compatibility through `CardDAV` and `CalDAV`
 - a canonical personal-tasks model prepared for future `JMAP Tasks`, `DAV`, and mobile adapters
 - `EWS` implementation in `0.1.3`, bounded by canonical submission and synchronization rules
@@ -131,14 +132,15 @@ Separate sorting center for exposed `SMTP` ingress, outbound relay, perimeter fi
 
 ### Current protocol-completion phase
 
-The current delivery phase is to finish the existing protocol adapters before introducing new protocol families. `IMAP` brought the compatibility foundation through `0.1.2` and remains supported as a mailbox-access communication protocol; `0.1.3` focuses on the already-selected `EWS` adapter.
+The current delivery phase is to finish the existing protocol adapters while beginning the minimal `MAPI over HTTP` foundation required for Outlook desktop. `IMAP` brought the compatibility foundation through `0.1.2` and remains supported as a mailbox-access communication protocol; `0.1.3` focuses on the already-selected `EWS` adapter and must keep early MAPI routes non-advertised until real semantics exist.
 
 This phase is explicitly depth-first:
 
 - `JMAP`: complete canonical `state` and `changes` semantics, WebSocket reliability, mailbox delegation behavior, and shared collection consistency
 - `IMAP`: keep improving synchronization correctness, `UID` behavior, flag handling, and compatibility coverage under realistic mailbox operations as continuing support for the `0.1.2` compatibility foundation
 - `ActiveSync`: treat Outlook mobile and iOS compatibility as a strategic flagship, with emphasis on long-poll stability, send-flow correctness, and `FolderSync` plus `Sync` edge cases
-- `EWS`: implement and stabilize Exchange-style mailbox, contacts, and calendar synchronization in `0.1.3`; `MAPI` stays deferred
+- `EWS`: implement and stabilize Exchange-style mailbox, contacts, and calendar synchronization in `0.1.3`
+- `MAPI over HTTP`: keep initial route, authentication, EMSMDB, NSPI, and session-context work behind non-advertised endpoints until real Outlook desktop login is viable
 - `DAV`: focus on `CardDAV`, `CalDAV`, and `VTODO` correctness plus client-matrix interoperability instead of broader DAV surface expansion
 - `ManageSieve` and mailbox `Sieve`: focus on script correctness, canonical execution during final delivery, and interoperability of mailbox-side filtering rather than additional extension breadth
 

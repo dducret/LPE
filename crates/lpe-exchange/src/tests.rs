@@ -511,6 +511,32 @@ async fn response_text(response: axum::response::Response) -> String {
 }
 
 #[tokio::test]
+async fn mapi_over_http_is_authenticated_but_not_implemented() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service.handle_mapi(&bearer_headers(), b"").await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(
+        response.headers().get("x-lpe-mapi-status").unwrap(),
+        "not-implemented"
+    );
+    assert!(response_text(response)
+        .await
+        .contains("MAPI over HTTP is not implemented by LPE yet."));
+
+    let error = service
+        .handle_mapi(&HeaderMap::new(), b"")
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("missing account authentication"));
+}
+
+#[tokio::test]
 async fn find_folder_lists_contact_and_calendar_folders() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
