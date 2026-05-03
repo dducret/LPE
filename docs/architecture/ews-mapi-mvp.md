@@ -47,6 +47,7 @@ The first `EWS` slice supports only the collaboration read/sync surface needed t
 - `SyncFolderItems`
 - `CreateItem` for `Message` items only
 - `DeleteItem` for canonical draft `Message` ids only
+- `CreateFolder` and `DeleteFolder` for canonical custom mailbox folders
 
 The adapter currently exposes:
 
@@ -55,12 +56,15 @@ The adapter currently exposes:
 - contact items from `contacts`
 - calendar items from `calendar_events`
 - message creation through the canonical draft and submission model
+- temporary/custom mailbox folder creation through the canonical JMAP mailbox model
 
 The EWS distinguished folder ids `contacts` and `calendar` map to the canonical owned `default` contact and calendar collections. Shared collections keep explicit synthetic ids such as `shared-contacts-{owner_account_id}` and `shared-calendar-{owner_account_id}`.
 
 The adapter returns a Basic authentication challenge for unauthenticated EWS requests and accepts `msgfolderroot` / `root` as lightweight root-folder discovery ids so clients can bootstrap folder traversal before requesting the supported contacts and calendar folders.
 
 Folder responses include EWS `TotalCount` and `ChildFolderCount` properties so strict EWS clients can read requested folder properties during bootstrap. The current MVP returns conservative zero counts for these compatibility properties instead of deriving full mailbox-style counters for collaboration folders.
+
+`CreateFolder` creates canonical custom mailbox folders, primarily for strict client connectivity tests that need temporary sync folders. `DeleteFolder` removes those custom mailbox folders through the canonical JMAP mailbox deletion path, which rejects system folders and non-empty folders. These operations do not add EWS mail read/sync support.
 
 When a client requests unsupported distinguished folders such as `inbox` or `tasks` through this narrow EWS adapter, the response remains an EWS-shaped `GetFolder` error with `ErrorFolderNotFound` instead of an HTTP transport failure. This keeps clients on the EWS negotiation path without advertising unsupported mail or task synchronization through EWS.
 

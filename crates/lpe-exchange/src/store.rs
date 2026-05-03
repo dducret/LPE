@@ -1,7 +1,7 @@
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, AuditEntryInput, CollaborationCollection,
-    SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage,
+    AccessibleContact, AccessibleEvent, AuditEntryInput, CollaborationCollection, JmapMailbox,
+    JmapMailboxCreateInput, SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage,
 };
 use uuid::Uuid;
 
@@ -39,6 +39,21 @@ pub trait ExchangeStore: AccountAuthStore {
         principal_account_id: Uuid,
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<AccessibleEvent>>;
+
+    fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>>;
+
+    fn create_jmap_mailbox<'a>(
+        &'a self,
+        input: JmapMailboxCreateInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox>;
+
+    fn destroy_jmap_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
 
     fn save_draft_message<'a>(
         &'a self,
@@ -121,6 +136,30 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, Vec<AccessibleEvent>> {
         Box::pin(async move {
             self.fetch_accessible_events_by_ids(principal_account_id, ids)
+                .await
+        })
+    }
+
+    fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
+        Box::pin(async move { self.fetch_jmap_mailboxes(account_id).await })
+    }
+
+    fn create_jmap_mailbox<'a>(
+        &'a self,
+        input: JmapMailboxCreateInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox> {
+        Box::pin(async move { self.create_jmap_mailbox(input, audit).await })
+    }
+
+    fn destroy_jmap_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.destroy_jmap_mailbox(account_id, mailbox_id, audit)
                 .await
         })
     }

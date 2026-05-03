@@ -3,8 +3,8 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, AuthenticatedAccount,
-    CollaborationCollection, CollaborationRights, SavedDraftMessage, StoredAccountAppPassword,
-    SubmitMessageInput, SubmittedMessage,
+    CollaborationCollection, CollaborationRights, JmapMailbox, JmapMailboxCreateInput,
+    SavedDraftMessage, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
 };
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
@@ -24,6 +24,9 @@ struct FakeStore {
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
     deleted_drafts: Arc<Mutex<Vec<Uuid>>>,
+    mailboxes: Arc<Mutex<Vec<JmapMailbox>>>,
+    created_mailboxes: Arc<Mutex<Vec<JmapMailboxCreateInput>>>,
+    destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
 }
 
 impl FakeStore {
@@ -57,6 +60,17 @@ impl FakeStore {
             display_name: display_name.to_string(),
             is_owned: true,
             rights: Self::rights(),
+        }
+    }
+
+    fn mailbox(id: &str, role: &str, name: &str) -> JmapMailbox {
+        JmapMailbox {
+            id: Uuid::parse_str(id).unwrap(),
+            role: role.to_string(),
+            name: name.to_string(),
+            sort_order: 40,
+            total_emails: 0,
+            unread_emails: 0,
         }
     }
 }
@@ -179,6 +193,39 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(events) })
     }
 
+    fn fetch_jmap_mailboxes<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
+        let mailboxes = self.mailboxes.lock().unwrap().clone();
+        Box::pin(async move { Ok(mailboxes) })
+    }
+
+    fn create_jmap_mailbox<'a>(
+        &'a self,
+        input: JmapMailboxCreateInput,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox> {
+        self.created_mailboxes.lock().unwrap().push(input.clone());
+        let mailbox = JmapMailbox {
+            id: Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap(),
+            role: "custom".to_string(),
+            name: input.name,
+            sort_order: input.sort_order.unwrap_or(40),
+            total_emails: 0,
+            unread_emails: 0,
+        };
+        self.mailboxes.lock().unwrap().push(mailbox.clone());
+        Box::pin(async move { Ok(mailbox) })
+    }
+
+    fn destroy_jmap_mailbox<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        self.destroyed_mailboxes.lock().unwrap().push(mailbox_id);
+        Box::pin(async move { Ok(()) })
+    }
+
     fn save_draft_message<'a>(
         &'a self,
         input: SubmitMessageInput,
@@ -252,6 +299,11 @@ async fn find_folder_lists_contact_and_calendar_folders() {
         calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
             "default", "calendar", "Calendar",
         )])),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA Sync",
+        )])),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -270,6 +322,8 @@ async fn find_folder_lists_contact_and_calendar_folders() {
     assert!(body.contains("<m:FindFolderResponse>"));
     assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
     assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
+    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\"/>"));
+    assert!(body.contains("<t:DisplayName>RCA Sync</t:DisplayName>"));
     assert!(body.contains("<t:TotalCount>0</t:TotalCount>"));
     assert!(body.contains("<t:ChildFolderCount>0</t:ChildFolderCount>"));
 }
@@ -358,6 +412,76 @@ async fn get_folder_returns_multiple_supported_folder_kinds() {
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
     assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
+}
+
+#[tokio::test]
+async fn create_folder_uses_canonical_mailbox_store() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let created_mailboxes = store.created_mailboxes.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:CreateFolder>
+                  <m:ParentFolderId><t:DistinguishedFolderId Id="msgfolderroot"/></m:ParentFolderId>
+                  <m:Folders><t:Folder><t:DisplayName>RCA Sync</t:DisplayName></t:Folder></m:Folders>
+                </m:CreateFolder>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\"/>"));
+    assert!(body.contains("<t:TotalCount>0</t:TotalCount>"));
+    assert_eq!(created_mailboxes.lock().unwrap()[0].name, "RCA Sync");
+}
+
+#[tokio::test]
+async fn delete_folder_uses_canonical_mailbox_destroy() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let destroyed_mailboxes = store.destroyed_mailboxes.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:DeleteFolder DeleteType="HardDelete">
+                  <m:FolderIds><t:FolderId Id="mailbox:44444444-4444-4444-4444-444444444444"/></m:FolderIds>
+                </m:DeleteFolder>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(
+        destroyed_mailboxes.lock().unwrap().as_slice(),
+        &[Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap()]
+    );
 }
 
 #[tokio::test]
@@ -710,7 +834,6 @@ async fn unknown_ews_operations_return_parseable_invalid_operation_errors() {
 
     for operation in [
         "SendItem",
-        "CreateFolder",
         "GetMailTips",
         "GetInboxRules",
         "ConvertId",

@@ -12,8 +12,8 @@ use axum::{
 };
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, AuditEntryInput, CollaborationCollection, Storage,
-    SubmitMessageInput, SubmittedRecipientInput,
+    AccessibleContact, AccessibleEvent, AuditEntryInput, CollaborationCollection, JmapMailbox,
+    JmapMailboxCreateInput, Storage, SubmitMessageInput, SubmittedRecipientInput,
 };
 use uuid::Uuid;
 
@@ -83,6 +83,8 @@ impl<S: ExchangeStore> ExchangeService<S> {
             "CreateItem" => self.create_item(&principal, body).await?,
             "UpdateItem" => unsupported_operation_response("UpdateItem"),
             "DeleteItem" => self.delete_item(&principal, body).await?,
+            "CreateFolder" => self.create_folder(&principal, body).await?,
+            "DeleteFolder" => self.delete_folder(&principal, body).await?,
             "GetUserOofSettings" => unsupported_operation_response("GetUserOofSettings"),
             "GetRoomLists" => unsupported_operation_response("GetRoomLists"),
             "FindPeople" => unsupported_operation_response("FindPeople"),
@@ -116,6 +118,15 @@ impl<S: ExchangeStore> ExchangeService<S> {
             .await?
         {
             folders.push_str(&folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar"));
+        }
+        for mailbox in self
+            .store
+            .fetch_jmap_mailboxes(principal.account_id)
+            .await?
+            .into_iter()
+            .filter(|mailbox| mailbox.role == "custom")
+        {
+            folders.push_str(&mailbox_folder_xml(&mailbox));
         }
 
         Ok(format!(
@@ -180,6 +191,39 @@ impl<S: ExchangeStore> ExchangeService<S> {
     }
 
     async fn get_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let mailbox_ids = requested_mailbox_folder_ids(request);
+        if !mailbox_ids.is_empty() {
+            let mailboxes = self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?;
+            let mut folders = String::new();
+            for mailbox_id in &mailbox_ids {
+                let Some(mailbox) = mailboxes.iter().find(|mailbox| mailbox.id == *mailbox_id)
+                else {
+                    return Ok(get_folder_error_response(
+                        "ErrorFolderNotFound",
+                        "requested mailbox folder is not exposed by EWS",
+                    ));
+                };
+                folders.push_str(&mailbox_folder_xml(mailbox));
+            }
+
+            return Ok(format!(
+                concat!(
+                    "<m:GetFolderResponse>",
+                    "<m:ResponseMessages>",
+                    "<m:GetFolderResponseMessage ResponseClass=\"Success\">",
+                    "<m:ResponseCode>NoError</m:ResponseCode>",
+                    "<m:Folders>{folders}</m:Folders>",
+                    "</m:GetFolderResponseMessage>",
+                    "</m:ResponseMessages>",
+                    "</m:GetFolderResponse>"
+                ),
+                folders = folders,
+            ));
+        }
+
         let requested = requested_folder_kinds(request);
         if requested.is_empty() && request_contains_folder_reference(request) {
             return Ok(get_folder_error_response(
@@ -464,6 +508,69 @@ impl<S: ExchangeStore> ExchangeService<S> {
             operation_error_response("DeleteItem", "ErrorItemNotFound", &error.to_string())
         }))
     }
+
+    async fn create_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let result = async {
+            let display_name = element_text(request, "DisplayName")
+                .ok_or_else(|| anyhow!("CreateFolder is missing DisplayName"))?;
+            let mailbox = self
+                .store
+                .create_jmap_mailbox(
+                    JmapMailboxCreateInput {
+                        account_id: principal.account_id,
+                        name: display_name.clone(),
+                        sort_order: None,
+                    },
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "ews-create-folder".to_string(),
+                        subject: display_name,
+                    },
+                )
+                .await?;
+
+            Ok(create_folder_success_response(&mailbox))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("CreateFolder", "ErrorInvalidOperation", &error.to_string())
+        }))
+    }
+
+    async fn delete_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let result = async {
+            let folder_ids = requested_mailbox_folder_ids(request);
+            if folder_ids.is_empty() {
+                return Ok(operation_error_response(
+                    "DeleteFolder",
+                    "ErrorInvalidOperation",
+                    "DeleteFolder currently supports only mailbox folder ids.",
+                ));
+            }
+
+            for folder_id in folder_ids {
+                self.store
+                    .destroy_jmap_mailbox(
+                        principal.account_id,
+                        folder_id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-delete-folder".to_string(),
+                            subject: folder_id.to_string(),
+                        },
+                    )
+                    .await?;
+            }
+
+            Ok(delete_folder_success_response())
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("DeleteFolder", "ErrorFolderNotFound", &error.to_string())
+        }))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -693,6 +800,30 @@ fn requested_item_ids(request: &str) -> Vec<String> {
     ids
 }
 
+fn requested_mailbox_folder_ids(request: &str) -> Vec<Uuid> {
+    requested_folder_ids(request)
+        .into_iter()
+        .filter_map(|id| {
+            id.strip_prefix("mailbox:")
+                .or(Some(id.as_str()))
+                .and_then(|value| Uuid::parse_str(value).ok())
+        })
+        .collect()
+}
+
+fn requested_folder_ids(request: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    let mut rest = request;
+    while let Some(index) = rest.find("<t:FolderId").or_else(|| rest.find("<FolderId")) {
+        rest = &rest[index..];
+        if let Some(id) = attribute_value_after(rest, "FolderId", "Id") {
+            ids.push(id.to_string());
+        }
+        rest = &rest[1..];
+    }
+    ids
+}
+
 fn attribute_value_after<'a>(body: &'a str, tag: &str, attr: &str) -> Option<&'a str> {
     let index = body.find(tag)?;
     let rest = &body[index..];
@@ -864,6 +995,35 @@ fn delete_item_success_response() -> String {
     .to_string()
 }
 
+fn create_folder_success_response(mailbox: &JmapMailbox) -> String {
+    format!(
+        concat!(
+            "<m:CreateFolderResponse>",
+            "<m:ResponseMessages>",
+            "<m:CreateFolderResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Folders>{folder}</m:Folders>",
+            "</m:CreateFolderResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:CreateFolderResponse>"
+        ),
+        folder = mailbox_folder_xml(mailbox),
+    )
+}
+
+fn delete_folder_success_response() -> String {
+    concat!(
+        "<m:DeleteFolderResponse>",
+        "<m:ResponseMessages>",
+        "<m:DeleteFolderResponseMessage ResponseClass=\"Success\">",
+        "<m:ResponseCode>NoError</m:ResponseCode>",
+        "</m:DeleteFolderResponseMessage>",
+        "</m:ResponseMessages>",
+        "</m:DeleteFolderResponse>"
+    )
+    .to_string()
+}
+
 fn get_item_error_response(code: &str, message: &str) -> String {
     format!(
         concat!(
@@ -1008,6 +1168,23 @@ fn folder_xml(collection: &CollaborationCollection, distinguished_id: &str, clas
         display = escape_xml(&collection.display_name),
         class = class,
         distinguished_id = distinguished_id,
+    )
+}
+
+fn mailbox_folder_xml(mailbox: &JmapMailbox) -> String {
+    format!(
+        concat!(
+            "<t:Folder>",
+            "<t:FolderId Id=\"mailbox:{id}\"/>",
+            "<t:DisplayName>{display}</t:DisplayName>",
+            "<t:FolderClass>IPF.Note</t:FolderClass>",
+            "<t:TotalCount>{total_count}</t:TotalCount>",
+            "<t:ChildFolderCount>0</t:ChildFolderCount>",
+            "</t:Folder>"
+        ),
+        id = mailbox.id,
+        display = escape_xml(&mailbox.name),
+        total_count = mailbox.total_emails,
     )
 }
 
