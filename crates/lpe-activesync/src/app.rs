@@ -6,12 +6,14 @@ use axum::{
     routing::{on, MethodFilter},
     Router,
 };
+use lpe_mail_auth::authenticate_account;
 use lpe_storage::Storage;
 
 use crate::{
     constants::ACTIVE_SYNC_PATH,
-    response::{empty_response, http_error},
+    response::{auth_challenge_response, empty_response, http_error},
     service::ActiveSyncService,
+    store::ActiveSyncStore,
     types::ActiveSyncQuery,
 };
 
@@ -22,8 +24,23 @@ pub fn router() -> Router<Storage> {
     )
 }
 
-async fn options_handler() -> Response {
-    empty_response()
+async fn options_handler(
+    State(storage): State<Storage>,
+    Query(query): Query<ActiveSyncQuery>,
+    headers: HeaderMap,
+) -> Response {
+    options_response_for_store(&storage, &query, &headers).await
+}
+
+pub(crate) async fn options_response_for_store<S: ActiveSyncStore>(
+    storage: &S,
+    query: &ActiveSyncQuery,
+    headers: &HeaderMap,
+) -> Response {
+    match authenticate_account(storage, query.user.as_deref(), headers, "activesync").await {
+        Ok(_) => empty_response(),
+        Err(_) => auth_challenge_response(),
+    }
 }
 
 async fn post_handler(

@@ -1,6 +1,6 @@
 use anyhow::Result;
 use axum::{
-    http::{HeaderMap, HeaderValue, StatusCode},
+    http::{header::WWW_AUTHENTICATE, HeaderMap, HeaderValue, StatusCode},
     response::Response,
 };
 use uuid::Uuid;
@@ -14,6 +14,17 @@ pub(crate) fn empty_response() -> Response {
     let mut response = Response::new(axum::body::Body::empty());
     *response.status_mut() = StatusCode::OK;
     add_common_headers(response.headers_mut());
+    response
+}
+
+pub(crate) fn auth_challenge_response() -> Response {
+    let mut response = Response::new(axum::body::Body::empty());
+    *response.status_mut() = StatusCode::UNAUTHORIZED;
+    add_common_headers(response.headers_mut());
+    response.headers_mut().insert(
+        WWW_AUTHENTICATE,
+        HeaderValue::from_static("Basic realm=\"LPE ActiveSync\""),
+    );
     response
 }
 

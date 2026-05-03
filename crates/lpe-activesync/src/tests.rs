@@ -20,6 +20,7 @@ use lpe_storage::{
 use uuid::Uuid;
 
 use crate::{
+    app::options_response_for_store,
     service::ActiveSyncService,
     store::{ActiveSyncStore, StoreFuture},
     types::ActiveSyncQuery,
@@ -786,6 +787,68 @@ fn mime_headers() -> HeaderMap {
         HeaderValue::from_static("message/rfc822"),
     );
     headers
+}
+
+#[tokio::test]
+async fn options_challenges_anonymous_requests() {
+    let store = FakeStore::default();
+    let response = options_response_for_store(
+        &store,
+        &ActiveSyncQuery {
+            cmd: None,
+            user: Some("alice@example.test".to_string()),
+            device_id: Some("dev1".to_string()),
+            _device_type: Some("phone".to_string()),
+        },
+        &HeaderMap::new(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response
+            .headers()
+            .get(axum::http::header::WWW_AUTHENTICATE)
+            .and_then(|value| value.to_str().ok()),
+        Some("Basic realm=\"LPE ActiveSync\"")
+    );
+}
+
+#[tokio::test]
+async fn options_returns_capabilities_after_authentication() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let response = options_response_for_store(
+        &store,
+        &ActiveSyncQuery {
+            cmd: None,
+            user: Some("alice@example.test".to_string()),
+            device_id: Some("dev1".to_string()),
+            _device_type: Some("phone".to_string()),
+        },
+        &bearer_headers(),
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("ms-asprotocolversions")
+            .and_then(|value| value.to_str().ok()),
+        Some("16.1")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("ms-asprotocolcommands")
+            .and_then(|value| value.to_str().ok()),
+        Some(
+            "FolderSync,ItemOperations,Ping,Provision,Search,SendMail,SmartForward,SmartReply,Sync"
+        )
+    );
 }
 
 async fn decode_response_body(response: axum::response::Response) -> WbxmlNode {
