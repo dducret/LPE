@@ -984,6 +984,8 @@ fn root_folder_xml() -> String {
         "<t:FolderId Id=\"msgfolderroot\"/>",
         "<t:DisplayName>Root</t:DisplayName>",
         "<t:FolderClass>IPF.Note</t:FolderClass>",
+        "<t:TotalCount>0</t:TotalCount>",
+        "<t:ChildFolderCount>0</t:ChildFolderCount>",
         "<t:DistinguishedFolderId Id=\"msgfolderroot\"/>",
         "</t:Folder>"
     )
@@ -997,6 +999,8 @@ fn folder_xml(collection: &CollaborationCollection, distinguished_id: &str, clas
             "<t:FolderId Id=\"{id}\"/>",
             "<t:DisplayName>{display}</t:DisplayName>",
             "<t:FolderClass>IPF.{class}</t:FolderClass>",
+            "<t:TotalCount>0</t:TotalCount>",
+            "<t:ChildFolderCount>0</t:ChildFolderCount>",
             "<t:DistinguishedFolderId Id=\"{distinguished_id}\"/>",
             "</t:Folder>"
         ),

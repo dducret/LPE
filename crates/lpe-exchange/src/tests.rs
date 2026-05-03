@@ -270,6 +270,8 @@ async fn find_folder_lists_contact_and_calendar_folders() {
     assert!(body.contains("<m:FindFolderResponse>"));
     assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
     assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
+    assert!(body.contains("<t:TotalCount>0</t:TotalCount>"));
+    assert!(body.contains("<t:ChildFolderCount>0</t:ChildFolderCount>"));
 }
 
 #[tokio::test]
@@ -325,6 +327,8 @@ async fn get_folder_returns_msgfolderroot() {
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:FolderId Id=\"msgfolderroot\"/>"));
     assert!(body.contains("<t:DisplayName>Root</t:DisplayName>"));
+    assert!(body.contains("<t:TotalCount>0</t:TotalCount>"));
+    assert!(body.contains("<t:ChildFolderCount>0</t:ChildFolderCount>"));
 }
 
 #[tokio::test]
