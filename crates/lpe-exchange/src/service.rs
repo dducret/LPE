@@ -74,6 +74,9 @@ impl<S: ExchangeStore> ExchangeService<S> {
             "FindItem" => self.find_item(&principal, body).await?,
             "GetItem" => self.get_item(&principal, body).await?,
             "SyncFolderItems" => self.sync_folder_items(&principal, body).await?,
+            "GetServerTimeZones" => get_server_time_zones_response(),
+            "ResolveNames" => resolve_names_no_results_response(),
+            "GetUserAvailability" => get_user_availability_unavailable_response(),
             _ => bail!("unsupported EWS operation {operation}"),
         };
 
@@ -355,6 +358,9 @@ fn operation_name(body: &str) -> Option<&'static str> {
     [
         "SyncFolderItems",
         "SyncFolderHierarchy",
+        "GetServerTimeZones",
+        "GetUserAvailability",
+        "ResolveNames",
         "FindFolder",
         "GetFolder",
         "FindItem",
@@ -522,6 +528,55 @@ fn get_folder_error_response(code: &str, message: &str) -> String {
         code = escape_xml(code),
         message = escape_xml(message),
     )
+}
+
+fn get_server_time_zones_response() -> String {
+    concat!(
+        "<m:GetServerTimeZonesResponse>",
+        "<m:ResponseMessages>",
+        "<m:GetServerTimeZonesResponseMessage ResponseClass=\"Success\">",
+        "<m:ResponseCode>NoError</m:ResponseCode>",
+        "<m:TimeZoneDefinitions>",
+        "<t:TimeZoneDefinition Id=\"UTC\" Name=\"(UTC) Coordinated Universal Time\"/>",
+        "<t:TimeZoneDefinition Id=\"W. Europe Standard Time\" Name=\"(UTC+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna\"/>",
+        "</m:TimeZoneDefinitions>",
+        "</m:GetServerTimeZonesResponseMessage>",
+        "</m:ResponseMessages>",
+        "</m:GetServerTimeZonesResponse>"
+    )
+    .to_string()
+}
+
+fn resolve_names_no_results_response() -> String {
+    concat!(
+        "<m:ResolveNamesResponse>",
+        "<m:ResponseMessages>",
+        "<m:ResolveNamesResponseMessage ResponseClass=\"Error\">",
+        "<m:MessageText>No results were found.</m:MessageText>",
+        "<m:ResponseCode>ErrorNameResolutionNoResults</m:ResponseCode>",
+        "<m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>",
+        "</m:ResolveNamesResponseMessage>",
+        "</m:ResponseMessages>",
+        "</m:ResolveNamesResponse>"
+    )
+    .to_string()
+}
+
+fn get_user_availability_unavailable_response() -> String {
+    concat!(
+        "<m:GetUserAvailabilityResponse>",
+        "<m:FreeBusyResponseArray>",
+        "<m:FreeBusyResponse>",
+        "<m:ResponseMessage ResponseClass=\"Error\">",
+        "<m:MessageText>Free/busy is not implemented by the EWS MVP.</m:MessageText>",
+        "<m:ResponseCode>ErrorFreeBusyGenerationFailed</m:ResponseCode>",
+        "<m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>",
+        "</m:ResponseMessage>",
+        "</m:FreeBusyResponse>",
+        "</m:FreeBusyResponseArray>",
+        "</m:GetUserAvailabilityResponse>"
+    )
+    .to_string()
 }
 
 fn root_folder_xml() -> String {
