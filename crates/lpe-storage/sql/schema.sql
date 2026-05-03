@@ -21,7 +21,7 @@ CREATE SEQUENCE message_modseq_seq START WITH 2;
 
 CREATE TABLE schema_metadata (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
-    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.9'),
+    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.10'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -991,7 +991,7 @@ LEFT JOIN attachments a
 GROUP BY m.id, m.account_id, m.mailbox_id, m.received_at, m.subject_normalized, mb.search_vector;
 
 INSERT INTO schema_metadata (singleton, schema_version)
-VALUES (TRUE, '0.1.9');
+VALUES (TRUE, '0.1.10');
 
 INSERT INTO security_settings (
     tenant_id,

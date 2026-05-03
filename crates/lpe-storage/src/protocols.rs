@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::{
     submission,
     submission::{AttachmentUploadInput, SubmittedRecipientInput},
+    util::{canonical_system_mailbox_display_name, system_mailbox_role_for_display_name},
     AccountQuotaRow, ActiveSyncAttachmentRow, ActiveSyncSyncStateRow, AuditEntryInput,
     ImapEmailRow, JmapEmailRecipientRow, JmapEmailRow, JmapEmailSubmissionRow, JmapMailboxRow,
     JmapUploadBlobRow, MessageBccRecipientRecordRow, Storage,
@@ -250,6 +251,8 @@ impl Storage {
             .await?;
         self.ensure_mailbox(&mut tx, &tenant_id, account_id, "sent", "Sent", 20, 365)
             .await?;
+        self.ensure_mailbox(&mut tx, &tenant_id, account_id, "trash", "Deleted", 30, 365)
+            .await?;
         tx.commit().await?;
 
         self.fetch_jmap_mailboxes(account_id).await
@@ -296,6 +299,37 @@ impl Storage {
         let name = input.name.trim();
         if name.is_empty() {
             bail!("mailbox name is required");
+        }
+        if let Some(role) = system_mailbox_role_for_display_name(name) {
+            let display_name = canonical_system_mailbox_display_name(role)
+                .ok_or_else(|| anyhow!("system mailbox display name not found"))?;
+            let sort_order = match role {
+                "inbox" => 0,
+                "drafts" => 10,
+                "sent" => 20,
+                "trash" => 30,
+                _ => input.sort_order.unwrap_or(30),
+            };
+            let mailbox_id = self
+                .ensure_mailbox(
+                    &mut tx,
+                    &tenant_id,
+                    input.account_id,
+                    role,
+                    display_name,
+                    sort_order,
+                    365,
+                )
+                .await?;
+            self.insert_audit(&mut tx, &tenant_id, audit).await?;
+            tx.commit().await?;
+
+            return self
+                .fetch_jmap_mailboxes(input.account_id)
+                .await?
+                .into_iter()
+                .find(|mailbox| mailbox.id == mailbox_id)
+                .ok_or_else(|| anyhow!("mailbox creation failed"));
         }
 
         let duplicate = sqlx::query(
@@ -1726,5 +1760,6 @@ mod tests {
         assert!(is_system_mailbox_role("inbox"));
         assert!(is_system_mailbox_role("sent"));
         assert!(is_system_mailbox_role("drafts"));
+        assert!(is_system_mailbox_role("trash"));
     }
 }

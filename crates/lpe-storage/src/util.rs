@@ -86,6 +86,11 @@ pub(crate) fn system_mailbox_aliases(role: &str, display_name: &str) -> Vec<Stri
             "sent items".to_string(),
             "sent messages".to_string(),
         ],
+        "trash" => vec![
+            "deleted".to_string(),
+            "deleted items".to_string(),
+            "trash".to_string(),
+        ],
         _ => Vec::new(),
     };
     let normalized_display_name = display_name.trim().to_lowercase();
@@ -97,6 +102,26 @@ pub(crate) fn system_mailbox_aliases(role: &str, display_name: &str) -> Vec<Stri
         aliases.push(normalized_display_name);
     }
     aliases
+}
+
+pub(crate) fn system_mailbox_role_for_display_name(display_name: &str) -> Option<&'static str> {
+    match display_name.trim().to_ascii_lowercase().as_str() {
+        "inbox" => Some("inbox"),
+        "draft" | "drafts" => Some("drafts"),
+        "sent" | "sent items" | "sent messages" => Some("sent"),
+        "deleted" | "deleted items" | "trash" => Some("trash"),
+        _ => None,
+    }
+}
+
+pub(crate) fn canonical_system_mailbox_display_name(role: &str) -> Option<&'static str> {
+    match role {
+        "inbox" => Some("Inbox"),
+        "drafts" => Some("Drafts"),
+        "sent" => Some("Sent"),
+        "trash" => Some("Deleted"),
+        _ => None,
+    }
 }
 
 pub(crate) fn normalize_admin_permissions(

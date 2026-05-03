@@ -87,7 +87,7 @@ const DEFAULT_COLLECTION_ID: &str = "default";
 const DEFAULT_TASK_LIST_NAME: &str = "Tasks";
 const DEFAULT_TASK_LIST_ROLE: &str = "inbox";
 const CANONICAL_CHANGE_CHANNEL: &str = "lpe_canonical_changes";
-const EXPECTED_SCHEMA_VERSION: &str = "0.1.9";
+const EXPECTED_SCHEMA_VERSION: &str = "0.1.10";
 
 impl Storage {
     pub(crate) async fn allocate_mail_modseq_in_tx(
@@ -188,25 +188,25 @@ impl Storage {
 
             if let Some(canonical_row) = rows.first() {
                 let canonical_id = canonical_row.try_get::<Uuid, _>("id")?;
-                if canonical_row.try_get::<String, _>("role")?.trim() != role {
-                    sqlx::query(
-                        r#"
-                        UPDATE mailboxes
-                        SET role = $4,
-                            sort_order = $5,
-                            retention_days = $6
-                        WHERE tenant_id = $1 AND account_id = $2 AND id = $3
-                        "#,
-                    )
-                    .bind(tenant_id)
-                    .bind(account_id)
-                    .bind(canonical_id)
-                    .bind(role)
-                    .bind(sort_order)
-                    .bind(retention_days)
-                    .execute(&mut **tx)
-                    .await?;
-                }
+                sqlx::query(
+                    r#"
+                    UPDATE mailboxes
+                    SET role = $4,
+                        display_name = $5,
+                        sort_order = $6,
+                        retention_days = $7
+                    WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(account_id)
+                .bind(canonical_id)
+                .bind(role)
+                .bind(display_name)
+                .bind(sort_order)
+                .bind(retention_days)
+                .execute(&mut **tx)
+                .await?;
 
                 let alias_ids = rows
                     .iter()

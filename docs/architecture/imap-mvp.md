@@ -18,8 +18,9 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `LIST` for the canonical system mailboxes, rendering the inbox as the single
   canonical `INBOX` name and honoring mailbox patterns such as `INBOX`, `%`, and `*`
 - system mailbox discovery canonicalizes legacy aliases such as `INBOX`,
-  `Draft`, `Drafts`, `Sent Items`, and `Sent Messages` before Outlook selects
-  those folders, including rows with extra whitespace or non-normalized role text
+  `Draft`, `Drafts`, `Sent Items`, `Sent Messages`, `Deleted`,
+  `Deleted Items`, and `Trash` before Outlook selects those folders, including
+  rows with extra whitespace or non-normalized role text
 - tolerant legacy `XLIST` for Outlook desktop compatibility
 - `SPECIAL-USE` folder flags on listed system mailboxes where the flag is standard;
   regular `LIST` identifies the inbox by the special `INBOX` name rather than a
@@ -27,11 +28,13 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - tolerant `LSUB`, `SUBSCRIBE`, and `UNSUBSCRIBE` for Outlook compatibility; subscription state is not persisted yet
 - `STATUS` for mailbox counters and stable UID metadata
 - mailbox management through `CREATE`, `RENAME`, and `DELETE` for custom user mailboxes
-- custom `CREATE` folders, including Outlook defaults such as `Deleted Items` and
-  `Junk Email`, are stored with the neutral canonical role `custom`
+- `CREATE` for trash aliases such as `Deleted Items` and `Trash` is accepted
+  as an idempotent request for the canonical `Deleted` mailbox with role `trash`
+- custom `CREATE` folders such as `Junk Email` are stored with the neutral
+  canonical role `custom`
 - Outlook-style slash-delimited custom folder names such as `Projects/2026`
   are accepted and stored as canonical custom mailbox display names
-- `SELECT` on `Inbox`, `Sent`, and `Drafts`
+- `SELECT` on `Inbox`, `Sent`, `Drafts`, and the canonical `Deleted` trash mailbox
 - `EXAMINE`, `CHECK`, `CLOSE`, `UNSELECT`, and `EXPUNGE` for Outlook desktop synchronization flows
 - `FETCH` over canonical message state, including `ENVELOPE`, `BODYSTRUCTURE`,
   `BODY`, `BODY.PEEK[HEADER.FIELDS (...)]`, `BODY.PEEK[HEADER.FIELDS.NOT (...)]`,
@@ -48,8 +51,8 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
   idle window until `DONE`
 - `CONDSTORE` mailbox sync primitives: `HIGHESTMODSEQ`, per-message `MODSEQ`,
   `FETCH ... (CHANGEDSINCE n)`, and conditional `STORE` with `UNCHANGEDSINCE`
-- `COPY` and `UID COPY` into `Inbox` or custom mailboxes
-- `MOVE` and `UID MOVE` between `Inbox` and custom user mailboxes
+- `COPY` and `UID COPY` into `Inbox`, trash, or custom mailboxes
+- `MOVE` and `UID MOVE` between `Inbox`, trash, and custom user mailboxes
 - richer `SEARCH`
 - `UID FETCH`, `UID STORE`, and `UID SEARCH`
 - `UID EXPUNGE` for messages already marked `\Deleted`
@@ -76,6 +79,9 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `APPEND` to `Inbox` and custom folders reuses canonical message import and
   never performs outbound delivery
 - custom IMAP mailbox creation and rename reuse the canonical mailbox records already exposed through `JMAP`
+- trash aliases are canonicalized to one `trash` mailbox displayed as `Deleted`;
+  `Deleted Items` and `Trash` are accepted as compatibility names and do not
+  create additional user-visible folders
 - slash-delimited IMAP folder names are a compatibility projection over the
   current canonical mailbox record; they do not add a separate IMAP hierarchy store
 - `COPY` reuses canonical message-copy persistence and creates a new canonical message row in the target mailbox instead of introducing mailbox replication state
@@ -98,7 +104,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `FETCH BODYSTRUCTURE` and MIME section rendering are compatibility projections over the canonical message text and sanitized HTML fields; attachment MIME reserialization remains deferred
 - `RFC822.SIZE` reports the byte length of the RFC822 projection returned by `BODY[]`, not the original raw ingest size, so size metadata stays consistent with what IMAP clients fetch
 - `COPY` intentionally rejects `Sent` and `Drafts` as source or target mailboxes so the adapter cannot become an alternate sent-message or draft workflow
-- `MOVE` uses the same guardrail and only supports `Inbox` plus custom user mailboxes
+- `MOVE` uses the same guardrail and only supports `Inbox`, trash, and custom user mailboxes
 - `SEARCH` now supports optional `RETURN (...)`, optional `CHARSET`, `ALL`,
   `SEEN`, `UNSEEN`, `FLAGGED`, `UNFLAGGED`, `DELETED`, `UNDELETED`,
   `ANSWERED`, `UNANSWERED`, `DRAFT`, `UNDRAFT`, `RECENT`, `OLD`, `NEW`,

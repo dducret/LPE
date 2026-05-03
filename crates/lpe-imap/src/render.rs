@@ -39,8 +39,19 @@ pub(crate) struct PartialRange {
 }
 
 pub(crate) fn mailbox_name_matches(display_name: &str, role: &str, requested: &str) -> bool {
-    requested.eq_ignore_ascii_case(display_name)
+    if requested.eq_ignore_ascii_case(display_name)
         || (role == "inbox" && requested.eq_ignore_ascii_case("INBOX"))
+    {
+        return true;
+    }
+
+    let requested = requested.trim().to_ascii_lowercase();
+    match role {
+        "drafts" => matches!(requested.as_str(), "draft" | "drafts"),
+        "sent" => matches!(requested.as_str(), "sent" | "sent items" | "sent messages"),
+        "trash" => matches!(requested.as_str(), "deleted" | "deleted items" | "trash"),
+        _ => false,
+    }
 }
 
 pub(crate) fn render_list_flags(role: &str, legacy_xlist: bool) -> String {
@@ -49,6 +60,7 @@ pub(crate) fn render_list_flags(role: &str, legacy_xlist: bool) -> String {
         "inbox" if legacy_xlist => flags.push("\\Inbox"),
         "sent" => flags.push("\\Sent"),
         "drafts" => flags.push("\\Drafts"),
+        "trash" => flags.push("\\Trash"),
         _ => {}
     }
     format!("({})", flags.join(" "))

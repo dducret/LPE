@@ -74,6 +74,12 @@ impl FakeStore {
                     "Drafts",
                     10,
                 ),
+                mailbox(
+                    "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+                    "trash",
+                    "Deleted",
+                    30,
+                ),
             ])),
             emails: Arc::new(Mutex::new(vec![
                 email(
@@ -304,6 +310,26 @@ impl ImapStore for FakeStore {
         _audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapMailbox> {
         let mut mailboxes = self.mailboxes.lock().unwrap();
+        if let Some((role, canonical_name, sort_order)) = system_mailbox_for_name(name) {
+            if let Some(existing) = mailboxes
+                .iter()
+                .find(|mailbox| mailbox.role == role)
+                .cloned()
+            {
+                return Box::pin(async move { Ok(existing) });
+            }
+
+            let created = mailbox(
+                &Uuid::new_v4().to_string(),
+                role,
+                canonical_name,
+                sort_order,
+            );
+            mailboxes.push(created.clone());
+            let _ = account_id;
+            return Box::pin(async move { Ok(created) });
+        }
+
         let mailbox = mailbox(
             &Uuid::new_v4().to_string(),
             "custom",
@@ -760,6 +786,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     assert!(list.contains("* LIST (\\HasNoChildren) \"/\" \"INBOX\""));
     assert!(list.contains("* LIST (\\HasNoChildren \\Sent) \"/\" \"Sent\""));
     assert!(list.contains("* LIST (\\HasNoChildren \\Drafts) \"/\" \"Drafts\""));
+    assert!(list.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
 
     let select = send_command(&mut stream, "A3 SELECT Inbox\r\n", "A3").await;
     assert!(select.contains("* 1 EXISTS"));
@@ -818,7 +845,8 @@ async fn login_list_select_fetch_store_search_and_append_work() {
 
     let list_custom = send_command(&mut stream, "A8 LIST \"\" \"*\"\r\n", "A8").await;
     assert!(list_custom.contains("\"Projects\""));
-    assert!(list_custom.contains("\"Deleted Items\""));
+    assert!(list_custom.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
+    assert!(!list_custom.contains("\"Deleted Items\""));
     assert!(list_custom.contains("\"Junk Email\""));
     assert!(list_custom.contains("\"Outlook Parent/Child\""));
 
@@ -1006,6 +1034,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
     assert!(lsub.contains("* LSUB (\\HasNoChildren) \"/\" \"INBOX\""));
     assert!(lsub.contains("* LSUB (\\HasNoChildren \\Sent) \"/\" \"Sent\""));
     assert!(lsub.contains("* LSUB (\\HasNoChildren \\Drafts) \"/\" \"Drafts\""));
+    assert!(lsub.contains("* LSUB (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
 
     let unsubscribe = send_command(&mut stream, "OL7 UNSUBSCRIBE Inbox\r\n", "OL7").await;
     assert!(unsubscribe.contains("OL7 OK UNSUBSCRIBE completed"));
@@ -1014,12 +1043,14 @@ async fn outlook_first_login_list_select_sync_transcript() {
     assert!(list.contains("* LIST (\\HasNoChildren) \"/\" \"INBOX\""));
     assert!(list.contains("* LIST (\\HasNoChildren \\Sent) \"/\" \"Sent\""));
     assert!(list.contains("* LIST (\\HasNoChildren \\Drafts) \"/\" \"Drafts\""));
+    assert!(list.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
 
     let list_inbox = send_command(&mut stream, "OL8A LIST \"\" \"INBOX\"\r\n", "OL8A").await;
     assert_eq!(list_inbox.matches("* LIST ").count(), 1);
     assert!(list_inbox.contains("* LIST (\\HasNoChildren) \"/\" \"INBOX\""));
     assert!(!list_inbox.contains("\"Sent\""));
     assert!(!list_inbox.contains("\"Drafts\""));
+    assert!(!list_inbox.contains("\"Deleted\""));
 
     let list_root = send_command(&mut stream, "OL8B LIST \"\" \"\"\r\n", "OL8B").await;
     assert!(list_root.contains("* LIST (\\Noselect) \"/\" \"\""));
@@ -1772,6 +1803,16 @@ fn mailbox(id: &str, role: &str, name: &str, sort_order: i32) -> JmapMailbox {
         sort_order,
         total_emails: 0,
         unread_emails: 0,
+    }
+}
+
+fn system_mailbox_for_name(name: &str) -> Option<(&'static str, &'static str, i32)> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "inbox" => Some(("inbox", "Inbox", 0)),
+        "draft" | "drafts" => Some(("drafts", "Drafts", 10)),
+        "sent" | "sent items" | "sent messages" => Some(("sent", "Sent", 20)),
+        "deleted" | "deleted items" | "trash" => Some(("trash", "Deleted", 30)),
+        _ => None,
     }
 }
 
