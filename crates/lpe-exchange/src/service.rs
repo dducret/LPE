@@ -170,6 +170,18 @@ impl<S: ExchangeStore> ExchangeService<S> {
             changes.push_str("</t:Create>");
             count += 1;
         }
+        for mailbox in self
+            .store
+            .fetch_jmap_mailboxes(principal.account_id)
+            .await?
+            .into_iter()
+            .filter(|mailbox| mailbox.role == "custom")
+        {
+            changes.push_str("<t:Create>");
+            changes.push_str(&mailbox_folder_xml(&mailbox));
+            changes.push_str("</t:Create>");
+            count += 1;
+        }
         let sync_state = format!("folder-hierarchy:{count}");
 
         Ok(format!(

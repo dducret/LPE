@@ -64,7 +64,7 @@ The adapter returns a Basic authentication challenge for unauthenticated EWS req
 
 Folder responses include EWS `TotalCount` and `ChildFolderCount` properties so strict EWS clients can read requested folder properties during bootstrap. The current MVP returns conservative zero counts for these compatibility properties instead of deriving full mailbox-style counters for collaboration folders.
 
-`CreateFolder` creates canonical custom mailbox folders, primarily for strict client connectivity tests that need temporary sync folders. `DeleteFolder` removes those custom mailbox folders through the canonical JMAP mailbox deletion path, which rejects system folders and non-empty folders. These operations do not add EWS mail read/sync support.
+`CreateFolder` creates canonical custom mailbox folders, primarily for strict client connectivity tests that need temporary sync folders. `FindFolder` and `SyncFolderHierarchy` expose those custom mailbox folders. `DeleteFolder` removes those custom mailbox folders through the canonical JMAP mailbox deletion path, which rejects system folders and non-empty folders. These operations do not add EWS mail read/sync support.
 
 `SyncFolderItems` on a custom mailbox folder returns an empty successful sync response so connectivity tests can bind and sync a temporary folder without exposing mailbox messages through EWS.
 

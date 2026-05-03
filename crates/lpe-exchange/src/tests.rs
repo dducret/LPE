@@ -338,6 +338,11 @@ async fn sync_folder_hierarchy_lists_contact_and_calendar_folders() {
         calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
             "default", "calendar", "Calendar",
         )])),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA Sync",
+        )])),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -357,6 +362,8 @@ async fn sync_folder_hierarchy_lists_contact_and_calendar_folders() {
     assert!(body.contains("<t:Create><t:Folder>"));
     assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
     assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
+    assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\"/>"));
+    assert!(body.contains("<t:DisplayName>RCA Sync</t:DisplayName>"));
 }
 
 #[tokio::test]
