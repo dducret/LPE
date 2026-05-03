@@ -897,6 +897,7 @@ impl Storage {
                 b.body_html_sanitized,
                 m.unread,
                 m.flagged,
+                m.imap_deleted,
                 m.has_attachments,
                 m.size_octets,
                 m.internet_message_id,
