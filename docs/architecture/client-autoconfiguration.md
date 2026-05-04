@@ -29,6 +29,8 @@ With the documented Debian reverse proxy, those routes are published as-is by `n
 
 The Rust service also mounts the first guarded `MAPI over HTTP` implementation routes at `/mapi/emsmdb` and `/mapi/nspi`. They provide authenticated transport/session handling and early mailbox-folder bootstrap behavior. They are published by autodiscover only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled for Outlook interoperability testing.
 
+Autodiscover publication is a compatibility contract, not only a routing hint. A route may exist internally before it is safe to publish. `EWS`, `mapiHttp`, legacy `EXCH` / `EXPR`, and SOAP Exchange autodiscover blocks must remain separately gated so an administrator can expose the narrow surface they intend without hijacking the default Outlook desktop `IMAP` setup path.
+
 ### Thunderbird
 
 Thunderbird autoconfig publishes:
@@ -68,6 +70,8 @@ The default MVP does not advertise `MAPI` or `MobileSync` for Outlook desktop. O
 - legacy Outlook and Remote Connectivity Analyzer probes without that header receive the `EXCH` and `EXPR` provider sections only when `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` is also explicitly enabled
 
 SOAP autodiscover returns `MapiHttpEnabled` as `True` only when MAPI publication and `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` are both enabled. This is intentionally not the default because message tables, NSPI address book operations, and full Outlook profile creation are still being implemented.
+
+`LPE_AUTOCONFIG_MAPI_ENABLED` must stay an interoperability-test switch until the classic Outlook for Windows desktop matrix proves profile creation, first sync, day-two sync, `NSPI` name resolution, canonical send and draft flows, reconnect behavior, and authoritative `Sent` visibility. Legacy `EXCH` / `EXPR` publication has the stricter requirement that the deployment is intentionally testing Outlook setup probes that do not send `X-MapiHttpCapability`.
 
 The `0.1.3` `EWS` endpoint is the Exchange-style compatibility focus for mailbox, contacts, and calendar synchronization. Autodiscovery publishes it only when `LPE_AUTOCONFIG_EWS_ENABLED` is explicitly set to a true value. This keeps `EWS` publication an administrator choice until the deployment accepts the current MVP limits.
 

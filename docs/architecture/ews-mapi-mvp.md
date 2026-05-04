@@ -8,6 +8,42 @@ The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchang
 
 `MAPI` implementation has started as a guarded `MAPI over HTTP` foundation for future Outlook desktop support. It is not Outlook-ready. `mapiHttp` autodiscover publication is available only through an explicit administrator interoperability-test switch. The current slice implements authenticated transport request classification, session-context cookies, and the first mailbox-folder bootstrap ROPs. Legacy `EXCH` / `EXPR` provider metadata for Outlook setup probes that do not yet send `X-MapiHttpCapability` requires a separate explicit interoperability-test switch; requests that do send that header receive the dedicated `mapiHttp` provider instead.
 
+### Full-support boundary
+
+For `LPE`, "full support" for Exchange compatibility means production-quality support for the client and interoperability surfaces that map cleanly onto the canonical `LPE` model. It does not mean becoming a complete Microsoft Exchange Server clone.
+
+The intended supported surface is:
+
+- `EWS` for mailbox folders, messages, contacts, calendars, tasks, attachments, search, availability, delegation discovery, and the common EWS client-library flows that can be backed by canonical `LPE` storage
+- `MAPI over HTTP` for classic Outlook for Windows desktop profile creation, mailbox synchronization, cached-mode operation, address book lookup through `NSPI`, send and draft flows through canonical submission, attachments, delegated mailbox projection, and reconnect behavior
+- autodiscover that publishes only the Exchange surfaces an administrator has explicitly enabled and that the interoperability matrix has proven
+- mailbox `Basic`, mailbox app-password, and mailbox OAuth bearer authentication scoped through the existing mailbox-account model
+
+The explicitly unsupported surface unless a later architecture document widens it is:
+
+- Exchange administration APIs and Exchange control-plane compatibility
+- public folders, archive mailbox parity, journaling, unified messaging, transport rules, litigation/eDiscovery parity, or Exchange Online service integration
+- Outlook Anywhere, legacy RPC/HTTP, MAPI/RPC, POP-before-SMTP, or any direct client `SMTP` path inside the core `LPE` service
+- cross-tenant directory or collaboration visibility
+- Exchange-specific mailbox, contact, calendar, task, `Sent`, `Outbox`, GAL, or rights stores
+
+This boundary is also the release gate. `EWS` can be administrator-published when its documented MVP limits are acceptable for a deployment. `MAPI over HTTP` remains an interoperability-test surface until Outlook desktop can create a profile, synchronize canonical mailbox state, resolve names through `NSPI`, send through canonical submission, reconnect after session loss, and keep the authoritative `Sent` view consistent.
+
+### Milestone roadmap
+
+1. Documentation and scope lock: resolve documentation divergence, define the support boundary above, and keep autodiscover publication gates explicit.
+2. Exchange adapter foundation: harden shared SOAP/XML parsing, MAPI binary framing, error taxonomy, auth scopes, tenant isolation, structured logs, and golden protocol fixtures.
+3. EWS mail and folder completion: add durable folder and item sync state with tombstones, message update/move/copy, soft and hard delete behavior, read-state and flag mutation, stable ids and change keys, and canonical `Sent` submission checks.
+4. EWS attachments and protected metadata: implement attachment get/create/delete flows, MIME export, `Magika` validation for client-provided files, and protected `Bcc` handling that preserves compliance access without indexing or user-facing AI exposure.
+5. EWS contacts, calendars, tasks, and availability: add recurrence, time zones, attendee response flows, meeting update/cancel behavior, reminders, free/busy, OOF, and tasks over canonical task storage.
+6. EWS interoperability lab: gate publication with repeatable tests against EWS client libraries and real clients selected for the release, including day-two sync and mutation scenarios.
+7. MAPI/HTTP transport and session correctness: harden HTTPS transport, common request/response framing, session-context cookies, handle lifetime, reconnect behavior, idle cleanup, request correlation, and `X-MapiHttpCapability` autodiscover behavior.
+8. EMSMDB read/write mailbox store: implement the Outlook-critical ROPs for folder hierarchy, contents tables, property bags, body streams, message create/save/open, move/copy/delete, read state, flags, categories where mapped, recipient tables, attachments, named properties, and canonical change tracking.
+9. EMSMDB sync and send semantics: implement Incremental Change Synchronization, notifications or pending event behavior, conflict handling, cached-mode friendliness, draft lifecycle, delegated send-as and send-on-behalf, and canonical `Sent` visibility.
+10. NSPI and address book: implement tenant-scoped address list projection, stable entry IDs, legacy DN mapping, `ResolveNames`, `QueryRows`, `GetMatches`, restrictions, and property columns without a parallel GAL store.
+11. Outlook desktop certification: verify classic Outlook for Windows desktop profile creation, first sync, day-two sync, cached mode, send/receive, attachments, delegated mailbox behavior, reconnects, and supported authentication modes before supported `mapiHttp` publication.
+12. Operations, security, and support hardening: add Exchange-adapter dashboards and alerts, document supported clients and unsupported Exchange features, review any new dependencies against `LICENSE.md`, and keep public edge routing through `LPE-CT`.
+
 ### Architectural principles
 
 - `JMAP` remains the primary modern protocol

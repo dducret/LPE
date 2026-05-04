@@ -29,7 +29,7 @@ The near-term order is:
 - `JMAP` depth first: state or change semantics, WebSocket reliability, delegation, and shared-collection consistency
 - `IMAP` support as a continuing client communication protocol: sync behavior, `UID` handling, flags, and client compatibility
 - `EWS` in `0.1.3`: Exchange-style folder, mail, contacts, and calendar synchronization without `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox`
-- `MAPI over HTTP` groundwork in `0.1.3`: authenticated, non-advertised `/mapi/emsmdb` and `/mapi/nspi` routes that return explicit not-implemented responses until real Outlook-usable EMSMDB and NSPI behavior exists
+- `MAPI over HTTP` groundwork in `0.1.3`: authenticated `/mapi/emsmdb` and `/mapi/nspi` routes with guarded transport, session, NSPI bootstrap, and early read-only mailbox ROP behavior; autodiscover publication remains opt-in for interoperability testing until Outlook-usable EMSMDB and NSPI behavior is proven
 - `ActiveSync` as the flagship compatibility target for `Outlook` and mobile clients
 - `DAV` and `ManageSieve` interoperability work after the higher-priority mail protocols are stable
 
@@ -53,7 +53,7 @@ The current repository already contains:
 - an explicit internal `LPE` / `LPE-CT` HTTP integration contract
 - MVP protocol adapters for `JMAP Mail`, `JMAP Contacts`, `JMAP Calendars`, `IMAP`, `ActiveSync`, `EWS`, `Sieve` / `ManageSieve`, `CardDAV`, and `CalDAV`
 - canonical personal tasks exposed through the account workspace model
-- public client autoconfiguration for `Thunderbird`, `Outlook`, `ActiveSync`, and opt-in `EWS`
+- public client autoconfiguration for `Thunderbird`, `Outlook`, `ActiveSync`, opt-in `EWS`, and guarded opt-in `MAPI over HTTP` interoperability testing
 - a web client backed by persistent account authentication and mailbox/workspace APIs
 - first observability foundations with metrics and structured tracing
 

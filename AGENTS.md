@@ -56,7 +56,7 @@ The core `LPE` server is multi-tenant. Each tenant manages its domain and domain
 - `JMAP` is the primary modern protocol
 - `IMAP` is a mailbox compatibility layer
 - finish current protocol depth and interoperability before adding new protocol breadth
-- prioritize protocol completion in this order: `JMAP`, `IMAP`, `ActiveSync`, `DAV`, then `ManageSieve` / mailbox `Sieve`
+- prioritize protocol completion depth before protocol breadth: `JMAP`, `IMAP`, `ActiveSync`, the active `EWS` compatibility adapter, guarded `MAPI over HTTP` groundwork for Outlook desktop, `DAV`, then `ManageSieve` / mailbox `Sieve`
 - internet-facing `SMTP` must stay in `LPE-CT`, not move back into the core `LPE` server
 - client autodiscovery and autoconfiguration must publish only endpoints that are truly implemented and exposed
 - the internal `LPE -> LPE-CT` relay must never be advertised as a client `SMTP` submission endpoint unless a real authenticated client-submission service is explicitly deployed and documented
@@ -82,9 +82,10 @@ The core `LPE` server remains responsible for the canonical sent-message copy in
 Native Outlook and mobile support is a first-class requirement.
 
 - `ActiveSync` targets mobile and native clients that actually support `Exchange ActiveSync`; do not try to force Outlook for Windows desktop to use `ActiveSync` as an Exchange account
-- Outlook for Windows desktop currently uses `IMAP` unless and until `EWS` or `MAPI` is implemented
+- Outlook for Windows desktop currently uses `IMAP` unless an administrator explicitly enables the bounded `EWS` or guarded `MAPI over HTTP` interoperability surfaces documented for the deployment
 - protocol planning must treat both Outlook desktop `IMAP` interoperability and `ActiveSync` mobile compatibility labs as flagship requirements before introducing new client protocols
-- `EWS` stays a future extension
+- `EWS` is the active `0.1.3` Exchange compatibility adapter; it must stay bounded to documented canonical mailbox, contacts, calendar, and submission behavior until its limits are explicitly widened
+- `MAPI over HTTP` is the future Outlook desktop Exchange route; it must stay behind authenticated endpoints and opt-in autodiscover publication until Outlook desktop profile creation, EMSMDB, NSPI, session context, and canonical mailbox synchronization are proven in interoperability testing
 - `IMAP` + `SMTP` + autodiscover is the current Outlook desktop path, but must not be treated as the final Outlook adoption story
 - every client layer must use the canonical `LPE` submission and synchronization model
 - no client layer may implement parallel `Sent` or `Outbox` logic
