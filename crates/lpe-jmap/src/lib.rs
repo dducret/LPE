@@ -1425,6 +1425,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_omits_submission_for_read_only_shared_mailbox_with_sender_grant() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_read_only_access(true, false),
+            ],
+            sender_identities: vec![SenderIdentity {
+                id: format!("send-as:{}", FakeStore::shared_account().account_id),
+                owner_account_id: FakeStore::shared_account().account_id,
+                email: FakeStore::shared_account().email,
+                display_name: FakeStore::shared_account().display_name,
+                authorization_kind: "send-as".to_string(),
+                sender_address: None,
+                sender_display: None,
+            }],
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let session = service
+            .session_document(Some("Bearer token"), None)
+            .await
+            .unwrap();
+        let shared_account = &session.accounts[&FakeStore::shared_account().account_id.to_string()];
+        assert!(shared_account.is_read_only);
+        assert!(shared_account
+            .account_capabilities
+            .contains_key(JMAP_MAIL_CAPABILITY));
+        assert!(!shared_account
+            .account_capabilities
+            .contains_key(JMAP_SUBMISSION_CAPABILITY));
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Identity/get".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string()
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        assert!(response.method_responses[0].1["list"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
     async fn mailbox_get_projects_delegated_submit_rights_from_sender_grants() {
         let store = FakeStore {
             session: Some(FakeStore::account()),
@@ -1496,6 +1556,39 @@ mod tests {
         let rights = &response.method_responses[0].1["list"][0]["myRights"];
         assert_eq!(rights["mayAddItems"], true);
         assert_eq!(rights["maySubmit"], true);
+
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_read_only_access(true, false),
+            ],
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Mailbox/get".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "ids": [FakeStore::draft_mailbox().id.to_string()],
+                            "properties": ["id", "myRights"]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let rights = &response.method_responses[0].1["list"][0]["myRights"];
+        assert_eq!(rights["mayAddItems"], false);
+        assert_eq!(rights["maySubmit"], false);
     }
 
     #[tokio::test]

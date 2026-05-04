@@ -352,7 +352,7 @@ fn mailbox_to_value(
 }
 
 pub(crate) fn mailbox_account_may_submit(access: &MailboxAccountAccess) -> bool {
-    access.is_owned || access.may_send_as || access.may_send_on_behalf
+    access.is_owned || (access.may_write && (access.may_send_as || access.may_send_on_behalf))
 }
 
 pub(crate) fn mailbox_account_may_write(access: &MailboxAccountAccess) -> bool {

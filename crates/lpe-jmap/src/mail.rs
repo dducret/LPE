@@ -603,10 +603,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .await?;
         let account_id = account_access.account_id;
         let properties = identity_properties(arguments.properties);
-        let identities = self
-            .store
-            .fetch_sender_identities(account.account_id, account_id)
-            .await?;
+        let identities = if crate::mailboxes::mailbox_account_may_submit(&account_access) {
+            self.store
+                .fetch_sender_identities(account.account_id, account_id)
+                .await?
+        } else {
+            Vec::new()
+        };
         let requested_ids = arguments.ids.unwrap_or_default();
         let list = identities
             .iter()

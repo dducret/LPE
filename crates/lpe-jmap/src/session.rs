@@ -155,7 +155,7 @@ pub(crate) fn requested_account_id(
 }
 
 fn mailbox_account_is_read_only(access: &MailboxAccountAccess) -> bool {
-    !(access.may_write || access.is_owned || access.may_send_as || access.may_send_on_behalf)
+    !access.is_owned && !access.may_write
 }
 
 fn session_account_capabilities(
@@ -176,7 +176,7 @@ fn session_account_capabilities(
             account_capabilities.insert(capability.to_string(), value.clone());
         }
     }
-    if access.may_send_as || access.may_send_on_behalf {
+    if access.may_write && (access.may_send_as || access.may_send_on_behalf) {
         if let Some(value) = capabilities.get(JMAP_SUBMISSION_CAPABILITY) {
             account_capabilities.insert(JMAP_SUBMISSION_CAPABILITY.to_string(), value.clone());
         }
