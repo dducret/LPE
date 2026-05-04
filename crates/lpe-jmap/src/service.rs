@@ -546,15 +546,18 @@ fn mailbox_state_fingerprint(
     access: Option<&MailboxAccountAccess>,
 ) -> String {
     let is_drafts = mailbox.role == "drafts";
-    let (may_read, may_write, may_submit) = access
+    let (may_read, may_write, may_draft, may_submit) = access
         .map(|access| {
+            let may_write = access.is_owned || access.may_write;
+            let may_submit = access.is_owned || access.may_send_as || access.may_send_on_behalf;
             (
                 access.may_read,
-                access.may_write,
-                is_drafts && (access.is_owned || access.may_send_as || access.may_send_on_behalf),
+                may_write,
+                is_drafts && may_write && may_submit,
+                is_drafts && may_submit,
             )
         })
-        .unwrap_or((true, true, false));
+        .unwrap_or((true, true, is_drafts, false));
     opaque_state_fingerprint(&format!(
         "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         mailbox.role,
@@ -563,8 +566,8 @@ fn mailbox_state_fingerprint(
         mailbox.total_emails,
         mailbox.unread_emails,
         may_read,
-        may_write && is_drafts,
-        may_write && is_drafts,
+        may_draft,
+        may_draft,
         may_write,
         may_write,
         may_submit,

@@ -68,6 +68,7 @@ Additional supported `JMAP` routes:
 - shared mailbox `Session` account flags, `Mailbox/get` `myRights`, and delegated `Identity/get` values are projected from the canonical mailbox delegation plus sender delegation grants rather than adapter-local ACL state
 - shared mailbox `Session` `accountCapabilities` advertise mail access, and advertise submission only when canonical sender delegation grants allow `send-as` or `send-on-behalf`; collaboration and task capabilities remain on the authenticated principal account rather than being copied onto delegated mailbox accounts
 - `Mailbox/set`, `Email/set`, `Email/copy`, and `Email/import` reject writes when the selected shared mailbox account is not writable according to canonical mailbox access; `EmailSubmission/set` remains governed by canonical sender delegation and the canonical submission workflow
+- shared `Drafts` writes are advertised and accepted only when mailbox write access and canonical sender delegation are both present, so draft creation, copy, and import cannot drift from the later canonical submission authorization check
 - `Bcc` remains stored separately in `message_bcc_recipients`
 - `Bcc` is not reinjected into search, `participants_normalized`, or `Email/query`
 - `Email/get` may return `bcc` only when the `bcc` property is explicitly requested for the authenticated account's own sender-side draft or sent message

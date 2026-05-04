@@ -318,6 +318,7 @@ fn mailbox_to_value(
     properties: &HashSet<String>,
 ) -> Value {
     let is_drafts = mailbox.role == "drafts";
+    let may_draft = is_drafts && mailbox_account_may_draft(access);
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", mailbox.id.to_string());
     insert_if(properties, &mut object, "name", mailbox.name.clone());
@@ -336,8 +337,8 @@ fn mailbox_to_value(
             "myRights".to_string(),
             json!({
                 "mayReadItems": access.may_read,
-                "mayAddItems": access.may_write && is_drafts,
-                "mayRemoveItems": access.may_write && is_drafts,
+                "mayAddItems": may_draft,
+                "mayRemoveItems": may_draft,
                 "maySetSeen": access.may_write,
                 "maySetKeywords": access.may_write,
                 "mayCreateChild": false,
@@ -358,11 +359,24 @@ pub(crate) fn mailbox_account_may_write(access: &MailboxAccountAccess) -> bool {
     access.is_owned || access.may_write
 }
 
+pub(crate) fn mailbox_account_may_draft(access: &MailboxAccountAccess) -> bool {
+    mailbox_account_may_write(access) && mailbox_account_may_submit(access)
+}
+
 pub(crate) fn ensure_mailbox_write(may_write: bool) -> Result<()> {
     if may_write {
         Ok(())
     } else {
         bail!("write access is not granted on this mailbox account")
+    }
+}
+
+pub(crate) fn ensure_mailbox_draft_write(access: &MailboxAccountAccess) -> Result<()> {
+    ensure_mailbox_write(mailbox_account_may_write(access))?;
+    if mailbox_account_may_submit(access) {
+        Ok(())
+    } else {
+        bail!("sender delegation is required to write drafts in this mailbox account")
     }
 }
 

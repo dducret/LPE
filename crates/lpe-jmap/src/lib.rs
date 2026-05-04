@@ -1455,8 +1455,41 @@ mod tests {
 
         let rights = &response.method_responses[0].1["list"][0]["myRights"];
         assert_eq!(rights["mayReadItems"], true);
-        assert_eq!(rights["mayAddItems"], true);
+        assert_eq!(rights["mayAddItems"], false);
         assert_eq!(rights["maySubmit"], false);
+
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(true, false),
+            ],
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Mailbox/get".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "ids": [FakeStore::draft_mailbox().id.to_string()],
+                            "properties": ["id", "myRights"]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let rights = &response.method_responses[0].1["list"][0]["myRights"];
+        assert_eq!(rights["mayAddItems"], true);
+        assert_eq!(rights["maySubmit"], true);
     }
 
     #[tokio::test]
@@ -1621,6 +1654,54 @@ mod tests {
         assert_eq!(
             saved[0].sender_address.as_deref(),
             Some("alice@example.test")
+        );
+    }
+
+    #[tokio::test]
+    async fn email_set_rejects_shared_mailbox_draft_without_sender_delegation() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/set".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "create": {
+                                "k1": {
+                                    "from": [{"email": "shared@example.test"}],
+                                    "to": [{"email": "bob@example.test"}],
+                                    "subject": "No sender rights",
+                                    "textBody": "Denied"
+                                }
+                            }
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(store.saved_drafts.lock().unwrap().len(), 0);
+        assert_eq!(
+            response.method_responses[0].1["notCreated"]["k1"]["description"],
+            "sender delegation is required to write drafts in this mailbox account"
         );
     }
 
@@ -2861,6 +2942,73 @@ mod tests {
         assert_eq!(
             response.method_responses[2].1["notCreated"]["i1"]["description"],
             "write access is not granted on this mailbox account"
+        );
+        assert_eq!(store.imported_emails.lock().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn email_copy_and_import_reject_shared_drafts_without_sender_delegation() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Email/copy".to_string(),
+                            json!({
+                                "accountId": FakeStore::shared_account().account_id.to_string(),
+                                "fromAccountId": FakeStore::shared_account().account_id.to_string(),
+                                "create": {
+                                    "e1": {
+                                        "emailId": FakeStore::draft_email().id.to_string(),
+                                        "mailboxIds": {FakeStore::draft_mailbox().id.to_string(): true}
+                                    }
+                                }
+                            }),
+                            "c1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Email/import".to_string(),
+                            json!({
+                                "accountId": FakeStore::shared_account().account_id.to_string(),
+                                "emails": {
+                                    "i1": {
+                                        "blobId": "77777777-7777-7777-7777-777777777777",
+                                        "mailboxIds": {FakeStore::draft_mailbox().id.to_string(): true}
+                                    }
+                                }
+                            }),
+                            "c2".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["notCreated"]["e1"]["description"],
+            "sender delegation is required to write drafts in this mailbox account"
+        );
+        assert_eq!(
+            response.method_responses[1].1["notCreated"]["i1"]["description"],
+            "sender delegation is required to write drafts in this mailbox account"
         );
         assert_eq!(store.imported_emails.lock().unwrap().len(), 0);
     }

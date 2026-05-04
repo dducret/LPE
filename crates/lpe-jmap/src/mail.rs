@@ -238,9 +238,23 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let mut created = Map::new();
         let mut not_created = Map::new();
         for (creation_id, value) in arguments.create {
-            match crate::mailboxes::ensure_mailbox_write(may_write)
+            let copy_result = match crate::mailboxes::ensure_mailbox_write(may_write)
                 .and_then(|_| parse_email_copy(value, created_ids))
             {
+                Ok((email_id, mailbox_id)) => match self
+                    .ensure_target_mailbox_accepts_message_write(
+                        account_id,
+                        mailbox_id,
+                        &account_access,
+                    )
+                    .await
+                {
+                    Ok(()) => Ok((email_id, mailbox_id)),
+                    Err(error) => Err(error),
+                },
+                Err(error) => Err(error),
+            };
+            match copy_result {
                 Ok((email_id, mailbox_id)) => {
                     let audit = AuditEntryInput {
                         actor: account.email.clone(),
@@ -360,7 +374,6 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .requested_account_access(account, arguments.account_id.as_deref())
             .await?;
         let account_id = account_access.account_id;
-        let may_write = crate::mailboxes::mailbox_account_may_write(&account_access);
         let old_state = self.object_state(account_id, "Email").await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
@@ -371,13 +384,14 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if let Some(create) = arguments.create {
             for (creation_id, value) in create {
-                let create_result = match crate::mailboxes::ensure_mailbox_write(may_write) {
-                    Ok(()) => {
-                        self.create_draft(account, &account_access, value, creation_id.as_str())
-                            .await
-                    }
-                    Err(error) => Err(error),
-                };
+                let create_result =
+                    match crate::mailboxes::ensure_mailbox_draft_write(&account_access) {
+                        Ok(()) => {
+                            self.create_draft(account, &account_access, value, creation_id.as_str())
+                                .await
+                        }
+                        Err(error) => Err(error),
+                    };
                 match create_result {
                     Ok(saved) => {
                         created_ids.insert(creation_id.clone(), saved.message_id.to_string());
@@ -398,13 +412,14 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if let Some(update) = arguments.update {
             for (id, value) in update {
-                let update_result = match crate::mailboxes::ensure_mailbox_write(may_write) {
-                    Ok(()) => {
-                        self.update_draft(account, &account_access, &id, value)
-                            .await
-                    }
-                    Err(error) => Err(error),
-                };
+                let update_result =
+                    match crate::mailboxes::ensure_mailbox_draft_write(&account_access) {
+                        Ok(()) => {
+                            self.update_draft(account, &account_access, &id, value)
+                                .await
+                        }
+                        Err(error) => Err(error),
+                    };
                 match update_result {
                     Ok(_) => {
                         updated.insert(id, Value::Object(Map::new()));
@@ -418,7 +433,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if let Some(ids) = arguments.destroy {
             for id in ids {
-                match crate::mailboxes::ensure_mailbox_write(may_write)
+                match crate::mailboxes::ensure_mailbox_draft_write(&account_access)
                     .and_then(|_| parse_uuid(&id))
                 {
                     Ok(message_id) => {
@@ -984,6 +999,12 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .map(|(mailbox_id, _)| parse_uuid(mailbox_id))
             .transpose()?
             .ok_or_else(|| anyhow!("one target mailboxId is required"))?;
+        self.ensure_target_mailbox_accepts_message_write(
+            account_access.account_id,
+            target_mailbox_id,
+            account_access,
+        )
+        .await?;
         let blob = self
             .store
             .fetch_jmap_upload_blob(account_access.account_id, blob_id)
@@ -1060,6 +1081,30 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     attachment.file_name,
                     outcome.reason
                 );
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn ensure_target_mailbox_accepts_message_write(
+        &self,
+        account_id: Uuid,
+        target_mailbox_id: Uuid,
+        account_access: &MailboxAccountAccess,
+    ) -> Result<()> {
+        crate::mailboxes::ensure_mailbox_write(crate::mailboxes::mailbox_account_may_write(
+            account_access,
+        ))?;
+        if let Some(target_mailbox) = self
+            .store
+            .fetch_jmap_mailboxes(account_id)
+            .await?
+            .into_iter()
+            .find(|mailbox| mailbox.id == target_mailbox_id)
+        {
+            if target_mailbox.role == "drafts" {
+                crate::mailboxes::ensure_mailbox_draft_write(account_access)?;
             }
         }
 
