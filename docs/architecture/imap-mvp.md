@@ -17,6 +17,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `ENABLE CONDSTORE` for clients that explicitly enable conditional-store
   synchronization before fetching mailbox state
 - tolerant `ID`
+- tolerant legacy `AUTH LOGIN` as an alias for `AUTHENTICATE LOGIN`
 - `NAMESPACE` for the flat personal namespace
 - `LIST` for the canonical system mailboxes, rendering the inbox as the single
   canonical `INBOX` name and honoring mailbox patterns such as `INBOX`, `%`, and `*`
@@ -29,6 +30,8 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
   regular `LIST` identifies the inbox by the special `INBOX` name rather than a
   non-standard `\Inbox` flag
 - tolerant `LSUB`, `SUBSCRIBE`, and `UNSUBSCRIBE` for Outlook compatibility; subscription state is not persisted yet
+- tolerant `GETQUOTAROOT` and `GETQUOTA` probes for clients that check storage
+  limits even though the adapter does not advertise `QUOTA`
 - `STATUS` for mailbox counters and stable UID metadata
 - mailbox management through `CREATE`, `RENAME`, and `DELETE` for custom user mailboxes
 - `CREATE` for trash aliases such as `Deleted Items` and `Trash` is accepted

@@ -1935,6 +1935,52 @@ async fn login_authenticate_with_initial_username_is_accepted() {
 }
 
 #[tokio::test]
+async fn legacy_auth_login_alias_is_accepted() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+
+    let username_challenge = send_partial_command(&mut stream, "A1 AUTH LOGIN\r\n").await;
+    assert!(username_challenge.contains("+ VXNlcm5hbWU6"));
+
+    let username = base64::engine::general_purpose::STANDARD.encode("alice@example.test");
+    let password_challenge = send_partial_command(&mut stream, &format!("{username}\r\n")).await;
+    assert!(password_challenge.contains("+ UGFzc3dvcmQ6"));
+
+    let password = base64::engine::general_purpose::STANDARD.encode("secret");
+    let response = send_command(&mut stream, &format!("{password}\r\n"), "A1").await;
+
+    assert!(response.contains("A1 OK AUTHENTICATE completed"));
+    task.abort();
+}
+
+#[tokio::test]
+async fn quota_probe_commands_are_tolerated_for_outlook_setup() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+
+    let quota_root = send_command(&mut stream, "A2 GETQUOTAROOT Inbox\r\n", "A2").await;
+    assert!(quota_root.contains("* QUOTAROOT \"INBOX\""));
+    assert!(quota_root.contains("A2 OK GETQUOTAROOT completed"));
+
+    let quota = send_command(&mut stream, "A3 GETQUOTA \"\"\r\n", "A3").await;
+    assert!(quota.contains("A3 OK GETQUOTA completed"));
+    task.abort();
+}
+
+#[tokio::test]
 async fn acl_commands_project_canonical_mailbox_and_sender_delegation() {
     let store = FakeStore::new();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

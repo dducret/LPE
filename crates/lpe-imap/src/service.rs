@@ -10,7 +10,11 @@ use tokio::{
 use tracing::warn;
 use uuid::Uuid;
 
-use crate::{parse::parse_request_line, render::sanitize_imap_text, store::ImapStore};
+use crate::{
+    parse::parse_request_line,
+    render::{render_mailbox_name, sanitize_imap_quoted, sanitize_imap_text},
+    store::ImapStore,
+};
 
 const CAPABILITIES: &str =
     "IMAP4rev1 AUTH=PLAIN AUTH=LOGIN AUTH=XOAUTH2 SASL-IR ID IDLE MOVE NAMESPACE UIDPLUS CONDSTORE ENABLE ACL SPECIAL-USE UNSELECT";
@@ -139,6 +143,10 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
                 self.handle_authenticate(&request.tag, &request.arguments, reader, writer)
                     .await
             }
+            "AUTH" => {
+                self.handle_authenticate(&request.tag, &request.arguments, reader, writer)
+                    .await
+            }
             "LIST" => {
                 self.handle_list(&request.tag, &request.arguments, writer)
                     .await
@@ -195,6 +203,14 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             "EXPUNGE" => self.handle_expunge(&request.tag, writer).await,
             "GETACL" => {
                 self.handle_getacl(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "GETQUOTAROOT" => {
+                self.handle_getquotaroot(&request.tag, &request.arguments, writer)
+                    .await
+            }
+            "GETQUOTA" => {
+                self.handle_getquota(&request.tag, &request.arguments, writer)
                     .await
             }
             "MYRIGHTS" => {
@@ -373,6 +389,44 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         writer.write_all(enabled_response.as_bytes()).await?;
         writer
             .write_all(format!("{tag} OK ENABLE completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    async fn handle_getquotaroot<W>(
+        &mut self,
+        tag: &str,
+        arguments: &str,
+        writer: &mut W,
+    ) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        let mailbox = self.resolve_mailbox_by_name(arguments).await?;
+        writer
+            .write_all(
+                format!(
+                    "* QUOTAROOT \"{}\"\r\n",
+                    sanitize_imap_quoted(&render_mailbox_name(&mailbox))
+                )
+                .as_bytes(),
+            )
+            .await?;
+        writer
+            .write_all(format!("{tag} OK GETQUOTAROOT completed\r\n").as_bytes())
+            .await?;
+        writer.flush().await?;
+        Ok(true)
+    }
+
+    async fn handle_getquota<W>(&self, tag: &str, _arguments: &str, writer: &mut W) -> Result<bool>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        self.require_auth()?;
+        writer
+            .write_all(format!("{tag} OK GETQUOTA completed\r\n").as_bytes())
             .await?;
         writer.flush().await?;
         Ok(true)
