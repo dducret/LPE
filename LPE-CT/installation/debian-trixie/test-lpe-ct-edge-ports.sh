@@ -305,6 +305,9 @@ probe_public_imaps_auth_if_configured() {
   local server_name
 
   if [[ -z "${test_email}" || -z "${test_password}" ]]; then
+    if outlook_scope_enabled; then
+      fail "Outlook scope requires LPE_CT_IMAPS_TEST_EMAIL and LPE_CT_IMAPS_TEST_PASSWORD so the public IMAPS login path is actually verified."
+    fi
     warn "Skipping authenticated public IMAPS probe; set LPE_CT_IMAPS_TEST_EMAIL and LPE_CT_IMAPS_TEST_PASSWORD to verify Outlook-facing 993 login."
     return 0
   fi
@@ -323,8 +326,12 @@ probe_public_imaps_auth_if_configured() {
     -servername "${server_name}" >"${output_file}" 2>&1 <<EOF || openssl_status=$?
 A1 CAPABILITY
 A2 LOGIN ${quoted_email} ${quoted_password}
-A3 SELECT INBOX
-A4 LOGOUT
+A3 ID ("name" "Microsoft Outlook" "version" "16.0")
+A4 NAMESPACE
+A5 LIST "" "*"
+A6 STATUS INBOX (MESSAGES UIDNEXT UIDVALIDITY UNSEEN)
+A7 SELECT INBOX
+A8 LOGOUT
 EOF
 
   if ! grep -q '^\* OK LPE IMAP ready' "${output_file}"; then
@@ -346,7 +353,34 @@ EOF
     rm -f "${output_file}"
     fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed authenticated LOGIN through the proxy"
   fi
-  if ! grep -q '^A3 OK \[READ-WRITE\] SELECT completed' "${output_file}"; then
+  if ! grep -q '^A3 OK ID completed' "${output_file}"; then
+    echo "[DIAG] Public IMAPS probe logged in but Outlook-style ID did not complete."
+    recent_logs
+    rm -f "${output_file}"
+    fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed Outlook-style ID through the proxy"
+  fi
+  if ! grep -q '^\* NAMESPACE ' "${output_file}" \
+    || ! grep -q '^A4 OK NAMESPACE completed' "${output_file}"; then
+    echo "[DIAG] Public IMAPS probe logged in but NAMESPACE did not complete."
+    recent_logs
+    rm -f "${output_file}"
+    fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed NAMESPACE through the proxy"
+  fi
+  if ! grep -q '^\* LIST ' "${output_file}" \
+    || ! grep -q '^A5 OK LIST completed' "${output_file}"; then
+    echo "[DIAG] Public IMAPS probe logged in but LIST did not return folders."
+    recent_logs
+    rm -f "${output_file}"
+    fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed LIST through the proxy"
+  fi
+  if ! grep -q '^\* STATUS "INBOX"' "${output_file}" \
+    || ! grep -q '^A6 OK STATUS completed' "${output_file}"; then
+    echo "[DIAG] Public IMAPS probe logged in but STATUS INBOX did not complete."
+    recent_logs
+    rm -f "${output_file}"
+    fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed STATUS INBOX through the proxy"
+  fi
+  if ! grep -q '^A7 OK \[READ-WRITE\] SELECT completed' "${output_file}"; then
     echo "[DIAG] Public IMAPS probe logged in but could not SELECT INBOX."
     recent_logs
     rm -f "${output_file}"
@@ -357,7 +391,7 @@ EOF
     warn "Authenticated public IMAPS probe succeeded, but openssl exited with status ${openssl_status} after the IMAP session closed."
   fi
   rm -f "${output_file}"
-  pass "Public IMAPS on ${HOST}:${IMAPS_PORT} accepted login and SELECT INBOX through LPE-CT"
+  pass "Public IMAPS on ${HOST}:${IMAPS_PORT} accepted Outlook-style login, folder discovery, STATUS, and SELECT INBOX through LPE-CT"
 }
 
 probe_client_publication() {

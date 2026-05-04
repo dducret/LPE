@@ -225,8 +225,10 @@ From the `LPE-CT` server, `test-lpe-ct-edge-ports.sh` verifies both public
 `993` TLS and reachability to `LPE_CT_IMAPS_UPSTREAM_ADDRESS`. For an
 Outlook-equivalent check, pass the same mailbox credentials used with the core
 IMAP test. The script then verifies trusted public TLS for the client hostname,
-Outlook autodiscover IMAP/SMTP publication, public IMAPS login, and `SELECT
-INBOX` through the `LPE-CT` proxy:
+Outlook autodiscover IMAP/SMTP publication, public IMAPS login, Outlook-style
+folder discovery, `STATUS INBOX`, and `SELECT INBOX` through the `LPE-CT`
+proxy. The `outlook` scope fails when these credentials are missing because a
+TLS-only check is not enough to prove Outlook can create the profile:
 
 ```bash
 sudo HOST=mail.example.com \
