@@ -4605,6 +4605,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn task_list_changes_tracks_shared_rights_updates() {
+        let shared_account = FakeStore::shared_account();
+        let shared_task_list = ClientTaskList {
+            id: Uuid::parse_str("90909090-9090-9090-9090-909090909090").unwrap(),
+            name: "Shared Ops".to_string(),
+            role: None,
+            sort_order: 40,
+            owner_account_id: shared_account.account_id,
+            owner_email: shared_account.email,
+            owner_display_name: shared_account.display_name,
+            is_owned: false,
+            rights: FakeStore::read_only_rights(),
+            updated_at: "2026-04-20T16:10:00Z".to_string(),
+        };
+        let initial_service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            task_lists: Arc::new(Mutex::new(vec![
+                FakeStore::default_task_list(),
+                shared_task_list.clone(),
+            ])),
+            ..Default::default()
+        });
+
+        let initial = initial_service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_TASKS_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "TaskList/get".to_string(),
+                        json!({}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        let state = initial.method_responses[0].1["state"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let mut writable_shared_task_list = shared_task_list.clone();
+        writable_shared_task_list.rights = CollaborationRights {
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: false,
+        };
+        let updated_service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            task_lists: Arc::new(Mutex::new(vec![
+                FakeStore::default_task_list(),
+                writable_shared_task_list,
+            ])),
+            ..Default::default()
+        });
+
+        let changes = updated_service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_TASKS_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "TaskList/changes".to_string(),
+                        json!({"sinceState": state}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            changes.method_responses[0].1["updated"],
+            json!([shared_task_list.id.to_string()])
+        );
+    }
+
+    #[tokio::test]
     async fn task_query_includes_shared_accessible_tasks() {
         let shared_account = FakeStore::shared_account();
         let shared_task_list = ClientTaskList {

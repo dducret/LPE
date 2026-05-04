@@ -245,7 +245,7 @@ The current sync contract is:
 - `Task/changes` fingerprints include canonical task content together with `task_list_id`, `sort_order`, and `updated_at`
 - `Task/query` is ordered by canonical task-list `sort_order`, then task `sort_order`, then `updated_at`, then `id`
 - `Task/queryChanges` treats task reordering, task-list moves, and task-list ordering changes as ordered-result changes so clients can reconcile list-aware task ordering
-- `TaskList/changes` uses canonical task-list rows directly; there is no parallel list sync store
+- `TaskList/changes` uses canonical task-list rows directly, including owner and `myRights` projections from task-list grants; there is no parallel list sync store
 - canonical task-list grant changes and shared-task updates now wake every affected `JMAP` principal account through the shared canonical change channel instead of notifying only the owner session
 
 ### Out of scope for the MVP

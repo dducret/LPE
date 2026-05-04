@@ -667,7 +667,15 @@ fn task_state_fingerprint(task: &ClientTask) -> String {
 
 fn task_list_state_fingerprint(task_list: &ClientTaskList) -> String {
     opaque_state_fingerprint(&format!(
-        "{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        task_list.owner_account_id,
+        task_list.owner_email,
+        task_list.owner_display_name,
+        task_list.is_owned,
+        task_list.rights.may_read,
+        task_list.rights.may_write,
+        task_list.rights.may_delete,
+        task_list.rights.may_share,
         task_list.name,
         task_list.role.clone().unwrap_or_default(),
         task_list.sort_order,
