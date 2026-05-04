@@ -4331,6 +4331,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deleted_shared_task_list_push_change_wakes_former_grantee_principal() {
+        let account = FakeStore::account();
+        let shared_owner = FakeStore::shared_account();
+        let shared_task_list = ClientTaskList {
+            id: Uuid::parse_str("97979797-9797-9797-9797-979797979797").unwrap(),
+            name: "Retired Shared Ops".to_string(),
+            role: None,
+            sort_order: 40,
+            owner_account_id: shared_owner.account_id,
+            owner_email: shared_owner.email.clone(),
+            owner_display_name: shared_owner.display_name.clone(),
+            is_owned: false,
+            rights: FakeStore::read_only_rights(),
+            updated_at: "2026-04-20T16:10:00Z".to_string(),
+        };
+        let enabled_types = HashSet::from(["TaskList".to_string()]);
+        let initial_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            task_lists: Arc::new(Mutex::new(vec![
+                FakeStore::default_task_list(),
+                shared_task_list,
+            ])),
+            ..Default::default()
+        });
+        let last_type_states = initial_service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+        let subscription = push_subscription(enabled_types, last_type_states);
+
+        let updated_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            task_lists: Arc::new(Mutex::new(vec![FakeStore::default_task_list()])),
+            ..Default::default()
+        });
+        let mut change_set = CanonicalPushChangeSet::default();
+        change_set.insert_accounts(CanonicalChangeCategory::Tasks, [shared_owner.account_id]);
+
+        let (changed, current_type_states) = updated_service
+            .compute_push_changes(account.account_id, &subscription, &change_set)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            changed[&account.account_id.to_string()]["TaskList"],
+            current_type_states[&account.account_id.to_string()]["TaskList"]
+        );
+    }
+
+    #[tokio::test]
     async fn contacts_methods_use_canonical_contact_store() {
         let store = FakeStore {
             session: Some(FakeStore::account()),

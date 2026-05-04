@@ -835,6 +835,20 @@ impl Storage {
         if task_count > 0 {
             bail!("task list must be empty before it can be destroyed");
         }
+        let grantee_account_ids = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT grantee_account_id
+            FROM task_list_grants
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND task_list_id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(task_list_id)
+        .fetch_all(&mut *tx)
+        .await?;
         sqlx::query(
             r#"
             DELETE FROM task_lists
@@ -846,8 +860,14 @@ impl Storage {
         .bind(task_list_id)
         .execute(&mut *tx)
         .await?;
-        Self::emit_task_access_change(&mut tx, &tenant_id, account_id, &[task_list_id], &[])
-            .await?;
+        Self::emit_task_access_change(
+            &mut tx,
+            &tenant_id,
+            account_id,
+            &[task_list_id],
+            &grantee_account_ids,
+        )
+        .await?;
         tx.commit().await?;
 
         Ok(())
