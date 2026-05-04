@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -172,10 +172,11 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let mut not_updated = Map::new();
         let mut destroyed = Vec::new();
         let mut not_destroyed = Map::new();
+        let may_write = mailbox_account_may_write(&account_access);
 
         if let Some(create) = arguments.create {
             for (creation_id, value) in create {
-                match parse_mailbox_create(value) {
+                match ensure_mailbox_write(may_write).and_then(|_| parse_mailbox_create(value)) {
                     Ok(input) => {
                         let audit = AuditEntryInput {
                             actor: account.email.clone(),
@@ -212,8 +213,10 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if let Some(update) = arguments.update {
             for (id, value) in update {
-                match parse_uuid(&id).and_then(|mailbox_id| {
-                    parse_mailbox_update(value).map(|input| (mailbox_id, input))
+                match ensure_mailbox_write(may_write).and_then(|_| {
+                    parse_uuid(&id).and_then(|mailbox_id| {
+                        parse_mailbox_update(value).map(|input| (mailbox_id, input))
+                    })
                 }) {
                     Ok((mailbox_id, input)) => {
                         let audit = AuditEntryInput {
@@ -251,7 +254,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if let Some(ids) = arguments.destroy {
             for id in ids {
-                match parse_uuid(&id) {
+                match ensure_mailbox_write(may_write).and_then(|_| parse_uuid(&id)) {
                     Ok(mailbox_id) => {
                         let audit = AuditEntryInput {
                             actor: account.email.clone(),
@@ -349,6 +352,18 @@ fn mailbox_to_value(
 
 pub(crate) fn mailbox_account_may_submit(access: &MailboxAccountAccess) -> bool {
     access.is_owned || access.may_send_as || access.may_send_on_behalf
+}
+
+pub(crate) fn mailbox_account_may_write(access: &MailboxAccountAccess) -> bool {
+    access.is_owned || access.may_write
+}
+
+pub(crate) fn ensure_mailbox_write(may_write: bool) -> Result<()> {
+    if may_write {
+        Ok(())
+    } else {
+        bail!("write access is not granted on this mailbox account")
+    }
 }
 
 fn parse_mailbox_create(value: Value) -> Result<MailboxCreateInput> {

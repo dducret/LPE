@@ -506,6 +506,15 @@ mod tests {
             }
         }
 
+        fn shared_mailbox_read_only_access(
+            may_send_as: bool,
+            may_send_on_behalf: bool,
+        ) -> MailboxAccountAccess {
+            let mut access = Self::shared_mailbox_access(may_send_as, may_send_on_behalf);
+            access.may_write = false;
+            access
+        }
+
         fn sender_identity() -> SenderIdentity {
             let account = Self::account();
             SenderIdentity {
@@ -1660,6 +1669,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn email_set_rejects_read_only_shared_mailbox_mutations() {
+        let read_only = FakeStore::shared_mailbox_read_only_access(true, false);
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            accessible_mailbox_accounts: vec![FakeStore::mailbox_access(), read_only],
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/set".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "create": {
+                                "k1": {
+                                    "from": [{"email": "shared@example.test"}],
+                                    "to": [{"email": "bob@example.test"}],
+                                    "subject": "No write",
+                                    "textBody": "Denied"
+                                }
+                            },
+                            "update": {
+                                FakeStore::draft_email().id.to_string(): {
+                                    "subject": "Still denied"
+                                }
+                            },
+                            "destroy": [FakeStore::draft_email().id.to_string()]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(store.saved_drafts.lock().unwrap().len(), 0);
+        assert_eq!(
+            response.method_responses[0].1["notCreated"]["k1"]["description"],
+            "write access is not granted on this mailbox account"
+        );
+        assert_eq!(
+            response.method_responses[0].1["notUpdated"][FakeStore::draft_email().id.to_string()]
+                ["description"],
+            "write access is not granted on this mailbox account"
+        );
+        assert_eq!(
+            response.method_responses[0].1["notDestroyed"][FakeStore::draft_email().id.to_string()]
+                ["description"],
+            "write access is not granted on this mailbox account"
+        );
+    }
+
+    #[tokio::test]
     async fn email_set_maps_seen_and_flagged_keywords_to_draft_state() {
         let store = FakeStore {
             session: Some(FakeStore::account()),
@@ -2699,6 +2771,98 @@ mod tests {
             response.method_responses[3].1["list"][0]["hardLimit"],
             Value::Number(100.into())
         );
+    }
+
+    #[tokio::test]
+    async fn mailbox_copy_and_import_reject_read_only_shared_mailbox_mutations() {
+        let read_only = FakeStore::shared_mailbox_read_only_access(true, false);
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            accessible_mailbox_accounts: vec![FakeStore::mailbox_access(), read_only],
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+        let shared_account_id = FakeStore::shared_account().account_id.to_string();
+        let draft_id = FakeStore::draft_email().id.to_string();
+        let draft_mailbox_id = FakeStore::draft_mailbox().id.to_string();
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Mailbox/set".to_string(),
+                            json!({
+                                "accountId": shared_account_id,
+                                "create": {"m1": {"name": "Archive"}},
+                                "update": {draft_mailbox_id: {"name": "Renamed"}},
+                                "destroy": [FakeStore::draft_mailbox().id.to_string()]
+                            }),
+                            "c1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Email/copy".to_string(),
+                            json!({
+                                "accountId": FakeStore::shared_account().account_id.to_string(),
+                                "fromAccountId": FakeStore::shared_account().account_id.to_string(),
+                                "create": {
+                                    "e1": {
+                                        "emailId": draft_id,
+                                        "mailboxIds": {FakeStore::draft_mailbox().id.to_string(): true}
+                                    }
+                                }
+                            }),
+                            "c2".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Email/import".to_string(),
+                            json!({
+                                "accountId": FakeStore::shared_account().account_id.to_string(),
+                                "emails": {
+                                    "i1": {
+                                        "blobId": "77777777-7777-7777-7777-777777777777",
+                                        "mailboxIds": {FakeStore::draft_mailbox().id.to_string(): true}
+                                    }
+                                }
+                            }),
+                            "c3".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["notCreated"]["m1"]["description"],
+            "write access is not granted on this mailbox account"
+        );
+        assert_eq!(
+            response.method_responses[0].1["notUpdated"][FakeStore::draft_mailbox().id.to_string()]
+                ["description"],
+            "write access is not granted on this mailbox account"
+        );
+        assert_eq!(
+            response.method_responses[0].1["notDestroyed"]
+                [FakeStore::draft_mailbox().id.to_string()]["description"],
+            "write access is not granted on this mailbox account"
+        );
+        assert_eq!(
+            response.method_responses[1].1["notCreated"]["e1"]["description"],
+            "write access is not granted on this mailbox account"
+        );
+        assert_eq!(
+            response.method_responses[2].1["notCreated"]["i1"]["description"],
+            "write access is not granted on this mailbox account"
+        );
+        assert_eq!(store.imported_emails.lock().unwrap().len(), 0);
     }
 
     #[tokio::test]
