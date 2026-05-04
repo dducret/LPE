@@ -45,12 +45,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         Ok(copied_blob) => {
                             copied.insert(
                                 blob_id,
-                                json!({
-                                    "accountId": target_account.account_id.to_string(),
-                                    "blobId": format!("upload:{}", copied_blob.id),
-                                    "type": copied_blob.media_type,
-                                    "size": copied_blob.octet_size,
-                                }),
+                                Value::String(format!("upload:{}", copied_blob.id)),
                             );
                         }
                         Err(error) => {

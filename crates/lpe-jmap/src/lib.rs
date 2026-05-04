@@ -3885,18 +3885,14 @@ mod tests {
             .unwrap();
 
         let copied = &response.method_responses[0].1["copied"];
-        assert!(
-            copied["upload:88888888-8888-8888-8888-888888888888"]["blobId"]
-                .as_str()
-                .unwrap()
-                .starts_with("upload:")
-        );
-        assert!(
-            copied["message:cccccccc-cccc-cccc-cccc-cccccccccccc"]["blobId"]
-                .as_str()
-                .unwrap()
-                .starts_with("upload:")
-        );
+        assert!(copied["upload:88888888-8888-8888-8888-888888888888"]
+            .as_str()
+            .unwrap()
+            .starts_with("upload:"));
+        assert!(copied["message:cccccccc-cccc-cccc-cccc-cccccccccccc"]
+            .as_str()
+            .unwrap()
+            .starts_with("upload:"));
         assert_eq!(
             response.method_responses[0].1["notCopied"]["missing"]["description"],
             "blob not found"
