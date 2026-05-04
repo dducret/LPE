@@ -1523,6 +1523,11 @@ mod tests {
             [&FakeStore::shared_account().account_id.to_string()]
             .account_capabilities;
         assert!(shared_capabilities.contains_key(JMAP_MAIL_CAPABILITY));
+        assert!(shared_capabilities.contains_key(JMAP_BLOB_CAPABILITY));
+        assert_eq!(
+            shared_capabilities[JMAP_BLOB_CAPABILITY]["maxSizeBlobSet"],
+            MAX_SIZE_UPLOAD
+        );
         assert!(shared_capabilities.contains_key(JMAP_SUBMISSION_CAPABILITY));
         assert!(!shared_capabilities.contains_key(JMAP_CONTACTS_CAPABILITY));
         assert!(!shared_capabilities.contains_key(JMAP_CALENDARS_CAPABILITY));
@@ -1597,6 +1602,11 @@ mod tests {
             .account_capabilities;
 
         assert!(shared_capabilities.contains_key(JMAP_MAIL_CAPABILITY));
+        assert!(shared_capabilities.contains_key(JMAP_BLOB_CAPABILITY));
+        assert_eq!(
+            shared_capabilities[JMAP_BLOB_CAPABILITY]["maxSizeBlobSet"],
+            MAX_SIZE_UPLOAD
+        );
         assert!(!shared_capabilities.contains_key(JMAP_SUBMISSION_CAPABILITY));
         assert!(!shared_capabilities.contains_key(JMAP_CONTACTS_CAPABILITY));
         assert!(!shared_capabilities.contains_key(JMAP_CALENDARS_CAPABILITY));
@@ -1633,6 +1643,13 @@ mod tests {
         assert!(shared_account
             .account_capabilities
             .contains_key(JMAP_MAIL_CAPABILITY));
+        assert!(shared_account
+            .account_capabilities
+            .contains_key(JMAP_BLOB_CAPABILITY));
+        assert_eq!(
+            shared_account.account_capabilities[JMAP_BLOB_CAPABILITY]["maxSizeBlobSet"],
+            0
+        );
         assert!(!shared_account
             .account_capabilities
             .contains_key(JMAP_SUBMISSION_CAPABILITY));
@@ -4061,6 +4078,102 @@ mod tests {
         let uploads = store.uploads.lock().unwrap();
         assert!(uploads.iter().any(|blob| blob.blob_bytes == b"hello world"));
         assert!(uploads.iter().any(|blob| blob.blob_bytes == b"world"));
+    }
+
+    #[tokio::test]
+    async fn blob_create_paths_reject_read_only_shared_accounts() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_read_only_access(false, false),
+            ],
+            uploads: Arc::new(Mutex::new(vec![JmapUploadBlob {
+                id: Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap(),
+                account_id: FakeStore::account().account_id,
+                media_type: "text/plain".to_string(),
+                octet_size: 5,
+                blob_bytes: b"hello".to_vec(),
+            }])),
+            ..Default::default()
+        };
+        let service =
+            JmapService::new_with_validator(store, validator_ok("text/plain", "text", "txt", 0.99));
+
+        let upload_response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_BLOB_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Blob/upload".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "create": {
+                                "b1": {
+                                    "type": "text/plain",
+                                    "data": [{"data:asText": "blocked"}]
+                                }
+                            }
+                        }),
+                        "u1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            upload_response.method_responses[0].1["type"],
+            "invalidArguments"
+        );
+        assert_eq!(
+            upload_response.method_responses[0].1["description"],
+            "accountId is read-only"
+        );
+
+        let copy_response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_BLOB_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Blob/copy".to_string(),
+                        json!({
+                            "fromAccountId": FakeStore::account().account_id.to_string(),
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "blobIds": ["upload:99999999-9999-9999-9999-999999999999"]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            copy_response.method_responses[0].1["type"],
+            "invalidArguments"
+        );
+        assert_eq!(
+            copy_response.method_responses[0].1["description"],
+            "accountId is read-only"
+        );
+
+        let http_upload = service
+            .handle_upload(
+                Some("Bearer token"),
+                &FakeStore::shared_account().account_id.to_string(),
+                "text/plain",
+                b"blocked",
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(http_upload.to_string(), "accountId is read-only");
     }
 
     #[tokio::test]

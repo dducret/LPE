@@ -79,6 +79,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let account_access = self
             .requested_account_access(account, arguments.account_id.as_deref())
             .await?;
+        ensure_blob_create_allowed(&account_access)?;
         let mut created = Map::new();
         let mut not_created = Map::new();
 
@@ -243,6 +244,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let source_account = self
             .requested_account_access(account, Some(&arguments.from_account_id))
             .await?;
+        ensure_blob_create_allowed(&target_account)?;
         let mut copied = Map::new();
         let mut not_copied = Map::new();
 
@@ -366,6 +368,14 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         );
         let blob = self.resolve_download_blob(account_access, &blob_id).await?;
         slice_blob_range(&blob.blob_bytes, source.offset.unwrap_or(0), source.length)
+    }
+}
+
+fn ensure_blob_create_allowed(access: &MailboxAccountAccess) -> Result<()> {
+    if access.is_owned || access.may_write {
+        Ok(())
+    } else {
+        bail!("accountId is read-only")
     }
 }
 

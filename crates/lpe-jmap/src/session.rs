@@ -198,7 +198,7 @@ fn session_account_capabilities(
     if access.is_owned {
         return capabilities
             .iter()
-            .map(|(name, value)| (name.clone(), account_capability_value(name, value)))
+            .map(|(name, value)| (name.clone(), account_capability_value(access, name, value)))
             .collect();
     }
 
@@ -212,7 +212,7 @@ fn session_account_capabilities(
         if let Some(value) = capabilities.get(capability) {
             account_capabilities.insert(
                 capability.to_string(),
-                account_capability_value(capability, value),
+                account_capability_value(access, capability, value),
             );
         }
     }
@@ -220,17 +220,21 @@ fn session_account_capabilities(
         if let Some(value) = capabilities.get(JMAP_SUBMISSION_CAPABILITY) {
             account_capabilities.insert(
                 JMAP_SUBMISSION_CAPABILITY.to_string(),
-                account_capability_value(JMAP_SUBMISSION_CAPABILITY, value),
+                account_capability_value(access, JMAP_SUBMISSION_CAPABILITY, value),
             );
         }
     }
     account_capabilities
 }
 
-fn account_capability_value(capability: &str, global_value: &Value) -> Value {
+fn account_capability_value(
+    access: &MailboxAccountAccess,
+    capability: &str,
+    global_value: &Value,
+) -> Value {
     if capability == JMAP_BLOB_CAPABILITY {
         json!({
-            "maxSizeBlobSet": MAX_SIZE_UPLOAD,
+            "maxSizeBlobSet": if access.is_owned || access.may_write { MAX_SIZE_UPLOAD } else { 0 },
             "maxDataSources": MAX_BLOB_DATA_SOURCES,
             "supportedTypeNames": ["Mailbox", "Thread", "Email"],
             "supportedDigestAlgorithms": [],

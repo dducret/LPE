@@ -95,6 +95,7 @@ Additional supported `JMAP` routes:
 - message `blobId` values now expose the canonical `mime_blob_ref` shape when one already exists, including `upload:{uuid}` for imported MIME uploads, and fall back to stable `message:{emailId}` identifiers for canonical message downloads
 - `GET /api/jmap/download/{accountId}/{blobId}/{name}` can return temporary upload blobs and reconstructed `message/rfc822` downloads for canonical message blob IDs; delegated/shared mailbox downloads never include protected `Bcc` metadata
 - `Blob/copy` copies readable upload or canonical message blobs into the destination account's temporary upload blob store; it does not introduce a separate durable blob store
+- temporary blob creation through HTTP upload, `Blob/upload`, and `Blob/copy` destinations requires canonical write access to the target account; read-only shared accounts can still read accessible blobs, but advertise `maxSizeBlobSet: 0`
 - `Blob/get` returns requested byte ranges from readable temporary upload blobs or reconstructed canonical message blobs; non-owner delegated/shared mailbox reads use the same Bcc-safe reconstruction path as HTTP download
 - `Blob/lookup` is limited to canonical mail references for `Mailbox`, `Thread`, and `Email`; it never exposes inaccessible blobs and does not inspect unrelated collaboration stores or introduce a separate blob-reference index
 - the session keeps `eventSourceUrl` empty; this MVP uses `JMAP` over WebSocket rather than the older event-source transport

@@ -521,6 +521,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .requested_account_access(&account, Some(account_id))
             .await?;
         let requested_account_id = requested_account.account_id;
+        if !requested_account.is_owned && !requested_account.may_write {
+            bail!("accountId is read-only");
+        }
         if body.len() as u64 > MAX_SIZE_UPLOAD {
             bail!("JMAP upload exceeds maxSizeUpload");
         }
