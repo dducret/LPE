@@ -18,6 +18,7 @@ pub enum IngressContext {
     PstUpload,
     PstProcessing,
     AttachmentParsing,
+    ExchangeAttachment,
     ActiveSyncMimeSubmission,
     SmtpClientSubmission,
     LpeCtInboundSmtp,

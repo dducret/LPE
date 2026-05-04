@@ -112,6 +112,7 @@ The first `EWS` slice supports the read/sync surface needed to begin mailbox, co
 - `MoveItem` for canonical `Message` ids and canonical mailbox target folders
 - `CopyItem` for canonical `Message` ids and canonical mailbox target folders
 - `CreateFolder` and `DeleteFolder` for canonical custom mailbox folders
+- `GetAttachment`, `CreateAttachment`, and `DeleteAttachment` for canonical message file attachments
 
 The adapter currently exposes:
 
@@ -138,7 +139,7 @@ Folder responses include EWS `TotalCount` and `ChildFolderCount` properties so s
 
 `CreateFolder` creates canonical custom mailbox folders, primarily for strict client connectivity tests that need temporary sync folders. `FindFolder` and `SyncFolderHierarchy` expose those custom mailbox folders. `DeleteFolder` removes those custom mailbox folders through the canonical JMAP mailbox deletion path, which rejects system folders and non-empty folders.
 
-Mailbox folders, including system folders such as `Inbox`, `Drafts`, `Sent`, and `Deleted`, are exposed through canonical JMAP mailboxes. `FindItem`, `GetItem`, and `SyncFolderItems` return canonical messages from the requested mailbox. When a message has canonical attachments, `GetItem` includes EWS `FileAttachment` references backed by canonical attachment ids, `GetAttachment` returns the stored blob content for those references, and `DeleteAttachment` removes matching canonical attachment rows while updating message attachment state and search metadata. Client-provided attachment creation through `CreateAttachment`, `CreateItem`, or `UpdateItem` remains out of scope until those files are routed through the documented `Magika` validation and attachment ingestion path. For temporary custom mailbox folders, `CreateItem SaveOnly` can import a `Message` into the requested canonical custom mailbox folder, so strict EWS connectivity tests can create, sync, read, delete, and resync items inside a temporary folder.
+Mailbox folders, including system folders such as `Inbox`, `Drafts`, `Sent`, and `Deleted`, are exposed through canonical JMAP mailboxes. `FindItem`, `GetItem`, and `SyncFolderItems` return canonical messages from the requested mailbox. When a message has canonical attachments, `GetItem` includes EWS `FileAttachment` references backed by canonical attachment ids, `GetAttachment` returns the stored blob content for those references, `CreateAttachment` validates client-provided file attachments with `Magika` before routing them through canonical attachment ingestion, and `DeleteAttachment` removes matching canonical attachment rows while updating message attachment state and search metadata. For temporary custom mailbox folders, `CreateItem SaveOnly` can import a `Message` into the requested canonical custom mailbox folder, so strict EWS connectivity tests can create, sync, read, delete, and resync items inside a temporary folder.
 
 When a client requests unsupported distinguished folders such as `tasks` through this EWS adapter, the response remains an EWS-shaped `GetFolder` error with `ErrorFolderNotFound` instead of an HTTP transport failure. This keeps clients on the EWS negotiation path without advertising unsupported task synchronization through EWS.
 
@@ -160,7 +161,7 @@ Request element names ending in `Request`, such as `GetUserOofSettingsRequest`, 
 
 - `SyncFolderItems` uses compact server `SyncState` values over canonical item ids and deterministic change keys for contacts and calendar events; those keys include canonical update markers, but the adapter does not yet maintain a full EWS incremental change ledger with tombstone history beyond the previous client token
 - `UpdateItem` message support is limited to read-state and flag mutation; attachment mutations, tasks, and meeting workflow updates are not implemented yet
-- EWS attachment support is limited to `GetItem` attachment references, `GetAttachment` content retrieval, and `DeleteAttachment` row removal for already-ingested canonical attachments; client-provided attachment create flows are not implemented yet
+- EWS attachment support is limited to file attachments over `GetItem`, `GetAttachment`, `CreateAttachment`, and `DeleteAttachment`; item attachments, inline attachment metadata, attachment creation through `CreateItem` / `UpdateItem`, and rich MIME export are not implemented yet
 - tasks, free/busy, recurrence expansion, alarms, meeting scheduling, extended properties, and GAL are not implemented through `EWS` yet
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
 - enabled `EWS` POX autodiscover publishes the configured EWS URL through a `WEB` protocol block with `ASUrl` for EWS-aware clients; top-level `EXCH` and `EXPR` provider sections remain reserved for explicit legacy Exchange autodiscover interoperability-test mode

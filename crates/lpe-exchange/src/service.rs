@@ -11,12 +11,16 @@ use axum::{
     Router,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use lpe_magika::{
+    Detector, ExpectedKind, IngressContext, PolicyDecision, SystemDetector, ValidationRequest,
+    Validator,
+};
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
-    AuditEntryInput, CollaborationCollection, JmapEmail, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, Storage, SubmitMessageInput, SubmittedRecipientInput,
-    UpsertClientContactInput, UpsertClientEventInput,
+    AttachmentUploadInput, AuditEntryInput, CollaborationCollection, JmapEmail,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, Storage, SubmitMessageInput,
+    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
 };
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -66,13 +70,24 @@ pub fn router() -> Router<Storage> {
 }
 
 #[derive(Clone)]
-pub(crate) struct ExchangeService<S> {
+pub(crate) struct ExchangeService<S, V = SystemDetector> {
     store: S,
+    validator: Validator<V>,
 }
 
-impl<S> ExchangeService<S> {
+impl<S> ExchangeService<S, SystemDetector> {
     pub(crate) fn new(store: S) -> Self {
-        Self { store }
+        Self {
+            store,
+            validator: Validator::from_env(),
+        }
+    }
+}
+
+#[cfg(test)]
+impl<S, V> ExchangeService<S, V> {
+    pub(crate) fn new_with_validator(store: S, validator: Validator<V>) -> Self {
+        Self { store, validator }
     }
 }
 
@@ -133,7 +148,7 @@ async fn mapi_post_handler(
     }
 }
 
-impl<S: ExchangeStore> ExchangeService<S> {
+impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
     pub(crate) async fn handle(&self, headers: &HeaderMap, body: &[u8]) -> Result<Response> {
         let principal = authenticate_account(&self.store, None, headers, "ews").await?;
         let body = decode_ews_body(headers, body)?;
@@ -166,6 +181,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
             "CreateFolder" => self.create_folder(&principal, &body).await?,
             "DeleteFolder" => self.delete_folder(&principal, &body).await?,
             "GetAttachment" => self.get_attachment(&principal, &body).await?,
+            "CreateAttachment" => self.create_attachment(&principal, &body).await?,
             "DeleteAttachment" => self.delete_attachment(&principal, &body).await?,
             "GetUserOofSettings" => unsupported_operation_response("GetUserOofSettings"),
             "GetRoomLists" => unsupported_operation_response("GetRoomLists"),
@@ -564,6 +580,109 @@ impl<S: ExchangeStore> ExchangeService<S> {
         }
 
         Ok(get_attachment_success_response(attachments))
+    }
+
+    async fn create_attachment(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let ids = requested_item_ids(request);
+        let message_ids = ids
+            .iter()
+            .filter_map(|id| id.strip_prefix("message:"))
+            .map(Uuid::parse_str)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        if ids.len() != 1 || message_ids.len() != 1 {
+            return Ok(operation_error_response(
+                "CreateAttachment",
+                "ErrorInvalidOperation",
+                "CreateAttachment currently supports exactly one canonical message parent id.",
+            ));
+        }
+        if element_content(request, "ItemAttachment").is_some() {
+            return Ok(operation_error_response(
+                "CreateAttachment",
+                "ErrorInvalidOperation",
+                "CreateAttachment currently supports only FileAttachment payloads.",
+            ));
+        }
+
+        let file_attachments = element_contents(request, "FileAttachment");
+        if file_attachments.is_empty() {
+            return Ok(operation_error_response(
+                "CreateAttachment",
+                "ErrorInvalidOperation",
+                "CreateAttachment requires at least one FileAttachment.",
+            ));
+        }
+
+        let message_id = message_ids[0];
+        let mut attachments = String::new();
+        let mut root_item = String::new();
+        for file_attachment in file_attachments {
+            let mut attachment = match parse_file_attachment_upload(file_attachment) {
+                Ok(attachment) => attachment,
+                Err(error) => {
+                    return Ok(operation_error_response(
+                        "CreateAttachment",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    ));
+                }
+            };
+
+            let declared_mime = element_text(file_attachment, "ContentType")
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            let outcome = self.validator.validate_bytes(
+                ValidationRequest {
+                    ingress_context: IngressContext::ExchangeAttachment,
+                    declared_mime: declared_mime.clone(),
+                    filename: Some(attachment.file_name.clone()),
+                    expected_kind: expected_attachment_kind(
+                        &attachment.media_type,
+                        &attachment.file_name,
+                    ),
+                },
+                &attachment.blob_bytes,
+            )?;
+            if outcome.policy_decision != PolicyDecision::Accept {
+                return Ok(operation_error_response(
+                    "CreateAttachment",
+                    "ErrorInvalidOperation",
+                    &outcome.reason,
+                ));
+            }
+            if declared_mime.is_none() && !outcome.detected_mime.trim().is_empty() {
+                attachment.media_type = outcome.detected_mime.clone();
+            }
+
+            let Some((email, stored_attachment)) = self
+                .store
+                .add_message_attachment(
+                    principal.account_id,
+                    message_id,
+                    attachment,
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "ews-create-attachment".to_string(),
+                        subject: format!("message:{message_id}"),
+                    },
+                )
+                .await?
+            else {
+                return Ok(operation_error_response(
+                    "CreateAttachment",
+                    "ErrorItemNotFound",
+                    "The requested parent message was not found or is not exposed by EWS.",
+                ));
+            };
+            root_item = root_item_id_xml(&email);
+            attachments.push_str(&file_attachment_reference_xml(&stored_attachment));
+        }
+
+        Ok(create_attachment_success_response(attachments, root_item))
     }
 
     async fn delete_attachment(
@@ -1939,6 +2058,48 @@ fn parse_recipients(message: &str, collection_name: &str) -> Vec<SubmittedRecipi
         .unwrap_or_default()
 }
 
+fn parse_file_attachment_upload(value: &str) -> Result<AttachmentUploadInput> {
+    let file_name = element_text(value, "Name")
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| anyhow!("FileAttachment Name is required"))?;
+    let media_type = element_text(value, "ContentType")
+        .map(|content_type| content_type.trim().to_string())
+        .filter(|content_type| !content_type.is_empty())
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    let content = element_text(value, "Content")
+        .map(|content| content.trim().to_string())
+        .filter(|content| !content.is_empty())
+        .ok_or_else(|| anyhow!("FileAttachment Content is required"))?;
+    let blob_bytes = BASE64_STANDARD
+        .decode(content.as_bytes())
+        .map_err(|_| anyhow!("FileAttachment Content must be valid base64"))?;
+
+    Ok(AttachmentUploadInput {
+        file_name,
+        media_type,
+        blob_bytes,
+    })
+}
+
+fn expected_attachment_kind(media_type: &str, file_name: &str) -> ExpectedKind {
+    let media_type = media_type.trim().to_ascii_lowercase();
+    let file_name = file_name.trim().to_ascii_lowercase();
+    if matches!(
+        media_type.as_str(),
+        "application/pdf"
+            | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            | "application/vnd.oasis.opendocument.text"
+    ) || file_name.ends_with(".pdf")
+        || file_name.ends_with(".docx")
+        || file_name.ends_with(".odt")
+    {
+        ExpectedKind::SupportedAttachmentText
+    } else {
+        ExpectedKind::Any
+    }
+}
+
 fn parse_first_mailbox(value: &str) -> Option<ParsedMailbox> {
     element_contents(value, "Mailbox")
         .into_iter()
@@ -2743,6 +2904,24 @@ fn get_attachment_success_response(attachments: String) -> String {
             "</m:GetAttachmentResponse>"
         ),
         attachments = attachments,
+    )
+}
+
+fn create_attachment_success_response(attachments: String, root_item: String) -> String {
+    format!(
+        concat!(
+            "<m:CreateAttachmentResponse>",
+            "<m:ResponseMessages>",
+            "<m:CreateAttachmentResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Attachments>{attachments}</m:Attachments>",
+            "{root_item}",
+            "</m:CreateAttachmentResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:CreateAttachmentResponse>"
+        ),
+        attachments = attachments,
+        root_item = root_item,
     )
 }
 

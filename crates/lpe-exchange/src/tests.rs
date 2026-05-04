@@ -1,12 +1,14 @@
 use axum::body::to_bytes;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, ActiveSyncAttachment,
-    ActiveSyncAttachmentContent, AuthenticatedAccount, CollaborationCollection,
-    CollaborationRights, JmapEmail, JmapEmailAddress, JmapEmailQuery, JmapImportedEmailInput,
-    JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage, StoredAccountAppPassword,
-    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
+    ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount,
+    CollaborationCollection, CollaborationRights, JmapEmail, JmapEmailAddress, JmapEmailQuery,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
+    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
+    UpsertClientEventInput,
 };
 use std::{
     collections::HashMap,
@@ -36,6 +38,7 @@ struct FakeStore {
     emails: Arc<Mutex<Vec<JmapEmail>>>,
     attachments: Arc<Mutex<HashMap<Uuid, Vec<ActiveSyncAttachment>>>>,
     attachment_contents: Arc<Mutex<HashMap<String, ActiveSyncAttachmentContent>>>,
+    created_attachments: Arc<Mutex<Vec<AttachmentUploadInput>>>,
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
     deleted_emails: Arc<Mutex<Vec<Uuid>>>,
     moved_emails: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
@@ -43,6 +46,45 @@ struct FakeStore {
     mailboxes: Arc<Mutex<Vec<JmapMailbox>>>,
     created_mailboxes: Arc<Mutex<Vec<JmapMailboxCreateInput>>>,
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
+}
+
+#[derive(Clone)]
+struct FakeDetector {
+    detection: MagikaDetection,
+}
+
+impl FakeDetector {
+    fn pdf() -> Self {
+        Self {
+            detection: MagikaDetection {
+                label: "pdf".to_string(),
+                mime_type: "application/pdf".to_string(),
+                description: "PDF document".to_string(),
+                group: "document".to_string(),
+                extensions: vec!["pdf".to_string()],
+                score: Some(0.99),
+            },
+        }
+    }
+
+    fn executable() -> Self {
+        Self {
+            detection: MagikaDetection {
+                label: "pebin".to_string(),
+                mime_type: "application/vnd.microsoft.portable-executable".to_string(),
+                description: "Windows executable".to_string(),
+                group: "executable".to_string(),
+                extensions: vec!["exe".to_string()],
+                score: Some(0.99),
+            },
+        }
+    }
+}
+
+impl Detector for FakeDetector {
+    fn detect(&self, _source: DetectionSource<'_>) -> anyhow::Result<MagikaDetection> {
+        Ok(self.detection.clone())
+    }
 }
 
 impl FakeStore {
@@ -543,6 +585,54 @@ impl ExchangeStore for FakeStore {
             .get(file_reference)
             .cloned();
         Box::pin(async move { Ok(content) })
+    }
+
+    fn add_message_attachment<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        attachment: AttachmentUploadInput,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, Option<(JmapEmail, ActiveSyncAttachment)>> {
+        let mut emails = self.emails.lock().unwrap();
+        let Some(email) = emails.iter_mut().find(|email| email.id == message_id) else {
+            return Box::pin(async move { Ok(None) });
+        };
+        email.has_attachments = true;
+        let email = email.clone();
+        drop(emails);
+
+        self.created_attachments
+            .lock()
+            .unwrap()
+            .push(attachment.clone());
+        let attachment_id = Uuid::parse_str("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd").unwrap();
+        let file_reference = format!("attachment:{message_id}:{attachment_id}");
+        let stored_attachment = ActiveSyncAttachment {
+            id: attachment_id,
+            message_id,
+            file_name: attachment.file_name.clone(),
+            media_type: attachment.media_type.clone(),
+            size_octets: attachment.blob_bytes.len() as u64,
+            file_reference: file_reference.clone(),
+        };
+        self.attachments
+            .lock()
+            .unwrap()
+            .entry(message_id)
+            .or_default()
+            .push(stored_attachment.clone());
+        self.attachment_contents.lock().unwrap().insert(
+            file_reference.clone(),
+            ActiveSyncAttachmentContent {
+                file_reference,
+                file_name: attachment.file_name,
+                media_type: attachment.media_type,
+                blob_bytes: attachment.blob_bytes,
+            },
+        );
+
+        Box::pin(async move { Ok(Some((email, stored_attachment))) })
     }
 
     fn delete_message_attachment<'a>(
@@ -3923,6 +4013,104 @@ async fn get_attachment_rejects_unknown_attachment_id() {
     assert!(body.contains("<m:GetAttachmentResponse>"));
     assert!(body.contains("ResponseClass=\"Error\""));
     assert!(body.contains("<m:ResponseCode>ErrorAttachmentNotFound</m:ResponseCode>"));
+}
+
+#[tokio::test]
+async fn create_attachment_validates_and_adds_canonical_attachment() {
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "99999999-9999-9999-9999-999999999999",
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA folder item",
+        )])),
+        ..Default::default()
+    };
+    let created_attachments = store.created_attachments.clone();
+    let attachments = store.attachments.clone();
+    let emails = store.emails.clone();
+    let service =
+        ExchangeService::new_with_validator(store, Validator::new(FakeDetector::pdf(), 0.8));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:CreateAttachment><m:ParentItemId><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ParentItemId><m:Attachments><t:FileAttachment><t:Name>brief.pdf</t:Name><t:ContentType>application/pdf</t:ContentType><t:Content>aGVsbG8=</t:Content></t:FileAttachment></m:Attachments></m:CreateAttachment></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateAttachmentResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:AttachmentId Id=\"attachment:99999999-9999-9999-9999-999999999999:cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd\"/>"));
+    assert!(body.contains("RootItemId=\"message:99999999-9999-9999-9999-999999999999\""));
+    assert_eq!(created_attachments.lock().unwrap().len(), 1);
+    let attachment = &created_attachments.lock().unwrap()[0];
+    assert_eq!(attachment.file_name, "brief.pdf");
+    assert_eq!(attachment.media_type, "application/pdf");
+    assert_eq!(attachment.blob_bytes, b"hello");
+    assert_eq!(
+        attachments.lock().unwrap().get(&message_id).unwrap().len(),
+        1
+    );
+    assert!(emails.lock().unwrap()[0].has_attachments);
+}
+
+#[tokio::test]
+async fn create_attachment_rejects_magika_blocked_payload() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "99999999-9999-9999-9999-999999999999",
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA folder item",
+        )])),
+        ..Default::default()
+    };
+    let created_attachments = store.created_attachments.clone();
+    let service =
+        ExchangeService::new_with_validator(store, Validator::new(FakeDetector::executable(), 0.8));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:CreateAttachment><m:ParentItemId><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ParentItemId><m:Attachments><t:FileAttachment><t:Name>brief.pdf</t:Name><t:ContentType>application/pdf</t:ContentType><t:Content>aGVsbG8=</t:Content></t:FileAttachment></m:Attachments></m:CreateAttachment></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateAttachmentResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(created_attachments.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn create_attachment_rejects_unknown_parent_message() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service =
+        ExchangeService::new_with_validator(store, Validator::new(FakeDetector::pdf(), 0.8));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:CreateAttachment><m:ParentItemId><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ParentItemId><m:Attachments><t:FileAttachment><t:Name>brief.pdf</t:Name><t:ContentType>application/pdf</t:ContentType><t:Content>aGVsbG8=</t:Content></t:FileAttachment></m:Attachments></m:CreateAttachment></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateAttachmentResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
 }
 
 #[tokio::test]

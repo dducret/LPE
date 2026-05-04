@@ -506,7 +506,8 @@ impl Storage {
         }
 
         self.ingest_message_attachments_in_tx(tx, tenant_id, account_id, message_id, attachments)
-            .await
+            .await?;
+        Ok(())
     }
 
     async fn ensure_named_mailbox(

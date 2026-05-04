@@ -134,6 +134,7 @@ fn decide_policy(
         IngressContext::JmapUpload
         | IngressContext::JmapEmailImport
         | IngressContext::ImapAppend
+        | IngressContext::ExchangeAttachment
         | IngressContext::ActiveSyncMimeSubmission
         | IngressContext::SmtpClientSubmission => {
             if mismatch {

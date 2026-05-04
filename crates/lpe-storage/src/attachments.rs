@@ -27,15 +27,17 @@ impl Storage {
         account_id: Uuid,
         message_id: Uuid,
         attachments: &[AttachmentUploadInput],
-    ) -> Result<()> {
+    ) -> Result<Vec<Uuid>> {
         if attachments.is_empty() {
-            return Ok(());
+            return Ok(Vec::new());
         }
 
         let domain_name = self.load_account_domain_in_tx(tx, account_id).await?;
         let mut search_fragments = Vec::new();
+        let mut attachment_ids = Vec::with_capacity(attachments.len());
 
         for attachment in attachments {
+            let attachment_id = Uuid::new_v4();
             let blob = self
                 .store_attachment_blob_in_tx(
                     tx,
@@ -65,7 +67,7 @@ impl Storage {
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, to_tsvector('simple', COALESCE($8, '')), $9)
                 "#,
             )
-            .bind(Uuid::new_v4())
+            .bind(attachment_id)
             .bind(tenant_id)
             .bind(message_id)
             .bind(attachment.file_name.trim())
@@ -76,6 +78,7 @@ impl Storage {
             .bind(blob.id)
             .execute(&mut **tx)
             .await?;
+            attachment_ids.push(attachment_id);
         }
 
         sqlx::query(
@@ -108,7 +111,7 @@ impl Storage {
             .await?;
         }
 
-        Ok(())
+        Ok(attachment_ids)
     }
 
     async fn store_attachment_blob_in_tx(

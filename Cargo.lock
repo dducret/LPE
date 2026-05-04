@@ -1491,6 +1491,7 @@ dependencies = [
  "anyhow",
  "axum",
  "base64",
+ "lpe-magika",
  "lpe-mail-auth",
  "lpe-storage",
  "sqlx",

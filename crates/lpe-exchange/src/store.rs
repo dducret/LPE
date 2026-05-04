@@ -1,9 +1,9 @@
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
-    AuditEntryInput, CollaborationCollection, JmapEmail, JmapEmailQuery, JmapImportedEmailInput,
-    JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage, Storage, SubmitMessageInput,
-    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
+    AttachmentUploadInput, AuditEntryInput, CollaborationCollection, JmapEmail, JmapEmailQuery,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage, Storage,
+    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -136,6 +136,14 @@ pub trait ExchangeStore: AccountAuthStore {
         account_id: Uuid,
         file_reference: &'a str,
     ) -> StoreFuture<'a, Option<ActiveSyncAttachmentContent>>;
+
+    fn add_message_attachment<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        attachment: AttachmentUploadInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Option<(JmapEmail, ActiveSyncAttachment)>>;
 
     fn delete_message_attachment<'a>(
         &'a self,
@@ -461,6 +469,19 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, Option<ActiveSyncAttachmentContent>> {
         Box::pin(async move {
             self.fetch_activesync_attachment_content(account_id, file_reference)
+                .await
+        })
+    }
+
+    fn add_message_attachment<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        attachment: AttachmentUploadInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Option<(JmapEmail, ActiveSyncAttachment)>> {
+        Box::pin(async move {
+            self.add_message_attachment(account_id, message_id, attachment, audit)
                 .await
         })
     }

@@ -1820,6 +1820,119 @@ impl Storage {
         }))
     }
 
+    pub async fn add_message_attachment(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        attachment: AttachmentUploadInput,
+        audit: AuditEntryInput,
+    ) -> Result<Option<(JmapEmail, ActiveSyncAttachment)>> {
+        let file_name = attachment.file_name.trim();
+        if file_name.is_empty() {
+            bail!("attachment file name is required");
+        }
+        let media_type = attachment.media_type.trim();
+        if media_type.is_empty() {
+            bail!("attachment media type is required");
+        }
+
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let exists = sqlx::query(
+            r#"
+            SELECT 1
+            FROM messages
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if exists.is_none() {
+            tx.commit().await?;
+            return Ok(None);
+        }
+
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+        let attachment_ids = self
+            .ingest_message_attachments_in_tx(
+                &mut tx,
+                &tenant_id,
+                account_id,
+                message_id,
+                &[attachment],
+            )
+            .await?;
+        let Some(attachment_id) = attachment_ids.into_iter().next() else {
+            tx.commit().await?;
+            return Ok(None);
+        };
+
+        sqlx::query(
+            r#"
+            UPDATE messages
+            SET imap_modseq = $3
+            WHERE tenant_id = $1 AND account_id = $4 AND id = $2
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(message_id)
+        .bind(modseq)
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            UPDATE message_bodies
+            SET search_vector = to_tsvector(
+                'simple',
+                concat_ws(
+                    ' ',
+                    body_text,
+                    participants_normalized,
+                    COALESCE((
+                        SELECT string_agg(extracted_text, ' ')
+                        FROM attachments
+                        WHERE tenant_id = $1
+                          AND message_id = $2
+                          AND extracted_text IS NOT NULL
+                    ), '')
+                )
+            )
+            WHERE message_id = $2
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(message_id)
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
+
+        let email = self
+            .fetch_jmap_emails(account_id, &[message_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("message not found after attachment creation"))?;
+        let attachment = self
+            .fetch_activesync_message_attachments(account_id, message_id)
+            .await?
+            .into_iter()
+            .find(|attachment| attachment.id == attachment_id)
+            .ok_or_else(|| anyhow!("attachment not found after creation"))?;
+
+        Ok(Some((email, attachment)))
+    }
+
     pub async fn delete_message_attachment(
         &self,
         account_id: Uuid,
