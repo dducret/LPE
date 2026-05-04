@@ -53,8 +53,11 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
   idle window until `DONE`
 - `CONDSTORE` mailbox sync primitives: `HIGHESTMODSEQ`, per-message `MODSEQ`,
   `FETCH ... (CHANGEDSINCE n)`, and conditional `STORE` with `UNCHANGEDSINCE`
-- `COPY` and `UID COPY` into `Inbox`, trash, or custom mailboxes
-- `MOVE` and `UID MOVE` between `Inbox`, trash, and custom user mailboxes
+- `COPY` and `UID COPY` into `Inbox`, trash, or custom mailboxes, with
+  `Drafts` allowed as a source only when the target is trash for client delete
+  workflows
+- `MOVE` and `UID MOVE` between `Inbox`, trash, and custom user mailboxes, with
+  `Drafts` to trash supported for Thunderbird-style draft deletion
 - richer `SEARCH`
 - `UID FETCH`, `UID STORE`, and `UID SEARCH`
 - `UID EXPUNGE` for messages already marked `\Deleted`
@@ -105,8 +108,11 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - mailbox management accepts slash-delimited Outlook folder names, but true parent/child hierarchy metadata is not implemented yet
 - `FETCH BODYSTRUCTURE` and MIME section rendering are compatibility projections over the canonical message text and sanitized HTML fields; attachment MIME reserialization remains deferred
 - `RFC822.SIZE` reports the byte length of the RFC822 projection returned by `BODY[]`, not the original raw ingest size, so size metadata stays consistent with what IMAP clients fetch
-- `COPY` intentionally rejects `Sent` and `Drafts` as source or target mailboxes so the adapter cannot become an alternate sent-message or draft workflow
-- `MOVE` uses the same guardrail and only supports `Inbox`, trash, and custom user mailboxes
+- `COPY` intentionally rejects `Sent` as a source or target and `Drafts` as a
+  target so the adapter cannot become an alternate sent-message or draft
+  workflow; `Drafts` to trash is allowed only for client delete workflows
+- `MOVE` uses the same guardrail, with the same `Drafts` to trash exception for
+  client delete workflows
 - `SEARCH` now supports optional `RETURN (...)`, optional `CHARSET`, `ALL`,
   `SEEN`, `UNSEEN`, `FLAGGED`, `UNFLAGGED`, `DELETED`, `UNDELETED`,
   `ANSWERED`, `UNANSWERED`, `DRAFT`, `UNDRAFT`, `RECENT`, `OLD`, `NEW`,

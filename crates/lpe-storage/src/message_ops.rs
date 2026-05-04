@@ -283,23 +283,27 @@ impl Storage {
             .next()
             .ok_or_else(|| anyhow::anyhow!("message not found"))?;
 
-        let target_mailbox_exists = sqlx::query_scalar::<_, bool>(
+        let target_mailbox = sqlx::query(
             r#"
-            SELECT EXISTS (
-                SELECT 1
-                FROM mailboxes
-                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
-            )
+            SELECT role
+            FROM mailboxes
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            LIMIT 1
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
         .bind(target_mailbox_id)
-        .fetch_one(&self.pool)
+        .fetch_optional(&self.pool)
         .await?;
-        if !target_mailbox_exists {
-            bail!("target mailbox not found");
-        }
+        let target_role = target_mailbox
+            .ok_or_else(|| anyhow::anyhow!("target mailbox not found"))?
+            .try_get::<String, _>("role")?;
+        let delivery_status = if target_role == "drafts" {
+            "draft"
+        } else {
+            "stored"
+        };
 
         let mut tx = self.pool.begin().await?;
         let modseq = self
@@ -311,7 +315,8 @@ impl Storage {
             SET
                 mailbox_id = $4,
                 imap_uid = nextval('message_imap_uid_seq'),
-                imap_modseq = $5
+                imap_modseq = $5,
+                delivery_status = $6
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             "#,
         )
@@ -320,6 +325,7 @@ impl Storage {
         .bind(message_id)
         .bind(target_mailbox_id)
         .bind(modseq)
+        .bind(delivery_status)
         .execute(&mut *tx)
         .await?;
         if moved.rows_affected() == 0 {

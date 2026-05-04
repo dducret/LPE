@@ -470,8 +470,14 @@ fn strip_search_return_options(tokens: &mut Vec<String>) -> Result<()> {
 }
 
 fn ensure_copy_allowed(source_role: &str, target_role: &str) -> Result<()> {
-    if matches!(source_role, "drafts" | "sent") || matches!(target_role, "drafts" | "sent") {
-        bail!("COPY does not support Sent or Drafts because those states stay canonical");
+    if matches!(target_role, "drafts" | "sent") {
+        bail!("COPY does not support Sent or Drafts as target mailboxes because those states stay canonical");
+    }
+    if source_role == "sent" {
+        bail!("COPY does not support Sent as a source mailbox because Sent stays canonical");
+    }
+    if source_role == "drafts" && target_role != "trash" {
+        bail!("COPY from Drafts is only supported to Trash for client deletion");
     }
     Ok(())
 }
@@ -480,10 +486,14 @@ fn ensure_move_allowed(selected: &SelectedMailbox, target_mailbox: &JmapMailbox)
     if selected.mailbox_id == target_mailbox.id {
         bail!("MOVE target mailbox must differ from the selected mailbox");
     }
-    if matches!(selected.mailbox_role.as_str(), "drafts" | "sent")
-        || matches!(target_mailbox.role.as_str(), "drafts" | "sent")
-    {
-        bail!("MOVE does not support Sent or Drafts because those states stay canonical");
+    if matches!(target_mailbox.role.as_str(), "drafts" | "sent") {
+        bail!("MOVE does not support Sent or Drafts as target mailboxes because those states stay canonical");
+    }
+    if selected.mailbox_role == "sent" {
+        bail!("MOVE does not support Sent as a source mailbox because Sent stays canonical");
+    }
+    if selected.mailbox_role == "drafts" && target_mailbox.role != "trash" {
+        bail!("MOVE from Drafts is only supported to Trash for client deletion");
     }
     Ok(())
 }

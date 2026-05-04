@@ -460,6 +460,11 @@ impl ImapStore for FakeStore {
         moved.mailbox_name = target_mailbox.name;
         moved.uid = next_uid;
         moved.modseq = modseq;
+        moved.delivery_status = if moved.mailbox_role == "drafts" {
+            "draft".to_string()
+        } else {
+            "stored".to_string()
+        };
         let moved = moved.clone();
         Box::pin(async move { Ok(moved) })
     }
@@ -1270,6 +1275,70 @@ async fn thunderbird_copy_to_trash_then_expunge_removes_source_only() {
     let trash_fetch = send_command(&mut stream, "A10 UID FETCH 3:* (FLAGS)\r\n", "A10").await;
     assert!(trash_fetch.contains("FLAGS ("));
     assert!(!trash_fetch.contains("\\Deleted"));
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn thunderbird_delete_draft_by_move_to_trash_removes_drafts_copy() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+
+    let draft_literal = concat!(
+        "From: Alice <alice@example.test>\r\n",
+        "To: Bob <bob@example.test>\r\n",
+        "Subject: Delete draft\r\n",
+        "\r\n",
+        "Draft body"
+    );
+    let append_prelude = send_partial_command(
+        &mut stream,
+        &format!(
+            "A2 APPEND Drafts {{{}}}\r\n",
+            draft_literal.as_bytes().len()
+        ),
+    )
+    .await;
+    assert!(append_prelude.contains("+ Ready for literal data"));
+    let append = send_command(&mut stream, &format!("{draft_literal}\r\n"), "A2").await;
+    assert!(append.contains("A2 OK [APPENDUID 1 3] APPEND completed"));
+
+    let select_drafts = send_command(&mut stream, "A3 SELECT Drafts\r\n", "A3").await;
+    assert!(select_drafts.contains("* 1 EXISTS"));
+
+    let move_to_trash =
+        send_command(&mut stream, "A4 UID MOVE 3 \"Deleted Items\"\r\n", "A4").await;
+    assert!(move_to_trash.contains("* 1 EXPUNGE"));
+    assert!(move_to_trash.contains("* 0 EXISTS"));
+    assert!(move_to_trash.contains("A4 OK [COPYUID 1 3 4] MOVE completed"));
+
+    let select_drafts_after = send_command(&mut stream, "A5 SELECT Drafts\r\n", "A5").await;
+    assert!(select_drafts_after.contains("* 0 EXISTS"));
+
+    let select_trash = send_command(&mut stream, "A6 SELECT \"Deleted Items\"\r\n", "A6").await;
+    assert!(select_trash.contains("* 1 EXISTS"));
+    let trash_search = send_command(
+        &mut stream,
+        "A7 UID SEARCH SUBJECT \"Delete draft\"\r\n",
+        "A7",
+    )
+    .await;
+    assert!(trash_search.contains("* SEARCH 4"));
+    assert!(store
+        .emails
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|email| email.uid == 4
+            && email.mailbox_role == "trash"
+            && email.delivery_status == "stored"));
 
     task.abort();
 }
