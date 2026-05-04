@@ -3747,6 +3747,50 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(blob.blob_bytes, b"mime-body".to_vec());
+
+        let draft_blob = service
+            .handle_download(
+                Some("Bearer token"),
+                &FakeStore::account().account_id.to_string(),
+                "draft-message:cccccccc-cccc-cccc-cccc-cccccccccccc",
+            )
+            .await
+            .unwrap();
+        let draft_message = String::from_utf8(draft_blob.blob_bytes).unwrap();
+        assert_eq!(draft_blob.media_type, "message/rfc822");
+        assert!(draft_message.contains("Subject: Draft subject\r\n"));
+        assert!(draft_message.contains("To: Bob <bob@example.test>\r\n"));
+        assert!(draft_message.contains("Bcc: hidden@example.test\r\n"));
+        assert!(draft_message.contains("\r\nDraft body\r\n"));
+    }
+
+    #[tokio::test]
+    async fn message_blob_download_hides_bcc_for_delegated_shared_mailbox() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let blob = service
+            .handle_download(
+                Some("Bearer token"),
+                &FakeStore::shared_account().account_id.to_string(),
+                "message:cccccccc-cccc-cccc-cccc-cccccccccccc",
+            )
+            .await
+            .unwrap();
+        let message = String::from_utf8(blob.blob_bytes).unwrap();
+
+        assert!(message.contains("Subject: Draft subject\r\n"));
+        assert!(!message.contains("Bcc:"));
+        assert!(!message.contains("hidden@example.test"));
     }
 
     #[tokio::test]

@@ -27,7 +27,7 @@ use crate::{
     session,
     state::{encode_state, StateEntry},
     store::JmapStore,
-    upload::parse_upload_blob_id,
+    upload::{message_rfc822_bytes, JmapBlobId},
 };
 
 pub(crate) const JMAP_CORE_CAPABILITY: &str = "urn:ietf:params:jmap:core";
@@ -540,11 +540,31 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .requested_account_access(&account, Some(account_id))
             .await?;
         let requested_account_id = requested_account.account_id;
-        let blob_id = parse_upload_blob_id(blob_id)?;
-        self.store
-            .fetch_jmap_upload_blob(requested_account_id, blob_id)
-            .await?
-            .ok_or_else(|| anyhow!("blob not found"))
+        match JmapBlobId::parse(blob_id)? {
+            JmapBlobId::Upload(blob_id) => self
+                .store
+                .fetch_jmap_upload_blob(requested_account_id, blob_id)
+                .await?
+                .ok_or_else(|| anyhow!("blob not found")),
+            JmapBlobId::Message(message_id) => {
+                let email = self
+                    .store
+                    .fetch_jmap_emails(requested_account_id, &[message_id])
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("blob not found"))?;
+                let blob_bytes = message_rfc822_bytes(&email, requested_account.is_owned);
+                Ok(JmapUploadBlob {
+                    id: message_id,
+                    account_id: requested_account_id,
+                    media_type: "message/rfc822".to_string(),
+                    octet_size: blob_bytes.len() as u64,
+                    blob_bytes,
+                })
+            }
+            JmapBlobId::Opaque(_) => Err(anyhow!("blob not found")),
+        }
     }
 
     pub(crate) async fn authenticate(

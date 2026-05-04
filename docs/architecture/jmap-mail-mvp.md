@@ -92,8 +92,9 @@ Additional supported `JMAP` routes:
 - `Email/copy` currently supports only same-account copy
 - `Email/import` consumes a validated `message/rfc822` blob, extracts visible multipart text with plaintext preference, preserves a first HTML body when available, validates each imported attachment with `Magika`, trims structural multipart boundary line endings from imported attachment bytes, and imports multipart attachments into the canonical attachment pipeline
 - `Blob/upload` currently stores temporary upload blobs in `PostgreSQL`
-- message `blobId` values now expose the canonical `mime_blob_ref` shape when one already exists, including `upload:{uuid}` for imported MIME uploads, and fall back to adapter-scoped opaque identifiers for messages that do not yet expose a persistent downloadable MIME blob
-- no `JMAP Blob/get`, blob copy, or persistent message download contract is advertised yet; the current blob model is intentionally limited to uploaded-imported MIME reuse and internal canonical references
+- message `blobId` values now expose the canonical `mime_blob_ref` shape when one already exists, including `upload:{uuid}` for imported MIME uploads, and fall back to stable `message:{emailId}` identifiers for canonical message downloads
+- `GET /api/jmap/download/{accountId}/{blobId}/{name}` can return temporary upload blobs and reconstructed `message/rfc822` downloads for canonical message blob IDs; delegated/shared mailbox downloads never include protected `Bcc` metadata
+- no `JMAP Blob/get` or blob copy contract is advertised yet; the current blob model is limited to uploaded-imported MIME reuse, canonical message download, and internal canonical references
 - the session keeps `eventSourceUrl` empty; this MVP uses `JMAP` over WebSocket rather than the older event-source transport
 - WebSocket push uses canonical `PostgreSQL` signaling end to end: `lpe-storage` writes a canonical change-journal row and emits principal-filtered `LISTEN` / `NOTIFY` wakeups after canonical commits, while `lpe-jmap` replays bounded missed reconnect work from that journal and recomputes only the affected canonical object states without introducing a second mailbox state engine
 - when reconnect recovery or a live push wakeup sees the canonical journal cursor advance without a subscribed object-state fingerprint change, `lpe-jmap` may emit a `StateChange` with an empty `changed` map so clients receive a fresher `pushState` cursor and avoid unnecessary future full-snapshot fallbacks
@@ -105,7 +106,6 @@ Additional supported `JMAP` routes:
 
 - `Blob/copy`
 - `VacationResponse/get`
-- persistent message-blob retrieval beyond temporary uploaded blobs
 - journal retention, pruning, and resumable push cursors beyond the current bounded reconnect-replay window for very large mailbox counts
 
 ### Current completion priorities
