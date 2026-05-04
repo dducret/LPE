@@ -1180,6 +1180,7 @@ impl Storage {
         &self,
         account_id: Uuid,
         draft_message_id: Uuid,
+        submitted_by_account_id: Uuid,
         source: &str,
         audit: AuditEntryInput,
     ) -> Result<SubmittedMessage> {
@@ -1249,7 +1250,7 @@ impl Storage {
             SubmitMessageInput {
                 draft_message_id: Some(draft_message_id),
                 account_id,
-                submitted_by_account_id: draft.submitted_by_account_id,
+                submitted_by_account_id,
                 source: source.trim().to_lowercase(),
                 from_display: draft.from_display,
                 from_address: draft.from_address,

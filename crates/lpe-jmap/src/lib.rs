@@ -83,6 +83,7 @@ mod tests {
         imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
         saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
         submitted_drafts: Arc<Mutex<Vec<Uuid>>>,
+        submitted_draft_actors: Arc<Mutex<Vec<Uuid>>>,
         submitted_draft_sources: Arc<Mutex<Vec<String>>>,
         canonical_change_cursor: Option<i64>,
         canonical_change_replay: CanonicalChangeReplay,
@@ -822,12 +823,17 @@ mod tests {
 
         async fn submit_draft_message(
             &self,
-            _account_id: Uuid,
+            account_id: Uuid,
             draft_message_id: Uuid,
+            submitted_by_account_id: Uuid,
             source: &str,
             _audit: AuditEntryInput,
         ) -> Result<SubmittedMessage> {
             self.submitted_drafts.lock().unwrap().push(draft_message_id);
+            self.submitted_draft_actors
+                .lock()
+                .unwrap()
+                .push(submitted_by_account_id);
             self.submitted_draft_sources
                 .lock()
                 .unwrap()
@@ -835,8 +841,8 @@ mod tests {
             Ok(SubmittedMessage {
                 message_id: Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap(),
                 thread_id: FakeStore::draft_email().thread_id,
-                account_id: FakeStore::account().account_id,
-                submitted_by_account_id: FakeStore::account().account_id,
+                account_id,
+                submitted_by_account_id,
                 sent_mailbox_id: Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap(),
                 outbound_queue_id: Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap(),
                 delivery_status: "queued".to_string(),
@@ -1900,6 +1906,10 @@ mod tests {
             store.submitted_draft_sources.lock().unwrap().as_slice(),
             ["jmap"]
         );
+        assert_eq!(
+            store.submitted_draft_actors.lock().unwrap().as_slice(),
+            [FakeStore::account().account_id]
+        );
         assert!(store.saved_drafts.lock().unwrap().is_empty());
         let payload = &response.method_responses[0].1;
         assert_eq!(
@@ -1909,6 +1919,56 @@ mod tests {
         assert_eq!(
             payload["created"]["send1"]["undoStatus"],
             Value::String("final".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn email_submission_set_uses_authenticated_submitter_for_delegated_draft() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(true, false),
+            ],
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "EmailSubmission/set".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "create": {
+                                "send1": {
+                                    "emailId": FakeStore::draft_email().id.to_string()
+                                }
+                            }
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store.submitted_draft_actors.lock().unwrap().as_slice(),
+            [FakeStore::account().account_id]
+        );
+        assert_eq!(
+            response.method_responses[0].1["created"]["send1"]["emailId"],
+            Value::String("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee".to_string())
         );
     }
 
@@ -1961,6 +2021,57 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("sender delegation is required"));
+    }
+
+    #[tokio::test]
+    async fn email_submission_set_rejects_read_only_shared_mailbox_draft_submit() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_read_only_access(true, false),
+            ],
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "EmailSubmission/set".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "create": {
+                                "send1": {
+                                    "emailId": FakeStore::draft_email().id.to_string()
+                                }
+                            }
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(store.submitted_drafts.lock().unwrap().is_empty());
+        assert_eq!(
+            response.method_responses[0].1["type"],
+            Value::String("invalidArguments".to_string())
+        );
+        assert!(response.method_responses[0].1["description"]
+            .as_str()
+            .unwrap()
+            .contains("write access is required"));
     }
 
     #[tokio::test]

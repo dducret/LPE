@@ -485,6 +485,9 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .requested_account_access(account, arguments.account_id.as_deref())
             .await?;
         let account_id = account_access.account_id;
+        if !account_access.is_owned && !account_access.may_write {
+            bail!("write access is required to submit drafts from a delegated mailbox");
+        }
         if !crate::mailboxes::mailbox_account_may_submit(&account_access) {
             bail!("sender delegation is required to submit from a delegated mailbox");
         }
@@ -504,7 +507,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         };
                         match self
                             .store
-                            .submit_draft_message(account_id, message_id, "jmap", audit)
+                            .submit_draft_message(
+                                account_id,
+                                message_id,
+                                account.account_id,
+                                "jmap",
+                                audit,
+                            )
                             .await
                         {
                             Ok(result) => {

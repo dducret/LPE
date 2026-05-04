@@ -115,6 +115,7 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         &self,
         account_id: Uuid,
         draft_message_id: Uuid,
+        submitted_by_account_id: Uuid,
         source: &str,
         audit: AuditEntryInput,
     ) -> Result<SubmittedMessage>;
@@ -392,11 +393,18 @@ impl JmapStore for Storage {
         &self,
         account_id: Uuid,
         draft_message_id: Uuid,
+        submitted_by_account_id: Uuid,
         source: &str,
         audit: AuditEntryInput,
     ) -> Result<SubmittedMessage> {
-        self.submit_draft_message(account_id, draft_message_id, source, audit)
-            .await
+        self.submit_draft_message(
+            account_id,
+            draft_message_id,
+            submitted_by_account_id,
+            source,
+            audit,
+        )
+        .await
     }
 
     async fn copy_jmap_email(
