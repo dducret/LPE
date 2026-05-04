@@ -2775,6 +2775,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn email_query_changes_reports_existing_message_reorders() {
+        let initial = JmapService::new_with_validator(
+            FakeStore {
+                session: Some(FakeStore::account()),
+                emails: vec![FakeStore::draft_email(), FakeStore::inbox_email()],
+                ..Default::default()
+            },
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
+        let initial_response = initial
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/query".to_string(),
+                        json!({}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        let email_query_state = initial_response.method_responses[0].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let updated = JmapService::new_with_validator(
+            FakeStore {
+                session: Some(FakeStore::account()),
+                emails: vec![FakeStore::inbox_email(), FakeStore::draft_email()],
+                ..Default::default()
+            },
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
+        let response = updated
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/queryChanges".to_string(),
+                        json!({"sinceQueryState": email_query_state, "maxChanges": 4}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["hasMoreChanges"],
+            Value::Bool(false)
+        );
+        assert_eq!(
+            response.method_responses[0].1["removed"],
+            json!([
+                FakeStore::draft_email().id.to_string(),
+                FakeStore::inbox_email().id.to_string()
+            ])
+        );
+        assert_eq!(
+            response.method_responses[0].1["added"],
+            json!([
+                {"id": FakeStore::inbox_email().id.to_string(), "index": 0},
+                {"id": FakeStore::draft_email().id.to_string(), "index": 1}
+            ])
+        );
+    }
+
+    #[tokio::test]
     async fn mailbox_query_states_are_bound_to_the_requested_account() {
         let shared = FakeStore::shared_account();
         let service = JmapService::new(FakeStore {
