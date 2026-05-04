@@ -18,9 +18,9 @@ use lpe_magika::{
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
-    AttachmentUploadInput, AuditEntryInput, CollaborationCollection, JmapEmail, JmapEmailAddress,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, Storage, SubmitMessageInput,
-    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    AttachmentUploadInput, AuditEntryInput, ClientTask, CollaborationCollection, JmapEmail,
+    JmapEmailAddress, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, Storage,
+    SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
 };
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -38,6 +38,7 @@ const MAPI_NSPI_PATH: &str = "/mapi/nspi";
 const MAPI_NSPI_TRAILING_PATH: &str = "/mapi/nspi/";
 const CONTACTS_FOLDER_ID: &str = "contacts";
 const CALENDAR_FOLDER_ID: &str = "calendar";
+const TASKS_FOLDER_ID: &str = "tasks";
 const DEFAULT_COLLECTION_ID: &str = "default";
 const MAILBOX_QUERY_LIMIT: u64 = 200;
 
@@ -225,6 +226,13 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
         {
             folders.push_str(&folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar"));
         }
+        for collection in self
+            .store
+            .fetch_accessible_task_collections(principal.account_id)
+            .await?
+        {
+            folders.push_str(&folder_xml(&collection, TASKS_FOLDER_ID, "Task"));
+        }
         for mailbox in self
             .store
             .fetch_jmap_mailboxes(principal.account_id)
@@ -271,6 +279,16 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
         {
             changes.push_str("<t:Create>");
             changes.push_str(&folder_xml(&collection, CALENDAR_FOLDER_ID, "Calendar"));
+            changes.push_str("</t:Create>");
+            count += 1;
+        }
+        for collection in self
+            .store
+            .fetch_accessible_task_collections(principal.account_id)
+            .await?
+        {
+            changes.push_str("<t:Create>");
+            changes.push_str(&folder_xml(&collection, TASKS_FOLDER_ID, "Task"));
             changes.push_str("</t:Create>");
             count += 1;
         }
@@ -382,6 +400,17 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
                             .collect::<String>(),
                     );
                 }
+                FolderKind::Tasks => {
+                    folders.push_str(
+                        &self
+                            .store
+                            .fetch_accessible_task_collections(principal.account_id)
+                            .await?
+                            .into_iter()
+                            .map(|collection| folder_xml(&collection, TASKS_FOLDER_ID, "Task"))
+                            .collect::<String>(),
+                    );
+                }
                 FolderKind::Mailbox => {
                     let mailbox_ids = self
                         .requested_mailbox_folder_ids(principal, request)
@@ -444,6 +473,16 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
                     events.iter().map(calendar_item_summary_xml).collect(),
                 ))
             }
+            FolderKind::Tasks => {
+                let collection_id = requested_collection_id(request).unwrap_or(TASKS_FOLDER_ID);
+                let tasks = self
+                    .store
+                    .fetch_accessible_tasks_in_collection(principal.account_id, collection_id)
+                    .await?;
+                Ok(find_item_response(
+                    tasks.iter().map(task_item_summary_xml).collect(),
+                ))
+            }
             FolderKind::Mailbox => {
                 let Some(mailbox_id) = self
                     .requested_mailbox_folder_ids(principal, request)
@@ -491,12 +530,18 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
             .filter_map(|id| id.strip_prefix("event:"))
             .filter_map(|id| Uuid::parse_str(id).ok())
             .collect::<Vec<_>>();
+        let task_ids = ids
+            .iter()
+            .filter_map(|id| id.strip_prefix("task:"))
+            .filter_map(|id| Uuid::parse_str(id).ok())
+            .collect::<Vec<_>>();
         let message_ids = ids
             .iter()
             .filter_map(|id| id.strip_prefix("message:"))
             .filter_map(|id| Uuid::parse_str(id).ok())
             .collect::<Vec<_>>();
-        let supported_id_count = contact_ids.len() + event_ids.len() + message_ids.len();
+        let supported_id_count =
+            contact_ids.len() + event_ids.len() + task_ids.len() + message_ids.len();
 
         let mut items = String::new();
         for contact in self
@@ -512,6 +557,13 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
             .await?
         {
             items.push_str(&calendar_item_xml(&event));
+        }
+        for task in self
+            .store
+            .fetch_accessible_tasks_by_ids(principal.account_id, &task_ids)
+            .await?
+        {
+            items.push_str(&task_item_xml(&task));
         }
         for email in self
             .store
@@ -760,6 +812,11 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
                 .len()
             + self
                 .store
+                .fetch_accessible_task_collections(principal.account_id)
+                .await?
+                .len()
+            + self
+                .store
                 .fetch_jmap_mailboxes(principal.account_id)
                 .await?
                 .len())
@@ -930,6 +987,80 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
                     }
                 }
                 collaboration_sync_state("calendar", collection_id, &current_items)
+            }
+            FolderKind::Tasks => {
+                let collection_id = requested_collection_id(request).unwrap_or(TASKS_FOLDER_ID);
+                let tasks = self
+                    .store
+                    .fetch_accessible_tasks_in_collection(principal.account_id, collection_id)
+                    .await?;
+                let sync_versions = sync_version_by_id(
+                    self.store
+                        .fetch_task_sync_versions(principal.account_id, collection_id)
+                        .await?,
+                );
+                let current_items = tasks
+                    .iter()
+                    .map(|task| {
+                        (
+                            task.id,
+                            task_change_key(task, sync_versions.get(&task.id).map(String::as_str)),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let current_set = current_items
+                    .iter()
+                    .map(|(id, _)| *id)
+                    .collect::<HashSet<_>>();
+                let previous_state = requested_sync_state(request)
+                    .map(|state| collaboration_sync_state_items(&state, "tasks", collection_id))
+                    .unwrap_or_default();
+                let previous_by_id = sync_state_items_by_id(&previous_state.items);
+                for task in &tasks {
+                    let current_change_key =
+                        task_change_key(task, sync_versions.get(&task.id).map(String::as_str));
+                    match previous_by_id.get(&task.id) {
+                        None => {
+                            changes.push_str("<t:Create>");
+                            changes.push_str(&task_item_xml_with_change_key(
+                                task,
+                                &current_change_key,
+                            ));
+                            changes.push_str("</t:Create>");
+                        }
+                        Some(None) => {
+                            changes.push_str("<t:Update>");
+                            changes.push_str(&task_item_xml_with_change_key(
+                                task,
+                                &current_change_key,
+                            ));
+                            changes.push_str("</t:Update>");
+                        }
+                        Some(Some(previous_change_key))
+                            if !previous_state.is_current_version
+                                || previous_change_key != &current_change_key =>
+                        {
+                            changes.push_str("<t:Update>");
+                            changes.push_str(&task_item_xml_with_change_key(
+                                task,
+                                &current_change_key,
+                            ));
+                            changes.push_str("</t:Update>");
+                        }
+                        _ => {}
+                    }
+                }
+                for item in previous_state.items {
+                    let task_id = item.id;
+                    if !current_set.contains(&task_id) {
+                        changes.push_str("<t:Delete>");
+                        changes.push_str(&format!(
+                            "<t:ItemId Id=\"task:{task_id}\" ChangeKey=\"deleted\"/>"
+                        ));
+                        changes.push_str("</t:Delete>");
+                    }
+                }
+                collaboration_sync_state("tasks", collection_id, &current_items)
             }
             FolderKind::Mailbox => {
                 let Some(mailbox_id) = self
@@ -1199,6 +1330,11 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
                 .filter_map(|id| id.strip_prefix("event:"))
                 .map(Uuid::parse_str)
                 .collect::<std::result::Result<Vec<_>, _>>()?;
+            let task_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("task:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
             let message_ids = ids
                 .iter()
                 .filter_map(|id| id.strip_prefix("message:"))
@@ -1206,12 +1342,13 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
                 .collect::<std::result::Result<Vec<_>, _>>()?;
 
             if ids.is_empty()
-                || contact_ids.len() + event_ids.len() + message_ids.len() != ids.len()
+                || contact_ids.len() + event_ids.len() + task_ids.len() + message_ids.len()
+                    != ids.len()
             {
                 return Ok(operation_error_response(
                     "DeleteItem",
                     "ErrorInvalidOperation",
-                    "DeleteItem currently supports only contact, calendar, and message ids.",
+                    "DeleteItem currently supports only contact, calendar, task, and message ids.",
                 ));
             }
             for contact_id in contact_ids {
@@ -1222,6 +1359,11 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
             for event_id in event_ids {
                 self.store
                     .delete_accessible_event(principal.account_id, event_id)
+                    .await?;
+            }
+            for task_id in task_ids {
+                self.store
+                    .delete_accessible_task(principal.account_id, task_id)
                     .await?;
             }
             let delete_type = attribute_value_after(request, "DeleteItem", "DeleteType")
@@ -2143,6 +2285,7 @@ enum FolderKind {
     Root,
     Contacts,
     Calendar,
+    Tasks,
     Mailbox,
 }
 
@@ -2214,6 +2357,13 @@ fn requested_folder_kind(request: &str) -> Option<FolderKind> {
     {
         return Some(FolderKind::Contacts);
     }
+    if request.contains("DistinguishedFolderId Id=\"tasks\"")
+        || request.contains("DistinguishedFolderId Id='tasks'")
+        || request.contains("FolderId Id=\"tasks\"")
+        || request.contains("FolderId Id='tasks'")
+    {
+        return Some(FolderKind::Tasks);
+    }
     if request.contains("mailbox:") || !requested_mailbox_folder_ids(request).is_empty() {
         return Some(FolderKind::Mailbox);
     }
@@ -2225,6 +2375,8 @@ fn requested_folder_kind(request: &str) -> Option<FolderKind> {
             Some(FolderKind::Calendar)
         } else if id.starts_with("shared-contacts-") {
             Some(FolderKind::Contacts)
+        } else if id.starts_with("shared-tasks-") {
+            Some(FolderKind::Tasks)
         } else if id.starts_with("mailbox:") || Uuid::parse_str(id).is_ok() {
             Some(FolderKind::Mailbox)
         } else if id == "msgfolderroot" || id == "root" {
@@ -2240,6 +2392,8 @@ fn sync_state_folder_kind(sync_state: &str) -> Option<FolderKind> {
         Some(FolderKind::Contacts)
     } else if sync_state.starts_with("calendar:") {
         Some(FolderKind::Calendar)
+    } else if sync_state.starts_with("tasks:") {
+        Some(FolderKind::Tasks)
     } else if sync_state.starts_with("mailbox:") {
         Some(FolderKind::Mailbox)
     } else if sync_state.starts_with("root:") {
@@ -2278,6 +2432,14 @@ fn requested_folder_kinds(request: &str) -> Vec<FolderKind> {
     {
         kinds.push(FolderKind::Calendar);
     }
+    if request.contains("DistinguishedFolderId Id=\"tasks\"")
+        || request.contains("DistinguishedFolderId Id='tasks'")
+        || request.contains("FolderId Id=\"tasks\"")
+        || request.contains("FolderId Id='tasks'")
+        || request.contains("shared-tasks-")
+    {
+        kinds.push(FolderKind::Tasks);
+    }
     if request.contains("mailbox:") || !requested_mailbox_folder_ids(request).is_empty() {
         kinds.push(FolderKind::Mailbox);
     }
@@ -2302,7 +2464,7 @@ fn requested_collection_id(request: &str) -> Option<&str> {
                 .next()
         })
         .map(|value| match value {
-            "contacts" | "calendar" => DEFAULT_COLLECTION_ID,
+            "contacts" | "calendar" | "tasks" => DEFAULT_COLLECTION_ID,
             other => other,
         })
 }
@@ -3360,6 +3522,7 @@ fn folder_xml(collection: &CollaborationCollection, distinguished_id: &str, clas
     let element = match distinguished_id {
         CONTACTS_FOLDER_ID => "ContactsFolder",
         CALENDAR_FOLDER_ID => "CalendarFolder",
+        TASKS_FOLDER_ID => "TasksFolder",
         _ => "Folder",
     };
     format!(
@@ -3459,6 +3622,21 @@ fn calendar_change_key(event: &AccessibleEvent, sync_version: Option<&str>) -> S
     ])
 }
 
+fn task_change_key(task: &ClientTask, sync_version: Option<&str>) -> String {
+    stable_change_key(&[
+        "task",
+        &task.id.to_string(),
+        sync_version.unwrap_or_default(),
+        &task.task_list_id.to_string(),
+        &task.title,
+        &task.description,
+        &task.status,
+        task.due_at.as_deref().unwrap_or_default(),
+        task.completed_at.as_deref().unwrap_or_default(),
+        &task.sort_order.to_string(),
+    ])
+}
+
 fn stable_change_key(parts: &[&str]) -> String {
     let mut hash = 0xcbf29ce484222325_u64;
     for part in parts {
@@ -3476,6 +3654,7 @@ fn count_folder_elements(value: &str) -> usize {
     count_tag_occurrences(value, "<t:Folder>")
         + count_tag_occurrences(value, "<t:ContactsFolder>")
         + count_tag_occurrences(value, "<t:CalendarFolder>")
+        + count_tag_occurrences(value, "<t:TasksFolder>")
 }
 
 fn contact_summary_xml(contact: &AccessibleContact) -> String {
@@ -3585,6 +3764,77 @@ fn calendar_item_xml_with_change_key(event: &AccessibleEvent, change_key: &str) 
         end = escape_xml(&event_end_datetime(event)),
         notes = escape_xml(&event.notes),
     )
+}
+
+fn task_item_summary_xml(task: &ClientTask) -> String {
+    let change_key = task_change_key(task, None);
+    task_item_summary_xml_with_change_key(task, &change_key)
+}
+
+fn task_item_summary_xml_with_change_key(task: &ClientTask, change_key: &str) -> String {
+    format!(
+        concat!(
+            "<t:Task>",
+            "<t:ItemId Id=\"task:{id}\" ChangeKey=\"{change_key}\"/>",
+            "<t:Subject>{title}</t:Subject>",
+            "<t:Status>{status}</t:Status>",
+            "{due_date}",
+            "{complete_date}",
+            "</t:Task>"
+        ),
+        id = task.id,
+        change_key = escape_xml(change_key),
+        title = escape_xml(&task.title),
+        status = ews_task_status(&task.status),
+        due_date = optional_text_element("t:DueDate", task.due_at.as_deref()),
+        complete_date = optional_text_element("t:CompleteDate", task.completed_at.as_deref()),
+    )
+}
+
+fn task_item_xml(task: &ClientTask) -> String {
+    let change_key = task_change_key(task, None);
+    task_item_xml_with_change_key(task, &change_key)
+}
+
+fn task_item_xml_with_change_key(task: &ClientTask, change_key: &str) -> String {
+    format!(
+        concat!(
+            "<t:Task>",
+            "<t:ItemId Id=\"task:{id}\" ChangeKey=\"{change_key}\"/>",
+            "<t:ParentFolderId Id=\"{folder_id}\"/>",
+            "<t:Subject>{title}</t:Subject>",
+            "<t:Body BodyType=\"Text\">{description}</t:Body>",
+            "<t:Status>{status}</t:Status>",
+            "{due_date}",
+            "{complete_date}",
+            "</t:Task>"
+        ),
+        id = task.id,
+        change_key = escape_xml(change_key),
+        folder_id = task.task_list_id,
+        title = escape_xml(&task.title),
+        description = escape_xml(&task.description),
+        status = ews_task_status(&task.status),
+        due_date = optional_text_element("t:DueDate", task.due_at.as_deref()),
+        complete_date = optional_text_element("t:CompleteDate", task.completed_at.as_deref()),
+    )
+}
+
+fn ews_task_status(status: &str) -> &'static str {
+    match status {
+        "in-progress" => "InProgress",
+        "completed" => "Completed",
+        "cancelled" => "Deferred",
+        _ => "NotStarted",
+    }
+}
+
+fn optional_text_element(name: &str, value: Option<&str>) -> String {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("<{name}>{}</{name}>", escape_xml(value)))
+        .unwrap_or_default()
 }
 
 fn ews_datetime(date: &str, time: &str) -> String {

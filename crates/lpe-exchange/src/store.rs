@@ -1,9 +1,10 @@
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
-    AttachmentUploadInput, AuditEntryInput, CollaborationCollection, JmapEmail, JmapEmailQuery,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage, Storage,
-    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
+    AttachmentUploadInput, AuditEntryInput, ClientTask, CollaborationCollection, JmapEmail,
+    JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
+    Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
+    UpsertClientEventInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -15,6 +16,11 @@ pub trait ExchangeStore: AccountAuthStore {
     ) -> StoreFuture<'a, Vec<CollaborationCollection>>;
 
     fn fetch_accessible_calendar_collections<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<CollaborationCollection>>;
+
+    fn fetch_accessible_task_collections<'a>(
         &'a self,
         principal_account_id: Uuid,
     ) -> StoreFuture<'a, Vec<CollaborationCollection>>;
@@ -38,6 +44,18 @@ pub trait ExchangeStore: AccountAuthStore {
     ) -> StoreFuture<'a, Vec<AccessibleEvent>>;
 
     fn fetch_event_sync_versions<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<(Uuid, String)>>;
+
+    fn fetch_accessible_tasks_in_collection<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<ClientTask>>;
+
+    fn fetch_task_sync_versions<'a>(
         &'a self,
         principal_account_id: Uuid,
         collection_id: &'a str,
@@ -93,6 +111,18 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         principal_account_id: Uuid,
         event_id: Uuid,
+    ) -> StoreFuture<'a, ()>;
+
+    fn fetch_accessible_tasks_by_ids<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ClientTask>>;
+
+    fn delete_accessible_task<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        task_id: Uuid,
     ) -> StoreFuture<'a, ()>;
 
     fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>>;
@@ -224,6 +254,16 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn fetch_accessible_task_collections<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<CollaborationCollection>> {
+        Box::pin(async move {
+            self.fetch_accessible_task_collections(principal_account_id)
+                .await
+        })
+    }
+
     fn fetch_accessible_contacts_in_collection<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -309,6 +349,35 @@ impl ExchangeStore for Storage {
             Ok(rows
                 .into_iter()
                 .map(|row| (row.get("id"), row.get("updated_at")))
+                .collect())
+        })
+    }
+
+    fn fetch_accessible_tasks_in_collection<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<ClientTask>> {
+        Box::pin(async move {
+            let tasks = self.fetch_client_tasks(principal_account_id).await?;
+            Ok(tasks
+                .into_iter()
+                .filter(|task| task_matches_collection(task, collection_id))
+                .collect())
+        })
+    }
+
+    fn fetch_task_sync_versions<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<(Uuid, String)>> {
+        Box::pin(async move {
+            let tasks = self.fetch_client_tasks(principal_account_id).await?;
+            Ok(tasks
+                .into_iter()
+                .filter(|task| task_matches_collection(task, collection_id))
+                .map(|task| (task.id, task.updated_at))
                 .collect())
         })
     }
@@ -403,6 +472,25 @@ impl ExchangeStore for Storage {
             self.delete_accessible_event(principal_account_id, event_id)
                 .await
         })
+    }
+
+    fn fetch_accessible_tasks_by_ids<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ClientTask>> {
+        Box::pin(async move {
+            self.fetch_client_tasks_by_ids(principal_account_id, ids)
+                .await
+        })
+    }
+
+    fn delete_accessible_task<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        task_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move { self.delete_client_task(principal_account_id, task_id).await })
     }
 
     fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
@@ -570,4 +658,8 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, SubmittedMessage> {
         Box::pin(async move { self.submit_message(input, audit).await })
     }
+}
+
+fn task_matches_collection(task: &ClientTask, collection_id: &str) -> bool {
+    matches!(collection_id, "tasks" | "default") || task.task_list_id.to_string() == collection_id
 }

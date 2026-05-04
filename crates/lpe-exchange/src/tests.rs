@@ -5,7 +5,7 @@ use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, ActiveSyncAttachment,
-    ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount,
+    ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount, ClientTask,
     CollaborationCollection, CollaborationRights, JmapEmail, JmapEmailAddress, JmapEmailQuery,
     JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
     StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
@@ -28,12 +28,16 @@ struct FakeStore {
     session: Option<AuthenticatedAccount>,
     contact_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
     calendar_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
+    task_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
     contacts: Arc<Mutex<Vec<AccessibleContact>>>,
     contact_versions: Arc<Mutex<HashMap<Uuid, u64>>>,
     deleted_contacts: Arc<Mutex<Vec<Uuid>>>,
     events: Arc<Mutex<Vec<AccessibleEvent>>>,
     event_versions: Arc<Mutex<HashMap<Uuid, u64>>>,
     deleted_events: Arc<Mutex<Vec<Uuid>>>,
+    tasks: Arc<Mutex<Vec<ClientTask>>>,
+    task_versions: Arc<Mutex<HashMap<Uuid, u64>>>,
+    deleted_tasks: Arc<Mutex<Vec<Uuid>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
     emails: Arc<Mutex<Vec<JmapEmail>>>,
@@ -168,6 +172,27 @@ impl FakeStore {
             delivery_status: "stored".to_string(),
         }
     }
+
+    fn task(id: &str, task_list_id: &str, title: &str) -> ClientTask {
+        let account = Self::account();
+        ClientTask {
+            id: Uuid::parse_str(id).unwrap(),
+            owner_account_id: account.account_id,
+            owner_email: account.email,
+            owner_display_name: account.display_name,
+            is_owned: true,
+            rights: Self::rights(),
+            task_list_id: Uuid::parse_str(task_list_id).unwrap(),
+            task_list_sort_order: 0,
+            title: title.to_string(),
+            description: "Task body".to_string(),
+            status: "needs-action".to_string(),
+            due_at: Some("2026-05-05T09:00:00Z".to_string()),
+            completed_at: None,
+            sort_order: 10,
+            updated_at: "2026-05-04T08:00:00Z".to_string(),
+        }
+    }
 }
 
 impl AccountAuthStore for FakeStore {
@@ -221,6 +246,14 @@ impl ExchangeStore for FakeStore {
         _principal_account_id: Uuid,
     ) -> StoreFuture<'a, Vec<CollaborationCollection>> {
         let collections = self.calendar_collections.lock().unwrap().clone();
+        Box::pin(async move { Ok(collections) })
+    }
+
+    fn fetch_accessible_task_collections<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<CollaborationCollection>> {
+        let collections = self.task_collections.lock().unwrap().clone();
         Box::pin(async move { Ok(collections) })
     }
 
@@ -306,6 +339,54 @@ impl ExchangeStore for FakeStore {
             })
             .collect();
         Box::pin(async move { Ok(events) })
+    }
+
+    fn fetch_accessible_tasks_in_collection<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<ClientTask>> {
+        let tasks = self
+            .tasks
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|task| {
+                matches!(collection_id, "tasks" | "default")
+                    || task.task_list_id.to_string() == collection_id
+            })
+            .cloned()
+            .collect();
+        Box::pin(async move { Ok(tasks) })
+    }
+
+    fn fetch_task_sync_versions<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<(Uuid, String)>> {
+        let versions = self.task_versions.lock().unwrap().clone();
+        let tasks = self
+            .tasks
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|task| {
+                matches!(collection_id, "tasks" | "default")
+                    || task.task_list_id.to_string() == collection_id
+            })
+            .map(|task| {
+                (
+                    task.id,
+                    versions
+                        .get(&task.id)
+                        .copied()
+                        .map(|version| version.to_string())
+                        .unwrap_or_else(|| task.updated_at.clone()),
+                )
+            })
+            .collect();
+        Box::pin(async move { Ok(tasks) })
     }
 
     fn fetch_accessible_contacts_by_ids<'a>(
@@ -483,6 +564,32 @@ impl ExchangeStore for FakeStore {
             .lock()
             .unwrap()
             .retain(|event| event.id != event_id);
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn fetch_accessible_tasks_by_ids<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ClientTask>> {
+        let tasks = self
+            .tasks
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|task| ids.contains(&task.id))
+            .cloned()
+            .collect();
+        Box::pin(async move { Ok(tasks) })
+    }
+
+    fn delete_accessible_task<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        task_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        self.deleted_tasks.lock().unwrap().push(task_id);
+        self.tasks.lock().unwrap().retain(|task| task.id != task_id);
         Box::pin(async move { Ok(()) })
     }
 
@@ -2712,6 +2819,36 @@ async fn delete_item_hard_deletes_canonical_message() {
 }
 
 #[tokio::test]
+async fn delete_item_deletes_canonical_task() {
+    let task_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        tasks: Arc::new(Mutex::new(vec![FakeStore::task(
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "aaaaaaaa-0000-0000-0000-000000000001",
+            "Review task",
+        )])),
+        ..Default::default()
+    };
+    let deleted_tasks = store.deleted_tasks.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:DeleteItem><m:ItemIds><t:ItemId Id="task:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(deleted_tasks.lock().unwrap().as_slice(), &[task_id]);
+}
+
+#[tokio::test]
 async fn delete_item_rejects_unsupported_item_ids() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -2722,7 +2859,7 @@ async fn delete_item_rejects_unsupported_item_ids() {
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:DeleteItem><m:ItemIds><t:ItemId Id="task:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+            br#"<s:Envelope><s:Body><m:DeleteItem><m:ItemIds><t:ItemId Id="note:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
         )
         .await
         .unwrap();
