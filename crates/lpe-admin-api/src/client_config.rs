@@ -45,7 +45,16 @@ async fn outlook_autodiscover_post(headers: HeaderMap, body: Bytes) -> Response 
     let email = parse_autodiscover_email(body.as_ref());
     let endpoints = PublishedEndpoints::from_headers(&headers, email.as_deref());
     let response = if requested_soap_user_settings(body.as_ref()) {
-        render_soap_user_settings_autodiscover(&endpoints, email.as_deref())
+        match render_soap_user_settings_response(&endpoints, email.as_deref()) {
+            Some(response) => response,
+            None => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    "SOAP Autodiscover is not published for the default Outlook IMAP profile.\n",
+                )
+                    .into_response();
+            }
+        }
     } else if requested_mobilesync_schema(body.as_ref()) {
         render_mobilesync_autodiscover(&endpoints, email.as_deref())
     } else {
@@ -137,6 +146,10 @@ impl PublishedEndpoints {
             activesync_url,
             jmap_session_url,
         }
+    }
+
+    fn exchange_autodiscover_enabled(&self) -> bool {
+        self.ews_enabled || self.mapi_enabled
     }
 }
 
@@ -512,6 +525,15 @@ fn render_soap_user_settings_autodiscover(
     )
 }
 
+fn render_soap_user_settings_response(
+    config: &PublishedEndpoints,
+    email: Option<&str>,
+) -> Option<String> {
+    config
+        .exchange_autodiscover_enabled()
+        .then(|| render_soap_user_settings_autodiscover(config, email))
+}
+
 fn soap_string_user_setting(name: &str, value: &str) -> String {
     format!(
         concat!(
@@ -753,8 +775,9 @@ fn xml_response(body: String) -> Response {
 mod tests {
     use super::{
         parse_autodiscover_email, render_mobilesync_autodiscover, render_outlook_autodiscover,
-        render_soap_user_settings_autodiscover, render_thunderbird_autoconfig,
-        requested_mobilesync_schema, requested_soap_user_settings, PublishedEndpoints,
+        render_soap_user_settings_autodiscover, render_soap_user_settings_response,
+        render_thunderbird_autoconfig, requested_mobilesync_schema, requested_soap_user_settings,
+        PublishedEndpoints,
     };
     use axum::http::HeaderMap;
     use std::sync::Mutex;
@@ -1104,13 +1127,21 @@ mod tests {
     }
 
     #[test]
+    fn soap_autodiscover_is_not_published_for_default_outlook_imap_profile() {
+        let xml = render_soap_user_settings_response(&sample_config(), Some("alice@example.test"));
+
+        assert!(xml.is_none());
+    }
+
+    #[test]
     fn soap_autodiscover_reports_mapi_http_enabled_when_opted_in() {
         let config = PublishedEndpoints {
             mapi_enabled: true,
             ..sample_config()
         };
 
-        let xml = render_soap_user_settings_autodiscover(&config, Some("alice@example.test"));
+        let xml = render_soap_user_settings_response(&config, Some("alice@example.test"))
+            .expect("MAPI opt-in should publish SOAP Autodiscover");
 
         assert!(xml.contains("<a:Name>MapiHttpEnabled</a:Name>"));
         assert!(xml.contains("<a:Value>True</a:Value>"));

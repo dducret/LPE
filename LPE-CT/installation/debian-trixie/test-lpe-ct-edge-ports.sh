@@ -364,7 +364,7 @@ EOF
     fail "SMTPS submission on ${HOST}:${SUBMISSION_PORT} rejected RCPT TO for ${test_recipient}"
   fi
 
-  if [[ "${openssl_status}" -ne 0 ]]; then
+  if [[ "${openssl_status}" -ne 0 ]] && ! grep -q '^221 bye' "${output_file}"; then
     warn "Authenticated SMTPS submission probe succeeded, but openssl exited with status ${openssl_status} after the SMTP session closed."
   fi
   rm -f "${output_file}"
@@ -542,6 +542,24 @@ probe_client_publication() {
         || fail "Outlook Autodiscover publishes WEB and may make Outlook choose an Exchange-style route instead of IMAP"
       [[ "$body" != *"mapiHttp"* ]] \
         || fail "Outlook Autodiscover publishes mapiHttp in the default IMAP account setup path"
+
+      body="$(curl --silent --show-error --insecure \
+        --header "Host: ${host_header}" \
+        --header 'Content-Type: text/xml; charset=utf-8' \
+        --write-out '\n%{http_code}' \
+        --data "<?xml version=\"1.0\" encoding=\"utf-8\"?><s:Envelope xmlns:a=\"http://schemas.microsoft.com/exchange/2010/Autodiscover\" xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body><a:GetUserSettingsRequestMessage><a:Request><a:Users><a:User><a:Mailbox>${autodiscover_email}</a:Mailbox></a:User></a:Users><a:RequestedSettings><a:Setting>ExternalEwsUrl</a:Setting><a:Setting>MapiHttpEnabled</a:Setting></a:RequestedSettings></a:Request></a:GetUserSettingsRequestMessage></s:Body></s:Envelope>" \
+        "${base_url}/autodiscover/autodiscover.xml")" \
+        || fail "Outlook SOAP Autodiscover probe failed before an HTTP response was received"
+      local soap_status="${body##*$'\n'}"
+      local soap_body="${body%$'\n'*}"
+      if [[ "${soap_status}" =~ ^2 ]]; then
+        [[ "${soap_body}" != *"<a:GetUserSettingsResponseMessage>"* ]] \
+          || fail "Outlook SOAP Autodiscover returns Exchange user settings in the default IMAP setup path"
+        [[ "${soap_body}" != *"<a:Name>ExternalEwsUrl</a:Name>"* ]] \
+          || fail "Outlook SOAP Autodiscover publishes EWS settings in the default IMAP setup path"
+        [[ "${soap_body}" != *"<a:Name>MapiHttpEnabled</a:Name>"* ]] \
+          || fail "Outlook SOAP Autodiscover publishes MAPI settings in the default IMAP setup path"
+      fi
     fi
   fi
   pass "Autodiscover POST publishes IMAP through LPE-CT"
