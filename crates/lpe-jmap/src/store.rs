@@ -5,8 +5,8 @@ use lpe_storage::{
     CanonicalPushChangeSet, ClientTask, ClientTaskList, CollaborationCollection,
     CreateTaskListInput, JmapEmail, JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput,
     JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapThreadQuery,
-    JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, SenderIdentity, Storage,
-    SubmitMessageInput, SubmittedMessage, UpdateTaskListInput, UpsertClientContactInput,
+    JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, SenderIdentity, SieveScriptDocument,
+    Storage, SubmitMessageInput, SubmittedMessage, UpdateTaskListInput, UpsertClientContactInput,
     UpsertClientEventInput, UpsertClientTaskInput,
 };
 use uuid::Uuid;
@@ -89,6 +89,10 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         ids: &[Uuid],
     ) -> Result<Vec<JmapEmailSubmission>>;
     async fn fetch_jmap_quota(&self, account_id: Uuid) -> Result<JmapQuota>;
+    async fn fetch_active_sieve_script(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Option<SieveScriptDocument>>;
     async fn save_jmap_upload_blob(
         &self,
         account_id: Uuid,
@@ -351,6 +355,13 @@ impl JmapStore for Storage {
 
     async fn fetch_jmap_quota(&self, account_id: Uuid) -> Result<JmapQuota> {
         self.fetch_jmap_quota(account_id).await
+    }
+
+    async fn fetch_active_sieve_script(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Option<SieveScriptDocument>> {
+        self.fetch_active_sieve_script(account_id).await
     }
 
     async fn save_jmap_upload_blob(

@@ -12,7 +12,8 @@ use crate::{
     service::opaque_state_fingerprint,
     JmapService, JMAP_CALENDARS_CAPABILITY, JMAP_CONTACTS_CAPABILITY, JMAP_CORE_CAPABILITY,
     JMAP_MAIL_CAPABILITY, JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY,
-    JMAP_WEBSOCKET_CAPABILITY, MAX_CONCURRENT_UPLOAD, MAX_SIZE_UPLOAD, SESSION_STATE,
+    JMAP_VACATION_RESPONSE_CAPABILITY, JMAP_WEBSOCKET_CAPABILITY, MAX_CONCURRENT_UPLOAD,
+    MAX_SIZE_UPLOAD, SESSION_STATE,
 };
 
 impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
@@ -50,6 +51,10 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         primary_accounts.insert(JMAP_CONTACTS_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_CALENDARS_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_TASKS_CAPABILITY.to_string(), account_id.clone());
+        primary_accounts.insert(
+            JMAP_VACATION_RESPONSE_CAPABILITY.to_string(),
+            account_id.clone(),
+        );
 
         Ok(SessionDocument {
             capabilities,
@@ -152,6 +157,7 @@ fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {
                 "mayCreateTaskList": true,
             }),
         ),
+        (JMAP_VACATION_RESPONSE_CAPABILITY.to_string(), json!({})),
         (
             JMAP_WEBSOCKET_CAPABILITY.to_string(),
             json!({

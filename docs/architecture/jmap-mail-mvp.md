@@ -101,11 +101,11 @@ Additional supported `JMAP` routes:
 - mail push state spans every mailbox account visible through canonical mailbox delegation so one authenticated session can receive `StateChange` payloads for owned and delegated mailboxes without a protocol-local sharing cache
 - collaboration and task push stay principal-scoped: shared contacts, calendars, and task lists notify every affected principal account, while mailbox push still spans the canonical owner plus delegated mailbox readers
 - supported push data types are limited to `Mailbox`, `Email`, `Thread`, `AddressBook`, `ContactCard`, `Calendar`, `CalendarEvent`, `TaskList`, and `Task`
+- `VacationResponse/get` is a read-only projection of the authenticated account's active canonical `Sieve` script; it exposes a singleton response when a supported `vacation` action is present and does not introduce a separate `JMAP` vacation store or `VacationResponse/set`
 
 ### Next methods to add
 
 - `Blob/copy`
-- `VacationResponse/get`
 - journal retention, pruning, and resumable push cursors beyond the current bounded reconnect-replay window for very large mailbox counts
 
 ### Current completion priorities

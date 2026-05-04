@@ -36,6 +36,7 @@ pub(crate) const JMAP_SUBMISSION_CAPABILITY: &str = "urn:ietf:params:jmap:submis
 pub(crate) const JMAP_CONTACTS_CAPABILITY: &str = "urn:ietf:params:jmap:contacts";
 pub(crate) const JMAP_CALENDARS_CAPABILITY: &str = "urn:ietf:params:jmap:calendars";
 pub(crate) const JMAP_TASKS_CAPABILITY: &str = "urn:ietf:params:jmap:tasks";
+pub(crate) const JMAP_VACATION_RESPONSE_CAPABILITY: &str = "urn:ietf:params:jmap:vacationresponse";
 pub(crate) const JMAP_WEBSOCKET_CAPABILITY: &str = "urn:ietf:params:jmap:websocket";
 pub(crate) const SESSION_STATE: &str = "mvp-3";
 pub(crate) const QUERY_STATE_VERSION: &str = "mvp-3";
@@ -283,6 +284,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 "Thread/changes" => self.handle_thread_changes(account, arguments).await,
                 "Quota/get" => self.handle_quota_get(account, arguments).await,
                 "SearchSnippet/get" => self.handle_search_snippet_get(account, arguments).await,
+                "VacationResponse/get" => {
+                    self.handle_vacation_response_get(account, arguments).await
+                }
                 _ => Ok(method_error("unknownMethod", "method is not supported")),
             };
 

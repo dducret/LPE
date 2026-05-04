@@ -13,6 +13,7 @@ mod state;
 mod store;
 mod tasks;
 mod upload;
+mod vacation;
 mod validation;
 mod websocket;
 
@@ -23,9 +24,9 @@ pub(crate) use crate::parse::parse_submission_email_id;
 pub(crate) use crate::service::{
     collection_state_fingerprint, trim_snippet, DEFAULT_GET_LIMIT, JMAP_CALENDARS_CAPABILITY,
     JMAP_CONTACTS_CAPABILITY, JMAP_CORE_CAPABILITY, JMAP_MAIL_CAPABILITY,
-    JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY, JMAP_WEBSOCKET_CAPABILITY,
-    MAX_CONCURRENT_UPLOAD, MAX_QUERY_LIMIT, MAX_SIZE_UPLOAD, PUSH_STATE_VERSION,
-    QUERY_STATE_VERSION, SESSION_STATE, STATE_TOKEN_VERSION,
+    JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY, JMAP_VACATION_RESPONSE_CAPABILITY,
+    JMAP_WEBSOCKET_CAPABILITY, MAX_CONCURRENT_UPLOAD, MAX_QUERY_LIMIT, MAX_SIZE_UPLOAD,
+    PUSH_STATE_VERSION, QUERY_STATE_VERSION, SESSION_STATE, STATE_TOKEN_VERSION,
 };
 pub(crate) use crate::session::requested_account_id;
 pub(crate) use crate::state::encode_query_state;
@@ -34,7 +35,7 @@ pub(crate) use crate::upload::blob_id_for_message;
 #[cfg(test)]
 use lpe_storage::{
     AuthenticatedAccount, ClientTask, JmapEmail, JmapEmailQuery, JmapMailbox, JmapUploadBlob,
-    SubmitMessageInput, SubmittedMessage,
+    SieveScriptDocument, SubmitMessageInput, SubmittedMessage,
 };
 #[cfg(test)]
 use serde_json::{json, Value};
@@ -82,6 +83,7 @@ mod tests {
         tasks: Arc<Mutex<Vec<ClientTask>>>,
         uploads: Arc<Mutex<Vec<JmapUploadBlob>>>,
         imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
+        active_sieve_script: Option<String>,
         saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
         submitted_drafts: Arc<Mutex<Vec<Uuid>>>,
         submitted_draft_actors: Arc<Mutex<Vec<Uuid>>>,
@@ -765,6 +767,21 @@ mod tests {
                 used: 10,
                 hard_limit: 100,
             })
+        }
+
+        async fn fetch_active_sieve_script(
+            &self,
+            _account_id: Uuid,
+        ) -> Result<Option<SieveScriptDocument>> {
+            Ok(self
+                .active_sieve_script
+                .as_ref()
+                .map(|content| SieveScriptDocument {
+                    name: "active".to_string(),
+                    content: content.clone(),
+                    is_active: true,
+                    updated_at: "2026-04-20T15:00:00Z".to_string(),
+                }))
         }
 
         async fn save_jmap_upload_blob(
@@ -3812,6 +3829,9 @@ mod tests {
         assert!(session.capabilities.contains_key(JMAP_CONTACTS_CAPABILITY));
         assert!(session.capabilities.contains_key(JMAP_CALENDARS_CAPABILITY));
         assert!(session.capabilities.contains_key(JMAP_TASKS_CAPABILITY));
+        assert!(session
+            .capabilities
+            .contains_key(JMAP_VACATION_RESPONSE_CAPABILITY));
         assert!(session.capabilities.contains_key(JMAP_WEBSOCKET_CAPABILITY));
         assert_eq!(
             session.primary_accounts[JMAP_CONTACTS_CAPABILITY],
@@ -3825,6 +3845,77 @@ mod tests {
             session.primary_accounts[JMAP_TASKS_CAPABILITY],
             FakeStore::account().account_id.to_string()
         );
+        assert_eq!(
+            session.primary_accounts[JMAP_VACATION_RESPONSE_CAPABILITY],
+            FakeStore::account().account_id.to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn vacation_response_get_projects_canonical_active_sieve_vacation() {
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            active_sieve_script: Some(
+                r#"require ["vacation"];
+                   vacation :subject "Out" :days 3 "Away until Monday";"#
+                    .to_string(),
+            ),
+            ..Default::default()
+        });
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_VACATION_RESPONSE_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "VacationResponse/get".to_string(),
+                        json!({}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let object = &response.method_responses[0].1["list"][0];
+        assert_eq!(object["id"], "singleton");
+        assert_eq!(object["isEnabled"], true);
+        assert_eq!(object["subject"], "Out");
+        assert_eq!(object["textBody"], "Away until Monday");
+        assert_eq!(object["htmlBody"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn vacation_response_get_returns_disabled_without_active_vacation() {
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            active_sieve_script: Some(r#"require ["fileinto"]; keep;"#.to_string()),
+            ..Default::default()
+        });
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_VACATION_RESPONSE_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "VacationResponse/get".to_string(),
+                        json!({
+                            "ids": ["singleton", "other"],
+                            "properties": ["id", "isEnabled", "subject", "textBody"]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let body = &response.method_responses[0].1;
+        assert_eq!(body["list"][0]["isEnabled"], false);
+        assert_eq!(body["list"][0]["subject"], "");
+        assert_eq!(body["notFound"], json!(["other"]));
     }
 
     #[tokio::test]

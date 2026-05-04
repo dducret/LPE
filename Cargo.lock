@@ -1521,6 +1521,7 @@ dependencies = [
  "anyhow",
  "axum",
  "base64",
+ "lpe-core",
  "lpe-magika",
  "lpe-storage",
  "serde",
