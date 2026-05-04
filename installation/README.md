@@ -229,6 +229,7 @@ through the `LPE-CT` proxy:
 
 ```bash
 sudo HOST=mail.example.com \
+  LPE_CT_EDGE_TEST_SCOPE=imaps \
   LPE_CT_IMAPS_TEST_EMAIL=user@example.com \
   LPE_CT_IMAPS_TEST_PASSWORD='mailbox-password' \
   ./test-lpe-ct-edge-ports.sh
@@ -238,7 +239,10 @@ If the upstream probe fails, check that `LPE_IMAP_BIND_ADDRESS` is not
 loopback-only and that the LAN firewall allows `LPE-CT` to connect to the core
 `LPE` address on `1143`. If the authenticated public IMAPS probe fails before
 `lpe.service` receives anything, inspect `journalctl -u lpe-ct.service` because
-the failure is still on the TLS/proxy edge path.
+the failure is still on the TLS/proxy edge path. The full edge test uses
+`LPE_CT_EDGE_TEST_SCOPE=all` by default; set the scope to `smtp`, `https`,
+`submission`, `imaps`, or a comma-separated subset when isolating one client
+path.
 
 The management UI URL must use `https://`. The generated `nginx` site redirects
 plain `HTTP` received on port `80` to the configured

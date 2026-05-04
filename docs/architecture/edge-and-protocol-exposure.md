@@ -31,9 +31,11 @@ The core `LPE` server must not be directly reachable from the public Internet an
 Operational validation for public `IMAPS` must cover more than a certificate
 handshake. The Debian edge-port test can also use mailbox test credentials to
 verify the full client path: public `993` `TLS`, `LPE-CT` proxying, core IMAP
-`LOGIN`, and `SELECT INBOX`. If Outlook fails while `lpe.service` receives no
-new log entries, the first logs to inspect are `journalctl -u lpe-ct.service`
-because the client has not reached the core protocol adapter.
+`LOGIN`, and `SELECT INBOX`, and it supports a scoped `imaps` run when SMTP or
+HTTPS publication is not part of the current investigation. If Outlook fails
+while `lpe.service` receives no new log entries, the first logs to inspect are
+`journalctl -u lpe-ct.service` because the client has not reached the core
+protocol adapter.
 
 For secure client submission, the baseline target prefers implicit TLS on port `465`, aligned with `RFC 8314`.
 

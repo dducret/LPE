@@ -5,6 +5,7 @@ ENV_FILE="${ENV_FILE:-/etc/lpe-ct/lpe-ct.env}"
 HOST="${HOST:-127.0.0.1}"
 SERVICE_NAME="${SERVICE_NAME:-lpe-ct.service}"
 SERVICE_USER="${SERVICE_USER:-lpe-ct}"
+TEST_SCOPE="${LPE_CT_EDGE_TEST_SCOPE:-all}"
 
 fail() {
   echo "[FAIL] $*" >&2
@@ -19,6 +20,26 @@ pass() {
   echo "[OK] $*"
 }
 
+scope_enabled() {
+  local scope="$1"
+  [[ "${TEST_SCOPE}" == "all" || ",${TEST_SCOPE}," == *",${scope},"* ]]
+}
+
+validate_test_scope() {
+  local -a tokens
+  local token
+  IFS=',' read -ra tokens <<<"${TEST_SCOPE}"
+  for token in "${tokens[@]}"; do
+    case "${token}" in
+      all|smtp|https|submission|imaps)
+        ;;
+      *)
+        fail "Unsupported LPE_CT_EDGE_TEST_SCOPE token '${token}'. Use all, smtp, https, submission, imaps, or a comma-separated subset."
+        ;;
+    esac
+  done
+}
+
 imap_quote() {
   local value="$1"
   value="${value//\\/\\\\}"
@@ -30,6 +51,7 @@ imap_quote() {
 set -a
 source "$ENV_FILE"
 set +a
+validate_test_scope
 
 listener_snapshot() {
   local port="$1"
@@ -372,44 +394,60 @@ if [[ -n "${LPE_CT_IMAPS_BIND_ADDRESS:-}" ]]; then
   check_tls_file_readable "IMAPS TLS private key" "${LPE_CT_IMAPS_TLS_KEY_PATH:-${LPE_CT_PUBLIC_TLS_KEY_PATH:-}}"
 fi
 
-tcp_probe "SMTP ingress" "$HOST" "${SMTP_PORT:-25}"
-if [[ -n "${LPE_CT_PUBLIC_TLS_CERT_PATH:-}" && -n "${LPE_CT_PUBLIC_TLS_KEY_PATH:-}" ]]; then
-  smtp_starttls_probe_if_possible "$HOST" "${SMTP_PORT:-25}"
+if scope_enabled "smtp"; then
+  tcp_probe "SMTP ingress" "$HOST" "${SMTP_PORT:-25}"
+  if [[ -n "${LPE_CT_PUBLIC_TLS_CERT_PATH:-}" && -n "${LPE_CT_PUBLIC_TLS_KEY_PATH:-}" ]]; then
+    smtp_starttls_probe_if_possible "$HOST" "${SMTP_PORT:-25}"
+  else
+    echo "[SKIP] LPE_CT_PUBLIC_TLS_CERT_PATH and LPE_CT_PUBLIC_TLS_KEY_PATH are not both configured; SMTP STARTTLS is intentionally not advertised."
+  fi
 else
-  echo "[SKIP] LPE_CT_PUBLIC_TLS_CERT_PATH and LPE_CT_PUBLIC_TLS_KEY_PATH are not both configured; SMTP STARTTLS is intentionally not advertised."
+  echo "[SKIP] SMTP ingress checks skipped by LPE_CT_EDGE_TEST_SCOPE=${TEST_SCOPE}."
 fi
 
-curl --silent --show-error --fail --insecure "https://${HOST}:${HTTPS_PORT}/" >/dev/null \
-  || fail "HTTPS management edge is not reachable on ${HOST}:${HTTPS_PORT}"
-pass "HTTPS management edge is reachable on ${HOST}:${HTTPS_PORT}"
-headers_file="$(mktemp)"
-curl --silent --show-error --fail --insecure --http1.1 \
-  --header "Host: ${LPE_CT_PUBLICATION_TEST_HOST:-${LPE_CT_PUBLIC_HOSTNAME:-${LPE_CT_SERVER_NAME:-localhost}}}" \
-  --dump-header "${headers_file}" \
-  --output /dev/null \
-  "https://${HOST}:${HTTPS_PORT}/" \
-  || {
-    rm -f "${headers_file}"
-    fail "HTTPS security-header probe failed on ${HOST}:${HTTPS_PORT}"
-  }
-assert_https_security_headers "${headers_file}" "LPE-CT HTTPS management edge"
-rm -f "${headers_file}"
-pass "HTTPS management edge exposes required security headers"
-tls_probe_if_possible "$HOST" "$HTTPS_PORT" "HTTPS"
-probe_client_publication
-
-if [[ -n "${LPE_CT_SUBMISSION_BIND_ADDRESS:-}" ]]; then
-  tls_probe_if_possible "$HOST" "$SUBMISSION_PORT" "SMTPS submission"
+if scope_enabled "https"; then
+  curl --silent --show-error --fail --insecure "https://${HOST}:${HTTPS_PORT}/" >/dev/null \
+    || fail "HTTPS management edge is not reachable on ${HOST}:${HTTPS_PORT}"
+  pass "HTTPS management edge is reachable on ${HOST}:${HTTPS_PORT}"
+  headers_file="$(mktemp)"
+  curl --silent --show-error --fail --insecure --http1.1 \
+    --header "Host: ${LPE_CT_PUBLICATION_TEST_HOST:-${LPE_CT_PUBLIC_HOSTNAME:-${LPE_CT_SERVER_NAME:-localhost}}}" \
+    --dump-header "${headers_file}" \
+    --output /dev/null \
+    "https://${HOST}:${HTTPS_PORT}/" \
+    || {
+      rm -f "${headers_file}"
+      fail "HTTPS security-header probe failed on ${HOST}:${HTTPS_PORT}"
+    }
+  assert_https_security_headers "${headers_file}" "LPE-CT HTTPS management edge"
+  rm -f "${headers_file}"
+  pass "HTTPS management edge exposes required security headers"
+  tls_probe_if_possible "$HOST" "$HTTPS_PORT" "HTTPS"
+  probe_client_publication
 else
-  echo "[SKIP] LPE_CT_SUBMISSION_BIND_ADDRESS is not configured; port 465 is intentionally not enabled."
+  echo "[SKIP] HTTPS publication checks skipped by LPE_CT_EDGE_TEST_SCOPE=${TEST_SCOPE}."
 fi
 
-if [[ -n "${LPE_CT_IMAPS_BIND_ADDRESS:-}" ]]; then
-  tls_probe_if_possible "$HOST" "$IMAPS_PORT" "IMAPS"
-  probe_imaps_upstream "${LPE_CT_IMAPS_UPSTREAM_ADDRESS:-}"
-  probe_public_imaps_auth_if_configured
+if scope_enabled "submission"; then
+  if [[ -n "${LPE_CT_SUBMISSION_BIND_ADDRESS:-}" ]]; then
+    tls_probe_if_possible "$HOST" "$SUBMISSION_PORT" "SMTPS submission"
+  else
+    echo "[SKIP] LPE_CT_SUBMISSION_BIND_ADDRESS is not configured; port 465 is intentionally not enabled."
+  fi
 else
-  echo "[SKIP] LPE_CT_IMAPS_BIND_ADDRESS is not configured; port 993 is not enabled."
+  echo "[SKIP] SMTPS submission checks skipped by LPE_CT_EDGE_TEST_SCOPE=${TEST_SCOPE}."
+fi
+
+if scope_enabled "imaps"; then
+  if [[ -n "${LPE_CT_IMAPS_BIND_ADDRESS:-}" ]]; then
+    tls_probe_if_possible "$HOST" "$IMAPS_PORT" "IMAPS"
+    probe_imaps_upstream "${LPE_CT_IMAPS_UPSTREAM_ADDRESS:-}"
+    probe_public_imaps_auth_if_configured
+  else
+    echo "[SKIP] LPE_CT_IMAPS_BIND_ADDRESS is not configured; port 993 is not enabled."
+  fi
+else
+  echo "[SKIP] IMAPS checks skipped by LPE_CT_EDGE_TEST_SCOPE=${TEST_SCOPE}."
 fi
 
 echo "LPE-CT edge port test completed successfully."
