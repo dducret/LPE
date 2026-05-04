@@ -574,6 +574,18 @@ fn utf16z(value: &str) -> Vec<u8> {
     bytes
 }
 
+fn utf16z_string_bytes(value: &[u8]) -> Vec<u8> {
+    value
+        .chunks_exact(2)
+        .take_while(|chunk| *chunk != [0, 0])
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect::<Vec<_>>()
+        .iter()
+        .map(|unit| char::from_u32(*unit as u32).unwrap_or(char::REPLACEMENT_CHARACTER))
+        .collect::<String>()
+        .into_bytes()
+}
+
 #[tokio::test]
 async fn mapi_over_http_connect_creates_emsmdb_session() {
     let store = FakeStore {
@@ -1084,6 +1096,53 @@ async fn mapi_over_http_bind_creates_nspi_session() {
     assert_eq!(body.len(), 28);
     assert_eq!(&body[0..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
     assert_ne!(&body[8..24], &[0; 16]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_returns_nspi_and_mailbox_urls() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let mut headers = mapi_headers("GetAddressBookUrl");
+    headers.insert("host", HeaderValue::from_static("mail.example.test"));
+    headers.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, b"")
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-requesttype").unwrap(),
+        "GetAddressBookUrl"
+    );
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(
+        utf16z_string_bytes(&body[8..]),
+        b"https://mail.example.test/mapi/nspi/".to_vec()
+    );
+    assert!(body.ends_with(&[0, 0, 0, 0]));
+
+    headers.insert("x-requesttype", HeaderValue::from_static("GetMailboxUrl"));
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(
+        response.headers().get("x-requesttype").unwrap(),
+        "GetMailboxUrl"
+    );
+    let body = response_bytes(response).await;
+    assert_eq!(
+        utf16z_string_bytes(&body[8..]),
+        b"https://mail.example.test/mapi/emsmdb/".to_vec()
+    );
 }
 
 #[tokio::test]

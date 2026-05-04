@@ -39,6 +39,8 @@ enum MapiRequestType {
     Execute,
     Bind,
     Unbind,
+    GetAddressBookUrl,
+    GetMailboxUrl,
     Ping,
     Unsupported(String),
 }
@@ -91,6 +93,12 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
         }
         (MapiEndpoint::Nspi, MapiRequestType::Unbind) => {
             disconnect_response(endpoint, &principal, headers, &request_id, "Unbind")
+        }
+        (MapiEndpoint::Nspi, MapiRequestType::GetAddressBookUrl) => {
+            endpoint_url_response("GetAddressBookUrl", &request_id, headers, "/mapi/nspi/")
+        }
+        (MapiEndpoint::Nspi, MapiRequestType::GetMailboxUrl) => {
+            endpoint_url_response("GetMailboxUrl", &request_id, headers, "/mapi/emsmdb/")
         }
         (_, MapiRequestType::Ping) => mapi_response("PING", &request_id, 0, Vec::new(), None),
         (_, MapiRequestType::Unsupported(value)) => mapi_diagnostic_response(
@@ -291,6 +299,37 @@ fn disconnect_response(
     )
 }
 
+fn endpoint_url_response(
+    request_type: &str,
+    request_id: &str,
+    headers: &HeaderMap,
+    path: &str,
+) -> Response {
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    write_utf16z(&mut body, &public_endpoint_url(headers, path));
+    write_u32(&mut body, 0);
+    mapi_response(request_type, request_id, 0, body, None)
+}
+
+fn public_endpoint_url(headers: &HeaderMap, path: &str) -> String {
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("https");
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("localhost");
+    format!("{scheme}://{host}{path}")
+}
+
 fn create_session(endpoint: MapiEndpoint, principal: &AccountPrincipal) -> String {
     let session_id = Uuid::new_v4().to_string();
     let session = MapiSession {
@@ -354,6 +393,8 @@ fn request_type(headers: &HeaderMap) -> Result<MapiRequestType> {
         "execute" => MapiRequestType::Execute,
         "bind" => MapiRequestType::Bind,
         "unbind" => MapiRequestType::Unbind,
+        "getaddressbookurl" => MapiRequestType::GetAddressBookUrl,
+        "getmailboxurl" => MapiRequestType::GetMailboxUrl,
         "ping" => MapiRequestType::Ping,
         _ => MapiRequestType::Unsupported(value.to_string()),
     })
@@ -917,6 +958,8 @@ impl MapiRequestType {
             MapiRequestType::Execute => "Execute",
             MapiRequestType::Bind => "Bind",
             MapiRequestType::Unbind => "Unbind",
+            MapiRequestType::GetAddressBookUrl => "GetAddressBookUrl",
+            MapiRequestType::GetMailboxUrl => "GetMailboxUrl",
             MapiRequestType::Ping => "PING",
             MapiRequestType::Unsupported(value) => value,
         }

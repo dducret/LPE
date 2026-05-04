@@ -44,6 +44,8 @@ Implemented request types:
 - EMSMDB `Disconnect`: consumes the authenticated EMSMDB session cookie and expires it
 - NSPI `Bind`: creates an authenticated address book session context and returns an NSPI bind success body with a stable non-zero server GUID plus an implementation-owned session cookie
 - NSPI `Unbind`: consumes the authenticated NSPI session cookie and expires it
+- NSPI `GetAddressBookUrl`: returns the externally visible `/mapi/nspi/` URL using forwarded host/protocol headers when present
+- NSPI `GetMailboxUrl`: returns the externally visible `/mapi/emsmdb/` URL using forwarded host/protocol headers when present
 - `PING`: returns a transport success response on either endpoint
 
 `Execute` currently parses the EMSMDB Execute request body and validates the session cookie. It supports `RopRelease`, which intentionally emits no ROP response, the first private-mailbox `RopLogon` response with canonical account identity and fixed special-folder ids, `RopOpenFolder`, `RopGetHierarchyTable`, `RopSetColumns`, `RopQueryRows`, and `RopGetPropertiesSpecific` for opened folder handles. The implementation now keeps per-session ROP handle state and populates root and IPM-subtree hierarchy table rows from canonical JMAP mailbox folders, including display name, folder id, parent folder id, content count, unread count, and subfolder flags for the supported property tags. The common special-folder ids for `Inbox`, `Drafts`, `Sent`, and `Deleted` are also mapped back to canonical mailbox roles for opened-folder property reads. Other ROPs currently return MAPI ROP error buffers with `MAPI_E_NO_SUPPORT`. NSPI table/query operations are not implemented yet.
