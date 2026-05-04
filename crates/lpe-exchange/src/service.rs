@@ -16,7 +16,7 @@ use lpe_storage::{
     JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, Storage, SubmitMessageInput,
     SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::{
@@ -557,23 +557,43 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     .store
                     .fetch_accessible_contacts_in_collection(principal.account_id, collection_id)
                     .await?;
-                let current_ids = contacts
+                let current_items = contacts
                     .iter()
-                    .map(|contact| contact.id)
+                    .map(|contact| (contact.id, contact_change_key(contact)))
                     .collect::<Vec<_>>();
-                let current_set = current_ids.iter().copied().collect::<HashSet<_>>();
-                let previous_ids = requested_sync_state(request)
-                    .map(|state| collaboration_sync_state_ids(&state, "contacts", collection_id))
+                let current_set = current_items
+                    .iter()
+                    .map(|(id, _)| *id)
+                    .collect::<HashSet<_>>();
+                let previous_items = requested_sync_state(request)
+                    .map(|state| collaboration_sync_state_items(&state, "contacts", collection_id))
                     .unwrap_or_default();
-                let previous_set = previous_ids.iter().copied().collect::<HashSet<_>>();
+                let previous_by_id = sync_state_items_by_id(&previous_items);
                 for contact in &contacts {
-                    if !previous_set.contains(&contact.id) {
-                        changes.push_str("<t:Create>");
-                        changes.push_str(&contact_item_xml(contact));
-                        changes.push_str("</t:Create>");
+                    let current_change_key = contact_change_key(contact);
+                    match previous_by_id.get(&contact.id) {
+                        None => {
+                            changes.push_str("<t:Create>");
+                            changes.push_str(&contact_item_xml(contact));
+                            changes.push_str("</t:Create>");
+                        }
+                        Some(None) => {
+                            changes.push_str("<t:Update>");
+                            changes.push_str(&contact_item_xml(contact));
+                            changes.push_str("</t:Update>");
+                        }
+                        Some(Some(previous_change_key))
+                            if previous_change_key != &current_change_key =>
+                        {
+                            changes.push_str("<t:Update>");
+                            changes.push_str(&contact_item_xml(contact));
+                            changes.push_str("</t:Update>");
+                        }
+                        _ => {}
                     }
                 }
-                for contact_id in previous_ids {
+                for item in previous_items {
+                    let contact_id = item.id;
                     if !current_set.contains(&contact_id) {
                         changes.push_str("<t:Delete>");
                         changes.push_str(&format!(
@@ -582,7 +602,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
                         changes.push_str("</t:Delete>");
                     }
                 }
-                collaboration_sync_state("contacts", collection_id, &current_ids)
+                collaboration_sync_state("contacts", collection_id, &current_items)
             }
             FolderKind::Calendar => {
                 let collection_id = requested_collection_id(request).unwrap_or(CALENDAR_FOLDER_ID);
@@ -590,20 +610,43 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     .store
                     .fetch_accessible_events_in_collection(principal.account_id, collection_id)
                     .await?;
-                let current_ids = events.iter().map(|event| event.id).collect::<Vec<_>>();
-                let current_set = current_ids.iter().copied().collect::<HashSet<_>>();
-                let previous_ids = requested_sync_state(request)
-                    .map(|state| collaboration_sync_state_ids(&state, "calendar", collection_id))
+                let current_items = events
+                    .iter()
+                    .map(|event| (event.id, calendar_change_key(event)))
+                    .collect::<Vec<_>>();
+                let current_set = current_items
+                    .iter()
+                    .map(|(id, _)| *id)
+                    .collect::<HashSet<_>>();
+                let previous_items = requested_sync_state(request)
+                    .map(|state| collaboration_sync_state_items(&state, "calendar", collection_id))
                     .unwrap_or_default();
-                let previous_set = previous_ids.iter().copied().collect::<HashSet<_>>();
+                let previous_by_id = sync_state_items_by_id(&previous_items);
                 for event in &events {
-                    if !previous_set.contains(&event.id) {
-                        changes.push_str("<t:Create>");
-                        changes.push_str(&calendar_item_xml(event));
-                        changes.push_str("</t:Create>");
+                    let current_change_key = calendar_change_key(event);
+                    match previous_by_id.get(&event.id) {
+                        None => {
+                            changes.push_str("<t:Create>");
+                            changes.push_str(&calendar_item_xml(event));
+                            changes.push_str("</t:Create>");
+                        }
+                        Some(None) => {
+                            changes.push_str("<t:Update>");
+                            changes.push_str(&calendar_item_xml(event));
+                            changes.push_str("</t:Update>");
+                        }
+                        Some(Some(previous_change_key))
+                            if previous_change_key != &current_change_key =>
+                        {
+                            changes.push_str("<t:Update>");
+                            changes.push_str(&calendar_item_xml(event));
+                            changes.push_str("</t:Update>");
+                        }
+                        _ => {}
                     }
                 }
-                for event_id in previous_ids {
+                for item in previous_items {
+                    let event_id = item.id;
                     if !current_set.contains(&event_id) {
                         changes.push_str("<t:Delete>");
                         changes.push_str(&format!(
@@ -612,7 +655,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
                         changes.push_str("</t:Delete>");
                     }
                 }
-                collaboration_sync_state("calendar", collection_id, &current_ids)
+                collaboration_sync_state("calendar", collection_id, &current_items)
             }
             FolderKind::Mailbox => {
                 let Some(mailbox_id) = self
@@ -1502,27 +1545,55 @@ fn mailbox_sync_state(mailbox_id: Uuid, message_ids: &[Uuid]) -> String {
     )
 }
 
-fn collaboration_sync_state(kind: &str, collection_id: &str, item_ids: &[Uuid]) -> String {
-    let id_list = item_ids
+fn collaboration_sync_state(kind: &str, collection_id: &str, items: &[(Uuid, String)]) -> String {
+    let item_list = items
         .iter()
-        .map(Uuid::to_string)
+        .map(|(id, change_key)| format!("{id}={change_key}"))
         .collect::<Vec<_>>()
         .join(",");
-    if id_list.is_empty() {
+    if item_list.is_empty() {
         format!("{kind}:{collection_id}:0")
     } else {
-        format!("{kind}:{collection_id}:{id_list}")
+        format!("{kind}:{collection_id}:{item_list}")
     }
 }
 
-fn collaboration_sync_state_ids(sync_state: &str, kind: &str, collection_id: &str) -> Vec<Uuid> {
+#[derive(Debug, Clone)]
+struct SyncStateItem {
+    id: Uuid,
+    change_key: Option<String>,
+}
+
+fn collaboration_sync_state_items(
+    sync_state: &str,
+    kind: &str,
+    collection_id: &str,
+) -> Vec<SyncStateItem> {
     let prefix = format!("{kind}:{collection_id}:");
     sync_state
         .strip_prefix(&prefix)
         .unwrap_or_default()
         .split(',')
         .filter(|value| !value.is_empty() && *value != "0")
-        .filter_map(|value| Uuid::parse_str(value).ok())
+        .filter_map(|value| {
+            if let Some((id, change_key)) = value.split_once('=') {
+                return Uuid::parse_str(id).ok().map(|id| SyncStateItem {
+                    id,
+                    change_key: Some(change_key.to_string()),
+                });
+            }
+            Uuid::parse_str(value).ok().map(|id| SyncStateItem {
+                id,
+                change_key: None,
+            })
+        })
+        .collect()
+}
+
+fn sync_state_items_by_id(items: &[SyncStateItem]) -> HashMap<Uuid, Option<String>> {
+    items
+        .iter()
+        .map(|item| (item.id, item.change_key.clone()))
         .collect()
 }
 
@@ -2120,6 +2191,51 @@ fn folder_change_key(id: &str) -> String {
     format!("ck-{id}")
 }
 
+fn contact_change_key(contact: &AccessibleContact) -> String {
+    stable_change_key(&[
+        "contact",
+        &contact.id.to_string(),
+        &contact.collection_id,
+        &contact.name,
+        &contact.role,
+        &contact.email,
+        &contact.phone,
+        &contact.team,
+        &contact.notes,
+    ])
+}
+
+fn calendar_change_key(event: &AccessibleEvent) -> String {
+    stable_change_key(&[
+        "calendar",
+        &event.id.to_string(),
+        &event.collection_id,
+        &event.date,
+        &event.time,
+        &event.time_zone,
+        &event.duration_minutes.to_string(),
+        &event.recurrence_rule,
+        &event.title,
+        &event.location,
+        &event.attendees,
+        &event.attendees_json,
+        &event.notes,
+    ])
+}
+
+fn stable_change_key(parts: &[&str]) -> String {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for part in parts {
+        for byte in part.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("ck-{hash:016x}")
+}
+
 fn count_folder_elements(value: &str) -> usize {
     count_tag_occurrences(value, "<t:Folder>")
         + count_tag_occurrences(value, "<t:ContactsFolder>")
@@ -2130,12 +2246,13 @@ fn contact_summary_xml(contact: &AccessibleContact) -> String {
     format!(
         concat!(
             "<t:Contact>",
-            "<t:ItemId Id=\"contact:{id}\"/>",
+            "<t:ItemId Id=\"contact:{id}\" ChangeKey=\"{change_key}\"/>",
             "<t:Subject>{name}</t:Subject>",
             "<t:DisplayName>{name}</t:DisplayName>",
             "</t:Contact>"
         ),
         id = contact.id,
+        change_key = contact_change_key(contact),
         name = escape_xml(&contact.name),
     )
 }
@@ -2144,7 +2261,7 @@ fn contact_item_xml(contact: &AccessibleContact) -> String {
     format!(
         concat!(
             "<t:Contact>",
-            "<t:ItemId Id=\"contact:{id}\"/>",
+            "<t:ItemId Id=\"contact:{id}\" ChangeKey=\"{change_key}\"/>",
             "<t:ParentFolderId Id=\"{folder_id}\"/>",
             "<t:Subject>{name}</t:Subject>",
             "<t:DisplayName>{name}</t:DisplayName>",
@@ -2158,6 +2275,7 @@ fn contact_item_xml(contact: &AccessibleContact) -> String {
             "</t:Contact>"
         ),
         id = contact.id,
+        change_key = contact_change_key(contact),
         folder_id = escape_xml(&contact.collection_id),
         name = escape_xml(&contact.name),
         given = escape_xml(&first_name(&contact.name)),
@@ -2174,13 +2292,14 @@ fn calendar_item_summary_xml(event: &AccessibleEvent) -> String {
     format!(
         concat!(
             "<t:CalendarItem>",
-            "<t:ItemId Id=\"event:{id}\"/>",
+            "<t:ItemId Id=\"event:{id}\" ChangeKey=\"{change_key}\"/>",
             "<t:Subject>{title}</t:Subject>",
             "<t:Start>{start}</t:Start>",
             "<t:End>{end}</t:End>",
             "</t:CalendarItem>"
         ),
         id = event.id,
+        change_key = calendar_change_key(event),
         title = escape_xml(&event.title),
         start = escape_xml(&ews_datetime(&event.date, &event.time)),
         end = escape_xml(&event_end_datetime(event)),
@@ -2191,7 +2310,7 @@ fn calendar_item_xml(event: &AccessibleEvent) -> String {
     format!(
         concat!(
             "<t:CalendarItem>",
-            "<t:ItemId Id=\"event:{id}\"/>",
+            "<t:ItemId Id=\"event:{id}\" ChangeKey=\"{change_key}\"/>",
             "<t:ParentFolderId Id=\"{folder_id}\"/>",
             "<t:Subject>{title}</t:Subject>",
             "<t:Location>{location}</t:Location>",
@@ -2202,6 +2321,7 @@ fn calendar_item_xml(event: &AccessibleEvent) -> String {
             "</t:CalendarItem>"
         ),
         id = event.id,
+        change_key = calendar_change_key(event),
         folder_id = escape_xml(&event.collection_id),
         title = escape_xml(&event.title),
         location = escape_xml(&event.location),
