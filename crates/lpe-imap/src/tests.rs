@@ -664,6 +664,7 @@ impl ImapStore for FakeStore {
             .iter_mut()
             .find(|grant| grant.grantee_email.eq_ignore_ascii_case(&normalized_email))
             .map(|grant| {
+                grant.may_write = input.may_write;
                 grant.updated_at = "2026-04-22T10:05:00Z".to_string();
                 grant.clone()
             })
@@ -676,6 +677,7 @@ impl ImapStore for FakeStore {
                     grantee_account_id,
                     grantee_email: normalized_email.clone(),
                     grantee_display_name: normalized_email.clone(),
+                    may_write: input.may_write,
                     created_at: "2026-04-22T10:00:00Z".to_string(),
                     updated_at: "2026-04-22T10:00:00Z".to_string(),
                 };
@@ -2102,6 +2104,24 @@ async fn acl_commands_project_canonical_mailbox_and_sender_delegation() {
     assert!(
         invalid_send_only.contains("A11 NO sender delegation rights require mailbox access rights")
     );
+
+    let read_only = send_command(
+        &mut stream,
+        "A12 SETACL Inbox carol@example.test lr\r\n",
+        "A12",
+    )
+    .await;
+    assert!(read_only.contains("A12 OK SETACL completed"));
+
+    let getacl_read_only = send_command(&mut stream, "A13 GETACL Inbox\r\n", "A13").await;
+    assert!(getacl_read_only.contains("carol@example.test lr"));
+    assert!(!getacl_read_only.contains("carol@example.test lrswite"));
+    let grants = store.mailbox_grants.lock().unwrap();
+    let carol = grants
+        .iter()
+        .find(|grant| grant.grantee_email == "carol@example.test")
+        .expect("read-only mailbox grant should be stored");
+    assert!(!carol.may_write);
 
     task.abort();
 }

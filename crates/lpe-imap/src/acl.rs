@@ -19,6 +19,7 @@ const ASSIGNABLE_RIGHTS: &str = OWNER_RIGHTS;
 #[derive(Clone, Copy)]
 struct AclState {
     mailbox: bool,
+    may_write: bool,
     send_as: bool,
     send_on_behalf: bool,
 }
@@ -239,6 +240,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                     MailboxDelegationGrantInput {
                         owner_account_id: principal.account_id,
                         grantee_email: identifier.to_string(),
+                        may_write: requested_state.may_write,
                     },
                     AuditEntryInput {
                         actor: principal.email.clone(),
@@ -331,16 +333,19 @@ fn combine_acl_state(
             .entry(grant.grantee_email.to_ascii_lowercase())
             .or_insert(AclState {
                 mailbox: false,
+                may_write: false,
                 send_as: false,
                 send_on_behalf: false,
             });
         entry.mailbox = true;
+        entry.may_write = grant.may_write;
     }
     for grant in sender_grants {
         let entry = grants
             .entry(grant.grantee_email.to_ascii_lowercase())
             .or_insert(AclState {
                 mailbox: false,
+                may_write: false,
                 send_as: false,
                 send_on_behalf: false,
             });
@@ -358,6 +363,7 @@ fn parse_acl_state_update(current: Option<AclState>, token: &str) -> Result<AclS
     if trimmed.is_empty() {
         return Ok(AclState {
             mailbox: false,
+            may_write: false,
             send_as: false,
             send_on_behalf: false,
         });
@@ -371,6 +377,7 @@ fn parse_acl_state_update(current: Option<AclState>, token: &str) -> Result<AclS
     let requested = parse_acl_rights(rights_source)?;
     let base = current.unwrap_or(AclState {
         mailbox: false,
+        may_write: false,
         send_as: false,
         send_on_behalf: false,
     });
@@ -378,11 +385,17 @@ fn parse_acl_state_update(current: Option<AclState>, token: &str) -> Result<AclS
     Ok(match mode {
         '+' => AclState {
             mailbox: base.mailbox || requested.mailbox,
+            may_write: base.may_write || requested.may_write,
             send_as: base.send_as || requested.send_as,
             send_on_behalf: base.send_on_behalf || requested.send_on_behalf,
         },
         '-' => AclState {
-            mailbox: base.mailbox && !requested.mailbox,
+            mailbox: if requested.mailbox && !requested.may_write {
+                false
+            } else {
+                base.mailbox
+            },
+            may_write: base.may_write && !requested.may_write,
             send_as: base.send_as && !requested.send_as,
             send_on_behalf: base.send_on_behalf && !requested.send_on_behalf,
         },
@@ -392,13 +405,18 @@ fn parse_acl_state_update(current: Option<AclState>, token: &str) -> Result<AclS
 
 fn parse_acl_rights(source: &str) -> Result<AclState> {
     let mut mailbox = false;
+    let mut may_write = false;
     let mut send_as = false;
     let mut send_on_behalf = false;
     let mut unsupported = BTreeSet::new();
 
     for ch in source.chars() {
         match ch {
-            'l' | 'r' | 's' | 'w' | 'i' | 't' | 'e' => mailbox = true,
+            'l' | 'r' => mailbox = true,
+            's' | 'w' | 'i' | 't' | 'e' => {
+                mailbox = true;
+                may_write = true;
+            }
             'p' => send_as = true,
             'b' => send_on_behalf = true,
             _ => {
@@ -416,6 +434,7 @@ fn parse_acl_rights(source: &str) -> Result<AclState> {
 
     Ok(AclState {
         mailbox,
+        may_write,
         send_as,
         send_on_behalf,
     })
@@ -424,7 +443,11 @@ fn parse_acl_rights(source: &str) -> Result<AclState> {
 fn render_acl_rights(state: AclState, owner: bool) -> String {
     let mut rights = String::new();
     if state.mailbox {
-        rights.push_str(MAILBOX_RIGHTS);
+        if state.may_write {
+            rights.push_str(MAILBOX_RIGHTS);
+        } else {
+            rights.push_str("lr");
+        }
     }
     if owner {
         rights.push('a');

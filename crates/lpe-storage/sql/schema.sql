@@ -929,6 +929,7 @@ CREATE TABLE mailbox_delegation_grants (
     tenant_id TEXT NOT NULL CHECK (btrim(tenant_id) <> ''),
     owner_account_id UUID NOT NULL,
     grantee_account_id UUID NOT NULL,
+    may_write BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, owner_account_id, grantee_account_id),
@@ -991,7 +992,7 @@ LEFT JOIN attachments a
 GROUP BY m.id, m.account_id, m.mailbox_id, m.received_at, m.subject_normalized, mb.search_vector;
 
 INSERT INTO schema_metadata (singleton, schema_version)
-VALUES (TRUE, '0.1.10');
+VALUES (TRUE, '0.1.11');
 
 INSERT INTO security_settings (
     tenant_id,

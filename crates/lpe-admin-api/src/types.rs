@@ -418,6 +418,8 @@ pub struct CollaborationOverviewResponse {
 #[serde(rename_all = "camelCase")]
 pub struct UpsertMailboxDelegationGrantRequest {
     pub grantee_email: String,
+    #[serde(default = "default_true")]
+    pub may_write: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -425,6 +427,10 @@ pub struct UpsertMailboxDelegationGrantRequest {
 pub struct UpsertSenderDelegationGrantRequest {
     pub grantee_email: String,
     pub sender_right: String,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize)]

@@ -220,6 +220,7 @@ pub(crate) async fn upsert_mailbox_delegation_grant(
                 MailboxDelegationGrantInput {
                     owner_account_id: account.account_id,
                     grantee_email: request.grantee_email.clone(),
+                    may_write: request.may_write,
                 },
                 AuditEntryInput {
                     actor: account.email.clone(),

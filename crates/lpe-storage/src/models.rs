@@ -144,6 +144,7 @@ pub(crate) struct MailboxAccountAccessRow {
     pub(crate) account_id: Uuid,
     pub(crate) email: String,
     pub(crate) display_name: String,
+    pub(crate) may_write: bool,
     pub(crate) may_send_as: bool,
     pub(crate) may_send_on_behalf: bool,
 }
@@ -157,6 +158,7 @@ pub(crate) struct MailboxDelegationGrantRow {
     pub(crate) grantee_account_id: Uuid,
     pub(crate) grantee_email: String,
     pub(crate) grantee_display_name: String,
+    pub(crate) may_write: bool,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
 }

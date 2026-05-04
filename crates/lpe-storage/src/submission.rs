@@ -156,6 +156,7 @@ pub struct SenderIdentity {
 pub struct MailboxDelegationGrantInput {
     pub owner_account_id: Uuid,
     pub grantee_email: String,
+    pub may_write: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -175,6 +176,7 @@ pub struct MailboxDelegationGrant {
     pub grantee_account_id: Uuid,
     pub grantee_email: String,
     pub grantee_display_name: String,
+    pub may_write: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -516,17 +518,20 @@ impl Storage {
         sqlx::query(
             r#"
             INSERT INTO mailbox_delegation_grants (
-                id, tenant_id, owner_account_id, grantee_account_id
+                id, tenant_id, owner_account_id, grantee_account_id, may_write
             )
-            VALUES ($1, $2, $3, $4)
+            VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (tenant_id, owner_account_id, grantee_account_id)
-            DO UPDATE SET updated_at = NOW()
+            DO UPDATE SET
+                may_write = EXCLUDED.may_write,
+                updated_at = NOW()
             "#,
         )
         .bind(Uuid::new_v4())
         .bind(&tenant_id)
         .bind(owner.id)
         .bind(grantee.id)
+        .bind(input.may_write)
         .execute(&mut *tx)
         .await?;
 
@@ -593,6 +598,7 @@ impl Storage {
                 g.grantee_account_id,
                 grantee.primary_email AS grantee_email,
                 grantee.display_name AS grantee_display_name,
+                g.may_write,
                 to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
                 to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             FROM mailbox_delegation_grants g
@@ -761,6 +767,7 @@ impl Storage {
                 g.grantee_account_id,
                 grantee.primary_email AS grantee_email,
                 grantee.display_name AS grantee_display_name,
+                g.may_write,
                 to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
                 to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             FROM mailbox_delegation_grants g
@@ -836,6 +843,7 @@ impl Storage {
                 owner.id AS account_id,
                 owner.primary_email AS email,
                 owner.display_name,
+                g.may_write,
                 EXISTS(
                     SELECT 1
                     FROM sender_delegation_grants sg
@@ -870,7 +878,7 @@ impl Storage {
             display_name: row.display_name,
             is_owned: false,
             may_read: true,
-            may_write: true,
+            may_write: row.may_write,
             may_send_as: row.may_send_as,
             may_send_on_behalf: row.may_send_on_behalf,
         }));
@@ -1574,6 +1582,7 @@ fn map_mailbox_delegation_grant(row: MailboxDelegationGrantRow) -> MailboxDelega
         grantee_account_id: row.grantee_account_id,
         grantee_email: row.grantee_email,
         grantee_display_name: row.grantee_display_name,
+        may_write: row.may_write,
         created_at: row.created_at,
         updated_at: row.updated_at,
     }

@@ -103,7 +103,7 @@ Mailbox delegation is modeled separately from contacts/calendar collection grant
 
 The MVP introduces two canonical grant tables:
 
-- `mailbox_delegation_grants` for shared mailbox access
+- `mailbox_delegation_grants` for shared mailbox access, including the canonical `may_write` flag
 - `sender_delegation_grants` for sender authorization
 
 The mailbox projection grant exposes the delegated mailbox as another canonical mailbox account to the grantee. It does not copy mailbox state, messages, folders, or drafts.
@@ -116,6 +116,7 @@ Sender grants are distinct durable rights:
 `IMAP ACL` admin commands are an adapter projection over those same canonical grants. The current `IMAP` slice does not create a per-mailbox ACL database or a protocol-local rights journal. Instead:
 
 - mailbox access rights are projected from `mailbox_delegation_grants`
+- read-only access is represented by a mailbox grant with `may_write=false`; writable access uses `may_write=true`
 - `p` maps to canonical `send_as`
 - `b` is reserved by `LPE` as an `IMAP ACL` projection of canonical `send_on_behalf`
 - `SETACL` and `DELETEACL` update the canonical delegation tables directly
@@ -151,6 +152,7 @@ Mail `JMAP` additionally exposes accessible shared mailbox accounts in the sessi
 For delegated mailboxes:
 
 - mailbox visibility comes from `mailbox_delegation_grants`
+- mailbox write rights come from `mailbox_delegation_grants.may_write`
 - draft submission visibility comes from `sender_delegation_grants`
 - a shared mailbox without `send-as` or `send-on-behalf` must not be advertised as submittable through `Mailbox/get`
 - `Identity/get` may expose `LPE`-specific metadata that makes the canonical sender mode explicit, such as the delegated authorization kind and the authenticated sender identity used for `send-on-behalf`
