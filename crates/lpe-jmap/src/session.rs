@@ -12,7 +12,7 @@ use crate::{
     service::opaque_state_fingerprint,
     JmapService, JMAP_CALENDARS_CAPABILITY, JMAP_CONTACTS_CAPABILITY, JMAP_CORE_CAPABILITY,
     JMAP_MAIL_CAPABILITY, JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY,
-    JMAP_WEBSOCKET_CAPABILITY, SESSION_STATE,
+    JMAP_WEBSOCKET_CAPABILITY, MAX_CONCURRENT_UPLOAD, MAX_SIZE_UPLOAD, SESSION_STATE,
 };
 
 impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
@@ -86,9 +86,9 @@ fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {
         (
             JMAP_CORE_CAPABILITY.to_string(),
             json!({
-                "maxSizeUpload": 0,
+                "maxSizeUpload": MAX_SIZE_UPLOAD,
                 "maxCallsInRequest": 16,
-                "maxConcurrentUpload": 0,
+                "maxConcurrentUpload": MAX_CONCURRENT_UPLOAD,
                 "maxObjectsInGet": 250,
                 "maxObjectsInSet": 128,
                 "collationAlgorithms": ["i;ascii-casemap"],

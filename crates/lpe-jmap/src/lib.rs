@@ -23,8 +23,9 @@ pub(crate) use crate::parse::parse_submission_email_id;
 pub(crate) use crate::service::{
     collection_state_fingerprint, trim_snippet, DEFAULT_GET_LIMIT, JMAP_CALENDARS_CAPABILITY,
     JMAP_CONTACTS_CAPABILITY, JMAP_CORE_CAPABILITY, JMAP_MAIL_CAPABILITY,
-    JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY, JMAP_WEBSOCKET_CAPABILITY, MAX_QUERY_LIMIT,
-    PUSH_STATE_VERSION, QUERY_STATE_VERSION, SESSION_STATE, STATE_TOKEN_VERSION,
+    JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY, JMAP_WEBSOCKET_CAPABILITY,
+    MAX_CONCURRENT_UPLOAD, MAX_QUERY_LIMIT, MAX_SIZE_UPLOAD, PUSH_STATE_VERSION,
+    QUERY_STATE_VERSION, SESSION_STATE, STATE_TOKEN_VERSION,
 };
 pub(crate) use crate::session::requested_account_id;
 pub(crate) use crate::state::encode_query_state;
@@ -1290,6 +1291,14 @@ mod tests {
         assert_eq!(session.username, "alice@example.test");
         assert_eq!(session.api_url, "/jmap/api");
         assert!(session.capabilities.contains_key(JMAP_MAIL_CAPABILITY));
+        assert_eq!(
+            session.capabilities[JMAP_CORE_CAPABILITY]["maxSizeUpload"],
+            MAX_SIZE_UPLOAD
+        );
+        assert_eq!(
+            session.capabilities[JMAP_CORE_CAPABILITY]["maxConcurrentUpload"],
+            MAX_CONCURRENT_UPLOAD
+        );
         assert_eq!(
             session.capabilities[JMAP_WEBSOCKET_CAPABILITY]["url"],
             "wss://mail.example.test/jmap/ws"
@@ -5212,6 +5221,33 @@ mod tests {
             .unwrap();
         assert_eq!(blob.media_type, "message/rfc822");
         assert_eq!(blob.blob_bytes, b"Subject: Hello\r\n\r\nBody".to_vec());
+    }
+
+    #[tokio::test]
+    async fn upload_rejects_bodies_larger_than_session_limit() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            ..Default::default()
+        };
+        let service = JmapService::new_with_validator(
+            store,
+            validator_ok("message/rfc822", "eml", "eml", 0.99),
+        );
+        let oversized = vec![b'x'; MAX_SIZE_UPLOAD as usize + 1];
+
+        let result = service
+            .handle_upload(
+                Some("Bearer token"),
+                &FakeStore::account().account_id.to_string(),
+                "message/rfc822",
+                &oversized,
+            )
+            .await;
+
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "JMAP upload exceeds maxSizeUpload"
+        );
     }
 
     #[tokio::test]

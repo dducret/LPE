@@ -49,7 +49,7 @@ The WebSocket capability is advertised only when the `/jmap/ws` endpoint is actu
 
 Additional supported `JMAP` routes:
 
-- `POST /api/jmap/upload/{accountId}` for temporary `JMAP` blob upload
+- `POST /api/jmap/upload/{accountId}` for temporary `JMAP` blob upload; the `Session` core capability advertises the enforced `maxSizeUpload` and concurrent upload limit for real-client interoperability
 - `GET /api/jmap/download/{accountId}/{blobId}/{name}` for temporary blob download
 - `GET /api/jmap/ws` for `JMAP` over WebSocket with the `jmap` subprotocol
 

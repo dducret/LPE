@@ -43,6 +43,8 @@ pub(crate) const STATE_TOKEN_VERSION: &str = "mvp-2";
 pub(crate) const PUSH_STATE_VERSION: &str = "mvp-push-1";
 pub(crate) const MAX_QUERY_LIMIT: u64 = 250;
 pub(crate) const DEFAULT_GET_LIMIT: u64 = 100;
+pub(crate) const MAX_SIZE_UPLOAD: u64 = 25 * 1024 * 1024;
+pub(crate) const MAX_CONCURRENT_UPLOAD: u64 = 4;
 
 type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 
@@ -491,6 +493,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .requested_account_access(&account, Some(account_id))
             .await?;
         let requested_account_id = requested_account.account_id;
+        if body.len() as u64 > MAX_SIZE_UPLOAD {
+            bail!("JMAP upload exceeds maxSizeUpload");
+        }
         let outcome = self.validator.validate_bytes(
             ValidationRequest {
                 ingress_context: IngressContext::JmapUpload,
