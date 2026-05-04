@@ -548,8 +548,8 @@ fn mailbox_state_fingerprint(
     let is_drafts = mailbox.role == "drafts";
     let (may_read, may_write, may_draft, may_submit) = access
         .map(|access| {
-            let may_write = access.is_owned || access.may_write;
-            let may_submit = access.is_owned || access.may_send_as || access.may_send_on_behalf;
+            let may_write = crate::mailboxes::mailbox_account_may_write(access);
+            let may_submit = crate::mailboxes::mailbox_account_may_submit(access);
             (
                 access.may_read,
                 may_write,
@@ -668,7 +668,7 @@ fn email_state_fingerprint(email: &JmapEmail) -> String {
     )
 }
 
-fn opaque_state_fingerprint(value: &str) -> String {
+pub(crate) fn opaque_state_fingerprint(value: &str) -> String {
     let digest = Sha256::digest(value.as_bytes());
     digest
         .iter()

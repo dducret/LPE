@@ -1297,6 +1297,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn session_state_tracks_accessible_mailbox_projection() {
+        let base = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            accessible_mailbox_accounts: vec![FakeStore::mailbox_access()],
+            ..Default::default()
+        });
+        let delegated = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        });
+        let read_only_without_sender = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_read_only_access(false, false),
+            ],
+            ..Default::default()
+        });
+        let read_only_with_sender = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_read_only_access(true, false),
+            ],
+            ..Default::default()
+        });
+
+        let base = base
+            .session_document(Some("Bearer token"), None)
+            .await
+            .unwrap();
+        let delegated = delegated
+            .session_document(Some("Bearer token"), None)
+            .await
+            .unwrap();
+        let read_only_without_sender = read_only_without_sender
+            .session_document(Some("Bearer token"), None)
+            .await
+            .unwrap();
+        let read_only_with_sender = read_only_with_sender
+            .session_document(Some("Bearer token"), None)
+            .await
+            .unwrap();
+
+        assert_ne!(base.state, delegated.state);
+        assert_eq!(read_only_without_sender.state, read_only_with_sender.state);
+        assert!(!delegated.state.contains("shared@example.test"));
+    }
+
+    #[tokio::test]
     async fn session_and_identity_include_accessible_shared_mailbox_accounts() {
         let store = FakeStore {
             session: Some(FakeStore::account()),
@@ -1589,6 +1643,79 @@ mod tests {
         let rights = &response.method_responses[0].1["list"][0]["myRights"];
         assert_eq!(rights["mayAddItems"], false);
         assert_eq!(rights["maySubmit"], false);
+    }
+
+    #[tokio::test]
+    async fn mailbox_state_does_not_advertise_submit_for_read_only_sender_grant() {
+        let initial = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_read_only_access(false, false),
+            ],
+            ..Default::default()
+        });
+        let initial_response = initial
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Mailbox/get".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string()
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        let state = initial_response.method_responses[0].1["state"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let with_sender_grant = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_read_only_access(true, false),
+            ],
+            ..Default::default()
+        });
+        let changes = with_sender_grant
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Mailbox/changes".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "sinceState": state
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(changes.method_responses[0].1["created"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(changes.method_responses[0].1["updated"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(changes.method_responses[0].1["destroyed"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

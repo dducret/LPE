@@ -9,6 +9,7 @@ use lpe_storage::{AuthenticatedAccount, MailboxAccountAccess};
 use crate::{
     parse::parse_uuid,
     protocol::{SessionAccount, SessionDocument},
+    service::opaque_state_fingerprint,
     JmapService, JMAP_CALENDARS_CAPABILITY, JMAP_CONTACTS_CAPABILITY, JMAP_CORE_CAPABILITY,
     JMAP_MAIL_CAPABILITY, JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY,
     JMAP_WEBSOCKET_CAPABILITY, SESSION_STATE,
@@ -57,7 +58,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             download_url: "/jmap/download/{accountId}/{blobId}/{name}".to_string(),
             upload_url: "/jmap/upload/{accountId}".to_string(),
             event_source_url: None,
-            state: SESSION_STATE.to_string(),
+            state: session_state(&accessible_accounts),
         })
     }
 }
@@ -182,4 +183,39 @@ fn session_account_capabilities(
         }
     }
     account_capabilities
+}
+
+fn session_state(accessible_accounts: &[MailboxAccountAccess]) -> String {
+    let mut entries = accessible_accounts
+        .iter()
+        .map(|account| {
+            let may_submit = account.may_write
+                && (account.is_owned || account.may_send_as || account.may_send_on_behalf);
+            format!(
+                "{}|{}|{}|{}|{}|{}|{}|{}",
+                account.account_id,
+                account.email,
+                account.display_name,
+                account.is_owned,
+                account.may_read,
+                account.may_write,
+                may_submit,
+                session_account_version(account)
+            )
+        })
+        .collect::<Vec<_>>();
+    entries.sort();
+    opaque_state_fingerprint(&format!("{}|{}", SESSION_STATE, entries.join(";")))
+}
+
+fn session_account_version(access: &MailboxAccountAccess) -> &'static str {
+    if access.is_owned {
+        "owned"
+    } else if access.may_write && (access.may_send_as || access.may_send_on_behalf) {
+        "shared-submit"
+    } else if access.may_write {
+        "shared-write"
+    } else {
+        "shared-read"
+    }
 }

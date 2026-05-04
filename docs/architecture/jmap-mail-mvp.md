@@ -21,6 +21,7 @@ This document describes the `JMAP Mail` scope currently supported by `LPE` for t
 - `urn:ietf:params:jmap:websocket`
 
 The `JMAP` session is real: it is built from the authenticated mailbox account and exposes that current `LPE` account as the active `accountId`.
+Its session `state` is derived from the current accessible mailbox-account projection, so mailbox delegation or sender-right changes that alter advertised accounts or account capabilities change the session document state.
 The WebSocket capability is advertised only when the `/jmap/ws` endpoint is actually present in the running adapter.
 
 ### Supported methods
@@ -58,7 +59,7 @@ Additional supported `JMAP` routes:
 - `Email/set` accepts draft `keywords` for `$draft`, `$seen`, and `$flagged`; `$seen` and `$flagged` are mapped onto the canonical draft unread-flagged state without creating any parallel priority model
 - `EmailSubmission/set` does not submit raw MIME or direct `SMTP`
 - `EmailSubmission/set` takes an existing draft `emailId` and calls the canonical `LPE` submission workflow
-- for delegated mailbox accounts, `EmailSubmission/set` is available only when canonical sender delegation grants allow `send-as` or `send-on-behalf`
+- for delegated mailbox accounts, `EmailSubmission/set` is available only when canonical mailbox write access and sender delegation grants allow draft-backed submission
 - canonical submission creates the authoritative copy in `Sent`, marks the message as `queued`, inserts an `outbound_message_queue` row, then removes the source draft
 - `JMAP` object `state` values and WebSocket `StateChange` payloads are derived from the same canonical mailbox, message, contact, and calendar projections already stored in `PostgreSQL`
 - `JMAP` object `state` tokens use opaque fingerprints of canonical projection data; protected or message-visible fields such as `Bcc`, subject, and body content must not be serialized directly into client-visible state tokens
