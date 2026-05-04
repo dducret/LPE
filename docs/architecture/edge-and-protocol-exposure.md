@@ -56,6 +56,18 @@ types `http://host:443` instead of `https://host`. Debian deployments render the
 redirect with `LPE_CT_NGINX_LISTEN_PORT` so a non-standard HTTPS port is explicit
 instead of silently redirecting to a closed `443`.
 
+The public `HTTPS` edge must also emit baseline browser security headers without
+changing protocol payloads for `ActiveSync`, `EWS`, `MAPI`, autodiscover, or
+`JMAP`. The Debian `LPE-CT` nginx template sets `Strict-Transport-Security:
+max-age=31536000` without `includeSubDomains` by default, because the installer
+cannot prove that every delegated subdomain is served only over `HTTPS`.
+Deployments that control and harden every subdomain may extend the HSTS policy
+manually. The default framing policy is both `X-Frame-Options: DENY` and
+`Content-Security-Policy: frame-ancestors 'none'`. A broader CSP for scripts,
+styles, images, and API connections is intentionally deferred until it can be
+validated against the webmail, administration UI, and native-client protocol
+flows.
+
 When client submission is enabled, `LPE-CT` terminates the external `TLS` session, performs `AUTH`, and forwards the raw RFC 822 message plus envelope to the internal canonical `LPE` submission workflow. `LPE-CT` does not create the authoritative `Sent` copy itself, and the internal `LPE -> LPE-CT` outbound relay remains a backend-only transport.
 
 When published, the `JMAP` WebSocket endpoint remains a reverse-proxied `LPE` protocol adapter behind `LPE-CT`; it does not change the rule that `LPE-CT` is the only external exposure point.

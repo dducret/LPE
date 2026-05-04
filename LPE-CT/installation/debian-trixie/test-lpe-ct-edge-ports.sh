@@ -64,6 +64,28 @@ service_user_can_read() {
   fi
 }
 
+assert_https_security_headers() {
+  local headers_file="$1"
+  local label="$2"
+  local required_headers=(
+    '^strict-transport-security: max-age=31536000'
+    '^x-content-type-options: nosniff'
+    '^referrer-policy: no-referrer'
+    '^x-frame-options: DENY'
+    "^content-security-policy: frame-ancestors 'none'"
+    '^permissions-policy:'
+  )
+  local header
+
+  for header in "${required_headers[@]}"; do
+    grep -qi "${header}" "${headers_file}" \
+      || {
+        sed -n '1,40p' "${headers_file}" || true
+        fail "${label} is missing expected HTTPS security header matching: ${header}"
+      }
+  done
+}
+
 check_tls_file_readable() {
   local label="$1"
   local path="$2"
@@ -290,6 +312,19 @@ fi
 curl --silent --show-error --fail --insecure "https://${HOST}:${HTTPS_PORT}/" >/dev/null \
   || fail "HTTPS management edge is not reachable on ${HOST}:${HTTPS_PORT}"
 pass "HTTPS management edge is reachable on ${HOST}:${HTTPS_PORT}"
+headers_file="$(mktemp)"
+curl --silent --show-error --fail --insecure --http1.1 \
+  --header "Host: ${LPE_CT_PUBLICATION_TEST_HOST:-${LPE_CT_PUBLIC_HOSTNAME:-${LPE_CT_SERVER_NAME:-localhost}}}" \
+  --dump-header "${headers_file}" \
+  --output /dev/null \
+  "https://${HOST}:${HTTPS_PORT}/" \
+  || {
+    rm -f "${headers_file}"
+    fail "HTTPS security-header probe failed on ${HOST}:${HTTPS_PORT}"
+  }
+assert_https_security_headers "${headers_file}" "LPE-CT HTTPS management edge"
+rm -f "${headers_file}"
+pass "HTTPS management edge exposes required security headers"
 tls_probe_if_possible "$HOST" "$HTTPS_PORT" "HTTPS"
 probe_client_publication
 

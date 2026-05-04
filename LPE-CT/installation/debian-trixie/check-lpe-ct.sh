@@ -33,6 +33,28 @@ check_command() {
   pass "Command available: $cmd"
 }
 
+assert_https_security_headers() {
+  local headers_file="$1"
+  local label="$2"
+  local required_headers=(
+    '^strict-transport-security: max-age=31536000'
+    '^x-content-type-options: nosniff'
+    '^referrer-policy: no-referrer'
+    '^x-frame-options: DENY'
+    "^content-security-policy: frame-ancestors 'none'"
+    '^permissions-policy:'
+  )
+  local header
+
+  for header in "${required_headers[@]}"; do
+    grep -qi "${header}" "${headers_file}" \
+      || {
+        sed -n '1,40p' "${headers_file}" >&2 || true
+        fail "${label} is missing expected HTTPS security header matching: ${header}"
+      }
+  done
+}
+
 check_command curl
 check_command nginx
 check_command systemctl
@@ -84,6 +106,20 @@ systemctl is-enabled nginx >/dev/null 2>&1 || fail "Service is not enabled: ngin
 pass "Service enabled: nginx"
 systemctl is-active nginx >/dev/null 2>&1 || fail "Service is not active: nginx"
 pass "Service active: nginx"
+
+security_headers="$(mktemp)"
+curl --silent --show-error --fail --insecure --http1.1 \
+  --header "Host: ${PUBLIC_HOST_HEADER}" \
+  --dump-header "$security_headers" \
+  --output /dev/null \
+  "${PUBLIC_HTTPS_BASE}/" \
+  || {
+    rm -f "$security_headers"
+    fail "HTTPS security-header probe failed through LPE-CT public edge"
+  }
+assert_https_security_headers "$security_headers" "LPE-CT public HTTPS edge"
+rm -f "$security_headers"
+pass "LPE-CT public HTTPS edge exposes required security headers"
 
 health_body="$(curl --silent --show-error --fail "$API_HEALTH_URL")" || fail "Health request failed: $API_HEALTH_URL"
 [[ "$health_body" == *"\"status\":\"ok\""* ]] || fail "Unexpected health response: $health_body"

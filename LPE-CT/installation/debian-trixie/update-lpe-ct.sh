@@ -68,6 +68,12 @@ validate_publication_config() {
     "location /autoconfig/"
     "location /.well-known/autoconfig/"
     "location /mapi/"
+    "Strict-Transport-Security"
+    "X-Content-Type-Options"
+    "Referrer-Policy"
+    "X-Frame-Options"
+    "Content-Security-Policy"
+    "Permissions-Policy"
   )
   local pattern
 

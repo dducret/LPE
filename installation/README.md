@@ -58,6 +58,15 @@ mobile and Outlook long-poll requests are not cut off by the edge proxy. The
 `install-lpe-ct.sh` and `update-lpe-ct.sh` scripts validate the rendered nginx
 publication settings, while `check-lpe-ct.sh` and `test-lpe-ct-edge-ports.sh`
 validate the live autodiscover and ActiveSync responses through the public edge.
+The same generated `HTTPS` site now emits baseline security headers:
+`Strict-Transport-Security: max-age=31536000`, `X-Content-Type-Options:
+nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
+`Content-Security-Policy: frame-ancestors 'none'`, and a restrictive
+`Permissions-Policy`. HSTS intentionally omits `includeSubDomains` by default;
+only add it locally when every subdomain under the published domain is covered
+by the same HTTPS guarantee. The CSP is deliberately limited to frame ancestry
+until script/style/connect directives can be validated against the webmail,
+administration UI, `JMAP`, `ActiveSync`, `EWS`, `MAPI`, and autodiscover flows.
 
 They also install `/opt/lpe-ct/bin/lpe-ct-host-action` with a narrow sudoers policy for management-console host maintenance actions. The `lpe-ct` service still runs as the non-root `lpe-ct` user, but NTP changes, manual time sync, `apt update && apt upgrade -y`, restart, and shutdown are delegated to that root-owned helper. Existing nodes must rerun `LPE-CT/installation/debian-trixie/update-lpe-ct.sh` to receive the helper, sudoers file, and refreshed service hardening settings.
 
@@ -537,6 +546,10 @@ By default:
 - `nginx` also publishes `/Microsoft-Server-ActiveSync`
 - `nginx` also publishes `/autodiscover/autodiscover.xml` and `/Autodiscover/Autodiscover.xml`
 - `nginx` also publishes `/autoconfig/mail/config-v1.1.xml` and `/.well-known/autoconfig/mail/config-v1.1.xml`
+
+The core `LPE` nginx template also emits the non-HSTS baseline browser security
+headers for its local administration and webmail publication. HSTS remains the
+responsibility of the public `HTTPS` edge, normally `LPE-CT`.
 
 On the public edge, `LPE-CT` must publish HTTPS on `443` with
 `LPE_CT_PUBLIC_TLS_CERT_PATH` and `LPE_CT_PUBLIC_TLS_KEY_PATH`. The same
