@@ -2786,7 +2786,9 @@ async fn create_delete_contact_round_trips_through_sync_folder_items() {
     assert!(body.contains("<t:Create><t:Contact>"));
     assert!(body.contains("contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
     assert!(body.contains("<t:DisplayName>RCA Contact</t:DisplayName>"));
-    assert!(body.contains("<m:SyncState>contacts:default:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb=ck-"));
+    assert!(
+        body.contains("<m:SyncState>contacts:default:v2:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb=ck-")
+    );
 
     let response = service
         .handle(
@@ -2813,7 +2815,7 @@ async fn create_delete_contact_round_trips_through_sync_folder_items() {
     assert!(
         body.contains("<t:Delete><t:ItemId Id=\"contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\"")
     );
-    assert!(body.contains("<m:SyncState>contacts:default:0</m:SyncState>"));
+    assert!(body.contains("<m:SyncState>contacts:default:v2:0</m:SyncState>"));
 }
 
 #[tokio::test]
@@ -2853,7 +2855,105 @@ async fn sync_folder_items_returns_contact_update_for_legacy_id_only_sync_state(
     assert!(body.contains("<t:Update><t:Contact>"));
     assert!(body.contains("contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
     assert!(body.contains("<t:DisplayName>Updated RCA Contact</t:DisplayName>"));
-    assert!(body.contains("<m:SyncState>contacts:default:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb=ck-"));
+    assert!(
+        body.contains("<m:SyncState>contacts:default:v2:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb=ck-")
+    );
+}
+
+#[tokio::test]
+async fn sync_folder_items_returns_contact_update_for_legacy_keyed_sync_state() {
+    let contact_id = Uuid::parse_str("e77d919d-df4f-488d-bb4c-2defdfd8d6ec").unwrap();
+    let collection = FakeStore::collection("default", "contacts", "Contacts");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![collection.clone()])),
+        contacts: Arc::new(Mutex::new(vec![AccessibleContact {
+            id: contact_id,
+            collection_id: collection.id.clone(),
+            owner_account_id: collection.owner_account_id,
+            owner_email: collection.owner_email.clone(),
+            owner_display_name: collection.owner_display_name.clone(),
+            rights: collection.rights.clone(),
+            name: "RCA Contact".to_string(),
+            role: "Tester".to_string(),
+            email: "rca@example.test".to_string(),
+            phone: "+41000000000".to_string(),
+            team: "LPE".to_string(),
+            notes: "RCA sync verification".to_string(),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:ItemShape><t:BaseShape>AllProperties</t:BaseShape></m:ItemShape><m:SyncFolderId><t:FolderId Id="default" ChangeKey="ck-default"/></m:SyncFolderId><m:SyncState>contacts:default:e77d919d-df4f-488d-bb4c-2defdfd8d6ec=ck-d21173e54e57cc77</m:SyncState><m:MaxChangesReturned>10</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Update><t:Contact>"));
+    assert!(body.contains("contact:e77d919d-df4f-488d-bb4c-2defdfd8d6ec"));
+    assert!(
+        body.contains("<m:SyncState>contacts:default:v2:e77d919d-df4f-488d-bb4c-2defdfd8d6ec=ck-")
+    );
+}
+
+#[tokio::test]
+async fn sync_folder_items_returns_no_contact_change_for_current_keyed_sync_state() {
+    let contact_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    let collection = FakeStore::collection("default", "contacts", "Contacts");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![collection.clone()])),
+        contacts: Arc::new(Mutex::new(vec![AccessibleContact {
+            id: contact_id,
+            collection_id: collection.id.clone(),
+            owner_account_id: collection.owner_account_id,
+            owner_email: collection.owner_email.clone(),
+            owner_display_name: collection.owner_display_name.clone(),
+            rights: collection.rights.clone(),
+            name: "RCA Contact".to_string(),
+            role: "Tester".to_string(),
+            email: "rca@example.test".to_string(),
+            phone: "+41000000000".to_string(),
+            team: "LPE".to_string(),
+            notes: "No change".to_string(),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>contacts:default:0</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    let current_sync_state = body
+        .split("<m:SyncState>")
+        .nth(1)
+        .and_then(|rest| rest.split("</m:SyncState>").next())
+        .unwrap()
+        .to_string();
+    assert!(current_sync_state.starts_with("contacts:default:v2:"));
+
+    let request = format!(
+        r#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>{current_sync_state}</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
+    );
+    let response = service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(!body.contains("<t:Create>"));
+    assert!(!body.contains("<t:Update>"));
+    assert!(!body.contains("<t:Delete>"));
+    assert!(body.contains(&format!("<m:SyncState>{current_sync_state}</m:SyncState>")));
 }
 
 #[tokio::test]
@@ -3088,7 +3188,9 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
     assert!(body.contains("<t:Subject>RCA Calendar</t:Subject>"));
     assert!(body.contains("<t:Start>2026-05-04T09:30:00Z</t:Start>"));
     assert!(body.contains("<t:End>2026-05-04T10:15:00Z</t:End>"));
-    assert!(body.contains("<m:SyncState>calendar:default:cccccccc-cccc-cccc-cccc-cccccccccccc=ck-"));
+    assert!(
+        body.contains("<m:SyncState>calendar:default:v2:cccccccc-cccc-cccc-cccc-cccccccccccc=ck-")
+    );
 
     let response = service
         .handle(
@@ -3113,7 +3215,7 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
         .unwrap();
     let body = response_text(response).await;
     assert!(body.contains("<t:Delete><t:ItemId Id=\"event:cccccccc-cccc-cccc-cccc-cccccccccccc\""));
-    assert!(body.contains("<m:SyncState>calendar:default:0</m:SyncState>"));
+    assert!(body.contains("<m:SyncState>calendar:default:v2:0</m:SyncState>"));
 }
 
 #[tokio::test]

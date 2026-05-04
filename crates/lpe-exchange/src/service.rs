@@ -578,10 +578,10 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     .iter()
                     .map(|(id, _)| *id)
                     .collect::<HashSet<_>>();
-                let previous_items = requested_sync_state(request)
+                let previous_state = requested_sync_state(request)
                     .map(|state| collaboration_sync_state_items(&state, "contacts", collection_id))
                     .unwrap_or_default();
-                let previous_by_id = sync_state_items_by_id(&previous_items);
+                let previous_by_id = sync_state_items_by_id(&previous_state.items);
                 for contact in &contacts {
                     let current_change_key = contact_change_key(
                         contact,
@@ -605,7 +605,8 @@ impl<S: ExchangeStore> ExchangeService<S> {
                             changes.push_str("</t:Update>");
                         }
                         Some(Some(previous_change_key))
-                            if previous_change_key != &current_change_key =>
+                            if !previous_state.is_current_version
+                                || previous_change_key != &current_change_key =>
                         {
                             changes.push_str("<t:Update>");
                             changes.push_str(&contact_item_xml_with_change_key(
@@ -617,7 +618,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
                         _ => {}
                     }
                 }
-                for item in previous_items {
+                for item in previous_state.items {
                     let contact_id = item.id;
                     if !current_set.contains(&contact_id) {
                         changes.push_str("<t:Delete>");
@@ -656,10 +657,10 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     .iter()
                     .map(|(id, _)| *id)
                     .collect::<HashSet<_>>();
-                let previous_items = requested_sync_state(request)
+                let previous_state = requested_sync_state(request)
                     .map(|state| collaboration_sync_state_items(&state, "calendar", collection_id))
                     .unwrap_or_default();
-                let previous_by_id = sync_state_items_by_id(&previous_items);
+                let previous_by_id = sync_state_items_by_id(&previous_state.items);
                 for event in &events {
                     let current_change_key = calendar_change_key(
                         event,
@@ -683,7 +684,8 @@ impl<S: ExchangeStore> ExchangeService<S> {
                             changes.push_str("</t:Update>");
                         }
                         Some(Some(previous_change_key))
-                            if previous_change_key != &current_change_key =>
+                            if !previous_state.is_current_version
+                                || previous_change_key != &current_change_key =>
                         {
                             changes.push_str("<t:Update>");
                             changes.push_str(&calendar_item_xml_with_change_key(
@@ -695,7 +697,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
                         _ => {}
                     }
                 }
-                for item in previous_items {
+                for item in previous_state.items {
                     let event_id = item.id;
                     if !current_set.contains(&event_id) {
                         changes.push_str("<t:Delete>");
@@ -1882,6 +1884,8 @@ fn mailbox_sync_state(mailbox_id: Uuid, message_ids: &[Uuid]) -> String {
     )
 }
 
+const COLLABORATION_SYNC_STATE_VERSION: &str = "v2";
+
 fn collaboration_sync_state(kind: &str, collection_id: &str, items: &[(Uuid, String)]) -> String {
     let item_list = items
         .iter()
@@ -1889,9 +1893,9 @@ fn collaboration_sync_state(kind: &str, collection_id: &str, items: &[(Uuid, Str
         .collect::<Vec<_>>()
         .join(",");
     if item_list.is_empty() {
-        format!("{kind}:{collection_id}:0")
+        format!("{kind}:{collection_id}:{COLLABORATION_SYNC_STATE_VERSION}:0")
     } else {
-        format!("{kind}:{collection_id}:{item_list}")
+        format!("{kind}:{collection_id}:{COLLABORATION_SYNC_STATE_VERSION}:{item_list}")
     }
 }
 
@@ -1901,15 +1905,38 @@ struct SyncStateItem {
     change_key: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+struct CollaborationSyncState {
+    is_current_version: bool,
+    items: Vec<SyncStateItem>,
+}
+
+impl Default for CollaborationSyncState {
+    fn default() -> Self {
+        Self {
+            is_current_version: true,
+            items: Vec::new(),
+        }
+    }
+}
+
 fn collaboration_sync_state_items(
     sync_state: &str,
     kind: &str,
     collection_id: &str,
-) -> Vec<SyncStateItem> {
+) -> CollaborationSyncState {
     let prefix = format!("{kind}:{collection_id}:");
-    sync_state
-        .strip_prefix(&prefix)
-        .unwrap_or_default()
+    let Some(values) = sync_state.strip_prefix(&prefix) else {
+        return CollaborationSyncState::default();
+    };
+    let (is_current_version, values) = if let Some(values) =
+        values.strip_prefix(&format!("{COLLABORATION_SYNC_STATE_VERSION}:"))
+    {
+        (true, values)
+    } else {
+        (false, values)
+    };
+    let items = values
         .split(',')
         .filter(|value| !value.is_empty() && *value != "0")
         .filter_map(|value| {
@@ -1924,7 +1951,11 @@ fn collaboration_sync_state_items(
                 change_key: None,
             })
         })
-        .collect()
+        .collect();
+    CollaborationSyncState {
+        is_current_version,
+        items,
+    }
 }
 
 fn sync_state_items_by_id(items: &[SyncStateItem]) -> HashMap<Uuid, Option<String>> {
