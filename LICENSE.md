@@ -26,7 +26,7 @@ These exceptions are currently accepted because they are common in the Rust ecos
 - `tailwindcss` for the shared web design-system normalization layer and primitive-component styling baseline
 - `postcss` and `autoprefixer` because the current `Tailwind CSS` integration depends on the standard build pipeline and no `Apache-2.0` alternative is selected in the current web toolchain
 
-`argon2` is used for password hashing. The RustCrypto crate is available under `Apache-2.0 OR MIT`, which is compatible with the `Apache-2.0` preference.
+`argon2` is used for password hashing, and `sha2` is used for opaque state-token fingerprints. These RustCrypto crates are available under `Apache-2.0 OR MIT`, which is compatible with the `Apache-2.0` preference.
 
 `rustls`, `tokio-rustls`, and `rustls-pemfile` are acceptable for implicit-TLS `SMTP` submission because they are published under `Apache-2.0`-compatible dual licenses and keep TLS termination inside the Rust service boundary.
 

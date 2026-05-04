@@ -13,6 +13,7 @@ use lpe_storage::{
     CollaborationCollection, JmapEmail, JmapMailbox, JmapUploadBlob, MailboxAccountAccess, Storage,
 };
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -363,7 +364,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         fingerprints.sort();
                         StateEntry {
                             id: thread_id.to_string(),
-                            fingerprint: fingerprints.join("|"),
+                            fingerprint: opaque_state_fingerprint(&fingerprints.join("|")),
                         }
                     })
                     .collect::<Vec<_>>();
@@ -525,7 +526,7 @@ fn bearer_token(authorization: Option<&str>) -> Option<&str> {
 }
 
 pub(crate) fn collection_state_fingerprint(collection: &CollaborationCollection) -> String {
-    format!(
+    opaque_state_fingerprint(&format!(
         "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         collection.kind,
         collection.owner_account_id,
@@ -537,7 +538,7 @@ pub(crate) fn collection_state_fingerprint(collection: &CollaborationCollection)
         collection.rights.may_write,
         collection.rights.may_delete,
         collection.rights.may_share
-    )
+    ))
 }
 
 fn mailbox_state_fingerprint(
@@ -554,7 +555,7 @@ fn mailbox_state_fingerprint(
             )
         })
         .unwrap_or((true, true, false));
-    format!(
+    opaque_state_fingerprint(&format!(
         "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         mailbox.role,
         mailbox.name,
@@ -567,11 +568,11 @@ fn mailbox_state_fingerprint(
         may_write,
         may_write,
         may_submit,
-    )
+    ))
 }
 
 fn contact_state_fingerprint(contact: &AccessibleContact) -> String {
-    format!(
+    opaque_state_fingerprint(&format!(
         "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         contact.collection_id,
         contact.owner_account_id,
@@ -585,11 +586,11 @@ fn contact_state_fingerprint(contact: &AccessibleContact) -> String {
         contact.notes,
         contact.rights.may_write,
         contact.rights.may_delete
-    )
+    ))
 }
 
 fn event_state_fingerprint(event: &AccessibleEvent) -> String {
-    format!(
+    opaque_state_fingerprint(&format!(
         "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         event.collection_id,
         event.owner_account_id,
@@ -606,11 +607,11 @@ fn event_state_fingerprint(event: &AccessibleEvent) -> String {
         event.attendees_json,
         event.notes,
         event.rights.may_write
-    )
+    ))
 }
 
 fn task_state_fingerprint(task: &ClientTask) -> String {
-    format!(
+    opaque_state_fingerprint(&format!(
         "{}|{}|{}|{}|{}|{}|{}|{}",
         task.task_list_id,
         task.title,
@@ -620,46 +621,56 @@ fn task_state_fingerprint(task: &ClientTask) -> String {
         task.completed_at.as_deref().unwrap_or_default(),
         task.sort_order,
         task.updated_at
-    )
+    ))
 }
 
 fn task_list_state_fingerprint(task_list: &ClientTaskList) -> String {
-    format!(
+    opaque_state_fingerprint(&format!(
         "{}|{}|{}|{}",
         task_list.name,
         task_list.role.clone().unwrap_or_default(),
         task_list.sort_order,
         task_list.updated_at
-    )
+    ))
 }
 
 fn email_state_fingerprint(email: &JmapEmail) -> String {
-    format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        email.thread_id,
-        email.mailbox_id,
-        email.mailbox_role,
-        email.mailbox_name,
-        email.received_at,
-        email.sent_at.as_deref().unwrap_or_default(),
-        email.from_display.as_deref().unwrap_or_default(),
-        email.from_address,
-        format_addresses(&email.to),
-        format_addresses(&email.cc),
-        format_addresses(&email.bcc),
-        email.subject,
-        email.preview,
-        email.unread,
-        email.flagged,
-        email.delivery_status,
-    ) + &format!(
-        "|{}|{}|{}|{}|{}",
-        email.body_text,
-        email.body_html_sanitized.as_deref().unwrap_or_default(),
-        email.has_attachments,
-        email.size_octets,
-        email.internet_message_id.as_deref().unwrap_or_default(),
+    opaque_state_fingerprint(
+        &(format!(
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            email.thread_id,
+            email.mailbox_id,
+            email.mailbox_role,
+            email.mailbox_name,
+            email.received_at,
+            email.sent_at.as_deref().unwrap_or_default(),
+            email.from_display.as_deref().unwrap_or_default(),
+            email.from_address,
+            format_addresses(&email.to),
+            format_addresses(&email.cc),
+            format_addresses(&email.bcc),
+            email.subject,
+            email.preview,
+            email.unread,
+            email.flagged,
+            email.delivery_status,
+        ) + &format!(
+            "|{}|{}|{}|{}|{}",
+            email.body_text,
+            email.body_html_sanitized.as_deref().unwrap_or_default(),
+            email.has_attachments,
+            email.size_octets,
+            email.internet_message_id.as_deref().unwrap_or_default(),
+        )),
     )
+}
+
+fn opaque_state_fingerprint(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>()
 }
 
 pub(crate) fn trim_snippet(value: &str, max_chars: usize) -> String {

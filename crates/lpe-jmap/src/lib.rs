@@ -45,7 +45,7 @@ mod tests {
     use super::*;
     use crate::{
         protocol::{JmapApiRequest, JmapMethodCall},
-        state::{decode_query_state, encode_push_state},
+        state::{decode_query_state, decode_state, encode_push_state},
         store::{JmapPushListener, JmapStore},
     };
     use anyhow::{anyhow, bail, Result};
@@ -1891,6 +1891,52 @@ mod tests {
 
         let list = response.method_responses[0].1["list"].as_array().unwrap();
         assert_eq!(list[0]["bcc"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn email_state_tokens_do_not_expose_message_or_bcc_content() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            emails: vec![FakeStore::draft_email()],
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/get".to_string(),
+                        json!({"properties": ["id", "bcc", "subject", "bodyValues"]}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["list"][0]["bcc"][0]["email"],
+            Value::String("hidden@example.test".to_string())
+        );
+        let token = response.method_responses[0].1["state"].as_str().unwrap();
+        let decoded = decode_state(token).unwrap();
+        let fingerprints = decoded
+            .entries
+            .iter()
+            .map(|entry| entry.fingerprint.as_str())
+            .collect::<Vec<_>>()
+            .join("|");
+
+        assert!(!token.contains("hidden@example.test"));
+        assert!(!fingerprints.contains("hidden@example.test"));
+        assert!(!fingerprints.contains("Draft subject"));
+        assert!(!fingerprints.contains("Draft body"));
+        assert!(fingerprints
+            .chars()
+            .all(|value| value.is_ascii_hexdigit() || value == '|'));
     }
 
     #[tokio::test]
