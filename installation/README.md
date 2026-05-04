@@ -224,25 +224,29 @@ sudo LPE_IMAP_TEST_EMAIL=user@example.com \
 From the `LPE-CT` server, `test-lpe-ct-edge-ports.sh` verifies both public
 `993` TLS and reachability to `LPE_CT_IMAPS_UPSTREAM_ADDRESS`. For an
 Outlook-equivalent check, pass the same mailbox credentials used with the core
-IMAP test. The script then verifies trusted public TLS for the client hostname,
-Outlook autodiscover IMAP/SMTP publication, public IMAPS login, Outlook-style
-folder discovery, `STATUS INBOX`, and `SELECT INBOX` through the `LPE-CT`
-proxy. It also authenticates to public `465` with `AUTH LOGIN` and verifies
-`MAIL FROM` / `RCPT TO` acceptance without sending a message. The `outlook`
-scope fails when these credentials are missing because TLS-only checks are not
-enough to prove Outlook can create the profile:
+IMAP test as `LPE_CT_OUTLOOK_TEST_EMAIL` and `LPE_CT_OUTLOOK_TEST_PASSWORD`.
+The script then verifies trusted public TLS for the client hostname, Outlook
+autodiscover IMAP/SMTP publication, public IMAPS login, Outlook-style folder
+discovery, `STATUS INBOX`, and `SELECT INBOX` through the `LPE-CT` proxy. It
+also authenticates to public `465` with `AUTH LOGIN` and verifies `MAIL FROM` /
+`RCPT TO` acceptance without sending a message. The `outlook` scope fails when
+these credentials are missing because TLS-only checks are not enough to prove
+Outlook can create the profile:
 
 ```bash
 sudo HOST=mail.example.com \
   LPE_CT_EDGE_TEST_SCOPE=outlook \
   LPE_CT_PUBLICATION_TEST_HOST=mail.example.com \
-  LPE_CT_AUTODISCOVER_TEST_EMAIL=user@example.com \
-  LPE_CT_IMAPS_TEST_EMAIL=user@example.com \
-  LPE_CT_IMAPS_TEST_PASSWORD='mailbox-password' \
-  LPE_CT_SUBMISSION_TEST_EMAIL=user@example.com \
-  LPE_CT_SUBMISSION_TEST_PASSWORD='mailbox-password' \
+  LPE_CT_OUTLOOK_TEST_EMAIL=user@example.com \
+  LPE_CT_OUTLOOK_TEST_PASSWORD='mailbox-password' \
   ./test-lpe-ct-edge-ports.sh
 ```
+
+If a deployment needs different identities for autodiscover, IMAPS, or
+submission, the protocol-specific overrides remain available:
+`LPE_CT_AUTODISCOVER_TEST_EMAIL`, `LPE_CT_IMAPS_TEST_EMAIL`,
+`LPE_CT_IMAPS_TEST_PASSWORD`, `LPE_CT_SUBMISSION_TEST_EMAIL`, and
+`LPE_CT_SUBMISSION_TEST_PASSWORD`.
 
 If the upstream probe fails, check that `LPE_IMAP_BIND_ADDRESS` is not
 loopback-only and that the LAN firewall allows `LPE-CT` to connect to the core

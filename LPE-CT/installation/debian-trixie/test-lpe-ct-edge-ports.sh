@@ -286,8 +286,8 @@ smtp_starttls_probe_if_possible() {
 }
 
 probe_submission_auth_if_configured() {
-  local test_email="${LPE_CT_SUBMISSION_TEST_EMAIL:-${LPE_CT_IMAPS_TEST_EMAIL:-${LPE_IMAP_TEST_EMAIL:-${IMAP_TEST_EMAIL:-}}}}"
-  local test_password="${LPE_CT_SUBMISSION_TEST_PASSWORD:-${LPE_CT_IMAPS_TEST_PASSWORD:-${LPE_IMAP_TEST_PASSWORD:-${IMAP_TEST_PASSWORD:-}}}}"
+  local test_email="${LPE_CT_SUBMISSION_TEST_EMAIL:-${LPE_CT_OUTLOOK_TEST_EMAIL:-${LPE_CT_IMAPS_TEST_EMAIL:-${LPE_IMAP_TEST_EMAIL:-${IMAP_TEST_EMAIL:-}}}}}"
+  local test_password="${LPE_CT_SUBMISSION_TEST_PASSWORD:-${LPE_CT_OUTLOOK_TEST_PASSWORD:-${LPE_CT_IMAPS_TEST_PASSWORD:-${LPE_IMAP_TEST_PASSWORD:-${IMAP_TEST_PASSWORD:-}}}}}"
   local test_recipient="${LPE_CT_SUBMISSION_TEST_RCPT:-${test_email}}"
   local output_file
   local openssl_status=0
@@ -297,9 +297,9 @@ probe_submission_auth_if_configured() {
 
   if [[ -z "${test_email}" || -z "${test_password}" ]]; then
     if outlook_scope_enabled; then
-      fail "Outlook scope requires LPE_CT_SUBMISSION_TEST_EMAIL and LPE_CT_SUBMISSION_TEST_PASSWORD, or the IMAPS test credential variables, so SMTP submission AUTH on 465 is verified."
+      fail "Outlook scope requires LPE_CT_OUTLOOK_TEST_EMAIL and LPE_CT_OUTLOOK_TEST_PASSWORD, or submission/IMAPS-specific test credential variables, so SMTP submission AUTH on 465 is verified."
     fi
-    warn "Skipping authenticated SMTPS submission probe; set LPE_CT_SUBMISSION_TEST_EMAIL and LPE_CT_SUBMISSION_TEST_PASSWORD to verify Outlook-facing 465 login."
+    warn "Skipping authenticated SMTPS submission probe; set LPE_CT_OUTLOOK_TEST_EMAIL and LPE_CT_OUTLOOK_TEST_PASSWORD, or the submission-specific variables, to verify Outlook-facing 465 login."
     return 0
   fi
   if ! command -v openssl >/dev/null 2>&1; then
@@ -391,8 +391,8 @@ probe_imaps_upstream() {
 }
 
 probe_public_imaps_auth_if_configured() {
-  local test_email="${LPE_CT_IMAPS_TEST_EMAIL:-${LPE_IMAP_TEST_EMAIL:-${IMAP_TEST_EMAIL:-}}}"
-  local test_password="${LPE_CT_IMAPS_TEST_PASSWORD:-${LPE_IMAP_TEST_PASSWORD:-${IMAP_TEST_PASSWORD:-}}}"
+  local test_email="${LPE_CT_IMAPS_TEST_EMAIL:-${LPE_CT_OUTLOOK_TEST_EMAIL:-${LPE_IMAP_TEST_EMAIL:-${IMAP_TEST_EMAIL:-}}}}"
+  local test_password="${LPE_CT_IMAPS_TEST_PASSWORD:-${LPE_CT_OUTLOOK_TEST_PASSWORD:-${LPE_IMAP_TEST_PASSWORD:-${IMAP_TEST_PASSWORD:-}}}}"
   local output_file
   local openssl_status=0
   local quoted_email
@@ -401,9 +401,9 @@ probe_public_imaps_auth_if_configured() {
 
   if [[ -z "${test_email}" || -z "${test_password}" ]]; then
     if outlook_scope_enabled; then
-      fail "Outlook scope requires LPE_CT_IMAPS_TEST_EMAIL and LPE_CT_IMAPS_TEST_PASSWORD so the public IMAPS login path is actually verified."
+      fail "Outlook scope requires LPE_CT_OUTLOOK_TEST_EMAIL and LPE_CT_OUTLOOK_TEST_PASSWORD, or IMAPS-specific test credential variables, so the public IMAPS login path is actually verified."
     fi
-    warn "Skipping authenticated public IMAPS probe; set LPE_CT_IMAPS_TEST_EMAIL and LPE_CT_IMAPS_TEST_PASSWORD to verify Outlook-facing 993 login."
+    warn "Skipping authenticated public IMAPS probe; set LPE_CT_OUTLOOK_TEST_EMAIL and LPE_CT_OUTLOOK_TEST_PASSWORD, or the IMAPS-specific variables, to verify Outlook-facing 993 login."
     return 0
   fi
   if ! command -v openssl >/dev/null 2>&1; then
@@ -492,7 +492,7 @@ EOF
 probe_client_publication() {
   local base_url="https://${HOST}:${HTTPS_PORT}"
   local host_header="${LPE_CT_PUBLICATION_TEST_HOST:-${LPE_CT_PUBLIC_HOSTNAME:-${LPE_CT_SERVER_NAME:-localhost}}}"
-  local autodiscover_email="${LPE_CT_AUTODISCOVER_TEST_EMAIL:-${LPE_CT_BOOTSTRAP_ADMIN_EMAIL:-admin@example.test}}"
+  local autodiscover_email="${LPE_CT_AUTODISCOVER_TEST_EMAIL:-${LPE_CT_OUTLOOK_TEST_EMAIL:-${LPE_CT_BOOTSTRAP_ADMIN_EMAIL:-admin@example.test}}}"
   local expected_imap_host="${LPE_CT_EXPECTED_AUTODISCOVER_IMAP_HOST:-${LPE_AUTOCONFIG_IMAP_HOST:-${host_header}}}"
   local expected_imap_port="${LPE_CT_EXPECTED_AUTODISCOVER_IMAP_PORT:-${LPE_AUTOCONFIG_IMAP_PORT:-${IMAPS_PORT:-993}}}"
   local expected_smtp_host="${LPE_CT_EXPECTED_AUTODISCOVER_SMTP_HOST:-${LPE_AUTOCONFIG_SMTP_HOST:-${expected_imap_host}}}"
