@@ -393,11 +393,15 @@ probe_imaps_upstream() {
 probe_public_imaps_auth_if_configured() {
   local test_email="${LPE_CT_IMAPS_TEST_EMAIL:-${LPE_CT_OUTLOOK_TEST_EMAIL:-${LPE_IMAP_TEST_EMAIL:-${IMAP_TEST_EMAIL:-}}}}"
   local test_password="${LPE_CT_IMAPS_TEST_PASSWORD:-${LPE_CT_OUTLOOK_TEST_PASSWORD:-${LPE_IMAP_TEST_PASSWORD:-${IMAP_TEST_PASSWORD:-}}}}"
+  local input_file
   local output_file
   local openssl_status=0
   local quoted_email
   local quoted_password
   local server_name
+  local append_message_id
+  local append_literal
+  local append_literal_size
 
   if [[ -z "${test_email}" || -z "${test_password}" ]]; then
     if outlook_scope_enabled; then
@@ -414,79 +418,105 @@ probe_public_imaps_auth_if_configured() {
   quoted_email="$(imap_quote "${test_email}")"
   quoted_password="$(imap_quote "${test_password}")"
   server_name="$(tls_server_name)"
+  append_message_id="lpe-outlook-imap-append-$(date +%s)-$$@${server_name}"
+  printf -v append_literal 'From: Outlook Probe <%s>\r\nTo: Outlook Probe <%s>\r\nMessage-ID: <%s>\r\nSubject: LPE Outlook Sent APPEND probe\r\n\r\nLPE Outlook IMAP Sent APPEND probe.\r\n' "${test_email}" "${test_email}" "${append_message_id}"
+  append_literal_size="${#append_literal}"
+  input_file="$(mktemp)"
   output_file="$(mktemp)"
 
-  timeout 20 openssl s_client -quiet -crlf \
+  printf 'A1 CAPABILITY\r\nA2 LOGIN %s %s\r\nA3 ID ("name" "Microsoft Outlook" "version" "16.0")\r\nA4 NAMESPACE\r\nA5 LIST "" "*"\r\nA6 STATUS INBOX (MESSAGES UIDNEXT UIDVALIDITY UNSEEN)\r\nA7 SELECT INBOX\r\nA8 STATUS Sent (MESSAGES UIDNEXT UIDVALIDITY UNSEEN)\r\nA9 SELECT Sent\r\nA10 APPEND Sent (\\Seen) " 4-May-2026 12:00:00 +0000" {%s}\r\n%s\r\nA11 LOGOUT\r\n' \
+    "${quoted_email}" "${quoted_password}" "${append_literal_size}" "${append_literal}" >"${input_file}"
+
+  timeout 20 openssl s_client -quiet \
     -connect "${HOST}:${IMAPS_PORT}" \
-    -servername "${server_name}" >"${output_file}" 2>&1 <<EOF || openssl_status=$?
-A1 CAPABILITY
-A2 LOGIN ${quoted_email} ${quoted_password}
-A3 ID ("name" "Microsoft Outlook" "version" "16.0")
-A4 NAMESPACE
-A5 LIST "" "*"
-A6 STATUS INBOX (MESSAGES UIDNEXT UIDVALIDITY UNSEEN)
-A7 SELECT INBOX
-A8 LOGOUT
-EOF
+    -servername "${server_name}" <"${input_file}" >"${output_file}" 2>&1 || openssl_status=$?
 
   if ! grep -q '^\* OK LPE IMAP ready' "${output_file}"; then
     echo "[DIAG] Public IMAPS probe did not receive the core IMAP greeting through LPE-CT."
     recent_logs
-    rm -f "${output_file}"
+    rm -f "${input_file}" "${output_file}"
     fail "Public IMAPS on ${HOST}:${IMAPS_PORT} did not proxy to the core IMAP greeting"
   fi
   if ! grep -q '^A1 OK CAPABILITY completed' "${output_file}"; then
     echo "[DIAG] Public IMAPS probe reached a greeting but CAPABILITY did not complete."
     recent_logs
-    rm -f "${output_file}"
+    rm -f "${input_file}" "${output_file}"
     fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed CAPABILITY through the proxy"
   fi
   if ! grep -q '^A2 OK LOGIN completed' "${output_file}"; then
     echo "[DIAG] Public IMAPS probe reached the core IMAP adapter, but LOGIN failed for the supplied test account."
     echo "[DIAG] Re-check mailbox credentials and inspect both lpe-ct.service and lpe.service logs."
     recent_logs
-    rm -f "${output_file}"
+    rm -f "${input_file}" "${output_file}"
     fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed authenticated LOGIN through the proxy"
   fi
   if ! grep -q '^A3 OK ID completed' "${output_file}"; then
     echo "[DIAG] Public IMAPS probe logged in but Outlook-style ID did not complete."
     recent_logs
-    rm -f "${output_file}"
+    rm -f "${input_file}" "${output_file}"
     fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed Outlook-style ID through the proxy"
   fi
   if ! grep -q '^\* NAMESPACE ' "${output_file}" \
     || ! grep -q '^A4 OK NAMESPACE completed' "${output_file}"; then
     echo "[DIAG] Public IMAPS probe logged in but NAMESPACE did not complete."
     recent_logs
-    rm -f "${output_file}"
+    rm -f "${input_file}" "${output_file}"
     fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed NAMESPACE through the proxy"
   fi
   if ! grep -q '^\* LIST ' "${output_file}" \
     || ! grep -q '^A5 OK LIST completed' "${output_file}"; then
     echo "[DIAG] Public IMAPS probe logged in but LIST did not return folders."
     recent_logs
-    rm -f "${output_file}"
+    rm -f "${input_file}" "${output_file}"
     fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed LIST through the proxy"
   fi
   if ! grep -q '^\* STATUS "INBOX"' "${output_file}" \
     || ! grep -q '^A6 OK STATUS completed' "${output_file}"; then
     echo "[DIAG] Public IMAPS probe logged in but STATUS INBOX did not complete."
     recent_logs
-    rm -f "${output_file}"
+    rm -f "${input_file}" "${output_file}"
     fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed STATUS INBOX through the proxy"
   fi
   if ! grep -q '^A7 OK \[READ-WRITE\] SELECT completed' "${output_file}"; then
     echo "[DIAG] Public IMAPS probe logged in but could not SELECT INBOX."
     recent_logs
-    rm -f "${output_file}"
+    rm -f "${input_file}" "${output_file}"
     fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed SELECT INBOX through the proxy"
+  fi
+  if ! grep -q '^\* STATUS "Sent"' "${output_file}" \
+    || ! grep -q '^A8 OK STATUS completed' "${output_file}"; then
+    echo "[DIAG] Public IMAPS probe logged in but STATUS Sent did not complete."
+    recent_logs
+    rm -f "${input_file}" "${output_file}"
+    fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed STATUS Sent through the proxy"
+  fi
+  if ! grep -q '^A9 OK \[READ-WRITE\] SELECT completed' "${output_file}"; then
+    echo "[DIAG] Public IMAPS probe logged in but could not SELECT Sent."
+    recent_logs
+    rm -f "${input_file}" "${output_file}"
+    fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed SELECT Sent through the proxy"
+  fi
+  if ! grep -q '^A10 OK .*APPEND completed' "${output_file}"; then
+    echo "[DIAG] Public IMAPS probe logged in but Outlook-style APPEND Sent did not complete."
+    sed -n '1,160p' "${output_file}" || true
+    recent_logs
+    rm -f "${input_file}" "${output_file}"
+    fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed Outlook-style APPEND Sent through the proxy"
+  fi
+  if grep -q '^\* STATUS "Sent" (MESSAGES [1-9]' "${output_file}" \
+    && ! grep -q '^A10 OK \[APPENDUID ' "${output_file}"; then
+    echo "[DIAG] Sent contains canonical messages, but Outlook-style APPEND Sent did not return APPENDUID."
+    sed -n '1,160p' "${output_file}" || true
+    recent_logs
+    rm -f "${input_file}" "${output_file}"
+    fail "Public IMAPS on ${HOST}:${IMAPS_PORT} completed APPEND Sent without UIDPLUS APPENDUID"
   fi
 
   if [[ "${openssl_status}" -ne 0 ]]; then
     warn "Authenticated public IMAPS probe succeeded, but openssl exited with status ${openssl_status} after the IMAP session closed."
   fi
-  rm -f "${output_file}"
-  pass "Public IMAPS on ${HOST}:${IMAPS_PORT} accepted Outlook-style login, folder discovery, STATUS, and SELECT INBOX through LPE-CT"
+  rm -f "${input_file}" "${output_file}"
+  pass "Public IMAPS on ${HOST}:${IMAPS_PORT} accepted Outlook-style login, folder discovery, STATUS, SELECT, and APPEND Sent through LPE-CT"
 }
 
 probe_client_publication() {

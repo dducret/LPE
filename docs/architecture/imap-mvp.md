@@ -69,8 +69,10 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `UID EXPUNGE` for messages already marked `\Deleted`
 - `APPEND` to `Drafts`, persisted through the canonical draft workflow
 - Outlook-style `APPEND` to `Sent` is accepted as a compatibility acknowledgement
-  after client `SMTP` submission, but it does not persist another message or create
-  an alternate sent-message path
+  after client `SMTP` submission. When the canonical `Sent` copy is already
+  visible, the acknowledgement includes a `UIDPLUS` `APPENDUID` for that
+  canonical message so Outlook can complete its send validation, but it does not
+  persist another message or create an alternate sent-message path
 - `APPEND` to `Inbox` and custom folders such as `Junk Email`, persisted through
   the canonical message import workflow for Outlook local-folder change sync
 - `UIDPLUS` response codes where the current canonical workflow can supply them directly
@@ -86,7 +88,9 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 - `SELECT` / `EXAMINE` publishes `PERMANENTFLAGS` for the writable canonical
   flag subset so Outlook can identify the flags it may persist
 - `APPEND` to `Drafts` reuses `save_draft_message`
-- `APPEND` returns `APPENDUID` using the canonical draft row written into `messages`
+- `APPEND` returns `APPENDUID` using the canonical row written into `messages`;
+  the special `Sent` acknowledgement maps to an existing canonical `Sent` row
+  when one can be identified by `Message-ID` or by current `Sent` order
 - `APPEND` to `Inbox` and custom folders reuses canonical message import and
   never performs outbound delivery
 - custom IMAP mailbox creation and rename reuse the canonical mailbox records already exposed through `JMAP`

@@ -49,6 +49,31 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
 
         validate_append_attachments(&self.validator, &literal)?;
         if append_to_sent {
+            let parsed = parse_rfc822_message(&literal).ok();
+            let sent_messages = self
+                .store
+                .fetch_imap_emails(principal.account_id, mailbox.id)
+                .await?;
+            let append_uid = sent_append_ack_uid(
+                &sent_messages,
+                parsed
+                    .as_ref()
+                    .and_then(|message| message.message_id.as_deref()),
+            );
+            if let Some(uid) = append_uid {
+                writer
+                    .write_all(
+                        format!(
+                            "{tag} OK [APPENDUID {} {}] APPEND completed\r\n",
+                            UID_VALIDITY, uid
+                        )
+                        .as_bytes(),
+                    )
+                    .await?;
+                writer.flush().await?;
+                return Ok(true);
+            }
+
             writer
                 .write_all(format!("{tag} OK APPEND completed\r\n").as_bytes())
                 .await?;
@@ -235,4 +260,33 @@ fn validate_append_attachments<D: Detector>(validator: &Validator<D>, bytes: &[u
         }
     }
     Ok(())
+}
+
+fn sent_append_ack_uid(
+    sent_messages: &[lpe_storage::ImapEmail],
+    appended_message_id: Option<&str>,
+) -> Option<u32> {
+    appended_message_id
+        .and_then(|message_id| {
+            sent_messages
+                .iter()
+                .find(|email| {
+                    email
+                        .internet_message_id
+                        .as_deref()
+                        .is_some_and(|stored_message_id| {
+                            message_ids_match(stored_message_id, message_id)
+                        })
+                })
+                .map(|email| email.uid)
+        })
+        .or_else(|| sent_messages.iter().map(|email| email.uid).max())
+}
+
+fn message_ids_match(stored: &str, appended: &str) -> bool {
+    normalize_message_id(stored).eq_ignore_ascii_case(&normalize_message_id(appended))
+}
+
+fn normalize_message_id(value: &str) -> &str {
+    value.trim().trim_start_matches('<').trim_end_matches('>')
 }

@@ -958,6 +958,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     let sent_literal = concat!(
         "From: Alice <alice@example.test>\r\n",
         "To: Bob <bob@example.test>\r\n",
+        "Message-ID: <22222222-2222-2222-2222-222222222222@example.test>\r\n",
         "Subject: Outlook sent append\r\n",
         "\r\n",
         "Sent body"
@@ -972,8 +973,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     .await;
     assert!(append_sent_prelude.contains("+ Ready for literal data"));
     let append_sent = send_command(&mut stream, &format!("{sent_literal}\r\n"), "A18S").await;
-    assert!(append_sent.contains("A18S OK APPEND completed"));
-    assert!(!append_sent.contains("APPENDUID"));
+    assert!(append_sent.contains("A18S OK [APPENDUID 1 2] APPEND completed"));
     let sent_status = send_command(&mut stream, "A18T STATUS Sent (MESSAGES)\r\n", "A18T").await;
     assert!(sent_status.contains("* STATUS \"Sent\" (MESSAGES 1)"));
 
