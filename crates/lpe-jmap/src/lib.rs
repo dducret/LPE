@@ -3654,6 +3654,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn websocket_push_enable_refreshes_cursor_for_unchanged_states() {
+        let account = FakeStore::account();
+        let enabled_types = HashSet::from(["Task".to_string()]);
+        let service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            tasks: Arc::new(Mutex::new(vec![FakeStore::task()])),
+            canonical_change_cursor: Some(11),
+            ..Default::default()
+        });
+        let states = service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+        let previous_push_state = encode_push_state(&states, Some(10)).unwrap();
+
+        let changed = service
+            .recover_push_enable_change(
+                account.account_id,
+                &enabled_types,
+                Some(previous_push_state.as_str()),
+                Some(11),
+                &states,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(changed, HashMap::new());
+    }
+
+    #[tokio::test]
     async fn websocket_reconnect_recovers_task_changes_from_canonical_journal() {
         let account = FakeStore::account();
         let enabled_types = HashSet::from(["Task".to_string()]);

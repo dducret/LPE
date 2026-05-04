@@ -258,7 +258,11 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             enabled_types,
         );
         if previous_type_states == *current_type_states {
-            return Ok(None);
+            return Ok(if previous_push_state.cursor != current_cursor {
+                Some(HashMap::new())
+            } else {
+                None
+            });
         }
 
         let Some(previous_cursor) = previous_push_state.cursor else {
@@ -296,8 +300,12 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             return Ok(Some(current_type_states.clone()));
         }
 
-        if changed.is_empty() && replay.current_cursor != current_cursor {
-            return Ok(None);
+        if changed.is_empty() {
+            return Ok(if previous_push_state.cursor != current_cursor {
+                Some(HashMap::new())
+            } else {
+                None
+            });
         }
 
         Ok(Some(changed))
