@@ -3654,6 +3654,73 @@ async fn delete_item_removes_custom_mailbox_message() {
 }
 
 #[tokio::test]
+async fn move_item_moves_custom_mailbox_message_to_target_folder() {
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let target_mailbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox("44444444-4444-4444-4444-444444444444", "custom", "RCA Sync"),
+            FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "custom", "Archive"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "99999999-9999-9999-9999-999999999999",
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA folder item",
+        )])),
+        ..Default::default()
+    };
+    let moved_emails = store.moved_emails.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:MoveItem><m:ToFolderId><t:FolderId Id="mailbox:55555555-5555-5555-5555-555555555555"/></m:ToFolderId><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ItemIds></m:MoveItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:MoveItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("message:99999999-9999-9999-9999-999999999999"));
+    assert!(body.contains("mailbox:55555555-5555-5555-5555-555555555555"));
+    assert_eq!(
+        moved_emails.lock().unwrap().as_slice(),
+        &[(message_id, target_mailbox_id)]
+    );
+}
+
+#[tokio::test]
+async fn move_item_rejects_non_message_ids() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "custom",
+            "Archive",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:MoveItem><m:ToFolderId><t:FolderId Id="mailbox:55555555-5555-5555-5555-555555555555"/></m:ToFolderId><m:ItemIds><t:ItemId Id="contact:cccccccc-cccc-cccc-cccc-cccccccccccc"/></m:ItemIds></m:MoveItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:MoveItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("supports only canonical message ids"));
+}
+
+#[tokio::test]
 async fn find_item_returns_calendar_items_from_canonical_store() {
     let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
     let collection = FakeStore::collection("default", "calendar", "Calendar");
