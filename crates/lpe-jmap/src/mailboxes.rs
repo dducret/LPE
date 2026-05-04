@@ -56,7 +56,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .filter(|id| !mailbox_ids.contains(id))
             .map(|id| Value::String(id.to_string()))
             .collect::<Vec<_>>();
-        let state = self.object_state(account_id, "Mailbox").await?;
+        let state = self.mailbox_object_state(&account_access).await?;
 
         Ok(json!({
             "accountId": account_id.to_string(),
@@ -144,7 +144,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .requested_account_access(account, arguments.account_id.as_deref())
             .await?;
         let account_id = account_access.account_id;
-        let entries = self.object_state_entries(account_id, "Mailbox").await?;
+        let entries = self.mailbox_object_state_entries(&account_access).await?;
         Ok(changes_response(
             account_id,
             "Mailbox",
@@ -165,7 +165,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .requested_account_access(account, arguments.account_id.as_deref())
             .await?;
         let account_id = account_access.account_id;
-        let old_state = self.object_state(account_id, "Mailbox").await?;
+        let old_state = self.mailbox_object_state(&account_access).await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
         let mut updated = Map::new();
@@ -276,7 +276,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             }
         }
 
-        let new_state = self.object_state(account_id, "Mailbox").await?;
+        let new_state = self.mailbox_object_state(&account_access).await?;
         Ok(json!({
             "accountId": account_id.to_string(),
             "oldState": old_state,

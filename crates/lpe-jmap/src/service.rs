@@ -10,7 +10,7 @@ use axum::{
 use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AuthenticatedAccount, ClientTask, ClientTaskList,
-    CollaborationCollection, JmapEmail, JmapUploadBlob, MailboxAccountAccess, Storage,
+    CollaborationCollection, JmapEmail, JmapMailbox, JmapUploadBlob, MailboxAccountAccess, Storage,
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -297,6 +297,28 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         encode_state(account_id, data_type, entries)
     }
 
+    pub(crate) async fn mailbox_object_state(
+        &self,
+        access: &MailboxAccountAccess,
+    ) -> Result<String> {
+        let entries = self.mailbox_object_state_entries(access).await?;
+        encode_state(access.account_id, "Mailbox", entries)
+    }
+
+    pub(crate) async fn mailbox_object_state_entries(
+        &self,
+        access: &MailboxAccountAccess,
+    ) -> Result<Vec<StateEntry>> {
+        let mailboxes = self.store.fetch_jmap_mailboxes(access.account_id).await?;
+        Ok(mailboxes
+            .into_iter()
+            .map(|mailbox| StateEntry {
+                id: mailbox.id.to_string(),
+                fingerprint: mailbox_state_fingerprint(&mailbox, Some(access)),
+            })
+            .collect())
+    }
+
     pub(crate) async fn object_state_entries(
         &self,
         account_id: Uuid,
@@ -309,14 +331,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     .into_iter()
                     .map(|mailbox| StateEntry {
                         id: mailbox.id.to_string(),
-                        fingerprint: format!(
-                            "{}|{}|{}|{}|{}",
-                            mailbox.role,
-                            mailbox.name,
-                            mailbox.sort_order,
-                            mailbox.total_emails,
-                            mailbox.unread_emails
-                        ),
+                        fingerprint: mailbox_state_fingerprint(&mailbox, None),
                     })
                     .collect())
             }
@@ -522,6 +537,36 @@ pub(crate) fn collection_state_fingerprint(collection: &CollaborationCollection)
         collection.rights.may_write,
         collection.rights.may_delete,
         collection.rights.may_share
+    )
+}
+
+fn mailbox_state_fingerprint(
+    mailbox: &JmapMailbox,
+    access: Option<&MailboxAccountAccess>,
+) -> String {
+    let is_drafts = mailbox.role == "drafts";
+    let (may_read, may_write, may_submit) = access
+        .map(|access| {
+            (
+                access.may_read,
+                access.may_write,
+                is_drafts && (access.is_owned || access.may_send_as || access.may_send_on_behalf),
+            )
+        })
+        .unwrap_or((true, true, false));
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        mailbox.role,
+        mailbox.name,
+        mailbox.sort_order,
+        mailbox.total_emails,
+        mailbox.unread_emails,
+        may_read,
+        may_write && is_drafts,
+        may_write && is_drafts,
+        may_write,
+        may_write,
+        may_submit,
     )
 }
 

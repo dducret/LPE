@@ -1417,6 +1417,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mailbox_changes_report_delegated_submit_right_changes() {
+        let shared = FakeStore::shared_account();
+        let initial = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::inbox_mailbox(), FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        });
+        let initial_response = initial
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Mailbox/get".to_string(),
+                        json!({"accountId": shared.account_id.to_string()}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        let prior_state = initial_response.method_responses[0].1["state"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let updated = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::inbox_mailbox(), FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(true, false),
+            ],
+            ..Default::default()
+        });
+        let changes = updated
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Mailbox/changes".to_string(),
+                        json!({
+                            "accountId": shared.account_id.to_string(),
+                            "sinceState": prior_state
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let updated = changes.method_responses[0].1["updated"].as_array().unwrap();
+        assert_eq!(updated.len(), 1);
+        assert_eq!(
+            updated[0],
+            Value::String(FakeStore::draft_mailbox().id.to_string())
+        );
+    }
+
+    #[tokio::test]
     async fn email_set_creates_draft_through_canonical_storage() {
         let store = FakeStore {
             session: Some(FakeStore::account()),
@@ -3003,6 +3069,49 @@ mod tests {
         assert_eq!(
             changed[&account.account_id.to_string()]["Mailbox"],
             current_type_states[&account.account_id.to_string()]["Mailbox"]
+        );
+    }
+
+    #[tokio::test]
+    async fn scoped_push_change_reports_delegated_mailbox_right_changes() {
+        let account = FakeStore::account();
+        let shared = FakeStore::shared_account();
+        let enabled_types = HashSet::from(["Mailbox".to_string()]);
+        let initial_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        });
+        let last_type_states = initial_service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+        let subscription = push_subscription(enabled_types, last_type_states);
+
+        let updated_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(true, false),
+            ],
+            ..Default::default()
+        });
+        let mut change_set = CanonicalPushChangeSet::default();
+        change_set.insert_accounts(CanonicalChangeCategory::Mail, [shared.account_id]);
+
+        let (changed, current_type_states) = updated_service
+            .compute_push_changes(account.account_id, &subscription, &change_set)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            changed[&shared.account_id.to_string()]["Mailbox"],
+            current_type_states[&shared.account_id.to_string()]["Mailbox"]
         );
     }
 

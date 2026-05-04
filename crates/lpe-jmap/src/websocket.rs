@@ -324,12 +324,17 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             let visible_mail_accounts = self
                 .store
                 .fetch_accessible_mailbox_accounts(principal_account_id)
-                .await?
-                .into_iter()
+                .await?;
+            let visible_mail_account_ids = visible_mail_accounts
+                .iter()
                 .map(|entry| entry.account_id)
                 .collect::<HashSet<_>>();
+            let visible_mail_account_access = visible_mail_accounts
+                .into_iter()
+                .map(|entry| (entry.account_id, entry))
+                .collect::<HashMap<_, _>>();
             let mut tracked_mail_accounts = change_set.accounts_for(CanonicalChangeCategory::Mail);
-            tracked_mail_accounts.extend(visible_mail_accounts.iter().copied());
+            tracked_mail_accounts.extend(visible_mail_account_ids.iter().copied());
             tracked_mail_accounts.extend(
                 subscription
                     .last_type_states
@@ -352,17 +357,21 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 })
                 .filter_map(|(account_id, _)| Uuid::parse_str(account_id).ok())
                 .collect::<HashSet<_>>();
-            mail_topology_changed = previous_visible_mail_accounts != visible_mail_accounts;
+            mail_topology_changed = previous_visible_mail_accounts != visible_mail_account_ids;
 
             for account_id in tracked_mail_accounts {
                 let account_key = account_id.to_string();
-                if visible_mail_accounts.contains(&account_id) {
+                if let Some(access) = visible_mail_account_access.get(&account_id) {
                     for data_type in subscription
                         .enabled_types
                         .iter()
                         .filter(|value| self.is_mail_push_type(value))
                     {
-                        let state = self.object_state(account_id, data_type).await?;
+                        let state = if data_type == "Mailbox" {
+                            self.mailbox_object_state(access).await?
+                        } else {
+                            self.object_state(account_id, data_type).await?
+                        };
                         current_type_states
                             .entry(account_key.clone())
                             .or_default()
@@ -545,9 +554,12 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             let mut account_states = HashMap::new();
             for data_type in data_types {
                 if self.is_mail_push_type(data_type) {
-                    let state = self
-                        .object_state(mailbox_account.account_id, data_type)
-                        .await?;
+                    let state = if data_type == "Mailbox" {
+                        self.mailbox_object_state(&mailbox_account).await?
+                    } else {
+                        self.object_state(mailbox_account.account_id, data_type)
+                            .await?
+                    };
                     account_states.insert(data_type.clone(), state);
                 }
             }
