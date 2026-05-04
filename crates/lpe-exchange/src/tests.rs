@@ -628,6 +628,20 @@ fn bearer_headers() -> HeaderMap {
 fn mapi_headers(request_type: &str) -> HeaderMap {
     let mut headers = bearer_headers();
     headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/mapi-http"),
+    );
+    headers.insert(
+        "x-requesttype",
+        HeaderValue::from_str(request_type).unwrap(),
+    );
+    headers.insert("x-requestid", HeaderValue::from_static("request-1"));
+    headers
+}
+
+fn mapi_headers_without_content_type(request_type: &str) -> HeaderMap {
+    let mut headers = bearer_headers();
+    headers.insert(
         "x-requesttype",
         HeaderValue::from_str(request_type).unwrap(),
     );
@@ -748,6 +762,31 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
     assert!(raw_body.starts_with(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 0\r\n"));
     let body = strip_mapi_http_envelope(raw_body);
     assert_eq!(&body[0..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_rejects_missing_content_type() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_headers_without_content_type("Connect"),
+            b"",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "4");
+    let body = response_bytes(response).await;
+    let message = String::from_utf8_lossy(&body);
+    assert!(message.contains("Content-Type application/mapi-http"));
 }
 
 #[tokio::test]

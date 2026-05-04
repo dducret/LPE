@@ -92,6 +92,14 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
     let principal = authenticate_account(store, None, headers, "mapi").await?;
     let request_type = request_type(headers)?;
     let request_id = request_id(headers);
+    if !is_mapi_content_type(headers) {
+        return Ok(mapi_diagnostic_response(
+            request_type.header_value(),
+            &request_id,
+            4,
+            "MAPI requests must use Content-Type application/mapi-http.",
+        ));
+    }
 
     let response = match (endpoint, request_type) {
         (MapiEndpoint::Emsmdb, MapiRequestType::Connect) => {
@@ -652,6 +660,15 @@ fn request_id(headers: &HeaderMap) -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or("00000000-0000-0000-0000-000000000000")
         .to_string()
+}
+
+fn is_mapi_content_type(headers: &HeaderMap) -> bool {
+    headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(str::trim)
+        .is_some_and(|value| value.eq_ignore_ascii_case(MAPI_CONTENT_TYPE))
 }
 
 fn mapi_diagnostic_response(
