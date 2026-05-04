@@ -222,9 +222,23 @@ sudo LPE_IMAP_TEST_EMAIL=user@example.com \
 ```
 
 From the `LPE-CT` server, `test-lpe-ct-edge-ports.sh` verifies both public
-`993` TLS and reachability to `LPE_CT_IMAPS_UPSTREAM_ADDRESS`. If that upstream
-probe fails, check that `LPE_IMAP_BIND_ADDRESS` is not loopback-only and that the
-LAN firewall allows `LPE-CT` to connect to the core `LPE` address on `1143`.
+`993` TLS and reachability to `LPE_CT_IMAPS_UPSTREAM_ADDRESS`. For an
+Outlook-equivalent check, pass the same mailbox credentials used with the core
+IMAP test; the script then logs in through public IMAPS and selects `INBOX`
+through the `LPE-CT` proxy:
+
+```bash
+sudo HOST=mail.example.com \
+  LPE_CT_IMAPS_TEST_EMAIL=user@example.com \
+  LPE_CT_IMAPS_TEST_PASSWORD='mailbox-password' \
+  ./test-lpe-ct-edge-ports.sh
+```
+
+If the upstream probe fails, check that `LPE_IMAP_BIND_ADDRESS` is not
+loopback-only and that the LAN firewall allows `LPE-CT` to connect to the core
+`LPE` address on `1143`. If the authenticated public IMAPS probe fails before
+`lpe.service` receives anything, inspect `journalctl -u lpe-ct.service` because
+the failure is still on the TLS/proxy edge path.
 
 The management UI URL must use `https://`. The generated `nginx` site redirects
 plain `HTTP` received on port `80` to the configured

@@ -19,6 +19,13 @@ pass() {
   echo "[OK] $*"
 }
 
+imap_quote() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "${value}"
+}
+
 [[ -f "$ENV_FILE" ]] || fail "Environment file not found: $ENV_FILE"
 set -a
 source "$ENV_FILE"
@@ -213,6 +220,69 @@ probe_imaps_upstream() {
   pass "LPE IMAP upstream ${upstream} is reachable from LPE-CT"
 }
 
+probe_public_imaps_auth_if_configured() {
+  local test_email="${LPE_CT_IMAPS_TEST_EMAIL:-${LPE_IMAP_TEST_EMAIL:-${IMAP_TEST_EMAIL:-}}}"
+  local test_password="${LPE_CT_IMAPS_TEST_PASSWORD:-${LPE_IMAP_TEST_PASSWORD:-${IMAP_TEST_PASSWORD:-}}}"
+  local output_file
+  local openssl_status=0
+  local quoted_email
+  local quoted_password
+
+  if [[ -z "${test_email}" || -z "${test_password}" ]]; then
+    warn "Skipping authenticated public IMAPS probe; set LPE_CT_IMAPS_TEST_EMAIL and LPE_CT_IMAPS_TEST_PASSWORD to verify Outlook-facing 993 login."
+    return 0
+  fi
+  if ! command -v openssl >/dev/null 2>&1; then
+    warn "Skipping authenticated public IMAPS probe; openssl is not available."
+    return 0
+  fi
+
+  quoted_email="$(imap_quote "${test_email}")"
+  quoted_password="$(imap_quote "${test_password}")"
+  output_file="$(mktemp)"
+
+  timeout 20 openssl s_client -quiet -crlf \
+    -connect "${HOST}:${IMAPS_PORT}" \
+    -servername "${LPE_CT_PUBLIC_HOSTNAME:-localhost}" >"${output_file}" 2>&1 <<EOF || openssl_status=$?
+A1 CAPABILITY
+A2 LOGIN ${quoted_email} ${quoted_password}
+A3 SELECT INBOX
+A4 LOGOUT
+EOF
+
+  if ! grep -q '^\* OK LPE IMAP ready' "${output_file}"; then
+    echo "[DIAG] Public IMAPS probe did not receive the core IMAP greeting through LPE-CT."
+    recent_logs
+    rm -f "${output_file}"
+    fail "Public IMAPS on ${HOST}:${IMAPS_PORT} did not proxy to the core IMAP greeting"
+  fi
+  if ! grep -q '^A1 OK CAPABILITY completed' "${output_file}"; then
+    echo "[DIAG] Public IMAPS probe reached a greeting but CAPABILITY did not complete."
+    recent_logs
+    rm -f "${output_file}"
+    fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed CAPABILITY through the proxy"
+  fi
+  if ! grep -q '^A2 OK LOGIN completed' "${output_file}"; then
+    echo "[DIAG] Public IMAPS probe reached the core IMAP adapter, but LOGIN failed for the supplied test account."
+    echo "[DIAG] Re-check mailbox credentials and inspect both lpe-ct.service and lpe.service logs."
+    recent_logs
+    rm -f "${output_file}"
+    fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed authenticated LOGIN through the proxy"
+  fi
+  if ! grep -q '^A3 OK \[READ-WRITE\] SELECT completed' "${output_file}"; then
+    echo "[DIAG] Public IMAPS probe logged in but could not SELECT INBOX."
+    recent_logs
+    rm -f "${output_file}"
+    fail "Public IMAPS on ${HOST}:${IMAPS_PORT} failed SELECT INBOX through the proxy"
+  fi
+
+  if [[ "${openssl_status}" -ne 0 ]]; then
+    warn "Authenticated public IMAPS probe succeeded, but openssl exited with status ${openssl_status} after the IMAP session closed."
+  fi
+  rm -f "${output_file}"
+  pass "Public IMAPS on ${HOST}:${IMAPS_PORT} accepted login and SELECT INBOX through LPE-CT"
+}
+
 probe_client_publication() {
   local base_url="https://${HOST}:${HTTPS_PORT}"
   local host_header="${LPE_CT_PUBLICATION_TEST_HOST:-${LPE_CT_PUBLIC_HOSTNAME:-${LPE_CT_SERVER_NAME:-localhost}}}"
@@ -337,6 +407,7 @@ fi
 if [[ -n "${LPE_CT_IMAPS_BIND_ADDRESS:-}" ]]; then
   tls_probe_if_possible "$HOST" "$IMAPS_PORT" "IMAPS"
   probe_imaps_upstream "${LPE_CT_IMAPS_UPSTREAM_ADDRESS:-}"
+  probe_public_imaps_auth_if_configured
 else
   echo "[SKIP] LPE_CT_IMAPS_BIND_ADDRESS is not configured; port 993 is not enabled."
 fi
