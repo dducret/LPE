@@ -3853,6 +3853,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blob_get_hides_bcc_for_delegated_shared_mailbox_message() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_BLOB_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Blob/get".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "ids": ["message:cccccccc-cccc-cccc-cccc-cccccccccccc"],
+                            "properties": ["data:asText", "size"]
+                        }),
+                        "g1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let message = response.method_responses[0].1["list"][0]["data:asText"]
+            .as_str()
+            .unwrap();
+        assert!(message.contains("Subject: Draft subject\r\n"));
+        assert!(!message.contains("Bcc:"));
+        assert!(!message.contains("hidden@example.test"));
+    }
+
+    #[tokio::test]
     async fn blob_copy_copies_upload_and_message_blobs_through_canonical_blob_pipeline() {
         let store = FakeStore {
             session: Some(FakeStore::account()),
