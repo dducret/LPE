@@ -343,6 +343,61 @@ impl Storage {
             .ok_or_else(|| anyhow::anyhow!("moved message not found"))
     }
 
+    pub async fn update_jmap_email_flags(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        unread: Option<bool>,
+        flagged: Option<bool>,
+        audit: AuditEntryInput,
+    ) -> Result<JmapEmail> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        if unread.is_none() && flagged.is_none() {
+            return self
+                .fetch_jmap_emails(account_id, &[message_id])
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("message not found"));
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+        let updated = sqlx::query(
+            r#"
+            UPDATE messages
+            SET
+                unread = COALESCE($4, unread),
+                flagged = COALESCE($5, flagged),
+                imap_modseq = $6
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .bind(unread)
+        .bind(flagged)
+        .bind(modseq)
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() == 0 {
+            bail!("message not found");
+        }
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
+
+        self.fetch_jmap_emails(account_id, &[message_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("updated message not found"))
+    }
+
     pub async fn import_jmap_email(
         &self,
         input: JmapImportedEmailInput,

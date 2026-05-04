@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use axum::{
     body::Bytes,
     extract::State,
@@ -877,16 +877,49 @@ impl<S: ExchangeStore> ExchangeService<S> {
                 .filter_map(|id| id.strip_prefix("event:"))
                 .map(Uuid::parse_str)
                 .collect::<std::result::Result<Vec<_>, _>>()?;
+            let message_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("message:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
 
-            if ids.is_empty() || contact_ids.len() + event_ids.len() != ids.len() {
+            if ids.is_empty()
+                || contact_ids.len() + event_ids.len() + message_ids.len() != ids.len()
+            {
                 return Ok(operation_error_response(
                     "UpdateItem",
                     "ErrorInvalidOperation",
-                    "UpdateItem currently supports only contact and calendar item ids.",
+                    "UpdateItem currently supports only contact, calendar, and read/flag message item ids.",
                 ));
             }
 
             let mut items = String::new();
+            if !message_ids.is_empty() {
+                let Some((unread, flagged)) = parse_update_message_flags(request)? else {
+                    return Ok(operation_error_response(
+                        "UpdateItem",
+                        "ErrorInvalidOperation",
+                        "UpdateItem message updates currently support only IsRead and FlagStatus.",
+                    ));
+                };
+                for message_id in message_ids {
+                    let updated = self
+                        .store
+                        .update_jmap_email_flags(
+                            principal.account_id,
+                            message_id,
+                            unread,
+                            flagged,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-update-message-flags".to_string(),
+                                subject: message_id.to_string(),
+                            },
+                        )
+                        .await?;
+                    items.push_str(&message_item_xml(&updated));
+                }
+            }
             for contact_id in contact_ids {
                 let existing = self
                     .store
@@ -1643,6 +1676,32 @@ fn parse_attendee(attendee: &str) -> Option<String> {
         }
         _ => mailbox.address,
     })
+}
+
+fn parse_update_message_flags(request: &str) -> Result<Option<(Option<bool>, Option<bool>)>> {
+    let unread = element_text(request, "IsRead")
+        .map(|value| parse_xml_bool(&value).map(|is_read| !is_read))
+        .transpose()?;
+    let mut flagged = element_text(request, "FlagStatus")
+        .map(|value| match value.trim().to_ascii_lowercase().as_str() {
+            "notflagged" => Ok(false),
+            "flagged" | "complete" => Ok(true),
+            other => bail!("unsupported message FlagStatus {other}"),
+        })
+        .transpose()?;
+    if field_deleted(request, "message:Flag") || field_deleted(request, "message:FlagStatus") {
+        flagged = Some(false);
+    }
+
+    Ok((unread.is_some() || flagged.is_some()).then_some((unread, flagged)))
+}
+
+fn parse_xml_bool(value: &str) -> Result<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" => Ok(true),
+        "false" | "0" => Ok(false),
+        other => bail!("unsupported boolean value {other}"),
+    }
 }
 
 fn requested_time_zone(request: &str) -> Option<String> {

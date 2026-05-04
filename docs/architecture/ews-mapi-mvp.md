@@ -107,7 +107,7 @@ The first `EWS` slice supports the read/sync surface needed to begin mailbox, co
 - `GetItem`
 - `SyncFolderItems`
 - `CreateItem` for `Message`, `Contact`, and `CalendarItem` items
-- `UpdateItem` for canonical `Contact` and `CalendarItem` items
+- `UpdateItem` for canonical `Contact`, `CalendarItem`, and read/flag `Message` fields
 - `DeleteItem` for canonical `Message`, `Contact`, and `CalendarItem` ids
 - `MoveItem` for canonical `Message` ids and canonical mailbox target folders
 - `CopyItem` for canonical `Message` ids and canonical mailbox target folders
@@ -147,7 +147,7 @@ The adapter also answers early client bootstrap probes for `GetServerTimeZones`,
 
 Message ids returned by `CreateItem` and mail read operations are canonical mailbox ids wrapped in an EWS id prefix. Contact ids are canonical contact ids wrapped in the `contact:` EWS id prefix. Calendar item ids are canonical event ids wrapped in the `event:` EWS id prefix. `DeleteItem DeleteType="HardDelete"` permanently deletes the canonical message. `DeleteItem` without `HardDelete`, including `MoveToDeletedItems`, moves the canonical message to the `trash` mailbox when that mailbox exists; deleting a message that is already in `trash` permanently deletes it. `MoveItem` and `CopyItem` accept canonical `message:` ids and a single canonical mailbox target, either as `FolderId Id="mailbox:{uuid}"` or a supported distinguished mailbox folder such as `inbox`, `drafts`, `sentitems`, or `deleteditems`. `CopyItem` duplicates the canonical body, recipients, protected `Bcc` metadata, and attachment rows through the canonical mailbox copy primitive. `DeleteItem` for contact and event ids deletes through canonical collaboration rights and storage. This uses the same canonical mailbox and collaboration primitives as the other protocol layers and must not create EWS-only deletion, move, or copy state.
 
-`UpdateItem` supports canonical `Contact` and `CalendarItem` ids and applies partial EWS field updates through canonical collaboration rights. Unsupported item ids, task updates, attachment mutations, and mailbox message updates return EWS-shaped `ErrorInvalidOperation` responses and must not mutate canonical data.
+`UpdateItem` supports canonical `Contact` and `CalendarItem` ids and applies partial EWS field updates through canonical collaboration rights. For canonical `Message` ids, `UpdateItem` is limited to `IsRead` and `FlagStatus`, mapping those fields to the canonical `unread` and `flagged` mailbox fields with normal mail-change emission. Unsupported item ids, task updates, attachment mutations, and other mailbox message updates return EWS-shaped `ErrorInvalidOperation` responses and must not mutate canonical data.
 
 Other out-of-scope client bootstrap operations, including `GetUserOofSettings`, `GetRoomLists`, `FindPeople`, `ExpandDL`, `Subscribe`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, `GetSharingFolder`, `GetAttachment`, `Unsubscribe`, and `GetEvents`, also return EWS-shaped `ErrorInvalidOperation` responses instead of generic SOAP transport faults.
 
@@ -158,7 +158,7 @@ Request element names ending in `Request`, such as `GetUserOofSettingsRequest`, 
 ### Current limitations
 
 - `SyncFolderItems` uses compact server `SyncState` values over canonical item ids and deterministic change keys for contacts and calendar events; those keys include canonical update markers, but the adapter does not yet maintain a full EWS incremental change ledger with tombstone history beyond the previous client token
-- `UpdateItem` is limited to contact and calendar field updates; message updates, attachment mutations, tasks, and meeting workflow updates are not implemented yet
+- `UpdateItem` message support is limited to read-state and flag mutation; attachment mutations, tasks, and meeting workflow updates are not implemented yet
 - tasks, free/busy, recurrence expansion, alarms, meeting scheduling, extended properties, attachments, and GAL are not implemented through `EWS` yet
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
 - enabled `EWS` POX autodiscover publishes the configured EWS URL through a `WEB` protocol block with `ASUrl` for EWS-aware clients; top-level `EXCH` and `EXPR` provider sections remain reserved for explicit legacy Exchange autodiscover interoperability-test mode

@@ -602,6 +602,29 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(copied) })
     }
 
+    fn update_jmap_email_flags<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        unread: Option<bool>,
+        flagged: Option<bool>,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        let mut emails = self.emails.lock().unwrap();
+        let email = emails
+            .iter_mut()
+            .find(|email| email.id == message_id)
+            .unwrap();
+        if let Some(unread) = unread {
+            email.unread = unread;
+        }
+        if let Some(flagged) = flagged {
+            email.flagged = flagged;
+        }
+        let updated = email.clone();
+        Box::pin(async move { Ok(updated) })
+    }
+
     fn delete_jmap_email<'a>(
         &'a self,
         _account_id: Uuid,
@@ -2416,6 +2439,63 @@ async fn update_item_rejects_unsupported_item_ids() {
     assert!(body.contains("<m:UpdateItemResponse>"));
     assert!(body.contains("ResponseClass=\"Error\""));
     assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+}
+
+#[tokio::test]
+async fn update_item_updates_message_read_and_flag_state() {
+    let mut email = FakeStore::email(
+        "dddddddd-dddd-dddd-dddd-dddddddddddd",
+        "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+        "inbox",
+        "Mailbox message",
+    );
+    email.unread = true;
+    email.flagged = false;
+    let emails = Arc::new(Mutex::new(vec![email]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: emails.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:UpdateItem>
+                  <m:ItemChanges>
+                    <t:ItemChange>
+                      <t:ItemId Id="message:dddddddd-dddd-dddd-dddd-dddddddddddd"/>
+                      <t:Updates>
+                        <t:SetItemField>
+                          <t:FieldURI FieldURI="message:IsRead"/>
+                          <t:Message><t:IsRead>true</t:IsRead></t:Message>
+                        </t:SetItemField>
+                        <t:SetItemField>
+                          <t:FieldURI FieldURI="message:Flag"/>
+                          <t:Message><t:Flag><t:FlagStatus>Flagged</t:FlagStatus></t:Flag></t:Message>
+                        </t:SetItemField>
+                      </t:Updates>
+                    </t:ItemChange>
+                  </m:ItemChanges>
+                </m:UpdateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UpdateItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:IsRead>true</t:IsRead>"));
+    let updated = emails.lock().unwrap()[0].clone();
+    assert!(!updated.unread);
+    assert!(updated.flagged);
 }
 
 #[tokio::test]
