@@ -26,15 +26,15 @@ Its stable architectural base is:
 
 `IMAP` was the development-start compatibility layer through `0.1.2` and remains a supported communication protocol for mailbox access.
 The current `0.1.3` product priority is implementing the selected `EWS` adapter
-for Exchange-style clients while preserving the canonical mailbox, contacts, and
-calendar model.
+for Exchange-style clients while preserving the canonical mailbox, contacts,
+calendar, and task model.
 
 That means:
 
 - `JMAP` first: complete state or change semantics, WebSocket reliability, and shared-mailbox behavior
 - `IMAP` remains a supported client communication protocol and should receive correctness fixes for sync, `UID` behavior, flags, and real-client compatibility, but it is no longer the main `0.1.3` release driver
 - `ActiveSync` as the flagship mobile/native-client story for clients that support `Exchange ActiveSync`: prioritize Outlook mobile and iOS compatibility labs, long-poll stability, send-flow correctness, and folder-sync edge cases
-- `EWS` is the `0.1.3` Exchange compatibility focus for Exchange-style folder, mail, contacts, and calendar synchronization; it must not imply `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox` model
+- `EWS` is the `0.1.3` Exchange compatibility focus for Exchange-style folder, mail, contacts, calendar, and task synchronization; it must not imply `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox` model
 - `MAPI over HTTP` work can proceed behind authenticated endpoints; `mapiHttp` autodiscover publication is opt-in for interoperability testing, and legacy `EXCH` / `EXPR` autodiscover publication requires its own explicit test switch so Outlook desktop `IMAP` setup is not hijacked before EMSMDB, NSPI, session context, and canonical mailbox synchronization are implemented enough for real Outlook desktop login
 - Outlook for Windows desktop can continue to use the supported `IMAP` communication path when configured that way; `EWS` publication remains an explicit administrator choice until its limits are acceptable for the deployment
 - `DAV` and `ManageSieve` after that: focus on correctness, canonical execution, and client-matrix interoperability rather than feature sprawl

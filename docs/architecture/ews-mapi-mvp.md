@@ -98,7 +98,7 @@ Implemented request types:
 
 ### Supported EWS operations
 
-The first `EWS` slice supports the read/sync surface needed to begin mailbox, contacts, and calendar interoperability:
+The first `EWS` slice supports the read/sync surface needed to begin mailbox, contacts, calendar, and task interoperability:
 
 - `FindFolder`
 - `GetFolder`
@@ -108,7 +108,7 @@ The first `EWS` slice supports the read/sync surface needed to begin mailbox, co
 - `SyncFolderItems`
 - `CreateItem` for `Message`, `Contact`, and `CalendarItem` items
 - `UpdateItem` for canonical `Contact`, `CalendarItem`, and read/flag `Message` fields
-- `DeleteItem` for canonical `Message`, `Contact`, and `CalendarItem` ids
+- `DeleteItem` for canonical `Message`, `Contact`, `CalendarItem`, and `Task` ids
 - `MoveItem` for canonical `Message` ids and canonical mailbox target folders
 - `CopyItem` for canonical `Message` ids and canonical mailbox target folders
 - `CreateFolder` and `DeleteFolder` for canonical custom mailbox folders
@@ -118,20 +118,23 @@ The adapter currently exposes:
 
 - canonical owned and same-tenant shared contact collections as `Contacts` folders
 - canonical owned and same-tenant shared calendar collections as `Calendar` folders
+- canonical owned and same-tenant shared task lists as `Tasks` folders
 - contact items from `contacts`
 - contact creation, update, and deletion through the canonical contacts model
 - calendar items from `calendar_events`
 - calendar item creation, update, and deletion through the canonical calendar model
+- task items from canonical task storage
+- task deletion through the canonical task model
 - message creation through the canonical draft and submission model
 - mailbox read and sync through the canonical JMAP mailbox model
 - message attachment discovery and retrieval through canonical attachment rows and blob storage
 - mailbox deletion through canonical hard-delete or move-to-trash behavior
 - temporary/custom mailbox folder creation through the canonical JMAP mailbox model
 
-The EWS distinguished folder ids `contacts` and `calendar` map to the canonical owned `default` contact and calendar collections. Shared collections keep explicit synthetic ids such as `shared-contacts-{owner_account_id}` and `shared-calendar-{owner_account_id}`.
+The EWS distinguished folder ids `contacts`, `calendar`, and `tasks` map to the canonical owned `default` contact, calendar, and task collections. Shared collections keep explicit synthetic ids such as `shared-contacts-{owner_account_id}`, `shared-calendar-{owner_account_id}`, and `shared-tasks-{owner_account_id}`.
 
-The adapter returns a Basic authentication challenge for unauthenticated EWS requests and accepts `msgfolderroot` / `root` as lightweight root-folder discovery ids so clients can bootstrap folder traversal before requesting the supported contacts and calendar folders.
-`SyncFolderItems` for contacts and calendar events includes deterministic item change keys in both item ids and a versioned server `SyncState`, derived from canonical item content plus the canonical row update marker.
+The adapter returns a Basic authentication challenge for unauthenticated EWS requests and accepts `msgfolderroot` / `root` as lightweight root-folder discovery ids so clients can bootstrap folder traversal before requesting the supported contacts, calendar, and task folders.
+`SyncFolderItems` for contacts, calendar events, and tasks includes deterministic item change keys in both item ids and a versioned server `SyncState`, derived from canonical item content plus the canonical row update marker.
 This allows the adapter to return create, update, and delete changes without introducing an Exchange-specific collaboration store, including after bounded `UpdateItem` requests that touch EWS fields not represented as first-class LPE contact or calendar properties.
 Legacy unversioned contact and calendar sync states from earlier `0.1.3` builds, including ID-only states and keyed states such as `contacts:default:{id}=ck-*`, are still accepted; matching current items are returned once as updates and the response advances the client to the `v2` change-key state format.
 
@@ -141,13 +144,13 @@ Folder responses include EWS `TotalCount` and `ChildFolderCount` properties so s
 
 Mailbox folders, including system folders such as `Inbox`, `Drafts`, `Sent`, and `Deleted`, are exposed through canonical JMAP mailboxes. `FindItem`, `GetItem`, and `SyncFolderItems` return canonical messages from the requested mailbox. When a message has canonical attachments, `GetItem` includes EWS `FileAttachment` references backed by canonical attachment ids, requested EWS `MimeContent` is reconstructed from canonical message, recipient, and attachment state, `GetAttachment` returns the stored blob content for those references, `CreateAttachment` validates client-provided file attachments with `Magika` before routing them through canonical attachment ingestion, and `DeleteAttachment` removes matching canonical attachment rows while updating message attachment state and search metadata. EWS MIME reconstruction follows the existing protected metadata rule: `Bcc` is included only for canonical `Drafts` and `Sent` messages, and is not exposed for normal mailbox reads. For temporary custom mailbox folders, `CreateItem SaveOnly` can import a `Message` into the requested canonical custom mailbox folder, so strict EWS connectivity tests can create, sync, read, delete, and resync items inside a temporary folder.
 
-When a client requests unsupported distinguished folders such as `tasks` through this EWS adapter, the response remains an EWS-shaped `GetFolder` error with `ErrorFolderNotFound` instead of an HTTP transport failure. This keeps clients on the EWS negotiation path without advertising unsupported task synchronization through EWS.
+Task folders expose canonical task-list contents for `FindItem`, `GetItem`, and `SyncFolderItems`. The current task item mapping is intentionally narrow: id, parent folder, subject, text body, status, due date, completion date, and deterministic change key. It does not introduce an EWS task store.
 
 The adapter also answers early client bootstrap probes for `GetServerTimeZones`, `ResolveNames`, and `GetUserAvailability`. `GetServerTimeZones` returns minimal `UTC` and `W. Europe Standard Time` definitions. `ResolveNames` returns an EWS no-results error because GAL resolution is not implemented. `GetUserAvailability` returns an EWS free/busy generation error because free/busy remains outside the current MVP.
 
 `CreateItem` supports `Message`, `Contact`, and `CalendarItem` items. `Message` `SaveOnly` writes through the canonical Drafts path. `Message` `SendOnly` and `SendAndSaveCopy` write through the canonical submission path, which persists the canonical `Sent` copy before queueing outbound transport for `LPE-CT`. `Contact` creation writes to the requested canonical contacts collection, defaulting to the owned `default` address book. `CalendarItem` creation writes to the requested canonical calendar collection, defaulting to the owned `default` calendar. `CreateItem` does not implement task, attachment, meeting invitation, or folder writes.
 
-Message ids returned by `CreateItem` and mail read operations are canonical mailbox ids wrapped in an EWS id prefix. Contact ids are canonical contact ids wrapped in the `contact:` EWS id prefix. Calendar item ids are canonical event ids wrapped in the `event:` EWS id prefix. `DeleteItem DeleteType="HardDelete"` permanently deletes the canonical message. `DeleteItem` without `HardDelete`, including `MoveToDeletedItems`, moves the canonical message to the `trash` mailbox when that mailbox exists; deleting a message that is already in `trash` permanently deletes it. `MoveItem` and `CopyItem` accept canonical `message:` ids and a single canonical mailbox target, either as `FolderId Id="mailbox:{uuid}"` or a supported distinguished mailbox folder such as `inbox`, `drafts`, `sentitems`, or `deleteditems`. `CopyItem` duplicates the canonical body, recipients, protected `Bcc` metadata, and attachment rows through the canonical mailbox copy primitive. `DeleteItem` for contact and event ids deletes through canonical collaboration rights and storage. This uses the same canonical mailbox and collaboration primitives as the other protocol layers and must not create EWS-only deletion, move, or copy state.
+Message ids returned by `CreateItem` and mail read operations are canonical mailbox ids wrapped in an EWS id prefix. Contact ids are canonical contact ids wrapped in the `contact:` EWS id prefix. Calendar item ids are canonical event ids wrapped in the `event:` EWS id prefix. Task ids are canonical task ids wrapped in the `task:` EWS id prefix. `DeleteItem DeleteType="HardDelete"` permanently deletes the canonical message. `DeleteItem` without `HardDelete`, including `MoveToDeletedItems`, moves the canonical message to the `trash` mailbox when that mailbox exists; deleting a message that is already in `trash` permanently deletes it. `MoveItem` and `CopyItem` accept canonical `message:` ids and a single canonical mailbox target, either as `FolderId Id="mailbox:{uuid}"` or a supported distinguished mailbox folder such as `inbox`, `drafts`, `sentitems`, or `deleteditems`. `CopyItem` duplicates the canonical body, recipients, protected `Bcc` metadata, and attachment rows through the canonical mailbox copy primitive. `DeleteItem` for contact, event, and task ids deletes through canonical collaboration/task rights and storage. This uses the same canonical mailbox, collaboration, and task primitives as the other protocol layers and must not create EWS-only deletion, move, or copy state.
 
 `UpdateItem` supports canonical `Contact` and `CalendarItem` ids and applies partial EWS field updates through canonical collaboration rights. For canonical `Message` ids, `UpdateItem` is limited to `IsRead` and `FlagStatus`, mapping those fields to the canonical `unread` and `flagged` mailbox fields with normal mail-change emission. Unsupported item ids, task updates, attachment mutations, and other mailbox message updates return EWS-shaped `ErrorInvalidOperation` responses and must not mutate canonical data.
 
@@ -159,10 +162,10 @@ Request element names ending in `Request`, such as `GetUserOofSettingsRequest`, 
 
 ### Current limitations
 
-- `SyncFolderItems` uses compact server `SyncState` values over canonical item ids and deterministic change keys for contacts and calendar events; those keys include canonical update markers, but the adapter does not yet maintain a full EWS incremental change ledger with tombstone history beyond the previous client token
+- `SyncFolderItems` uses compact server `SyncState` values over canonical item ids and deterministic change keys for contacts, calendar events, and tasks; those keys include canonical update markers, but the adapter does not yet maintain a full EWS incremental change ledger with tombstone history beyond the previous client token
 - `UpdateItem` message support is limited to read-state and flag mutation; attachment mutations, tasks, and meeting workflow updates are not implemented yet
 - EWS attachment support is limited to file attachments over `GetItem`, `GetAttachment`, `CreateAttachment`, and `DeleteAttachment`; item attachments, inline attachment metadata, attachment creation through `CreateItem` / `UpdateItem`, and byte-for-byte original RFC822 source replay are not implemented yet
-- tasks, free/busy, recurrence expansion, alarms, meeting scheduling, extended properties, and GAL are not implemented through `EWS` yet
+- task create/update, free/busy, recurrence expansion, alarms, meeting scheduling, extended properties, and GAL are not implemented through `EWS` yet
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
 - enabled `EWS` POX autodiscover publishes the configured EWS URL through a `WEB` protocol block with `ASUrl` for EWS-aware clients; top-level `EXCH` and `EXPR` provider sections remain reserved for explicit legacy Exchange autodiscover interoperability-test mode
 - SOAP `GetUserSettings` autodiscover publishes the same configured `EWS` endpoint as `ExternalEwsUrl` and `InternalEwsUrl` for EWS clients that prefer SOAP autodiscover over POX
