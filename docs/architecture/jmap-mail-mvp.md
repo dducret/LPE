@@ -113,7 +113,7 @@ Additional supported `JMAP` routes:
 - mail push state spans every mailbox account visible through canonical mailbox delegation so one authenticated session can receive `StateChange` payloads for owned and delegated mailboxes without a protocol-local sharing cache
 - collaboration and task push stay principal-scoped: shared contacts, calendars, and task lists notify every affected principal account, while mailbox push still spans the canonical owner plus delegated mailbox readers
 - supported push data types are limited to `Mailbox`, `Email`, `Thread`, `AddressBook`, `ContactCard`, `Calendar`, `CalendarEvent`, `TaskList`, and `Task`
-- `VacationResponse/get` and `VacationResponse/set` project the authenticated account's canonical active `Sieve` script; `set` writes a bounded `jmap-vacation` Sieve script or disables the active script and does not introduce a separate `JMAP` vacation store
+- `VacationResponse/get` and `VacationResponse/set` project the authenticated account's canonical active `Sieve` script; `set` patch updates preserve omitted singleton fields from that projection, writes a bounded `jmap-vacation` Sieve script or disables the active script, and does not introduce a separate `JMAP` vacation store
 
 ### Next methods to add
 

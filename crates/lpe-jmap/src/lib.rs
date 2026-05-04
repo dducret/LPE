@@ -4640,6 +4640,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn vacation_response_set_update_preserves_omitted_fields() {
+        let active_sieve_script = Arc::new(Mutex::new(Some(
+            r#"require ["vacation"];
+               vacation :subject "Out" :days 7 "Away until Monday";"#
+                .to_string(),
+        )));
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            active_sieve_script: active_sieve_script.clone(),
+            ..Default::default()
+        });
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_VACATION_RESPONSE_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "VacationResponse/set".to_string(),
+                        json!({
+                            "update": {
+                                "singleton": {
+                                    "subject": "Back later"
+                                }
+                            }
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let updated = &response.method_responses[0].1["updated"]["singleton"];
+        assert_eq!(updated["isEnabled"], true);
+        assert_eq!(updated["subject"], "Back later");
+        assert_eq!(updated["textBody"], "Away until Monday");
+        let script = active_sieve_script.lock().unwrap().clone().unwrap();
+        assert!(script.contains("vacation :subject \"Back later\" :days 7 \"Away until Monday\";"));
+    }
+
+    #[tokio::test]
     async fn websocket_push_states_include_shared_mailbox_accounts() {
         let shared = FakeStore::shared_account();
         let service = JmapService::new(FakeStore {

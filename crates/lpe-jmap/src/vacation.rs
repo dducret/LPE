@@ -98,7 +98,8 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     );
                     continue;
                 }
-                match save_vacation_response(self, account_id, &value, false, account).await {
+                let disabled = VacationResponseProjection::disabled();
+                match save_vacation_response(self, account_id, &value, &disabled, account).await {
                     Ok(projection) => {
                         created_ids.insert(client_id.clone(), VACATION_RESPONSE_ID.to_string());
                         created.insert(
@@ -123,14 +124,8 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     not_updated.insert(id, set_error("VacationResponse not found"));
                     continue;
                 }
-                match save_vacation_response(
-                    self,
-                    account_id,
-                    &patch,
-                    old_projection.is_enabled,
-                    account,
-                )
-                .await
+                match save_vacation_response(self, account_id, &patch, &old_projection, account)
+                    .await
                 {
                     Ok(projection) => {
                         updated.insert(
@@ -213,7 +208,7 @@ async fn save_vacation_response<S: crate::store::JmapStore, V: lpe_magika::Detec
     service: &JmapService<S, V>,
     account_id: uuid::Uuid,
     value: &Value,
-    existing_enabled: bool,
+    existing: &VacationResponseProjection,
     account: &AuthenticatedAccount,
 ) -> Result<VacationResponseProjection> {
     let object = value
@@ -222,7 +217,7 @@ async fn save_vacation_response<S: crate::store::JmapStore, V: lpe_magika::Detec
     let is_enabled = object
         .get("isEnabled")
         .and_then(Value::as_bool)
-        .unwrap_or(existing_enabled);
+        .unwrap_or(existing.is_enabled);
     if !is_enabled {
         service
             .store
@@ -244,15 +239,13 @@ async fn save_vacation_response<S: crate::store::JmapStore, V: lpe_magika::Detec
     let subject = object
         .get("subject")
         .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+        .map(|value| value.trim().to_string())
+        .unwrap_or_else(|| existing.subject.clone());
     let text_body = object
         .get("textBody")
         .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("textBody is required when enabling VacationResponse"))?
-        .trim()
-        .to_string();
+        .map(|value| value.trim().to_string())
+        .unwrap_or_else(|| existing.text_body.clone());
     if text_body.is_empty() {
         bail!("textBody is required when enabling VacationResponse");
     }
