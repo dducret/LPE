@@ -22,6 +22,7 @@ const EMSMDB_COOKIE: &str = "lpe_mapi_emsmdb";
 const NSPI_COOKIE: &str = "lpe_mapi_nspi";
 const EMSMDB_COOKIE_PATH: &str = "/mapi/emsmdb";
 const NSPI_COOKIE_PATH: &str = "/mapi/nspi";
+const MAPI_SESSION_MAX_AGE_SECONDS: u32 = 1_800;
 const NSPI_SERVER_GUID: [u8; 16] = [
     0x4c, 0x50, 0x45, 0x00, 0x4d, 0x41, 0x50, 0x49, 0x4e, 0x53, 0x50, 0x49, 0x00, 0x00, 0x00, 0x01,
 ];
@@ -1598,7 +1599,9 @@ fn session_cookie(endpoint: MapiEndpoint, session_id: &str, expired: bool) -> St
     if expired {
         format!("{name}=; Path={path}; Max-Age=0; HttpOnly; SameSite=Lax; Secure")
     } else {
-        format!("{name}={session_id}; Path={path}; HttpOnly; SameSite=Lax; Secure")
+        format!(
+            "{name}={session_id}; Path={path}; Max-Age={MAPI_SESSION_MAX_AGE_SECONDS}; HttpOnly; SameSite=Lax; Secure"
+        )
     }
 }
 

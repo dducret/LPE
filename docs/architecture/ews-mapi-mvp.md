@@ -76,9 +76,9 @@ The first `MAPI over HTTP` implementation surface exists as authenticated transp
 
 Implemented request types:
 
-- EMSMDB `Connect`: creates an authenticated MAPI session context and returns an EMSMDB connect success body plus an implementation-owned session cookie
+- EMSMDB `Connect`: creates an authenticated MAPI session context and returns an EMSMDB connect success body plus an implementation-owned, HTTP-only, secure session cookie with a bounded `Max-Age`
 - EMSMDB `Disconnect`: consumes the authenticated EMSMDB session cookie and expires it
-- NSPI `Bind`: creates an authenticated address book session context and returns an NSPI bind success body with a stable non-zero server GUID plus an implementation-owned session cookie
+- NSPI `Bind`: creates an authenticated address book session context and returns an NSPI bind success body with a stable non-zero server GUID plus an implementation-owned, HTTP-only, secure session cookie with a bounded `Max-Age`
 - NSPI `Unbind`: consumes the authenticated NSPI session cookie and expires it
 - NSPI `GetAddressBookUrl`: returns the externally visible `/mapi/nspi/` URL using forwarded host/protocol headers when present
 - NSPI `GetMailboxUrl`: returns the externally visible `/mapi/emsmdb/` URL using forwarded host/protocol headers when present

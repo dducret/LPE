@@ -809,13 +809,16 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
     );
     assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
-    assert!(response
+    let set_cookie = response
         .headers()
         .get("set-cookie")
         .unwrap()
         .to_str()
-        .unwrap()
-        .starts_with("lpe_mapi_emsmdb="));
+        .unwrap();
+    assert!(set_cookie.starts_with("lpe_mapi_emsmdb="));
+    assert!(set_cookie.contains("Max-Age=1800"));
+    assert!(set_cookie.contains("HttpOnly"));
+    assert!(set_cookie.contains("Secure"));
 
     let raw_body = to_bytes(response.into_body(), usize::MAX)
         .await
