@@ -1,12 +1,17 @@
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use lpe_core::sieve::{Action, Statement};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::collections::HashSet;
 
-use lpe_storage::AuthenticatedAccount;
+use lpe_storage::{AuditEntryInput, AuthenticatedAccount};
 
-use crate::{convert::insert_if, service::opaque_state_fingerprint, JmapService, SESSION_STATE};
+use crate::{
+    convert::{insert_if, resolve_creation_reference},
+    error::set_error,
+    service::opaque_state_fingerprint,
+    JmapService, SESSION_STATE,
+};
 
 const VACATION_RESPONSE_ID: &str = "singleton";
 
@@ -16,6 +21,15 @@ struct VacationResponseGetArguments {
     account_id: Option<String>,
     ids: Option<Vec<String>>,
     properties: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VacationResponseSetArguments {
+    account_id: Option<String>,
+    create: Option<Map<String, Value>>,
+    update: Option<Map<String, Value>>,
+    destroy: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +72,122 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         }))
     }
 
+    pub(crate) async fn handle_vacation_response_set(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        created_ids: &mut std::collections::HashMap<String, String>,
+    ) -> Result<Value> {
+        let arguments: VacationResponseSetArguments = serde_json::from_value(arguments)?;
+        let account_id = crate::requested_account_id(arguments.account_id.as_deref(), account)?;
+        let old_projection = self.vacation_response_projection(account_id).await?;
+        let old_state = vacation_response_state(&old_projection);
+        let mut created = Map::new();
+        let mut not_created = Map::new();
+        let mut updated = Map::new();
+        let mut not_updated = Map::new();
+        let mut destroyed = Vec::new();
+        let mut not_destroyed = Map::new();
+
+        if let Some(create) = arguments.create {
+            for (client_id, value) in create {
+                if old_projection.is_enabled {
+                    not_created.insert(
+                        client_id,
+                        set_error("VacationResponse already exists; update singleton instead"),
+                    );
+                    continue;
+                }
+                match save_vacation_response(self, account_id, &value, false, account).await {
+                    Ok(projection) => {
+                        created_ids.insert(client_id.clone(), VACATION_RESPONSE_ID.to_string());
+                        created.insert(
+                            client_id,
+                            vacation_response_to_value(
+                                &projection,
+                                &vacation_response_properties(None),
+                            ),
+                        );
+                    }
+                    Err(error) => {
+                        not_created.insert(client_id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        if let Some(update) = arguments.update {
+            for (id, patch) in update {
+                let id = resolve_creation_reference(&id, created_ids);
+                if id != VACATION_RESPONSE_ID {
+                    not_updated.insert(id, set_error("VacationResponse not found"));
+                    continue;
+                }
+                match save_vacation_response(
+                    self,
+                    account_id,
+                    &patch,
+                    old_projection.is_enabled,
+                    account,
+                )
+                .await
+                {
+                    Ok(projection) => {
+                        updated.insert(
+                            id,
+                            vacation_response_to_value(
+                                &projection,
+                                &vacation_response_properties(None),
+                            ),
+                        );
+                    }
+                    Err(error) => {
+                        not_updated.insert(id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        if let Some(destroy) = arguments.destroy {
+            for id in destroy {
+                let id = resolve_creation_reference(&id, created_ids);
+                if id != VACATION_RESPONSE_ID {
+                    not_destroyed.insert(id, set_error("VacationResponse not found"));
+                    continue;
+                }
+                match self
+                    .store
+                    .set_active_sieve_script(
+                        account_id,
+                        None,
+                        vacation_audit(account, account_id, "jmap-vacation-disable"),
+                    )
+                    .await
+                {
+                    Ok(_) => destroyed.push(id),
+                    Err(error) => {
+                        not_destroyed.insert(id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        let new_projection = self.vacation_response_projection(account_id).await?;
+        let new_state = vacation_response_state(&new_projection);
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "oldState": old_state,
+            "newState": new_state,
+            "created": Value::Object(created),
+            "notCreated": Value::Object(not_created),
+            "updated": Value::Object(updated),
+            "notUpdated": Value::Object(not_updated),
+            "destroyed": destroyed,
+            "notDestroyed": Value::Object(not_destroyed),
+        }))
+    }
+
     async fn vacation_response_projection(
         &self,
         account_id: uuid::Uuid,
@@ -76,6 +206,100 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             subject: action.0.unwrap_or_default(),
             text_body: action.1,
         })
+    }
+}
+
+async fn save_vacation_response<S: crate::store::JmapStore, V: lpe_magika::Detector>(
+    service: &JmapService<S, V>,
+    account_id: uuid::Uuid,
+    value: &Value,
+    existing_enabled: bool,
+    account: &AuthenticatedAccount,
+) -> Result<VacationResponseProjection> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("VacationResponse/set value must be an object"))?;
+    let is_enabled = object
+        .get("isEnabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(existing_enabled);
+    if !is_enabled {
+        service
+            .store
+            .set_active_sieve_script(
+                account_id,
+                None,
+                vacation_audit(account, account_id, "jmap-vacation-disable"),
+            )
+            .await?;
+        return Ok(VacationResponseProjection::disabled());
+    }
+
+    if object.get("fromDate").is_some_and(|value| !value.is_null())
+        || object.get("toDate").is_some_and(|value| !value.is_null())
+        || object.get("htmlBody").is_some_and(|value| !value.is_null())
+    {
+        bail!("fromDate, toDate, and htmlBody are not supported by the canonical Sieve MVP");
+    }
+    let subject = object
+        .get("subject")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let text_body = object
+        .get("textBody")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("textBody is required when enabling VacationResponse"))?
+        .trim()
+        .to_string();
+    if text_body.is_empty() {
+        bail!("textBody is required when enabling VacationResponse");
+    }
+
+    let content = vacation_sieve_script(&subject, &text_body);
+    service
+        .store
+        .put_sieve_script(
+            account_id,
+            "jmap-vacation",
+            &content,
+            true,
+            vacation_audit(account, account_id, "jmap-vacation-enable"),
+        )
+        .await?;
+    Ok(VacationResponseProjection {
+        is_enabled: true,
+        subject,
+        text_body,
+    })
+}
+
+fn vacation_sieve_script(subject: &str, text_body: &str) -> String {
+    let subject = sieve_quote(subject);
+    let text_body = sieve_quote(text_body);
+    if subject.is_empty() {
+        format!("require [\"vacation\"];\r\nvacation :days 7 \"{text_body}\";\r\n")
+    } else {
+        format!(
+            "require [\"vacation\"];\r\nvacation :subject \"{subject}\" :days 7 \"{text_body}\";\r\n"
+        )
+    }
+}
+
+fn sieve_quote(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn vacation_audit(
+    account: &AuthenticatedAccount,
+    subject_account_id: uuid::Uuid,
+    action: &str,
+) -> AuditEntryInput {
+    AuditEntryInput {
+        actor: account.email.clone(),
+        action: action.to_string(),
+        subject: subject_account_id.to_string(),
     }
 }
 

@@ -93,6 +93,20 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         &self,
         account_id: Uuid,
     ) -> Result<Option<SieveScriptDocument>>;
+    async fn put_sieve_script(
+        &self,
+        account_id: Uuid,
+        name: &str,
+        content: &str,
+        activate: bool,
+        audit: AuditEntryInput,
+    ) -> Result<SieveScriptDocument>;
+    async fn set_active_sieve_script(
+        &self,
+        account_id: Uuid,
+        name: Option<&str>,
+        audit: AuditEntryInput,
+    ) -> Result<Option<String>>;
     async fn save_jmap_upload_blob(
         &self,
         account_id: Uuid,
@@ -362,6 +376,27 @@ impl JmapStore for Storage {
         account_id: Uuid,
     ) -> Result<Option<SieveScriptDocument>> {
         self.fetch_active_sieve_script(account_id).await
+    }
+
+    async fn put_sieve_script(
+        &self,
+        account_id: Uuid,
+        name: &str,
+        content: &str,
+        activate: bool,
+        audit: AuditEntryInput,
+    ) -> Result<SieveScriptDocument> {
+        self.put_sieve_script(account_id, name, content, activate, audit)
+            .await
+    }
+
+    async fn set_active_sieve_script(
+        &self,
+        account_id: Uuid,
+        name: Option<&str>,
+        audit: AuditEntryInput,
+    ) -> Result<Option<String>> {
+        self.set_active_sieve_script(account_id, name, audit).await
     }
 
     async fn save_jmap_upload_blob(

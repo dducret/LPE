@@ -94,18 +94,18 @@ Additional supported `JMAP` routes:
 - `Blob/upload` currently stores temporary upload blobs in `PostgreSQL`
 - message `blobId` values now expose the canonical `mime_blob_ref` shape when one already exists, including `upload:{uuid}` for imported MIME uploads, and fall back to stable `message:{emailId}` identifiers for canonical message downloads
 - `GET /api/jmap/download/{accountId}/{blobId}/{name}` can return temporary upload blobs and reconstructed `message/rfc822` downloads for canonical message blob IDs; delegated/shared mailbox downloads never include protected `Bcc` metadata
-- no `JMAP Blob/get` or blob copy contract is advertised yet; the current blob model is limited to uploaded-imported MIME reuse, canonical message download, and internal canonical references
+- `Blob/copy` copies readable upload or canonical message blobs into the destination account's temporary upload blob store; it does not introduce a separate durable blob store
+- no `JMAP Blob/get` contract is advertised yet; the current blob model is limited to uploaded-imported MIME reuse, canonical message download, temporary blob copy, and internal canonical references
 - the session keeps `eventSourceUrl` empty; this MVP uses `JMAP` over WebSocket rather than the older event-source transport
 - WebSocket push uses canonical `PostgreSQL` signaling end to end: `lpe-storage` writes a canonical change-journal row and emits principal-filtered `LISTEN` / `NOTIFY` wakeups after canonical commits, while `lpe-jmap` replays bounded missed reconnect work from that journal and recomputes only the affected canonical object states without introducing a second mailbox state engine
 - when reconnect recovery or a live push wakeup sees the canonical journal cursor advance without a subscribed object-state fingerprint change, `lpe-jmap` may emit a `StateChange` with an empty `changed` map so clients receive a fresher `pushState` cursor and avoid unnecessary future full-snapshot fallbacks
 - mail push state spans every mailbox account visible through canonical mailbox delegation so one authenticated session can receive `StateChange` payloads for owned and delegated mailboxes without a protocol-local sharing cache
 - collaboration and task push stay principal-scoped: shared contacts, calendars, and task lists notify every affected principal account, while mailbox push still spans the canonical owner plus delegated mailbox readers
 - supported push data types are limited to `Mailbox`, `Email`, `Thread`, `AddressBook`, `ContactCard`, `Calendar`, `CalendarEvent`, `TaskList`, and `Task`
-- `VacationResponse/get` is a read-only projection of the authenticated account's active canonical `Sieve` script; it exposes a singleton response when a supported `vacation` action is present and does not introduce a separate `JMAP` vacation store or `VacationResponse/set`
+- `VacationResponse/get` and `VacationResponse/set` project the authenticated account's canonical active `Sieve` script; `set` writes a bounded `jmap-vacation` Sieve script or disables the active script and does not introduce a separate `JMAP` vacation store
 
 ### Next methods to add
 
-- `Blob/copy`
 - journal retention, pruning, and resumable push cursors beyond the current bounded reconnect-replay window for very large mailbox counts
 
 ### Current completion priorities

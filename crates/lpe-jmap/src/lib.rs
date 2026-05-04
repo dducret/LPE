@@ -1,3 +1,4 @@
+mod blob;
 mod calendar;
 mod contacts;
 mod convert;
@@ -83,7 +84,7 @@ mod tests {
         tasks: Arc<Mutex<Vec<ClientTask>>>,
         uploads: Arc<Mutex<Vec<JmapUploadBlob>>>,
         imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
-        active_sieve_script: Option<String>,
+        active_sieve_script: Arc<Mutex<Option<String>>>,
         saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
         submitted_drafts: Arc<Mutex<Vec<Uuid>>>,
         submitted_draft_actors: Arc<Mutex<Vec<Uuid>>>,
@@ -775,6 +776,8 @@ mod tests {
         ) -> Result<Option<SieveScriptDocument>> {
             Ok(self
                 .active_sieve_script
+                .lock()
+                .unwrap()
                 .as_ref()
                 .map(|content| SieveScriptDocument {
                     name: "active".to_string(),
@@ -782,6 +785,37 @@ mod tests {
                     is_active: true,
                     updated_at: "2026-04-20T15:00:00Z".to_string(),
                 }))
+        }
+
+        async fn put_sieve_script(
+            &self,
+            _account_id: Uuid,
+            _name: &str,
+            content: &str,
+            activate: bool,
+            _audit: AuditEntryInput,
+        ) -> Result<SieveScriptDocument> {
+            if activate {
+                *self.active_sieve_script.lock().unwrap() = Some(content.to_string());
+            }
+            Ok(SieveScriptDocument {
+                name: "jmap-vacation".to_string(),
+                content: content.to_string(),
+                is_active: activate,
+                updated_at: "2026-04-20T15:00:00Z".to_string(),
+            })
+        }
+
+        async fn set_active_sieve_script(
+            &self,
+            _account_id: Uuid,
+            name: Option<&str>,
+            _audit: AuditEntryInput,
+        ) -> Result<Option<String>> {
+            if name.is_none() {
+                *self.active_sieve_script.lock().unwrap() = None;
+            }
+            Ok(name.map(ToString::to_string))
         }
 
         async fn save_jmap_upload_blob(
@@ -3811,6 +3845,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blob_copy_copies_upload_and_message_blobs_through_canonical_blob_pipeline() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            uploads: Arc::new(Mutex::new(vec![JmapUploadBlob {
+                id: Uuid::parse_str("88888888-8888-8888-8888-888888888888").unwrap(),
+                account_id: FakeStore::account().account_id,
+                media_type: "message/rfc822".to_string(),
+                octet_size: 9,
+                blob_bytes: b"mime-body".to_vec(),
+            }])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_CORE_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Blob/copy".to_string(),
+                        json!({
+                            "fromAccountId": FakeStore::account().account_id.to_string(),
+                            "accountId": FakeStore::account().account_id.to_string(),
+                            "blobIds": [
+                                "upload:88888888-8888-8888-8888-888888888888",
+                                "message:cccccccc-cccc-cccc-cccc-cccccccccccc",
+                                "missing"
+                            ]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let copied = &response.method_responses[0].1["copied"];
+        assert!(
+            copied["upload:88888888-8888-8888-8888-888888888888"]["blobId"]
+                .as_str()
+                .unwrap()
+                .starts_with("upload:")
+        );
+        assert!(
+            copied["message:cccccccc-cccc-cccc-cccc-cccccccccccc"]["blobId"]
+                .as_str()
+                .unwrap()
+                .starts_with("upload:")
+        );
+        assert_eq!(
+            response.method_responses[0].1["notCopied"]["missing"]["description"],
+            "blob not found"
+        );
+        let uploads = store.uploads.lock().unwrap();
+        assert!(uploads.iter().any(|blob| blob.blob_bytes == b"mime-body"));
+        assert!(uploads.iter().any(|blob| {
+            String::from_utf8_lossy(&blob.blob_bytes).contains("Subject: Draft subject")
+        }));
+    }
+
+    #[tokio::test]
     async fn session_exposes_contacts_and_calendars_capabilities() {
         let service = JmapService::new(FakeStore {
             session: Some(FakeStore::account()),
@@ -3855,11 +3953,11 @@ mod tests {
     async fn vacation_response_get_projects_canonical_active_sieve_vacation() {
         let service = JmapService::new(FakeStore {
             session: Some(FakeStore::account()),
-            active_sieve_script: Some(
+            active_sieve_script: Arc::new(Mutex::new(Some(
                 r#"require ["vacation"];
                    vacation :subject "Out" :days 3 "Away until Monday";"#
                     .to_string(),
-            ),
+            ))),
             ..Default::default()
         });
 
@@ -3890,7 +3988,9 @@ mod tests {
     async fn vacation_response_get_returns_disabled_without_active_vacation() {
         let service = JmapService::new(FakeStore {
             session: Some(FakeStore::account()),
-            active_sieve_script: Some(r#"require ["fileinto"]; keep;"#.to_string()),
+            active_sieve_script: Arc::new(Mutex::new(Some(
+                r#"require ["fileinto"]; keep;"#.to_string(),
+            ))),
             ..Default::default()
         });
 
@@ -3916,6 +4016,80 @@ mod tests {
         assert_eq!(body["list"][0]["isEnabled"], false);
         assert_eq!(body["list"][0]["subject"], "");
         assert_eq!(body["notFound"], json!(["other"]));
+    }
+
+    #[tokio::test]
+    async fn vacation_response_set_writes_canonical_active_sieve_script() {
+        let active_sieve_script = Arc::new(Mutex::new(None));
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            active_sieve_script: active_sieve_script.clone(),
+            ..Default::default()
+        });
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_VACATION_RESPONSE_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "VacationResponse/set".to_string(),
+                        json!({
+                            "create": {
+                                "v1": {
+                                    "isEnabled": true,
+                                    "subject": "Away",
+                                    "textBody": "Back next week"
+                                }
+                            }
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.created_ids["v1"], "singleton");
+        assert_eq!(
+            response.method_responses[0].1["created"]["v1"]["isEnabled"],
+            true
+        );
+        let script = active_sieve_script.lock().unwrap().clone().unwrap();
+        assert!(script.contains("vacation :subject \"Away\" :days 7 \"Back next week\";"));
+    }
+
+    #[tokio::test]
+    async fn vacation_response_set_destroy_disables_active_sieve_script() {
+        let active_sieve_script = Arc::new(Mutex::new(Some(
+            r#"require ["vacation"]; vacation :subject "Out" "Away";"#.to_string(),
+        )));
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            active_sieve_script: active_sieve_script.clone(),
+            ..Default::default()
+        });
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_VACATION_RESPONSE_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "VacationResponse/set".to_string(),
+                        json!({"destroy": ["singleton"]}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["destroyed"],
+            json!(["singleton"])
+        );
+        assert!(active_sieve_script.lock().unwrap().is_none());
     }
 
     #[tokio::test]

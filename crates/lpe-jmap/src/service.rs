@@ -284,8 +284,13 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 "Thread/changes" => self.handle_thread_changes(account, arguments).await,
                 "Quota/get" => self.handle_quota_get(account, arguments).await,
                 "SearchSnippet/get" => self.handle_search_snippet_get(account, arguments).await,
+                "Blob/copy" => self.handle_blob_copy(account, arguments).await,
                 "VacationResponse/get" => {
                     self.handle_vacation_response_get(account, arguments).await
+                }
+                "VacationResponse/set" => {
+                    self.handle_vacation_response_set(account, arguments, &mut created_ids)
+                        .await
                 }
                 _ => Ok(method_error("unknownMethod", "method is not supported")),
             };
@@ -543,6 +548,15 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let requested_account = self
             .requested_account_access(&account, Some(account_id))
             .await?;
+        self.resolve_download_blob(&requested_account, blob_id)
+            .await
+    }
+
+    pub(crate) async fn resolve_download_blob(
+        &self,
+        requested_account: &MailboxAccountAccess,
+        blob_id: &str,
+    ) -> Result<JmapUploadBlob> {
         let requested_account_id = requested_account.account_id;
         match JmapBlobId::parse(blob_id)? {
             JmapBlobId::Upload(blob_id) => self
