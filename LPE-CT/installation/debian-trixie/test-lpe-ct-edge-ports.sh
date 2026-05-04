@@ -27,6 +27,11 @@ scope_enabled() {
     || ( ",${TEST_SCOPE}," == *",outlook,"* && "${scope}" =~ ^(https|submission|imaps)$ ) ]]
 }
 
+explicit_scope_enabled() {
+  local scope="$1"
+  [[ "${TEST_SCOPE}" == "all" || ",${TEST_SCOPE}," == *",${scope},"* ]]
+}
+
 outlook_scope_enabled() {
   [[ ",${TEST_SCOPE}," == *",outlook,"* ]]
 }
@@ -446,6 +451,11 @@ probe_client_publication() {
     fi
   fi
   pass "Autodiscover POST publishes IMAP through LPE-CT"
+
+  if ! explicit_scope_enabled "https"; then
+    echo "[SKIP] ActiveSync and MAPI publication checks skipped by LPE_CT_EDGE_TEST_SCOPE=${TEST_SCOPE}."
+    return 0
+  fi
 
   headers_file="$(mktemp)"
   curl --silent --show-error --fail --insecure --http1.1 \

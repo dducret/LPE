@@ -255,7 +255,9 @@ intentionally published on a different IMAP or SMTP hostname, set
 autodiscover publishes Exchange-style `EXCH`, `EXPR`, `WEB`, or `mapiHttp`
 blocks unless `LPE_CT_EXPECTED_OUTLOOK_EXCHANGE_AUTODISCOVER=true` is set,
 because those blocks can make Outlook choose the unfinished Exchange route
-instead of the working `IMAP` profile.
+instead of the working `IMAP` profile. It does not require `ActiveSync` or
+`MAPI` OPTIONS checks; run `LPE_CT_EDGE_TEST_SCOPE=https` or `all` for those
+publication checks.
 
 The management UI URL must use `https://`. The generated `nginx` site redirects
 plain `HTTP` received on port `80` to the configured
