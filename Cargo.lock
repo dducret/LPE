@@ -1490,6 +1490,7 @@ version = "0.1.3"
 dependencies = [
  "anyhow",
  "axum",
+ "base64",
  "lpe-mail-auth",
  "lpe-storage",
  "sqlx",

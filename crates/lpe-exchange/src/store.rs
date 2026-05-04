@@ -1,9 +1,9 @@
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, AuditEntryInput, CollaborationCollection, JmapEmail,
-    JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
-    Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
-    UpsertClientEventInput,
+    AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
+    AuditEntryInput, CollaborationCollection, JmapEmail, JmapEmailQuery, JmapImportedEmailInput,
+    JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage, Storage, SubmitMessageInput,
+    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -124,6 +124,18 @@ pub trait ExchangeStore: AccountAuthStore {
         account_id: Uuid,
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<JmapEmail>>;
+
+    fn fetch_message_attachments<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ActiveSyncAttachment>>;
+
+    fn fetch_attachment_content<'a>(
+        &'a self,
+        account_id: Uuid,
+        file_reference: &'a str,
+    ) -> StoreFuture<'a, Option<ActiveSyncAttachmentContent>>;
 
     fn import_jmap_email<'a>(
         &'a self,
@@ -422,6 +434,28 @@ impl ExchangeStore for Storage {
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<JmapEmail>> {
         Box::pin(async move { self.fetch_jmap_emails(account_id, ids).await })
+    }
+
+    fn fetch_message_attachments<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ActiveSyncAttachment>> {
+        Box::pin(async move {
+            self.fetch_activesync_message_attachments(account_id, message_id)
+                .await
+        })
+    }
+
+    fn fetch_attachment_content<'a>(
+        &'a self,
+        account_id: Uuid,
+        file_reference: &'a str,
+    ) -> StoreFuture<'a, Option<ActiveSyncAttachmentContent>> {
+        Box::pin(async move {
+            self.fetch_activesync_attachment_content(account_id, file_reference)
+                .await
+        })
     }
 
     fn import_jmap_email<'a>(

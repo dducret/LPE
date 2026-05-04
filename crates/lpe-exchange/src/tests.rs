@@ -2,11 +2,11 @@ use axum::body::to_bytes;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, AccountLogin, AuthenticatedAccount,
-    CollaborationCollection, CollaborationRights, JmapEmail, JmapEmailAddress, JmapEmailQuery,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
-    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
-    UpsertClientEventInput,
+    AccessibleContact, AccessibleEvent, AccountLogin, ActiveSyncAttachment,
+    ActiveSyncAttachmentContent, AuthenticatedAccount, CollaborationCollection,
+    CollaborationRights, JmapEmail, JmapEmailAddress, JmapEmailQuery, JmapImportedEmailInput,
+    JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage, StoredAccountAppPassword,
+    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
 };
 use std::{
     collections::HashMap,
@@ -34,6 +34,8 @@ struct FakeStore {
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
     emails: Arc<Mutex<Vec<JmapEmail>>>,
+    attachments: Arc<Mutex<HashMap<Uuid, Vec<ActiveSyncAttachment>>>>,
+    attachment_contents: Arc<Mutex<HashMap<String, ActiveSyncAttachmentContent>>>,
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
     deleted_emails: Arc<Mutex<Vec<Uuid>>>,
     moved_emails: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
@@ -512,6 +514,35 @@ impl ExchangeStore for FakeStore {
             .cloned()
             .collect();
         Box::pin(async move { Ok(emails) })
+    }
+
+    fn fetch_message_attachments<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ActiveSyncAttachment>> {
+        let attachments = self
+            .attachments
+            .lock()
+            .unwrap()
+            .get(&message_id)
+            .cloned()
+            .unwrap_or_default();
+        Box::pin(async move { Ok(attachments) })
+    }
+
+    fn fetch_attachment_content<'a>(
+        &'a self,
+        _account_id: Uuid,
+        file_reference: &'a str,
+    ) -> StoreFuture<'a, Option<ActiveSyncAttachmentContent>> {
+        let content = self
+            .attachment_contents
+            .lock()
+            .unwrap()
+            .get(file_reference)
+            .cloned();
+        Box::pin(async move { Ok(content) })
     }
 
     fn import_jmap_email<'a>(
@@ -2748,7 +2779,6 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
         "GetUserConfiguration",
         "GetSharingMetadata",
         "GetSharingFolder",
-        "GetAttachment",
         "Unsubscribe",
         "GetEvents",
     ] {
@@ -3743,6 +3773,116 @@ async fn get_item_returns_system_mailbox_message_body() {
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:Subject>Inbox message</t:Subject>"));
     assert!(body.contains("<t:Body BodyType=\"Text\">Hello</t:Body>"));
+}
+
+#[tokio::test]
+async fn get_item_includes_attachment_references_for_message() {
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let attachment_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
+    let mut email = FakeStore::email(
+        "99999999-9999-9999-9999-999999999999",
+        "44444444-4444-4444-4444-444444444444",
+        "custom",
+        "RCA folder item",
+    );
+    email.has_attachments = true;
+    let file_reference = format!("attachment:{message_id}:{attachment_id}");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![email])),
+        attachments: Arc::new(Mutex::new(HashMap::from([(
+            message_id,
+            vec![ActiveSyncAttachment {
+                id: attachment_id,
+                message_id,
+                file_name: "brief.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                size_octets: 5,
+                file_reference: file_reference.clone(),
+            }],
+        )]))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetItem><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:Attachments>"));
+    assert!(body.contains("<t:FileAttachment>"));
+    assert!(body.contains(&format!("<t:AttachmentId Id=\"{file_reference}\"/>")));
+    assert!(body.contains("<t:Name>brief.pdf</t:Name>"));
+    assert!(body.contains("<t:ContentType>application/pdf</t:ContentType>"));
+    assert!(body.contains("<t:Size>5</t:Size>"));
+    assert!(!body.contains("<t:Content>"));
+}
+
+#[tokio::test]
+async fn get_attachment_returns_canonical_attachment_content() {
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let attachment_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
+    let file_reference = format!("attachment:{message_id}:{attachment_id}");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        attachment_contents: Arc::new(Mutex::new(HashMap::from([(
+            file_reference.clone(),
+            ActiveSyncAttachmentContent {
+                file_reference: file_reference.clone(),
+                file_name: "brief.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                blob_bytes: b"hello".to_vec(),
+            },
+        )]))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = format!(
+        r#"<s:Envelope><s:Body><m:GetAttachment><m:AttachmentIds><t:AttachmentId Id="{file_reference}"/></m:AttachmentIds></m:GetAttachment></s:Body></s:Envelope>"#
+    );
+
+    let response = service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetAttachmentResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains(&format!("<t:AttachmentId Id=\"{file_reference}\"/>")));
+    assert!(body.contains("<t:Name>brief.pdf</t:Name>"));
+    assert!(body.contains("<t:ContentType>application/pdf</t:ContentType>"));
+    assert!(body.contains("<t:Size>5</t:Size>"));
+    assert!(body.contains("<t:Content>aGVsbG8=</t:Content>"));
+}
+
+#[tokio::test]
+async fn get_attachment_rejects_unknown_attachment_id() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetAttachment><m:AttachmentIds><t:AttachmentId Id="attachment:99999999-9999-9999-9999-999999999999:abababab-abab-abab-abab-abababababab"/></m:AttachmentIds></m:GetAttachment></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetAttachmentResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorAttachmentNotFound</m:ResponseCode>"));
 }
 
 #[tokio::test]

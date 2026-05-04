@@ -10,11 +10,13 @@ use axum::{
     routing::{on, MethodFilter},
     Router,
 };
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, AuditEntryInput, CollaborationCollection, JmapEmail,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, Storage, SubmitMessageInput,
-    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
+    AuditEntryInput, CollaborationCollection, JmapEmail, JmapImportedEmailInput, JmapMailbox,
+    JmapMailboxCreateInput, Storage, SubmitMessageInput, SubmittedRecipientInput,
+    UpsertClientContactInput, UpsertClientEventInput,
 };
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -163,6 +165,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
             "CopyItem" => self.copy_item(&principal, &body).await?,
             "CreateFolder" => self.create_folder(&principal, &body).await?,
             "DeleteFolder" => self.delete_folder(&principal, &body).await?,
+            "GetAttachment" => self.get_attachment(&principal, &body).await?,
             "GetUserOofSettings" => unsupported_operation_response("GetUserOofSettings"),
             "GetRoomLists" => unsupported_operation_response("GetRoomLists"),
             "FindPeople" => unsupported_operation_response("FindPeople"),
@@ -172,7 +175,6 @@ impl<S: ExchangeStore> ExchangeService<S> {
             "GetUserConfiguration" => unsupported_operation_response("GetUserConfiguration"),
             "GetSharingMetadata" => unsupported_operation_response("GetSharingMetadata"),
             "GetSharingFolder" => unsupported_operation_response("GetSharingFolder"),
-            "GetAttachment" => unsupported_operation_response("GetAttachment"),
             "Unsubscribe" => unsupported_operation_response("Unsubscribe"),
             "GetEvents" => unsupported_operation_response("GetEvents"),
             _ => unsupported_operation_response(&operation),
@@ -499,7 +501,14 @@ impl<S: ExchangeStore> ExchangeService<S> {
             .await?
             .into_iter()
         {
-            items.push_str(&message_item_xml(&email));
+            let attachments = if email.has_attachments {
+                self.store
+                    .fetch_message_attachments(principal.account_id, email.id)
+                    .await?
+            } else {
+                Vec::new()
+            };
+            items.push_str(&message_item_xml_with_attachments(&email, &attachments));
         }
 
         if !ids.is_empty()
@@ -525,6 +534,35 @@ impl<S: ExchangeStore> ExchangeService<S> {
             ),
             items = items,
         ))
+    }
+
+    async fn get_attachment(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let ids = requested_attachment_ids(request);
+        if ids.is_empty() {
+            return Ok(operation_error_response(
+                "GetAttachment",
+                "ErrorInvalidOperation",
+                "GetAttachment requires at least one AttachmentId.",
+            ));
+        }
+
+        let mut attachments = String::new();
+        for id in ids {
+            let Some(content) = self
+                .store
+                .fetch_attachment_content(principal.account_id, &id)
+                .await?
+            else {
+                return Ok(operation_error_response(
+                    "GetAttachment",
+                    "ErrorAttachmentNotFound",
+                    "The requested attachment was not found or is not exposed by EWS.",
+                ));
+            };
+            attachments.push_str(&file_attachment_content_xml(&content));
+        }
+
+        Ok(get_attachment_success_response(attachments))
     }
 
     async fn root_child_folder_count(&self, principal: &AccountPrincipal) -> Result<usize> {
@@ -2200,6 +2238,13 @@ fn requested_item_ids(request: &str) -> Vec<String> {
     ids
 }
 
+fn requested_attachment_ids(request: &str) -> Vec<String> {
+    attribute_values_for_tag(request, "AttachmentId", "Id")
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
 fn requested_mailbox_folder_ids(request: &str) -> Vec<Uuid> {
     requested_folder_ids(request)
         .into_iter()
@@ -2429,15 +2474,75 @@ fn message_summary_xml(email: &JmapEmail) -> String {
 }
 
 fn message_item_xml(email: &JmapEmail) -> String {
+    message_item_xml_with_attachments(email, &[])
+}
+
+fn message_item_xml_with_attachments(
+    email: &JmapEmail,
+    attachments: &[ActiveSyncAttachment],
+) -> String {
     let mut xml = message_summary_xml(email);
     xml.insert_str(
         xml.len() - "</t:Message>".len(),
         &format!(
-            "<t:Body BodyType=\"Text\">{}</t:Body>",
-            escape_xml(&email.body_text)
+            "<t:Body BodyType=\"Text\">{}</t:Body>{}",
+            escape_xml(&email.body_text),
+            message_attachments_xml(attachments),
         ),
     );
     xml
+}
+
+fn message_attachments_xml(attachments: &[ActiveSyncAttachment]) -> String {
+    if attachments.is_empty() {
+        return String::new();
+    }
+
+    format!(
+        "<t:Attachments>{}</t:Attachments>",
+        attachments
+            .iter()
+            .map(file_attachment_reference_xml)
+            .collect::<String>()
+    )
+}
+
+fn file_attachment_reference_xml(attachment: &ActiveSyncAttachment) -> String {
+    format!(
+        concat!(
+            "<t:FileAttachment>",
+            "<t:AttachmentId Id=\"{file_reference}\"/>",
+            "<t:Name>{name}</t:Name>",
+            "<t:ContentType>{content_type}</t:ContentType>",
+            "<t:Size>{size}</t:Size>",
+            "<t:IsInline>false</t:IsInline>",
+            "</t:FileAttachment>"
+        ),
+        file_reference = escape_xml(&attachment.file_reference),
+        name = escape_xml(&attachment.file_name),
+        content_type = escape_xml(&attachment.media_type),
+        size = attachment.size_octets,
+    )
+}
+
+fn file_attachment_content_xml(content: &ActiveSyncAttachmentContent) -> String {
+    format!(
+        concat!(
+            "<t:FileAttachment>",
+            "<t:AttachmentId Id=\"{file_reference}\"/>",
+            "<t:Name>{name}</t:Name>",
+            "<t:ContentType>{content_type}</t:ContentType>",
+            "<t:Size>{size}</t:Size>",
+            "<t:IsInline>false</t:IsInline>",
+            "<t:Content>{body}</t:Content>",
+            "</t:FileAttachment>"
+        ),
+        file_reference = escape_xml(&content.file_reference),
+        name = escape_xml(&content.file_name),
+        content_type = escape_xml(&content.media_type),
+        size = content.blob_bytes.len(),
+        body = BASE64_STANDARD.encode(&content.blob_bytes),
+    )
 }
 
 fn create_item_success_response(message_id: Uuid, delivery_status: &str) -> String {
@@ -2572,6 +2677,22 @@ fn copy_item_success_response(items: String) -> String {
             "</m:CopyItemResponse>"
         ),
         items = items,
+    )
+}
+
+fn get_attachment_success_response(attachments: String) -> String {
+    format!(
+        concat!(
+            "<m:GetAttachmentResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetAttachmentResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Attachments>{attachments}</m:Attachments>",
+            "</m:GetAttachmentResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetAttachmentResponse>"
+        ),
+        attachments = attachments,
     )
 }
 

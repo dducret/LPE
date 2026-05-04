@@ -123,6 +123,7 @@ The adapter currently exposes:
 - calendar item creation, update, and deletion through the canonical calendar model
 - message creation through the canonical draft and submission model
 - mailbox read and sync through the canonical JMAP mailbox model
+- message attachment discovery and retrieval through canonical attachment rows and blob storage
 - mailbox deletion through canonical hard-delete or move-to-trash behavior
 - temporary/custom mailbox folder creation through the canonical JMAP mailbox model
 
@@ -137,7 +138,7 @@ Folder responses include EWS `TotalCount` and `ChildFolderCount` properties so s
 
 `CreateFolder` creates canonical custom mailbox folders, primarily for strict client connectivity tests that need temporary sync folders. `FindFolder` and `SyncFolderHierarchy` expose those custom mailbox folders. `DeleteFolder` removes those custom mailbox folders through the canonical JMAP mailbox deletion path, which rejects system folders and non-empty folders.
 
-Mailbox folders, including system folders such as `Inbox`, `Drafts`, `Sent`, and `Deleted`, are exposed through canonical JMAP mailboxes. `FindItem`, `GetItem`, and `SyncFolderItems` return canonical messages from the requested mailbox. For temporary custom mailbox folders, `CreateItem SaveOnly` can import a `Message` into the requested canonical custom mailbox folder, so strict EWS connectivity tests can create, sync, read, delete, and resync items inside a temporary folder.
+Mailbox folders, including system folders such as `Inbox`, `Drafts`, `Sent`, and `Deleted`, are exposed through canonical JMAP mailboxes. `FindItem`, `GetItem`, and `SyncFolderItems` return canonical messages from the requested mailbox. When a message has canonical attachments, `GetItem` includes EWS `FileAttachment` references backed by canonical attachment ids and `GetAttachment` returns the stored blob content for those references. This is a read path only; `CreateAttachment`, `DeleteAttachment`, and attachment mutation through `CreateItem` or `UpdateItem` remain out of scope until client-provided files are routed through the documented `Magika` validation and attachment ingestion path. For temporary custom mailbox folders, `CreateItem SaveOnly` can import a `Message` into the requested canonical custom mailbox folder, so strict EWS connectivity tests can create, sync, read, delete, and resync items inside a temporary folder.
 
 When a client requests unsupported distinguished folders such as `tasks` through this EWS adapter, the response remains an EWS-shaped `GetFolder` error with `ErrorFolderNotFound` instead of an HTTP transport failure. This keeps clients on the EWS negotiation path without advertising unsupported task synchronization through EWS.
 
@@ -149,7 +150,7 @@ Message ids returned by `CreateItem` and mail read operations are canonical mail
 
 `UpdateItem` supports canonical `Contact` and `CalendarItem` ids and applies partial EWS field updates through canonical collaboration rights. For canonical `Message` ids, `UpdateItem` is limited to `IsRead` and `FlagStatus`, mapping those fields to the canonical `unread` and `flagged` mailbox fields with normal mail-change emission. Unsupported item ids, task updates, attachment mutations, and other mailbox message updates return EWS-shaped `ErrorInvalidOperation` responses and must not mutate canonical data.
 
-Other out-of-scope client bootstrap operations, including `GetUserOofSettings`, `GetRoomLists`, `FindPeople`, `ExpandDL`, `Subscribe`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, `GetSharingFolder`, `GetAttachment`, `Unsubscribe`, and `GetEvents`, also return EWS-shaped `ErrorInvalidOperation` responses instead of generic SOAP transport faults.
+Other out-of-scope client bootstrap operations, including `GetUserOofSettings`, `GetRoomLists`, `FindPeople`, `ExpandDL`, `Subscribe`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, `GetSharingFolder`, `Unsubscribe`, and `GetEvents`, also return EWS-shaped `ErrorInvalidOperation` responses instead of generic SOAP transport faults.
 
 Any other unsupported EWS operation that can be identified as the first request element in the SOAP body also returns an operation-specific EWS-shaped `ErrorInvalidOperation` response. This keeps strict EWS client libraries from failing on transport faults or unknown response-code enum values while avoiding false success for unsupported mail, folder, rule, conversation, streaming, or conversion operations.
 
@@ -159,7 +160,8 @@ Request element names ending in `Request`, such as `GetUserOofSettingsRequest`, 
 
 - `SyncFolderItems` uses compact server `SyncState` values over canonical item ids and deterministic change keys for contacts and calendar events; those keys include canonical update markers, but the adapter does not yet maintain a full EWS incremental change ledger with tombstone history beyond the previous client token
 - `UpdateItem` message support is limited to read-state and flag mutation; attachment mutations, tasks, and meeting workflow updates are not implemented yet
-- tasks, free/busy, recurrence expansion, alarms, meeting scheduling, extended properties, attachments, and GAL are not implemented through `EWS` yet
+- EWS attachment support is limited to `GetItem` attachment references and `GetAttachment` content retrieval for already-ingested canonical attachments; client-provided attachment create/delete flows are not implemented yet
+- tasks, free/busy, recurrence expansion, alarms, meeting scheduling, extended properties, and GAL are not implemented through `EWS` yet
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
 - enabled `EWS` POX autodiscover publishes the configured EWS URL through a `WEB` protocol block with `ASUrl` for EWS-aware clients; top-level `EXCH` and `EXPR` provider sections remain reserved for explicit legacy Exchange autodiscover interoperability-test mode
 - SOAP `GetUserSettings` autodiscover publishes the same configured `EWS` endpoint as `ExternalEwsUrl` and `InternalEwsUrl` for EWS clients that prefer SOAP autodiscover over POX
