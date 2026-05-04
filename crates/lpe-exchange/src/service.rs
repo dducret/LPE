@@ -157,7 +157,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
             "ResolveNames" => resolve_names_no_results_response(),
             "GetUserAvailability" => get_user_availability_unavailable_response(),
             "CreateItem" => self.create_item(&principal, &body).await?,
-            "UpdateItem" => unsupported_operation_response("UpdateItem"),
+            "UpdateItem" => self.update_item(&principal, &body).await?,
             "DeleteItem" => self.delete_item(&principal, &body).await?,
             "CreateFolder" => self.create_folder(&principal, &body).await?,
             "DeleteFolder" => self.delete_folder(&principal, &body).await?,
@@ -810,6 +810,75 @@ impl<S: ExchangeStore> ExchangeService<S> {
         }))
     }
 
+    async fn update_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let result = async {
+            let ids = requested_item_ids(request);
+            let contact_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("contact:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let event_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("event:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+
+            if ids.is_empty() || contact_ids.len() + event_ids.len() != ids.len() {
+                return Ok(operation_error_response(
+                    "UpdateItem",
+                    "ErrorInvalidOperation",
+                    "UpdateItem currently supports only contact and calendar item ids.",
+                ));
+            }
+
+            let mut items = String::new();
+            for contact_id in contact_ids {
+                let existing = self
+                    .store
+                    .fetch_accessible_contacts_by_ids(principal.account_id, &[contact_id])
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("contact not found"))?;
+                let updated = self
+                    .store
+                    .update_accessible_contact(
+                        principal.account_id,
+                        contact_id,
+                        parse_update_contact_input(principal, &existing, request),
+                    )
+                    .await?;
+                items.push_str(&contact_item_xml(&updated));
+            }
+            for event_id in event_ids {
+                let existing = self
+                    .store
+                    .fetch_accessible_events_by_ids(principal.account_id, &[event_id])
+                    .await?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("event not found"))?;
+                let updated = self
+                    .store
+                    .update_accessible_event(
+                        principal.account_id,
+                        event_id,
+                        parse_update_event_input(principal, &existing, request)?,
+                    )
+                    .await?;
+                items.push_str(&calendar_item_xml(&updated));
+            }
+
+            Ok(update_item_success_response(items))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("UpdateItem", "ErrorInvalidOperation", &error.to_string())
+        }))
+    }
+
     async fn delete_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let result = async {
             let ids = requested_item_ids(request);
@@ -1161,6 +1230,84 @@ fn parse_create_contact_input(
     })
 }
 
+fn parse_update_contact_input(
+    principal: &AccountPrincipal,
+    existing: &AccessibleContact,
+    request: &str,
+) -> UpsertClientContactInput {
+    let contact = element_content(request, "Contact").unwrap_or(request);
+    let given_name = element_text(contact, "GivenName");
+    let surname = element_text(contact, "Surname");
+    let existing_given = first_name(&existing.name);
+    let existing_surname = last_name(&existing.name);
+    let name_from_parts = (given_name.is_some() || surname.is_some()).then(|| {
+        [
+            given_name.as_deref().unwrap_or(&existing_given),
+            surname.as_deref().unwrap_or(&existing_surname),
+        ]
+        .into_iter()
+        .filter(|value| !value.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+    });
+    let name = element_text(contact, "DisplayName")
+        .or_else(|| element_text(contact, "FileAs"))
+        .or(name_from_parts)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| existing.name.clone());
+    let email = contact_entry_value(contact, "EmailAddresses", "EmailAddress1")
+        .or_else(|| element_text(contact, "EmailAddress"))
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| existing.email.clone());
+    let notes = if field_deleted(request, "item:Body") {
+        String::new()
+    } else if let Some(body_value) = element_text(contact, "Body") {
+        let body_tag = open_tag_text(contact, "Body").unwrap_or_default();
+        let body_type = attribute_value(body_tag, "BodyType").unwrap_or("Text");
+        if body_type.eq_ignore_ascii_case("HTML") {
+            html_to_text(&body_value)
+        } else {
+            body_value
+        }
+    } else {
+        existing.notes.clone()
+    };
+
+    UpsertClientContactInput {
+        id: Some(existing.id),
+        account_id: principal.account_id,
+        name,
+        role: deleted_or_updated_text(
+            request,
+            contact,
+            "contacts:JobTitle",
+            "JobTitle",
+            &existing.role,
+        ),
+        email,
+        phone: deleted_or_updated_contact_entry(
+            request,
+            contact,
+            &[
+                "contacts:PhoneNumber:MobilePhone",
+                "contacts:PhoneNumber:BusinessPhone",
+                "contacts:PhoneNumber:HomePhone",
+            ],
+            "PhoneNumbers",
+            &["MobilePhone", "BusinessPhone", "HomePhone"],
+            &existing.phone,
+        ),
+        team: deleted_or_updated_text(
+            request,
+            contact,
+            "contacts:CompanyName",
+            "CompanyName",
+            &existing.team,
+        ),
+        notes,
+    }
+}
+
 fn parse_create_event_input(
     principal: &AccountPrincipal,
     request: &str,
@@ -1196,6 +1343,90 @@ fn parse_create_event_input(
         attendees_json: "[]".to_string(),
         notes,
     })
+}
+
+fn parse_update_event_input(
+    principal: &AccountPrincipal,
+    existing: &AccessibleEvent,
+    request: &str,
+) -> Result<UpsertClientEventInput> {
+    let event = element_content(request, "CalendarItem").unwrap_or(request);
+    let start = element_text(event, "Start");
+    let end = element_text(event, "End");
+    let (date, time) = start
+        .as_deref()
+        .and_then(ews_datetime_parts)
+        .unwrap_or_else(|| (existing.date.clone(), existing.time.clone()));
+    let duration_minutes = match (start.as_deref(), end.as_deref()) {
+        (Some(start), Some(end)) => {
+            ews_duration_minutes(start, end).unwrap_or(existing.duration_minutes)
+        }
+        (Some(start), None) => {
+            ews_duration_minutes(start, &format!("{}T{}:00Z", existing.date, existing.time))
+                .unwrap_or(existing.duration_minutes)
+        }
+        _ => existing.duration_minutes,
+    };
+    let notes = if field_deleted(request, "item:Body") {
+        String::new()
+    } else if let Some(body_value) = element_text(event, "Body") {
+        let body_tag = open_tag_text(event, "Body").unwrap_or_default();
+        let body_type = attribute_value(body_tag, "BodyType").unwrap_or("Text");
+        if body_type.eq_ignore_ascii_case("HTML") {
+            html_to_text(&body_value)
+        } else {
+            body_value
+        }
+    } else {
+        existing.notes.clone()
+    };
+    let attendees = parse_event_attendees(event);
+
+    Ok(UpsertClientEventInput {
+        id: Some(existing.id),
+        account_id: principal.account_id,
+        date,
+        time,
+        time_zone: requested_time_zone(request).unwrap_or_else(|| existing.time_zone.clone()),
+        duration_minutes,
+        recurrence_rule: existing.recurrence_rule.clone(),
+        title: deleted_or_updated_text(
+            request,
+            event,
+            "calendar:Subject",
+            "Subject",
+            &existing.title,
+        )
+        .if_empty(existing.title.clone()),
+        location: deleted_or_updated_text(
+            request,
+            event,
+            "calendar:Location",
+            "Location",
+            &existing.location,
+        ),
+        attendees: if attendees.is_empty() {
+            existing.attendees.clone()
+        } else {
+            attendees.join(", ")
+        },
+        attendees_json: existing.attendees_json.clone(),
+        notes,
+    })
+}
+
+trait EmptyStringFallback {
+    fn if_empty(self, fallback: String) -> String;
+}
+
+impl EmptyStringFallback for String {
+    fn if_empty(self, fallback: String) -> String {
+        if self.trim().is_empty() {
+            fallback
+        } else {
+            self
+        }
+    }
 }
 
 fn parse_event_attendees(event: &str) -> Vec<String> {
@@ -1276,6 +1507,62 @@ fn contact_entry_value(contact: &str, collection_name: &str, key: &str) -> Optio
         rest = &rest[content_start..];
     }
     element_text(collection, "Entry")
+}
+
+fn deleted_or_updated_text(
+    request: &str,
+    container: &str,
+    field_uri: &str,
+    local_name: &str,
+    existing: &str,
+) -> String {
+    if field_deleted(request, field_uri) {
+        String::new()
+    } else {
+        element_text(container, local_name).unwrap_or_else(|| existing.to_string())
+    }
+}
+
+fn deleted_or_updated_contact_entry(
+    request: &str,
+    contact: &str,
+    field_uris: &[&str],
+    collection_name: &str,
+    keys: &[&str],
+    existing: &str,
+) -> String {
+    if field_uris
+        .iter()
+        .any(|field_uri| field_deleted(request, field_uri))
+    {
+        return String::new();
+    }
+    keys.iter()
+        .find_map(|key| contact_entry_value(contact, collection_name, key))
+        .unwrap_or_else(|| existing.to_string())
+}
+
+fn field_deleted(request: &str, field_uri: &str) -> bool {
+    element_contents(request, "DeleteItemField")
+        .into_iter()
+        .any(|delete| field_block_matches(delete, field_uri))
+}
+
+fn field_block_matches(block: &str, field_uri: &str) -> bool {
+    if attribute_values_for_tag(block, "FieldURI", "FieldURI")
+        .into_iter()
+        .any(|value| value == field_uri)
+    {
+        return true;
+    }
+
+    let Some((base_field_uri, field_index)) = field_uri.rsplit_once(':') else {
+        return false;
+    };
+    let indexed_fields = attribute_values_for_tag(block, "IndexedFieldURI", "FieldURI");
+    let field_indexes = attribute_values_for_tag(block, "IndexedFieldURI", "FieldIndex");
+    indexed_fields.iter().any(|value| *value == base_field_uri)
+        && field_indexes.iter().any(|value| *value == field_index)
 }
 
 fn imported_email_input(input: SubmitMessageInput, mailbox_id: Uuid) -> JmapImportedEmailInput {
@@ -1938,6 +2225,22 @@ fn create_event_success_response(event: &AccessibleEvent) -> String {
         title = escape_xml(&event.title),
         start = escape_xml(&ews_datetime(&event.date, &event.time)),
         end = escape_xml(&event_end_datetime(event)),
+    )
+}
+
+fn update_item_success_response(items: String) -> String {
+    format!(
+        concat!(
+            "<m:UpdateItemResponse>",
+            "<m:ResponseMessages>",
+            "<m:UpdateItemResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Items>{items}</m:Items>",
+            "</m:UpdateItemResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:UpdateItemResponse>"
+        ),
+        items = items,
     )
 }
 

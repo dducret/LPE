@@ -71,6 +71,7 @@ The first `EWS` slice supports the read/sync surface needed to begin mailbox, co
 - `GetItem`
 - `SyncFolderItems`
 - `CreateItem` for `Message`, `Contact`, and `CalendarItem` items
+- `UpdateItem` for canonical `Contact` and `CalendarItem` items
 - `DeleteItem` for canonical `Message`, `Contact`, and `CalendarItem` ids
 - `CreateFolder` and `DeleteFolder` for canonical custom mailbox folders
 
@@ -79,9 +80,9 @@ The adapter currently exposes:
 - canonical owned and same-tenant shared contact collections as `Contacts` folders
 - canonical owned and same-tenant shared calendar collections as `Calendar` folders
 - contact items from `contacts`
-- contact creation and deletion through the canonical contacts model
+- contact creation, update, and deletion through the canonical contacts model
 - calendar items from `calendar_events`
-- calendar item creation and deletion through the canonical calendar model
+- calendar item creation, update, and deletion through the canonical calendar model
 - message creation through the canonical draft and submission model
 - mailbox read and sync through the canonical JMAP mailbox model
 - mailbox deletion through canonical hard-delete or move-to-trash behavior
@@ -107,7 +108,7 @@ The adapter also answers early client bootstrap probes for `GetServerTimeZones`,
 
 Message ids returned by `CreateItem` and mail read operations are canonical mailbox ids wrapped in an EWS id prefix. Contact ids are canonical contact ids wrapped in the `contact:` EWS id prefix. Calendar item ids are canonical event ids wrapped in the `event:` EWS id prefix. `DeleteItem DeleteType="HardDelete"` permanently deletes the canonical message. `DeleteItem` without `HardDelete`, including `MoveToDeletedItems`, moves the canonical message to the `trash` mailbox when that mailbox exists; deleting a message that is already in `trash` permanently deletes it. `DeleteItem` for contact and event ids deletes through canonical collaboration rights and storage. This uses the same canonical mailbox and collaboration primitives as the other protocol layers and must not create EWS-only deletion state.
 
-Write operations that are outside the current MVP, including `UpdateItem`, return EWS-shaped `ErrorInvalidOperation` responses. Those unsupported operations must not mutate canonical contacts or calendar data until write support is explicitly designed and routed through canonical collaboration rights.
+`UpdateItem` supports canonical `Contact` and `CalendarItem` ids and applies partial EWS field updates through canonical collaboration rights. Unsupported item ids, task updates, attachment mutations, and mailbox message updates return EWS-shaped `ErrorInvalidOperation` responses and must not mutate canonical data.
 
 Other out-of-scope client bootstrap operations, including `GetUserOofSettings`, `GetRoomLists`, `FindPeople`, `ExpandDL`, `Subscribe`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, `GetSharingFolder`, `GetAttachment`, `Unsubscribe`, and `GetEvents`, also return EWS-shaped `ErrorInvalidOperation` responses instead of generic SOAP transport faults.
 
@@ -118,7 +119,7 @@ Request element names ending in `Request`, such as `GetUserOofSettingsRequest`, 
 ### Current limitations
 
 - `SyncFolderItems` uses compact server `SyncState` values over canonical item ids and deterministic change keys for contacts and calendar events; it does not yet maintain a full EWS incremental change ledger with tombstone history beyond the previous client token
-- write operations such as `UpdateItem` are not implemented yet
+- `UpdateItem` is limited to contact and calendar field updates; message updates, attachment mutations, tasks, and meeting workflow updates are not implemented yet
 - tasks, free/busy, recurrence expansion, alarms, meeting scheduling, extended properties, attachments, and GAL are not implemented through `EWS` yet
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
 - enabled `EWS` POX autodiscover publishes the configured EWS URL through a `WEB` protocol block with `ASUrl` for EWS-aware clients; top-level `EXCH` and `EXPR` provider sections remain reserved for explicit `MAPI` interoperability-test mode
@@ -131,7 +132,7 @@ The next EWS phase should focus on:
 
 - real Outlook desktop compatibility testing for contacts and calendar discovery
 - persistent incremental `SyncFolderItems` state over canonical contact and calendar change notifications
-- `CreateItem`, `UpdateItem`, and `DeleteItem` for contacts and calendar events, routed through canonical collaboration rights
+- deeper `UpdateItem` coverage for contacts and calendar events, routed through canonical collaboration rights
 
 The next MAPI phase should focus on:
 

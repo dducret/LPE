@@ -43,6 +43,13 @@ pub trait ExchangeStore: AccountAuthStore {
         input: UpsertClientContactInput,
     ) -> StoreFuture<'a, AccessibleContact>;
 
+    fn update_accessible_contact<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        contact_id: Uuid,
+        input: UpsertClientContactInput,
+    ) -> StoreFuture<'a, AccessibleContact>;
+
     fn delete_accessible_contact<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -59,6 +66,13 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         principal_account_id: Uuid,
         collection_id: Option<&'a str>,
+        input: UpsertClientEventInput,
+    ) -> StoreFuture<'a, AccessibleEvent>;
+
+    fn update_accessible_event<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
         input: UpsertClientEventInput,
     ) -> StoreFuture<'a, AccessibleEvent>;
 
@@ -198,6 +212,18 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn update_accessible_contact<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        contact_id: Uuid,
+        input: UpsertClientContactInput,
+    ) -> StoreFuture<'a, AccessibleContact> {
+        Box::pin(async move {
+            self.update_accessible_contact(principal_account_id, contact_id, input)
+                .await
+        })
+    }
+
     fn delete_accessible_contact<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -228,6 +254,18 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, AccessibleEvent> {
         Box::pin(async move {
             self.create_accessible_event(principal_account_id, collection_id, input)
+                .await
+        })
+    }
+
+    fn update_accessible_event<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+        input: UpsertClientEventInput,
+    ) -> StoreFuture<'a, AccessibleEvent> {
+        Box::pin(async move {
+            self.update_accessible_event(principal_account_id, event_id, input)
                 .await
         })
     }
