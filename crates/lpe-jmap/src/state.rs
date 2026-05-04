@@ -20,6 +20,7 @@ pub(crate) struct QueryDiff {
     pub(crate) removed: Vec<String>,
     pub(crate) added: Vec<Value>,
     pub(crate) has_more_changes: bool,
+    pub(crate) query_state_ids: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -50,49 +51,23 @@ pub(crate) fn changes_response(
     max_changes: Option<u64>,
     current_entries: Vec<StateEntry>,
 ) -> Value {
-    let max_changes = max_changes.unwrap_or(u64::MAX) as usize;
-    let new_state = encode_state(account_id, kind, current_entries.clone())
-        .unwrap_or_else(|_| crate::SESSION_STATE.to_string());
-    let Ok(previous) = decode_state(since_state) else {
-        let created = current_entries
-            .into_iter()
-            .take(max_changes)
-            .map(|entry| entry.id)
-            .collect::<Vec<_>>();
-        return json!({
-            "accountId": account_id.to_string(),
-            "oldState": since_state,
-            "newState": new_state,
-            "hasMoreChanges": false,
-            "created": created,
-            "updated": Vec::<String>::new(),
-            "destroyed": Vec::<String>::new(),
-        });
+    let max_changes = max_changes.unwrap_or(u64::MAX).max(1) as usize;
+    let previous_entries = match decode_state(since_state) {
+        Ok(previous) if previous.account_id == account_id.to_string() && previous.kind == kind => {
+            previous.entries
+        }
+        _ => Vec::new(),
     };
 
-    if previous.account_id != account_id.to_string() || previous.kind != kind {
-        let created = current_entries
-            .into_iter()
-            .take(max_changes)
-            .map(|entry| entry.id)
-            .collect::<Vec<_>>();
-        return json!({
-            "accountId": account_id.to_string(),
-            "oldState": since_state,
-            "newState": new_state,
-            "hasMoreChanges": false,
-            "created": created,
-            "updated": Vec::<String>::new(),
-            "destroyed": Vec::<String>::new(),
-        });
-    }
-
-    let previous_map = previous
-        .entries
+    let previous_map = previous_entries
+        .iter()
+        .cloned()
         .into_iter()
         .map(|entry| (entry.id, entry.fingerprint))
         .collect::<HashMap<_, _>>();
     let current_map = current_entries
+        .iter()
+        .cloned()
         .into_iter()
         .map(|entry| (entry.id, entry.fingerprint))
         .collect::<HashMap<_, _>>();
@@ -123,7 +98,7 @@ pub(crate) fn changes_response(
 
     let total_changes = created.len() + updated.len() + destroyed.len();
     let has_more_changes = total_changes > max_changes;
-    if total_changes > max_changes {
+    if has_more_changes {
         let mut remaining = max_changes;
         created.truncate(remaining.min(created.len()));
         remaining = remaining.saturating_sub(created.len());
@@ -131,6 +106,20 @@ pub(crate) fn changes_response(
         remaining = remaining.saturating_sub(updated.len());
         destroyed.truncate(remaining.min(destroyed.len()));
     }
+
+    let new_state_entries = if has_more_changes {
+        apply_state_changes(
+            previous_entries,
+            &current_map,
+            &created,
+            &updated,
+            &destroyed,
+        )
+    } else {
+        current_entries
+    };
+    let new_state = encode_state(account_id, kind, new_state_entries)
+        .unwrap_or_else(|_| crate::SESSION_STATE.to_string());
 
     json!({
         "accountId": account_id.to_string(),
@@ -141,6 +130,41 @@ pub(crate) fn changes_response(
         "updated": updated,
         "destroyed": destroyed,
     })
+}
+
+fn apply_state_changes(
+    previous_entries: Vec<StateEntry>,
+    current_map: &HashMap<String, String>,
+    created: &[String],
+    updated: &[String],
+    destroyed: &[String],
+) -> Vec<StateEntry> {
+    let mut entries = previous_entries
+        .into_iter()
+        .filter(|entry| !destroyed.contains(&entry.id))
+        .map(|mut entry| {
+            if updated.contains(&entry.id) {
+                if let Some(fingerprint) = current_map.get(&entry.id) {
+                    entry.fingerprint = fingerprint.clone();
+                }
+            }
+            (entry.id.clone(), entry)
+        })
+        .collect::<HashMap<_, _>>();
+
+    for id in created {
+        if let Some(fingerprint) = current_map.get(id) {
+            entries.insert(
+                id.clone(),
+                StateEntry {
+                    id: id.clone(),
+                    fingerprint: fingerprint.clone(),
+                },
+            );
+        }
+    }
+
+    entries.into_values().collect()
 }
 
 pub(crate) fn encode_state(
@@ -283,12 +307,13 @@ pub(crate) fn query_changes_response(
         bail!("queryState does not match requested filter or sort");
     }
 
-    let next_query_state = encode_query_state(account_id, kind, filter, sort, current_ids.clone())?;
     let diff = if matches!(kind, "Task" | "Mailbox/query") {
         compute_query_diff_with_reorders(&previous.ids, &current_ids, max_changes)
     } else {
         compute_query_diff(&previous.ids, &current_ids, max_changes)
     };
+    let next_query_state =
+        encode_query_state(account_id, kind, filter, sort, diff.query_state_ids.clone())?;
 
     Ok(json!({
         "accountId": account_id.to_string(),
@@ -322,15 +347,23 @@ pub(crate) fn compute_query_diff(
             })
         })
         .collect::<Vec<_>>();
-    truncate_query_diff(&mut removed, &mut added, max_changes)
+    truncate_query_diff(
+        previous_ids,
+        current_ids,
+        &mut removed,
+        &mut added,
+        max_changes,
+    )
 }
 
 fn truncate_query_diff(
+    previous_ids: &[String],
+    current_ids: &[String],
     removed: &mut Vec<String>,
     added: &mut Vec<Value>,
     max_changes: Option<u64>,
 ) -> QueryDiff {
-    let change_limit = max_changes.unwrap_or(u64::MAX) as usize;
+    let change_limit = max_changes.unwrap_or(u64::MAX).max(1) as usize;
     let total_changes = removed.len() + added.len();
     let has_more_changes = total_changes > change_limit;
     if total_changes > change_limit {
@@ -339,11 +372,43 @@ fn truncate_query_diff(
         remaining = remaining.saturating_sub(removed.len());
         added.truncate(remaining.min(added.len()));
     }
+    let query_state_ids = if has_more_changes {
+        apply_query_changes(previous_ids, removed, added)
+    } else {
+        current_ids.to_vec()
+    };
     QueryDiff {
         removed: std::mem::take(removed),
         added: std::mem::take(added),
         has_more_changes,
+        query_state_ids,
     }
+}
+
+fn apply_query_changes(
+    previous_ids: &[String],
+    removed: &[String],
+    added: &[Value],
+) -> Vec<String> {
+    let mut ids = previous_ids
+        .iter()
+        .filter(|id| !removed.contains(id))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    for value in added {
+        let Some(id) = value.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let index = value
+            .get("index")
+            .and_then(Value::as_u64)
+            .unwrap_or(ids.len() as u64) as usize;
+        ids.retain(|existing| existing != id);
+        ids.insert(index.min(ids.len()), id.to_string());
+    }
+
+    ids
 }
 
 pub(crate) fn compute_query_diff_with_reorders(
@@ -385,5 +450,126 @@ pub(crate) fn compute_query_diff_with_reorders(
         }
     }
 
-    truncate_query_diff(&mut removed, &mut added, max_changes)
+    truncate_query_diff(
+        previous_ids,
+        current_ids,
+        &mut removed,
+        &mut added,
+        max_changes,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(id: &str, fingerprint: &str) -> StateEntry {
+        StateEntry {
+            id: id.to_string(),
+            fingerprint: fingerprint.to_string(),
+        }
+    }
+
+    #[test]
+    fn changes_response_returns_intermediate_state_when_truncated() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        let old_state = encode_state(
+            account_id,
+            "Email",
+            vec![entry("a", "old"), entry("b", "same"), entry("c", "gone")],
+        )
+        .unwrap();
+
+        let first = changes_response(
+            account_id,
+            "Email",
+            &old_state,
+            Some(1),
+            vec![entry("a", "new"), entry("b", "same"), entry("d", "created")],
+        );
+        assert_eq!(first["hasMoreChanges"], Value::Bool(true));
+        assert_eq!(first["created"].as_array().unwrap().len(), 1);
+
+        let second = changes_response(
+            account_id,
+            "Email",
+            first["newState"].as_str().unwrap(),
+            Some(1),
+            vec![entry("a", "new"), entry("b", "same"), entry("d", "created")],
+        );
+        assert_eq!(second["hasMoreChanges"], Value::Bool(true));
+        assert_eq!(second["updated"].as_array().unwrap().len(), 1);
+
+        let third = changes_response(
+            account_id,
+            "Email",
+            second["newState"].as_str().unwrap(),
+            Some(1),
+            vec![entry("a", "new"), entry("b", "same"), entry("d", "created")],
+        );
+        assert_eq!(third["hasMoreChanges"], Value::Bool(false));
+        assert_eq!(third["destroyed"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn query_changes_response_returns_intermediate_query_state_when_truncated() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        let old_query_state = encode_query_state(
+            account_id,
+            "Email/query",
+            None,
+            None,
+            vec!["a".to_string(), "b".to_string(), "c".to_string()],
+        )
+        .unwrap();
+        let current_ids = vec!["b".to_string(), "d".to_string(), "e".to_string()];
+
+        let first = query_changes_response(
+            account_id,
+            "Email/query",
+            old_query_state,
+            None,
+            None,
+            current_ids.clone(),
+            current_ids.len() as u64,
+            Some(1),
+        )
+        .unwrap();
+        assert_eq!(first["hasMoreChanges"], Value::Bool(true));
+        assert_eq!(first["removed"].as_array().unwrap().len(), 1);
+
+        let second = query_changes_response(
+            account_id,
+            "Email/query",
+            first["newQueryState"].as_str().unwrap().to_string(),
+            None,
+            None,
+            current_ids.clone(),
+            current_ids.len() as u64,
+            Some(1),
+        )
+        .unwrap();
+        assert_eq!(second["hasMoreChanges"], Value::Bool(true));
+        assert_eq!(second["removed"].as_array().unwrap().len(), 1);
+
+        let third = query_changes_response(
+            account_id,
+            "Email/query",
+            second["newQueryState"].as_str().unwrap().to_string(),
+            None,
+            None,
+            current_ids.clone(),
+            current_ids.len() as u64,
+            Some(2),
+        )
+        .unwrap();
+        assert_eq!(third["hasMoreChanges"], Value::Bool(false));
+        assert_eq!(third["added"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            decode_query_state(third["newQueryState"].as_str().unwrap())
+                .unwrap()
+                .ids,
+            current_ids
+        );
+    }
 }
