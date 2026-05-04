@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
-use lpe_storage::{JmapEmail, JmapMailbox};
+use lpe_storage::{JmapEmail, JmapEmailAddress, JmapMailbox};
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock},
@@ -821,6 +821,12 @@ fn execute_rops(
                 &request,
                 input_object(session, &handle_slots, &request),
             )),
+            0x0F => responses.extend_from_slice(&rop_read_recipients_response(
+                &request,
+                input_object(session, &handle_slots, &request),
+                mailboxes,
+                emails,
+            )),
             0x12 => {
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::HierarchyTable { columns, .. })
@@ -1082,7 +1088,7 @@ fn rop_open_message_response(request: &RopRequest, email: &JmapEmail) -> Vec<u8>
     response.push(0);
     write_typed_string(&mut response, "");
     write_typed_string(&mut response, &email.subject);
-    response.extend_from_slice(&(email.to.len() as u16).to_le_bytes());
+    response.extend_from_slice(&(message_recipients(email).len() as u16).to_le_bytes());
     response.extend_from_slice(&0u16.to_le_bytes());
     response.push(0);
     response
@@ -1156,6 +1162,43 @@ fn rop_get_properties_specific_response(
         }
     };
     response.extend_from_slice(&row);
+    response
+}
+
+fn rop_read_recipients_response(
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+) -> Vec<u8> {
+    let input_handle_index = request.input_handle_index().unwrap_or(0);
+    let Some(MapiObject::Message {
+        folder_id,
+        message_id,
+    }) = object
+    else {
+        return rop_error_response(0x0F, input_handle_index, 0x0000_04B9);
+    };
+    let Some(email) = message_for_id(*folder_id, *message_id, mailboxes, emails) else {
+        return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
+    };
+    let start = request.row_id().unwrap_or(0) as usize;
+    let recipients = message_recipients(email);
+    if start >= recipients.len() {
+        return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
+    }
+
+    let mut response = vec![0x0F, input_handle_index];
+    write_u32(&mut response, 0);
+    for (offset, recipient) in recipients.into_iter().enumerate().skip(start) {
+        write_u32(&mut response, offset as u32);
+        response.push(recipient.recipient_type);
+        response.extend_from_slice(&0x0FFFu16.to_le_bytes());
+        response.extend_from_slice(&0u16.to_le_bytes());
+        let row = serialize_recipient_row(recipient.address);
+        response.extend_from_slice(&(row.len() as u16).to_le_bytes());
+        response.extend_from_slice(&row);
+    }
     response
 }
 
@@ -1387,6 +1430,39 @@ fn display_to(email: &JmapEmail) -> String {
         })
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+struct MapiRecipient<'a> {
+    recipient_type: u8,
+    address: &'a JmapEmailAddress,
+}
+
+fn message_recipients(email: &JmapEmail) -> Vec<MapiRecipient<'_>> {
+    email
+        .to
+        .iter()
+        .map(|address| MapiRecipient {
+            recipient_type: 0x01,
+            address,
+        })
+        .chain(email.cc.iter().map(|address| MapiRecipient {
+            recipient_type: 0x02,
+            address,
+        }))
+        .collect()
+}
+
+fn serialize_recipient_row(address: &JmapEmailAddress) -> Vec<u8> {
+    let mut row = Vec::new();
+    let recipient_flags = 0x0200u16 | 0x0010 | 0x0008 | 0x0003;
+    row.extend_from_slice(&recipient_flags.to_le_bytes());
+    write_utf16z(&mut row, &address.address);
+    write_utf16z(
+        &mut row,
+        address.display_name.as_deref().unwrap_or(&address.address),
+    );
+    row.extend_from_slice(&0u16.to_le_bytes());
+    row
 }
 
 fn message_flags(email: &JmapEmail) -> u32 {
@@ -1658,6 +1734,11 @@ impl RopRequest {
         Some(u64::from_le_bytes(bytes.try_into().ok()?))
     }
 
+    fn row_id(&self) -> Option<u32> {
+        let bytes = self.payload.get(..4)?;
+        Some(u32::from_le_bytes(bytes.try_into().ok()?))
+    }
+
     fn property_tags(&self) -> Vec<u32> {
         let start = match self.rop_id {
             0x07 => 4,
@@ -1736,6 +1817,18 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: None,
                 payload: Vec::new(),
+            })
+        }
+        0x0F => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+            let _reserved = cursor.read_u16()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
             })
         }
         0x12 => {
