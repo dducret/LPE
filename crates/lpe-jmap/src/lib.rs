@@ -2632,7 +2632,10 @@ mod tests {
             .handle_api_request(
                 Some("Bearer token"),
                 JmapApiRequest {
-                    using_capabilities: vec![JMAP_CORE_CAPABILITY.to_string()],
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                    ],
                     method_calls: vec![
                         JmapMethodCall(
                             "Mailbox/changes".to_string(),
@@ -4174,6 +4177,81 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(http_upload.to_string(), "accountId is read-only");
+    }
+
+    #[tokio::test]
+    async fn method_dispatch_requires_declared_capabilities() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_CORE_CAPABILITY.to_string()],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Email/get".to_string(),
+                            json!({
+                                "accountId": FakeStore::account().account_id.to_string(),
+                                "ids": ["cccccccc-cccc-cccc-cccc-cccccccccccc"]
+                            }),
+                            "e1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Blob/get".to_string(),
+                            json!({
+                                "accountId": FakeStore::account().account_id.to_string(),
+                                "ids": ["message:cccccccc-cccc-cccc-cccc-cccccccccccc"]
+                            }),
+                            "b1".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.method_responses[0].1["type"], "unknownMethod");
+        assert_eq!(
+            response.method_responses[0].1["description"],
+            "method capability is not requested"
+        );
+        assert_eq!(response.method_responses[1].1["type"], "unknownMethod");
+        assert_eq!(
+            response.method_responses[1].1["description"],
+            "method capability is not requested"
+        );
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_BLOB_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Blob/copy".to_string(),
+                        json!({
+                            "fromAccountId": FakeStore::account().account_id.to_string(),
+                            "accountId": FakeStore::account().account_id.to_string(),
+                            "blobIds": ["message:cccccccc-cccc-cccc-cccc-cccccccccccc"]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.method_responses[0].1["type"], "unknownMethod");
+        assert_eq!(
+            response.method_responses[0].1["description"],
+            "method capability is not requested"
+        );
     }
 
     #[tokio::test]

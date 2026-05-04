@@ -19,6 +19,8 @@ This document describes the `JMAP Mail` scope currently supported by `LPE` for t
 - `urn:ietf:params:jmap:core`
 - `urn:ietf:params:jmap:mail`
 - `urn:ietf:params:jmap:submission`
+- `urn:ietf:params:jmap:blob`
+- `urn:ietf:params:jmap:vacationresponse`
 - `urn:ietf:params:jmap:websocket`
 
 The `JMAP` session is real: it is built from the authenticated mailbox account and exposes that current `LPE` account as the active `accountId`.
@@ -47,6 +49,12 @@ The WebSocket capability is advertised only when the `/jmap/ws` endpoint is actu
 - `Thread/changes`
 - `Quota/get`
 - `SearchSnippet/get`
+- `Blob/copy`
+- `Blob/upload`
+- `Blob/get`
+- `Blob/lookup`
+- `VacationResponse/get`
+- `VacationResponse/set`
 
 Additional supported `JMAP` routes:
 
@@ -57,6 +65,7 @@ Additional supported `JMAP` routes:
 ### Important MVP rules
 
 - `Email/set` persists only in the `Drafts` mailbox
+- method dispatch requires the defining capability to be present in the request `using` list; methods with missing capabilities return `unknownMethod` rather than executing under an undeclared protocol surface
 - `Email/set` accepts draft `keywords` for `$draft`, `$seen`, and `$flagged`; `$seen` and `$flagged` are mapped onto the canonical draft unread-flagged state without creating any parallel priority model
 - `EmailSubmission/set` does not submit raw MIME or direct `SMTP`
 - `EmailSubmission/set` takes an existing draft `emailId` and calls the canonical `LPE` submission workflow
