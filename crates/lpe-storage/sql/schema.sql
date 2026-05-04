@@ -21,7 +21,7 @@ CREATE SEQUENCE message_modseq_seq START WITH 2;
 
 CREATE TABLE schema_metadata (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
-    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.10'),
+    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.11'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
