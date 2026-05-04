@@ -145,13 +145,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .await?;
         let account_id = account_access.account_id;
         let entries = self.mailbox_object_state_entries(&account_access).await?;
-        Ok(changes_response(
+        changes_response(
             account_id,
             "Mailbox",
             &arguments.since_state,
             arguments.max_changes,
             entries,
-        ))
+        )
     }
 
     pub(crate) async fn handle_mailbox_set(

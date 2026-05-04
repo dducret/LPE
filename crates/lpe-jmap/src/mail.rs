@@ -205,13 +205,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .await?;
         let account_id = account_access.account_id;
         let entries = self.object_state_entries(account_id, "Email").await?;
-        Ok(changes_response(
+        changes_response(
             account_id,
             "Email",
             &arguments.since_state,
             arguments.max_changes,
             entries,
-        ))
+        )
     }
 
     pub(crate) async fn handle_email_copy(
@@ -757,13 +757,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .await?;
         let account_id = account_access.account_id;
         let entries = self.object_state_entries(account_id, "Thread").await?;
-        Ok(changes_response(
+        changes_response(
             account_id,
             "Thread",
             &arguments.since_state,
             arguments.max_changes,
             entries,
-        ))
+        )
     }
 
     pub(crate) async fn handle_quota_get(

@@ -2492,6 +2492,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn changes_reject_malformed_and_cross_account_state_tokens() {
+        let shared = FakeStore::shared_account();
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        });
+        let initial = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Mailbox/get".to_string(),
+                        json!({}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        let owned_state = initial.method_responses[0].1["state"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Mailbox/changes".to_string(),
+                            json!({"sinceState": "not-a-state"}),
+                            "c1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Mailbox/changes".to_string(),
+                            json!({
+                                "accountId": shared.account_id.to_string(),
+                                "sinceState": owned_state
+                            }),
+                            "c2".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["type"],
+            Value::String("invalidArguments".to_string())
+        );
+        assert_eq!(
+            response.method_responses[1].1["type"],
+            Value::String("invalidArguments".to_string())
+        );
+        assert!(response.method_responses[1].1["description"]
+            .as_str()
+            .unwrap()
+            .contains("state does not match requested account"));
+    }
+
+    #[tokio::test]
     async fn mailbox_and_email_query_changes_replay_snapshot_differences() {
         let initial = JmapService::new_with_validator(
             FakeStore {

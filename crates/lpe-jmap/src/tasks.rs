@@ -71,13 +71,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
         let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
         let entries = self.object_state_entries(account_id, "TaskList").await?;
-        Ok(changes_response(
+        changes_response(
             account_id,
             "TaskList",
             &arguments.since_state,
             arguments.max_changes,
             entries,
-        ))
+        )
     }
 
     pub(crate) async fn handle_task_list_set(
@@ -306,13 +306,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
         let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
         let entries = self.object_state_entries(account_id, "Task").await?;
-        Ok(changes_response(
+        changes_response(
             account_id,
             "Task",
             &arguments.since_state,
             arguments.max_changes,
             entries,
-        ))
+        )
     }
 
     pub(crate) async fn handle_task_set(

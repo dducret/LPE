@@ -80,6 +80,7 @@ Additional supported `JMAP` routes:
 - `Email/query` supports only the `inMailbox` filter
 - `Email/queryChanges` and `Mailbox/queryChanges` use a stateless snapshot `queryState` token derived from the ordered result set instead of a durable per-query history table
 - `queryChanges` compares the full ordered result set for the logical query even when the original `query` response was paginated, and is intended for incremental client refresh, not for long-lived durable sync cursors
+- `changes` accepts `sinceState: "0"` as the explicit initial-sync state and otherwise requires an opaque state token bound to the requested account and method; malformed, cross-account, or cross-method tokens are rejected instead of being treated as a fresh initial sync
 - `Email/get` exposes a practical subset of `JMAP Mail` properties
 - one `LPE` email currently belongs to one `LPE` mailbox, so `mailboxIds` contains one entry
 - `EmailSubmission/set` currently supports only `create`

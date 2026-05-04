@@ -105,13 +105,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 fingerprint: super::collection_state_fingerprint(&collection),
             })
             .collect::<Vec<_>>();
-        Ok(changes_response(
+        changes_response(
             account_id,
             "AddressBook",
             &arguments.since_state,
             arguments.max_changes,
             entries,
-        ))
+        )
     }
 
     pub(crate) async fn handle_contact_get(
@@ -202,13 +202,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
         let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
         let entries = self.object_state_entries(account_id, "ContactCard").await?;
-        Ok(changes_response(
+        changes_response(
             account_id,
             "ContactCard",
             &arguments.since_state,
             arguments.max_changes,
             entries,
-        ))
+        )
     }
 
     pub(crate) async fn handle_contact_set(

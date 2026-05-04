@@ -50,13 +50,19 @@ pub(crate) fn changes_response(
     since_state: &str,
     max_changes: Option<u64>,
     current_entries: Vec<StateEntry>,
-) -> Value {
+) -> Result<Value> {
     let max_changes = max_changes.unwrap_or(u64::MAX).max(1) as usize;
-    let previous_entries = match decode_state(since_state) {
-        Ok(previous) if previous.account_id == account_id.to_string() && previous.kind == kind => {
-            previous.entries
+    let previous_entries = if since_state == "0" {
+        Vec::new()
+    } else {
+        let previous = decode_state(since_state)?;
+        if previous.account_id != account_id.to_string() {
+            bail!("state does not match requested account");
         }
-        _ => Vec::new(),
+        if previous.kind != kind {
+            bail!("state does not match requested method");
+        }
+        previous.entries
     };
 
     let previous_map = previous_entries
@@ -121,7 +127,7 @@ pub(crate) fn changes_response(
     let new_state = encode_state(account_id, kind, new_state_entries)
         .unwrap_or_else(|_| crate::SESSION_STATE.to_string());
 
-    json!({
+    Ok(json!({
         "accountId": account_id.to_string(),
         "oldState": since_state,
         "newState": new_state,
@@ -129,7 +135,7 @@ pub(crate) fn changes_response(
         "created": created,
         "updated": updated,
         "destroyed": destroyed,
-    })
+    }))
 }
 
 fn apply_state_changes(
@@ -487,6 +493,7 @@ mod tests {
             Some(1),
             vec![entry("a", "new"), entry("b", "same"), entry("d", "created")],
         );
+        let first = first.unwrap();
         assert_eq!(first["hasMoreChanges"], Value::Bool(true));
         assert_eq!(first["created"].as_array().unwrap().len(), 1);
 
@@ -497,6 +504,7 @@ mod tests {
             Some(1),
             vec![entry("a", "new"), entry("b", "same"), entry("d", "created")],
         );
+        let second = second.unwrap();
         assert_eq!(second["hasMoreChanges"], Value::Bool(true));
         assert_eq!(second["updated"].as_array().unwrap().len(), 1);
 
@@ -507,8 +515,29 @@ mod tests {
             Some(1),
             vec![entry("a", "new"), entry("b", "same"), entry("d", "created")],
         );
+        let third = third.unwrap();
         assert_eq!(third["hasMoreChanges"], Value::Bool(false));
         assert_eq!(third["destroyed"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn changes_response_rejects_invalid_or_mismatched_state_tokens() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        let other_account_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+        let other_account_state = encode_state(other_account_id, "Email", Vec::new()).unwrap();
+        let wrong_kind_state = encode_state(account_id, "Mailbox", Vec::new()).unwrap();
+
+        let initial =
+            changes_response(account_id, "Email", "0", None, vec![entry("a", "1")]).unwrap();
+        assert_eq!(initial["created"], json!(["a"]));
+
+        assert!(changes_response(account_id, "Email", "not-a-state", None, Vec::new()).is_err());
+        assert!(
+            changes_response(account_id, "Email", &other_account_state, None, Vec::new()).is_err()
+        );
+        assert!(
+            changes_response(account_id, "Email", &wrong_kind_state, None, Vec::new()).is_err()
+        );
     }
 
     #[test]
