@@ -221,19 +221,19 @@ enum SmtpCommandOutcome {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum SmtpPathKind {
+pub(crate) enum SmtpPathKind {
     MailFrom,
     RcptTo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ParsedSmtpPath {
-    address: String,
-    declared_size: Option<u64>,
+pub(crate) struct ParsedSmtpPath {
+    pub(crate) address: String,
+    pub(crate) declared_size: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum SmtpPathError {
+pub(crate) enum SmtpPathError {
     MalformedPath,
     InvalidAddress,
     InvalidSize,
@@ -4970,11 +4970,11 @@ where
     Ok(data)
 }
 
-fn max_smtp_message_size_bytes(max_mb: u32) -> u64 {
+pub(crate) fn max_smtp_message_size_bytes(max_mb: u32) -> u64 {
     u64::from(max_mb.max(1)) * 1024 * 1024
 }
 
-fn parse_smtp_path(
+pub(crate) fn parse_smtp_path(
     value: &str,
     kind: SmtpPathKind,
     max_message_size_bytes: u64,
@@ -5073,7 +5073,7 @@ fn is_valid_smtp_mailbox(address: &str) -> bool {
     })
 }
 
-fn smtp_path_error_reply(command: &str, error: SmtpPathError) -> String {
+pub(crate) fn smtp_path_error_reply(command: &str, error: SmtpPathError) -> String {
     match error {
         SmtpPathError::MalformedPath | SmtpPathError::InvalidAddress => {
             format!("501 malformed {command} path")

@@ -25,7 +25,11 @@ use tokio_rustls::{
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::{integration_shared_secret, transport_policy};
+use crate::{
+    integration_shared_secret,
+    smtp::{max_smtp_message_size_bytes, parse_smtp_path, smtp_path_error_reply, SmtpPathKind},
+    transport_policy,
+};
 
 const SUBMISSION_AUTH_PATH: &str = "/internal/lpe-ct/submission-auth";
 const SUBMISSION_ACCEPT_PATH: &str = "/internal/lpe-ct/submissions";
@@ -188,8 +192,18 @@ async fn handle_submission_session(
         }
 
         if upper.starts_with("MAIL FROM:") {
-            let candidate = normalize_path_argument(&command[10..]);
             let config = crate::smtp::runtime_config_from_store(&dashboard_store)?;
+            let candidate = match parse_smtp_path(
+                command[10..].trim(),
+                SmtpPathKind::MailFrom,
+                max_smtp_message_size_bytes(config.max_message_size_mb),
+            ) {
+                Ok(parsed) => parsed.address,
+                Err(error) => {
+                    write_line(&mut writer, &smtp_path_error_reply("MAIL FROM", error)).await?;
+                    continue;
+                }
+            };
             if let transport_policy::AddressPolicyVerdict::Reject(reason) =
                 transport_policy::evaluate_address_policy_with_config(
                     &config.address_policy,
@@ -211,8 +225,18 @@ async fn handle_submission_session(
                 write_line(&mut writer, "503 send MAIL FROM first").await?;
                 continue;
             }
-            let recipient = normalize_path_argument(&command[8..]);
             let config = crate::smtp::runtime_config_from_store(&dashboard_store)?;
+            let recipient = match parse_smtp_path(
+                command[8..].trim(),
+                SmtpPathKind::RcptTo,
+                max_smtp_message_size_bytes(config.max_message_size_mb),
+            ) {
+                Ok(parsed) => parsed.address,
+                Err(error) => {
+                    write_line(&mut writer, &smtp_path_error_reply("RCPT TO", error)).await?;
+                    continue;
+                }
+            };
             if let transport_policy::AddressPolicyVerdict::Reject(reason) =
                 transport_policy::evaluate_address_policy_with_config(
                     &config.address_policy,
@@ -582,10 +606,6 @@ where
     writer.write_all(b"\r\n").await?;
     writer.flush().await?;
     Ok(())
-}
-
-fn normalize_path_argument(value: &str) -> String {
-    value.trim().trim_matches(['<', '>']).to_lowercase()
 }
 
 fn max_message_size_bytes() -> usize {
