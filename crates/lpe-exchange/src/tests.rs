@@ -1146,6 +1146,39 @@ async fn mapi_over_http_returns_nspi_and_mailbox_urls() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_resolve_names_resolves_authenticated_mailbox() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &[0; 103])
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-requesttype").unwrap(),
+        "ResolveNames"
+    );
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
+    assert_ne!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[16..20].try_into().unwrap()), 1);
+    assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+    assert!(contains_bytes(&body, &utf16z("Alice")));
+    assert!(contains_bytes(
+        &body,
+        &utf16z("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice-example-test")
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_unbind_consumes_nspi_session() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

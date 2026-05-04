@@ -41,6 +41,7 @@ enum MapiRequestType {
     Unbind,
     GetAddressBookUrl,
     GetMailboxUrl,
+    ResolveNames,
     Ping,
     Unsupported(String),
 }
@@ -99,6 +100,9 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
         }
         (MapiEndpoint::Nspi, MapiRequestType::GetMailboxUrl) => {
             endpoint_url_response("GetMailboxUrl", &request_id, headers, "/mapi/emsmdb/")
+        }
+        (MapiEndpoint::Nspi, MapiRequestType::ResolveNames) => {
+            resolve_names_response(&principal, &request_id)
         }
         (_, MapiRequestType::Ping) => mapi_response("PING", &request_id, 0, Vec::new(), None),
         (_, MapiRequestType::Unsupported(value)) => mapi_diagnostic_response(
@@ -313,6 +317,64 @@ fn endpoint_url_response(
     mapi_response(request_type, request_id, 0, body, None)
 }
 
+fn resolve_names_response(principal: &AccountPrincipal, request_id: &str) -> Response {
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 1);
+    write_u32(&mut body, principal_minimal_entry_id(principal));
+    write_u32(&mut body, 1);
+    body.extend_from_slice(&nspi_resolved_principal_row(principal));
+    write_u32(&mut body, 0);
+    mapi_response("ResolveNames", request_id, 0, body, None)
+}
+
+fn principal_minimal_entry_id(principal: &AccountPrincipal) -> u32 {
+    let bytes = principal.account_id.as_bytes();
+    u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) | 0x8000_0000
+}
+
+fn nspi_resolved_principal_row(principal: &AccountPrincipal) -> Vec<u8> {
+    let mut row = Vec::new();
+    write_u32(&mut row, 8);
+    write_nspi_string_property(&mut row, 0x3001_001F, &principal.display_name);
+    write_nspi_string_property(&mut row, 0x39FE_001F, &principal.email);
+    write_nspi_string_property(&mut row, 0x3003_001F, &principal.email);
+    write_nspi_string_property(&mut row, 0x3A00_001F, &principal.display_name);
+    write_nspi_u32_property(&mut row, 0x0FFE_0003, principal_minimal_entry_id(principal));
+    write_nspi_u32_property(&mut row, 0x3000_0003, principal_minimal_entry_id(principal));
+    write_nspi_string_property(&mut row, 0x3004_001F, &principal.email);
+    write_nspi_string_property(&mut row, 0x3002_001F, &principal_legacy_dn(principal));
+    row
+}
+
+fn write_nspi_u32_property(row: &mut Vec<u8>, property_tag: u32, value: u32) {
+    write_u32(row, property_tag);
+    write_u32(row, 0);
+    write_u32(row, value);
+}
+
+fn write_nspi_string_property(row: &mut Vec<u8>, property_tag: u32, value: &str) {
+    write_u32(row, property_tag);
+    write_u32(row, 0);
+    write_utf16z(row, value);
+}
+
+fn principal_legacy_dn(principal: &AccountPrincipal) -> String {
+    let legacy_user = principal
+        .email
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    format!("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={legacy_user}")
+}
+
 fn public_endpoint_url(headers: &HeaderMap, path: &str) -> String {
     let scheme = headers
         .get("x-forwarded-proto")
@@ -395,6 +457,7 @@ fn request_type(headers: &HeaderMap) -> Result<MapiRequestType> {
         "unbind" => MapiRequestType::Unbind,
         "getaddressbookurl" => MapiRequestType::GetAddressBookUrl,
         "getmailboxurl" => MapiRequestType::GetMailboxUrl,
+        "resolvenames" => MapiRequestType::ResolveNames,
         "ping" => MapiRequestType::Ping,
         _ => MapiRequestType::Unsupported(value.to_string()),
     })
@@ -960,6 +1023,7 @@ impl MapiRequestType {
             MapiRequestType::Unbind => "Unbind",
             MapiRequestType::GetAddressBookUrl => "GetAddressBookUrl",
             MapiRequestType::GetMailboxUrl => "GetMailboxUrl",
+            MapiRequestType::ResolveNames => "ResolveNames",
             MapiRequestType::Ping => "PING",
             MapiRequestType::Unsupported(value) => value,
         }
