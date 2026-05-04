@@ -307,7 +307,7 @@ pub(crate) fn query_changes_response(
         bail!("queryState does not match requested filter or sort");
     }
 
-    let diff = if matches!(kind, "Task" | "Mailbox/query") {
+    let diff = if matches!(kind, "Email/query" | "Task" | "Mailbox/query") {
         compute_query_diff_with_reorders(&previous.ids, &current_ids, max_changes)
     } else {
         compute_query_diff(&previous.ids, &current_ids, max_changes)
@@ -567,6 +567,62 @@ mod tests {
         assert_eq!(third["added"].as_array().unwrap().len(), 2);
         assert_eq!(
             decode_query_state(third["newQueryState"].as_str().unwrap())
+                .unwrap()
+                .ids,
+            current_ids
+        );
+    }
+
+    #[test]
+    fn email_query_changes_reports_reorders_and_paginates_to_current_order() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        let old_query_state = encode_query_state(
+            account_id,
+            "Email/query",
+            None,
+            None,
+            vec!["a".to_string(), "b".to_string(), "c".to_string()],
+        )
+        .unwrap();
+        let current_ids = vec!["c".to_string(), "a".to_string(), "b".to_string()];
+
+        let first = query_changes_response(
+            account_id,
+            "Email/query",
+            old_query_state,
+            None,
+            None,
+            current_ids.clone(),
+            current_ids.len() as u64,
+            Some(2),
+        )
+        .unwrap();
+        assert_eq!(first["hasMoreChanges"], Value::Bool(true));
+        assert_eq!(first["removed"], json!(["a".to_string(), "b".to_string()]));
+        assert_eq!(first["added"], json!([]));
+
+        let second = query_changes_response(
+            account_id,
+            "Email/query",
+            first["newQueryState"].as_str().unwrap().to_string(),
+            None,
+            None,
+            current_ids.clone(),
+            current_ids.len() as u64,
+            Some(4),
+        )
+        .unwrap();
+        assert_eq!(second["hasMoreChanges"], Value::Bool(false));
+        assert_eq!(second["removed"], json!([]));
+        assert_eq!(
+            second["added"],
+            json!([
+                {"id": "a", "index": 1},
+                {"id": "b", "index": 2}
+            ])
+        );
+        assert_eq!(
+            decode_query_state(second["newQueryState"].as_str().unwrap())
                 .unwrap()
                 .ids,
             current_ids
