@@ -88,9 +88,14 @@ async fn session_handler(
     let service = JmapService::new(storage);
     let authorization = authorization_header(&headers);
     let websocket_url = session::websocket_url(&headers);
+    let public_base_path = session::public_base_path(&headers);
     Ok(Json(
         service
-            .session_document(authorization.as_deref(), websocket_url.as_deref())
+            .session_document(
+                authorization.as_deref(),
+                websocket_url.as_deref(),
+                Some(&public_base_path),
+            )
             .await
             .map_err(http_error)?,
     ))

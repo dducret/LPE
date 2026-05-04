@@ -1284,6 +1284,7 @@ mod tests {
             .session_document(
                 Some("Bearer token"),
                 Some("wss://mail.example.test/jmap/ws"),
+                None,
             )
             .await
             .unwrap();
@@ -1302,6 +1303,39 @@ mod tests {
         assert_eq!(
             session.capabilities[JMAP_WEBSOCKET_CAPABILITY]["url"],
             "wss://mail.example.test/jmap/ws"
+        );
+    }
+
+    #[tokio::test]
+    async fn session_urls_respect_forwarded_jmap_prefix() {
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            ..Default::default()
+        });
+
+        let session = service
+            .session_document(
+                Some("Bearer token"),
+                Some("wss://mail.example.test/api/jmap/ws"),
+                Some("/api/jmap"),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(session.api_url, "/api/jmap/api");
+        assert_eq!(session.upload_url, "/api/jmap/upload/{accountId}");
+        assert_eq!(
+            session.download_url,
+            "/api/jmap/download/{accountId}/{blobId}/{name}"
+        );
+
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("host", "mail.example.test".parse().unwrap());
+        headers.insert("x-forwarded-proto", "https".parse().unwrap());
+        headers.insert("x-forwarded-prefix", "/api/jmap".parse().unwrap());
+        assert_eq!(
+            crate::session::websocket_url(&headers).unwrap(),
+            "wss://mail.example.test/api/jmap/ws"
         );
     }
 
@@ -1338,19 +1372,19 @@ mod tests {
         });
 
         let base = base
-            .session_document(Some("Bearer token"), None)
+            .session_document(Some("Bearer token"), None, None)
             .await
             .unwrap();
         let delegated = delegated
-            .session_document(Some("Bearer token"), None)
+            .session_document(Some("Bearer token"), None, None)
             .await
             .unwrap();
         let read_only_without_sender = read_only_without_sender
-            .session_document(Some("Bearer token"), None)
+            .session_document(Some("Bearer token"), None, None)
             .await
             .unwrap();
         let read_only_with_sender = read_only_with_sender
-            .session_document(Some("Bearer token"), None)
+            .session_document(Some("Bearer token"), None, None)
             .await
             .unwrap();
 
@@ -1416,7 +1450,7 @@ mod tests {
         let service = JmapService::new(store);
 
         let session = service
-            .session_document(Some("Bearer token"), None)
+            .session_document(Some("Bearer token"), None, None)
             .await
             .unwrap();
         assert!(session
@@ -1496,7 +1530,7 @@ mod tests {
         });
 
         let session = service
-            .session_document(Some("Bearer token"), None)
+            .session_document(Some("Bearer token"), None, None)
             .await
             .unwrap();
         let shared_capabilities = &session.accounts
@@ -1532,7 +1566,7 @@ mod tests {
         let service = JmapService::new(store);
 
         let session = service
-            .session_document(Some("Bearer token"), None)
+            .session_document(Some("Bearer token"), None, None)
             .await
             .unwrap();
         let shared_account = &session.accounts[&FakeStore::shared_account().account_id.to_string()];
@@ -3726,6 +3760,7 @@ mod tests {
             .session_document(
                 Some("Bearer token"),
                 Some("wss://mail.example.test/jmap/ws"),
+                None,
             )
             .await
             .unwrap();

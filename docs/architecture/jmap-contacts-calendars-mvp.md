@@ -21,6 +21,7 @@ The `crates/lpe-jmap` crate acts as a `JMAP` adapter on top of the canonical mod
 - login remains `/api/mail/auth/login`
 - the existing account bearer token must then be sent to `/api/jmap/session` and `/api/jmap/api`
 - without the Debian reverse proxy, the same routes are exposed directly as `/jmap/session` and `/jmap/api`
+- the Debian reverse proxy sets `X-Forwarded-Prefix: /api/jmap` so the shared `Session` document advertises public `/api/jmap/*` URLs
 
 ### Supported session capabilities
 

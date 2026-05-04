@@ -12,6 +12,7 @@ This document describes the `JMAP Mail` scope currently supported by `LPE` for t
 - login remains `/api/mail/auth/login`
 - the existing account bearer token must then be sent to `/api/jmap/session`, `/api/jmap/api`, and `/api/jmap/ws`
 - without the Debian reverse proxy, the same routes are exposed directly as `/jmap/session`, `/jmap/api`, and `/jmap/ws`
+- the Debian reverse proxy sets `X-Forwarded-Prefix: /api/jmap` so the `Session` document advertises public `/api/jmap/*` URLs instead of direct internal `/jmap/*` URLs
 
 ### Supported session capabilities
 

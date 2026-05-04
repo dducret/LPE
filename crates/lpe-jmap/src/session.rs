@@ -20,9 +20,11 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         &self,
         authorization: Option<&str>,
         websocket_url: Option<&str>,
+        public_base_path: Option<&str>,
     ) -> Result<SessionDocument> {
         let account = self.authenticate(authorization).await?;
         let capabilities = session_capabilities(websocket_url.unwrap_or("ws://localhost/jmap/ws"));
+        let public_base_path = normalize_public_base_path(public_base_path);
         let accessible_accounts = self
             .store
             .fetch_accessible_mailbox_accounts(account.account_id)
@@ -54,13 +56,21 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             accounts,
             primary_accounts,
             username: account.email,
-            api_url: "/jmap/api".to_string(),
-            download_url: "/jmap/download/{accountId}/{blobId}/{name}".to_string(),
-            upload_url: "/jmap/upload/{accountId}".to_string(),
+            api_url: format!("{public_base_path}/api"),
+            download_url: format!("{public_base_path}/download/{{accountId}}/{{blobId}}/{{name}}"),
+            upload_url: format!("{public_base_path}/upload/{{accountId}}"),
             event_source_url: None,
             state: session_state(&accessible_accounts),
         })
     }
+}
+
+pub(crate) fn public_base_path(headers: &HeaderMap) -> String {
+    normalize_public_base_path(
+        headers
+            .get("x-forwarded-prefix")
+            .and_then(|value| value.to_str().ok()),
+    )
 }
 
 pub(crate) fn websocket_url(headers: &HeaderMap) -> Option<String> {
@@ -78,7 +88,21 @@ pub(crate) fn websocket_url(headers: &HeaderMap) -> Option<String> {
             _ => "ws",
         })
         .unwrap_or("ws");
-    Some(format!("{scheme}://{host}/jmap/ws"))
+    let public_base_path = public_base_path(headers);
+    Some(format!("{scheme}://{host}{public_base_path}/ws"))
+}
+
+fn normalize_public_base_path(value: Option<&str>) -> String {
+    let path = value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("/jmap");
+    let path = format!("/{}", path.trim_matches('/'));
+    if path == "/" {
+        "/jmap".to_string()
+    } else {
+        path
+    }
 }
 
 fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {
