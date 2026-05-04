@@ -2462,6 +2462,10 @@ mod tests {
             Value::Number(1.into())
         );
         assert!(response.method_responses[0].1["queryState"].is_string());
+        assert_eq!(
+            response.method_responses[0].1["canCalculateChanges"],
+            Value::Bool(false)
+        );
     }
 
     #[tokio::test]
@@ -3259,6 +3263,16 @@ mod tests {
                             "c2".to_string(),
                         ),
                         JmapMethodCall(
+                            "AddressBook/query".to_string(),
+                            json!({}),
+                            "c3".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "ContactCard/query".to_string(),
+                            json!({}),
+                            "c4".to_string(),
+                        ),
+                        JmapMethodCall(
                             "ContactCard/set".to_string(),
                             json!({
                                 "create": {
@@ -3273,7 +3287,7 @@ mod tests {
                                     }
                                 }
                             }),
-                            "c3".to_string(),
+                            "c5".to_string(),
                         ),
                     ],
                 },
@@ -3288,6 +3302,14 @@ mod tests {
         assert_eq!(
             response.method_responses[1].1["list"][0]["name"]["full"],
             Value::String("Bob Example".to_string())
+        );
+        assert_eq!(
+            response.method_responses[2].1["canCalculateChanges"],
+            Value::Bool(false)
+        );
+        assert_eq!(
+            response.method_responses[3].1["canCalculateChanges"],
+            Value::Bool(false)
         );
         assert!(response.created_ids.contains_key("new1"));
         let contacts = store.contacts.lock().unwrap();
@@ -3316,10 +3338,11 @@ mod tests {
                     ],
                     method_calls: vec![
                         JmapMethodCall("Calendar/get".to_string(), json!({}), "c1".to_string()),
+                        JmapMethodCall("Calendar/query".to_string(), json!({}), "c2".to_string()),
                         JmapMethodCall(
                             "CalendarEvent/query".to_string(),
                             json!({"filter": {"inCalendar": "default"}}),
-                            "c2".to_string(),
+                            "c3".to_string(),
                         ),
                         JmapMethodCall(
                             "CalendarEvent/set".to_string(),
@@ -3350,7 +3373,7 @@ mod tests {
                                     }
                                 }
                             }),
-                            "c3".to_string(),
+                            "c4".to_string(),
                         ),
                     ],
                 },
@@ -3363,8 +3386,16 @@ mod tests {
             Value::String("default".to_string())
         );
         assert_eq!(
-            response.method_responses[1].1["ids"][0],
+            response.method_responses[1].1["canCalculateChanges"],
+            Value::Bool(false)
+        );
+        assert_eq!(
+            response.method_responses[2].1["ids"][0],
             Value::String(FakeStore::event().id.to_string())
+        );
+        assert_eq!(
+            response.method_responses[2].1["canCalculateChanges"],
+            Value::Bool(false)
         );
         let events = store.events.lock().unwrap();
         assert_eq!(events.len(), 2);

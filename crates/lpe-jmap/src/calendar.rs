@@ -85,7 +85,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         Ok(json!({
             "accountId": account_id.to_string(),
             "queryState": SESSION_STATE,
-            "canCalculateChanges": true,
+            "canCalculateChanges": false,
             "position": position,
             "ids": ids,
             "total": collections.len(),
@@ -191,7 +191,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         Ok(json!({
             "accountId": account_id.to_string(),
             "queryState": SESSION_STATE,
-            "canCalculateChanges": true,
+            "canCalculateChanges": false,
             "position": position,
             "ids": ids,
             "total": events.len(),
