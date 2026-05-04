@@ -6,7 +6,7 @@ This document describes the `0.1.3` `Exchange` compatibility work in `LPE`.
 
 The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchange`. `IMAP` carried the initial desktop compatibility work through `0.1.2`; `0.1.3` moves the Exchange-style compatibility focus to `EWS`. Its goal is to let Exchange-style clients read and synchronize canonical mailbox, `Contacts`, and `Calendar` data from the `LPE` server without introducing a second collaboration or mailbox store.
 
-`MAPI` implementation has started as a guarded `MAPI over HTTP` foundation for future Outlook desktop support. It is not Outlook-ready. Autodiscover publication is available only through an explicit administrator interoperability-test switch. The current slice implements authenticated transport request classification, session-context cookies, and the first mailbox-folder bootstrap ROPs. In that test mode, Autodiscover also publishes legacy `EXCH` / `EXPR` provider metadata for Outlook setup probes that do not yet send `X-MapiHttpCapability`; requests that do send that header receive the dedicated `mapiHttp` provider instead.
+`MAPI` implementation has started as a guarded `MAPI over HTTP` foundation for future Outlook desktop support. It is not Outlook-ready. `mapiHttp` autodiscover publication is available only through an explicit administrator interoperability-test switch. The current slice implements authenticated transport request classification, session-context cookies, and the first mailbox-folder bootstrap ROPs. Legacy `EXCH` / `EXPR` provider metadata for Outlook setup probes that do not yet send `X-MapiHttpCapability` requires a separate explicit interoperability-test switch; requests that do send that header receive the dedicated `mapiHttp` provider instead.
 
 ### Architectural principles
 
@@ -17,7 +17,7 @@ The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchang
 - `EWS` must not introduce parallel contact, calendar, mailbox, rights, `Sent`, or `Outbox` state
 - `EWS` and `MAPI` authentication reuse mailbox-account authentication
 - `EWS` must not perform or advertise `SMTP`; outbound transport remains in `LPE-CT`
-- `MAPI` autodiscover publication must remain opt-in and clearly experimental until EMSMDB, NSPI, session context, and mailbox synchronization semantics are implemented against canonical `LPE` state
+- `MAPI` autodiscover publication must remain opt-in and clearly experimental until EMSMDB, NSPI, session context, and mailbox synchronization semantics are implemented against canonical `LPE` state; legacy `EXCH` / `EXPR` publication must remain separately opt-in so it cannot hijack Outlook desktop `IMAP` setup
 - no `Stalwart` code is reused
 
 ### Endpoints
@@ -123,9 +123,9 @@ Request element names ending in `Request`, such as `GetUserOofSettingsRequest`, 
 - `UpdateItem` is limited to contact and calendar field updates; message updates, attachment mutations, tasks, and meeting workflow updates are not implemented yet
 - tasks, free/busy, recurrence expansion, alarms, meeting scheduling, extended properties, attachments, and GAL are not implemented through `EWS` yet
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
-- enabled `EWS` POX autodiscover publishes the configured EWS URL through a `WEB` protocol block with `ASUrl` for EWS-aware clients; top-level `EXCH` and `EXPR` provider sections remain reserved for explicit `MAPI` interoperability-test mode
+- enabled `EWS` POX autodiscover publishes the configured EWS URL through a `WEB` protocol block with `ASUrl` for EWS-aware clients; top-level `EXCH` and `EXPR` provider sections remain reserved for explicit legacy Exchange autodiscover interoperability-test mode
 - SOAP `GetUserSettings` autodiscover publishes the same configured `EWS` endpoint as `ExternalEwsUrl` and `InternalEwsUrl` for EWS clients that prefer SOAP autodiscover over POX
-- `MAPI over HTTP` currently has authenticated transport, session-context wiring, a private-mailbox logon skeleton, read-only canonical mailbox-folder bootstrap ROPs, an initial read-only contents-table view over canonical message rows, read-only message open/property bootstrap, and visible recipient-row reads; it is not an Outlook-ready mailbox service and must be advertised only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled for interoperability testing
+- `MAPI over HTTP` currently has authenticated transport, session-context wiring, a private-mailbox logon skeleton, read-only canonical mailbox-folder bootstrap ROPs, an initial read-only contents-table view over canonical message rows, read-only message open/property bootstrap, and visible recipient-row reads; it is not an Outlook-ready mailbox service and must advertise `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled for interoperability testing, with legacy `EXCH` / `EXPR` provider sections requiring the additional `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` switch
 
 ### Completion priorities
 

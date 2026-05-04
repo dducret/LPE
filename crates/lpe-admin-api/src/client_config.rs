@@ -66,6 +66,7 @@ struct PublishedEndpoints {
     ews_url: String,
     mapi_enabled: bool,
     mapi_http_requested: bool,
+    legacy_exchange_autodiscover_enabled: bool,
     mapi_emsmdb_url: String,
     mapi_nspi_url: String,
     activesync_url: String,
@@ -106,6 +107,8 @@ impl PublishedEndpoints {
             .get("x-mapihttpcapability")
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| !value.trim().is_empty());
+        let legacy_exchange_autodiscover_enabled =
+            env_flag("LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED");
         let mapi_mailbox_id = email_hint.unwrap_or_default();
         let mapi_emsmdb_url = env::var("LPE_AUTOCONFIG_MAPI_EMSMDB_URL").unwrap_or_else(|_| {
             format!("{public_scheme}://{public_host}/mapi/emsmdb/?MailboxId={mapi_mailbox_id}")
@@ -128,6 +131,7 @@ impl PublishedEndpoints {
             ews_url,
             mapi_enabled,
             mapi_http_requested,
+            legacy_exchange_autodiscover_enabled,
             mapi_emsmdb_url,
             mapi_nspi_url,
             activesync_url,
@@ -248,7 +252,10 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
         ));
     }
 
-    if config.mapi_enabled && !config.mapi_http_requested {
+    if config.mapi_enabled
+        && config.legacy_exchange_autodiscover_enabled
+        && !config.mapi_http_requested
+    {
         xml.push_str(&render_exchange_provider_autodiscover_protocols(
             config, email,
         ));
@@ -764,6 +771,7 @@ mod tests {
             ews_url: "https://mail.example.test/EWS/Exchange.asmx".to_string(),
             mapi_enabled: false,
             mapi_http_requested: false,
+            legacy_exchange_autodiscover_enabled: false,
             mapi_emsmdb_url: "https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test"
                 .to_string(),
             mapi_nspi_url: "https://mail.example.test/mapi/nspi/?MailboxId=alice@example.test"
@@ -885,6 +893,7 @@ mod tests {
         let config = PublishedEndpoints {
             mapi_enabled: true,
             mapi_http_requested: false,
+            legacy_exchange_autodiscover_enabled: true,
             ..sample_config()
         };
 
@@ -901,9 +910,28 @@ mod tests {
     }
 
     #[test]
+    fn mapi_enabled_does_not_hijack_default_outlook_imap_profile() {
+        let config = PublishedEndpoints {
+            mapi_enabled: true,
+            mapi_http_requested: false,
+            legacy_exchange_autodiscover_enabled: false,
+            ..sample_config()
+        };
+
+        let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(xml.contains("<Type>IMAP</Type>"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+        assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
+        assert!(!xml.contains("<Type>WEB</Type>"));
+    }
+
+    #[test]
     fn mapi_autodiscover_publication_is_env_opt_in() {
         let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("LPE_AUTOCONFIG_MAPI_ENABLED", "true");
+        std::env::remove_var("LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED");
         std::env::remove_var("LPE_AUTOCONFIG_MAPI_EMSMDB_URL");
         std::env::remove_var("LPE_AUTOCONFIG_MAPI_NSPI_URL");
         std::env::remove_var("LPE_PUBLIC_HOSTNAME");
@@ -917,6 +945,7 @@ mod tests {
 
         assert!(config.mapi_enabled);
         assert!(config.mapi_http_requested);
+        assert!(!config.legacy_exchange_autodiscover_enabled);
         assert_eq!(
             config.mapi_emsmdb_url,
             "https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test"
@@ -928,6 +957,32 @@ mod tests {
         assert!(xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
 
         std::env::remove_var("LPE_AUTOCONFIG_MAPI_ENABLED");
+    }
+
+    #[test]
+    fn legacy_exchange_autodiscover_publication_has_separate_opt_in() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("LPE_AUTOCONFIG_MAPI_ENABLED", "true");
+        std::env::set_var(
+            "LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED",
+            "true",
+        );
+        std::env::remove_var("LPE_PUBLIC_HOSTNAME");
+        std::env::remove_var("LPE_PUBLIC_SCHEME");
+
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "mail.example.test".parse().unwrap());
+        let config = PublishedEndpoints::from_headers(&headers, Some("alice@example.test"));
+        let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(config.mapi_enabled);
+        assert!(config.legacy_exchange_autodiscover_enabled);
+        assert!(xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+        assert!(xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+        assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
+
+        std::env::remove_var("LPE_AUTOCONFIG_MAPI_ENABLED");
+        std::env::remove_var("LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED");
     }
 
     #[test]

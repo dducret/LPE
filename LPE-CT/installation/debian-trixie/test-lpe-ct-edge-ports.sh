@@ -400,6 +400,16 @@ probe_client_publication() {
     else
       warn "Outlook Autodiscover SMTP profile was not required because LPE_CT_SUBMISSION_BIND_ADDRESS is not configured."
     fi
+    if [[ "${LPE_CT_EXPECTED_OUTLOOK_EXCHANGE_AUTODISCOVER:-false}" != "true" ]]; then
+      [[ "$body" != *"<Type>EXCH</Type>"* ]] \
+        || fail "Outlook Autodiscover publishes EXCH and may make Outlook choose the unfinished Exchange route instead of IMAP"
+      [[ "$body" != *"<Type>EXPR</Type>"* ]] \
+        || fail "Outlook Autodiscover publishes EXPR and may make Outlook choose the unfinished Exchange route instead of IMAP"
+      [[ "$body" != *"<Type>WEB</Type>"* ]] \
+        || fail "Outlook Autodiscover publishes WEB and may make Outlook choose an Exchange-style route instead of IMAP"
+      [[ "$body" != *"mapiHttp"* ]] \
+        || fail "Outlook Autodiscover publishes mapiHttp in the default IMAP account setup path"
+    fi
   fi
   pass "Autodiscover POST publishes IMAP through LPE-CT"
 

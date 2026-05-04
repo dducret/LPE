@@ -249,7 +249,11 @@ client path. The `outlook` scope intentionally skips public `25` and combines
 the checks Outlook desktop needs for `IMAP` account setup. If autodiscover is
 intentionally published on a different IMAP or SMTP hostname, set
 `LPE_CT_EXPECTED_AUTODISCOVER_IMAP_HOST` or
-`LPE_CT_EXPECTED_AUTODISCOVER_SMTP_HOST` for that run.
+`LPE_CT_EXPECTED_AUTODISCOVER_SMTP_HOST` for that run. The same scope fails if
+autodiscover publishes Exchange-style `EXCH`, `EXPR`, `WEB`, or `mapiHttp`
+blocks unless `LPE_CT_EXPECTED_OUTLOOK_EXCHANGE_AUTODISCOVER=true` is set,
+because those blocks can make Outlook choose the unfinished Exchange route
+instead of the working `IMAP` profile.
 
 The management UI URL must use `https://`. The generated `nginx` site redirects
 plain `HTTP` received on port `80` to the configured
@@ -595,8 +599,10 @@ and guarded MAPI paths: `/Microsoft-Server-ActiveSync`, `/mapi/`,
 `/Autodiscover/`, `/autoconfig/`, and `/.well-known/autoconfig/`. A healthy
 public publication returns an Outlook autodiscover XML response containing
 `IMAP`, an opt-in `WEB` EWS discovery block when
-`LPE_AUTOCONFIG_EWS_ENABLED` is enabled, or an opt-in `mapiHttp` block when
-`LPE_AUTOCONFIG_MAPI_ENABLED` is enabled. `OPTIONS
+`LPE_AUTOCONFIG_EWS_ENABLED` is enabled, an opt-in `mapiHttp` block when
+`LPE_AUTOCONFIG_MAPI_ENABLED` is enabled, or legacy `EXCH` / `EXPR` provider
+sections only when `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` is
+also enabled. `OPTIONS
 /Microsoft-Server-ActiveSync` returns the `ms-asprotocolversions` and
 `ms-asprotocolcommands` headers. `OPTIONS /mapi/emsmdb` returns
 `x-lpe-mapi-status: transport-session-ready`.
@@ -607,11 +613,11 @@ For public client auto-configuration, the exposed front end must remain `LPE-CT`
 - Outlook for Windows desktop receives an `IMAP` profile by default; `IMAP` remains a supported mailbox-access communication protocol, while `0.1.3` deployments may explicitly enable EWS autodiscovery for the implemented Exchange-style compatibility surface
 - `ActiveSync` remains exposed for mobile/native clients that actually support `Exchange ActiveSync`
 - `EWS` remains opt-in through `LPE_AUTOCONFIG_EWS_ENABLED` and must not be treated as `MAPI`, `RPC`, or client `SMTP`
-- `MAPI over HTTP` routes are guarded implementation groundwork; the public edge publishes `/mapi/` so Outlook can reach the authenticated endpoints, but autodiscover publishes `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled for interoperability testing
+- `MAPI over HTTP` routes are guarded implementation groundwork; the public edge publishes `/mapi/` so Outlook can reach the authenticated endpoints, but autodiscover publishes `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled for interoperability testing, and legacy `EXCH` / `EXPR` provider sections only when `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled
 - no client `SMTP` endpoint should be advertised unless the authenticated `LPE-CT` submission listener is configured, exposed on `465`, and covered by the public certificate
 - the internal `LPE -> LPE-CT` relay must never be advertised as a client-submission endpoint
 
-The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, `LPE_AUTOCONFIG_EWS_ENABLED`, `LPE_AUTOCONFIG_EWS_URL`, `LPE_AUTOCONFIG_MAPI_ENABLED`, `LPE_AUTOCONFIG_MAPI_EMSMDB_URL`, and `LPE_AUTOCONFIG_MAPI_NSPI_URL` variables let you align the published HTTP/XML settings with the real public hostname. The detailed behavior is documented in `docs/architecture/client-autoconfiguration.md`.
+The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, `LPE_AUTOCONFIG_EWS_ENABLED`, `LPE_AUTOCONFIG_EWS_URL`, `LPE_AUTOCONFIG_MAPI_ENABLED`, `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_MAPI_EMSMDB_URL`, and `LPE_AUTOCONFIG_MAPI_NSPI_URL` variables let you align the published HTTP/XML settings with the real public hostname. The detailed behavior is documented in `docs/architecture/client-autoconfiguration.md`.
 
 If `LPE_BIND_ADDRESS` or `LPE_SERVER_NAME` changes in `/etc/lpe/lpe.env`, run `update-lpe.sh` again to regenerate the `nginx` configuration. If `LPE_IMAP_BIND_ADDRESS` changes, restart `lpe.service` and rerun `test-lpe-imap-listener.sh` on the core server, then rerun `test-lpe-ct-edge-ports.sh` on the `LPE-CT` server.
 
