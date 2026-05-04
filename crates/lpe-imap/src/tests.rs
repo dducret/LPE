@@ -774,6 +774,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
 
     let capability = send_command(&mut stream, "A0 CAPABILITY\r\n", "A0").await;
     assert!(capability.contains("AUTH=PLAIN"));
+    assert!(capability.contains("AUTH=LOGIN"));
     assert!(capability.contains("CONDSTORE"));
     assert!(capability.contains("ID"));
     assert!(capability.contains("IDLE"));
@@ -1877,6 +1878,57 @@ async fn plain_authenticate_challenge_response_is_accepted() {
     let auth_payload =
         base64::engine::general_purpose::STANDARD.encode("\0alice@example.test\0secret");
     let response = send_command(&mut stream, &format!("{auth_payload}\r\n"), "A1").await;
+
+    assert!(response.contains("A1 OK AUTHENTICATE completed"));
+    task.abort();
+}
+
+#[tokio::test]
+async fn login_authenticate_challenge_response_is_accepted() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+
+    let username_challenge = send_partial_command(&mut stream, "A1 AUTHENTICATE LOGIN\r\n").await;
+    assert!(username_challenge.contains("+ VXNlcm5hbWU6"));
+
+    let username = base64::engine::general_purpose::STANDARD.encode("alice@example.test");
+    let password_challenge = send_partial_command(&mut stream, &format!("{username}\r\n")).await;
+    assert!(password_challenge.contains("+ UGFzc3dvcmQ6"));
+
+    let password = base64::engine::general_purpose::STANDARD.encode("secret");
+    let response = send_command(&mut stream, &format!("{password}\r\n"), "A1").await;
+
+    assert!(response.contains("A1 OK AUTHENTICATE completed"));
+    task.abort();
+}
+
+#[tokio::test]
+async fn login_authenticate_with_initial_username_is_accepted() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+
+    let username = base64::engine::general_purpose::STANDARD.encode("alice@example.test");
+    let password_challenge = send_partial_command(
+        &mut stream,
+        &format!("A1 AUTHENTICATE LOGIN {username}\r\n"),
+    )
+    .await;
+    assert!(password_challenge.contains("+ UGFzc3dvcmQ6"));
+
+    let password = base64::engine::general_purpose::STANDARD.encode("secret");
+    let response = send_command(&mut stream, &format!("{password}\r\n"), "A1").await;
 
     assert!(response.contains("A1 OK AUTHENTICATE completed"));
     task.abort();

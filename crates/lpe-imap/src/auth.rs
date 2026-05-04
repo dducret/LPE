@@ -87,8 +87,39 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             return Ok(true);
         }
 
+        if mechanism.eq_ignore_ascii_case("LOGIN") {
+            let username_response = match tokens.len() {
+                1 => {
+                    writer.write_all(b"+ VXNlcm5hbWU6\r\n").await?;
+                    writer.flush().await?;
+                    read_authenticate_response(reader, "AUTHENTICATE LOGIN username").await?
+                }
+                2 => tokens[1].clone(),
+                _ => bail!("AUTHENTICATE LOGIN expects an optional username response"),
+            };
+            let username = parse_login_response(&username_response, "username")?;
+
+            writer.write_all(b"+ UGFzc3dvcmQ6\r\n").await?;
+            writer.flush().await?;
+            let password_response =
+                read_authenticate_response(reader, "AUTHENTICATE LOGIN password").await?;
+            let password = parse_login_response(&password_response, "password")?;
+
+            self.principal = Some(
+                authenticate_plain_credentials(&self.store, None, &username, &password, "imap")
+                    .await?,
+            );
+            self.selected = None;
+
+            writer
+                .write_all(format!("{tag} OK AUTHENTICATE completed\r\n").as_bytes())
+                .await?;
+            writer.flush().await?;
+            return Ok(true);
+        }
+
         if !mechanism.eq_ignore_ascii_case("XOAUTH2") {
-            bail!("only AUTHENTICATE PLAIN and XOAUTH2 are supported");
+            bail!("only AUTHENTICATE PLAIN, LOGIN, and XOAUTH2 are supported");
         }
         if tokens.len() != 2 {
             bail!("AUTHENTICATE XOAUTH2 expects an initial response");
@@ -106,6 +137,22 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         writer.flush().await?;
         Ok(true)
     }
+}
+
+async fn read_authenticate_response<R>(reader: &mut BufReader<R>, context: &str) -> Result<String>
+where
+    R: AsyncReadExt + Unpin,
+{
+    let mut line = String::new();
+    let bytes = reader.read_line(&mut line).await?;
+    if bytes == 0 {
+        bail!("{context} response was not received");
+    }
+    let response = line.trim_end_matches(['\r', '\n']);
+    if response == "*" {
+        bail!("{context} was cancelled by the client");
+    }
+    Ok(response.to_string())
 }
 
 fn parse_plain_initial_response(encoded: &str) -> Result<(String, String)> {
@@ -129,6 +176,23 @@ fn parse_plain_initial_response(encoded: &str) -> Result<(String, String)> {
         bail!("PLAIN payload is missing the username");
     }
     Ok((username, password))
+}
+
+fn parse_login_response(encoded: &str, field_name: &str) -> Result<String> {
+    if encoded.trim() == "=" {
+        bail!("AUTHENTICATE LOGIN {field_name} response is empty");
+    }
+    let decoded = BASE64
+        .decode(encoded.trim())
+        .map_err(|_| anyhow!("invalid LOGIN {field_name} response"))?;
+    let value = String::from_utf8(decoded)
+        .map_err(|_| anyhow!("invalid LOGIN {field_name} response"))?
+        .trim()
+        .to_string();
+    if value.is_empty() {
+        bail!("LOGIN payload is missing the {field_name}");
+    }
+    Ok(value)
 }
 
 fn parse_xoauth2_initial_response(encoded: &str) -> Result<(String, String)> {

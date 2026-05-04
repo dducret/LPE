@@ -8,7 +8,8 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 
 ## Implemented scope
 
-- account authentication through `LOGIN` or `AUTHENTICATE PLAIN` with the
+- account authentication through `LOGIN`, `AUTHENTICATE PLAIN`, or
+  Outlook-compatible `AUTHENTICATE LOGIN` with the
   existing mailbox account credentials, supporting Outlook-style SASL initial
   response and challenge/response flows
 - `AUTHENTICATE XOAUTH2` with the mailbox `OAuth2` bearer access token
@@ -104,7 +105,7 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
 
 - no outbound message submission through `IMAP APPEND`; outbound submission remains canonical through `JMAP`, `ActiveSync`, `SMTP` submission, and the web/API submission workflow
 - `APPEND` to `Sent` is an Outlook interoperability acknowledgement only; it intentionally does not create a second `Sent` copy because the authenticated `SMTP` submission path writes the authoritative copy
-- no durable subscribe state, parent/child hierarchy metadata, `QRESYNC`, or SASL mechanisms other than `XOAUTH2`
+- no durable subscribe state, parent/child hierarchy metadata, `QRESYNC`, or SASL mechanisms other than `LOGIN` and `XOAUTH2`
 - mailbox management accepts slash-delimited Outlook folder names, but true parent/child hierarchy metadata is not implemented yet
 - `FETCH BODYSTRUCTURE` and MIME section rendering are compatibility projections over the canonical message text and sanitized HTML fields; attachment MIME reserialization remains deferred
 - `RFC822.SIZE` reports the byte length of the RFC822 projection returned by `BODY[]`, not the original raw ingest size, so size metadata stays consistent with what IMAP clients fetch
