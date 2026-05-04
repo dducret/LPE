@@ -1325,6 +1325,14 @@ mod tests {
             session.accounts[&FakeStore::shared_account().account_id.to_string()].is_read_only,
             false
         );
+        let shared_capabilities = &session.accounts
+            [&FakeStore::shared_account().account_id.to_string()]
+            .account_capabilities;
+        assert!(shared_capabilities.contains_key(JMAP_MAIL_CAPABILITY));
+        assert!(shared_capabilities.contains_key(JMAP_SUBMISSION_CAPABILITY));
+        assert!(!shared_capabilities.contains_key(JMAP_CONTACTS_CAPABILITY));
+        assert!(!shared_capabilities.contains_key(JMAP_CALENDARS_CAPABILITY));
+        assert!(!shared_capabilities.contains_key(JMAP_TASKS_CAPABILITY));
 
         let response = service
             .handle_api_request(
@@ -1373,6 +1381,32 @@ mod tests {
             response.method_responses[0].1["list"][1]["xLpeSender"]["email"],
             Value::String("alice@example.test".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn session_omits_submission_for_shared_mailbox_without_sender_grant() {
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        });
+
+        let session = service
+            .session_document(Some("Bearer token"), None)
+            .await
+            .unwrap();
+        let shared_capabilities = &session.accounts
+            [&FakeStore::shared_account().account_id.to_string()]
+            .account_capabilities;
+
+        assert!(shared_capabilities.contains_key(JMAP_MAIL_CAPABILITY));
+        assert!(!shared_capabilities.contains_key(JMAP_SUBMISSION_CAPABILITY));
+        assert!(!shared_capabilities.contains_key(JMAP_CONTACTS_CAPABILITY));
+        assert!(!shared_capabilities.contains_key(JMAP_CALENDARS_CAPABILITY));
+        assert!(!shared_capabilities.contains_key(JMAP_TASKS_CAPABILITY));
     }
 
     #[tokio::test]

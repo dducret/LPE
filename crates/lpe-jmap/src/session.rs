@@ -34,7 +34,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     name: accessible.email.clone(),
                     is_personal: accessible.is_owned,
                     is_read_only: mailbox_account_is_read_only(accessible),
-                    account_capabilities: capabilities.clone(),
+                    account_capabilities: session_account_capabilities(accessible, &capabilities),
                 },
             );
         }
@@ -156,4 +156,30 @@ pub(crate) fn requested_account_id(
 
 fn mailbox_account_is_read_only(access: &MailboxAccountAccess) -> bool {
     !(access.may_write || access.is_owned || access.may_send_as || access.may_send_on_behalf)
+}
+
+fn session_account_capabilities(
+    access: &MailboxAccountAccess,
+    capabilities: &HashMap<String, Value>,
+) -> HashMap<String, Value> {
+    if access.is_owned {
+        return capabilities.clone();
+    }
+
+    let mut account_capabilities = HashMap::new();
+    for capability in [
+        JMAP_CORE_CAPABILITY,
+        JMAP_MAIL_CAPABILITY,
+        JMAP_WEBSOCKET_CAPABILITY,
+    ] {
+        if let Some(value) = capabilities.get(capability) {
+            account_capabilities.insert(capability.to_string(), value.clone());
+        }
+    }
+    if access.may_send_as || access.may_send_on_behalf {
+        if let Some(value) = capabilities.get(JMAP_SUBMISSION_CAPABILITY) {
+            account_capabilities.insert(JMAP_SUBMISSION_CAPABILITY.to_string(), value.clone());
+        }
+    }
+    account_capabilities
 }
