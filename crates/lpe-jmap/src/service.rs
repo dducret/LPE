@@ -33,6 +33,7 @@ use crate::{
 pub(crate) const JMAP_CORE_CAPABILITY: &str = "urn:ietf:params:jmap:core";
 pub(crate) const JMAP_MAIL_CAPABILITY: &str = "urn:ietf:params:jmap:mail";
 pub(crate) const JMAP_SUBMISSION_CAPABILITY: &str = "urn:ietf:params:jmap:submission";
+pub(crate) const JMAP_BLOB_CAPABILITY: &str = "urn:ietf:params:jmap:blob";
 pub(crate) const JMAP_CONTACTS_CAPABILITY: &str = "urn:ietf:params:jmap:contacts";
 pub(crate) const JMAP_CALENDARS_CAPABILITY: &str = "urn:ietf:params:jmap:calendars";
 pub(crate) const JMAP_TASKS_CAPABILITY: &str = "urn:ietf:params:jmap:tasks";
@@ -46,6 +47,7 @@ pub(crate) const MAX_QUERY_LIMIT: u64 = 250;
 pub(crate) const DEFAULT_GET_LIMIT: u64 = 100;
 pub(crate) const MAX_SIZE_UPLOAD: u64 = 25 * 1024 * 1024;
 pub(crate) const MAX_CONCURRENT_UPLOAD: u64 = 4;
+pub(crate) const MAX_BLOB_DATA_SOURCES: u64 = 64;
 
 type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 
@@ -284,7 +286,19 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 "Thread/changes" => self.handle_thread_changes(account, arguments).await,
                 "Quota/get" => self.handle_quota_get(account, arguments).await,
                 "SearchSnippet/get" => self.handle_search_snippet_get(account, arguments).await,
-                "Blob/copy" => self.handle_blob_copy(account, arguments).await,
+                "Blob/upload" => {
+                    self.handle_blob_upload(account, arguments, &mut created_ids)
+                        .await
+                }
+                "Blob/get" => self.handle_blob_get(account, arguments, &created_ids).await,
+                "Blob/lookup" => {
+                    self.handle_blob_lookup(account, arguments, &created_ids)
+                        .await
+                }
+                "Blob/copy" => {
+                    self.handle_blob_copy(account, arguments, &created_ids)
+                        .await
+                }
                 "VacationResponse/get" => {
                     self.handle_vacation_response_get(account, arguments).await
                 }

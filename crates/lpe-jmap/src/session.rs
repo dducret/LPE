@@ -10,10 +10,10 @@ use crate::{
     parse::parse_uuid,
     protocol::{SessionAccount, SessionDocument},
     service::opaque_state_fingerprint,
-    JmapService, JMAP_CALENDARS_CAPABILITY, JMAP_CONTACTS_CAPABILITY, JMAP_CORE_CAPABILITY,
-    JMAP_MAIL_CAPABILITY, JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY,
-    JMAP_VACATION_RESPONSE_CAPABILITY, JMAP_WEBSOCKET_CAPABILITY, MAX_CONCURRENT_UPLOAD,
-    MAX_SIZE_UPLOAD, SESSION_STATE,
+    JmapService, JMAP_BLOB_CAPABILITY, JMAP_CALENDARS_CAPABILITY, JMAP_CONTACTS_CAPABILITY,
+    JMAP_CORE_CAPABILITY, JMAP_MAIL_CAPABILITY, JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY,
+    JMAP_VACATION_RESPONSE_CAPABILITY, JMAP_WEBSOCKET_CAPABILITY, MAX_BLOB_DATA_SOURCES,
+    MAX_CONCURRENT_UPLOAD, MAX_SIZE_UPLOAD, SESSION_STATE,
 };
 
 impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
@@ -48,6 +48,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         primary_accounts.insert(JMAP_CORE_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_MAIL_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_SUBMISSION_CAPABILITY.to_string(), account_id.clone());
+        primary_accounts.insert(JMAP_BLOB_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_CONTACTS_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_CALENDARS_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_TASKS_CAPABILITY.to_string(), account_id.clone());
@@ -137,6 +138,7 @@ fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {
                 "maxDelayedSend": 0,
             }),
         ),
+        (JMAP_BLOB_CAPABILITY.to_string(), json!({})),
         (
             JMAP_CONTACTS_CAPABILITY.to_string(),
             json!({
@@ -194,25 +196,48 @@ fn session_account_capabilities(
     capabilities: &HashMap<String, Value>,
 ) -> HashMap<String, Value> {
     if access.is_owned {
-        return capabilities.clone();
+        return capabilities
+            .iter()
+            .map(|(name, value)| (name.clone(), account_capability_value(name, value)))
+            .collect();
     }
 
     let mut account_capabilities = HashMap::new();
     for capability in [
         JMAP_CORE_CAPABILITY,
         JMAP_MAIL_CAPABILITY,
+        JMAP_BLOB_CAPABILITY,
         JMAP_WEBSOCKET_CAPABILITY,
     ] {
         if let Some(value) = capabilities.get(capability) {
-            account_capabilities.insert(capability.to_string(), value.clone());
+            account_capabilities.insert(
+                capability.to_string(),
+                account_capability_value(capability, value),
+            );
         }
     }
     if access.may_write && (access.may_send_as || access.may_send_on_behalf) {
         if let Some(value) = capabilities.get(JMAP_SUBMISSION_CAPABILITY) {
-            account_capabilities.insert(JMAP_SUBMISSION_CAPABILITY.to_string(), value.clone());
+            account_capabilities.insert(
+                JMAP_SUBMISSION_CAPABILITY.to_string(),
+                account_capability_value(JMAP_SUBMISSION_CAPABILITY, value),
+            );
         }
     }
     account_capabilities
+}
+
+fn account_capability_value(capability: &str, global_value: &Value) -> Value {
+    if capability == JMAP_BLOB_CAPABILITY {
+        json!({
+            "maxSizeBlobSet": MAX_SIZE_UPLOAD,
+            "maxDataSources": MAX_BLOB_DATA_SOURCES,
+            "supportedTypeNames": ["Mailbox", "Thread", "Email"],
+            "supportedDigestAlgorithms": [],
+        })
+    } else {
+        global_value.clone()
+    }
 }
 
 pub(crate) fn session_state(accessible_accounts: &[MailboxAccountAccess]) -> String {

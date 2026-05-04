@@ -23,11 +23,12 @@ pub use crate::service::{router, JmapService};
 pub(crate) use crate::convert::resolve_creation_reference;
 pub(crate) use crate::parse::parse_submission_email_id;
 pub(crate) use crate::service::{
-    collection_state_fingerprint, trim_snippet, DEFAULT_GET_LIMIT, JMAP_CALENDARS_CAPABILITY,
-    JMAP_CONTACTS_CAPABILITY, JMAP_CORE_CAPABILITY, JMAP_MAIL_CAPABILITY,
-    JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY, JMAP_VACATION_RESPONSE_CAPABILITY,
-    JMAP_WEBSOCKET_CAPABILITY, MAX_CONCURRENT_UPLOAD, MAX_QUERY_LIMIT, MAX_SIZE_UPLOAD,
-    PUSH_STATE_VERSION, QUERY_STATE_VERSION, SESSION_STATE, STATE_TOKEN_VERSION,
+    collection_state_fingerprint, trim_snippet, DEFAULT_GET_LIMIT, JMAP_BLOB_CAPABILITY,
+    JMAP_CALENDARS_CAPABILITY, JMAP_CONTACTS_CAPABILITY, JMAP_CORE_CAPABILITY,
+    JMAP_MAIL_CAPABILITY, JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY,
+    JMAP_VACATION_RESPONSE_CAPABILITY, JMAP_WEBSOCKET_CAPABILITY, MAX_BLOB_DATA_SOURCES,
+    MAX_CONCURRENT_UPLOAD, MAX_QUERY_LIMIT, MAX_SIZE_UPLOAD, PUSH_STATE_VERSION,
+    QUERY_STATE_VERSION, SESSION_STATE, STATE_TOKEN_VERSION,
 };
 pub(crate) use crate::session::requested_account_id;
 pub(crate) use crate::state::encode_query_state;
@@ -824,14 +825,21 @@ mod tests {
             media_type: &str,
             blob_bytes: &[u8],
         ) -> Result<JmapUploadBlob> {
+            let mut uploads = self.uploads.lock().unwrap();
+            let stable_first_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+            let id = if uploads.iter().any(|blob| blob.id == stable_first_id) {
+                Uuid::new_v4()
+            } else {
+                stable_first_id
+            };
             let blob = JmapUploadBlob {
-                id: Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap(),
+                id,
                 account_id,
                 media_type: media_type.to_string(),
                 octet_size: blob_bytes.len() as u64,
                 blob_bytes: blob_bytes.to_vec(),
             };
-            self.uploads.lock().unwrap().push(blob.clone());
+            uploads.push(blob.clone());
             Ok(blob)
         }
 
@@ -3905,6 +3913,223 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blob_upload_get_and_copy_resolve_created_blob_references() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            ..Default::default()
+        };
+        let service = JmapService::new_with_validator(
+            store.clone(),
+            validator_sequence(vec![
+                Ok(MagikaDetection {
+                    label: "text".to_string(),
+                    mime_type: "text/plain".to_string(),
+                    description: "text".to_string(),
+                    group: "text".to_string(),
+                    extensions: vec!["txt".to_string()],
+                    score: Some(0.99),
+                }),
+                Ok(MagikaDetection {
+                    label: "text".to_string(),
+                    mime_type: "text/plain".to_string(),
+                    description: "text".to_string(),
+                    group: "text".to_string(),
+                    extensions: vec!["txt".to_string()],
+                    score: Some(0.99),
+                }),
+            ]),
+        );
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_BLOB_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Blob/upload".to_string(),
+                            json!({
+                                "accountId": FakeStore::account().account_id.to_string(),
+                                "create": {
+                                    "b1": {
+                                        "type": "text/plain",
+                                        "data": [{"data:asText": "hello world"}]
+                                    }
+                                }
+                            }),
+                            "u1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Blob/upload".to_string(),
+                            json!({
+                                "accountId": FakeStore::account().account_id.to_string(),
+                                "create": {
+                                    "b2": {
+                                        "type": "text/plain",
+                                        "data": [{"blobId": "#b1", "offset": 6, "length": 5}]
+                                    }
+                                }
+                            }),
+                            "u2".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Blob/get".to_string(),
+                            json!({
+                                "accountId": FakeStore::account().account_id.to_string(),
+                                "ids": ["#b2"],
+                                "properties": ["data:asText", "size"]
+                            }),
+                            "g1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Blob/copy".to_string(),
+                            json!({
+                                "fromAccountId": FakeStore::account().account_id.to_string(),
+                                "accountId": FakeStore::account().account_id.to_string(),
+                                "blobIds": ["#b2"]
+                            }),
+                            "c1".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(response.created_ids["b1"].starts_with("upload:"));
+        assert!(response.created_ids["b2"].starts_with("upload:"));
+        assert_eq!(
+            response.method_responses[2].1["list"][0]["id"],
+            response.created_ids["b2"]
+        );
+        assert_eq!(
+            response.method_responses[2].1["list"][0]["data:asText"],
+            "world"
+        );
+        assert_eq!(response.method_responses[2].1["list"][0]["size"], 5);
+        assert!(response.method_responses[3].1["copied"]["#b2"]
+            .as_str()
+            .unwrap()
+            .starts_with("upload:"));
+        let uploads = store.uploads.lock().unwrap();
+        assert!(uploads.iter().any(|blob| blob.blob_bytes == b"hello world"));
+        assert!(uploads.iter().any(|blob| blob.blob_bytes == b"world"));
+    }
+
+    #[tokio::test]
+    async fn blob_get_reports_encoding_and_range_edge_cases() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            uploads: Arc::new(Mutex::new(vec![JmapUploadBlob {
+                id: Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap(),
+                account_id: FakeStore::account().account_id,
+                media_type: "application/octet-stream".to_string(),
+                octet_size: 2,
+                blob_bytes: vec![0xff, 0xfe],
+            }])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_BLOB_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Blob/get".to_string(),
+                        json!({
+                            "accountId": FakeStore::account().account_id.to_string(),
+                            "ids": ["upload:99999999-9999-9999-9999-999999999999"],
+                            "properties": ["data", "data:asText", "data:asBase64", "size"],
+                            "offset": 0,
+                            "length": 10
+                        }),
+                        "g1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let blob = &response.method_responses[0].1["list"][0];
+        assert_eq!(blob["size"], 2);
+        assert_eq!(blob["data:asText"], Value::Null);
+        assert_eq!(blob["data:asBase64"], "//4=");
+        assert_eq!(blob["isEncodingProblem"], true);
+        assert_eq!(blob["isTruncated"], true);
+    }
+
+    #[tokio::test]
+    async fn blob_lookup_projects_visible_canonical_message_references() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                        JMAP_BLOB_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Blob/lookup".to_string(),
+                        json!({
+                            "accountId": FakeStore::account().account_id.to_string(),
+                            "typeNames": ["Email", "Thread", "Mailbox"],
+                            "ids": [
+                                "draft-message:cccccccc-cccc-cccc-cccc-cccccccccccc",
+                                "missing"
+                            ]
+                        }),
+                        "l1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let list = response.method_responses[0].1["list"].as_array().unwrap();
+        assert_eq!(
+            list[0]["matchedIds"]["Email"][0],
+            "cccccccc-cccc-cccc-cccc-cccccccccccc"
+        );
+        assert_eq!(
+            list[0]["matchedIds"]["Thread"][0],
+            "dddddddd-dddd-dddd-dddd-dddddddddddd"
+        );
+        assert_eq!(
+            list[0]["matchedIds"]["Mailbox"][0],
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        );
+        assert!(list[1]["matchedIds"]["Email"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(list[1]["matchedIds"]["Thread"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert!(list[1]["matchedIds"]["Mailbox"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
     async fn session_exposes_contacts_and_calendars_capabilities() {
         let service = JmapService::new(FakeStore {
             session: Some(FakeStore::account()),
@@ -3926,7 +4151,13 @@ mod tests {
         assert!(session
             .capabilities
             .contains_key(JMAP_VACATION_RESPONSE_CAPABILITY));
+        assert!(session.capabilities.contains_key(JMAP_BLOB_CAPABILITY));
         assert!(session.capabilities.contains_key(JMAP_WEBSOCKET_CAPABILITY));
+        assert_eq!(
+            session.accounts[&FakeStore::account().account_id.to_string()].account_capabilities
+                [JMAP_BLOB_CAPABILITY]["maxDataSources"],
+            MAX_BLOB_DATA_SOURCES
+        );
         assert_eq!(
             session.primary_accounts[JMAP_CONTACTS_CAPABILITY],
             FakeStore::account().account_id.to_string()
