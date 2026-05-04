@@ -72,6 +72,7 @@ struct MapiSession {
 enum MapiObject {
     Logon,
     Folder { folder_id: u64 },
+    Message { folder_id: u64, message_id: u64 },
     HierarchyTable { folder_id: u64, columns: Vec<u32> },
     ContentsTable { folder_id: u64, columns: Vec<u32> },
 }
@@ -754,6 +755,28 @@ fn execute_rops(
                 responses.extend_from_slice(&rop_open_folder_response(&request));
                 output_handles.push(handle);
             }
+            0x03 => {
+                let folder_id = request.folder_id().unwrap_or(INBOX_FOLDER_ID);
+                let message_id = request.message_id().unwrap_or(0);
+                if let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails) {
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::Message {
+                            folder_id,
+                            message_id,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_open_message_response(&request, email));
+                    output_handles.push(handle);
+                } else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x03,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_010F,
+                    ));
+                }
+            }
             0x04 => {
                 let folder_id = input_object(session, &handle_slots, &request)
                     .and_then(|object| object.folder_id())
@@ -792,8 +815,12 @@ fn execute_rops(
                 &request,
                 input_object(session, &handle_slots, &request),
                 mailboxes,
+                emails,
             )),
-            0x09 => responses.extend_from_slice(&rop_get_properties_list_response(&request)),
+            0x09 => responses.extend_from_slice(&rop_get_properties_list_response(
+                &request,
+                input_object(session, &handle_slots, &request),
+            )),
             0x12 => {
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::HierarchyTable { columns, .. })
@@ -857,6 +884,7 @@ const PID_TAG_HAS_ATTACHMENTS: u32 = 0x0E1B_000B;
 const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;
 const PID_TAG_INSTANCE_KEY: u32 = 0x0FF6_0102;
 const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
+const PID_TAG_BODY_W: u32 = 0x1000_001F;
 const PID_TAG_INTERNET_MESSAGE_ID_W: u32 = 0x1035_001F;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_MID: u32 = 0x674A_0014;
@@ -885,6 +913,7 @@ impl MapiObject {
         match self {
             MapiObject::Logon => Some(ROOT_FOLDER_ID),
             MapiObject::Folder { folder_id }
+            | MapiObject::Message { folder_id, .. }
             | MapiObject::HierarchyTable { folder_id, .. }
             | MapiObject::ContentsTable { folder_id, .. } => Some(*folder_id),
         }
@@ -987,6 +1016,26 @@ fn default_folder_property_tags() -> Vec<u32> {
     ]
 }
 
+fn default_message_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_MESSAGE_DELIVERY_TIME,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SENDER_NAME_W,
+        PID_TAG_SENDER_EMAIL_ADDRESS_W,
+        PID_TAG_DISPLAY_TO_W,
+        PID_TAG_HAS_ATTACHMENTS,
+        PID_TAG_BODY_W,
+        PID_TAG_INTERNET_MESSAGE_ID_W,
+    ]
+}
+
 fn split_rop_buffer(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
     if buffer.len() < 2 {
         return None;
@@ -1027,6 +1076,18 @@ fn rop_open_folder_response(request: &RopRequest) -> Vec<u8> {
     response
 }
 
+fn rop_open_message_response(request: &RopRequest, email: &JmapEmail) -> Vec<u8> {
+    let mut response = vec![0x03, request.output_handle_index.unwrap_or(0)];
+    write_u32(&mut response, 0);
+    response.push(0);
+    write_typed_string(&mut response, "");
+    write_typed_string(&mut response, &email.subject);
+    response.extend_from_slice(&(email.to.len() as u16).to_le_bytes());
+    response.extend_from_slice(&0u16.to_le_bytes());
+    response.push(0);
+    response
+}
+
 fn rop_get_hierarchy_table_response(request: &RopRequest, row_count: u32) -> Vec<u8> {
     let mut response = vec![0x04, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
@@ -1048,8 +1109,11 @@ fn rop_set_columns_response(request: &RopRequest) -> Vec<u8> {
     response
 }
 
-fn rop_get_properties_list_response(request: &RopRequest) -> Vec<u8> {
-    let tags = default_folder_property_tags();
+fn rop_get_properties_list_response(request: &RopRequest, object: Option<&MapiObject>) -> Vec<u8> {
+    let tags = match object {
+        Some(MapiObject::Message { .. }) => default_message_property_tags(),
+        _ => default_folder_property_tags(),
+    };
     let mut response = vec![0x09, request.response_handle_index()];
     write_u32(&mut response, 0);
     response.extend_from_slice(&(tags.len() as u16).to_le_bytes());
@@ -1063,16 +1127,34 @@ fn rop_get_properties_specific_response(
     request: &RopRequest,
     object: Option<&MapiObject>,
     mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
 ) -> Vec<u8> {
     let mut response = vec![0x07, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
     let columns = request.property_tags();
-    let folder_id = object
-        .and_then(MapiObject::folder_id)
-        .unwrap_or(ROOT_FOLDER_ID);
-    let row = folder_row_for_id(folder_id, mailboxes)
-        .map(|mailbox| serialize_folder_row(mailbox, &columns))
-        .unwrap_or_else(|| serialize_root_folder_row(mailboxes, &columns));
+    let row = match object {
+        Some(MapiObject::Message {
+            folder_id,
+            message_id,
+        }) => {
+            let Some(email) = message_for_id(*folder_id, *message_id, mailboxes, emails) else {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            };
+            serialize_message_row(email, &columns)
+        }
+        _ => {
+            let folder_id = object
+                .and_then(MapiObject::folder_id)
+                .unwrap_or(ROOT_FOLDER_ID);
+            folder_row_for_id(folder_id, mailboxes)
+                .map(|mailbox| serialize_folder_row(mailbox, &columns))
+                .unwrap_or_else(|| serialize_root_folder_row(mailboxes, &columns))
+        }
+    };
     response.extend_from_slice(&row);
     response
 }
@@ -1185,6 +1267,17 @@ fn emails_for_folder<'a>(
         .collect()
 }
 
+fn message_for_id<'a>(
+    folder_id: u64,
+    message_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &'a [JmapEmail],
+) -> Option<&'a JmapEmail> {
+    emails.iter().find(|email| {
+        mapi_message_id(email) == message_id && email_matches_folder(email, folder_id, mailboxes)
+    })
+}
+
 fn email_matches_folder(email: &JmapEmail, folder_id: u64, mailboxes: &[JmapMailbox]) -> bool {
     if let Some(role) = role_for_folder_id(folder_id) {
         return email.mailbox_role == role;
@@ -1268,6 +1361,7 @@ fn serialize_message_row(email: &JmapEmail, columns: &[u32]) -> Vec<u8> {
             PID_TAG_SENDER_EMAIL_ADDRESS_W => write_utf16z(&mut row, &email.from_address),
             PID_TAG_DISPLAY_TO_W => write_utf16z(&mut row, &display_to(email)),
             PID_TAG_HAS_ATTACHMENTS => row.push(email.has_attachments as u8),
+            PID_TAG_BODY_W => write_utf16z(&mut row, &email.body_text),
             PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => {
                 write_u16_prefixed_bytes(&mut row, email.id.as_bytes())
             }
@@ -1342,8 +1436,12 @@ fn mapi_message_id(email: &JmapEmail) -> u64 {
 }
 
 fn unsupported_rop_response(rop_id: u8, handle_index: u8) -> Vec<u8> {
+    rop_error_response(rop_id, handle_index, 0x8004_0102)
+}
+
+fn rop_error_response(rop_id: u8, handle_index: u8, error_code: u32) -> Vec<u8> {
     let mut response = vec![rop_id, handle_index];
-    write_u32(&mut response, 0x8004_0102);
+    write_u32(&mut response, error_code);
     response
 }
 
@@ -1443,6 +1541,15 @@ fn write_utf16z(body: &mut Vec<u8>, value: &str) {
         body.extend_from_slice(&unit.to_le_bytes());
     }
     body.extend_from_slice(&0u16.to_le_bytes());
+}
+
+fn write_typed_string(body: &mut Vec<u8>, value: &str) {
+    if value.is_empty() {
+        body.push(0x01);
+    } else {
+        body.push(0x04);
+        write_utf16z(body, value);
+    }
 }
 
 fn is_authentication_error(message: &str) -> bool {
@@ -1546,6 +1653,11 @@ impl RopRequest {
         Some(u64::from_le_bytes(bytes.try_into().ok()?))
     }
 
+    fn message_id(&self) -> Option<u64> {
+        let bytes = self.payload.get(9..17)?;
+        Some(u64::from_le_bytes(bytes.try_into().ok()?))
+    }
+
     fn property_tags(&self) -> Vec<u32> {
         let start = match self.rop_id {
             0x07 => 4,
@@ -1584,6 +1696,21 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
             let mut payload = Vec::new();
             payload.extend_from_slice(cursor.read_bytes(8)?);
             payload.push(cursor.read_u8()?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
+        0x03 => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            let _code_page_id = cursor.read_u16()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(cursor.read_bytes(8)?);
+            payload.push(cursor.read_u8()?);
+            payload.extend_from_slice(cursor.read_bytes(8)?);
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),

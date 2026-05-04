@@ -574,6 +574,14 @@ fn utf16z(value: &str) -> Vec<u8> {
     bytes
 }
 
+fn test_mapi_message_id(id: &str) -> u64 {
+    let uuid = Uuid::parse_str(id).unwrap();
+    let bytes = uuid.as_bytes();
+    u64::from_le_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ]) | 0x4000_0000_0000_0000
+}
+
 fn utf16z_string_bytes(value: &[u8]) -> Vec<u8> {
     value
         .chunks_exact(2)
@@ -1098,6 +1106,109 @@ async fn mapi_over_http_contents_table_lists_canonical_messages() {
     assert!(contains_bytes(response_rops, &utf16z("Bob")));
     assert!(contains_bytes(response_rops, &128u32.to_le_bytes()));
     assert!(!contains_bytes(response_rops, &utf16z("Archive message")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_open_message_then_gets_canonical_message_properties() {
+    let message_id = "11111111-1111-1111-1111-111111111111";
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            message_id,
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox message",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&5u64.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x03, 0x00, 0x01, 0x02, // RopOpenMessage
+    ]);
+    rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
+    rops.extend_from_slice(&5u64.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    rops.extend_from_slice(&[
+        0x07, 0x00, 0x02, // RopGetPropertiesSpecific
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+    rops.extend_from_slice(&5u16.to_le_bytes());
+    rops.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x1000_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x0C1F_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x0E08_0003u32.to_le_bytes());
+    rops.extend_from_slice(&0x0E07_0003u32.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &rop_buffer[2..2 + response_rop_size];
+
+    let open_message_offset = 8;
+    assert_eq!(response_rops[open_message_offset], 0x03);
+    assert_eq!(response_rops[open_message_offset + 1], 0x02);
+    assert_eq!(
+        u32::from_le_bytes(
+            response_rops[open_message_offset + 2..open_message_offset + 6]
+                .try_into()
+                .unwrap()
+        ),
+        0
+    );
+    let get_props_offset = response_rops
+        .iter()
+        .enumerate()
+        .skip(open_message_offset + 6)
+        .find_map(|(offset, byte)| (*byte == 0x07).then_some(offset))
+        .unwrap();
+    assert_eq!(response_rops[get_props_offset + 1], 0x02);
+    assert_eq!(
+        u32::from_le_bytes(
+            response_rops[get_props_offset + 2..get_props_offset + 6]
+                .try_into()
+                .unwrap()
+        ),
+        0
+    );
+    assert!(contains_bytes(response_rops, &utf16z("Inbox message")));
+    assert!(contains_bytes(response_rops, &utf16z("Hello")));
+    assert!(contains_bytes(response_rops, &utf16z("alice@example.test")));
+    assert!(contains_bytes(response_rops, &128u32.to_le_bytes()));
 }
 
 #[tokio::test]
