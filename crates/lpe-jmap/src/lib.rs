@@ -3205,6 +3205,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn websocket_reconnect_recovers_delegated_mailbox_right_changes_from_journal() {
+        let account = FakeStore::account();
+        let shared = FakeStore::shared_account();
+        let enabled_types = HashSet::from(["Mailbox".to_string()]);
+        let initial_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            canonical_change_cursor: Some(10),
+            ..Default::default()
+        });
+        let previous_states = initial_service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+        let previous_push_state = encode_push_state(&previous_states, Some(10)).unwrap();
+
+        let mut change_set = CanonicalPushChangeSet::default();
+        change_set.insert_accounts(CanonicalChangeCategory::Mail, [shared.account_id]);
+        change_set.set_journal_cursor(11);
+        let updated_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(true, false),
+            ],
+            canonical_change_cursor: Some(11),
+            canonical_change_replay: CanonicalChangeReplay {
+                change_set,
+                current_cursor: Some(11),
+                truncated: false,
+            },
+            ..Default::default()
+        });
+        let current_states = updated_service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+
+        let changed = updated_service
+            .recover_push_enable_change(
+                account.account_id,
+                &enabled_types,
+                Some(previous_push_state.as_str()),
+                Some(11),
+                &current_states,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(changed.len(), 1);
+        assert_eq!(
+            changed[&shared.account_id.to_string()]["Mailbox"],
+            current_states[&shared.account_id.to_string()]["Mailbox"]
+        );
+    }
+
+    #[tokio::test]
     async fn websocket_reconnect_falls_back_to_full_snapshot_when_journal_replay_is_truncated() {
         let account = FakeStore::account();
         let enabled_types = HashSet::from(["Task".to_string()]);
