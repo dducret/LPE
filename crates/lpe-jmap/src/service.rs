@@ -286,10 +286,15 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             method_responses.push(JmapMethodResponse(method_name, payload, call_id));
         }
 
+        let accessible_accounts = self
+            .store
+            .fetch_accessible_mailbox_accounts(account.account_id)
+            .await?;
+
         Ok(JmapApiResponse {
             method_responses,
             created_ids,
-            session_state: SESSION_STATE.to_string(),
+            session_state: session::session_state(&accessible_accounts),
         })
     }
 

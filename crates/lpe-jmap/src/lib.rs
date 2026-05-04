@@ -1348,6 +1348,29 @@ mod tests {
         assert_ne!(base.state, delegated.state);
         assert_eq!(read_only_without_sender.state, read_only_with_sender.state);
         assert!(!delegated.state.contains("shared@example.test"));
+
+        let api = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        })
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_CORE_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Mailbox/query".to_string(),
+                    json!({}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(api.session_state, delegated.state);
     }
 
     #[tokio::test]

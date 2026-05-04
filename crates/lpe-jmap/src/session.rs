@@ -185,7 +185,7 @@ fn session_account_capabilities(
     account_capabilities
 }
 
-fn session_state(accessible_accounts: &[MailboxAccountAccess]) -> String {
+pub(crate) fn session_state(accessible_accounts: &[MailboxAccountAccess]) -> String {
     let mut entries = accessible_accounts
         .iter()
         .map(|account| {
