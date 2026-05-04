@@ -526,6 +526,10 @@ probe_client_publication() {
         || fail "Outlook Autodiscover SMTP port is not ${expected_smtp_port}"
       [[ "$body" == *"<AuthRequired>on</AuthRequired>"* ]] \
         || fail "Outlook Autodiscover SMTP profile does not require authentication"
+      [[ "$body" == *"<UsePOPAuth>off</UsePOPAuth>"* ]] \
+        || fail "Outlook Autodiscover SMTP profile does not disable POP-before-SMTP authentication"
+      [[ "$body" == *"<SMTPLast>off</SMTPLast>"* ]] \
+        || fail "Outlook Autodiscover SMTP profile does not disable SMTP-after-download"
     else
       warn "Outlook Autodiscover SMTP profile was not required because LPE_CT_SUBMISSION_BIND_ADDRESS is not configured."
     fi

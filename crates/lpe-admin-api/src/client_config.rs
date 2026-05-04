@@ -244,6 +244,8 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
                 "        <SPA>off</SPA>\n",
                 "        <SSL>on</SSL>\n",
                 "        <AuthRequired>on</AuthRequired>\n",
+                "        <UsePOPAuth>off</UsePOPAuth>\n",
+                "        <SMTPLast>off</SMTPLast>\n",
                 "      </Protocol>\n"
             ),
             smtp_host = escape_xml(smtp_host),
@@ -840,6 +842,8 @@ mod tests {
         assert!(xml.contains("<Type>SMTP</Type>"));
         assert!(xml.contains("<Server>submit.example.test</Server>"));
         assert!(xml.contains("<Port>465</Port>"));
+        assert!(xml.contains("<UsePOPAuth>off</UsePOPAuth>"));
+        assert!(xml.contains("<SMTPLast>off</SMTPLast>"));
     }
 
     #[test]
