@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
-use lpe_storage::JmapMailbox;
+use lpe_storage::{JmapEmail, JmapMailbox};
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock},
@@ -274,6 +274,33 @@ async fn execute_response<S: ExchangeStore>(
             );
         }
     };
+    let emails = match store
+        .query_jmap_email_ids(principal.account_id, None, None, 0, 500)
+        .await
+    {
+        Ok(query) => match store
+            .fetch_jmap_emails(principal.account_id, &query.ids)
+            .await
+        {
+            Ok(emails) => emails,
+            Err(error) => {
+                return execute_failure_response(
+                    request_id,
+                    4,
+                    &format!("failed to load mailbox messages: {error}"),
+                    Some(session_cookie(endpoint, &session_id, false)),
+                );
+            }
+        },
+        Err(error) => {
+            return execute_failure_response(
+                request_id,
+                4,
+                &format!("failed to query mailbox messages: {error}"),
+                Some(session_cookie(endpoint, &session_id, false)),
+            );
+        }
+    };
     let Some(rop_buffer) = with_session_mut(&session_id, |session| {
         if !session_matches(session, endpoint, principal) {
             return None;
@@ -282,6 +309,7 @@ async fn execute_response<S: ExchangeStore>(
             principal,
             session,
             &mailboxes,
+            &emails,
             &execute.rop_buffer,
         ))
     })
@@ -695,6 +723,7 @@ fn execute_rops(
     principal: &AccountPrincipal,
     session: &mut MapiSession,
     mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
     rop_buffer: &[u8],
 ) -> Vec<u8> {
     let Some((requests, handle_table)) = split_rop_buffer(rop_buffer) else {
@@ -753,7 +782,10 @@ fn execute_rops(
                     },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses.extend_from_slice(&rop_get_contents_table_response(&request));
+                responses.extend_from_slice(&rop_get_contents_table_response(
+                    &request,
+                    folder_message_count(folder_id, mailboxes, emails),
+                ));
                 output_handles.push(handle);
             }
             0x07 => responses.extend_from_slice(&rop_get_properties_specific_response(
@@ -776,6 +808,7 @@ fn execute_rops(
                 &request,
                 input_object(session, &handle_slots, &request),
                 mailboxes,
+                emails,
             )),
             0x16 => responses.extend_from_slice(&rop_get_status_response(&request)),
             0x17 => responses.extend_from_slice(&rop_query_position_response(&request)),
@@ -813,7 +846,20 @@ const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
 const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
+const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
+const PID_TAG_SENDER_NAME_W: u32 = 0x0C1A_001F;
+const PID_TAG_SENDER_EMAIL_ADDRESS_W: u32 = 0x0C1F_001F;
+const PID_TAG_DISPLAY_TO_W: u32 = 0x0E04_001F;
+const PID_TAG_MESSAGE_DELIVERY_TIME: u32 = 0x0E06_0040;
+const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
+const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
+const PID_TAG_HAS_ATTACHMENTS: u32 = 0x0E1B_000B;
+const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;
+const PID_TAG_INSTANCE_KEY: u32 = 0x0FF6_0102;
+const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
+const PID_TAG_INTERNET_MESSAGE_ID_W: u32 = 0x1035_001F;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
+const PID_TAG_MID: u32 = 0x674A_0014;
 
 impl MapiSession {
     fn allocate_output_handle(
@@ -895,6 +941,10 @@ fn hierarchy_row_count(folder_id: u64, mailboxes: &[JmapMailbox]) -> u32 {
     }
 }
 
+fn folder_message_count(folder_id: u64, mailboxes: &[JmapMailbox], emails: &[JmapEmail]) -> u32 {
+    emails_for_folder(folder_id, mailboxes, emails).len() as u32
+}
+
 fn default_hierarchy_columns() -> Vec<u32> {
     vec![
         PID_TAG_DISPLAY_NAME_W,
@@ -903,6 +953,24 @@ fn default_hierarchy_columns() -> Vec<u32> {
         PID_TAG_CONTENT_COUNT,
         PID_TAG_CONTENT_UNREAD_COUNT,
         PID_TAG_SUBFOLDERS,
+    ]
+}
+
+fn default_contents_columns() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_MESSAGE_DELIVERY_TIME,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SENDER_NAME_W,
+        PID_TAG_SENDER_EMAIL_ADDRESS_W,
+        PID_TAG_DISPLAY_TO_W,
+        PID_TAG_HAS_ATTACHMENTS,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
     ]
 }
 
@@ -966,10 +1034,10 @@ fn rop_get_hierarchy_table_response(request: &RopRequest, row_count: u32) -> Vec
     response
 }
 
-fn rop_get_contents_table_response(request: &RopRequest) -> Vec<u8> {
+fn rop_get_contents_table_response(request: &RopRequest, row_count: u32) -> Vec<u8> {
     let mut response = vec![0x05, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
-    write_u32(&mut response, 0);
+    write_u32(&mut response, row_count);
     response
 }
 
@@ -1013,6 +1081,7 @@ fn rop_query_rows_response(
     request: &RopRequest,
     object: Option<&MapiObject>,
     mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
 ) -> Vec<u8> {
     let mut response = vec![0x15, request.response_handle_index()];
     write_u32(&mut response, 0);
@@ -1031,7 +1100,17 @@ fn rop_query_rows_response(
                 .map(|mailbox| serialize_folder_row(mailbox, &columns))
                 .collect::<Vec<_>>()
         }
-        Some(MapiObject::ContentsTable { .. }) => Vec::new(),
+        Some(MapiObject::ContentsTable { folder_id, columns }) => {
+            let columns = if columns.is_empty() {
+                default_contents_columns()
+            } else {
+                columns.clone()
+            };
+            emails_for_folder(*folder_id, mailboxes, emails)
+                .into_iter()
+                .map(|email| serialize_message_row(email, &columns))
+                .collect::<Vec<_>>()
+        }
         _ => Vec::new(),
     };
     response.extend_from_slice(&(rows.len() as u16).to_le_bytes());
@@ -1095,6 +1174,28 @@ fn folder_row_for_id(folder_id: u64, mailboxes: &[JmapMailbox]) -> Option<&JmapM
     })
 }
 
+fn emails_for_folder<'a>(
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &'a [JmapEmail],
+) -> Vec<&'a JmapEmail> {
+    emails
+        .iter()
+        .filter(|email| email_matches_folder(email, folder_id, mailboxes))
+        .collect()
+}
+
+fn email_matches_folder(email: &JmapEmail, folder_id: u64, mailboxes: &[JmapMailbox]) -> bool {
+    if let Some(role) = role_for_folder_id(folder_id) {
+        return email.mailbox_role == role;
+    }
+
+    mailboxes
+        .iter()
+        .find(|mailbox| mapi_folder_id(mailbox) == folder_id)
+        .is_some_and(|mailbox| email.mailbox_id == mailbox.id)
+}
+
 fn is_root_hierarchy_folder(folder_id: u64) -> bool {
     matches!(folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID)
 }
@@ -1144,6 +1245,67 @@ fn serialize_folder_row(mailbox: &JmapMailbox, columns: &[u32]) -> Vec<u8> {
     row
 }
 
+fn serialize_message_row(email: &JmapEmail, columns: &[u32]) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match *column {
+            PID_TAG_MID => write_u64(&mut row, mapi_message_id(email)),
+            PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+                write_utf16z(&mut row, &email.subject)
+            }
+            PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPM.Note"),
+            PID_TAG_MESSAGE_DELIVERY_TIME | PID_TAG_LAST_MODIFICATION_TIME => {
+                write_u64(&mut row, 0)
+            }
+            PID_TAG_MESSAGE_FLAGS => write_u32(&mut row, message_flags(email)),
+            PID_TAG_MESSAGE_SIZE => {
+                write_u32(&mut row, email.size_octets.clamp(0, u32::MAX as i64) as u32)
+            }
+            PID_TAG_SENDER_NAME_W => write_utf16z(
+                &mut row,
+                email.from_display.as_deref().unwrap_or(&email.from_address),
+            ),
+            PID_TAG_SENDER_EMAIL_ADDRESS_W => write_utf16z(&mut row, &email.from_address),
+            PID_TAG_DISPLAY_TO_W => write_utf16z(&mut row, &display_to(email)),
+            PID_TAG_HAS_ATTACHMENTS => row.push(email.has_attachments as u8),
+            PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => {
+                write_u16_prefixed_bytes(&mut row, email.id.as_bytes())
+            }
+            PID_TAG_INTERNET_MESSAGE_ID_W => {
+                write_utf16z(&mut row, email.internet_message_id.as_deref().unwrap_or(""))
+            }
+            _ => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+fn display_to(email: &JmapEmail) -> String {
+    email
+        .to
+        .iter()
+        .map(|address| {
+            address
+                .display_name
+                .as_deref()
+                .unwrap_or(&address.address)
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn message_flags(email: &JmapEmail) -> u32 {
+    let mut flags = 0u32;
+    if !email.unread {
+        flags |= 0x0000_0001;
+    }
+    if email.has_attachments {
+        flags |= 0x0000_0010;
+    }
+    flags
+}
+
 fn folder_message_class(mailbox: &JmapMailbox) -> &'static str {
     match mailbox.role.as_str() {
         "contacts" => "IPF.Contact",
@@ -1158,6 +1320,7 @@ fn write_property_default(row: &mut Vec<u8>, property_tag: u32) {
         0x000B => row.push(0),
         0x0014 => write_u64(row, 0),
         0x001E | 0x001F => write_utf16z(row, ""),
+        0x0040 => write_u64(row, 0),
         0x0048 => row.extend_from_slice(Uuid::nil().as_bytes()),
         0x0102 => write_u16_prefixed_bytes(row, &[]),
         _ => write_u32(row, 0x8004_0102),
@@ -1169,6 +1332,13 @@ fn mapi_folder_id(mailbox: &JmapMailbox) -> u64 {
     u64::from_le_bytes([
         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
     ]) | 0x8000_0000_0000_0000
+}
+
+fn mapi_message_id(email: &JmapEmail) -> u64 {
+    let bytes = email.id.as_bytes();
+    u64::from_le_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ]) | 0x4000_0000_0000_0000
 }
 
 fn unsupported_rop_response(rop_id: u8, handle_index: u8) -> Vec<u8> {
