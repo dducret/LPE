@@ -1,5 +1,6 @@
 use axum::body::to_bytes;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
@@ -885,6 +886,15 @@ fn rop_buffer(rops: &[u8], handles: &[u32]) -> Vec<u8> {
 async fn response_text(response: axum::response::Response) -> String {
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     String::from_utf8(bytes.to_vec()).unwrap()
+}
+
+fn decoded_mime_content(response: &str) -> String {
+    let encoded = response
+        .split("<t:MimeContent CharacterSet=\"UTF-8\">")
+        .nth(1)
+        .and_then(|value| value.split("</t:MimeContent>").next())
+        .unwrap();
+    String::from_utf8(BASE64_STANDARD.decode(encoded.as_bytes()).unwrap()).unwrap()
 }
 
 async fn response_bytes(response: axum::response::Response) -> Vec<u8> {
@@ -3906,6 +3916,75 @@ async fn get_item_returns_system_mailbox_message_body() {
 }
 
 #[tokio::test]
+async fn get_item_returns_requested_mime_content_without_leaking_bcc_for_normal_mailbox() {
+    let mut email = FakeStore::email(
+        "99999999-9999-9999-9999-999999999999",
+        "44444444-4444-4444-4444-444444444444",
+        "custom",
+        "RCA folder item",
+    );
+    email.bcc.push(JmapEmailAddress {
+        address: "hidden@example.test".to_string(),
+        display_name: Some("Hidden".to_string()),
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetItem><m:ItemShape><t:AdditionalProperties><t:FieldURI FieldURI="item:MimeContent"/></t:AdditionalProperties></m:ItemShape><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<t:MimeContent CharacterSet=\"UTF-8\">"));
+    let mime = decoded_mime_content(&body);
+    assert!(mime.contains("Subject: RCA folder item"));
+    assert!(mime.contains("Content-Type: text/plain; charset=UTF-8"));
+    assert!(mime.ends_with("Hello"));
+    assert!(!mime.contains("Bcc:"));
+}
+
+#[tokio::test]
+async fn get_item_mime_content_preserves_bcc_for_sent_message() {
+    let mut email = FakeStore::email(
+        "99999999-9999-9999-9999-999999999999",
+        "44444444-4444-4444-4444-444444444444",
+        "sent",
+        "Sent folder item",
+    );
+    email.bcc.push(JmapEmailAddress {
+        address: "hidden@example.test".to_string(),
+        display_name: Some("Hidden".to_string()),
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetItem><m:ItemShape><t:AdditionalProperties><t:FieldURI FieldURI="item:MimeContent"/></t:AdditionalProperties></m:ItemShape><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    let mime = decoded_mime_content(&body);
+    assert!(mime.contains("Subject: Sent folder item"));
+    assert!(mime.contains("Bcc: Hidden <hidden@example.test>"));
+}
+
+#[tokio::test]
 async fn get_item_includes_attachment_references_for_message() {
     let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
     let attachment_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
@@ -3953,6 +4032,61 @@ async fn get_item_includes_attachment_references_for_message() {
     assert!(body.contains("<t:ContentType>application/pdf</t:ContentType>"));
     assert!(body.contains("<t:Size>5</t:Size>"));
     assert!(!body.contains("<t:Content>"));
+}
+
+#[tokio::test]
+async fn get_item_mime_content_includes_canonical_attachments() {
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let attachment_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
+    let mut email = FakeStore::email(
+        "99999999-9999-9999-9999-999999999999",
+        "44444444-4444-4444-4444-444444444444",
+        "custom",
+        "RCA folder item",
+    );
+    email.has_attachments = true;
+    let file_reference = format!("attachment:{message_id}:{attachment_id}");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![email])),
+        attachments: Arc::new(Mutex::new(HashMap::from([(
+            message_id,
+            vec![ActiveSyncAttachment {
+                id: attachment_id,
+                message_id,
+                file_name: "brief.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                size_octets: 5,
+                file_reference: file_reference.clone(),
+            }],
+        )]))),
+        attachment_contents: Arc::new(Mutex::new(HashMap::from([(
+            file_reference.clone(),
+            ActiveSyncAttachmentContent {
+                file_reference,
+                file_name: "brief.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                blob_bytes: b"hello".to_vec(),
+            },
+        )]))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetItem><m:ItemShape><t:AdditionalProperties><t:FieldURI FieldURI="item:MimeContent"/></t:AdditionalProperties></m:ItemShape><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    let mime = decoded_mime_content(&body);
+    assert!(mime.contains("Content-Type: multipart/mixed; boundary=\"lpe-ews-mixed-99999999999999999999999999999999\""));
+    assert!(mime.contains("Content-Disposition: attachment; filename=\"brief.pdf\""));
+    assert!(mime.contains("Content-Type: application/pdf; name=\"brief.pdf\""));
+    assert!(mime.contains("aGVsbG8="));
 }
 
 #[tokio::test]

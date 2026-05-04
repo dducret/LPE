@@ -18,7 +18,7 @@ use lpe_magika::{
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
-    AttachmentUploadInput, AuditEntryInput, CollaborationCollection, JmapEmail,
+    AttachmentUploadInput, AuditEntryInput, CollaborationCollection, JmapEmail, JmapEmailAddress,
     JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, Storage, SubmitMessageInput,
     SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
 };
@@ -479,6 +479,7 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
     }
 
     async fn get_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let include_mime_content = requested_mime_content(request);
         let ids = requested_item_ids(request);
         let contact_ids = ids
             .iter()
@@ -525,7 +526,27 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
             } else {
                 Vec::new()
             };
-            items.push_str(&message_item_xml_with_attachments(&email, &attachments));
+            let mut attachment_contents = Vec::new();
+            if include_mime_content {
+                for attachment in &attachments {
+                    let Some(content) = self
+                        .store
+                        .fetch_attachment_content(principal.account_id, &attachment.file_reference)
+                        .await?
+                    else {
+                        return Ok(get_item_error_response(
+                            "ErrorItemNotFound",
+                            "The requested item attachment content was not found.",
+                        ));
+                    };
+                    attachment_contents.push(content);
+                }
+            }
+            items.push_str(&message_item_xml_with_details(
+                &email,
+                &attachments,
+                include_mime_content.then_some(attachment_contents.as_slice()),
+            ));
         }
 
         if !ids.is_empty()
@@ -2448,6 +2469,10 @@ fn requested_attachment_ids(request: &str) -> Vec<String> {
         .collect()
 }
 
+fn requested_mime_content(request: &str) -> bool {
+    request.contains("item:MimeContent") || request.contains("MimeContent")
+}
+
 fn requested_mailbox_folder_ids(request: &str) -> Vec<Uuid> {
     requested_folder_ids(request)
         .into_iter()
@@ -2684,16 +2709,238 @@ fn message_item_xml_with_attachments(
     email: &JmapEmail,
     attachments: &[ActiveSyncAttachment],
 ) -> String {
+    message_item_xml_with_details(email, attachments, None)
+}
+
+fn message_item_xml_with_details(
+    email: &JmapEmail,
+    attachments: &[ActiveSyncAttachment],
+    mime_attachment_contents: Option<&[ActiveSyncAttachmentContent]>,
+) -> String {
     let mut xml = message_summary_xml(email);
+    let mime_content = mime_attachment_contents
+        .map(|contents| {
+            format!(
+                "<t:MimeContent CharacterSet=\"UTF-8\">{}</t:MimeContent>",
+                BASE64_STANDARD.encode(render_mime_message(email, contents))
+            )
+        })
+        .unwrap_or_default();
     xml.insert_str(
         xml.len() - "</t:Message>".len(),
         &format!(
-            "<t:Body BodyType=\"Text\">{}</t:Body>{}",
+            "{}<t:Body BodyType=\"Text\">{}</t:Body>{}",
+            mime_content,
             escape_xml(&email.body_text),
             message_attachments_xml(attachments),
         ),
     );
     xml
+}
+
+fn render_mime_message(email: &JmapEmail, attachments: &[ActiveSyncAttachmentContent]) -> Vec<u8> {
+    let mut message = render_mime_header(email, attachments.is_empty());
+    if attachments.is_empty() {
+        message.push_str(&render_standalone_body_mime(email));
+    } else {
+        let boundary = mixed_boundary(email);
+        message.push_str(&format!("--{boundary}\r\n"));
+        message.push_str(&render_body_mime_part(email));
+        if !message.ends_with("\r\n") {
+            message.push_str("\r\n");
+        }
+        for attachment in attachments {
+            message.push_str(&format!("--{boundary}\r\n"));
+            message.push_str(&render_attachment_mime_part(attachment));
+        }
+        message.push_str(&format!("--{boundary}--\r\n"));
+    }
+    message.into_bytes()
+}
+
+fn render_standalone_body_mime(email: &JmapEmail) -> String {
+    if let Some(html) = email.body_html_sanitized.as_deref() {
+        let boundary = alternative_boundary(email);
+        return format!(
+            concat!(
+                "--{boundary}\r\n",
+                "Content-Type: text/plain; charset=UTF-8\r\n",
+                "Content-Transfer-Encoding: 7bit\r\n",
+                "\r\n",
+                "{text}\r\n",
+                "--{boundary}\r\n",
+                "Content-Type: text/html; charset=UTF-8\r\n",
+                "Content-Transfer-Encoding: 7bit\r\n",
+                "\r\n",
+                "{html}\r\n",
+                "--{boundary}--\r\n"
+            ),
+            boundary = boundary,
+            text = email.body_text,
+            html = html,
+        );
+    }
+
+    email.body_text.clone()
+}
+
+fn render_mime_header(email: &JmapEmail, without_attachments: bool) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "Date: {}",
+        sanitize_header_value(&email.received_at)
+    ));
+    lines.push(format!(
+        "From: {}",
+        render_mime_address(email.from_display.as_deref(), email.from_address.as_str())
+    ));
+    if !email.to.is_empty() {
+        lines.push(format!("To: {}", render_mime_recipients(&email.to)));
+    }
+    if !email.cc.is_empty() {
+        lines.push(format!("Cc: {}", render_mime_recipients(&email.cc)));
+    }
+    if !email.bcc.is_empty() && matches!(email.mailbox_role.as_str(), "drafts" | "sent") {
+        lines.push(format!("Bcc: {}", render_mime_recipients(&email.bcc)));
+    }
+    lines.push(format!(
+        "Subject: {}",
+        sanitize_header_value(&email.subject)
+    ));
+    if let Some(message_id) = email.internet_message_id.as_deref() {
+        lines.push(format!("Message-Id: {}", sanitize_header_value(message_id)));
+    }
+    lines.push("MIME-Version: 1.0".to_string());
+    let content_type = if without_attachments {
+        body_content_type(email)
+    } else {
+        format!("multipart/mixed; boundary=\"{}\"", mixed_boundary(email))
+    };
+    lines.push(format!("Content-Type: {content_type}"));
+    lines.join("\r\n") + "\r\n\r\n"
+}
+
+fn render_body_mime_part(email: &JmapEmail) -> String {
+    if let Some(html) = email.body_html_sanitized.as_deref() {
+        let boundary = alternative_boundary(email);
+        return format!(
+            concat!(
+                "Content-Type: multipart/alternative; boundary=\"{boundary}\"\r\n",
+                "\r\n",
+                "--{boundary}\r\n",
+                "Content-Type: text/plain; charset=UTF-8\r\n",
+                "Content-Transfer-Encoding: 7bit\r\n",
+                "\r\n",
+                "{text}\r\n",
+                "--{boundary}\r\n",
+                "Content-Type: text/html; charset=UTF-8\r\n",
+                "Content-Transfer-Encoding: 7bit\r\n",
+                "\r\n",
+                "{html}\r\n",
+                "--{boundary}--\r\n"
+            ),
+            boundary = boundary,
+            text = email.body_text,
+            html = html,
+        );
+    }
+
+    format!(
+        concat!(
+            "Content-Type: text/plain; charset=UTF-8\r\n",
+            "Content-Transfer-Encoding: 7bit\r\n",
+            "\r\n",
+            "{}\r\n"
+        ),
+        email.body_text,
+    )
+}
+
+fn render_attachment_mime_part(attachment: &ActiveSyncAttachmentContent) -> String {
+    let file_name = quote_mime_parameter(&attachment.file_name);
+    format!(
+        concat!(
+            "Content-Type: {content_type}; name=\"{file_name}\"\r\n",
+            "Content-Transfer-Encoding: base64\r\n",
+            "Content-Disposition: attachment; filename=\"{file_name}\"\r\n",
+            "\r\n",
+            "{body}\r\n"
+        ),
+        content_type = sanitize_header_value(&attachment.media_type),
+        file_name = file_name,
+        body = base64_mime_lines(&attachment.blob_bytes),
+    )
+}
+
+fn body_content_type(email: &JmapEmail) -> String {
+    if email.body_html_sanitized.is_some() {
+        format!(
+            "multipart/alternative; boundary=\"{}\"",
+            alternative_boundary(email)
+        )
+    } else {
+        "text/plain; charset=UTF-8".to_string()
+    }
+}
+
+fn mixed_boundary(email: &JmapEmail) -> String {
+    format!("lpe-ews-mixed-{}", email.id.simple())
+}
+
+fn alternative_boundary(email: &JmapEmail) -> String {
+    format!("lpe-ews-alt-{}", email.id.simple())
+}
+
+fn render_mime_recipients(recipients: &[JmapEmailAddress]) -> String {
+    recipients
+        .iter()
+        .map(|recipient| render_mime_address(recipient.display_name.as_deref(), &recipient.address))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn render_mime_address(display_name: Option<&str>, address: &str) -> String {
+    let address = sanitize_header_value(address);
+    match display_name
+        .map(sanitize_header_value)
+        .filter(|value| !value.trim().is_empty() && value != &address)
+    {
+        Some(display_name) => format!("{} <{}>", quote_display_name(&display_name), address),
+        None => address,
+    }
+}
+
+fn quote_display_name(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '.' | '_' | '-'))
+    {
+        value.to_string()
+    } else {
+        format!("\"{}\"", quote_mime_parameter(value))
+    }
+}
+
+fn quote_mime_parameter(value: &str) -> String {
+    sanitize_header_value(value)
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+}
+
+fn sanitize_header_value(value: &str) -> String {
+    value
+        .replace(['\r', '\n'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn base64_mime_lines(bytes: &[u8]) -> String {
+    bytes
+        .chunks(57)
+        .map(|chunk| BASE64_STANDARD.encode(chunk))
+        .collect::<Vec<_>>()
+        .join("\r\n")
 }
 
 fn message_attachments_xml(attachments: &[ActiveSyncAttachment]) -> String {
