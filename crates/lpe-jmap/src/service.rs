@@ -601,6 +601,16 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         requested_account: &MailboxAccountAccess,
         blob_id: &str,
     ) -> Result<JmapUploadBlob> {
+        self.resolve_download_blob_with_bcc(requested_account, blob_id, requested_account.is_owned)
+            .await
+    }
+
+    pub(crate) async fn resolve_download_blob_with_bcc(
+        &self,
+        requested_account: &MailboxAccountAccess,
+        blob_id: &str,
+        include_bcc: bool,
+    ) -> Result<JmapUploadBlob> {
         let requested_account_id = requested_account.account_id;
         match JmapBlobId::parse(blob_id)? {
             JmapBlobId::Upload(blob_id) => self
@@ -616,7 +626,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     .into_iter()
                     .next()
                     .ok_or_else(|| anyhow!("blob not found"))?;
-                let blob_bytes = message_rfc822_bytes(&email, requested_account.is_owned);
+                let blob_bytes = message_rfc822_bytes(&email, include_bcc);
                 Ok(JmapUploadBlob {
                     id: message_id,
                     account_id: requested_account_id,

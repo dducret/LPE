@@ -265,8 +265,9 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         for blob_id in arguments.blob_ids {
             let resolved_blob_id = resolve_creation_reference(&blob_id, created_ids);
+            let include_bcc = source_account.is_owned && target_account.is_owned;
             match self
-                .resolve_download_blob(&source_account, &resolved_blob_id)
+                .resolve_download_blob_with_bcc(&source_account, &resolved_blob_id, include_bcc)
                 .await
             {
                 Ok(blob) => {

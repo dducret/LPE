@@ -3977,6 +3977,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blob_copy_to_shared_account_does_not_widen_owner_bcc() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_CORE_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Blob/copy".to_string(),
+                        json!({
+                            "fromAccountId": FakeStore::account().account_id.to_string(),
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "blobIds": ["message:cccccccc-cccc-cccc-cccc-cccccccccccc"]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(response.method_responses[0].1["copied"]
+            ["message:cccccccc-cccc-cccc-cccc-cccccccccccc"]
+            .as_str()
+            .unwrap()
+            .starts_with("upload:"));
+        let uploads = store.uploads.lock().unwrap();
+        let copied = uploads
+            .iter()
+            .find(|blob| blob.account_id == FakeStore::shared_account().account_id)
+            .expect("copied shared-account blob");
+        let message = String::from_utf8(copied.blob_bytes.clone()).unwrap();
+        assert!(message.contains("Subject: Draft subject\r\n"));
+        assert!(!message.contains("Bcc:"));
+        assert!(!message.contains("hidden@example.test"));
+    }
+
+    #[tokio::test]
     async fn blob_upload_get_and_copy_resolve_created_blob_references() {
         let store = FakeStore {
             session: Some(FakeStore::account()),
