@@ -166,6 +166,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
             "CreateFolder" => self.create_folder(&principal, &body).await?,
             "DeleteFolder" => self.delete_folder(&principal, &body).await?,
             "GetAttachment" => self.get_attachment(&principal, &body).await?,
+            "DeleteAttachment" => self.delete_attachment(&principal, &body).await?,
             "GetUserOofSettings" => unsupported_operation_response("GetUserOofSettings"),
             "GetRoomLists" => unsupported_operation_response("GetRoomLists"),
             "FindPeople" => unsupported_operation_response("FindPeople"),
@@ -563,6 +564,47 @@ impl<S: ExchangeStore> ExchangeService<S> {
         }
 
         Ok(get_attachment_success_response(attachments))
+    }
+
+    async fn delete_attachment(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let ids = requested_attachment_ids(request);
+        if ids.is_empty() {
+            return Ok(operation_error_response(
+                "DeleteAttachment",
+                "ErrorInvalidOperation",
+                "DeleteAttachment requires at least one AttachmentId.",
+            ));
+        }
+
+        let mut root_items = String::new();
+        for id in ids {
+            let Some(email) = self
+                .store
+                .delete_message_attachment(
+                    principal.account_id,
+                    &id,
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "ews-delete-attachment".to_string(),
+                        subject: id.clone(),
+                    },
+                )
+                .await?
+            else {
+                return Ok(operation_error_response(
+                    "DeleteAttachment",
+                    "ErrorAttachmentNotFound",
+                    "The requested attachment was not found or is not exposed by EWS.",
+                ));
+            };
+            root_items.push_str(&root_item_id_xml(&email));
+        }
+
+        Ok(delete_attachment_success_response(root_items))
     }
 
     async fn root_child_folder_count(&self, principal: &AccountPrincipal) -> Result<usize> {
@@ -2545,6 +2587,14 @@ fn file_attachment_content_xml(content: &ActiveSyncAttachmentContent) -> String 
     )
 }
 
+fn root_item_id_xml(email: &JmapEmail) -> String {
+    format!(
+        "<m:RootItemId RootItemId=\"message:{id}\" RootItemChangeKey=\"{change_key}\"/>",
+        id = email.id,
+        change_key = escape_xml(&email.delivery_status),
+    )
+}
+
 fn create_item_success_response(message_id: Uuid, delivery_status: &str) -> String {
     format!(
         concat!(
@@ -2693,6 +2743,22 @@ fn get_attachment_success_response(attachments: String) -> String {
             "</m:GetAttachmentResponse>"
         ),
         attachments = attachments,
+    )
+}
+
+fn delete_attachment_success_response(root_items: String) -> String {
+    format!(
+        concat!(
+            "<m:DeleteAttachmentResponse>",
+            "<m:ResponseMessages>",
+            "<m:DeleteAttachmentResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "{root_items}",
+            "</m:DeleteAttachmentResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:DeleteAttachmentResponse>"
+        ),
+        root_items = root_items,
     )
 }
 

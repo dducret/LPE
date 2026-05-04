@@ -545,6 +545,36 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(content) })
     }
 
+    fn delete_message_attachment<'a>(
+        &'a self,
+        _account_id: Uuid,
+        file_reference: &'a str,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, Option<JmapEmail>> {
+        let Some((message_id, attachment_id)) = parse_attachment_reference(file_reference) else {
+            return Box::pin(async move { Ok(None) });
+        };
+        let mut attachments = self.attachments.lock().unwrap();
+        let Some(message_attachments) = attachments.get_mut(&message_id) else {
+            return Box::pin(async move { Ok(None) });
+        };
+        let before_len = message_attachments.len();
+        message_attachments.retain(|attachment| attachment.id != attachment_id);
+        if message_attachments.len() == before_len {
+            return Box::pin(async move { Ok(None) });
+        }
+        let has_attachments = !message_attachments.is_empty();
+        drop(attachments);
+
+        let mut emails = self.emails.lock().unwrap();
+        let Some(email) = emails.iter_mut().find(|email| email.id == message_id) else {
+            return Box::pin(async move { Ok(None) });
+        };
+        email.has_attachments = has_attachments;
+        let email = email.clone();
+        Box::pin(async move { Ok(Some(email)) })
+    }
+
     fn import_jmap_email<'a>(
         &'a self,
         input: JmapImportedEmailInput,
@@ -773,6 +803,16 @@ async fn response_bytes(response: axum::response::Response) -> Vec<u8> {
         .unwrap()
         .to_vec();
     strip_mapi_http_envelope(bytes)
+}
+
+fn parse_attachment_reference(value: &str) -> Option<(Uuid, Uuid)> {
+    let value = value.trim();
+    let rest = value.strip_prefix("attachment:")?;
+    let (message_id, attachment_id) = rest.split_once(':')?;
+    Some((
+        Uuid::parse_str(message_id).ok()?,
+        Uuid::parse_str(attachment_id).ok()?,
+    ))
 }
 
 fn strip_mapi_http_envelope(bytes: Vec<u8>) -> Vec<u8> {
@@ -3881,6 +3921,81 @@ async fn get_attachment_rejects_unknown_attachment_id() {
 
     let body = response_text(response).await;
     assert!(body.contains("<m:GetAttachmentResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorAttachmentNotFound</m:ResponseCode>"));
+}
+
+#[tokio::test]
+async fn delete_attachment_removes_canonical_attachment_reference() {
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let attachment_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
+    let mut email = FakeStore::email(
+        "99999999-9999-9999-9999-999999999999",
+        "44444444-4444-4444-4444-444444444444",
+        "custom",
+        "RCA folder item",
+    );
+    email.has_attachments = true;
+    let file_reference = format!("attachment:{message_id}:{attachment_id}");
+    let attachments = Arc::new(Mutex::new(HashMap::from([(
+        message_id,
+        vec![ActiveSyncAttachment {
+            id: attachment_id,
+            message_id,
+            file_name: "brief.pdf".to_string(),
+            media_type: "application/pdf".to_string(),
+            size_octets: 5,
+            file_reference: file_reference.clone(),
+        }],
+    )])));
+    let emails = Arc::new(Mutex::new(vec![email]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: emails.clone(),
+        attachments: attachments.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = format!(
+        r#"<s:Envelope><s:Body><m:DeleteAttachment><m:AttachmentIds><t:AttachmentId Id="{file_reference}"/></m:AttachmentIds></m:DeleteAttachment></s:Body></s:Envelope>"#
+    );
+
+    let response = service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteAttachmentResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("RootItemId=\"message:99999999-9999-9999-9999-999999999999\""));
+    assert!(attachments
+        .lock()
+        .unwrap()
+        .get(&message_id)
+        .unwrap()
+        .is_empty());
+    assert!(!emails.lock().unwrap()[0].has_attachments);
+}
+
+#[tokio::test]
+async fn delete_attachment_rejects_unknown_attachment_id() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:DeleteAttachment><m:AttachmentIds><t:AttachmentId Id="attachment:99999999-9999-9999-9999-999999999999:abababab-abab-abab-abab-abababababab"/></m:AttachmentIds></m:DeleteAttachment></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteAttachmentResponse>"));
     assert!(body.contains("ResponseClass=\"Error\""));
     assert!(body.contains("<m:ResponseCode>ErrorAttachmentNotFound</m:ResponseCode>"));
 }

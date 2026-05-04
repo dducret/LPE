@@ -137,6 +137,13 @@ pub trait ExchangeStore: AccountAuthStore {
         file_reference: &'a str,
     ) -> StoreFuture<'a, Option<ActiveSyncAttachmentContent>>;
 
+    fn delete_message_attachment<'a>(
+        &'a self,
+        account_id: Uuid,
+        file_reference: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Option<JmapEmail>>;
+
     fn import_jmap_email<'a>(
         &'a self,
         input: JmapImportedEmailInput,
@@ -454,6 +461,18 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, Option<ActiveSyncAttachmentContent>> {
         Box::pin(async move {
             self.fetch_activesync_attachment_content(account_id, file_reference)
+                .await
+        })
+    }
+
+    fn delete_message_attachment<'a>(
+        &'a self,
+        account_id: Uuid,
+        file_reference: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Option<JmapEmail>> {
+        Box::pin(async move {
+            self.delete_message_attachment(account_id, file_reference, audit)
                 .await
         })
     }

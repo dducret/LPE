@@ -1819,6 +1819,105 @@ impl Storage {
             blob_bytes: row.try_get("blob_bytes").unwrap_or_default(),
         }))
     }
+
+    pub async fn delete_message_attachment(
+        &self,
+        account_id: Uuid,
+        file_reference: &str,
+        audit: AuditEntryInput,
+    ) -> Result<Option<JmapEmail>> {
+        let Some((message_id, attachment_id)) =
+            crate::parse_activesync_file_reference(file_reference)
+        else {
+            return Ok(None);
+        };
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+
+        let deleted = sqlx::query(
+            r#"
+            DELETE FROM attachments a
+            USING messages m
+            WHERE a.tenant_id = $1
+              AND a.id = $2
+              AND a.message_id = $3
+              AND m.tenant_id = $1
+              AND m.account_id = $4
+              AND m.id = a.message_id
+            RETURNING a.message_id
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(attachment_id)
+        .bind(message_id)
+        .bind(account_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if deleted.is_none() {
+            tx.commit().await?;
+            return Ok(None);
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE messages
+            SET
+                has_attachments = EXISTS (
+                    SELECT 1
+                    FROM attachments
+                    WHERE tenant_id = $1 AND message_id = $2
+                ),
+                imap_modseq = $3
+            WHERE tenant_id = $1 AND account_id = $4 AND id = $2
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(message_id)
+        .bind(modseq)
+        .bind(account_id)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            UPDATE message_bodies
+            SET search_vector = to_tsvector(
+                'simple',
+                concat_ws(
+                    ' ',
+                    body_text,
+                    participants_normalized,
+                    COALESCE((
+                        SELECT string_agg(extracted_text, ' ')
+                        FROM attachments
+                        WHERE tenant_id = $1
+                          AND message_id = $2
+                          AND extracted_text IS NOT NULL
+                    ), '')
+                )
+            )
+            WHERE message_id = $2
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(message_id)
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
+
+        Ok(self
+            .fetch_jmap_emails(account_id, &[message_id])
+            .await?
+            .into_iter()
+            .next())
+    }
 }
 
 fn is_system_mailbox_role(role: &str) -> bool {
