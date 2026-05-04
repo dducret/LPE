@@ -22,7 +22,13 @@ pass() {
 
 scope_enabled() {
   local scope="$1"
-  [[ "${TEST_SCOPE}" == "all" || ",${TEST_SCOPE}," == *",${scope},"* ]]
+  [[ "${TEST_SCOPE}" == "all" \
+    || ",${TEST_SCOPE}," == *",${scope},"* \
+    || ( ",${TEST_SCOPE}," == *",outlook,"* && "${scope}" =~ ^(https|submission|imaps)$ ) ]]
+}
+
+outlook_scope_enabled() {
+  [[ ",${TEST_SCOPE}," == *",outlook,"* ]]
 }
 
 validate_test_scope() {
@@ -31,13 +37,17 @@ validate_test_scope() {
   IFS=',' read -ra tokens <<<"${TEST_SCOPE}"
   for token in "${tokens[@]}"; do
     case "${token}" in
-      all|smtp|https|submission|imaps)
+      all|smtp|https|submission|imaps|outlook)
         ;;
       *)
-        fail "Unsupported LPE_CT_EDGE_TEST_SCOPE token '${token}'. Use all, smtp, https, submission, imaps, or a comma-separated subset."
+        fail "Unsupported LPE_CT_EDGE_TEST_SCOPE token '${token}'. Use all, smtp, https, submission, imaps, outlook, or a comma-separated subset."
         ;;
     esac
   done
+}
+
+tls_server_name() {
+  printf '%s' "${LPE_CT_PUBLIC_HOSTNAME:-${LPE_CT_PUBLICATION_TEST_HOST:-${HOST:-${LPE_CT_SERVER_NAME:-localhost}}}}"
 }
 
 imap_quote() {
@@ -167,12 +177,14 @@ tls_probe_if_possible() {
   local name="$3"
   local output_file
   local openssl_status=0
+  local server_name
   if ! command -v openssl >/dev/null 2>&1; then
     echo "[SKIP] openssl is not available; TCP reachability for ${name} was checked, TLS handshake was not."
     return
   fi
+  server_name="$(tls_server_name)"
   output_file="$(mktemp)"
-  timeout 10 openssl s_client -showcerts -connect "${host}:${port}" -servername "${LPE_CT_PUBLIC_HOSTNAME:-localhost}" </dev/null >"${output_file}" 2>&1 || openssl_status=$?
+  timeout 10 openssl s_client -showcerts -connect "${host}:${port}" -servername "${server_name}" </dev/null >"${output_file}" 2>&1 || openssl_status=$?
   if grep -q "BEGIN CERTIFICATE" "${output_file}"; then
     if [[ "${openssl_status}" -ne 0 ]]; then
       echo "[WARN] ${name} on ${host}:${port} presented a TLS certificate, but openssl exited with status ${openssl_status}. A proxied service may have closed the session after TLS."
@@ -196,17 +208,58 @@ tls_probe_if_possible() {
   fail "${name} on ${host}:${port} did not present a TLS certificate"
 }
 
+tls_trust_probe_if_possible() {
+  local host="$1"
+  local port="$2"
+  local name="$3"
+  local output_file
+  local verify_mode="${LPE_CT_EDGE_TLS_VERIFY:-warn}"
+  local server_name
+  local openssl_status=0
+
+  [[ "${verify_mode}" != "skip" ]] || return 0
+  if ! command -v openssl >/dev/null 2>&1; then
+    echo "[SKIP] openssl is not available; trusted TLS verification for ${name} was not checked."
+    return 0
+  fi
+
+  server_name="$(tls_server_name)"
+  output_file="$(mktemp)"
+  timeout 10 openssl s_client -verify_return_error -verify_hostname "${server_name}" \
+    -connect "${host}:${port}" \
+    -servername "${server_name}" </dev/null >"${output_file}" 2>&1 || openssl_status=$?
+
+  if grep -q "Verify return code: 0 (ok)" "${output_file}"; then
+    if [[ "${openssl_status}" -ne 0 ]]; then
+      warn "${name} on ${host}:${port} passed trusted TLS verification, but openssl exited with status ${openssl_status} after the session closed."
+    fi
+    rm -f "${output_file}"
+    pass "${name} on ${host}:${port} has a trusted TLS certificate for ${server_name}"
+    return 0
+  fi
+
+  echo "[DIAG] ${name} TLS trust/hostname verification failed for ${server_name} on ${host}:${port}:"
+  sed -n '1,80p' "${output_file}" || true
+  rm -f "${output_file}"
+  if [[ "${verify_mode}" == "required" ]] || outlook_scope_enabled; then
+    fail "${name} on ${host}:${port} must present a trusted certificate matching ${server_name} for Outlook"
+  fi
+  warn "${name} on ${host}:${port} did not pass trusted TLS verification for ${server_name}; set LPE_CT_EDGE_TLS_VERIFY=required to fail on this."
+}
+
 smtp_starttls_probe_if_possible() {
   local host="$1"
   local port="$2"
   local output_file
   local openssl_status=0
+  local server_name
   if ! command -v openssl >/dev/null 2>&1; then
     echo "[SKIP] openssl is not available; SMTP STARTTLS handshake was not checked."
     return
   fi
+  server_name="$(tls_server_name)"
   output_file="$(mktemp)"
-  timeout 10 openssl s_client -starttls smtp -crlf -showcerts -connect "${host}:${port}" -servername "${LPE_CT_PUBLIC_HOSTNAME:-localhost}" </dev/null >"${output_file}" 2>&1 || openssl_status=$?
+  timeout 10 openssl s_client -starttls smtp -crlf -showcerts -connect "${host}:${port}" -servername "${server_name}" </dev/null >"${output_file}" 2>&1 || openssl_status=$?
   if grep -q "BEGIN CERTIFICATE" "${output_file}"; then
     if [[ "${openssl_status}" -ne 0 ]]; then
       echo "[WARN] SMTP STARTTLS on ${host}:${port} presented a TLS certificate, but openssl exited with status ${openssl_status}. The service may have closed the SMTP session after TLS."
@@ -249,6 +302,7 @@ probe_public_imaps_auth_if_configured() {
   local openssl_status=0
   local quoted_email
   local quoted_password
+  local server_name
 
   if [[ -z "${test_email}" || -z "${test_password}" ]]; then
     warn "Skipping authenticated public IMAPS probe; set LPE_CT_IMAPS_TEST_EMAIL and LPE_CT_IMAPS_TEST_PASSWORD to verify Outlook-facing 993 login."
@@ -261,11 +315,12 @@ probe_public_imaps_auth_if_configured() {
 
   quoted_email="$(imap_quote "${test_email}")"
   quoted_password="$(imap_quote "${test_password}")"
+  server_name="$(tls_server_name)"
   output_file="$(mktemp)"
 
   timeout 20 openssl s_client -quiet -crlf \
     -connect "${HOST}:${IMAPS_PORT}" \
-    -servername "${LPE_CT_PUBLIC_HOSTNAME:-localhost}" >"${output_file}" 2>&1 <<EOF || openssl_status=$?
+    -servername "${server_name}" >"${output_file}" 2>&1 <<EOF || openssl_status=$?
 A1 CAPABILITY
 A2 LOGIN ${quoted_email} ${quoted_password}
 A3 SELECT INBOX
@@ -309,6 +364,10 @@ probe_client_publication() {
   local base_url="https://${HOST}:${HTTPS_PORT}"
   local host_header="${LPE_CT_PUBLICATION_TEST_HOST:-${LPE_CT_PUBLIC_HOSTNAME:-${LPE_CT_SERVER_NAME:-localhost}}}"
   local autodiscover_email="${LPE_CT_AUTODISCOVER_TEST_EMAIL:-${LPE_CT_BOOTSTRAP_ADMIN_EMAIL:-admin@example.test}}"
+  local expected_imap_host="${LPE_CT_EXPECTED_AUTODISCOVER_IMAP_HOST:-${LPE_AUTOCONFIG_IMAP_HOST:-${host_header}}}"
+  local expected_imap_port="${LPE_CT_EXPECTED_AUTODISCOVER_IMAP_PORT:-${LPE_AUTOCONFIG_IMAP_PORT:-${IMAPS_PORT:-993}}}"
+  local expected_smtp_host="${LPE_CT_EXPECTED_AUTODISCOVER_SMTP_HOST:-${LPE_AUTOCONFIG_SMTP_HOST:-${expected_imap_host}}}"
+  local expected_smtp_port="${LPE_CT_EXPECTED_AUTODISCOVER_SMTP_PORT:-${LPE_AUTOCONFIG_SMTP_PORT:-${SUBMISSION_PORT:-465}}}"
   local body
   local headers_file
 
@@ -320,6 +379,28 @@ probe_client_publication() {
     || fail "Autodiscover POST is not reachable through LPE-CT HTTPS publication"
   [[ "$body" == *"<Type>IMAP</Type>"* ]] \
     || fail "Autodiscover POST did not publish IMAP through LPE-CT"
+  if outlook_scope_enabled; then
+    [[ "$body" == *"<Server>${expected_imap_host}</Server>"* ]] \
+      || fail "Outlook Autodiscover IMAP server is not ${expected_imap_host}"
+    [[ "$body" == *"<Port>${expected_imap_port}</Port>"* ]] \
+      || fail "Outlook Autodiscover IMAP port is not ${expected_imap_port}"
+    [[ "$body" == *"<SSL>on</SSL>"* ]] \
+      || fail "Outlook Autodiscover IMAP profile does not enable SSL"
+    [[ "$body" == *"<LoginName>${autodiscover_email}</LoginName>"* ]] \
+      || fail "Outlook Autodiscover IMAP login name is not ${autodiscover_email}"
+    if [[ -n "${LPE_CT_SUBMISSION_BIND_ADDRESS:-}" ]]; then
+      [[ "$body" == *"<Type>SMTP</Type>"* ]] \
+        || fail "Outlook Autodiscover does not publish SMTP even though LPE-CT submission is configured"
+      [[ "$body" == *"<Server>${expected_smtp_host}</Server>"* ]] \
+        || fail "Outlook Autodiscover SMTP server is not ${expected_smtp_host}"
+      [[ "$body" == *"<Port>${expected_smtp_port}</Port>"* ]] \
+        || fail "Outlook Autodiscover SMTP port is not ${expected_smtp_port}"
+      [[ "$body" == *"<AuthRequired>on</AuthRequired>"* ]] \
+        || fail "Outlook Autodiscover SMTP profile does not require authentication"
+    else
+      warn "Outlook Autodiscover SMTP profile was not required because LPE_CT_SUBMISSION_BIND_ADDRESS is not configured."
+    fi
+  fi
   pass "Autodiscover POST publishes IMAP through LPE-CT"
 
   headers_file="$(mktemp)"
@@ -423,6 +504,7 @@ if scope_enabled "https"; then
   rm -f "${headers_file}"
   pass "HTTPS management edge exposes required security headers"
   tls_probe_if_possible "$HOST" "$HTTPS_PORT" "HTTPS"
+  tls_trust_probe_if_possible "$HOST" "$HTTPS_PORT" "HTTPS"
   probe_client_publication
 else
   echo "[SKIP] HTTPS publication checks skipped by LPE_CT_EDGE_TEST_SCOPE=${TEST_SCOPE}."
@@ -431,6 +513,7 @@ fi
 if scope_enabled "submission"; then
   if [[ -n "${LPE_CT_SUBMISSION_BIND_ADDRESS:-}" ]]; then
     tls_probe_if_possible "$HOST" "$SUBMISSION_PORT" "SMTPS submission"
+    tls_trust_probe_if_possible "$HOST" "$SUBMISSION_PORT" "SMTPS submission"
   else
     echo "[SKIP] LPE_CT_SUBMISSION_BIND_ADDRESS is not configured; port 465 is intentionally not enabled."
   fi
@@ -441,6 +524,7 @@ fi
 if scope_enabled "imaps"; then
   if [[ -n "${LPE_CT_IMAPS_BIND_ADDRESS:-}" ]]; then
     tls_probe_if_possible "$HOST" "$IMAPS_PORT" "IMAPS"
+    tls_trust_probe_if_possible "$HOST" "$IMAPS_PORT" "IMAPS"
     probe_imaps_upstream "${LPE_CT_IMAPS_UPSTREAM_ADDRESS:-}"
     probe_public_imaps_auth_if_configured
   else

@@ -224,12 +224,15 @@ sudo LPE_IMAP_TEST_EMAIL=user@example.com \
 From the `LPE-CT` server, `test-lpe-ct-edge-ports.sh` verifies both public
 `993` TLS and reachability to `LPE_CT_IMAPS_UPSTREAM_ADDRESS`. For an
 Outlook-equivalent check, pass the same mailbox credentials used with the core
-IMAP test; the script then logs in through public IMAPS and selects `INBOX`
-through the `LPE-CT` proxy:
+IMAP test. The script then verifies trusted public TLS for the client hostname,
+Outlook autodiscover IMAP/SMTP publication, public IMAPS login, and `SELECT
+INBOX` through the `LPE-CT` proxy:
 
 ```bash
 sudo HOST=mail.example.com \
-  LPE_CT_EDGE_TEST_SCOPE=imaps \
+  LPE_CT_EDGE_TEST_SCOPE=outlook \
+  LPE_CT_PUBLICATION_TEST_HOST=mail.example.com \
+  LPE_CT_AUTODISCOVER_TEST_EMAIL=user@example.com \
   LPE_CT_IMAPS_TEST_EMAIL=user@example.com \
   LPE_CT_IMAPS_TEST_PASSWORD='mailbox-password' \
   ./test-lpe-ct-edge-ports.sh
@@ -241,8 +244,12 @@ loopback-only and that the LAN firewall allows `LPE-CT` to connect to the core
 `lpe.service` receives anything, inspect `journalctl -u lpe-ct.service` because
 the failure is still on the TLS/proxy edge path. The full edge test uses
 `LPE_CT_EDGE_TEST_SCOPE=all` by default; set the scope to `smtp`, `https`,
-`submission`, `imaps`, or a comma-separated subset when isolating one client
-path.
+`submission`, `imaps`, `outlook`, or a comma-separated subset when isolating one
+client path. The `outlook` scope intentionally skips public `25` and combines
+the checks Outlook desktop needs for `IMAP` account setup. If autodiscover is
+intentionally published on a different IMAP or SMTP hostname, set
+`LPE_CT_EXPECTED_AUTODISCOVER_IMAP_HOST` or
+`LPE_CT_EXPECTED_AUTODISCOVER_SMTP_HOST` for that run.
 
 The management UI URL must use `https://`. The generated `nginx` site redirects
 plain `HTTP` received on port `80` to the configured
