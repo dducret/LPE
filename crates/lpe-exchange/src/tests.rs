@@ -1179,6 +1179,78 @@ async fn mapi_over_http_resolve_names_resolves_authenticated_mailbox() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    for request_type in [
+        "CompareMIds",
+        "DNToMId",
+        "GetMatches",
+        "GetPropList",
+        "GetProps",
+        "GetSpecialTable",
+        "GetTemplateInfo",
+        "QueryColumns",
+        "QueryRows",
+        "ResortRestriction",
+        "SeekEntries",
+        "UpdateStat",
+    ] {
+        let response = service
+            .handle_mapi(MapiEndpoint::Nspi, &mapi_headers(request_type), &[0; 32])
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK, "{request_type}");
+        assert_eq!(
+            response.headers().get("x-requesttype").unwrap(),
+            request_type,
+            "{request_type}"
+        );
+        assert_eq!(
+            response.headers().get("x-responsecode").unwrap(),
+            "0",
+            "{request_type}"
+        );
+        let body = response_bytes(response).await;
+        assert!(body.len() >= 12, "{request_type}");
+        assert_eq!(
+            u32::from_le_bytes(body[0..4].try_into().unwrap()),
+            0,
+            "{request_type}"
+        );
+        assert_eq!(
+            u32::from_le_bytes(body[4..8].try_into().unwrap()),
+            0,
+            "{request_type}"
+        );
+
+        match request_type {
+            "GetMatches" | "GetProps" | "GetTemplateInfo" | "QueryRows" | "ResortRestriction"
+            | "SeekEntries" => {
+                assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+                assert!(contains_bytes(&body, &utf16z("Alice")));
+            }
+            "GetPropList" | "QueryColumns" => {
+                assert!(contains_bytes(&body, &0x3001_001Fu32.to_le_bytes()));
+                assert!(contains_bytes(&body, &0x39FE_001Fu32.to_le_bytes()));
+            }
+            "GetSpecialTable" => {
+                assert!(contains_bytes(&body, &utf16z("Global Address List")));
+            }
+            "DNToMId" => {
+                assert_ne!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 0);
+            }
+            _ => {}
+        }
+    }
+}
+
+#[tokio::test]
 async fn mapi_over_http_unbind_consumes_nspi_session() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

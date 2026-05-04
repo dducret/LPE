@@ -39,9 +39,21 @@ enum MapiRequestType {
     Execute,
     Bind,
     Unbind,
+    CompareMids,
+    DnToMid,
+    GetMatches,
+    GetPropList,
+    GetProps,
+    GetSpecialTable,
+    GetTemplateInfo,
     GetAddressBookUrl,
     GetMailboxUrl,
+    QueryColumns,
+    QueryRows,
     ResolveNames,
+    ResortRestriction,
+    SeekEntries,
+    UpdateStat,
     Ping,
     Unsupported(String),
 }
@@ -95,15 +107,51 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
         (MapiEndpoint::Nspi, MapiRequestType::Unbind) => {
             disconnect_response(endpoint, &principal, headers, &request_id, "Unbind")
         }
+        (MapiEndpoint::Nspi, MapiRequestType::CompareMids) => {
+            nspi_u32_result_response("CompareMIds", &request_id, 0)
+        }
+        (MapiEndpoint::Nspi, MapiRequestType::DnToMid) => nspi_u32_result_response(
+            "DNToMId",
+            &request_id,
+            principal_minimal_entry_id(&principal),
+        ),
+        (MapiEndpoint::Nspi, MapiRequestType::GetMatches) => {
+            nspi_principal_rowset_response("GetMatches", &principal, &request_id)
+        }
+        (MapiEndpoint::Nspi, MapiRequestType::GetPropList) => {
+            nspi_property_tags_response("GetPropList", &request_id)
+        }
+        (MapiEndpoint::Nspi, MapiRequestType::GetProps) => {
+            nspi_principal_props_response("GetProps", &principal, &request_id)
+        }
+        (MapiEndpoint::Nspi, MapiRequestType::GetSpecialTable) => {
+            nspi_special_table_response(&request_id)
+        }
+        (MapiEndpoint::Nspi, MapiRequestType::GetTemplateInfo) => {
+            nspi_principal_props_response("GetTemplateInfo", &principal, &request_id)
+        }
         (MapiEndpoint::Nspi, MapiRequestType::GetAddressBookUrl) => {
             endpoint_url_response("GetAddressBookUrl", &request_id, headers, "/mapi/nspi/")
         }
         (MapiEndpoint::Nspi, MapiRequestType::GetMailboxUrl) => {
             endpoint_url_response("GetMailboxUrl", &request_id, headers, "/mapi/emsmdb/")
         }
+        (MapiEndpoint::Nspi, MapiRequestType::QueryColumns) => {
+            nspi_property_tags_response("QueryColumns", &request_id)
+        }
+        (MapiEndpoint::Nspi, MapiRequestType::QueryRows) => {
+            nspi_principal_rowset_response("QueryRows", &principal, &request_id)
+        }
         (MapiEndpoint::Nspi, MapiRequestType::ResolveNames) => {
             resolve_names_response(&principal, &request_id)
         }
+        (MapiEndpoint::Nspi, MapiRequestType::ResortRestriction) => {
+            nspi_principal_rowset_response("ResortRestriction", &principal, &request_id)
+        }
+        (MapiEndpoint::Nspi, MapiRequestType::SeekEntries) => {
+            nspi_principal_rowset_response("SeekEntries", &principal, &request_id)
+        }
+        (MapiEndpoint::Nspi, MapiRequestType::UpdateStat) => nspi_update_stat_response(&request_id),
         (_, MapiRequestType::Ping) => mapi_response("PING", &request_id, 0, Vec::new(), None),
         (_, MapiRequestType::Unsupported(value)) => mapi_diagnostic_response(
             &value,
@@ -317,6 +365,17 @@ fn endpoint_url_response(
     mapi_response(request_type, request_id, 0, body, None)
 }
 
+const NSPI_BOOTSTRAP_PROPERTY_TAGS: &[u32] = &[
+    0x3001_001F, // PidTagDisplayName
+    0x39FE_001F, // PidTagSmtpAddress
+    0x3003_001F, // PidTagEmailAddress
+    0x3A00_001F, // PidTagAccount
+    0x0FFE_0003, // PidTagObjectType
+    0x3000_0003, // PidTagRowId
+    0x3004_001F, // PidTagComment
+    0x3002_001F, // PidTagAddressType / legacy bootstrap metadata
+];
+
 fn resolve_names_response(principal: &AccountPrincipal, request_id: &str) -> Response {
     let mut body = Vec::new();
     write_u32(&mut body, 0);
@@ -327,6 +386,86 @@ fn resolve_names_response(principal: &AccountPrincipal, request_id: &str) -> Res
     body.extend_from_slice(&nspi_resolved_principal_row(principal));
     write_u32(&mut body, 0);
     mapi_response("ResolveNames", request_id, 0, body, None)
+}
+
+fn nspi_u32_result_response(request_type: &str, request_id: &str, value: u32) -> Response {
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    write_u32(&mut body, value);
+    write_u32(&mut body, 0);
+    mapi_response(request_type, request_id, 0, body, None)
+}
+
+fn nspi_property_tags_response(request_type: &str, request_id: &str) -> Response {
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    write_u32(&mut body, NSPI_BOOTSTRAP_PROPERTY_TAGS.len() as u32);
+    for tag in NSPI_BOOTSTRAP_PROPERTY_TAGS {
+        write_u32(&mut body, *tag);
+    }
+    write_u32(&mut body, 0);
+    mapi_response(request_type, request_id, 0, body, None)
+}
+
+fn nspi_principal_props_response(
+    request_type: &str,
+    principal: &AccountPrincipal,
+    request_id: &str,
+) -> Response {
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    body.extend_from_slice(&nspi_resolved_principal_row(principal));
+    write_u32(&mut body, 0);
+    mapi_response(request_type, request_id, 0, body, None)
+}
+
+fn nspi_principal_rowset_response(
+    request_type: &str,
+    principal: &AccountPrincipal,
+    request_id: &str,
+) -> Response {
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 1);
+    body.extend_from_slice(&nspi_resolved_principal_row(principal));
+    write_u32(&mut body, 0);
+    mapi_response(request_type, request_id, 0, body, None)
+}
+
+fn nspi_special_table_response(request_id: &str) -> Response {
+    let mut table_row = Vec::new();
+    write_u32(&mut table_row, 4);
+    write_nspi_string_property(&mut table_row, 0x3001_001F, "Global Address List");
+    write_nspi_u32_property(&mut table_row, 0x0FFE_0003, 0);
+    write_nspi_u32_property(&mut table_row, 0x3000_0003, 1);
+    write_nspi_string_property(
+        &mut table_row,
+        0x3002_001F,
+        "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=Global Address List",
+    );
+
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 1);
+    write_u32(&mut body, 1);
+    body.extend_from_slice(&table_row);
+    write_u32(&mut body, 0);
+    mapi_response("GetSpecialTable", request_id, 0, body, None)
+}
+
+fn nspi_update_stat_response(request_id: &str) -> Response {
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    body.extend_from_slice(&[0; 36]);
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    mapi_response("UpdateStat", request_id, 0, body, None)
 }
 
 fn principal_minimal_entry_id(principal: &AccountPrincipal) -> u32 {
@@ -455,9 +594,21 @@ fn request_type(headers: &HeaderMap) -> Result<MapiRequestType> {
         "execute" => MapiRequestType::Execute,
         "bind" => MapiRequestType::Bind,
         "unbind" => MapiRequestType::Unbind,
+        "comparemids" => MapiRequestType::CompareMids,
+        "dntomid" => MapiRequestType::DnToMid,
+        "getmatches" => MapiRequestType::GetMatches,
+        "getproplist" => MapiRequestType::GetPropList,
+        "getprops" => MapiRequestType::GetProps,
+        "getspecialtable" => MapiRequestType::GetSpecialTable,
+        "gettemplateinfo" => MapiRequestType::GetTemplateInfo,
         "getaddressbookurl" => MapiRequestType::GetAddressBookUrl,
         "getmailboxurl" => MapiRequestType::GetMailboxUrl,
+        "querycolumns" => MapiRequestType::QueryColumns,
+        "queryrows" => MapiRequestType::QueryRows,
         "resolvenames" => MapiRequestType::ResolveNames,
+        "resortrestriction" => MapiRequestType::ResortRestriction,
+        "seekentries" => MapiRequestType::SeekEntries,
+        "updatestat" => MapiRequestType::UpdateStat,
         "ping" => MapiRequestType::Ping,
         _ => MapiRequestType::Unsupported(value.to_string()),
     })
@@ -1021,9 +1172,21 @@ impl MapiRequestType {
             MapiRequestType::Execute => "Execute",
             MapiRequestType::Bind => "Bind",
             MapiRequestType::Unbind => "Unbind",
+            MapiRequestType::CompareMids => "CompareMIds",
+            MapiRequestType::DnToMid => "DNToMId",
+            MapiRequestType::GetMatches => "GetMatches",
+            MapiRequestType::GetPropList => "GetPropList",
+            MapiRequestType::GetProps => "GetProps",
+            MapiRequestType::GetSpecialTable => "GetSpecialTable",
+            MapiRequestType::GetTemplateInfo => "GetTemplateInfo",
             MapiRequestType::GetAddressBookUrl => "GetAddressBookUrl",
             MapiRequestType::GetMailboxUrl => "GetMailboxUrl",
+            MapiRequestType::QueryColumns => "QueryColumns",
+            MapiRequestType::QueryRows => "QueryRows",
             MapiRequestType::ResolveNames => "ResolveNames",
+            MapiRequestType::ResortRestriction => "ResortRestriction",
+            MapiRequestType::SeekEntries => "SeekEntries",
+            MapiRequestType::UpdateStat => "UpdateStat",
             MapiRequestType::Ping => "PING",
             MapiRequestType::Unsupported(value) => value,
         }
