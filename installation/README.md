@@ -202,6 +202,16 @@ cd /opt/lpe/src/installation/debian-trixie
 sudo ./test-lpe-imap-listener.sh
 ```
 
+For an authenticated protocol check, pass a real mailbox address and password.
+The script then verifies `CAPABILITY`, literal-form `LOGIN`, and `SELECT INBOX`
+against the core listener:
+
+```bash
+sudo LPE_IMAP_TEST_EMAIL=user@example.com \
+  LPE_IMAP_TEST_PASSWORD='mailbox-password' \
+  ./test-lpe-imap-listener.sh
+```
+
 From the `LPE-CT` server, `test-lpe-ct-edge-ports.sh` verifies both public
 `993` TLS and reachability to `LPE_CT_IMAPS_UPSTREAM_ADDRESS`. If that upstream
 probe fails, check that `LPE_IMAP_BIND_ADDRESS` is not loopback-only and that the

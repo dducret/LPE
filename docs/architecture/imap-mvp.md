@@ -18,6 +18,8 @@ It does not introduce a parallel mailbox store, a parallel sent-message workflow
   synchronization before fetching mailbox state
 - tolerant `ID`
 - tolerant legacy `AUTH LOGIN` as an alias for `AUTHENTICATE LOGIN`
+- command literals for authentication and setup commands, including Outlook
+  login flows that send usernames or passwords as `{N}` literals
 - `NAMESPACE` for the flat personal namespace
 - `LIST` for the canonical system mailboxes, rendering the inbox as the single
   canonical `INBOX` name and honoring mailbox patterns such as `INBOX`, `%`, and `*`

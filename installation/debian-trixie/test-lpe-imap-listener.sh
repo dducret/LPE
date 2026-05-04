@@ -19,6 +19,103 @@ pass() {
   echo "[OK] $*"
 }
 
+IMAP_RESPONSE=""
+
+imap_read_until() {
+  local tag="$1"
+  local line
+  IMAP_RESPONSE=""
+  while IFS= read -r -t 5 line <&3; do
+    line="${line%$'\r'}"
+    IMAP_RESPONSE+="${line}"$'\n'
+    if [[ "${line}" == "${tag} "* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+imap_read_greeting() {
+  local line
+  IMAP_RESPONSE=""
+  if ! IFS= read -r -t 5 line <&3; then
+    return 1
+  fi
+  line="${line%$'\r'}"
+  IMAP_RESPONSE="${line}"$'\n'
+  [[ "${line}" == "* OK "* ]]
+}
+
+imap_send() {
+  printf '%s\r\n' "$1" >&3
+}
+
+imap_deep_probe() {
+  local test_email="${LPE_IMAP_TEST_EMAIL:-${IMAP_TEST_EMAIL:-}}"
+  local test_password="${LPE_IMAP_TEST_PASSWORD:-${IMAP_TEST_PASSWORD:-}}"
+  local test_email_size
+  local test_password_size
+  if [[ -z "${test_email}" || -z "${test_password}" ]]; then
+    warn "Skipping authenticated IMAP probe. Set LPE_IMAP_TEST_EMAIL and LPE_IMAP_TEST_PASSWORD to test CAPABILITY, literal LOGIN, and SELECT INBOX."
+    return 0
+  fi
+  test_email_size="$(printf '%s' "${test_email}" | wc -c | tr -d ' ')"
+  test_password_size="$(printf '%s' "${test_password}" | wc -c | tr -d ' ')"
+
+  if ! exec 3<>"/dev/tcp/${CONNECT_HOST}/${IMAP_PORT}"; then
+    fail "Unable to open IMAP probe connection to ${CONNECT_HOST}:${IMAP_PORT}"
+  fi
+
+  if ! imap_read_greeting; then
+    echo "[DIAG] IMAP greeting response:"
+    printf '%s' "${IMAP_RESPONSE}"
+    fail "IMAP listener did not return a valid greeting"
+  fi
+
+  imap_send "A1 CAPABILITY"
+  if ! imap_read_until "A1" || [[ "${IMAP_RESPONSE}" != *"AUTH=PLAIN"* ]]; then
+    echo "[DIAG] CAPABILITY response:"
+    printf '%s' "${IMAP_RESPONSE}"
+    fail "IMAP CAPABILITY did not complete with expected authentication support"
+  fi
+  pass "IMAP CAPABILITY completed"
+
+  imap_send "A2 LOGIN {${test_email_size}}"
+  if ! imap_read_until "+" || [[ "${IMAP_RESPONSE}" != *"+ Ready for literal data"* ]]; then
+    echo "[DIAG] Literal username prompt response:"
+    printf '%s' "${IMAP_RESPONSE}"
+    fail "IMAP LOGIN did not accept a username literal"
+  fi
+
+  imap_send "${test_email} {${test_password_size}}"
+  if ! imap_read_until "+" || [[ "${IMAP_RESPONSE}" != *"+ Ready for literal data"* ]]; then
+    echo "[DIAG] Literal password prompt response:"
+    printf '%s' "${IMAP_RESPONSE}"
+    fail "IMAP LOGIN did not accept a password literal"
+  fi
+
+  imap_send "${test_password}"
+  if ! imap_read_until "A2" || [[ "${IMAP_RESPONSE}" != *"A2 OK LOGIN completed"* ]]; then
+    echo "[DIAG] LOGIN response:"
+    printf '%s' "${IMAP_RESPONSE}"
+    fail "IMAP literal LOGIN failed for ${test_email}"
+  fi
+  pass "IMAP literal LOGIN completed for ${test_email}"
+
+  imap_send "A3 SELECT INBOX"
+  if ! imap_read_until "A3" || [[ "${IMAP_RESPONSE}" != *"A3 OK [READ-WRITE] SELECT completed"* ]]; then
+    echo "[DIAG] SELECT INBOX response:"
+    printf '%s' "${IMAP_RESPONSE}"
+    fail "IMAP SELECT INBOX failed for ${test_email}"
+  fi
+  pass "IMAP SELECT INBOX completed"
+
+  imap_send "A4 LOGOUT"
+  imap_read_until "A4" >/dev/null 2>&1 || true
+  exec 3>&-
+  exec 3<&-
+}
+
 [[ -f "${ENV_FILE}" ]] || fail "Environment file not found: ${ENV_FILE}"
 
 set -a
@@ -75,6 +172,7 @@ if ! timeout 5 bash -c ":</dev/tcp/${CONNECT_HOST}/${IMAP_PORT}" >/dev/null 2>&1
 fi
 
 pass "Core LPE IMAP listener is reachable on ${CONNECT_HOST}:${IMAP_PORT}"
+imap_deep_probe
 
 case "${IMAP_HOST}" in
   127.*|localhost)

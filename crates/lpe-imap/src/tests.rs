@@ -1960,6 +1960,65 @@ async fn legacy_auth_login_alias_is_accepted() {
 }
 
 #[tokio::test]
+async fn login_accepts_username_and_password_literals() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+
+    let username = "alice@example.test";
+    let password = "secret";
+    let username_prompt =
+        send_partial_command(&mut stream, &format!("A1 LOGIN {{{}}}\r\n", username.len())).await;
+    assert!(username_prompt.contains("+ Ready for literal data"));
+
+    let password_prompt = send_partial_command(
+        &mut stream,
+        &format!("{username} {{{}}}\r\n", password.len()),
+    )
+    .await;
+    assert!(password_prompt.contains("+ Ready for literal data"));
+
+    let response = send_command(&mut stream, &format!("{password}\r\n"), "A1").await;
+    assert!(response.contains("A1 OK LOGIN completed"));
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn authenticate_login_accepts_initial_username_literal() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+
+    let username = base64::engine::general_purpose::STANDARD.encode("alice@example.test");
+    let username_prompt = send_partial_command(
+        &mut stream,
+        &format!("A1 AUTHENTICATE LOGIN {{{}}}\r\n", username.len()),
+    )
+    .await;
+    assert!(username_prompt.contains("+ Ready for literal data"));
+
+    let password_challenge = send_partial_command(&mut stream, &format!("{username}\r\n")).await;
+    assert!(password_challenge.contains("+ UGFzc3dvcmQ6"));
+
+    let password = base64::engine::general_purpose::STANDARD.encode("secret");
+    let response = send_command(&mut stream, &format!("{password}\r\n"), "A1").await;
+    assert!(response.contains("A1 OK AUTHENTICATE completed"));
+
+    task.abort();
+}
+
+#[tokio::test]
 async fn quota_probe_commands_are_tolerated_for_outlook_setup() {
     let store = FakeStore::new();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use lpe_magika::{Detector, Validator};
 use lpe_mail_auth::AccountPrincipal;
 use lpe_storage::ImapEmail;
@@ -68,8 +68,14 @@ impl<S: ImapStore, D: Detector> ImapServer<S, D> {
             if line.is_empty() {
                 continue;
             }
+            let request_command = parse_request_line(line)?.command;
+            let line = if request_command == "APPEND" {
+                line.to_string()
+            } else {
+                read_command_literals(&mut reader, &mut write_half, line).await?
+            };
             let keep_running = session
-                .handle_request(&mut reader, &mut write_half, line)
+                .handle_request(&mut reader, &mut write_half, &line)
                 .await?;
             if !keep_running {
                 break;
@@ -78,6 +84,65 @@ impl<S: ImapStore, D: Detector> ImapServer<S, D> {
 
         Ok(())
     }
+}
+
+async fn read_command_literals<R, W>(
+    reader: &mut BufReader<R>,
+    writer: &mut W,
+    initial_line: &str,
+) -> Result<String>
+where
+    R: AsyncReadExt + Unpin,
+    W: AsyncWriteExt + Unpin,
+{
+    let mut line = initial_line.to_string();
+    while let Some((prefix, size, synchronizing)) = trailing_literal(&line)? {
+        if synchronizing {
+            writer.write_all(b"+ Ready for literal data\r\n").await?;
+            writer.flush().await?;
+        }
+
+        let mut literal = vec![0u8; size];
+        reader.read_exact(&mut literal).await?;
+        line = format!("{prefix}\"{}\"", quote_literal_token(&literal));
+
+        let mut rest = String::new();
+        reader.read_line(&mut rest).await?;
+        line.push_str(rest.trim_end_matches(['\r', '\n']));
+    }
+    Ok(line)
+}
+
+fn trailing_literal(line: &str) -> Result<Option<(&str, usize, bool)>> {
+    let Some(close_index) = line.strip_suffix('}').map(|_| line.len() - 1) else {
+        return Ok(None);
+    };
+    let Some(open_index) = line[..close_index].rfind('{') else {
+        return Ok(None);
+    };
+    let mut size_token = &line[open_index + 1..close_index];
+    let synchronizing = !size_token.ends_with('+');
+    if !synchronizing {
+        size_token = &size_token[..size_token.len() - 1];
+    }
+    if size_token.is_empty()
+        || !size_token
+            .chars()
+            .all(|character| character.is_ascii_digit())
+    {
+        return Ok(None);
+    }
+    let size = size_token.parse::<usize>()?;
+    if size > 4096 {
+        bail!("command literal is too large");
+    }
+    Ok(Some((&line[..open_index], size, synchronizing)))
+}
+
+fn quote_literal_token(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
 }
 
 pub async fn serve(listener: TcpListener, store: impl ImapStore) -> Result<()> {
