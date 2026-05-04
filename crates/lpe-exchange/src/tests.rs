@@ -8,7 +8,10 @@ use lpe_storage::{
     StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
     UpsertClientEventInput,
 };
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 use uuid::Uuid;
 
 use crate::{
@@ -23,8 +26,10 @@ struct FakeStore {
     contact_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
     calendar_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
     contacts: Arc<Mutex<Vec<AccessibleContact>>>,
+    contact_versions: Arc<Mutex<HashMap<Uuid, u64>>>,
     deleted_contacts: Arc<Mutex<Vec<Uuid>>>,
     events: Arc<Mutex<Vec<AccessibleEvent>>>,
+    event_versions: Arc<Mutex<HashMap<Uuid, u64>>>,
     deleted_events: Arc<Mutex<Vec<Uuid>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
@@ -189,6 +194,32 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(contacts) })
     }
 
+    fn fetch_contact_sync_versions<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<(Uuid, String)>> {
+        let versions = self.contact_versions.lock().unwrap().clone();
+        let contacts = self
+            .contacts
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|contact| contact.collection_id == collection_id)
+            .map(|contact| {
+                (
+                    contact.id,
+                    versions
+                        .get(&contact.id)
+                        .copied()
+                        .unwrap_or_default()
+                        .to_string(),
+                )
+            })
+            .collect();
+        Box::pin(async move { Ok(contacts) })
+    }
+
     fn fetch_accessible_events_in_collection<'a>(
         &'a self,
         _principal_account_id: Uuid,
@@ -201,6 +232,32 @@ impl ExchangeStore for FakeStore {
             .iter()
             .filter(|event| event.collection_id == collection_id)
             .cloned()
+            .collect();
+        Box::pin(async move { Ok(events) })
+    }
+
+    fn fetch_event_sync_versions<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<(Uuid, String)>> {
+        let versions = self.event_versions.lock().unwrap().clone();
+        let events = self
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event.collection_id == collection_id)
+            .map(|event| {
+                (
+                    event.id,
+                    versions
+                        .get(&event.id)
+                        .copied()
+                        .unwrap_or_default()
+                        .to_string(),
+                )
+            })
             .collect();
         Box::pin(async move { Ok(events) })
     }
@@ -244,6 +301,7 @@ impl ExchangeStore for FakeStore {
             team: input.team,
             notes: input.notes,
         };
+        self.contact_versions.lock().unwrap().insert(contact.id, 1);
         self.contacts.lock().unwrap().push(contact.clone());
         Box::pin(async move { Ok(contact) })
     }
@@ -265,6 +323,13 @@ impl ExchangeStore for FakeStore {
         contact.phone = input.phone;
         contact.team = input.team;
         contact.notes = input.notes;
+        let mut versions = self.contact_versions.lock().unwrap();
+        let version = versions
+            .get(&contact_id)
+            .copied()
+            .unwrap_or_default()
+            .saturating_add(1);
+        versions.insert(contact_id, version);
         let contact = contact.clone();
         Box::pin(async move { Ok(contact) })
     }
@@ -325,6 +390,7 @@ impl ExchangeStore for FakeStore {
             attendees_json: input.attendees_json,
             notes: input.notes,
         };
+        self.event_versions.lock().unwrap().insert(event.id, 1);
         self.events.lock().unwrap().push(event.clone());
         Box::pin(async move { Ok(event) })
     }
@@ -350,6 +416,13 @@ impl ExchangeStore for FakeStore {
         event.attendees = input.attendees;
         event.attendees_json = input.attendees_json;
         event.notes = input.notes;
+        let mut versions = self.event_versions.lock().unwrap();
+        let version = versions
+            .get(&event_id)
+            .copied()
+            .unwrap_or_default()
+            .saturating_add(1);
+        versions.insert(event_id, version);
         let event = event.clone();
         Box::pin(async move { Ok(event) })
     }
@@ -2869,6 +2942,90 @@ async fn update_contact_round_trips_through_sync_folder_items() {
     assert!(body.contains("<t:DisplayName>Updated RCA Contact</t:DisplayName>"));
     assert!(body.contains("<t:JobTitle>Manager</t:JobTitle>"));
     assert!(body.contains("<t:Body BodyType=\"Text\">Updated by RCA</t:Body>"));
+}
+
+#[tokio::test]
+async fn update_contact_unmapped_field_still_advances_sync_folder_items() {
+    let contact_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    let collection = FakeStore::collection("default", "contacts", "Contacts");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![collection.clone()])),
+        contacts: Arc::new(Mutex::new(vec![AccessibleContact {
+            id: contact_id,
+            collection_id: collection.id.clone(),
+            owner_account_id: collection.owner_account_id,
+            owner_email: collection.owner_email.clone(),
+            owner_display_name: collection.owner_display_name.clone(),
+            rights: collection.rights.clone(),
+            name: "RCA Contact".to_string(),
+            role: "Tester".to_string(),
+            email: "rca@example.test".to_string(),
+            phone: "+41000000000".to_string(),
+            team: "LPE".to_string(),
+            notes: "Created by RCA".to_string(),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default"/></m:SyncFolderId><m:SyncState>contacts:default:0</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    let old_sync_state = body
+        .split("<m:SyncState>")
+        .nth(1)
+        .and_then(|rest| rest.split("</m:SyncState>").next())
+        .unwrap()
+        .to_string();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:UpdateItem ConflictResolution="AlwaysOverwrite">
+                  <m:ItemChanges>
+                    <t:ItemChange>
+                      <t:ItemId Id="contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/>
+                      <t:Updates>
+                        <t:SetItemField>
+                          <t:FieldURI FieldURI="contacts:AssistantName"/>
+                          <t:Contact>
+                            <t:AssistantName>RCA Assistant</t:AssistantName>
+                          </t:Contact>
+                        </t:SetItemField>
+                      </t:Updates>
+                    </t:ItemChange>
+                  </m:ItemChanges>
+                </m:UpdateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UpdateItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    let request = format!(
+        r#"<s:Envelope><s:Body><m:SyncFolderItems><m:ItemShape><t:BaseShape>AllProperties</t:BaseShape></m:ItemShape><m:SyncFolderId><t:FolderId Id="default" ChangeKey="ck-default"/></m:SyncFolderId><m:SyncState>{old_sync_state}</m:SyncState><m:MaxChangesReturned>10</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#
+    );
+    let response = service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Update><t:Contact>"));
+    assert!(body.contains("<t:DisplayName>RCA Contact</t:DisplayName>"));
+    assert!(!body.contains(&format!("<m:SyncState>{old_sync_state}</m:SyncState>")));
 }
 
 #[tokio::test]

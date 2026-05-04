@@ -557,9 +557,22 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     .store
                     .fetch_accessible_contacts_in_collection(principal.account_id, collection_id)
                     .await?;
+                let sync_versions = sync_version_by_id(
+                    self.store
+                        .fetch_contact_sync_versions(principal.account_id, collection_id)
+                        .await?,
+                );
                 let current_items = contacts
                     .iter()
-                    .map(|contact| (contact.id, contact_change_key(contact)))
+                    .map(|contact| {
+                        (
+                            contact.id,
+                            contact_change_key(
+                                contact,
+                                sync_versions.get(&contact.id).map(String::as_str),
+                            ),
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let current_set = current_items
                     .iter()
@@ -570,23 +583,35 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     .unwrap_or_default();
                 let previous_by_id = sync_state_items_by_id(&previous_items);
                 for contact in &contacts {
-                    let current_change_key = contact_change_key(contact);
+                    let current_change_key = contact_change_key(
+                        contact,
+                        sync_versions.get(&contact.id).map(String::as_str),
+                    );
                     match previous_by_id.get(&contact.id) {
                         None => {
                             changes.push_str("<t:Create>");
-                            changes.push_str(&contact_item_xml(contact));
+                            changes.push_str(&contact_item_xml_with_change_key(
+                                contact,
+                                &current_change_key,
+                            ));
                             changes.push_str("</t:Create>");
                         }
                         Some(None) => {
                             changes.push_str("<t:Update>");
-                            changes.push_str(&contact_item_xml(contact));
+                            changes.push_str(&contact_item_xml_with_change_key(
+                                contact,
+                                &current_change_key,
+                            ));
                             changes.push_str("</t:Update>");
                         }
                         Some(Some(previous_change_key))
                             if previous_change_key != &current_change_key =>
                         {
                             changes.push_str("<t:Update>");
-                            changes.push_str(&contact_item_xml(contact));
+                            changes.push_str(&contact_item_xml_with_change_key(
+                                contact,
+                                &current_change_key,
+                            ));
                             changes.push_str("</t:Update>");
                         }
                         _ => {}
@@ -610,9 +635,22 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     .store
                     .fetch_accessible_events_in_collection(principal.account_id, collection_id)
                     .await?;
+                let sync_versions = sync_version_by_id(
+                    self.store
+                        .fetch_event_sync_versions(principal.account_id, collection_id)
+                        .await?,
+                );
                 let current_items = events
                     .iter()
-                    .map(|event| (event.id, calendar_change_key(event)))
+                    .map(|event| {
+                        (
+                            event.id,
+                            calendar_change_key(
+                                event,
+                                sync_versions.get(&event.id).map(String::as_str),
+                            ),
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let current_set = current_items
                     .iter()
@@ -623,23 +661,35 @@ impl<S: ExchangeStore> ExchangeService<S> {
                     .unwrap_or_default();
                 let previous_by_id = sync_state_items_by_id(&previous_items);
                 for event in &events {
-                    let current_change_key = calendar_change_key(event);
+                    let current_change_key = calendar_change_key(
+                        event,
+                        sync_versions.get(&event.id).map(String::as_str),
+                    );
                     match previous_by_id.get(&event.id) {
                         None => {
                             changes.push_str("<t:Create>");
-                            changes.push_str(&calendar_item_xml(event));
+                            changes.push_str(&calendar_item_xml_with_change_key(
+                                event,
+                                &current_change_key,
+                            ));
                             changes.push_str("</t:Create>");
                         }
                         Some(None) => {
                             changes.push_str("<t:Update>");
-                            changes.push_str(&calendar_item_xml(event));
+                            changes.push_str(&calendar_item_xml_with_change_key(
+                                event,
+                                &current_change_key,
+                            ));
                             changes.push_str("</t:Update>");
                         }
                         Some(Some(previous_change_key))
                             if previous_change_key != &current_change_key =>
                         {
                             changes.push_str("<t:Update>");
-                            changes.push_str(&calendar_item_xml(event));
+                            changes.push_str(&calendar_item_xml_with_change_key(
+                                event,
+                                &current_change_key,
+                            ));
                             changes.push_str("</t:Update>");
                         }
                         _ => {}
@@ -1884,6 +1934,10 @@ fn sync_state_items_by_id(items: &[SyncStateItem]) -> HashMap<Uuid, Option<Strin
         .collect()
 }
 
+fn sync_version_by_id(items: Vec<(Uuid, String)>) -> HashMap<Uuid, String> {
+    items.into_iter().collect()
+}
+
 fn mailbox_sync_state_ids(sync_state: &str, mailbox_id: Uuid) -> Vec<Uuid> {
     let prefix = format!("mailbox:{mailbox_id}:");
     sync_state
@@ -2494,10 +2548,11 @@ fn folder_change_key(id: &str) -> String {
     format!("ck-{id}")
 }
 
-fn contact_change_key(contact: &AccessibleContact) -> String {
+fn contact_change_key(contact: &AccessibleContact, sync_version: Option<&str>) -> String {
     stable_change_key(&[
         "contact",
         &contact.id.to_string(),
+        sync_version.unwrap_or_default(),
         &contact.collection_id,
         &contact.name,
         &contact.role,
@@ -2508,10 +2563,11 @@ fn contact_change_key(contact: &AccessibleContact) -> String {
     ])
 }
 
-fn calendar_change_key(event: &AccessibleEvent) -> String {
+fn calendar_change_key(event: &AccessibleEvent, sync_version: Option<&str>) -> String {
     stable_change_key(&[
         "calendar",
         &event.id.to_string(),
+        sync_version.unwrap_or_default(),
         &event.collection_id,
         &event.date,
         &event.time,
@@ -2546,6 +2602,11 @@ fn count_folder_elements(value: &str) -> usize {
 }
 
 fn contact_summary_xml(contact: &AccessibleContact) -> String {
+    let change_key = contact_change_key(contact, None);
+    contact_summary_xml_with_change_key(contact, &change_key)
+}
+
+fn contact_summary_xml_with_change_key(contact: &AccessibleContact, change_key: &str) -> String {
     format!(
         concat!(
             "<t:Contact>",
@@ -2555,12 +2616,17 @@ fn contact_summary_xml(contact: &AccessibleContact) -> String {
             "</t:Contact>"
         ),
         id = contact.id,
-        change_key = contact_change_key(contact),
+        change_key = escape_xml(change_key),
         name = escape_xml(&contact.name),
     )
 }
 
 fn contact_item_xml(contact: &AccessibleContact) -> String {
+    let change_key = contact_change_key(contact, None);
+    contact_item_xml_with_change_key(contact, &change_key)
+}
+
+fn contact_item_xml_with_change_key(contact: &AccessibleContact, change_key: &str) -> String {
     format!(
         concat!(
             "<t:Contact>",
@@ -2578,7 +2644,7 @@ fn contact_item_xml(contact: &AccessibleContact) -> String {
             "</t:Contact>"
         ),
         id = contact.id,
-        change_key = contact_change_key(contact),
+        change_key = escape_xml(change_key),
         folder_id = escape_xml(&contact.collection_id),
         name = escape_xml(&contact.name),
         given = escape_xml(&first_name(&contact.name)),
@@ -2592,6 +2658,11 @@ fn contact_item_xml(contact: &AccessibleContact) -> String {
 }
 
 fn calendar_item_summary_xml(event: &AccessibleEvent) -> String {
+    let change_key = calendar_change_key(event, None);
+    calendar_item_summary_xml_with_change_key(event, &change_key)
+}
+
+fn calendar_item_summary_xml_with_change_key(event: &AccessibleEvent, change_key: &str) -> String {
     format!(
         concat!(
             "<t:CalendarItem>",
@@ -2602,7 +2673,7 @@ fn calendar_item_summary_xml(event: &AccessibleEvent) -> String {
             "</t:CalendarItem>"
         ),
         id = event.id,
-        change_key = calendar_change_key(event),
+        change_key = escape_xml(change_key),
         title = escape_xml(&event.title),
         start = escape_xml(&ews_datetime(&event.date, &event.time)),
         end = escape_xml(&event_end_datetime(event)),
@@ -2610,6 +2681,11 @@ fn calendar_item_summary_xml(event: &AccessibleEvent) -> String {
 }
 
 fn calendar_item_xml(event: &AccessibleEvent) -> String {
+    let change_key = calendar_change_key(event, None);
+    calendar_item_xml_with_change_key(event, &change_key)
+}
+
+fn calendar_item_xml_with_change_key(event: &AccessibleEvent, change_key: &str) -> String {
     format!(
         concat!(
             "<t:CalendarItem>",
@@ -2624,7 +2700,7 @@ fn calendar_item_xml(event: &AccessibleEvent) -> String {
             "</t:CalendarItem>"
         ),
         id = event.id,
-        change_key = calendar_change_key(event),
+        change_key = escape_xml(change_key),
         folder_id = escape_xml(&event.collection_id),
         title = escape_xml(&event.title),
         location = escape_xml(&event.location),

@@ -5,6 +5,7 @@ use lpe_storage::{
     Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
     UpsertClientEventInput,
 };
+use sqlx::Row;
 use uuid::Uuid;
 
 pub trait ExchangeStore: AccountAuthStore {
@@ -24,11 +25,23 @@ pub trait ExchangeStore: AccountAuthStore {
         collection_id: &'a str,
     ) -> StoreFuture<'a, Vec<AccessibleContact>>;
 
+    fn fetch_contact_sync_versions<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<(Uuid, String)>>;
+
     fn fetch_accessible_events_in_collection<'a>(
         &'a self,
         principal_account_id: Uuid,
         collection_id: &'a str,
     ) -> StoreFuture<'a, Vec<AccessibleEvent>>;
+
+    fn fetch_event_sync_versions<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<(Uuid, String)>>;
 
     fn fetch_accessible_contacts_by_ids<'a>(
         &'a self,
@@ -178,6 +191,41 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn fetch_contact_sync_versions<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<(Uuid, String)>> {
+        Box::pin(async move {
+            let contacts = self
+                .fetch_accessible_contacts_in_collection(principal_account_id, collection_id)
+                .await?;
+            let ids = contacts
+                .iter()
+                .map(|contact| contact.id)
+                .collect::<Vec<_>>();
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let rows = sqlx::query(
+                r#"
+                SELECT
+                    id,
+                    to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at
+                FROM contacts
+                WHERE id = ANY($1)
+                "#,
+            )
+            .bind(&ids)
+            .fetch_all(self.pool())
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| (row.get("id"), row.get("updated_at")))
+                .collect())
+        })
+    }
+
     fn fetch_accessible_events_in_collection<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -186,6 +234,38 @@ impl ExchangeStore for Storage {
         Box::pin(async move {
             self.fetch_accessible_events_in_collection(principal_account_id, collection_id)
                 .await
+        })
+    }
+
+    fn fetch_event_sync_versions<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        collection_id: &'a str,
+    ) -> StoreFuture<'a, Vec<(Uuid, String)>> {
+        Box::pin(async move {
+            let events = self
+                .fetch_accessible_events_in_collection(principal_account_id, collection_id)
+                .await?;
+            let ids = events.iter().map(|event| event.id).collect::<Vec<_>>();
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let rows = sqlx::query(
+                r#"
+                SELECT
+                    id,
+                    to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at
+                FROM calendar_events
+                WHERE id = ANY($1)
+                "#,
+            )
+            .bind(&ids)
+            .fetch_all(self.pool())
+            .await?;
+            Ok(rows
+                .into_iter()
+                .map(|row| (row.get("id"), row.get("updated_at")))
+                .collect())
         })
     }
 

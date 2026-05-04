@@ -1492,6 +1492,7 @@ dependencies = [
  "axum",
  "lpe-mail-auth",
  "lpe-storage",
+ "sqlx",
  "tokio",
  "uuid",
 ]

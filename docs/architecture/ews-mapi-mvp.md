@@ -91,7 +91,8 @@ The adapter currently exposes:
 The EWS distinguished folder ids `contacts` and `calendar` map to the canonical owned `default` contact and calendar collections. Shared collections keep explicit synthetic ids such as `shared-contacts-{owner_account_id}` and `shared-calendar-{owner_account_id}`.
 
 The adapter returns a Basic authentication challenge for unauthenticated EWS requests and accepts `msgfolderroot` / `root` as lightweight root-folder discovery ids so clients can bootstrap folder traversal before requesting the supported contacts and calendar folders.
-`SyncFolderItems` for contacts and calendar events includes deterministic item change keys in both item ids and server `SyncState`, allowing the adapter to return create, update, and delete changes without introducing an Exchange-specific collaboration store.
+`SyncFolderItems` for contacts and calendar events includes deterministic item change keys in both item ids and server `SyncState`, derived from canonical item content plus the canonical row update marker.
+This allows the adapter to return create, update, and delete changes without introducing an Exchange-specific collaboration store, including after bounded `UpdateItem` requests that touch EWS fields not represented as first-class LPE contact or calendar properties.
 Legacy ID-only contact and calendar sync states from earlier `0.1.3` builds are still accepted; matching current items are returned once as updates and the response advances the client to the change-key state format.
 
 Folder responses include EWS `TotalCount` and `ChildFolderCount` properties so strict EWS clients can read requested folder properties during bootstrap. The current MVP returns conservative zero counts for these compatibility properties instead of deriving full mailbox-style counters for collaboration folders.
@@ -118,7 +119,7 @@ Request element names ending in `Request`, such as `GetUserOofSettingsRequest`, 
 
 ### Current limitations
 
-- `SyncFolderItems` uses compact server `SyncState` values over canonical item ids and deterministic change keys for contacts and calendar events; it does not yet maintain a full EWS incremental change ledger with tombstone history beyond the previous client token
+- `SyncFolderItems` uses compact server `SyncState` values over canonical item ids and deterministic change keys for contacts and calendar events; those keys include canonical update markers, but the adapter does not yet maintain a full EWS incremental change ledger with tombstone history beyond the previous client token
 - `UpdateItem` is limited to contact and calendar field updates; message updates, attachment mutations, tasks, and meeting workflow updates are not implemented yet
 - tasks, free/busy, recurrence expansion, alarms, meeting scheduling, extended properties, attachments, and GAL are not implemented through `EWS` yet
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
