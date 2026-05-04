@@ -37,6 +37,7 @@ struct FakeStore {
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
     deleted_emails: Arc<Mutex<Vec<Uuid>>>,
     moved_emails: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
+    copied_emails: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
     mailboxes: Arc<Mutex<Vec<JmapMailbox>>>,
     created_mailboxes: Arc<Mutex<Vec<JmapMailboxCreateInput>>>,
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
@@ -561,6 +562,44 @@ impl ExchangeStore for FakeStore {
         }
         let moved = email.clone();
         Box::pin(async move { Ok(moved) })
+    }
+
+    fn copy_jmap_email<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        self.copied_emails
+            .lock()
+            .unwrap()
+            .push((message_id, target_mailbox_id));
+        let target = self
+            .mailboxes
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|mailbox| mailbox.id == target_mailbox_id)
+            .cloned();
+        let mut copied = self
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|email| email.id == message_id)
+            .cloned()
+            .unwrap();
+        copied.id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+        if let Some(target) = target {
+            copied.mailbox_id = target.id;
+            copied.mailbox_role = target.role;
+            copied.mailbox_name = target.name;
+        } else {
+            copied.mailbox_id = target_mailbox_id;
+        }
+        self.emails.lock().unwrap().push(copied.clone());
+        Box::pin(async move { Ok(copied) })
     }
 
     fn delete_jmap_email<'a>(
@@ -3716,6 +3755,73 @@ async fn move_item_rejects_non_message_ids() {
 
     let body = response_text(response).await;
     assert!(body.contains("<m:MoveItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("supports only canonical message ids"));
+}
+
+#[tokio::test]
+async fn copy_item_copies_custom_mailbox_message_to_target_folder() {
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let target_mailbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox("44444444-4444-4444-4444-444444444444", "custom", "RCA Sync"),
+            FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "custom", "Archive"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "99999999-9999-9999-9999-999999999999",
+            "44444444-4444-4444-4444-444444444444",
+            "custom",
+            "RCA folder item",
+        )])),
+        ..Default::default()
+    };
+    let copied_emails = store.copied_emails.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:CopyItem><m:ToFolderId><t:FolderId Id="mailbox:55555555-5555-5555-5555-555555555555"/></m:ToFolderId><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ItemIds></m:CopyItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CopyItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("message:77777777-7777-7777-7777-777777777777"));
+    assert!(body.contains("mailbox:55555555-5555-5555-5555-555555555555"));
+    assert_eq!(
+        copied_emails.lock().unwrap().as_slice(),
+        &[(message_id, target_mailbox_id)]
+    );
+}
+
+#[tokio::test]
+async fn copy_item_rejects_non_message_ids() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "custom",
+            "Archive",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:CopyItem><m:ToFolderId><t:FolderId Id="mailbox:55555555-5555-5555-5555-555555555555"/></m:ToFolderId><m:ItemIds><t:ItemId Id="event:cccccccc-cccc-cccc-cccc-cccccccccccc"/></m:ItemIds></m:CopyItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CopyItemResponse>"));
     assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
     assert!(body.contains("supports only canonical message ids"));
 }

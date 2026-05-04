@@ -160,6 +160,7 @@ impl<S: ExchangeStore> ExchangeService<S> {
             "UpdateItem" => self.update_item(&principal, &body).await?,
             "DeleteItem" => self.delete_item(&principal, &body).await?,
             "MoveItem" => self.move_item(&principal, &body).await?,
+            "CopyItem" => self.copy_item(&principal, &body).await?,
             "CreateFolder" => self.create_folder(&principal, &body).await?,
             "DeleteFolder" => self.delete_folder(&principal, &body).await?,
             "GetUserOofSettings" => unsupported_operation_response("GetUserOofSettings"),
@@ -1110,6 +1111,76 @@ impl<S: ExchangeStore> ExchangeService<S> {
 
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
             operation_error_response("MoveItem", "ErrorItemNotFound", &error.to_string())
+        }))
+    }
+
+    async fn copy_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let result = async {
+            let ids = requested_item_ids(request);
+            let message_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("message:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+
+            if ids.is_empty() || message_ids.len() != ids.len() {
+                return Ok(operation_error_response(
+                    "CopyItem",
+                    "ErrorInvalidOperation",
+                    "CopyItem currently supports only canonical message ids.",
+                ));
+            }
+
+            let target_mailbox_ids = self
+                .requested_mailbox_folder_ids(principal, request)
+                .await?;
+            if target_mailbox_ids.len() != 1 {
+                return Ok(operation_error_response(
+                    "CopyItem",
+                    "ErrorInvalidOperation",
+                    "CopyItem requires exactly one canonical mailbox target folder.",
+                ));
+            }
+            let target_mailbox_id = target_mailbox_ids[0];
+            let mailboxes = self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?;
+            if !mailboxes
+                .iter()
+                .any(|mailbox| mailbox.id == target_mailbox_id)
+            {
+                return Ok(operation_error_response(
+                    "CopyItem",
+                    "ErrorFolderNotFound",
+                    "target mailbox folder not found",
+                ));
+            }
+
+            let mut items = String::new();
+            for message_id in message_ids {
+                let copied = self
+                    .store
+                    .copy_jmap_email(
+                        principal.account_id,
+                        message_id,
+                        target_mailbox_id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-copy-message".to_string(),
+                            subject: format!("{message_id}->{target_mailbox_id}"),
+                        },
+                    )
+                    .await?;
+                items.push_str(&message_item_xml(&copied));
+            }
+
+            Ok(copy_item_success_response(items))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("CopyItem", "ErrorItemNotFound", &error.to_string())
         }))
     }
 
@@ -2424,6 +2495,22 @@ fn move_item_success_response(items: String) -> String {
             "</m:MoveItemResponseMessage>",
             "</m:ResponseMessages>",
             "</m:MoveItemResponse>"
+        ),
+        items = items,
+    )
+}
+
+fn copy_item_success_response(items: String) -> String {
+    format!(
+        concat!(
+            "<m:CopyItemResponse>",
+            "<m:ResponseMessages>",
+            "<m:CopyItemResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Items>{items}</m:Items>",
+            "</m:CopyItemResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:CopyItemResponse>"
         ),
         items = items,
     )

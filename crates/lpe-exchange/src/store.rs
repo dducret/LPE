@@ -139,6 +139,14 @@ pub trait ExchangeStore: AccountAuthStore {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapEmail>;
 
+    fn copy_jmap_email<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail>;
+
     fn delete_jmap_email<'a>(
         &'a self,
         account_id: Uuid,
@@ -424,6 +432,19 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, JmapEmail> {
         Box::pin(async move {
             self.move_jmap_email(account_id, message_id, target_mailbox_id, audit)
+                .await
+        })
+    }
+
+    fn copy_jmap_email<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        Box::pin(async move {
+            self.copy_jmap_email(account_id, message_id, target_mailbox_id, audit)
                 .await
         })
     }
