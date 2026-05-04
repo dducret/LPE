@@ -217,25 +217,15 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let (changed, current_type_states) = self
             .compute_push_changes(principal_account_id, subscription, change_set)
             .await?;
-
-        if changed.is_empty() {
-            subscription.last_type_states = current_type_states;
-            subscription.last_journal_cursor = merge_journal_cursor(
-                subscription.last_journal_cursor,
-                change_set.journal_cursor(),
-            );
-            return Ok(());
-        }
-
-        let journal_cursor = merge_journal_cursor(
-            subscription.last_journal_cursor,
+        if let Some((changed, push_state)) = finalize_push_change(
+            subscription,
+            changed,
+            current_type_states,
             change_set.journal_cursor(),
-        );
-        let push_state = encode_push_state(&current_type_states, journal_cursor)?;
-        subscription.last_type_states = current_type_states;
-        subscription.last_push_state = Some(push_state.clone());
-        subscription.last_journal_cursor = journal_cursor;
-        self.send_state_change(socket, changed, push_state).await
+        )? {
+            self.send_state_change(socket, changed, push_state).await?;
+        }
+        Ok(())
     }
 
     pub(crate) async fn recover_push_enable_change(
@@ -616,5 +606,61 @@ fn merge_journal_cursor(left: Option<i64>, right: Option<i64>) -> Option<i64> {
         (Some(left), None) => Some(left),
         (None, Some(right)) => Some(right),
         (None, None) => None,
+    }
+}
+
+fn finalize_push_change(
+    subscription: &mut PushSubscription,
+    changed: HashMap<String, HashMap<String, String>>,
+    current_type_states: HashMap<String, HashMap<String, String>>,
+    change_cursor: Option<i64>,
+) -> Result<Option<(HashMap<String, HashMap<String, String>>, String)>> {
+    let journal_cursor = merge_journal_cursor(subscription.last_journal_cursor, change_cursor);
+    let should_send = !changed.is_empty() || subscription.last_journal_cursor != journal_cursor;
+    subscription.last_type_states = current_type_states;
+    subscription.last_journal_cursor = journal_cursor;
+    if !should_send {
+        return Ok(None);
+    }
+
+    let push_state = encode_push_state(&subscription.last_type_states, journal_cursor)?;
+    subscription.last_push_state = Some(push_state.clone());
+    Ok(Some((changed, push_state)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finalize_push_change_emits_cursor_only_push_state() {
+        let mut last_type_states = HashMap::new();
+        last_type_states.insert(
+            "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string(),
+            HashMap::from([("Task".to_string(), "state-1".to_string())]),
+        );
+        let mut subscription = PushSubscription {
+            enabled_types: HashSet::from(["Task".to_string()]),
+            last_type_states: last_type_states.clone(),
+            last_push_state: Some(encode_push_state(&last_type_states, Some(10)).unwrap()),
+            last_journal_cursor: Some(10),
+        };
+
+        let result = finalize_push_change(
+            &mut subscription,
+            HashMap::new(),
+            last_type_states,
+            Some(11),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(result.0.is_empty());
+        assert_eq!(decode_push_state(&result.1).unwrap().cursor, Some(11));
+        assert_eq!(subscription.last_journal_cursor, Some(11));
+        assert_eq!(
+            subscription.last_push_state.as_deref(),
+            Some(result.1.as_str())
+        );
     }
 }
