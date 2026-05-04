@@ -63,6 +63,7 @@ Additional supported `JMAP` routes:
 - canonical submission creates the authoritative copy in `Sent`, marks the message as `queued`, inserts an `outbound_message_queue` row, then removes the source draft
 - `JMAP` object `state` values and WebSocket `StateChange` payloads are derived from the same canonical mailbox, message, contact, and calendar projections already stored in `PostgreSQL`
 - `JMAP` object `state` tokens use opaque fingerprints of canonical projection data; protected or message-visible fields such as `Bcc`, subject, and body content must not be serialized directly into client-visible state tokens
+- delegated/shared mailbox `Email` and `Thread` state fingerprints exclude `Bcc`, so Bcc-only changes do not create observable state or push changes for delegated readers; owned sender-side state may still track Bcc for the authenticated owner's own draft and sent-message sync
 - the WebSocket transport is notification and request transport only; it does not introduce a second mailbox cache, event journal, or submission model
 - canonical change signaling stays inside `PostgreSQL`: `lpe-storage` emits account-scoped `LISTEN` / `NOTIFY` payloads after canonical commits, and `lpe-jmap` recomputes only the affected `JMAP` state scopes from canonical tables
 - mail push wakeups are expanded through canonical mailbox delegation so a change in a shared mailbox wakes both the owner session and delegated reader sessions without a protocol-local sharing cache

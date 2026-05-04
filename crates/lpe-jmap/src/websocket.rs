@@ -367,6 +367,8 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     {
                         let state = if data_type == "Mailbox" {
                             self.mailbox_object_state(access).await?
+                        } else if matches!(data_type.as_str(), "Email" | "Thread") {
+                            self.mail_object_state(access, data_type).await?
                         } else {
                             self.object_state(account_id, data_type).await?
                         };
@@ -554,6 +556,8 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 if self.is_mail_push_type(data_type) {
                     let state = if data_type == "Mailbox" {
                         self.mailbox_object_state(&mailbox_account).await?
+                    } else if matches!(data_type.as_str(), "Email" | "Thread") {
+                        self.mail_object_state(&mailbox_account, data_type).await?
                     } else {
                         self.object_state(mailbox_account.account_id, data_type)
                             .await?

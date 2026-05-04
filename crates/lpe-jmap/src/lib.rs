@@ -2401,6 +2401,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn delegated_email_and_thread_states_ignore_bcc_only_changes() {
+        let mut visible_email = FakeStore::draft_email();
+        visible_email.bcc.clear();
+        let hidden_bcc_email = FakeStore::draft_email();
+        let without_bcc = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            emails: vec![visible_email],
+            ..Default::default()
+        });
+        let with_bcc = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            emails: vec![hidden_bcc_email],
+            ..Default::default()
+        });
+        let mut owner_access = FakeStore::shared_mailbox_access(true, true);
+        owner_access.is_owned = true;
+        let delegated_access = FakeStore::shared_mailbox_access(false, false);
+
+        let owner_email_without = without_bcc
+            .mail_object_state(&owner_access, "Email")
+            .await
+            .unwrap();
+        let owner_email_with = with_bcc
+            .mail_object_state(&owner_access, "Email")
+            .await
+            .unwrap();
+        assert_ne!(owner_email_without, owner_email_with);
+
+        let delegated_email_without = without_bcc
+            .mail_object_state(&delegated_access, "Email")
+            .await
+            .unwrap();
+        let delegated_email_with = with_bcc
+            .mail_object_state(&delegated_access, "Email")
+            .await
+            .unwrap();
+        assert_eq!(delegated_email_without, delegated_email_with);
+
+        let delegated_thread_without = without_bcc
+            .mail_object_state(&delegated_access, "Thread")
+            .await
+            .unwrap();
+        let delegated_thread_with = with_bcc
+            .mail_object_state(&delegated_access, "Thread")
+            .await
+            .unwrap();
+        assert_eq!(delegated_thread_without, delegated_thread_with);
+    }
+
+    #[tokio::test]
     async fn email_state_tokens_do_not_expose_message_or_bcc_content() {
         let store = FakeStore {
             session: Some(FakeStore::account()),

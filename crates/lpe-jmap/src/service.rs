@@ -325,6 +325,70 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .collect())
     }
 
+    pub(crate) async fn mail_object_state(
+        &self,
+        access: &MailboxAccountAccess,
+        data_type: &str,
+    ) -> Result<String> {
+        let entries = self.mail_object_state_entries(access, data_type).await?;
+        encode_state(access.account_id, data_type, entries)
+    }
+
+    pub(crate) async fn mail_object_state_entries(
+        &self,
+        access: &MailboxAccountAccess,
+        data_type: &str,
+    ) -> Result<Vec<StateEntry>> {
+        self.mail_object_state_entries_with_bcc(access.account_id, data_type, access.is_owned)
+            .await
+    }
+
+    async fn mail_object_state_entries_with_bcc(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+        include_bcc: bool,
+    ) -> Result<Vec<StateEntry>> {
+        match data_type {
+            "Email" => {
+                let ids = self.store.fetch_all_jmap_email_ids(account_id).await?;
+                let emails = self.store.fetch_jmap_emails(account_id, &ids).await?;
+                Ok(emails
+                    .into_iter()
+                    .map(|email| StateEntry {
+                        id: email.id.to_string(),
+                        fingerprint: email_state_fingerprint(&email, include_bcc),
+                    })
+                    .collect())
+            }
+            "Thread" => {
+                let ids = self.store.fetch_all_jmap_email_ids(account_id).await?;
+                let emails = self.store.fetch_jmap_emails(account_id, &ids).await?;
+                let mut threads: HashMap<Uuid, Vec<String>> = HashMap::new();
+                for email in emails {
+                    threads.entry(email.thread_id).or_default().push(format!(
+                        "{}:{}",
+                        email.id,
+                        email_state_fingerprint(&email, include_bcc)
+                    ));
+                }
+                let mut entries = threads
+                    .into_iter()
+                    .map(|(thread_id, mut fingerprints)| {
+                        fingerprints.sort();
+                        StateEntry {
+                            id: thread_id.to_string(),
+                            fingerprint: opaque_state_fingerprint(&fingerprints.join("|")),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                entries.sort_by(|left, right| left.id.cmp(&right.id));
+                Ok(entries)
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
     pub(crate) async fn object_state_entries(
         &self,
         account_id: Uuid,
@@ -341,40 +405,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     })
                     .collect())
             }
-            "Email" => {
-                let ids = self.store.fetch_all_jmap_email_ids(account_id).await?;
-                let emails = self.store.fetch_jmap_emails(account_id, &ids).await?;
-                Ok(emails
-                    .into_iter()
-                    .map(|email| StateEntry {
-                        id: email.id.to_string(),
-                        fingerprint: email_state_fingerprint(&email),
-                    })
-                    .collect())
-            }
-            "Thread" => {
-                let ids = self.store.fetch_all_jmap_email_ids(account_id).await?;
-                let emails = self.store.fetch_jmap_emails(account_id, &ids).await?;
-                let mut threads: HashMap<Uuid, Vec<String>> = HashMap::new();
-                for email in emails {
-                    threads.entry(email.thread_id).or_default().push(format!(
-                        "{}:{}",
-                        email.id,
-                        email_state_fingerprint(&email)
-                    ));
-                }
-                let mut entries = threads
-                    .into_iter()
-                    .map(|(thread_id, mut fingerprints)| {
-                        fingerprints.sort();
-                        StateEntry {
-                            id: thread_id.to_string(),
-                            fingerprint: opaque_state_fingerprint(&fingerprints.join("|")),
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                entries.sort_by(|left, right| left.id.cmp(&right.id));
-                Ok(entries)
+            "Email" | "Thread" => {
+                self.mail_object_state_entries_with_bcc(account_id, data_type, true)
+                    .await
             }
             "AddressBook" => {
                 let collections = self
@@ -642,7 +675,7 @@ fn task_list_state_fingerprint(task_list: &ClientTaskList) -> String {
     ))
 }
 
-fn email_state_fingerprint(email: &JmapEmail) -> String {
+fn email_state_fingerprint(email: &JmapEmail, include_bcc: bool) -> String {
     opaque_state_fingerprint(
         &(format!(
             "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
@@ -656,7 +689,9 @@ fn email_state_fingerprint(email: &JmapEmail) -> String {
             email.from_address,
             format_addresses(&email.to),
             format_addresses(&email.cc),
-            format_addresses(&email.bcc),
+            include_bcc
+                .then(|| format_addresses(&email.bcc))
+                .unwrap_or_default(),
             email.subject,
             email.preview,
             email.unread,
