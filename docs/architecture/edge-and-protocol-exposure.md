@@ -34,12 +34,13 @@ verify the full client path: public `993` `TLS`, `LPE-CT` proxying, core IMAP
 `LOGIN`, and `SELECT INBOX`. It also supports a scoped `outlook` run that skips
 public `25` and validates trusted TLS, autodiscover IMAP/SMTP publication, the
 absence of Exchange-style autodiscover blocks in the default IMAP path, public
-`993`, submission `465`, and the IMAP login path needed by Outlook desktop. It
-does not require `ActiveSync` or `MAPI` publication checks because those are not
-part of Outlook desktop `IMAP` account setup. If Outlook fails while
-`lpe.service` receives no new log entries, the first logs to inspect are
-`journalctl -u lpe-ct.service` because the client has not reached the core
-protocol adapter.
+`993`, authenticated submission on `465`, and the IMAP login path needed by
+Outlook desktop. The submission probe authenticates with `AUTH LOGIN` and
+verifies `MAIL FROM` / `RCPT TO` acceptance without sending a message. It does
+not require `ActiveSync` or `MAPI` publication checks because those are not part
+of Outlook desktop `IMAP` account setup. If Outlook fails while `lpe.service`
+receives no new log entries, the first logs to inspect are `journalctl -u
+lpe-ct.service` because the client has not reached the core protocol adapter.
 
 For secure client submission, the baseline target prefers implicit TLS on port `465`, aligned with `RFC 8314`.
 

@@ -62,6 +62,10 @@ imap_quote() {
   printf '"%s"' "${value}"
 }
 
+smtp_auth_token() {
+  printf '%s' "$1" | base64 | tr -d '\r\n'
+}
+
 [[ -f "$ENV_FILE" ]] || fail "Environment file not found: $ENV_FILE"
 set -a
 source "$ENV_FILE"
@@ -279,6 +283,92 @@ smtp_starttls_probe_if_possible() {
   recent_logs
   rm -f "${output_file}"
   fail "SMTP ingress on ${host}:${port} failed STARTTLS handshake"
+}
+
+probe_submission_auth_if_configured() {
+  local test_email="${LPE_CT_SUBMISSION_TEST_EMAIL:-${LPE_CT_IMAPS_TEST_EMAIL:-${LPE_IMAP_TEST_EMAIL:-${IMAP_TEST_EMAIL:-}}}}"
+  local test_password="${LPE_CT_SUBMISSION_TEST_PASSWORD:-${LPE_CT_IMAPS_TEST_PASSWORD:-${LPE_IMAP_TEST_PASSWORD:-${IMAP_TEST_PASSWORD:-}}}}"
+  local test_recipient="${LPE_CT_SUBMISSION_TEST_RCPT:-${test_email}}"
+  local output_file
+  local openssl_status=0
+  local username_token
+  local password_token
+  local server_name
+
+  if [[ -z "${test_email}" || -z "${test_password}" ]]; then
+    if outlook_scope_enabled; then
+      fail "Outlook scope requires LPE_CT_SUBMISSION_TEST_EMAIL and LPE_CT_SUBMISSION_TEST_PASSWORD, or the IMAPS test credential variables, so SMTP submission AUTH on 465 is verified."
+    fi
+    warn "Skipping authenticated SMTPS submission probe; set LPE_CT_SUBMISSION_TEST_EMAIL and LPE_CT_SUBMISSION_TEST_PASSWORD to verify Outlook-facing 465 login."
+    return 0
+  fi
+  if ! command -v openssl >/dev/null 2>&1; then
+    warn "Skipping authenticated SMTPS submission probe; openssl is not available."
+    return 0
+  fi
+  if ! command -v base64 >/dev/null 2>&1; then
+    warn "Skipping authenticated SMTPS submission probe; base64 is not available."
+    return 0
+  fi
+
+  username_token="$(smtp_auth_token "${test_email}")"
+  password_token="$(smtp_auth_token "${test_password}")"
+  server_name="$(tls_server_name)"
+  output_file="$(mktemp)"
+
+  timeout 20 openssl s_client -quiet -crlf \
+    -connect "${HOST}:${SUBMISSION_PORT}" \
+    -servername "${server_name}" >"${output_file}" 2>&1 <<EOF || openssl_status=$?
+EHLO outlook.lpe.test
+AUTH LOGIN
+${username_token}
+${password_token}
+MAIL FROM:<${test_email}>
+RCPT TO:<${test_recipient}>
+RSET
+QUIT
+EOF
+
+  if ! grep -q '^220 LPE-CT ESMTP submission ready' "${output_file}"; then
+    echo "[DIAG] SMTPS submission probe did not receive the submission greeting."
+    recent_logs
+    rm -f "${output_file}"
+    fail "SMTPS submission on ${HOST}:${SUBMISSION_PORT} did not return the expected greeting"
+  fi
+  if ! grep -q '^250-AUTH PLAIN LOGIN' "${output_file}"; then
+    echo "[DIAG] SMTPS submission EHLO did not advertise AUTH PLAIN LOGIN."
+    sed -n '1,80p' "${output_file}" || true
+    recent_logs
+    rm -f "${output_file}"
+    fail "SMTPS submission on ${HOST}:${SUBMISSION_PORT} did not advertise Outlook-compatible AUTH"
+  fi
+  if ! grep -q '^235 authentication succeeded' "${output_file}"; then
+    echo "[DIAG] SMTPS submission AUTH LOGIN failed for the supplied test account."
+    sed -n '1,120p' "${output_file}" || true
+    recent_logs
+    rm -f "${output_file}"
+    fail "SMTPS submission on ${HOST}:${SUBMISSION_PORT} failed authenticated AUTH LOGIN"
+  fi
+  if ! grep -q '^250 sender accepted' "${output_file}"; then
+    echo "[DIAG] SMTPS submission authenticated but MAIL FROM was not accepted."
+    sed -n '1,120p' "${output_file}" || true
+    recent_logs
+    rm -f "${output_file}"
+    fail "SMTPS submission on ${HOST}:${SUBMISSION_PORT} rejected MAIL FROM for ${test_email}"
+  fi
+  if ! grep -q '^250 recipient accepted' "${output_file}"; then
+    echo "[DIAG] SMTPS submission authenticated but RCPT TO was not accepted."
+    sed -n '1,120p' "${output_file}" || true
+    recent_logs
+    rm -f "${output_file}"
+    fail "SMTPS submission on ${HOST}:${SUBMISSION_PORT} rejected RCPT TO for ${test_recipient}"
+  fi
+
+  if [[ "${openssl_status}" -ne 0 ]]; then
+    warn "Authenticated SMTPS submission probe succeeded, but openssl exited with status ${openssl_status} after the SMTP session closed."
+  fi
+  rm -f "${output_file}"
+  pass "SMTPS submission on ${HOST}:${SUBMISSION_PORT} accepted AUTH LOGIN, MAIL FROM, and RCPT TO through LPE-CT"
 }
 
 probe_imaps_upstream() {
@@ -568,6 +658,7 @@ if scope_enabled "submission"; then
   if [[ -n "${LPE_CT_SUBMISSION_BIND_ADDRESS:-}" ]]; then
     tls_probe_if_possible "$HOST" "$SUBMISSION_PORT" "SMTPS submission"
     tls_trust_probe_if_possible "$HOST" "$SUBMISSION_PORT" "SMTPS submission"
+    probe_submission_auth_if_configured
   else
     echo "[SKIP] LPE_CT_SUBMISSION_BIND_ADDRESS is not configured; port 465 is intentionally not enabled."
   fi
