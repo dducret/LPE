@@ -76,6 +76,7 @@ struct PublishedEndpoints {
     mapi_enabled: bool,
     mapi_http_requested: bool,
     legacy_exchange_autodiscover_enabled: bool,
+    soap_exchange_autodiscover_enabled: bool,
     mapi_emsmdb_url: String,
     mapi_nspi_url: String,
     activesync_url: String,
@@ -118,6 +119,8 @@ impl PublishedEndpoints {
             .is_some_and(|value| !value.trim().is_empty());
         let legacy_exchange_autodiscover_enabled =
             env_flag("LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED");
+        let soap_exchange_autodiscover_enabled =
+            env_flag("LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED");
         let mapi_mailbox_id = email_hint.unwrap_or_default();
         let mapi_emsmdb_url = env::var("LPE_AUTOCONFIG_MAPI_EMSMDB_URL").unwrap_or_else(|_| {
             format!("{public_scheme}://{public_host}/mapi/emsmdb/?MailboxId={mapi_mailbox_id}")
@@ -141,6 +144,7 @@ impl PublishedEndpoints {
             mapi_enabled,
             mapi_http_requested,
             legacy_exchange_autodiscover_enabled,
+            soap_exchange_autodiscover_enabled,
             mapi_emsmdb_url,
             mapi_nspi_url,
             activesync_url,
@@ -150,6 +154,10 @@ impl PublishedEndpoints {
 
     fn exchange_autodiscover_enabled(&self) -> bool {
         self.ews_enabled || self.mapi_enabled
+    }
+
+    fn soap_exchange_autodiscover_enabled(&self) -> bool {
+        self.soap_exchange_autodiscover_enabled && self.exchange_autodiscover_enabled()
     }
 }
 
@@ -530,7 +538,7 @@ fn render_soap_user_settings_response(
     email: Option<&str>,
 ) -> Option<String> {
     config
-        .exchange_autodiscover_enabled()
+        .soap_exchange_autodiscover_enabled()
         .then(|| render_soap_user_settings_autodiscover(config, email))
 }
 
@@ -797,6 +805,7 @@ mod tests {
             mapi_enabled: false,
             mapi_http_requested: false,
             legacy_exchange_autodiscover_enabled: false,
+            soap_exchange_autodiscover_enabled: false,
             mapi_emsmdb_url: "https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test"
                 .to_string(),
             mapi_nspi_url: "https://mail.example.test/mapi/nspi/?MailboxId=alice@example.test"
@@ -1134,9 +1143,53 @@ mod tests {
     }
 
     #[test]
+    fn soap_autodiscover_requires_separate_publication_opt_in() {
+        let ews_config = PublishedEndpoints {
+            ews_enabled: true,
+            ..sample_config()
+        };
+        let mapi_config = PublishedEndpoints {
+            mapi_enabled: true,
+            ..sample_config()
+        };
+
+        assert!(
+            render_soap_user_settings_response(&ews_config, Some("alice@example.test")).is_none()
+        );
+        assert!(
+            render_soap_user_settings_response(&mapi_config, Some("alice@example.test")).is_none()
+        );
+    }
+
+    #[test]
+    fn soap_exchange_autodiscover_publication_is_env_opt_in() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("LPE_AUTOCONFIG_EWS_ENABLED", "true");
+        std::env::set_var("LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED", "true");
+        std::env::remove_var("LPE_AUTOCONFIG_EWS_URL");
+        std::env::remove_var("LPE_PUBLIC_HOSTNAME");
+        std::env::remove_var("LPE_PUBLIC_SCHEME");
+
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "mail.example.test".parse().unwrap());
+        let config = PublishedEndpoints::from_headers(&headers, Some("alice@example.test"));
+        let xml = render_soap_user_settings_response(&config, Some("alice@example.test"))
+            .expect("explicit SOAP Exchange Autodiscover opt-in should publish user settings");
+
+        assert!(config.ews_enabled);
+        assert!(config.soap_exchange_autodiscover_enabled);
+        assert!(xml.contains("<a:Name>ExternalEwsUrl</a:Name>"));
+        assert!(xml.contains("<a:Value>https://mail.example.test/EWS/Exchange.asmx</a:Value>"));
+
+        std::env::remove_var("LPE_AUTOCONFIG_EWS_ENABLED");
+        std::env::remove_var("LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED");
+    }
+
+    #[test]
     fn soap_autodiscover_reports_mapi_http_enabled_when_opted_in() {
         let config = PublishedEndpoints {
             mapi_enabled: true,
+            soap_exchange_autodiscover_enabled: true,
             ..sample_config()
         };
 
