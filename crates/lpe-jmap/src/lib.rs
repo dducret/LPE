@@ -4365,6 +4365,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blob_lookup_requires_referenced_type_capability() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_BLOB_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Blob/lookup".to_string(),
+                        json!({
+                            "accountId": FakeStore::account().account_id.to_string(),
+                            "typeNames": ["Email"],
+                            "ids": ["draft-message:cccccccc-cccc-cccc-cccc-cccccccccccc"]
+                        }),
+                        "l1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.method_responses[0].1["type"], "unknownDataType");
+        assert_eq!(
+            response.method_responses[0].1["description"],
+            "mail capability is required for Blob/lookup mail references"
+        );
+    }
+
+    #[tokio::test]
     async fn session_exposes_contacts_and_calendars_capabilities() {
         let service = JmapService::new(FakeStore {
             session: Some(FakeStore::account()),

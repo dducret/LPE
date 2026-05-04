@@ -10,7 +10,8 @@ use lpe_storage::{AuthenticatedAccount, JmapEmail, MailboxAccountAccess};
 use crate::{
     blob_id_for_message,
     error::{method_error, set_error},
-    resolve_creation_reference, JmapService, MAX_BLOB_DATA_SOURCES, MAX_SIZE_UPLOAD,
+    resolve_creation_reference, JmapService, JMAP_MAIL_CAPABILITY, MAX_BLOB_DATA_SOURCES,
+    MAX_SIZE_UPLOAD,
 };
 
 const DEFAULT_BLOB_MEDIA_TYPE: &str = "application/octet-stream";
@@ -176,6 +177,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         account: &AuthenticatedAccount,
         arguments: Value,
         created_ids: &HashMap<String, String>,
+        declared_capabilities: &[String],
     ) -> Result<Value> {
         let arguments: BlobLookupArguments = serde_json::from_value(arguments)?;
         let unknown_type = arguments
@@ -186,6 +188,19 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             return Ok(method_error(
                 "unknownDataType",
                 &format!("{type_name} is not supported for Blob/lookup"),
+            ));
+        }
+        if arguments
+            .type_names
+            .iter()
+            .any(|type_name| matches!(type_name.as_str(), "Mailbox" | "Thread" | "Email"))
+            && !declared_capabilities
+                .iter()
+                .any(|capability| capability == JMAP_MAIL_CAPABILITY)
+        {
+            return Ok(method_error(
+                "unknownDataType",
+                "mail capability is required for Blob/lookup mail references",
             ));
         }
         let account_access = self

@@ -308,8 +308,13 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     }
                     "Blob/get" => self.handle_blob_get(account, arguments, &created_ids).await,
                     "Blob/lookup" => {
-                        self.handle_blob_lookup(account, arguments, &created_ids)
-                            .await
+                        self.handle_blob_lookup(
+                            account,
+                            arguments,
+                            &created_ids,
+                            &declared_capabilities,
+                        )
+                        .await
                     }
                     "Blob/copy" => {
                         self.handle_blob_copy(account, arguments, &created_ids)
