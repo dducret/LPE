@@ -27,8 +27,8 @@ pub(crate) use crate::service::{
     JMAP_CALENDARS_CAPABILITY, JMAP_CONTACTS_CAPABILITY, JMAP_CORE_CAPABILITY,
     JMAP_MAIL_CAPABILITY, JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY,
     JMAP_VACATION_RESPONSE_CAPABILITY, JMAP_WEBSOCKET_CAPABILITY, MAX_BLOB_DATA_SOURCES,
-    MAX_CONCURRENT_UPLOAD, MAX_QUERY_LIMIT, MAX_SIZE_UPLOAD, PUSH_STATE_VERSION,
-    QUERY_STATE_VERSION, SESSION_STATE, STATE_TOKEN_VERSION,
+    MAX_CONCURRENT_REQUESTS, MAX_CONCURRENT_UPLOAD, MAX_QUERY_LIMIT, MAX_SIZE_REQUEST,
+    MAX_SIZE_UPLOAD, PUSH_STATE_VERSION, QUERY_STATE_VERSION, SESSION_STATE, STATE_TOKEN_VERSION,
 };
 pub(crate) use crate::session::requested_account_id;
 pub(crate) use crate::state::encode_query_state;
@@ -1375,6 +1375,14 @@ mod tests {
         assert_eq!(
             session.capabilities[JMAP_CORE_CAPABILITY]["maxSizeUpload"],
             MAX_SIZE_UPLOAD
+        );
+        assert_eq!(
+            session.capabilities[JMAP_CORE_CAPABILITY]["maxSizeRequest"],
+            MAX_SIZE_REQUEST
+        );
+        assert_eq!(
+            session.capabilities[JMAP_CORE_CAPABILITY]["maxConcurrentRequests"],
+            MAX_CONCURRENT_REQUESTS
         );
         assert_eq!(
             session.capabilities[JMAP_CORE_CAPABILITY]["maxConcurrentUpload"],

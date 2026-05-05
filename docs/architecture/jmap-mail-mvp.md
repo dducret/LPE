@@ -66,6 +66,7 @@ The current finalization target is the `JMAP` Big Three: Mail, Contacts, and sim
 Additional supported `JMAP` routes:
 
 - `GET /.well-known/jmap` for RFC 8620 service autodiscovery; it redirects to the configured public `JMAP` session URL and follows `LPE_AUTOCONFIG_JMAP_SESSION_URL` when that override is set
+- `POST /api/jmap/api` enforces the `Session` core `maxSizeRequest` limit, and the core capability advertises `maxConcurrentRequests`, `maxCallsInRequest`, and object limits for real-client planning
 - `POST /api/jmap/upload/{accountId}` for temporary `JMAP` blob upload; the `Session` core capability advertises the enforced `maxSizeUpload` and concurrent upload limit for real-client interoperability
 - `GET /api/jmap/download/{accountId}/{blobId}/{name}` for temporary blob download
 - `GET /api/jmap/ws` for `JMAP` over WebSocket with the `jmap` subprotocol

@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use axum::{
     body::Bytes,
-    extract::{ws::WebSocketUpgrade, State},
+    extract::{ws::WebSocketUpgrade, DefaultBodyLimit, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
@@ -46,7 +46,9 @@ pub(crate) const STATE_TOKEN_VERSION: &str = "mvp-2";
 pub(crate) const PUSH_STATE_VERSION: &str = "mvp-push-1";
 pub(crate) const MAX_QUERY_LIMIT: u64 = 250;
 pub(crate) const DEFAULT_GET_LIMIT: u64 = 100;
+pub(crate) const MAX_SIZE_REQUEST: u64 = 10 * 1024 * 1024;
 pub(crate) const MAX_SIZE_UPLOAD: u64 = 25 * 1024 * 1024;
+pub(crate) const MAX_CONCURRENT_REQUESTS: u64 = 4;
 pub(crate) const MAX_CONCURRENT_UPLOAD: u64 = 4;
 pub(crate) const MAX_BLOB_DATA_SOURCES: u64 = 64;
 
@@ -55,7 +57,10 @@ type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 pub fn router() -> Router<Storage> {
     Router::new()
         .route("/session", get(session_handler))
-        .route("/api", post(api_handler))
+        .route(
+            "/api",
+            post(api_handler).layer(DefaultBodyLimit::max(MAX_SIZE_REQUEST as usize)),
+        )
         .route("/ws", get(websocket_handler))
         .route("/upload/{account_id}", post(upload_handler))
         .route(
