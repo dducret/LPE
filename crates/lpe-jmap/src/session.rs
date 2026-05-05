@@ -22,11 +22,11 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         &self,
         authorization: Option<&str>,
         websocket_url: Option<&str>,
-        public_base_path: Option<&str>,
+        public_base_url: Option<&str>,
     ) -> Result<SessionDocument> {
         let account = self.authenticate(authorization).await?;
         let capabilities = session_capabilities(websocket_url.unwrap_or("ws://localhost/jmap/ws"));
-        let public_base_path = normalize_public_base_path(public_base_path);
+        let public_base_url = normalize_public_base_url(public_base_url);
         let accessible_accounts = self
             .store
             .fetch_accessible_mailbox_accounts(account.account_id)
@@ -63,15 +63,27 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             accounts,
             primary_accounts,
             username: account.email,
-            api_url: format!("{public_base_path}/api"),
+            api_url: format!("{public_base_url}/api"),
             download_url: format!(
-                "{public_base_path}/download/{{accountId}}/{{blobId}}/{{name}}?accept={{type}}"
+                "{public_base_url}/download/{{accountId}}/{{blobId}}/{{name}}?accept={{type}}"
             ),
-            upload_url: format!("{public_base_path}/upload/{{accountId}}"),
+            upload_url: format!("{public_base_url}/upload/{{accountId}}"),
             event_source_url: String::new(),
             state: session_state(&accessible_accounts),
         })
     }
+}
+
+pub(crate) fn public_base_url(headers: &HeaderMap) -> Option<String> {
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))
+        .and_then(|value| value.to_str().ok())?;
+    let scheme = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("http");
+    Some(format!("{scheme}://{host}{}", public_base_path(headers)))
 }
 
 pub(crate) fn public_base_path(headers: &HeaderMap) -> String {
@@ -112,6 +124,16 @@ fn normalize_public_base_path(value: Option<&str>) -> String {
     } else {
         path
     }
+}
+
+fn normalize_public_base_url(value: Option<&str>) -> String {
+    let value = value.map(str::trim).filter(|value| !value.is_empty());
+    if let Some(value) = value {
+        if value.starts_with("http://") || value.starts_with("https://") {
+            return value.trim_end_matches('/').to_string();
+        }
+    }
+    normalize_public_base_path(value)
 }
 
 fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {

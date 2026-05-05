@@ -1411,16 +1411,19 @@ mod tests {
             .session_document(
                 Some("Bearer token"),
                 Some("wss://mail.example.test/api/jmap/ws"),
-                Some("/api/jmap"),
+                Some("https://mail.example.test/api/jmap"),
             )
             .await
             .unwrap();
 
-        assert_eq!(session.api_url, "/api/jmap/api");
-        assert_eq!(session.upload_url, "/api/jmap/upload/{accountId}");
+        assert_eq!(session.api_url, "https://mail.example.test/api/jmap/api");
+        assert_eq!(
+            session.upload_url,
+            "https://mail.example.test/api/jmap/upload/{accountId}"
+        );
         assert_eq!(
             session.download_url,
-            "/api/jmap/download/{accountId}/{blobId}/{name}?accept={type}"
+            "https://mail.example.test/api/jmap/download/{accountId}/{blobId}/{name}?accept={type}"
         );
 
         let mut headers = axum::http::HeaderMap::new();
@@ -1430,6 +1433,10 @@ mod tests {
         assert_eq!(
             crate::session::websocket_url(&headers).unwrap(),
             "wss://mail.example.test/api/jmap/ws"
+        );
+        assert_eq!(
+            crate::session::public_base_url(&headers).unwrap(),
+            "https://mail.example.test/api/jmap"
         );
     }
 
