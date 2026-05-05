@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::{
-    convert::insert_if,
+    convert::{apply_jmap_property_patch, has_jmap_property_patch, insert_if},
     error::set_error,
     parse::{parse_first_property_object_string, parse_uuid, parse_uuid_list},
     protocol::{
@@ -354,18 +354,24 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if let Some(update) = arguments.update {
             for (id, value) in update {
-                match parse_uuid(&id).and_then(|contact_id| {
-                    parse_contact_input(Some(contact_id), account_id, value)
-                        .map(|(_, input)| (contact_id, input))
-                }) {
-                    Ok((contact_id, input)) => match self
-                        .store
-                        .update_accessible_contact(account_id, contact_id, input)
+                match parse_uuid(&id) {
+                    Ok(contact_id) => match self
+                        .contact_update_input(account_id, contact_id, value)
                         .await
+                        .map(|input| (contact_id, input))
                     {
-                        Ok(_) => {
-                            updated.insert(id, Value::Object(Map::new()));
-                        }
+                        Ok((contact_id, input)) => match self
+                            .store
+                            .update_accessible_contact(account_id, contact_id, input)
+                            .await
+                        {
+                            Ok(_) => {
+                                updated.insert(id, Value::Object(Map::new()));
+                            }
+                            Err(error) => {
+                                not_updated.insert(id, set_error(&error.to_string()));
+                            }
+                        },
                         Err(error) => {
                             not_updated.insert(id, set_error(&error.to_string()));
                         }
@@ -410,6 +416,32 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             "notDestroyed": Value::Object(not_destroyed),
         }))
     }
+
+    async fn contact_update_input(
+        &self,
+        account_id: Uuid,
+        contact_id: Uuid,
+        value: Value,
+    ) -> Result<UpsertClientContactInput> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| anyhow!("contact card arguments must be an object"))?;
+        if !has_jmap_property_patch(object) {
+            return parse_contact_input(Some(contact_id), account_id, value)
+                .map(|(_, input)| input);
+        }
+
+        let existing = self
+            .store
+            .fetch_accessible_contacts_by_ids(account_id, &[contact_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("contact not found"))?;
+        let mut patched = contact_to_value(&existing, &contact_properties(None));
+        apply_jmap_property_patch(&mut patched, object)?;
+        parse_contact_input(Some(contact_id), account_id, patched).map(|(_, input)| input)
+    }
 }
 
 fn address_book_properties(properties: Option<Vec<String>>) -> HashSet<String> {
@@ -426,7 +458,6 @@ fn address_book_properties(properties: Option<Vec<String>>) -> HashSet<String> {
         .into_iter()
         .collect()
 }
-
 fn address_book_to_value(
     collection: &CollaborationCollection,
     properties: &HashSet<String>,
@@ -653,7 +684,7 @@ fn parse_contact_input(
 fn reject_unknown_contact_properties(object: &Map<String, Value>) -> Result<()> {
     for key in object.keys() {
         match key.as_str() {
-            "uid" | "kind" | "name" | "emails" | "phones" | "organizations" | "titles"
+            "id" | "uid" | "kind" | "name" | "emails" | "phones" | "organizations" | "titles"
             | "notes" | "addressBookIds" => {}
             _ => bail!("unsupported contact card property: {key}"),
         }

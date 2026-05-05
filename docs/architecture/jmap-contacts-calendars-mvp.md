@@ -133,7 +133,7 @@ Organizer and participant status are exposed through `participants`:
 - `CalendarEvent/set` supports only `@type=Event`
 - `CalendarEvent/set` accepts only `duration=PT0S`
 - `timeZone` must be `null` or absent
-- updates are full-resource replacements; fine-grained property patches are not implemented
+- `ContactCard/set` and `CalendarEvent/set` support bounded JMAP property patches for the implemented simple contact and event fields by merging patches onto the current canonical projection before writing through canonical storage
 - calendar participants are still mirrored as text for legacy fallback, but the canonical event metadata now stores one organizer plus attendee status and RSVP intent for interoperable adapters
 - no recurrence, alarms, free/busy, calendar attachments, or extended `VCARD` or `VCALENDAR` semantics
 - `AddressBook` and `Calendar` objects represent durable canonical collections and cannot be modified through `set` in the MVP

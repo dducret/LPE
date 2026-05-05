@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::{
-    convert::insert_if,
+    convert::{apply_jmap_property_patch, has_jmap_property_patch, insert_if},
     error::set_error,
     parse::{
         parse_first_property_object_string, parse_local_datetime, parse_local_datetime_value,
@@ -358,18 +358,24 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         if let Some(update) = arguments.update {
             for (id, value) in update {
-                match parse_uuid(&id).and_then(|event_id| {
-                    parse_calendar_event_input(Some(event_id), account_id, value)
-                        .map(|(_, input)| (event_id, input))
-                }) {
-                    Ok((event_id, input)) => match self
-                        .store
-                        .update_accessible_event(account_id, event_id, input)
+                match parse_uuid(&id) {
+                    Ok(event_id) => match self
+                        .calendar_event_update_input(account_id, event_id, value)
                         .await
+                        .map(|input| (event_id, input))
                     {
-                        Ok(_) => {
-                            updated.insert(id, Value::Object(Map::new()));
-                        }
+                        Ok((event_id, input)) => match self
+                            .store
+                            .update_accessible_event(account_id, event_id, input)
+                            .await
+                        {
+                            Ok(_) => {
+                                updated.insert(id, Value::Object(Map::new()));
+                            }
+                            Err(error) => {
+                                not_updated.insert(id, set_error(&error.to_string()));
+                            }
+                        },
                         Err(error) => {
                             not_updated.insert(id, set_error(&error.to_string()));
                         }
@@ -413,6 +419,32 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             "destroyed": destroyed,
             "notDestroyed": Value::Object(not_destroyed),
         }))
+    }
+
+    async fn calendar_event_update_input(
+        &self,
+        account_id: Uuid,
+        event_id: Uuid,
+        value: Value,
+    ) -> Result<UpsertClientEventInput> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| anyhow!("calendar event arguments must be an object"))?;
+        if !has_jmap_property_patch(object) {
+            return parse_calendar_event_input(Some(event_id), account_id, value)
+                .map(|(_, input)| input);
+        }
+
+        let existing = self
+            .store
+            .fetch_accessible_events_by_ids(account_id, &[event_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("event not found"))?;
+        let mut patched = calendar_event_to_value(&existing, &calendar_event_properties(None));
+        apply_jmap_property_patch(&mut patched, object)?;
+        parse_calendar_event_input(Some(event_id), account_id, patched).map(|(_, input)| input)
     }
 }
 
@@ -777,7 +809,7 @@ fn parse_calendar_event_input(
 fn reject_unknown_calendar_event_properties(object: &Map<String, Value>) -> Result<()> {
     for key in object.keys() {
         match key.as_str() {
-            "@type" | "uid" | "title" | "start" | "duration" | "timeZone" | "locations"
+            "id" | "@type" | "uid" | "title" | "start" | "duration" | "timeZone" | "locations"
             | "participants" | "description" | "calendarIds" => {}
             _ => bail!("unsupported calendar event property: {key}"),
         }

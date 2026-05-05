@@ -37,6 +37,80 @@ pub(crate) fn insert_if<T: Serialize>(
     }
 }
 
+pub(crate) fn has_jmap_property_patch(object: &Map<String, Value>) -> bool {
+    object.keys().any(|key| key.contains('/'))
+}
+
+pub(crate) fn apply_jmap_property_patch(
+    target: &mut Value,
+    patch: &Map<String, Value>,
+) -> Result<()> {
+    for (key, value) in patch {
+        if key.contains('/') {
+            apply_jmap_property_path(target, key, value.clone())?;
+        } else {
+            let object = target
+                .as_object_mut()
+                .ok_or_else(|| anyhow::anyhow!("patched object must be an object"))?;
+            if value.is_null() {
+                object.remove(key);
+            } else {
+                object.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn apply_jmap_property_path(target: &mut Value, path: &str, value: Value) -> Result<()> {
+    let segments = path
+        .split('/')
+        .map(unescape_property_path_segment)
+        .collect::<Result<Vec<_>>>()?;
+    if segments.is_empty() || segments.iter().any(|segment| segment.is_empty()) {
+        bail!("invalid property patch path: {path}");
+    }
+
+    let mut current = target;
+    for segment in &segments[..segments.len() - 1] {
+        let object = current
+            .as_object_mut()
+            .ok_or_else(|| anyhow::anyhow!("property patch path parent must be an object"))?;
+        current = object
+            .entry(segment.clone())
+            .or_insert_with(|| Value::Object(Map::new()));
+    }
+
+    let object = current
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("property patch path parent must be an object"))?;
+    let leaf = segments.last().unwrap();
+    if value.is_null() {
+        object.remove(leaf);
+    } else {
+        object.insert(leaf.clone(), value);
+    }
+    Ok(())
+}
+
+fn unescape_property_path_segment(segment: &str) -> Result<String> {
+    let mut output = String::new();
+    let mut chars = segment.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '~' {
+            match chars.next() {
+                Some('0') => output.push('~'),
+                Some('1') => output.push('/'),
+                Some(other) => bail!("invalid property patch escape: ~{other}"),
+                None => bail!("invalid trailing property patch escape"),
+            }
+        } else {
+            output.push(ch);
+        }
+    }
+    Ok(output)
+}
+
 pub(crate) fn address_value(email: &str, name: Option<&str>) -> Value {
     json!({
         "email": email,

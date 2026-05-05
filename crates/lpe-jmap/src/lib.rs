@@ -6975,6 +6975,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn contact_and_calendar_set_support_property_patches() {
+        let contact_id = FakeStore::contact().id.to_string();
+        let event_id = FakeStore::event().id.to_string();
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            contacts: Arc::new(Mutex::new(vec![FakeStore::contact()])),
+            events: Arc::new(Mutex::new(vec![FakeStore::event()])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CONTACTS_CAPABILITY.to_string(),
+                        JMAP_CALENDARS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "ContactCard/set".to_string(),
+                            json!({
+                                "update": {
+                                    (contact_id.clone()): {
+                                        "name/full": "Robert Example",
+                                        "emails/main/address": "robert@example.test",
+                                        "phones/main": null
+                                    }
+                                }
+                            }),
+                            "contact-patch".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/set".to_string(),
+                            json!({
+                                "update": {
+                                    (event_id.clone()): {
+                                        "title": "Planning",
+                                        "locations/main/name": "Room C",
+                                        "participants/p1/participationStatus": "tentative"
+                                    }
+                                }
+                            }),
+                            "event-patch".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["updated"][contact_id.as_str()],
+            json!({})
+        );
+        assert_eq!(
+            response.method_responses[1].1["updated"][event_id.as_str()],
+            json!({})
+        );
+
+        let contacts = store.contacts.lock().unwrap();
+        assert_eq!(contacts[0].name, "Robert Example");
+        assert_eq!(contacts[0].email, "robert@example.test");
+        assert_eq!(contacts[0].phone, "");
+        drop(contacts);
+
+        let events = store.events.lock().unwrap();
+        assert_eq!(events[0].title, "Planning");
+        assert_eq!(events[0].location, "Room C");
+        assert!(events[0]
+            .attendees_json
+            .contains("\"partstat\":\"tentative\""));
+    }
+
+    #[tokio::test]
     async fn contact_and_calendar_query_changes_report_reorders() {
         let contact_id = FakeStore::contact().id;
         let later_contact_id = Uuid::parse_str("13131313-1313-1313-1313-131313131313").unwrap();
