@@ -97,12 +97,13 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
     let request_type = request_type(headers)?;
     let request_id = request_id(headers);
     if !is_mapi_content_type(headers) {
-        return Ok(mapi_diagnostic_response(
+        let response = mapi_diagnostic_response(
             request_type.header_value(),
             &request_id,
             4,
             "MAPI requests must use Content-Type application/mapi-http.",
-        ));
+        );
+        return Ok(finalize_mapi_response(response, headers));
     }
 
     let response = match (endpoint, request_type) {
@@ -187,7 +188,7 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
         ),
     };
 
-    Ok(response)
+    Ok(finalize_mapi_response(response, headers))
 }
 
 pub(crate) fn mapi_error_response(error: &anyhow::Error) -> Response {
@@ -747,6 +748,21 @@ fn mapi_response(
         if let Ok(value) = HeaderValue::from_str(&cookie) {
             response.headers_mut().insert(SET_COOKIE, value);
         }
+    }
+    response
+}
+
+fn finalize_mapi_response(mut response: Response, request_headers: &HeaderMap) -> Response {
+    insert_header(
+        &mut response,
+        "x-expirationinfo",
+        &(MAPI_SESSION_MAX_AGE_SECONDS * 1000).to_string(),
+    );
+    insert_header(&mut response, "x-pendingperiod", "15000");
+    if let Some(client_info) = request_headers.get("x-clientinfo") {
+        response
+            .headers_mut()
+            .insert("x-clientinfo", client_info.clone());
     }
     response
 }

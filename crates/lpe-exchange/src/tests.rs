@@ -1070,6 +1070,7 @@ fn mapi_headers(request_type: &str) -> HeaderMap {
         HeaderValue::from_str(request_type).unwrap(),
     );
     headers.insert("x-requestid", HeaderValue::from_static("request-1"));
+    headers.insert("x-clientinfo", HeaderValue::from_static("client-info-1"));
     headers
 }
 
@@ -1080,6 +1081,7 @@ fn mapi_headers_without_content_type(request_type: &str) -> HeaderMap {
         HeaderValue::from_str(request_type).unwrap(),
     );
     headers.insert("x-requestid", HeaderValue::from_static("request-1"));
+    headers.insert("x-clientinfo", HeaderValue::from_static("client-info-1"));
     headers
 }
 
@@ -1094,6 +1096,7 @@ fn mapi_headers_with_content_type(request_type: &str, content_type: &'static str
         HeaderValue::from_str(request_type).unwrap(),
     );
     headers.insert("x-requestid", HeaderValue::from_static("request-1"));
+    headers.insert("x-clientinfo", HeaderValue::from_static("client-info-1"));
     headers
 }
 
@@ -1227,6 +1230,15 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
     );
     assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(
+        response.headers().get("x-clientinfo").unwrap(),
+        "client-info-1"
+    );
+    assert_eq!(
+        response.headers().get("x-expirationinfo").unwrap(),
+        "1800000"
+    );
+    assert_eq!(response.headers().get("x-pendingperiod").unwrap(), "15000");
     let set_cookie = response
         .headers()
         .get("set-cookie")
@@ -1324,6 +1336,14 @@ async fn mapi_over_http_accepts_outlook_octet_stream_bind_probe() {
     );
     assert_eq!(response.headers().get("x-requesttype").unwrap(), "Bind");
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(
+        response.headers().get("x-clientinfo").unwrap(),
+        "client-info-1"
+    );
+    assert_eq!(
+        response.headers().get("x-expirationinfo").unwrap(),
+        "1800000"
+    );
     let set_cookie = response
         .headers()
         .get("set-cookie")

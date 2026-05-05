@@ -247,6 +247,7 @@ def check_mapi_ping(base_url: str, email: str, password: str, timeout: int) -> N
                 "Content-Type": "application/mapi-http",
                 "X-RequestType": "PING",
                 "X-RequestId": "00000000-0000-0000-0000-000000000123",
+                "X-ClientInfo": "lpe-rca-connectivity-check",
             },
             timeout,
         )
@@ -268,6 +269,7 @@ def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, 
             "Content-Type": "application/octet-stream",
             "X-RequestType": "Bind",
             "X-RequestId": "00000000-0000-0000-0000-000000000124:1",
+            "X-ClientInfo": "lpe-rca-connectivity-check",
             "User-Agent": "MapiHttpClient",
         },
         timeout,
@@ -276,6 +278,10 @@ def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, 
     require("application/mapi-http" in content_type(response.headers), "MAPI NSPI Bind did not return MAPI content")
     response_code = next((value for key, value in response.headers.items() if key.lower() == "x-responsecode"), "")
     require(response_code == "0", f"MAPI NSPI Bind returned X-ResponseCode {response_code!r}: {response.text[:300]}")
+    expiration = next((value for key, value in response.headers.items() if key.lower() == "x-expirationinfo"), "")
+    require(expiration == "1800000", f"MAPI NSPI Bind returned X-ExpirationInfo {expiration!r}")
+    client_info = next((value for key, value in response.headers.items() if key.lower() == "x-clientinfo"), "")
+    require(client_info == "lpe-rca-connectivity-check", f"MAPI NSPI Bind did not echo X-ClientInfo")
     print("ok mapi_nspi_bind_octet_stream")
 
 
