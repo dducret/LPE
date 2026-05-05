@@ -87,6 +87,7 @@ def check_pox_autodiscover(
     base_url: str,
     email: str,
     expect_ews: bool,
+    expect_exchange_providers: bool,
     expect_mapi: bool,
     timeout: int,
 ) -> None:
@@ -117,6 +118,16 @@ def check_pox_autodiscover(
         if expect_ews:
             require("<Type>WEB</Type>" in text, f"{path} missing opt-in EWS WEB block")
             require("<ASUrl>" in text, f"{path} missing EWS ASUrl")
+        if expect_exchange_providers:
+            require(
+                "      <Protocol>\n        <Type>EXCH</Type>" in text,
+                f"{path} missing legacy EXCH provider section",
+            )
+            require(
+                "      <Protocol>\n        <Type>EXPR</Type>" in text,
+                f"{path} missing legacy EXPR provider section",
+            )
+            require("<EwsUrl>" in text, f"{path} missing EWS URL in legacy Exchange provider section")
 
     if expect_mapi:
         response = request(
@@ -262,7 +273,7 @@ def main() -> int:
         epilog=textwrap.dedent(
             """\
             Examples:
-              LPE_RCA_PASSWORD='...' tools/rca_outlook_connectivity_check.py --expect-ews --check-ews-basic
+              LPE_RCA_PASSWORD='...' tools/rca_outlook_connectivity_check.py --expect-ews --expect-exchange-providers --check-ews-basic
               tools/rca_outlook_connectivity_check.py --base-url http://127.0.0.1:8080 --email test@example.test
             """
         ),
@@ -272,13 +283,25 @@ def main() -> int:
     parser.add_argument("--password", default=os.getenv("LPE_RCA_PASSWORD"))
     parser.add_argument("--timeout", type=int, default=int(os.getenv("LPE_RCA_TIMEOUT", "20")))
     parser.add_argument("--expect-ews", action="store_true", help="Require EWS discovery to be published.")
+    parser.add_argument(
+        "--expect-exchange-providers",
+        action="store_true",
+        help="Require POX legacy EXCH and EXPR provider sections for RCA Outlook Connectivity.",
+    )
     parser.add_argument("--expect-mapi", action="store_true", help="Require MAPI/HTTP discovery to be published.")
     parser.add_argument("--check-ews-basic", action="store_true", help="Exercise Basic auth against /EWS/Exchange.asmx.")
     parser.add_argument("--check-mapi-ping", action="store_true", help="Exercise Basic auth PING against /mapi/emsmdb and /mapi/nspi.")
     args = parser.parse_args()
 
     base_url = args.base_url.rstrip("/")
-    check_pox_autodiscover(base_url, args.email, args.expect_ews, args.expect_mapi, args.timeout)
+    check_pox_autodiscover(
+        base_url,
+        args.email,
+        args.expect_ews,
+        args.expect_exchange_providers,
+        args.expect_mapi,
+        args.timeout,
+    )
     check_json_autodiscover(base_url, args.email, args.expect_ews, args.expect_mapi, args.timeout)
 
     if args.password:
