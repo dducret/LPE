@@ -4082,8 +4082,11 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
                         </t:NumberedRecurrence>
                       </t:Recurrence>
                       <t:RequiredAttendees>
-                        <t:Attendee><t:Mailbox><t:Name>Bob</t:Name><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox></t:Attendee>
+                        <t:Attendee><t:Mailbox><t:Name>Bob</t:Name><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox><t:ResponseType>Accept</t:ResponseType></t:Attendee>
                       </t:RequiredAttendees>
+                      <t:OptionalAttendees>
+                        <t:Attendee><t:Mailbox><t:Name>Carol</t:Name><t:EmailAddress>carol@example.test</t:EmailAddress></t:Mailbox><t:ResponseType>Tentative</t:ResponseType></t:Attendee>
+                      </t:OptionalAttendees>
                       <t:Body BodyType="Text">Created by RCA</t:Body>
                     </t:CalendarItem>
                   </m:Items>
@@ -4098,10 +4101,24 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
     assert!(body.contains("<m:CreateItemResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("event:cccccccc-cccc-cccc-cccc-cccccccccccc"));
+    let created_events = events.lock().unwrap();
     assert_eq!(
-        events.lock().unwrap()[0].recurrence_rule,
+        created_events[0].recurrence_rule,
         "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=5"
     );
+    assert_eq!(created_events[0].attendees, "Bob, Carol");
+    assert!(created_events[0]
+        .attendees_json
+        .contains("alice@example.test"));
+    assert!(created_events[0]
+        .attendees_json
+        .contains("bob@example.test"));
+    assert!(created_events[0]
+        .attendees_json
+        .contains("carol@example.test"));
+    assert!(created_events[0].attendees_json.contains("accepted"));
+    assert!(created_events[0].attendees_json.contains("tentative"));
+    drop(created_events);
 
     let response = service
         .handle(
@@ -4119,6 +4136,12 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
     assert!(body.contains("<t:WeeklyRecurrence>"));
     assert!(body.contains("<t:DaysOfWeek>Monday Wednesday</t:DaysOfWeek>"));
     assert!(body.contains("<t:NumberOfOccurrences>5</t:NumberOfOccurrences>"));
+    assert!(body.contains("<t:RequiredAttendees>"));
+    assert!(body.contains("<t:OptionalAttendees>"));
+    assert!(body.contains("<t:EmailAddress>bob@example.test</t:EmailAddress>"));
+    assert!(body.contains("<t:EmailAddress>carol@example.test</t:EmailAddress>"));
+    assert!(body.contains("<t:ResponseType>Accept</t:ResponseType>"));
+    assert!(body.contains("<t:ResponseType>Tentative</t:ResponseType>"));
     assert!(
         body.contains("<m:SyncState>calendar:default:v2:cccccccc-cccc-cccc-cccc-cccccccccccc=ck-")
     );

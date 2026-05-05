@@ -18,11 +18,13 @@ use lpe_magika::{
 };
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
-    AttachmentUploadInput, AuditEntryInput, ClientTask, CollaborationCollection, JmapEmail,
-    JmapEmailAddress, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, Storage,
-    SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientTaskInput,
+    calendar_attendee_labels, parse_calendar_participants_metadata,
+    serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent,
+    ActiveSyncAttachment, ActiveSyncAttachmentContent, AttachmentUploadInput, AuditEntryInput,
+    CalendarOrganizerMetadata, CalendarParticipantMetadata, CalendarParticipantsMetadata,
+    ClientTask, CollaborationCollection, JmapEmail, JmapEmailAddress, JmapImportedEmailInput,
+    JmapMailbox, JmapMailboxCreateInput, Storage, SubmitMessageInput, SubmittedRecipientInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -2057,7 +2059,7 @@ fn parse_create_event_input(
     } else {
         body_value
     };
-    let attendees = parse_event_attendees(event);
+    let (participants, _) = parse_event_participants(principal, event);
 
     Ok(UpsertClientEventInput {
         id: None,
@@ -2069,8 +2071,8 @@ fn parse_create_event_input(
         recurrence_rule: parse_ews_recurrence(event)?,
         title: element_text(event, "Subject").unwrap_or_else(|| "Untitled event".to_string()),
         location: element_text(event, "Location").unwrap_or_default(),
-        attendees: attendees.join(", "),
-        attendees_json: "[]".to_string(),
+        attendees: calendar_attendee_labels(&participants),
+        attendees_json: serialize_calendar_participants_metadata(&participants),
         notes,
     })
 }
@@ -2110,7 +2112,7 @@ fn parse_update_event_input(
     } else {
         existing.notes.clone()
     };
-    let attendees = parse_event_attendees(event);
+    let (participants, has_attendee_updates) = parse_event_participants(principal, event);
 
     Ok(UpsertClientEventInput {
         id: Some(existing.id),
@@ -2141,12 +2143,16 @@ fn parse_update_event_input(
             "Location",
             &existing.location,
         ),
-        attendees: if attendees.is_empty() {
-            existing.attendees.clone()
+        attendees: if has_attendee_updates {
+            calendar_attendee_labels(&participants)
         } else {
-            attendees.join(", ")
+            existing.attendees.clone()
         },
-        attendees_json: existing.attendees_json.clone(),
+        attendees_json: if has_attendee_updates {
+            serialize_calendar_participants_metadata(&participants)
+        } else {
+            existing.attendees_json.clone()
+        },
         notes,
     })
 }
@@ -2332,26 +2338,59 @@ impl EmptyStringFallback for String {
     }
 }
 
-fn parse_event_attendees(event: &str) -> Vec<String> {
-    ["RequiredAttendees", "OptionalAttendees"]
-        .into_iter()
-        .filter_map(|collection_name| element_content(event, collection_name))
-        .flat_map(|collection| {
+fn parse_event_participants(
+    principal: &AccountPrincipal,
+    event: &str,
+) -> (CalendarParticipantsMetadata, bool) {
+    let mut metadata = CalendarParticipantsMetadata {
+        organizer: Some(CalendarOrganizerMetadata {
+            email: principal.email.clone(),
+            common_name: principal.display_name.clone(),
+        }),
+        attendees: Vec::new(),
+    };
+    let mut has_attendee_collections = false;
+    for (collection_name, role) in [
+        ("RequiredAttendees", "REQ-PARTICIPANT"),
+        ("OptionalAttendees", "OPT-PARTICIPANT"),
+    ] {
+        let Some(collection) = element_content(event, collection_name) else {
+            continue;
+        };
+        has_attendee_collections = true;
+        metadata.attendees.extend(
             element_contents(collection, "Attendee")
                 .into_iter()
-                .filter_map(parse_attendee)
-        })
-        .collect()
+                .filter_map(|attendee| parse_attendee(attendee, role)),
+        );
+    }
+    (metadata, has_attendee_collections)
 }
 
-fn parse_attendee(attendee: &str) -> Option<String> {
+fn parse_attendee(attendee: &str, role: &str) -> Option<CalendarParticipantMetadata> {
     let mailbox = element_content(attendee, "Mailbox").and_then(parse_mailbox)?;
-    Some(match mailbox.display_name {
-        Some(display_name) if !display_name.trim().is_empty() => {
-            format!("{display_name} <{}>", mailbox.address)
-        }
-        _ => mailbox.address,
+    Some(CalendarParticipantMetadata {
+        email: mailbox.address,
+        common_name: mailbox.display_name.unwrap_or_default(),
+        role: role.to_string(),
+        partstat: ews_response_type_to_partstat(&element_text(attendee, "ResponseType")),
+        rsvp: false,
     })
+}
+
+fn ews_response_type_to_partstat(response_type: &Option<String>) -> String {
+    match response_type
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "accept" => "accepted",
+        "tentative" => "tentative",
+        "decline" => "declined",
+        _ => "needs-action",
+    }
+    .to_string()
 }
 
 fn parse_ews_recurrence(event: &str) -> Result<String> {
@@ -4351,6 +4390,7 @@ fn calendar_item_xml_with_change_key(event: &AccessibleEvent, change_key: &str) 
             "<t:End>{end}</t:End>",
             "{recurrence}",
             "<t:LegacyFreeBusyStatus>Busy</t:LegacyFreeBusyStatus>",
+            "{attendees}",
             "<t:Body BodyType=\"Text\">{notes}</t:Body>",
             "</t:CalendarItem>"
         ),
@@ -4362,8 +4402,67 @@ fn calendar_item_xml_with_change_key(event: &AccessibleEvent, change_key: &str) 
         start = escape_xml(&ews_datetime(&event.date, &event.time)),
         end = escape_xml(&event_end_datetime(event)),
         recurrence = ews_recurrence_xml(event),
+        attendees = ews_attendees_xml(event),
         notes = escape_xml(&event.notes),
     )
+}
+
+fn ews_attendees_xml(event: &AccessibleEvent) -> String {
+    let metadata = parse_calendar_participants_metadata(&event.attendees_json);
+    let required = ews_attendee_collection_xml(
+        "RequiredAttendees",
+        metadata
+            .attendees
+            .iter()
+            .filter(|attendee| !attendee.role.eq_ignore_ascii_case("OPT-PARTICIPANT")),
+    );
+    let optional = ews_attendee_collection_xml(
+        "OptionalAttendees",
+        metadata
+            .attendees
+            .iter()
+            .filter(|attendee| attendee.role.eq_ignore_ascii_case("OPT-PARTICIPANT")),
+    );
+    format!("{required}{optional}")
+}
+
+fn ews_attendee_collection_xml<'a>(
+    element_name: &str,
+    attendees: impl Iterator<Item = &'a CalendarParticipantMetadata>,
+) -> String {
+    let attendees = attendees.map(ews_attendee_xml).collect::<String>();
+    if attendees.is_empty() {
+        String::new()
+    } else {
+        format!("<t:{element_name}>{attendees}</t:{element_name}>")
+    }
+}
+
+fn ews_attendee_xml(attendee: &CalendarParticipantMetadata) -> String {
+    format!(
+        concat!(
+            "<t:Attendee>",
+            "<t:Mailbox>",
+            "<t:Name>{}</t:Name>",
+            "<t:EmailAddress>{}</t:EmailAddress>",
+            "<t:RoutingType>SMTP</t:RoutingType>",
+            "</t:Mailbox>",
+            "<t:ResponseType>{}</t:ResponseType>",
+            "</t:Attendee>"
+        ),
+        escape_xml(&attendee.common_name),
+        escape_xml(&attendee.email),
+        partstat_to_ews_response_type(&attendee.partstat),
+    )
+}
+
+fn partstat_to_ews_response_type(partstat: &str) -> &'static str {
+    match partstat.trim().to_ascii_lowercase().as_str() {
+        "accepted" => "Accept",
+        "tentative" => "Tentative",
+        "declined" => "Decline",
+        _ => "NoResponseReceived",
+    }
 }
 
 fn ews_recurrence_xml(event: &AccessibleEvent) -> String {
