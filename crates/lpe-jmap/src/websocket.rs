@@ -20,6 +20,17 @@ use crate::{
 };
 
 const MAX_PUSH_REPLAY_ROWS: u64 = 512;
+const SUPPORTED_PUSH_DATA_TYPES: &[&str] = &[
+    "Mailbox",
+    "Email",
+    "Thread",
+    "AddressBook",
+    "ContactCard",
+    "Calendar",
+    "CalendarEvent",
+    "TaskList",
+    "Task",
+];
 
 #[derive(Debug, Default)]
 pub(crate) struct PushSubscription {
@@ -127,11 +138,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     }
                     "WebSocketPushEnable" => {
                         let request: WebSocketPushEnable = serde_json::from_value(value)?;
-                        subscription.enabled_types = request
-                            .data_types
-                            .into_iter()
-                            .filter(|value| self.supports_push_data_type(value))
-                            .collect();
+                        subscription.enabled_types = normalize_push_data_types(request.data_types);
                         subscription.last_type_states.clear();
                         subscription.last_push_state = None;
                         subscription.last_journal_cursor = None;
@@ -491,21 +498,6 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         Ok(())
     }
 
-    fn supports_push_data_type(&self, data_type: &str) -> bool {
-        matches!(
-            data_type,
-            "Mailbox"
-                | "Email"
-                | "Thread"
-                | "AddressBook"
-                | "ContactCard"
-                | "Calendar"
-                | "CalendarEvent"
-                | "TaskList"
-                | "Task"
-        )
-    }
-
     fn push_categories(&self, data_types: &HashSet<String>) -> Vec<CanonicalChangeCategory> {
         let mut categories = Vec::new();
         if data_types.iter().any(|value| self.is_mail_push_type(value)) {
@@ -584,6 +576,19 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     }
 }
 
+fn normalize_push_data_types(data_types: Option<Vec<String>>) -> HashSet<String> {
+    data_types
+        .unwrap_or_else(|| {
+            SUPPORTED_PUSH_DATA_TYPES
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect()
+        })
+        .into_iter()
+        .filter(|value| SUPPORTED_PUSH_DATA_TYPES.contains(&value.as_str()))
+        .collect()
+}
+
 fn filter_push_state_types(
     type_states: HashMap<String, HashMap<String, String>>,
     enabled_types: &HashSet<String>,
@@ -635,6 +640,44 @@ fn finalize_push_change(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn push_enable_null_or_missing_data_types_subscribes_to_all_supported_types() {
+        let null_request: WebSocketPushEnable = serde_json::from_value(json!({
+            "@type": "WebSocketPushEnable",
+            "dataTypes": null,
+        }))
+        .unwrap();
+        let missing_request: WebSocketPushEnable = serde_json::from_value(json!({
+            "@type": "WebSocketPushEnable",
+        }))
+        .unwrap();
+
+        let null_types = normalize_push_data_types(null_request.data_types);
+        let missing_types = normalize_push_data_types(missing_request.data_types);
+        let expected = SUPPORTED_PUSH_DATA_TYPES
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect::<HashSet<_>>();
+
+        assert_eq!(null_types, expected);
+        assert_eq!(missing_types, expected);
+    }
+
+    #[test]
+    fn push_enable_filters_unsupported_data_types() {
+        let request: WebSocketPushEnable = serde_json::from_value(json!({
+            "@type": "WebSocketPushEnable",
+            "dataTypes": ["Mailbox", "Email", "UnsupportedType"],
+        }))
+        .unwrap();
+
+        assert_eq!(
+            normalize_push_data_types(request.data_types),
+            HashSet::from(["Mailbox".to_string(), "Email".to_string()])
+        );
+    }
 
     #[test]
     fn finalize_push_change_emits_cursor_only_push_state() {

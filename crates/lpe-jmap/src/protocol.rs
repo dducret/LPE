@@ -42,7 +42,7 @@ pub struct WebSocketPushEnable {
     #[serde(rename = "@type")]
     pub _type_name: String,
     #[serde(rename = "dataTypes", default)]
-    pub data_types: Vec<String>,
+    pub data_types: Option<Vec<String>>,
     #[serde(rename = "pushState")]
     pub push_state: Option<String>,
 }
