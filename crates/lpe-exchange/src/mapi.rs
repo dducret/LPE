@@ -18,6 +18,7 @@ use uuid::Uuid;
 use crate::store::ExchangeStore;
 
 const MAPI_CONTENT_TYPE: &str = "application/mapi-http";
+const MAPI_OCTET_STREAM_CONTENT_TYPE: &str = "application/octet-stream";
 const MAPI_SERVER_APPLICATION: &str = "LPE/0.1.3";
 const EMSMDB_COOKIE: &str = "lpe_mapi_emsmdb";
 const NSPI_COOKIE: &str = "lpe_mapi_nspi";
@@ -693,7 +694,10 @@ fn is_mapi_content_type(headers: &HeaderMap) -> bool {
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.split(';').next())
         .map(str::trim)
-        .is_some_and(|value| value.eq_ignore_ascii_case(MAPI_CONTENT_TYPE))
+        .is_some_and(|value| {
+            value.eq_ignore_ascii_case(MAPI_CONTENT_TYPE)
+                || value.eq_ignore_ascii_case(MAPI_OCTET_STREAM_CONTENT_TYPE)
+        })
 }
 
 fn mapi_diagnostic_response(

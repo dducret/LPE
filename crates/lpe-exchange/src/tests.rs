@@ -1083,6 +1083,20 @@ fn mapi_headers_without_content_type(request_type: &str) -> HeaderMap {
     headers
 }
 
+fn mapi_headers_with_content_type(request_type: &str, content_type: &'static str) -> HeaderMap {
+    let mut headers = bearer_headers();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static(content_type),
+    );
+    headers.insert(
+        "x-requesttype",
+        HeaderValue::from_str(request_type).unwrap(),
+    );
+    headers.insert("x-requestid", HeaderValue::from_static("request-1"));
+    headers
+}
+
 fn mapi_headers_without_request_id(request_type: &str) -> HeaderMap {
     let mut headers = bearer_headers();
     headers.insert(
@@ -1284,6 +1298,39 @@ async fn mapi_over_http_rejects_missing_content_type() {
     let body = response_bytes(response).await;
     let message = String::from_utf8_lossy(&body);
     assert!(message.contains("Content-Type application/mapi-http"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_accepts_outlook_octet_stream_bind_probe() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Nspi,
+            &mapi_headers_with_content_type("Bind", "application/octet-stream"),
+            &[0; 45],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "application/mapi-http"
+    );
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Bind");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let set_cookie = response
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(set_cookie.starts_with("lpe_mapi_nspi="));
 }
 
 #[tokio::test]

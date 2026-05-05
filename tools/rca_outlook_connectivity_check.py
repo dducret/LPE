@@ -257,6 +257,28 @@ def check_mapi_ping(base_url: str, email: str, password: str, timeout: int) -> N
     print("ok mapi_ping")
 
 
+def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, timeout: int) -> None:
+    token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
+    response = request(
+        "POST",
+        join_url(base_url, f"/mapi/nspi/?mailboxId={urllib.parse.quote(email, safe='@')}"),
+        bytes(45),
+        {
+            "Authorization": f"Basic {token}",
+            "Content-Type": "application/octet-stream",
+            "X-RequestType": "Bind",
+            "X-RequestId": "00000000-0000-0000-0000-000000000124:1",
+            "User-Agent": "MapiHttpClient",
+        },
+        timeout,
+    )
+    require(response.status == 200, f"MAPI NSPI Bind returned HTTP {response.status}: {response.text[:300]}")
+    require("application/mapi-http" in content_type(response.headers), "MAPI NSPI Bind did not return MAPI content")
+    response_code = next((value for key, value in response.headers.items() if key.lower() == "x-responsecode"), "")
+    require(response_code == "0", f"MAPI NSPI Bind returned X-ResponseCode {response_code!r}: {response.text[:300]}")
+    print("ok mapi_nspi_bind_octet_stream")
+
+
 def xml_escape(value: str) -> str:
     return (
         value.replace("&", "&amp;")
@@ -291,6 +313,11 @@ def main() -> int:
     parser.add_argument("--expect-mapi", action="store_true", help="Require MAPI/HTTP discovery to be published.")
     parser.add_argument("--check-ews-basic", action="store_true", help="Exercise Basic auth against /EWS/Exchange.asmx.")
     parser.add_argument("--check-mapi-ping", action="store_true", help="Exercise Basic auth PING against /mapi/emsmdb and /mapi/nspi.")
+    parser.add_argument(
+        "--check-mapi-nspi-bind-octet-stream",
+        action="store_true",
+        help="Exercise RCA-style NSPI Bind with Content-Type application/octet-stream.",
+    )
     args = parser.parse_args()
 
     base_url = args.base_url.rstrip("/")
@@ -310,10 +337,12 @@ def main() -> int:
             check_ews_basic(base_url, args.email, args.password, args.timeout)
         if args.check_mapi_ping:
             check_mapi_ping(base_url, args.email, args.password, args.timeout)
+        if args.check_mapi_nspi_bind_octet_stream:
+            check_mapi_nspi_bind_octet_stream(base_url, args.email, args.password, args.timeout)
     else:
         print("skip jmap_session password not provided")
-        if args.check_ews_basic or args.check_mapi_ping:
-            raise RuntimeError("--check-ews-basic and --check-mapi-ping require --password or LPE_RCA_PASSWORD")
+        if args.check_ews_basic or args.check_mapi_ping or args.check_mapi_nspi_bind_octet_stream:
+            raise RuntimeError("requested authenticated checks require --password or LPE_RCA_PASSWORD")
 
     return 0
 
