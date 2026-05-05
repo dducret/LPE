@@ -4887,6 +4887,21 @@ mod tests {
             .contains(&format!("limit is {MAX_OBJECTS_IN_SET}")));
     }
 
+    #[test]
+    fn api_request_concurrency_permits_match_advertised_limit() {
+        let permits = (0..MAX_CONCURRENT_REQUESTS)
+            .map(|_| {
+                crate::service::try_acquire_api_request_permit()
+                    .expect("advertised concurrency permit should be available")
+            })
+            .collect::<Vec<_>>();
+
+        assert!(crate::service::try_acquire_api_request_permit().is_none());
+
+        drop(permits);
+        assert!(crate::service::try_acquire_api_request_permit().is_some());
+    }
+
     #[tokio::test]
     async fn jmap_tester_style_big_three_batch_has_stable_json_shapes() {
         let account_id = FakeStore::account().account_id.to_string();
