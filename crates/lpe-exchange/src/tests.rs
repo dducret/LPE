@@ -1083,6 +1083,19 @@ fn mapi_headers_without_content_type(request_type: &str) -> HeaderMap {
     headers
 }
 
+fn mapi_headers_without_request_id(request_type: &str) -> HeaderMap {
+    let mut headers = bearer_headers();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/mapi-http"),
+    );
+    headers.insert(
+        "x-requesttype",
+        HeaderValue::from_str(request_type).unwrap(),
+    );
+    headers
+}
+
 fn execute_body(rop_buffer: &[u8]) -> Vec<u8> {
     let mut body = Vec::new();
     body.extend_from_slice(&0u32.to_le_bytes());
@@ -1218,6 +1231,34 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
     assert!(raw_body.starts_with(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 0\r\n"));
     let body = strip_mapi_http_envelope(raw_body);
     assert_eq!(&body[0..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_generates_request_id_when_client_omits_one() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_headers_without_request_id("Connect"),
+            b"",
+        )
+        .await
+        .unwrap();
+
+    let request_id = response
+        .headers()
+        .get("x-requestid")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert_ne!(request_id, "00000000-0000-0000-0000-000000000000");
+    assert_ne!(request_id, "request-1");
+    assert!(Uuid::parse_str(request_id).is_ok());
 }
 
 #[tokio::test]

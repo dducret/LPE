@@ -74,7 +74,7 @@ The first `MAPI over HTTP` implementation surface exists as authenticated transp
 - `OPTIONS /mapi/nspi`
 - `POST /mapi/nspi`
 
-`/mapi/emsmdb` is reserved for mailbox ROP processing. `/mapi/nspi` is reserved for address book and name service provider interface behavior. `OPTIONS` returns the supported HTTP methods with `x-lpe-mapi-status: transport-session-ready`. `POST` requires mailbox authentication and `Content-Type: application/mapi-http`, and returns `application/mapi-http` responses with `X-RequestType`, `X-ResponseCode`, `X-RequestId`, and `X-ServerApplication`. Response bodies use the MAPI/HTTP common response framing, including the `PROCESSING` and `DONE` meta-tags before the request-specific binary response body, so strict Outlook and Remote Connectivity Analyzer clients do not parse raw binary as the transport envelope.
+`/mapi/emsmdb` is reserved for mailbox ROP processing. `/mapi/nspi` is reserved for address book and name service provider interface behavior. `OPTIONS` returns the supported HTTP methods with `x-lpe-mapi-status: transport-session-ready`. `POST` requires mailbox authentication and `Content-Type: application/mapi-http`, and returns `application/mapi-http` responses with `X-RequestType`, `X-ResponseCode`, `X-RequestId`, and `X-ServerApplication`. Client-supplied non-empty `X-RequestId` values are echoed for diagnostics; if a client omits the header, `LPE` generates a non-zero per-request UUID instead of reusing a placeholder. Response bodies use the MAPI/HTTP common response framing, including the `PROCESSING` and `DONE` meta-tags before the request-specific binary response body, so strict Outlook and Remote Connectivity Analyzer clients do not parse raw binary as the transport envelope.
 
 Implemented request types:
 

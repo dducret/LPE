@@ -683,8 +683,8 @@ fn request_id(headers: &HeaderMap) -> String {
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or("00000000-0000-0000-0000-000000000000")
-        .to_string()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| Uuid::new_v4().to_string())
 }
 
 fn is_mapi_content_type(headers: &HeaderMap) -> bool {
