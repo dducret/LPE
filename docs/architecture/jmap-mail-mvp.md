@@ -95,6 +95,7 @@ Additional supported `JMAP` routes:
 - `Bcc` remains stored separately in `message_bcc_recipients`
 - `Bcc` is not reinjected into search, `participants_normalized`, or `Email/query`
 - `Email/get` may return `bcc` only when the `bcc` property is explicitly requested for the authenticated account's own sender-side draft or sent message
+- `Email/get` honors standard `bodyProperties`, `fetchTextBodyValues`, `fetchHTMLBodyValues`, `fetchAllBodyValues`, and `maxBodyValueBytes` arguments for canonical text and sanitized HTML body projections
 
 ### Accepted MVP limitations
 

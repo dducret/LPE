@@ -164,6 +164,11 @@ pub struct EmailGetArguments {
     pub account_id: Option<String>,
     pub ids: Option<Vec<String>>,
     pub properties: Option<Vec<String>>,
+    pub body_properties: Option<Vec<String>>,
+    pub fetch_text_body_values: Option<bool>,
+    pub fetch_html_body_values: Option<bool>,
+    pub fetch_all_body_values: Option<bool>,
+    pub max_body_value_bytes: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]

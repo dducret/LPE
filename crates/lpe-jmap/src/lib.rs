@@ -5511,6 +5511,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn email_get_honors_body_fetch_options_and_truncation() {
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            emails: vec![FakeStore::inbox_email()],
+            ..Default::default()
+        });
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Email/get".to_string(),
+                        json!({
+                            "ids": [FakeStore::inbox_email().id.to_string()],
+                            "properties": ["id", "textBody", "htmlBody", "bodyValues"],
+                            "bodyProperties": ["partId", "type", "size", "charset"],
+                            "fetchTextBodyValues": true,
+                            "fetchHTMLBodyValues": false,
+                            "maxBodyValueBytes": 5
+                        }),
+                        "email-get".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let object = &response.method_responses[0].1["list"][0];
+        assert_eq!(object["textBody"][0]["partId"], "textBody");
+        assert_eq!(object["textBody"][0]["type"], "text/plain");
+        assert_eq!(
+            object["textBody"][0]["size"],
+            FakeStore::inbox_email().body_text.len() as u64
+        );
+        assert_eq!(object["textBody"][0]["charset"], "utf-8");
+        assert_eq!(object["htmlBody"][0]["partId"], "htmlBody");
+        assert_eq!(object["bodyValues"]["textBody"]["value"], "Inbox");
+        assert_eq!(object["bodyValues"]["textBody"]["isTruncated"], true);
+        assert!(object["bodyValues"]["htmlBody"].is_null());
+    }
+
+    #[tokio::test]
     async fn blob_get_reports_encoding_and_range_edge_cases() {
         let store = FakeStore {
             session: Some(FakeStore::account()),

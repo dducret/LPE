@@ -174,6 +174,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .requested_account_access(account, arguments.account_id.as_deref())
             .await?;
         let account_id = account_access.account_id;
+        let body_options = EmailBodyOptions::from_arguments(&arguments);
         let properties = email_properties(arguments.properties);
 
         let ids = match parse_uuid_list(arguments.ids)? {
@@ -203,6 +204,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     email_to_value(
                         email,
                         &properties,
+                        &body_options,
                         account_access.is_owned
                             && matches!(email.mailbox_role.as_str(), "drafts" | "sent"),
                     )
@@ -1584,9 +1586,63 @@ pub(crate) fn thread_properties(properties: Option<Vec<String>>) -> HashSet<Stri
         .collect()
 }
 
+pub(crate) struct EmailBodyOptions {
+    body_properties: HashSet<String>,
+    fetch_text_body_values: bool,
+    fetch_html_body_values: bool,
+    fetch_all_body_values: bool,
+    explicit_fetch_flags: bool,
+    max_body_value_bytes: Option<usize>,
+}
+
+impl EmailBodyOptions {
+    fn from_arguments(arguments: &EmailGetArguments) -> Self {
+        let explicit_fetch_flags = arguments.fetch_text_body_values.is_some()
+            || arguments.fetch_html_body_values.is_some()
+            || arguments.fetch_all_body_values.is_some();
+        Self {
+            body_properties: arguments
+                .body_properties
+                .clone()
+                .unwrap_or_else(|| {
+                    vec![
+                        "partId".to_string(),
+                        "type".to_string(),
+                        "size".to_string(),
+                        "charset".to_string(),
+                    ]
+                })
+                .into_iter()
+                .collect(),
+            fetch_text_body_values: arguments.fetch_text_body_values.unwrap_or(false),
+            fetch_html_body_values: arguments.fetch_html_body_values.unwrap_or(false),
+            fetch_all_body_values: arguments.fetch_all_body_values.unwrap_or(false),
+            explicit_fetch_flags,
+            max_body_value_bytes: arguments.max_body_value_bytes.map(|value| value as usize),
+        }
+    }
+
+    fn should_fetch_text_value(&self) -> bool {
+        if self.explicit_fetch_flags {
+            self.fetch_all_body_values || self.fetch_text_body_values
+        } else {
+            true
+        }
+    }
+
+    fn should_fetch_html_value(&self) -> bool {
+        if self.explicit_fetch_flags {
+            self.fetch_all_body_values || self.fetch_html_body_values
+        } else {
+            true
+        }
+    }
+}
+
 pub(crate) fn email_to_value(
     email: &JmapEmail,
     properties: &HashSet<String>,
+    body_options: &EmailBodyOptions,
     include_owner_bcc: bool,
 ) -> Value {
     let mut object = Map::new();
@@ -1702,44 +1758,97 @@ pub(crate) fn email_to_value(
         email.has_attachments,
     );
 
+    let include_body_values =
+        properties.contains("bodyValues") || body_options.explicit_fetch_flags;
     let mut body_values = Map::new();
     if !email.body_text.is_empty() {
-        body_values.insert(
-            "textBody".to_string(),
-            json!({
-                "value": email.body_text.clone(),
-                "isEncodingProblem": false,
-                "isTruncated": false,
-            }),
-        );
+        if include_body_values && body_options.should_fetch_text_value() {
+            let (value, is_truncated) =
+                body_value(&email.body_text, body_options.max_body_value_bytes);
+            body_values.insert(
+                "textBody".to_string(),
+                json!({
+                    "value": value,
+                    "isEncodingProblem": false,
+                    "isTruncated": is_truncated,
+                }),
+            );
+        }
         if properties.contains("textBody") {
             object.insert(
                 "textBody".to_string(),
-                json!([{ "partId": "textBody", "type": "text/plain" }]),
+                Value::Array(vec![body_part_value(
+                    "textBody",
+                    "text/plain",
+                    email.body_text.len(),
+                    &body_options.body_properties,
+                )]),
             );
         }
     }
     if let Some(html) = &email.body_html_sanitized {
-        body_values.insert(
-            "htmlBody".to_string(),
-            json!({
-                "value": html.clone(),
-                "isEncodingProblem": false,
-                "isTruncated": false,
-            }),
-        );
+        if include_body_values && body_options.should_fetch_html_value() {
+            let (value, is_truncated) = body_value(html, body_options.max_body_value_bytes);
+            body_values.insert(
+                "htmlBody".to_string(),
+                json!({
+                    "value": value,
+                    "isEncodingProblem": false,
+                    "isTruncated": is_truncated,
+                }),
+            );
+        }
         if properties.contains("htmlBody") {
             object.insert(
                 "htmlBody".to_string(),
-                json!([{ "partId": "htmlBody", "type": "text/html" }]),
+                Value::Array(vec![body_part_value(
+                    "htmlBody",
+                    "text/html",
+                    html.len(),
+                    &body_options.body_properties,
+                )]),
             );
         }
     }
-    if properties.contains("bodyValues") {
+    if include_body_values {
         object.insert("bodyValues".to_string(), Value::Object(body_values));
     }
 
     Value::Object(object)
+}
+
+fn body_part_value(
+    part_id: &str,
+    content_type: &str,
+    size: usize,
+    properties: &HashSet<String>,
+) -> Value {
+    let mut object = Map::new();
+    insert_if(properties, &mut object, "partId", part_id);
+    insert_if(properties, &mut object, "type", content_type);
+    insert_if(properties, &mut object, "size", size as u64);
+    insert_if(properties, &mut object, "charset", "utf-8");
+    Value::Object(object)
+}
+
+fn body_value(value: &str, max_bytes: Option<usize>) -> (String, bool) {
+    let Some(max_bytes) = max_bytes else {
+        return (value.to_string(), false);
+    };
+    if value.len() <= max_bytes {
+        return (value.to_string(), false);
+    }
+    let mut boundary = 0;
+    for (index, _) in value.char_indices() {
+        if index > max_bytes {
+            break;
+        }
+        boundary = index;
+    }
+    if boundary == 0 && max_bytes > 0 && value.is_char_boundary(max_bytes) {
+        boundary = max_bytes;
+    }
+    (value[..boundary].to_string(), true)
 }
 
 pub(crate) fn email_submission_to_value(
