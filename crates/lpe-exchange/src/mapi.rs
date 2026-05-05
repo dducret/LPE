@@ -173,7 +173,7 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
             nspi_principal_rowset_response("QueryRows", &principal, &request_id)
         }
         (MapiEndpoint::Nspi, MapiRequestType::ResolveNames) => {
-            resolve_names_response(&principal, &request_id)
+            resolve_names_response(&principal, _body, &request_id)
         }
         (MapiEndpoint::Nspi, MapiRequestType::ResortRestriction) => {
             nspi_minimal_ids_response("ResortRestriction", &principal, &request_id)
@@ -444,7 +444,12 @@ const NSPI_BOOTSTRAP_PROPERTY_TAGS: &[u32] = &[
     0x3002_001F, // PidTagAddressType / legacy bootstrap metadata
 ];
 
-fn resolve_names_response(principal: &AccountPrincipal, request_id: &str) -> Response {
+fn resolve_names_response(
+    principal: &AccountPrincipal,
+    request: &[u8],
+    request_id: &str,
+) -> Response {
+    let columns = resolve_names_columns(request);
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
@@ -453,14 +458,39 @@ fn resolve_names_response(principal: &AccountPrincipal, request_id: &str) -> Res
     write_u32(&mut body, 1);
     write_u32(&mut body, principal_minimal_entry_id(principal));
     body.push(1);
-    write_large_property_tag_array(&mut body, NSPI_BOOTSTRAP_PROPERTY_TAGS);
+    write_large_property_tag_array(&mut body, &columns);
     write_u32(&mut body, 1);
-    body.extend_from_slice(&nspi_resolved_principal_row(
-        principal,
-        NSPI_BOOTSTRAP_PROPERTY_TAGS,
-    ));
+    body.extend_from_slice(&nspi_resolved_principal_row(principal, &columns));
     write_u32(&mut body, 0);
     mapi_response("ResolveNames", request_id, 0, body, None)
+}
+
+fn resolve_names_columns(request: &[u8]) -> Vec<u32> {
+    parse_resolve_names_columns(request)
+        .filter(|columns| !columns.is_empty())
+        .unwrap_or_else(|| NSPI_BOOTSTRAP_PROPERTY_TAGS.to_vec())
+}
+
+fn parse_resolve_names_columns(request: &[u8]) -> Option<Vec<u32>> {
+    let mut cursor = Cursor::new(request);
+    let _reserved = cursor.read_u32().ok()?;
+    let has_state = cursor.read_u8().ok()? != 0;
+    if has_state {
+        cursor.read_bytes(36).ok()?;
+    }
+    let has_property_tags = cursor.read_u8().ok()? != 0;
+    if !has_property_tags {
+        return None;
+    }
+    let count = cursor.read_u32().ok()? as usize;
+    if count == 0 || count > 128 {
+        return None;
+    }
+    let mut columns = Vec::with_capacity(count);
+    for _ in 0..count {
+        columns.push(cursor.read_u32().ok()?);
+    }
+    Some(columns)
 }
 
 fn nspi_u32_result_response(request_type: &str, request_id: &str, value: u32) -> Response {

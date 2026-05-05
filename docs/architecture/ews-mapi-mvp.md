@@ -100,7 +100,7 @@ Implemented request types:
 - NSPI `Unbind`: consumes the authenticated NSPI session cookie and expires it
 - NSPI `GetAddressBookUrl`: returns the externally visible `/mapi/nspi/` URL using forwarded host/protocol headers when present
 - NSPI `GetMailboxUrl`: returns the externally visible `/mapi/emsmdb/` URL using forwarded host/protocol headers when present
-- NSPI `ResolveNames`: returns the authenticated mailbox identity as the first Check Name result, including display name, SMTP address, account minimal entry id, and legacy DN metadata
+- NSPI `ResolveNames`: returns the authenticated mailbox identity as the first Check Name result, honoring the caller's requested address-book property columns when supplied and falling back to the bootstrap display name, SMTP address, account minimal entry id, and legacy metadata columns otherwise
 - NSPI bootstrap table and property requests `GetProps`, `GetPropList`, `QueryColumns`, `QueryRows`, `GetSpecialTable`, `GetMatches`, `SeekEntries`, `UpdateStat`, `DNToMId`, `CompareMIds`, `GetTemplateInfo`, and `ResortRestriction`: return protocol-success bootstrap data derived from the authenticated mailbox and a minimal Global Address List table so Outlook and Remote Connectivity Analyzer can continue past early address book probes without exposing a separate GAL store
 - `PING`: returns a transport success response on either endpoint
 

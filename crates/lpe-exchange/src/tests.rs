@@ -1181,6 +1181,17 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
+fn hex_bytes(value: &str) -> Vec<u8> {
+    value
+        .as_bytes()
+        .chunks(2)
+        .map(|chunk| {
+            let hex = std::str::from_utf8(chunk).unwrap();
+            u8::from_str_radix(hex, 16).unwrap()
+        })
+        .collect()
+}
+
 fn utf16z(value: &str) -> Vec<u8> {
     let mut bytes = value
         .encode_utf16()
@@ -2402,6 +2413,48 @@ async fn mapi_over_http_resolve_names_resolves_authenticated_mailbox() {
     assert!(contains_bytes(&body, &utf16z("alice@example.test")));
     assert!(contains_bytes(&body, &utf16z("Alice")));
     assert!(contains_bytes(&body, &utf16z("SMTP")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_resolve_names_honors_requested_rca_columns() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = hex_bytes(
+        "00000000ff000000000000000000000000000000000000000000000000e40400000904000009040000ff020000001f0003301f000130ff010000003d0053004d00540050003a0061006c0069006300650040006500780061006d0070006c0065002e007400650073007400000000000000",
+    );
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
+    assert_eq!(body[12], 1);
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
+    assert_eq!(body[21], 1);
+    assert_eq!(u32::from_le_bytes(body[22..26].try_into().unwrap()), 2);
+    assert_eq!(
+        u32::from_le_bytes(body[26..30].try_into().unwrap()),
+        0x3003_001F
+    );
+    assert_eq!(
+        u32::from_le_bytes(body[30..34].try_into().unwrap()),
+        0x3001_001F
+    );
+    assert_eq!(u32::from_le_bytes(body[34..38].try_into().unwrap()), 1);
+    assert_eq!(body[38], 0);
+    assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+    assert!(contains_bytes(&body, &utf16z("Alice")));
+    assert!(!contains_bytes(&body, &utf16z("SMTP")));
+    assert!(body.ends_with(&[0, 0, 0, 0]));
 }
 
 #[tokio::test]
