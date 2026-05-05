@@ -132,7 +132,7 @@ Organizer and participant status are exposed through `participants`:
 - no recurrence, alarms, free/busy, calendar attachments, or extended `VCARD` or `VCALENDAR` semantics
 - `AddressBook` and `Calendar` objects represent durable canonical collections and cannot be modified through `set` in the MVP
 - no user-specific renaming of shared collections
-- no fine-grained ACL history or real-time rights-change notifications
+- no fine-grained ACL history; rights-change notifications are bounded to principal-scoped `JMAP` push recomputation from the canonical collaboration change channel rather than a separate contacts/calendar event store
 
 ### Consistency with other adapters
 
