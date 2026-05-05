@@ -261,6 +261,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     }
                     "AddressBook/get" => self.handle_address_book_get(account, arguments).await,
                     "AddressBook/query" => self.handle_address_book_query(account, arguments).await,
+                    "AddressBook/queryChanges" => {
+                        self.handle_address_book_query_changes(account, arguments)
+                            .await
+                    }
                     "AddressBook/changes" => {
                         self.handle_address_book_changes(account, arguments).await
                     }
@@ -276,6 +280,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     }
                     "Calendar/get" => self.handle_calendar_get(account, arguments).await,
                     "Calendar/query" => self.handle_calendar_query(account, arguments).await,
+                    "Calendar/queryChanges" => {
+                        self.handle_calendar_query_changes(account, arguments).await
+                    }
                     "Calendar/changes" => self.handle_calendar_changes(account, arguments).await,
                     "CalendarEvent/get" => self.handle_calendar_event_get(account, arguments).await,
                     "CalendarEvent/query" => {
@@ -682,6 +689,7 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         }
         "AddressBook/get"
         | "AddressBook/query"
+        | "AddressBook/queryChanges"
         | "AddressBook/changes"
         | "ContactCard/get"
         | "ContactCard/query"
@@ -690,6 +698,7 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         | "ContactCard/set" => Some(JMAP_CONTACTS_CAPABILITY),
         "Calendar/get"
         | "Calendar/query"
+        | "Calendar/queryChanges"
         | "Calendar/changes"
         | "CalendarEvent/get"
         | "CalendarEvent/query"

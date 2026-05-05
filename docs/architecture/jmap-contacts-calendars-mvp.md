@@ -37,6 +37,7 @@ Contacts:
 
 - `AddressBook/get`
 - `AddressBook/query`
+- `AddressBook/queryChanges`
 - `AddressBook/changes`
 - `ContactCard/get`
 - `ContactCard/query`
@@ -48,6 +49,7 @@ Calendars:
 
 - `Calendar/get`
 - `Calendar/query`
+- `Calendar/queryChanges`
 - `Calendar/changes`
 - `CalendarEvent/get`
 - `CalendarEvent/query`
@@ -112,7 +114,7 @@ Organizer and participant status are exposed through `participants`:
 - an account in the same tenant may read or mutate a shared collection only through a canonical grant
 - cross-tenant access is not supported
 - rights changes are minimally audited through `audit_events`
-- `changes` uses the shared opaque canonical projection state-token path; `ContactCard/queryChanges` and `CalendarEvent/queryChanges` use stateless ordered-result snapshots so clients can reconcile creates, deletes, and supported-order reorders without a protocol-local sync store
+- `changes` uses the shared opaque canonical projection state-token path; `AddressBook/queryChanges`, `Calendar/queryChanges`, `ContactCard/queryChanges`, and `CalendarEvent/queryChanges` use stateless ordered-result snapshots so clients can reconcile creates, deletes, and supported-order reorders without a protocol-local sync store
 
 ### Accepted MVP limitations
 

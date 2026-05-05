@@ -23,7 +23,7 @@ use crate::{
     },
     state::{changes_response, query_changes_response, StateEntry},
     validation::{validate_calendar_event_filter, validate_entity_sort},
-    JmapService, DEFAULT_GET_LIMIT, MAX_QUERY_LIMIT, SESSION_STATE,
+    JmapService, DEFAULT_GET_LIMIT, MAX_QUERY_LIMIT,
 };
 
 impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
@@ -85,12 +85,49 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         Ok(json!({
             "accountId": account_id.to_string(),
-            "queryState": SESSION_STATE,
-            "canCalculateChanges": false,
+            "queryState": crate::encode_query_state(
+                account_id,
+                "Calendar/query",
+                None,
+                None,
+                collections.iter().map(|collection| collection.id.clone()).collect(),
+            )?,
+            "canCalculateChanges": true,
             "position": position,
             "ids": ids,
             "total": collections.len(),
         }))
+    }
+
+    pub(crate) async fn handle_calendar_query_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: QueryChangesArguments = serde_json::from_value(arguments)?;
+        let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
+        reject_collection_query_constraints(
+            arguments.filter.as_ref(),
+            arguments.sort.as_ref(),
+            "Calendar/query",
+        )?;
+        let collections = self
+            .store
+            .fetch_accessible_calendar_collections(account_id)
+            .await?;
+        query_changes_response(
+            account_id,
+            "Calendar/query",
+            arguments.since_query_state,
+            None,
+            None,
+            collections
+                .iter()
+                .map(|collection| collection.id.clone())
+                .collect(),
+            collections.len() as u64,
+            arguments.max_changes,
+        )
     }
 
     pub(crate) async fn handle_calendar_changes(
@@ -640,6 +677,17 @@ fn serialize_entity_query_sort(sort: Option<Vec<EntityQuerySort>>) -> Result<Opt
     })
     .transpose()
     .map_err(Into::into)
+}
+
+fn reject_collection_query_constraints(
+    filter: Option<&Value>,
+    sort: Option<&Vec<Value>>,
+    method: &str,
+) -> Result<()> {
+    if filter.is_some() || sort.is_some() {
+        bail!("{method} does not support filter or sort");
+    }
+    Ok(())
 }
 
 fn parse_calendar_event_input(

@@ -79,6 +79,8 @@ mod tests {
         emails: Vec<JmapEmail>,
         accessible_mailbox_accounts: Vec<MailboxAccountAccess>,
         sender_identities: Vec<SenderIdentity>,
+        contact_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
+        calendar_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
         contacts: Arc<Mutex<Vec<ClientContact>>>,
         events: Arc<Mutex<Vec<ClientEvent>>>,
         task_lists: Arc<Mutex<Vec<ClientTaskList>>>,
@@ -979,7 +981,12 @@ mod tests {
             &self,
             _principal_account_id: Uuid,
         ) -> Result<Vec<CollaborationCollection>> {
-            Ok(vec![Self::contact_collection()])
+            let collections = self.contact_collections.lock().unwrap();
+            if collections.is_empty() {
+                Ok(vec![Self::contact_collection()])
+            } else {
+                Ok(collections.clone())
+            }
         }
 
         async fn fetch_accessible_contacts(
@@ -1062,7 +1069,12 @@ mod tests {
             &self,
             _principal_account_id: Uuid,
         ) -> Result<Vec<CollaborationCollection>> {
-            Ok(vec![Self::calendar_collection()])
+            let collections = self.calendar_collections.lock().unwrap();
+            if collections.is_empty() {
+                Ok(vec![Self::calendar_collection()])
+            } else {
+                Ok(collections.clone())
+            }
         }
 
         async fn fetch_accessible_events(
@@ -5471,7 +5483,7 @@ mod tests {
         );
         assert_eq!(
             response.method_responses[2].1["canCalculateChanges"],
-            Value::Bool(false)
+            Value::Bool(true)
         );
         assert_eq!(
             response.method_responses[3].1["canCalculateChanges"],
@@ -5553,7 +5565,7 @@ mod tests {
         );
         assert_eq!(
             response.method_responses[1].1["canCalculateChanges"],
-            Value::Bool(false)
+            Value::Bool(true)
         );
         assert_eq!(
             response.method_responses[2].1["ids"][0],
@@ -5701,6 +5713,117 @@ mod tests {
             .unwrap()
             .iter()
             .any(|entry| entry["id"] == event_id.to_string() && entry["index"] == 1));
+    }
+
+    #[tokio::test]
+    async fn address_book_and_calendar_query_changes_report_collection_reorders() {
+        let mut shared_address_book = FakeStore::contact_collection();
+        shared_address_book.id = "shared-contacts".to_string();
+        shared_address_book.display_name = "Shared Contacts".to_string();
+        shared_address_book.is_owned = false;
+        shared_address_book.rights = FakeStore::read_only_rights();
+        let mut shared_calendar = FakeStore::calendar_collection();
+        shared_calendar.id = "shared-calendar".to_string();
+        shared_calendar.display_name = "Shared Calendar".to_string();
+        shared_calendar.is_owned = false;
+        shared_calendar.rights = FakeStore::read_only_rights();
+
+        let contact_collections = Arc::new(Mutex::new(vec![
+            FakeStore::contact_collection(),
+            shared_address_book.clone(),
+        ]));
+        let calendar_collections = Arc::new(Mutex::new(vec![
+            FakeStore::calendar_collection(),
+            shared_calendar.clone(),
+        ]));
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            contact_collections: contact_collections.clone(),
+            calendar_collections: calendar_collections.clone(),
+            ..Default::default()
+        });
+
+        let initial = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_CONTACTS_CAPABILITY.to_string(),
+                        JMAP_CALENDARS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "AddressBook/query".to_string(),
+                            json!({}),
+                            "ab1".to_string(),
+                        ),
+                        JmapMethodCall("Calendar/query".to_string(), json!({}), "cal1".to_string()),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+        let address_book_query_state = initial.method_responses[0].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let calendar_query_state = initial.method_responses[1].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        contact_collections.lock().unwrap().reverse();
+        calendar_collections.lock().unwrap().reverse();
+
+        let changes = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_CONTACTS_CAPABILITY.to_string(),
+                        JMAP_CALENDARS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "AddressBook/queryChanges".to_string(),
+                            json!({"sinceQueryState": address_book_query_state}),
+                            "ab2".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Calendar/queryChanges".to_string(),
+                            json!({"sinceQueryState": calendar_query_state}),
+                            "cal2".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            changes.method_responses[0].1["removed"],
+            json!(["default", "shared-contacts"])
+        );
+        assert_eq!(
+            changes.method_responses[0].1["added"],
+            json!([
+                {"id": "shared-contacts", "index": 0},
+                {"id": "default", "index": 1}
+            ])
+        );
+        assert_eq!(
+            changes.method_responses[1].1["removed"],
+            json!(["default", "shared-calendar"])
+        );
+        assert_eq!(
+            changes.method_responses[1].1["added"],
+            json!([
+                {"id": "shared-calendar", "index": 0},
+                {"id": "default", "index": 1}
+            ])
+        );
     }
 
     #[tokio::test]
