@@ -266,6 +266,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     }
                     "ContactCard/get" => self.handle_contact_get(account, arguments).await,
                     "ContactCard/query" => self.handle_contact_query(account, arguments).await,
+                    "ContactCard/queryChanges" => {
+                        self.handle_contact_query_changes(account, arguments).await
+                    }
                     "ContactCard/changes" => self.handle_contact_changes(account, arguments).await,
                     "ContactCard/set" => {
                         self.handle_contact_set(account, arguments, &mut created_ids)
@@ -277,6 +280,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     "CalendarEvent/get" => self.handle_calendar_event_get(account, arguments).await,
                     "CalendarEvent/query" => {
                         self.handle_calendar_event_query(account, arguments).await
+                    }
+                    "CalendarEvent/queryChanges" => {
+                        self.handle_calendar_event_query_changes(account, arguments)
+                            .await
                     }
                     "CalendarEvent/changes" => {
                         self.handle_calendar_event_changes(account, arguments).await
@@ -678,6 +685,7 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         | "AddressBook/changes"
         | "ContactCard/get"
         | "ContactCard/query"
+        | "ContactCard/queryChanges"
         | "ContactCard/changes"
         | "ContactCard/set" => Some(JMAP_CONTACTS_CAPABILITY),
         "Calendar/get"
@@ -685,6 +693,7 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         | "Calendar/changes"
         | "CalendarEvent/get"
         | "CalendarEvent/query"
+        | "CalendarEvent/queryChanges"
         | "CalendarEvent/changes"
         | "CalendarEvent/set" => Some(JMAP_CALENDARS_CAPABILITY),
         "TaskList/get" | "TaskList/changes" | "TaskList/set" | "Task/get" | "Task/query"

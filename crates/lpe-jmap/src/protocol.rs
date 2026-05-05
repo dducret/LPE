@@ -301,7 +301,7 @@ pub struct ContactCardQueryArguments {
     pub sort: Option<Vec<EntityQuerySort>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContactCardQueryFilter {
     pub in_address_book: Option<String>,
@@ -410,7 +410,7 @@ pub struct CalendarEventQueryArguments {
     pub sort: Option<Vec<EntityQuerySort>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CalendarEventQueryFilter {
     pub in_calendar: Option<String>,
@@ -428,7 +428,7 @@ pub struct CalendarEventSetArguments {
     pub destroy: Option<Vec<String>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntityQuerySort {
     pub property: String,

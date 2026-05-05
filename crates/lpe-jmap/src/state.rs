@@ -313,7 +313,10 @@ pub(crate) fn query_changes_response(
         bail!("queryState does not match requested filter or sort");
     }
 
-    let diff = if matches!(kind, "Email/query" | "Task" | "Mailbox/query") {
+    let diff = if matches!(
+        kind,
+        "Email/query" | "Task" | "Mailbox/query" | "ContactCard" | "CalendarEvent"
+    ) {
         compute_query_diff_with_reorders(&previous.ids, &current_ids, max_changes)
     } else {
         compute_query_diff(&previous.ids, &current_ids, max_changes)

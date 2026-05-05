@@ -5475,7 +5475,7 @@ mod tests {
         );
         assert_eq!(
             response.method_responses[3].1["canCalculateChanges"],
-            Value::Bool(false)
+            Value::Bool(true)
         );
         assert!(response.created_ids.contains_key("new1"));
         let contacts = store.contacts.lock().unwrap();
@@ -5561,7 +5561,7 @@ mod tests {
         );
         assert_eq!(
             response.method_responses[2].1["canCalculateChanges"],
-            Value::Bool(false)
+            Value::Bool(true)
         );
         let events = store.events.lock().unwrap();
         assert_eq!(events.len(), 2);
@@ -5574,6 +5574,133 @@ mod tests {
         assert!(created.attendees_json.contains("\"organizer\""));
         assert!(created.attendees_json.contains("\"partstat\":\"accepted\""));
         assert!(created.attendees_json.contains("\"rsvp\":true"));
+    }
+
+    #[tokio::test]
+    async fn contact_and_calendar_query_changes_report_reorders() {
+        let contact_id = FakeStore::contact().id;
+        let later_contact_id = Uuid::parse_str("13131313-1313-1313-1313-131313131313").unwrap();
+        let event_id = FakeStore::event().id;
+        let later_event_id = Uuid::parse_str("35353535-3535-3535-3535-353535353535").unwrap();
+        let mut later_event = FakeStore::event();
+        later_event.id = later_event_id;
+        later_event.time = "11:00".to_string();
+        later_event.title = "Later planning".to_string();
+
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            contacts: Arc::new(Mutex::new(vec![
+                FakeStore::contact(),
+                ClientContact {
+                    id: later_contact_id,
+                    name: "Zoe Example".to_string(),
+                    role: String::new(),
+                    email: "zoe@example.test".to_string(),
+                    phone: String::new(),
+                    team: String::new(),
+                    notes: String::new(),
+                },
+            ])),
+            events: Arc::new(Mutex::new(vec![FakeStore::event(), later_event])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store.clone());
+
+        let initial = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_CONTACTS_CAPABILITY.to_string(),
+                        JMAP_CALENDARS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "ContactCard/query".to_string(),
+                            json!({}),
+                            "cq1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/query".to_string(),
+                            json!({}),
+                            "eq1".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+        let contact_query_state = initial.method_responses[0].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let event_query_state = initial.method_responses[1].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        {
+            let mut contacts = store.contacts.lock().unwrap();
+            let contact = contacts
+                .iter_mut()
+                .find(|contact| contact.id == contact_id)
+                .unwrap();
+            contact.name = "Zzz Example".to_string();
+        }
+        {
+            let mut events = store.events.lock().unwrap();
+            let event = events
+                .iter_mut()
+                .find(|event| event.id == event_id)
+                .unwrap();
+            event.time = "12:00".to_string();
+        }
+
+        let changes = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_CONTACTS_CAPABILITY.to_string(),
+                        JMAP_CALENDARS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "ContactCard/queryChanges".to_string(),
+                            json!({"sinceQueryState": contact_query_state}),
+                            "cq2".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/queryChanges".to_string(),
+                            json!({"sinceQueryState": event_query_state}),
+                            "eq2".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(changes.method_responses[0].1["removed"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(contact_id.to_string())));
+        assert!(changes.method_responses[0].1["added"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["id"] == contact_id.to_string() && entry["index"] == 1));
+        assert!(changes.method_responses[1].1["removed"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(event_id.to_string())));
+        assert!(changes.method_responses[1].1["added"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["id"] == event_id.to_string() && entry["index"] == 1));
     }
 
     #[tokio::test]

@@ -19,8 +19,9 @@ use crate::{
     protocol::{
         CalendarEventGetArguments, CalendarEventQueryArguments, CalendarEventQueryFilter,
         CalendarEventSetArguments, CalendarGetArguments, CalendarQueryArguments, ChangesArguments,
+        EntityQuerySort, QueryChangesArguments,
     },
-    state::{changes_response, StateEntry},
+    state::{changes_response, query_changes_response, StateEntry},
     validation::{validate_calendar_event_filter, validate_entity_sort},
     JmapService, DEFAULT_GET_LIMIT, MAX_QUERY_LIMIT, SESSION_STATE,
 };
@@ -190,12 +191,47 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         Ok(json!({
             "accountId": account_id.to_string(),
-            "queryState": SESSION_STATE,
-            "canCalculateChanges": false,
+            "queryState": crate::encode_query_state(
+                account_id,
+                "CalendarEvent",
+                arguments.filter.map(serde_json::to_value).transpose()?,
+                serialize_entity_query_sort(arguments.sort)?,
+                events.iter().map(|event| event.id.to_string()).collect(),
+            )?,
+            "canCalculateChanges": true,
             "position": position,
             "ids": ids,
             "total": events.len(),
         }))
+    }
+
+    pub(crate) async fn handle_calendar_event_query_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: QueryChangesArguments<CalendarEventQueryFilter, EntityQuerySort> =
+            serde_json::from_value(arguments)?;
+        let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
+        validate_entity_sort(arguments.sort.as_deref(), "start", true)?;
+        validate_calendar_event_filter(arguments.filter.as_ref())?;
+
+        let mut events = self.store.fetch_accessible_events(account_id).await?;
+        if let Some(filter) = arguments.filter.as_ref() {
+            events.retain(|event| event_matches_filter(event, filter));
+        }
+        events.sort_by_key(calendar_event_sort_key);
+
+        query_changes_response(
+            account_id,
+            "CalendarEvent",
+            arguments.since_query_state,
+            arguments.filter.map(serde_json::to_value).transpose()?,
+            serialize_entity_query_sort(arguments.sort)?,
+            events.iter().map(|event| event.id.to_string()).collect(),
+            events.len() as u64,
+            arguments.max_changes,
+        )
     }
 
     pub(crate) async fn handle_calendar_event_changes(
@@ -594,6 +630,16 @@ fn calendar_event_sort_key(event: &AccessibleEvent) -> String {
 
 fn calendar_event_start(event: &AccessibleEvent) -> String {
     format!("{}T{}:00", event.date, event.time)
+}
+
+fn serialize_entity_query_sort(sort: Option<Vec<EntityQuerySort>>) -> Result<Option<Vec<Value>>> {
+    sort.map(|sort| {
+        sort.into_iter()
+            .map(serde_json::to_value)
+            .collect::<std::result::Result<Vec<_>, _>>()
+    })
+    .transpose()
+    .map_err(Into::into)
 }
 
 fn parse_calendar_event_input(

@@ -40,6 +40,7 @@ Contacts:
 - `AddressBook/changes`
 - `ContactCard/get`
 - `ContactCard/query`
+- `ContactCard/queryChanges`
 - `ContactCard/changes`
 - `ContactCard/set`
 
@@ -50,6 +51,7 @@ Calendars:
 - `Calendar/changes`
 - `CalendarEvent/get`
 - `CalendarEvent/query`
+- `CalendarEvent/queryChanges`
 - `CalendarEvent/changes`
 - `CalendarEvent/set`
 
@@ -110,15 +112,15 @@ Organizer and participant status are exposed through `participants`:
 - an account in the same tenant may read or mutate a shared collection only through a canonical grant
 - cross-tenant access is not supported
 - rights changes are minimally audited through `audit_events`
-- `changes` re-exposes the current account state and does not yet maintain a fine-grained sync history
+- `changes` uses the shared opaque canonical projection state-token path; `ContactCard/queryChanges` and `CalendarEvent/queryChanges` use stateless ordered-result snapshots so clients can reconcile creates, deletes, and supported-order reorders without a protocol-local sync store
 
 ### Accepted MVP limitations
 
 - an owning account always has a durable `default` canonical collection; extra shared collections may also be exposed
 - ACLs remain at the implicit collection level; there is no per-contact or per-event ACL yet
 - sharing and delegation remain limited to the same tenant
-- `ContactCard/query` supports only ascending `name` sort and simple text filtering, with `inAddressBook` limited to one target collection
-- `CalendarEvent/query` supports only ascending `start` sort and the `inCalendar`, `text`, `after`, and `before` filters
+- `ContactCard/query` and `ContactCard/queryChanges` support only ascending `name` sort and simple text filtering, with `inAddressBook` limited to one target collection
+- `CalendarEvent/query` and `CalendarEvent/queryChanges` support only ascending `start` sort and the `inCalendar`, `text`, `after`, and `before` filters
 - `ContactCard/set` supports only `kind=individual`
 - `CalendarEvent/set` supports only `@type=Event`
 - `CalendarEvent/set` accepts only `duration=PT0S`

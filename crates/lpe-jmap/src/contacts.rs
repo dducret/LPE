@@ -13,9 +13,9 @@ use crate::{
     protocol::{
         AddressBookGetArguments, AddressBookQueryArguments, ChangesArguments,
         ContactCardGetArguments, ContactCardQueryArguments, ContactCardQueryFilter,
-        ContactCardSetArguments,
+        ContactCardSetArguments, EntityQuerySort, QueryChangesArguments,
     },
-    state::{changes_response, StateEntry},
+    state::{changes_response, query_changes_response, StateEntry},
     validation::{validate_contact_filter, validate_entity_sort},
     JmapService, DEFAULT_GET_LIMIT, MAX_QUERY_LIMIT, SESSION_STATE,
 };
@@ -186,12 +186,50 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         Ok(json!({
             "accountId": account_id.to_string(),
-            "queryState": SESSION_STATE,
-            "canCalculateChanges": false,
+            "queryState": crate::encode_query_state(
+                account_id,
+                "ContactCard",
+                arguments.filter.map(serde_json::to_value).transpose()?,
+                serialize_entity_query_sort(arguments.sort)?,
+                contacts.iter().map(|contact| contact.id.to_string()).collect(),
+            )?,
+            "canCalculateChanges": true,
             "position": position,
             "ids": ids,
             "total": contacts.len(),
         }))
+    }
+
+    pub(crate) async fn handle_contact_query_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: QueryChangesArguments<ContactCardQueryFilter, EntityQuerySort> =
+            serde_json::from_value(arguments)?;
+        let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
+        validate_entity_sort(arguments.sort.as_deref(), "name", true)?;
+        validate_contact_filter(arguments.filter.as_ref())?;
+
+        let mut contacts = self.store.fetch_accessible_contacts(account_id).await?;
+        if let Some(filter) = arguments.filter.as_ref() {
+            contacts.retain(|contact| contact_matches_filter(contact, filter));
+        }
+        contacts.sort_by_key(|contact| contact.name.to_lowercase());
+
+        query_changes_response(
+            account_id,
+            "ContactCard",
+            arguments.since_query_state,
+            arguments.filter.map(serde_json::to_value).transpose()?,
+            serialize_entity_query_sort(arguments.sort)?,
+            contacts
+                .iter()
+                .map(|contact| contact.id.to_string())
+                .collect(),
+            contacts.len() as u64,
+            arguments.max_changes,
+        )
     }
 
     pub(crate) async fn handle_contact_changes(
@@ -484,6 +522,16 @@ fn contact_matches_filter(contact: &AccessibleContact, filter: &ContactCardQuery
         }
     }
     true
+}
+
+fn serialize_entity_query_sort(sort: Option<Vec<EntityQuerySort>>) -> Result<Option<Vec<Value>>> {
+    sort.map(|sort| {
+        sort.into_iter()
+            .map(serde_json::to_value)
+            .collect::<std::result::Result<Vec<_>, _>>()
+    })
+    .transpose()
+    .map_err(Into::into)
 }
 
 fn parse_contact_input(
