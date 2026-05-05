@@ -104,6 +104,7 @@ Additional supported `JMAP` routes:
 - mailbox and Big Three collaboration query snapshots use deterministic canonical-id tie-breakers for equal visible sort keys so backend row-order changes do not create false `queryChanges` reorders
 - `changes` accepts `sinceState: "0"` as the explicit initial-sync state and otherwise requires an opaque state token bound to the requested account and method; malformed, cross-account, or cross-method tokens are rejected instead of being treated as a fresh initial sync
 - `Email/get` exposes a practical subset of `JMAP Mail` properties
+- `Mailbox/get`, `Identity/get`, and other `get` methods distinguish omitted or `null` `ids` from an explicit empty `ids: []`; explicit empty selections return empty `list` and `notFound` arrays
 - one `LPE` email currently belongs to one `LPE` mailbox, so `mailboxIds` contains one entry
 - `EmailSubmission/set` currently supports only `create`
 - `EmailSubmission/set` expects an existing draft through `emailId` or a resolved creation reference in the same request

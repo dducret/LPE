@@ -29,7 +29,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let arguments: AddressBookGetArguments = serde_json::from_value(arguments)?;
         let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
         let properties = address_book_properties(arguments.properties);
-        let requested_ids = arguments.ids.unwrap_or_default();
+        let requested_ids = arguments.ids;
         let mut collections = self
             .store
             .fetch_accessible_contact_collections(account_id)
@@ -37,10 +37,16 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         collections.sort_by_key(collection_sort_key);
         let list = collections
             .iter()
-            .filter(|collection| requested_ids.is_empty() || requested_ids.contains(&collection.id))
+            .filter(|collection| {
+                requested_ids
+                    .as_ref()
+                    .map(|ids| ids.contains(&collection.id))
+                    .unwrap_or(true)
+            })
             .map(|collection| address_book_to_value(collection, &properties))
             .collect::<Vec<_>>();
         let not_found = requested_ids
+            .unwrap_or_default()
             .into_iter()
             .filter(|id| !collections.iter().any(|collection| collection.id == *id))
             .map(Value::String)

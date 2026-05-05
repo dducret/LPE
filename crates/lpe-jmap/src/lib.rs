@@ -5050,6 +5050,60 @@ mod tests {
             .contains(&format!("limit is {MAX_OBJECTS_IN_SET}")));
     }
 
+    #[tokio::test]
+    async fn get_methods_treat_explicit_empty_ids_as_empty_selection() {
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::inbox_mailbox()],
+            contact_collections: Arc::new(Mutex::new(vec![FakeStore::contact_collection()])),
+            calendar_collections: Arc::new(Mutex::new(vec![FakeStore::calendar_collection()])),
+            sender_identities: vec![FakeStore::sender_identity()],
+            ..Default::default()
+        });
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                        JMAP_CONTACTS_CAPABILITY.to_string(),
+                        JMAP_CALENDARS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Mailbox/get".to_string(),
+                            json!({"ids": []}),
+                            "mailbox".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Identity/get".to_string(),
+                            json!({"ids": []}),
+                            "identity".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "AddressBook/get".to_string(),
+                            json!({"ids": []}),
+                            "addressbook".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Calendar/get".to_string(),
+                            json!({"ids": []}),
+                            "calendar".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        for method in response.method_responses {
+            assert_eq!(method.1["list"], json!([]));
+            assert_eq!(method.1["notFound"], json!([]));
+        }
+    }
+
     #[test]
     fn api_request_concurrency_permits_match_advertised_limit() {
         let permits = (0..MAX_CONCURRENT_REQUESTS)

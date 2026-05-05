@@ -118,6 +118,7 @@ Organizer and participant status are exposed through `participants`:
 - rights changes are minimally audited through `audit_events`
 - `changes` uses the shared opaque canonical projection state-token path; `AddressBook/queryChanges`, `Calendar/queryChanges`, `ContactCard/queryChanges`, and `CalendarEvent/queryChanges` use stateless ordered-result snapshots so clients can reconcile creates, deletes, and supported-order reorders without a protocol-local sync store
 - address book, contact, calendar, and event query snapshots use deterministic canonical-id tie-breakers for equal visible sort keys so backend row-order changes do not create false `queryChanges` reorders
+- `AddressBook/get`, `ContactCard/get`, `Calendar/get`, and `CalendarEvent/get` distinguish omitted or `null` `ids` from an explicit empty `ids: []`; explicit empty selections return empty `list` and `notFound` arrays
 
 ### Accepted MVP limitations
 

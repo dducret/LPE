@@ -741,13 +741,19 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         } else {
             Vec::new()
         };
-        let requested_ids = arguments.ids.unwrap_or_default();
+        let requested_ids = arguments.ids;
         let list = identities
             .iter()
-            .filter(|identity| requested_ids.is_empty() || requested_ids.contains(&identity.id))
+            .filter(|identity| {
+                requested_ids
+                    .as_ref()
+                    .map(|ids| ids.contains(&identity.id))
+                    .unwrap_or(true)
+            })
             .map(|identity| identity_to_value(identity, &properties))
             .collect::<Vec<_>>();
         let not_found = requested_ids
+            .unwrap_or_default()
             .into_iter()
             .filter(|id| !identities.iter().any(|identity| identity.id == *id))
             .map(Value::String)
