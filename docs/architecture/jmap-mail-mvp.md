@@ -75,6 +75,7 @@ Additional supported `JMAP` routes:
 
 - `Email/set` persists only in the `Drafts` mailbox
 - method dispatch requires the defining capability to be present in the request `using` list; methods with missing capabilities return `unknownMethod` rather than executing under an undeclared protocol surface
+- request-level `using` capability names must be capabilities advertised by the current `Session`; unsupported capability names are rejected before method execution
 - `Email/set` accepts draft `keywords` for `$draft`, `$seen`, and `$flagged`; `$seen` and `$flagged` are mapped onto the canonical draft unread-flagged state without creating any parallel priority model
 - `EmailSubmission/set` does not submit raw MIME or direct `SMTP`
 - `EmailSubmission/set` takes an existing draft `emailId` and calls the canonical `LPE` submission workflow

@@ -122,6 +122,9 @@ async fn api_handler(
             "JMAP request exceeds maxCallsInRequest".to_string(),
         ));
     }
+    if let Err(error) = validate_declared_capabilities(&request) {
+        return Err((StatusCode::BAD_REQUEST, error.to_string()));
+    }
     let service = JmapService::new(storage);
     let authorization = authorization_header(&headers);
     Ok(Json(
@@ -226,6 +229,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         if api_request_exceeds_call_limit(&request) {
             bail!("JMAP request exceeds maxCallsInRequest");
         }
+        validate_declared_capabilities(&request)?;
         let declared_capabilities = request.using_capabilities;
         let mut method_responses = Vec::with_capacity(request.method_calls.len());
         let mut created_ids = HashMap::new();
@@ -764,6 +768,30 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
 pub(crate) fn api_request_exceeds_call_limit(request: &JmapApiRequest) -> bool {
     request.method_calls.len() > MAX_CALLS_IN_REQUEST as usize
+}
+
+pub(crate) fn validate_declared_capabilities(request: &JmapApiRequest) -> Result<()> {
+    for capability in &request.using_capabilities {
+        if !is_supported_capability(capability) {
+            bail!("JMAP request declares unsupported capability: {capability}");
+        }
+    }
+    Ok(())
+}
+
+fn is_supported_capability(capability: &str) -> bool {
+    matches!(
+        capability,
+        JMAP_CORE_CAPABILITY
+            | JMAP_MAIL_CAPABILITY
+            | JMAP_SUBMISSION_CAPABILITY
+            | JMAP_BLOB_CAPABILITY
+            | JMAP_CONTACTS_CAPABILITY
+            | JMAP_CALENDARS_CAPABILITY
+            | JMAP_TASKS_CAPABILITY
+            | JMAP_VACATION_RESPONSE_CAPABILITY
+            | JMAP_WEBSOCKET_CAPABILITY
+    )
 }
 
 fn method_capability(method_name: &str) -> Option<&'static str> {

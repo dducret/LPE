@@ -4805,6 +4805,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn api_request_rejects_unsupported_declared_capabilities() {
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            ..Default::default()
+        });
+
+        let error = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        "urn:ietf:params:jmap:unknown".to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Mailbox/query".to_string(),
+                        json!({}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "JMAP request declares unsupported capability: urn:ietf:params:jmap:unknown"
+        );
+    }
+
+    #[tokio::test]
     async fn jmap_tester_style_big_three_batch_has_stable_json_shapes() {
         let account_id = FakeStore::account().account_id.to_string();
         let contact_id = FakeStore::contact().id.to_string();

@@ -159,6 +159,21 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                                 .await?;
                                 return Ok(());
                             }
+                            Err(error)
+                                if error
+                                    .to_string()
+                                    .contains("JMAP request declares unsupported capability") =>
+                            {
+                                self.send_request_error(
+                                    socket,
+                                    envelope.id.clone(),
+                                    "invalidArguments",
+                                    StatusCode::BAD_REQUEST,
+                                    &error.to_string(),
+                                )
+                                .await?;
+                                return Ok(());
+                            }
                             Err(error) => return Err(error),
                         };
                         let response = WebSocketResponse {
