@@ -4,7 +4,7 @@
 
 This document describes the `0.1.3` `Exchange` compatibility work in `LPE`.
 
-The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchange`. `IMAP` carried the initial desktop compatibility work through `0.1.2`; `0.1.3` moves the Exchange-style compatibility focus to `EWS`. Its goal is to let Exchange-style clients read and synchronize canonical mailbox, `Contacts`, and `Calendar` data from the `LPE` server without introducing a second collaboration or mailbox store.
+The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchange`. `IMAP` carried the initial desktop compatibility work through `0.1.2`; `0.1.3` moves the Exchange-style compatibility focus to `EWS`. Its goal is to let Exchange-style clients read and synchronize canonical mailbox, `Contacts`, `Calendar`, and `Tasks` data from the `LPE` server without introducing a second collaboration or mailbox store.
 
 `MAPI` implementation has started as a guarded `MAPI over HTTP` foundation for future Outlook desktop support. It is not Outlook-ready. `mapiHttp` autodiscover publication is available only through an explicit administrator interoperability-test switch. The current slice implements authenticated transport request classification, session-context cookies, and the first mailbox-folder bootstrap ROPs. Legacy `EXCH` / `EXPR` provider metadata for Outlook setup probes that do not yet send `X-MapiHttpCapability` requires a separate explicit interoperability-test switch and an explicitly published EWS or MAPI surface; requests that do send that header receive the dedicated `mapiHttp` provider instead.
 
@@ -12,13 +12,13 @@ The repeatable `EWS` live smoke and release-gate checks are tracked in `docs/arc
 
 ### Full-support boundary
 
-For `LPE`, "full support" for Exchange compatibility means production-quality support for the client and interoperability surfaces that map cleanly onto the canonical `LPE` model. It does not mean becoming a complete Microsoft Exchange Server clone.
+For `LPE`, "full support" for Exchange and Outlook compatibility is an explicit project goal. It means production-quality support for the client and interoperability surfaces that map cleanly onto the canonical `LPE` model. It does not mean becoming a complete Microsoft Exchange Server clone.
 
 The intended supported surface is:
 
 - `EWS` for mailbox folders, messages, contacts, calendars, tasks, attachments, search, availability, delegation discovery, and the common EWS client-library flows that can be backed by canonical `LPE` storage
 - `MAPI over HTTP` for classic Outlook for Windows desktop profile creation, mailbox synchronization, cached-mode operation, address book lookup through `NSPI`, send and draft flows through canonical submission, attachments, delegated mailbox projection, and reconnect behavior
-- autodiscover that publishes only the Exchange surfaces an administrator has explicitly enabled and that the interoperability matrix has proven
+- autodiscover that publishes only the Exchange surfaces an administrator has explicitly enabled and that the interoperability matrix has proven, including legacy `EXCH` / `EXPR` provider metadata for RCA only when the legacy Exchange autodiscover switch is enabled
 - mailbox `Basic`, mailbox app-password, and mailbox OAuth bearer authentication scoped through the existing mailbox-account model
 
 The explicitly unsupported surface unless a later architecture document widens it is:

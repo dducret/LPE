@@ -641,11 +641,11 @@ also enabled with an explicitly published EWS or MAPI surface. `OPTIONS
 For public client auto-configuration, the exposed front end must remain `LPE-CT` or an equivalent HTTPS publication layer. In v1:
 
 - `Thunderbird` receives an `IMAP` profile
-- Outlook for Windows desktop receives an `IMAP` profile by default; `IMAP` remains a supported mailbox-access communication protocol, while `0.1.3` deployments may explicitly enable EWS autodiscovery for the implemented Exchange-style compatibility surface
+- Outlook support is a project goal: Outlook mobile uses `ActiveSync`, Outlook for Windows desktop receives an `IMAP` profile by default, `0.1.3` deployments may explicitly enable EWS autodiscovery for Exchange-style mail, contacts, calendar, and task compatibility, and the future full classic Outlook desktop Exchange-account path is `MAPI over HTTP`
 - `ActiveSync` remains exposed for mobile/native clients that actually support `Exchange ActiveSync`
 - `EWS` remains opt-in through `LPE_AUTOCONFIG_EWS_ENABLED` and must not be treated as `MAPI`, `RPC`, or client `SMTP`
 - `MAPI over HTTP` routes are guarded implementation groundwork; the public edge publishes `/mapi/` so Outlook can reach the authenticated endpoints, but autodiscover publishes `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled for interoperability testing, SOAP Exchange `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled, and legacy `EXCH` / `EXPR` provider sections only when `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled with an explicitly published EWS or MAPI surface
-- Microsoft Remote Connectivity Analyzer Outlook Connectivity expects a top-level `EXCH` provider section; for the EWS compatibility path, set both `LPE_AUTOCONFIG_EWS_ENABLED=true` and `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED=true`
+- Microsoft Remote Connectivity Analyzer Outlook Connectivity expects a top-level `EXCH` provider section; the error "The EXCH provider section is missing from the Autodiscover response" means the legacy Exchange provider metadata is not published. For the EWS compatibility path, set both `LPE_AUTOCONFIG_EWS_ENABLED=true` and `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED=true`
 - no client `SMTP` endpoint should be advertised unless the authenticated `LPE-CT` submission listener is configured, exposed on `465`, and covered by the public certificate
 - the internal `LPE -> LPE-CT` relay must never be advertised as a client-submission endpoint
 

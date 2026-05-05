@@ -18,19 +18,20 @@ See `docs/releases/0.1.3.md` for the short release note.
 - inbound and outbound `SMTP` transport is handled by the `LPE-CT` sorting center
 - `ActiveSync` is the first targeted native mobile compatibility layer for clients that support `Exchange ActiveSync`
 - `EWS` is the `0.1.3` Exchange compatibility implementation, with guarded `MAPI over HTTP` groundwork started for future Outlook desktop support
+- full Outlook support is a project goal: Outlook mobile through `ActiveSync`, Exchange-style mail, contacts, calendar, and task compatibility through `EWS`, and classic Outlook for Windows Exchange-account support through the guarded `MAPI over HTTP` track
 - the architecture remains compatible with future local AI without data leaving the server
 
 ## Current Priority
 
-The current repository priority is implementing `EWS` in `0.1.3` while preserving the canonical `LPE` mailbox, contacts, calendar, and submission model.
+The current repository priority is implementing `EWS` in `0.1.3` while preserving the canonical `LPE` mailbox, contacts, calendar, tasks, and submission model.
 
 The near-term order is:
 
 - `JMAP` depth first: state or change semantics, WebSocket reliability, delegation, and shared-collection consistency
 - `IMAP` support as a continuing client communication protocol: sync behavior, `UID` handling, flags, and client compatibility
-- `EWS` in `0.1.3`: Exchange-style folder, mail, contacts, and calendar synchronization without `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox`
+- `EWS` in `0.1.3`: Exchange-style folder, mail, contacts, calendar, and task synchronization without `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox`
 - `MAPI over HTTP` groundwork in `0.1.3`: authenticated `/mapi/emsmdb` and `/mapi/nspi` routes with guarded transport, session, NSPI bootstrap, and early read-only mailbox ROP behavior; autodiscover publication remains opt-in for interoperability testing until Outlook-usable EMSMDB and NSPI behavior is proven
-- `ActiveSync` as the flagship compatibility target for `Outlook` and mobile clients
+- `ActiveSync` as the flagship compatibility target for Outlook mobile and other native mobile clients
 - `DAV` and `ManageSieve` interoperability work after the higher-priority mail protocols are stable
 
 ## Structure

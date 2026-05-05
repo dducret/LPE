@@ -118,7 +118,7 @@ Separate sorting center for exposed `SMTP` ingress, outbound relay, perimeter fi
 - IMAP compatibility, established through `0.1.2` and permanently supported as a mailbox-access communication protocol
 - inbound and outbound `SMTP` transport through `LPE-CT`
 - mobile/native compatibility through `ActiveSync` as the first target for clients that support `Exchange ActiveSync`
-- Outlook for Windows desktop compatibility through the supported `IMAP` path when configured that way, with `0.1.3` now implementing `EWS` as an additional Exchange-style compatibility path and starting non-advertised `MAPI over HTTP` groundwork
+- Outlook support as an explicit goal: Outlook mobile through `ActiveSync`, Outlook for Windows desktop through the supported `IMAP` path when configured that way, `0.1.3` `EWS` for Exchange-style mail, contacts, calendar, and task compatibility, and bounded `MAPI over HTTP` groundwork for the future classic Outlook desktop Exchange-account route
 - contacts and calendar compatibility through `CardDAV` and `CalDAV`
 - a canonical personal-tasks model prepared for future `JMAP Tasks`, `DAV`, and mobile adapters
 - `EWS` implementation in `0.1.3`, bounded by canonical submission and synchronization rules
@@ -140,7 +140,7 @@ This phase is explicitly depth-first:
 - `IMAP`: keep improving synchronization correctness, `UID` behavior, flag handling, and compatibility coverage under realistic mailbox operations as continuing support for the `0.1.2` compatibility foundation
 - `ActiveSync`: treat Outlook mobile and iOS compatibility as a strategic flagship, with emphasis on long-poll stability, send-flow correctness, and `FolderSync` plus `Sync` edge cases
 - `EWS`: implement and stabilize Exchange-style mailbox, contacts, calendar, and task synchronization in `0.1.3`
-- `MAPI over HTTP`: keep initial route, authentication, EMSMDB, NSPI, and session-context work behind non-advertised endpoints until real Outlook desktop login is viable
+- `MAPI over HTTP`: keep initial route, authentication, EMSMDB, NSPI, and session-context work guarded until real Outlook desktop login is viable; this remains the planned full classic Outlook for Windows Exchange-account path
 - `DAV`: focus on `CardDAV`, `CalDAV`, and `VTODO` correctness plus client-matrix interoperability instead of broader DAV surface expansion
 - `ManageSieve` and mailbox `Sieve`: focus on script correctness, canonical execution during final delivery, and interoperability of mailbox-side filtering rather than additional extension breadth
 
