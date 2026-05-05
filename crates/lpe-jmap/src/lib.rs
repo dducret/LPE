@@ -27,9 +27,9 @@ pub(crate) use crate::service::{
     JMAP_CALENDARS_CAPABILITY, JMAP_CONTACTS_CAPABILITY, JMAP_CORE_CAPABILITY,
     JMAP_MAIL_CAPABILITY, JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY,
     JMAP_VACATION_RESPONSE_CAPABILITY, JMAP_WEBSOCKET_CAPABILITY, MAX_BLOB_DATA_SOURCES,
-    MAX_CALLS_IN_REQUEST, MAX_CONCURRENT_REQUESTS, MAX_CONCURRENT_UPLOAD, MAX_QUERY_LIMIT,
-    MAX_SIZE_REQUEST, MAX_SIZE_UPLOAD, PUSH_STATE_VERSION, QUERY_STATE_VERSION, SESSION_STATE,
-    STATE_TOKEN_VERSION,
+    MAX_CALLS_IN_REQUEST, MAX_CONCURRENT_REQUESTS, MAX_CONCURRENT_UPLOAD, MAX_OBJECTS_IN_GET,
+    MAX_OBJECTS_IN_SET, MAX_QUERY_LIMIT, MAX_SIZE_REQUEST, MAX_SIZE_UPLOAD, PUSH_STATE_VERSION,
+    QUERY_STATE_VERSION, SESSION_STATE, STATE_TOKEN_VERSION,
 };
 pub(crate) use crate::session::requested_account_id;
 pub(crate) use crate::state::encode_query_state;
@@ -4834,6 +4834,57 @@ mod tests {
             error.to_string(),
             "JMAP request declares unsupported capability: urn:ietf:params:jmap:unknown"
         );
+    }
+
+    #[tokio::test]
+    async fn api_request_rejects_object_batches_beyond_advertised_limits() {
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            ..Default::default()
+        });
+        let ids = (0..=MAX_OBJECTS_IN_GET)
+            .map(|index| format!("id-{index}"))
+            .collect::<Vec<_>>();
+        let mut create = serde_json::Map::new();
+        for index in 0..=MAX_OBJECTS_IN_SET {
+            create.insert(format!("client-{index}"), json!({}));
+        }
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                        JMAP_CONTACTS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Email/get".to_string(),
+                            json!({"ids": ids}),
+                            "get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "ContactCard/set".to_string(),
+                            json!({"create": Value::Object(create)}),
+                            "set".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.method_responses[0].1["type"], "tooManyObjects");
+        assert!(response.method_responses[0].1["description"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("limit is {MAX_OBJECTS_IN_GET}")));
+        assert_eq!(response.method_responses[1].1["type"], "tooManyObjects");
+        assert!(response.method_responses[1].1["description"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("limit is {MAX_OBJECTS_IN_SET}")));
     }
 
     #[tokio::test]

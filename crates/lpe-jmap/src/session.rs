@@ -13,8 +13,8 @@ use crate::{
     JmapService, JMAP_BLOB_CAPABILITY, JMAP_CALENDARS_CAPABILITY, JMAP_CONTACTS_CAPABILITY,
     JMAP_CORE_CAPABILITY, JMAP_MAIL_CAPABILITY, JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY,
     JMAP_VACATION_RESPONSE_CAPABILITY, JMAP_WEBSOCKET_CAPABILITY, MAX_BLOB_DATA_SOURCES,
-    MAX_CALLS_IN_REQUEST, MAX_CONCURRENT_REQUESTS, MAX_CONCURRENT_UPLOAD, MAX_SIZE_REQUEST,
-    MAX_SIZE_UPLOAD, SESSION_STATE,
+    MAX_CALLS_IN_REQUEST, MAX_CONCURRENT_REQUESTS, MAX_CONCURRENT_UPLOAD, MAX_OBJECTS_IN_GET,
+    MAX_OBJECTS_IN_SET, MAX_SIZE_REQUEST, MAX_SIZE_UPLOAD, SESSION_STATE,
 };
 
 impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
@@ -122,8 +122,8 @@ fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {
                 "maxConcurrentRequests": MAX_CONCURRENT_REQUESTS,
                 "maxCallsInRequest": MAX_CALLS_IN_REQUEST,
                 "maxConcurrentUpload": MAX_CONCURRENT_UPLOAD,
-                "maxObjectsInGet": 250,
-                "maxObjectsInSet": 128,
+                "maxObjectsInGet": MAX_OBJECTS_IN_GET,
+                "maxObjectsInSet": MAX_OBJECTS_IN_SET,
                 "collationAlgorithms": ["i;ascii-casemap"],
             }),
         ),

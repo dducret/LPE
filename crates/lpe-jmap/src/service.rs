@@ -51,6 +51,8 @@ pub(crate) const MAX_SIZE_REQUEST: u64 = 10 * 1024 * 1024;
 pub(crate) const MAX_SIZE_UPLOAD: u64 = 25 * 1024 * 1024;
 pub(crate) const MAX_CONCURRENT_REQUESTS: u64 = 4;
 pub(crate) const MAX_CONCURRENT_UPLOAD: u64 = 4;
+pub(crate) const MAX_OBJECTS_IN_GET: u64 = 250;
+pub(crate) const MAX_OBJECTS_IN_SET: u64 = 128;
 pub(crate) const MAX_BLOB_DATA_SOURCES: u64 = 64;
 
 type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
@@ -243,140 +245,160 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 })
                 .unwrap_or(true)
             {
-                match method_name.as_str() {
-                    "Mailbox/get" => self.handle_mailbox_get(account, arguments).await,
-                    "Mailbox/query" => self.handle_mailbox_query(account, arguments).await,
-                    "Mailbox/queryChanges" => {
-                        self.handle_mailbox_query_changes(account, arguments).await
-                    }
-                    "Mailbox/changes" => self.handle_mailbox_changes(account, arguments).await,
-                    "Mailbox/set" => {
-                        self.handle_mailbox_set(account, arguments, &mut created_ids)
+                if let Some(error) = method_object_limit_error(&method_name, &arguments) {
+                    Ok(error)
+                } else {
+                    match method_name.as_str() {
+                        "Mailbox/get" => self.handle_mailbox_get(account, arguments).await,
+                        "Mailbox/query" => self.handle_mailbox_query(account, arguments).await,
+                        "Mailbox/queryChanges" => {
+                            self.handle_mailbox_query_changes(account, arguments).await
+                        }
+                        "Mailbox/changes" => self.handle_mailbox_changes(account, arguments).await,
+                        "Mailbox/set" => {
+                            self.handle_mailbox_set(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "Email/query" => self.handle_email_query(account, arguments).await,
+                        "Email/queryChanges" => {
+                            self.handle_email_query_changes(account, arguments).await
+                        }
+                        "Email/get" => self.handle_email_get(account, arguments).await,
+                        "Email/changes" => self.handle_email_changes(account, arguments).await,
+                        "Email/set" => {
+                            self.handle_email_set(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "Email/copy" => {
+                            self.handle_email_copy(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "Email/import" => {
+                            self.handle_email_import(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "EmailSubmission/get" => {
+                            self.handle_email_submission_get(account, arguments).await
+                        }
+                        "EmailSubmission/changes" => {
+                            self.handle_email_submission_changes(account, arguments)
+                                .await
+                        }
+                        "EmailSubmission/query" => {
+                            self.handle_email_submission_query(account, arguments).await
+                        }
+                        "EmailSubmission/queryChanges" => {
+                            self.handle_email_submission_query_changes(account, arguments)
+                                .await
+                        }
+                        "EmailSubmission/set" => {
+                            self.handle_email_submission_set(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "AddressBook/get" => self.handle_address_book_get(account, arguments).await,
+                        "AddressBook/query" => {
+                            self.handle_address_book_query(account, arguments).await
+                        }
+                        "AddressBook/queryChanges" => {
+                            self.handle_address_book_query_changes(account, arguments)
+                                .await
+                        }
+                        "AddressBook/changes" => {
+                            self.handle_address_book_changes(account, arguments).await
+                        }
+                        "ContactCard/get" => self.handle_contact_get(account, arguments).await,
+                        "ContactCard/query" => self.handle_contact_query(account, arguments).await,
+                        "ContactCard/queryChanges" => {
+                            self.handle_contact_query_changes(account, arguments).await
+                        }
+                        "ContactCard/changes" => {
+                            self.handle_contact_changes(account, arguments).await
+                        }
+                        "ContactCard/set" => {
+                            self.handle_contact_set(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "Calendar/get" => self.handle_calendar_get(account, arguments).await,
+                        "Calendar/query" => self.handle_calendar_query(account, arguments).await,
+                        "Calendar/queryChanges" => {
+                            self.handle_calendar_query_changes(account, arguments).await
+                        }
+                        "Calendar/changes" => {
+                            self.handle_calendar_changes(account, arguments).await
+                        }
+                        "CalendarEvent/get" => {
+                            self.handle_calendar_event_get(account, arguments).await
+                        }
+                        "CalendarEvent/query" => {
+                            self.handle_calendar_event_query(account, arguments).await
+                        }
+                        "CalendarEvent/queryChanges" => {
+                            self.handle_calendar_event_query_changes(account, arguments)
+                                .await
+                        }
+                        "CalendarEvent/changes" => {
+                            self.handle_calendar_event_changes(account, arguments).await
+                        }
+                        "CalendarEvent/set" => {
+                            self.handle_calendar_event_set(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "TaskList/get" => self.handle_task_list_get(account, arguments).await,
+                        "TaskList/changes" => {
+                            self.handle_task_list_changes(account, arguments).await
+                        }
+                        "TaskList/set" => self.handle_task_list_set(account, arguments).await,
+                        "Task/get" => self.handle_task_get(account, arguments).await,
+                        "Task/query" => self.handle_task_query(account, arguments).await,
+                        "Task/queryChanges" => {
+                            self.handle_task_query_changes(account, arguments).await
+                        }
+                        "Task/changes" => self.handle_task_changes(account, arguments).await,
+                        "Task/set" => {
+                            self.handle_task_set(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "Identity/get" => self.handle_identity_get(account, arguments).await,
+                        "Identity/changes" => {
+                            self.handle_identity_changes(account, arguments).await
+                        }
+                        "Thread/query" => self.handle_thread_query(account, arguments).await,
+                        "Thread/queryChanges" => {
+                            self.handle_thread_query_changes(account, arguments).await
+                        }
+                        "Thread/get" => self.handle_thread_get(account, arguments).await,
+                        "Thread/changes" => self.handle_thread_changes(account, arguments).await,
+                        "Quota/get" => self.handle_quota_get(account, arguments).await,
+                        "SearchSnippet/get" => {
+                            self.handle_search_snippet_get(account, arguments).await
+                        }
+                        "Blob/upload" => {
+                            self.handle_blob_upload(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "Blob/get" => self.handle_blob_get(account, arguments, &created_ids).await,
+                        "Blob/lookup" => {
+                            self.handle_blob_lookup(
+                                account,
+                                arguments,
+                                &created_ids,
+                                &declared_capabilities,
+                            )
                             .await
+                        }
+                        "Blob/copy" => {
+                            self.handle_blob_copy(account, arguments, &created_ids)
+                                .await
+                        }
+                        "VacationResponse/get" => {
+                            self.handle_vacation_response_get(account, arguments).await
+                        }
+                        "VacationResponse/set" => {
+                            self.handle_vacation_response_set(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        _ => Ok(method_error("unknownMethod", "method is not supported")),
                     }
-                    "Email/query" => self.handle_email_query(account, arguments).await,
-                    "Email/queryChanges" => {
-                        self.handle_email_query_changes(account, arguments).await
-                    }
-                    "Email/get" => self.handle_email_get(account, arguments).await,
-                    "Email/changes" => self.handle_email_changes(account, arguments).await,
-                    "Email/set" => {
-                        self.handle_email_set(account, arguments, &mut created_ids)
-                            .await
-                    }
-                    "Email/copy" => {
-                        self.handle_email_copy(account, arguments, &mut created_ids)
-                            .await
-                    }
-                    "Email/import" => {
-                        self.handle_email_import(account, arguments, &mut created_ids)
-                            .await
-                    }
-                    "EmailSubmission/get" => {
-                        self.handle_email_submission_get(account, arguments).await
-                    }
-                    "EmailSubmission/changes" => {
-                        self.handle_email_submission_changes(account, arguments)
-                            .await
-                    }
-                    "EmailSubmission/query" => {
-                        self.handle_email_submission_query(account, arguments).await
-                    }
-                    "EmailSubmission/queryChanges" => {
-                        self.handle_email_submission_query_changes(account, arguments)
-                            .await
-                    }
-                    "EmailSubmission/set" => {
-                        self.handle_email_submission_set(account, arguments, &mut created_ids)
-                            .await
-                    }
-                    "AddressBook/get" => self.handle_address_book_get(account, arguments).await,
-                    "AddressBook/query" => self.handle_address_book_query(account, arguments).await,
-                    "AddressBook/queryChanges" => {
-                        self.handle_address_book_query_changes(account, arguments)
-                            .await
-                    }
-                    "AddressBook/changes" => {
-                        self.handle_address_book_changes(account, arguments).await
-                    }
-                    "ContactCard/get" => self.handle_contact_get(account, arguments).await,
-                    "ContactCard/query" => self.handle_contact_query(account, arguments).await,
-                    "ContactCard/queryChanges" => {
-                        self.handle_contact_query_changes(account, arguments).await
-                    }
-                    "ContactCard/changes" => self.handle_contact_changes(account, arguments).await,
-                    "ContactCard/set" => {
-                        self.handle_contact_set(account, arguments, &mut created_ids)
-                            .await
-                    }
-                    "Calendar/get" => self.handle_calendar_get(account, arguments).await,
-                    "Calendar/query" => self.handle_calendar_query(account, arguments).await,
-                    "Calendar/queryChanges" => {
-                        self.handle_calendar_query_changes(account, arguments).await
-                    }
-                    "Calendar/changes" => self.handle_calendar_changes(account, arguments).await,
-                    "CalendarEvent/get" => self.handle_calendar_event_get(account, arguments).await,
-                    "CalendarEvent/query" => {
-                        self.handle_calendar_event_query(account, arguments).await
-                    }
-                    "CalendarEvent/queryChanges" => {
-                        self.handle_calendar_event_query_changes(account, arguments)
-                            .await
-                    }
-                    "CalendarEvent/changes" => {
-                        self.handle_calendar_event_changes(account, arguments).await
-                    }
-                    "CalendarEvent/set" => {
-                        self.handle_calendar_event_set(account, arguments, &mut created_ids)
-                            .await
-                    }
-                    "TaskList/get" => self.handle_task_list_get(account, arguments).await,
-                    "TaskList/changes" => self.handle_task_list_changes(account, arguments).await,
-                    "TaskList/set" => self.handle_task_list_set(account, arguments).await,
-                    "Task/get" => self.handle_task_get(account, arguments).await,
-                    "Task/query" => self.handle_task_query(account, arguments).await,
-                    "Task/queryChanges" => self.handle_task_query_changes(account, arguments).await,
-                    "Task/changes" => self.handle_task_changes(account, arguments).await,
-                    "Task/set" => {
-                        self.handle_task_set(account, arguments, &mut created_ids)
-                            .await
-                    }
-                    "Identity/get" => self.handle_identity_get(account, arguments).await,
-                    "Identity/changes" => self.handle_identity_changes(account, arguments).await,
-                    "Thread/query" => self.handle_thread_query(account, arguments).await,
-                    "Thread/queryChanges" => {
-                        self.handle_thread_query_changes(account, arguments).await
-                    }
-                    "Thread/get" => self.handle_thread_get(account, arguments).await,
-                    "Thread/changes" => self.handle_thread_changes(account, arguments).await,
-                    "Quota/get" => self.handle_quota_get(account, arguments).await,
-                    "SearchSnippet/get" => self.handle_search_snippet_get(account, arguments).await,
-                    "Blob/upload" => {
-                        self.handle_blob_upload(account, arguments, &mut created_ids)
-                            .await
-                    }
-                    "Blob/get" => self.handle_blob_get(account, arguments, &created_ids).await,
-                    "Blob/lookup" => {
-                        self.handle_blob_lookup(
-                            account,
-                            arguments,
-                            &created_ids,
-                            &declared_capabilities,
-                        )
-                        .await
-                    }
-                    "Blob/copy" => {
-                        self.handle_blob_copy(account, arguments, &created_ids)
-                            .await
-                    }
-                    "VacationResponse/get" => {
-                        self.handle_vacation_response_get(account, arguments).await
-                    }
-                    "VacationResponse/set" => {
-                        self.handle_vacation_response_set(account, arguments, &mut created_ids)
-                            .await
-                    }
-                    _ => Ok(method_error("unknownMethod", "method is not supported")),
                 }
             } else {
                 Ok(method_error(
@@ -846,6 +868,75 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         "VacationResponse/get" | "VacationResponse/set" => Some(JMAP_VACATION_RESPONSE_CAPABILITY),
         _ => None,
     }
+}
+
+fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Value> {
+    let object_count = match method_name {
+        "Mailbox/get"
+        | "Email/get"
+        | "EmailSubmission/get"
+        | "Identity/get"
+        | "Thread/get"
+        | "Quota/get"
+        | "AddressBook/get"
+        | "ContactCard/get"
+        | "Calendar/get"
+        | "CalendarEvent/get"
+        | "TaskList/get"
+        | "Task/get"
+        | "Blob/get"
+        | "VacationResponse/get" => object_array_len(arguments, "ids"),
+        "SearchSnippet/get" => object_array_len(arguments, "emailIds"),
+        "Blob/lookup" => object_array_len(arguments, "ids"),
+        "Mailbox/set"
+        | "Email/set"
+        | "EmailSubmission/set"
+        | "ContactCard/set"
+        | "CalendarEvent/set"
+        | "TaskList/set"
+        | "Task/set"
+        | "VacationResponse/set" => set_object_count(arguments),
+        "Email/copy" => object_map_len(arguments, "create"),
+        "Email/import" => object_map_len(arguments, "emails"),
+        "Blob/upload" => object_map_len(arguments, "create"),
+        "Blob/copy" => object_array_len(arguments, "blobIds"),
+        _ => None,
+    };
+
+    let limit = if method_name.ends_with("/get")
+        || matches!(method_name, "SearchSnippet/get" | "Blob/lookup")
+    {
+        MAX_OBJECTS_IN_GET
+    } else {
+        MAX_OBJECTS_IN_SET
+    };
+
+    object_count
+        .filter(|count| *count > limit as usize)
+        .map(|count| {
+            method_error(
+                "tooManyObjects",
+                &format!("{method_name} includes {count} objects; limit is {limit}"),
+            )
+        })
+}
+
+fn object_array_len(arguments: &Value, field: &str) -> Option<usize> {
+    arguments.get(field).and_then(Value::as_array).map(Vec::len)
+}
+
+fn object_map_len(arguments: &Value, field: &str) -> Option<usize> {
+    arguments
+        .get(field)
+        .and_then(Value::as_object)
+        .map(serde_json::Map::len)
+}
+
+fn set_object_count(arguments: &Value) -> Option<usize> {
+    let count = object_map_len(arguments, "create").unwrap_or(0)
+        + object_map_len(arguments, "update").unwrap_or(0)
+        + object_array_len(arguments, "destroy").unwrap_or(0);
+    (count > 0).then_some(count)
 }
 
 fn authorization_header(headers: &HeaderMap) -> Option<String> {
