@@ -1145,6 +1145,7 @@ fn execute_rops(
     let Some((requests, handle_table)) = split_rop_buffer(rop_buffer) else {
         return rop_buffer_with_response(unsupported_rop_response(0, 0), &[]);
     };
+    let extended = is_rpc_header_ext_rop_buffer(rop_buffer);
     let mut handle_slots = read_handle_table(handle_table);
 
     let mut cursor = Cursor::new(requests);
@@ -1277,7 +1278,16 @@ fn execute_rops(
             )),
         }
     }
-    rop_buffer_with_response(responses, &output_handles)
+    let response = if extended {
+        rop_buffer_with_response_spec(responses, &output_handles)
+    } else {
+        rop_buffer_with_response(responses, &output_handles)
+    };
+    if extended {
+        rpc_header_ext_rop_buffer(response)
+    } else {
+        response
+    }
 }
 
 const ROOT_FOLDER_ID: u64 = 1;
@@ -1458,6 +1468,24 @@ fn default_message_property_tags() -> Vec<u32> {
 }
 
 fn split_rop_buffer(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
+    if let Some(payload) = rpc_header_ext_payload(buffer) {
+        return split_rop_payload_spec(payload);
+    }
+    split_rop_payload_legacy(buffer)
+}
+
+fn split_rop_payload_spec(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
+    if buffer.len() < 2 {
+        return None;
+    }
+    let rop_size = u16::from_le_bytes([buffer[0], buffer[1]]) as usize;
+    if rop_size < 2 || buffer.len() < rop_size {
+        return None;
+    }
+    Some((&buffer[2..rop_size], &buffer[rop_size..]))
+}
+
+fn split_rop_payload_legacy(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
     if buffer.len() < 2 {
         return None;
     }
@@ -1466,6 +1494,42 @@ fn split_rop_buffer(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
         return None;
     }
     Some((&buffer[2..2 + rop_size], &buffer[2 + rop_size..]))
+}
+
+fn is_rpc_header_ext_rop_buffer(buffer: &[u8]) -> bool {
+    rpc_header_ext_payload(buffer).is_some()
+}
+
+fn rpc_header_ext_payload(buffer: &[u8]) -> Option<&[u8]> {
+    if buffer.len() < 10 {
+        return None;
+    }
+    let version = u16::from_le_bytes([buffer[0], buffer[1]]);
+    let flags = u16::from_le_bytes([buffer[2], buffer[3]]);
+    let size = u16::from_le_bytes([buffer[4], buffer[5]]) as usize;
+    let size_actual = u16::from_le_bytes([buffer[6], buffer[7]]) as usize;
+    if version != 0 || size == 0 || size > size_actual || buffer.len() < 8 + size {
+        return None;
+    }
+    // The RCA bootstrap uses an uncompressed, unobfuscated RPC_HEADER_EXT payload
+    // with the Last flag. Compression and XOR obfuscation are handled later.
+    if flags & !0x0004 != 0 {
+        return None;
+    }
+    let payload = &buffer[8..8 + size];
+    split_rop_payload_spec(payload)?;
+    Some(payload)
+}
+
+fn rpc_header_ext_rop_buffer(payload: Vec<u8>) -> Vec<u8> {
+    let size = payload.len().min(u16::MAX as usize) as u16;
+    let mut buffer = Vec::with_capacity(8 + payload.len());
+    buffer.extend_from_slice(&0u16.to_le_bytes());
+    buffer.extend_from_slice(&0x0004u16.to_le_bytes());
+    buffer.extend_from_slice(&size.to_le_bytes());
+    buffer.extend_from_slice(&size.to_le_bytes());
+    buffer.extend_from_slice(&payload);
+    buffer
 }
 
 fn rop_logon_response_body(principal: &AccountPrincipal, request: &RopRequest) -> Vec<u8> {
@@ -1946,6 +2010,17 @@ fn rop_buffer_with_response(response: Vec<u8>, output_handles: &[u32]) -> Vec<u8
     buffer
 }
 
+fn rop_buffer_with_response_spec(response: Vec<u8>, output_handles: &[u32]) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    let rop_size = response.len().saturating_add(2).min(u16::MAX as usize) as u16;
+    buffer.extend_from_slice(&rop_size.to_le_bytes());
+    buffer.extend_from_slice(&response);
+    for handle in output_handles {
+        buffer.extend_from_slice(&handle.to_le_bytes());
+    }
+    buffer
+}
+
 fn execute_success_body(rop_buffer: Vec<u8>, auxiliary_buffer: Vec<u8>) -> Vec<u8> {
     let mut body = Vec::new();
     write_u32(&mut body, 0);
@@ -2308,13 +2383,17 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
         }
         0xFE => {
             let output_handle_index = cursor.read_u8()?;
+            let logon_flags = cursor.read_u8()?;
             let mut payload = Vec::new();
-            payload.push(cursor.read_u8()?);
+            payload.push(logon_flags);
             payload.extend_from_slice(cursor.read_bytes(4)?);
             payload.extend_from_slice(cursor.read_bytes(4)?);
             let essdn_size = cursor.read_u16()? as usize;
             payload.extend_from_slice(&(essdn_size as u16).to_le_bytes());
             payload.extend_from_slice(cursor.read_bytes(essdn_size)?);
+            if logon_flags & 0x40 != 0 {
+                payload.extend_from_slice(cursor.read_bytes(cursor.remaining())?);
+            }
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: None,
