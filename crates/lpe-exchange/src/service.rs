@@ -11,6 +11,7 @@ use axum::{
     Router,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use lpe_core::sieve::{Action, Statement};
 use lpe_magika::{
     Detector, ExpectedKind, IngressContext, PolicyDecision, SystemDetector, ValidationRequest,
     Validator,
@@ -185,7 +186,7 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
             "GetAttachment" => self.get_attachment(&principal, &body).await?,
             "CreateAttachment" => self.create_attachment(&principal, &body).await?,
             "DeleteAttachment" => self.delete_attachment(&principal, &body).await?,
-            "GetUserOofSettings" => unsupported_operation_response("GetUserOofSettings"),
+            "GetUserOofSettings" => self.get_user_oof_settings(&principal).await?,
             "GetRoomLists" => unsupported_operation_response("GetRoomLists"),
             "FindPeople" => unsupported_operation_response("FindPeople"),
             "ExpandDL" => unsupported_operation_response("ExpandDL"),
@@ -798,6 +799,16 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
         }
 
         Ok(delete_attachment_success_response(root_items))
+    }
+
+    async fn get_user_oof_settings(&self, principal: &AccountPrincipal) -> Result<String> {
+        let script = self
+            .store
+            .fetch_active_sieve_script(principal.account_id)
+            .await?;
+        Ok(get_user_oof_settings_response(&oof_projection_from_script(
+            script.as_ref().map(|script| script.content.as_str()),
+        )))
     }
 
     async fn root_child_folder_count(&self, principal: &AccountPrincipal) -> Result<usize> {
@@ -2138,6 +2149,63 @@ fn ews_task_status_to_canonical(value: &str) -> Result<&'static str> {
         "deferred" | "cancelled" | "canceled" => Ok("cancelled"),
         other => bail!("unsupported task Status {other}"),
     }
+}
+
+#[derive(Debug, Clone)]
+struct OofProjection {
+    is_enabled: bool,
+    text_body: String,
+}
+
+impl OofProjection {
+    fn disabled() -> Self {
+        Self {
+            is_enabled: false,
+            text_body: String::new(),
+        }
+    }
+}
+
+fn oof_projection_from_script(content: Option<&str>) -> OofProjection {
+    let Some(content) = content else {
+        return OofProjection::disabled();
+    };
+    let Ok(script) = lpe_core::sieve::parse_script(content) else {
+        return OofProjection::disabled();
+    };
+    let Some(text_body) = find_vacation_reason(&script.statements) else {
+        return OofProjection::disabled();
+    };
+
+    OofProjection {
+        is_enabled: true,
+        text_body,
+    }
+}
+
+fn find_vacation_reason(statements: &[Statement]) -> Option<String> {
+    for statement in statements {
+        match statement {
+            Statement::Action(Action::Vacation { reason, .. }) => return Some(reason.clone()),
+            Statement::If {
+                branches,
+                else_block,
+            } => {
+                for (_, branch) in branches {
+                    if let Some(reason) = find_vacation_reason(branch) {
+                        return Some(reason);
+                    }
+                }
+                if let Some(else_block) = else_block {
+                    if let Some(reason) = find_vacation_reason(else_block) {
+                        return Some(reason);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 trait EmptyStringFallback {
@@ -3631,6 +3699,35 @@ fn get_user_availability_unavailable_response() -> String {
         "</m:GetUserAvailabilityResponse>"
     )
     .to_string()
+}
+
+fn get_user_oof_settings_response(projection: &OofProjection) -> String {
+    let state = if projection.is_enabled {
+        "Enabled"
+    } else {
+        "Disabled"
+    };
+    let audience = if projection.is_enabled { "All" } else { "None" };
+    let message = escape_xml(&projection.text_body);
+    format!(
+        concat!(
+            "<m:GetUserOofSettingsResponse>",
+            "<m:ResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "</m:ResponseMessage>",
+            "<m:OofSettings>",
+            "<t:OofState>{state}</t:OofState>",
+            "<t:ExternalAudience>{audience}</t:ExternalAudience>",
+            "<t:InternalReply><t:Message>{message}</t:Message></t:InternalReply>",
+            "<t:ExternalReply><t:Message>{message}</t:Message></t:ExternalReply>",
+            "</m:OofSettings>",
+            "<m:AllowExternalOof>{audience}</m:AllowExternalOof>",
+            "</m:GetUserOofSettingsResponse>"
+        ),
+        state = state,
+        audience = audience,
+        message = message,
+    )
 }
 
 fn unsupported_operation_response(operation: &str) -> String {

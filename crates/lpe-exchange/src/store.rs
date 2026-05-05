@@ -3,7 +3,7 @@ use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
     AttachmentUploadInput, AuditEntryInput, ClientTask, CollaborationCollection, JmapEmail,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
-    Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
+    SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
     UpsertClientEventInput, UpsertClientTaskInput,
 };
 use sqlx::Row;
@@ -118,6 +118,11 @@ pub trait ExchangeStore: AccountAuthStore {
         principal_account_id: Uuid,
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<ClientTask>>;
+
+    fn fetch_active_sieve_script<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Option<SieveScriptDocument>>;
 
     fn create_accessible_task<'a>(
         &'a self,
@@ -496,6 +501,13 @@ impl ExchangeStore for Storage {
             self.fetch_client_tasks_by_ids(principal_account_id, ids)
                 .await
         })
+    }
+
+    fn fetch_active_sieve_script<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Option<SieveScriptDocument>> {
+        Box::pin(async move { self.fetch_active_sieve_script(account_id).await })
     }
 
     fn create_accessible_task<'a>(

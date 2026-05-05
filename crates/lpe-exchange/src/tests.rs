@@ -8,8 +8,8 @@ use lpe_storage::{
     ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount, ClientTask,
     CollaborationCollection, CollaborationRights, JmapEmail, JmapEmailAddress, JmapEmailQuery,
     JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
-    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientTaskInput,
+    SieveScriptDocument, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::{
     collections::HashMap,
@@ -38,6 +38,7 @@ struct FakeStore {
     tasks: Arc<Mutex<Vec<ClientTask>>>,
     task_versions: Arc<Mutex<HashMap<Uuid, u64>>>,
     deleted_tasks: Arc<Mutex<Vec<Uuid>>>,
+    active_sieve_script: Arc<Mutex<Option<String>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
     emails: Arc<Mutex<Vec<JmapEmail>>>,
@@ -581,6 +582,21 @@ impl ExchangeStore for FakeStore {
             .cloned()
             .collect();
         Box::pin(async move { Ok(tasks) })
+    }
+
+    fn fetch_active_sieve_script<'a>(
+        &'a self,
+        _account_id: Uuid,
+    ) -> StoreFuture<'a, Option<SieveScriptDocument>> {
+        let content = self.active_sieve_script.lock().unwrap().clone();
+        Box::pin(async move {
+            Ok(content.map(|content| SieveScriptDocument {
+                name: "jmap-vacation".to_string(),
+                content,
+                is_active: true,
+                updated_at: "2026-05-05T08:00:00Z".to_string(),
+            }))
+        })
     }
 
     fn create_accessible_task<'a>(
@@ -3220,7 +3236,6 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
     let service = ExchangeService::new(store);
 
     for operation in [
-        "GetUserOofSettings",
         "GetRoomLists",
         "FindPeople",
         "ExpandDL",
@@ -3248,7 +3263,7 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
 }
 
 #[tokio::test]
-async fn request_suffixed_operations_use_canonical_response_names() {
+async fn get_user_oof_settings_returns_disabled_without_active_vacation() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -3267,7 +3282,41 @@ async fn request_suffixed_operations_use_canonical_response_names() {
     let body = response_text(response).await;
     assert!(body.contains("<m:GetUserOofSettingsResponse>"));
     assert!(!body.contains("<m:GetUserOofSettingsRequestResponse>"));
-    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:OofState>Disabled</t:OofState>"));
+    assert!(body.contains("<t:ExternalAudience>None</t:ExternalAudience>"));
+    assert!(body.contains("<t:ServerVersionInfo"));
+}
+
+#[tokio::test]
+async fn get_user_oof_settings_projects_canonical_sieve_vacation() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        active_sieve_script: Arc::new(Mutex::new(Some(
+            r#"require ["vacation"];
+               vacation :subject "Out" :days 3 "Away until Monday";"#
+                .to_string(),
+        ))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetUserOofSettings /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetUserOofSettingsResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:OofState>Enabled</t:OofState>"));
+    assert!(body.contains("<t:ExternalAudience>All</t:ExternalAudience>"));
+    assert!(body.contains("<t:InternalReply><t:Message>Away until Monday</t:Message>"));
+    assert!(body.contains("<t:ExternalReply><t:Message>Away until Monday</t:Message>"));
     assert!(body.contains("<t:ServerVersionInfo"));
 }
 
