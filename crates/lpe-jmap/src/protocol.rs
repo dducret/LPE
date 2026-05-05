@@ -98,7 +98,7 @@ pub struct SessionDocument {
     #[serde(rename = "uploadUrl")]
     pub upload_url: String,
     #[serde(rename = "eventSourceUrl")]
-    pub event_source_url: Option<String>,
+    pub event_source_url: String,
     pub state: String,
 }
 

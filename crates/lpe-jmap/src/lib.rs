@@ -1397,6 +1397,7 @@ mod tests {
             session.capabilities[JMAP_WEBSOCKET_CAPABILITY]["url"],
             "wss://mail.example.test/jmap/ws"
         );
+        assert_eq!(session.event_source_url, "");
     }
 
     #[tokio::test]
