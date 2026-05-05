@@ -3,6 +3,7 @@ use axum::{
     extract::ws::{Message, WebSocket},
     http::StatusCode,
 };
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -117,7 +118,18 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     .unwrap_or("Request");
                 match message_type {
                     "Request" => {
-                        let envelope: WebSocketRequestEnvelope = serde_json::from_value(value)?;
+                        let request_id = websocket_request_id(&value);
+                        let envelope: WebSocketRequestEnvelope = match parse_websocket_object(
+                            value,
+                            request_id.clone(),
+                            "The WebSocket Request object is invalid.",
+                        ) {
+                            Ok(envelope) => envelope,
+                            Err(error) => {
+                                self.send_request_error_object(socket, error).await?;
+                                return Ok(());
+                            }
+                        };
                         let response = self
                             .handle_api_request_for_account(
                                 account,
@@ -137,7 +149,17 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                             .await?;
                     }
                     "WebSocketPushEnable" => {
-                        let request: WebSocketPushEnable = serde_json::from_value(value)?;
+                        let request: WebSocketPushEnable = match parse_websocket_object(
+                            value,
+                            None,
+                            "The WebSocketPushEnable object is invalid.",
+                        ) {
+                            Ok(request) => request,
+                            Err(error) => {
+                                self.send_request_error_object(socket, error).await?;
+                                return Ok(());
+                            }
+                        };
                         subscription.enabled_types = normalize_push_data_types(request.data_types);
                         subscription.last_type_states.clear();
                         subscription.last_push_state = None;
@@ -151,7 +173,17 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         .await?;
                     }
                     "WebSocketPushDisable" => {
-                        let _: WebSocketPushDisable = serde_json::from_value(value)?;
+                        let _: WebSocketPushDisable = match parse_websocket_object(
+                            value,
+                            None,
+                            "The WebSocketPushDisable object is invalid.",
+                        ) {
+                            Ok(request) => request,
+                            Err(error) => {
+                                self.send_request_error_object(socket, error).await?;
+                                return Ok(());
+                            }
+                        };
                         subscription.enabled_types.clear();
                         subscription.last_type_states.clear();
                         subscription.last_push_state = None;
@@ -460,6 +492,17 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         Ok((changed, current_type_states))
     }
 
+    async fn send_request_error_object(
+        &self,
+        socket: &mut WebSocket,
+        error: WebSocketRequestError,
+    ) -> Result<()> {
+        socket
+            .send(Message::Text(serde_json::to_string(&error)?.into()))
+            .await?;
+        Ok(())
+    }
+
     async fn send_request_error(
         &self,
         socket: &mut WebSocket,
@@ -468,17 +511,11 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         status: StatusCode,
         detail: &str,
     ) -> Result<()> {
-        let error = WebSocketRequestError {
-            type_name: "RequestError",
-            request_id,
-            error_type: error_type.to_string(),
-            status: status.as_u16(),
-            detail: detail.to_string(),
-        };
-        socket
-            .send(Message::Text(serde_json::to_string(&error)?.into()))
-            .await?;
-        Ok(())
+        self.send_request_error_object(
+            socket,
+            websocket_request_error(request_id, error_type, status, detail),
+        )
+        .await
     }
 
     async fn send_state_change(
@@ -589,6 +626,43 @@ fn normalize_push_data_types(data_types: Option<Vec<String>>) -> HashSet<String>
         .collect()
 }
 
+fn parse_websocket_object<T: DeserializeOwned>(
+    value: Value,
+    request_id: Option<String>,
+    detail: &str,
+) -> Result<T, WebSocketRequestError> {
+    serde_json::from_value(value).map_err(|_| {
+        websocket_request_error(
+            request_id,
+            "urn:ietf:params:jmap:error:invalidArguments",
+            StatusCode::BAD_REQUEST,
+            detail,
+        )
+    })
+}
+
+fn websocket_request_id(value: &Value) -> Option<String> {
+    value
+        .get("id")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+}
+
+fn websocket_request_error(
+    request_id: Option<String>,
+    error_type: &str,
+    status: StatusCode,
+    detail: &str,
+) -> WebSocketRequestError {
+    WebSocketRequestError {
+        type_name: "RequestError",
+        request_id,
+        error_type: error_type.to_string(),
+        status: status.as_u16(),
+        detail: detail.to_string(),
+    }
+}
+
 fn filter_push_state_types(
     type_states: HashMap<String, HashMap<String, String>>,
     enabled_types: &HashSet<String>,
@@ -676,6 +750,44 @@ mod tests {
         assert_eq!(
             normalize_push_data_types(request.data_types),
             HashSet::from(["Mailbox".to_string(), "Email".to_string()])
+        );
+    }
+
+    #[test]
+    fn malformed_websocket_request_objects_map_to_request_error() {
+        let request_error = parse_websocket_object::<WebSocketRequestEnvelope>(
+            json!({
+                "@type": "Request",
+                "id": "r1",
+                "methodCalls": "not-a-list",
+            }),
+            Some("r1".to_string()),
+            "The WebSocket Request object is invalid.",
+        )
+        .unwrap_err();
+        assert_eq!(request_error.request_id.as_deref(), Some("r1"));
+        assert_eq!(
+            request_error.error_type,
+            "urn:ietf:params:jmap:error:invalidArguments"
+        );
+        assert_eq!(request_error.status, 400);
+
+        let push_error = parse_websocket_object::<WebSocketPushEnable>(
+            json!({
+                "@type": "WebSocketPushEnable",
+                "dataTypes": "Mailbox",
+            }),
+            None,
+            "The WebSocketPushEnable object is invalid.",
+        )
+        .unwrap_err();
+        assert_eq!(
+            push_error.error_type,
+            "urn:ietf:params:jmap:error:invalidArguments"
+        );
+        assert_eq!(
+            push_error.detail,
+            "The WebSocketPushEnable object is invalid."
         );
     }
 
