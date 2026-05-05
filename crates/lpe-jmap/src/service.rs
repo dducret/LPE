@@ -63,6 +63,7 @@ pub(crate) const MAX_BLOB_DATA_SOURCES: u64 = 64;
 
 type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 static API_REQUEST_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
+static UPLOAD_REQUEST_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
 pub fn router() -> Router<Storage> {
     Router::new()
@@ -74,7 +75,11 @@ pub fn router() -> Router<Storage> {
                 .layer(DefaultBodyLimit::max(MAX_SIZE_REQUEST as usize)),
         )
         .route("/ws", get(websocket_handler))
-        .route("/upload/{account_id}", post(upload_handler))
+        .route(
+            "/upload/{account_id}",
+            post(upload_handler)
+                .layer::<_, Infallible>(middleware::from_fn(upload_concurrency_limit)),
+        )
         .route(
             "/download/{account_id}/{blob_id}/{name}",
             get(download_handler),
@@ -160,6 +165,25 @@ async fn api_concurrency_limit(request: Request<Body>, next: Next) -> Response {
 pub(crate) fn try_acquire_api_request_permit() -> Option<OwnedSemaphorePermit> {
     API_REQUEST_SEMAPHORE
         .get_or_init(|| Arc::new(Semaphore::new(MAX_CONCURRENT_REQUESTS as usize)))
+        .clone()
+        .try_acquire_owned()
+        .ok()
+}
+
+async fn upload_concurrency_limit(request: Request<Body>, next: Next) -> Response {
+    let Some(_permit) = try_acquire_upload_request_permit() else {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            "JMAP upload exceeds maxConcurrentUpload",
+        )
+            .into_response();
+    };
+    next.run(request).await
+}
+
+pub(crate) fn try_acquire_upload_request_permit() -> Option<OwnedSemaphorePermit> {
+    UPLOAD_REQUEST_SEMAPHORE
+        .get_or_init(|| Arc::new(Semaphore::new(MAX_CONCURRENT_UPLOAD as usize)))
         .clone()
         .try_acquire_owned()
         .ok()
