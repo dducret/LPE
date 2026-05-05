@@ -44,6 +44,7 @@ pub(crate) const SESSION_STATE: &str = "mvp-3";
 pub(crate) const QUERY_STATE_VERSION: &str = "mvp-3";
 pub(crate) const STATE_TOKEN_VERSION: &str = "mvp-2";
 pub(crate) const PUSH_STATE_VERSION: &str = "mvp-push-1";
+pub(crate) const MAX_CALLS_IN_REQUEST: u64 = 16;
 pub(crate) const MAX_QUERY_LIMIT: u64 = 250;
 pub(crate) const DEFAULT_GET_LIMIT: u64 = 100;
 pub(crate) const MAX_SIZE_REQUEST: u64 = 10 * 1024 * 1024;
@@ -115,6 +116,12 @@ async fn api_handler(
     headers: HeaderMap,
     Json(request): Json<JmapApiRequest>,
 ) -> HttpResult<JmapApiResponse> {
+    if api_request_exceeds_call_limit(&request) {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "JMAP request exceeds maxCallsInRequest".to_string(),
+        ));
+    }
     let service = JmapService::new(storage);
     let authorization = authorization_header(&headers);
     Ok(Json(
@@ -216,6 +223,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         account: &AuthenticatedAccount,
         request: JmapApiRequest,
     ) -> Result<JmapApiResponse> {
+        if api_request_exceeds_call_limit(&request) {
+            bail!("JMAP request exceeds maxCallsInRequest");
+        }
         let declared_capabilities = request.using_capabilities;
         let mut method_responses = Vec::with_capacity(request.method_calls.len());
         let mut created_ids = HashMap::new();
@@ -750,6 +760,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .await?
             .ok_or_else(|| anyhow!("invalid or expired account session"))
     }
+}
+
+pub(crate) fn api_request_exceeds_call_limit(request: &JmapApiRequest) -> bool {
+    request.method_calls.len() > MAX_CALLS_IN_REQUEST as usize
 }
 
 fn method_capability(method_name: &str) -> Option<&'static str> {

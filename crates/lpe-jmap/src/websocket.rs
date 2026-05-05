@@ -133,7 +133,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                                 return Ok(());
                             }
                         };
-                        let response = self
+                        let response = match self
                             .handle_api_request_for_account(
                                 account,
                                 JmapApiRequest {
@@ -141,7 +141,26 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                                     method_calls: envelope.method_calls,
                                 },
                             )
-                            .await?;
+                            .await
+                        {
+                            Ok(response) => response,
+                            Err(error)
+                                if error
+                                    .to_string()
+                                    .contains("JMAP request exceeds maxCallsInRequest") =>
+                            {
+                                self.send_request_error(
+                                    socket,
+                                    envelope.id.clone(),
+                                    "requestTooLarge",
+                                    StatusCode::PAYLOAD_TOO_LARGE,
+                                    &error.to_string(),
+                                )
+                                .await?;
+                                return Ok(());
+                            }
+                            Err(error) => return Err(error),
+                        };
                         let response = WebSocketResponse {
                             type_name: "Response",
                             id: envelope.id,
