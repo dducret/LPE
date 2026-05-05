@@ -10,7 +10,8 @@ use axum::{
 use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AuthenticatedAccount, ClientTask, ClientTaskList,
-    CollaborationCollection, JmapEmail, JmapMailbox, JmapUploadBlob, MailboxAccountAccess, Storage,
+    CollaborationCollection, JmapEmail, JmapEmailSubmission, JmapMailbox, JmapUploadBlob,
+    MailboxAccountAccess, SenderIdentity, Storage,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -405,6 +406,40 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         encode_state(access.account_id, data_type, entries)
     }
 
+    pub(crate) async fn email_submission_object_state(&self, account_id: Uuid) -> Result<String> {
+        let submissions = self
+            .store
+            .fetch_jmap_email_submissions(account_id, &[])
+            .await?;
+        let entries = submissions
+            .into_iter()
+            .map(|submission| StateEntry {
+                id: submission.id.to_string(),
+                fingerprint: email_submission_state_fingerprint(&submission),
+            })
+            .collect();
+        encode_state(account_id, "EmailSubmission", entries)
+    }
+
+    pub(crate) async fn identity_object_state(
+        &self,
+        principal_account_id: Uuid,
+        target_account_id: Uuid,
+    ) -> Result<String> {
+        let identities = self
+            .store
+            .fetch_sender_identities(principal_account_id, target_account_id)
+            .await?;
+        let entries = identities
+            .into_iter()
+            .map(|identity| StateEntry {
+                id: identity.id.clone(),
+                fingerprint: identity_state_fingerprint(&identity),
+            })
+            .collect();
+        encode_state(target_account_id, "Identity", entries)
+    }
+
     pub(crate) async fn mail_object_state_entries(
         &self,
         access: &MailboxAccountAccess,
@@ -741,6 +776,33 @@ pub(crate) fn collection_state_fingerprint(collection: &CollaborationCollection)
         collection.rights.may_write,
         collection.rights.may_delete,
         collection.rights.may_share
+    ))
+}
+
+fn email_submission_state_fingerprint(submission: &JmapEmailSubmission) -> String {
+    opaque_state_fingerprint(&format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        submission.email_id,
+        submission.thread_id,
+        submission.identity_id,
+        submission.identity_email,
+        submission.envelope_mail_from,
+        submission.envelope_rcpt_to.join(","),
+        submission.send_at,
+        submission.undo_status,
+        submission.delivery_status
+    ))
+}
+
+fn identity_state_fingerprint(identity: &SenderIdentity) -> String {
+    opaque_state_fingerprint(&format!(
+        "{}|{}|{}|{}|{}|{}",
+        identity.owner_account_id,
+        identity.email,
+        identity.display_name,
+        identity.authorization_kind,
+        identity.sender_address.as_deref().unwrap_or_default(),
+        identity.sender_display.as_deref().unwrap_or_default()
     ))
 }
 

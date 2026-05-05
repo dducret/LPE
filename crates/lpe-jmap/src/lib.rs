@@ -79,6 +79,7 @@ mod tests {
         emails: Vec<JmapEmail>,
         accessible_mailbox_accounts: Vec<MailboxAccountAccess>,
         sender_identities: Vec<SenderIdentity>,
+        email_submissions: Vec<JmapEmailSubmission>,
         contact_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
         calendar_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
         contacts: Arc<Mutex<Vec<ClientContact>>>,
@@ -535,6 +536,21 @@ mod tests {
                 sender_display: None,
             }
         }
+
+        fn email_submission() -> JmapEmailSubmission {
+            JmapEmailSubmission {
+                id: Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap(),
+                email_id: Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap(),
+                thread_id: Self::draft_email().thread_id,
+                identity_id: format!("self:{}", Self::account().account_id),
+                identity_email: Self::account().email,
+                envelope_mail_from: "alice@example.test".to_string(),
+                envelope_rcpt_to: vec!["bob@example.test".to_string()],
+                send_at: "2026-04-18T10:01:00Z".to_string(),
+                undo_status: "final".to_string(),
+                delivery_status: "queued".to_string(),
+            }
+        }
     }
 
     fn push_subscription(
@@ -742,18 +758,11 @@ mod tests {
             _account_id: Uuid,
             ids: &[Uuid],
         ) -> Result<Vec<JmapEmailSubmission>> {
-            let submissions = vec![JmapEmailSubmission {
-                id: Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap(),
-                email_id: Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap(),
-                thread_id: FakeStore::draft_email().thread_id,
-                identity_id: format!("self:{}", FakeStore::account().account_id),
-                identity_email: FakeStore::account().email,
-                envelope_mail_from: "alice@example.test".to_string(),
-                envelope_rcpt_to: vec!["bob@example.test".to_string()],
-                send_at: "2026-04-18T10:01:00Z".to_string(),
-                undo_status: "final".to_string(),
-                delivery_status: "queued".to_string(),
-            }];
+            let submissions = if self.email_submissions.is_empty() {
+                vec![FakeStore::email_submission()]
+            } else {
+                self.email_submissions.clone()
+            };
             if ids.is_empty() {
                 Ok(submissions)
             } else {
@@ -3336,6 +3345,133 @@ mod tests {
             response.method_responses[2].1["list"][0]["deliveryStatus"],
             Value::String("queued".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn identity_get_state_tracks_sender_identity_projection() {
+        let account = FakeStore::account();
+        let first_identity = FakeStore::sender_identity();
+        let mut renamed_identity = first_identity.clone();
+        renamed_identity.display_name = "Alice Delegated".to_string();
+
+        let first_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            sender_identities: vec![first_identity],
+            ..Default::default()
+        });
+        let renamed_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            sender_identities: vec![renamed_identity],
+            ..Default::default()
+        });
+
+        let first = first_service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Identity/get".to_string(),
+                        json!({}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        let renamed = renamed_service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Identity/get".to_string(),
+                        json!({}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let first_state = first.method_responses[0].1["state"].as_str().unwrap();
+        let renamed_state = renamed.method_responses[0].1["state"].as_str().unwrap();
+        let decoded = decode_state(first_state).unwrap();
+
+        assert_eq!(decoded.kind, "Identity");
+        assert_eq!(decoded.entries.len(), 1);
+        assert_ne!(first_state, renamed_state);
+    }
+
+    #[tokio::test]
+    async fn email_submission_get_state_tracks_submission_rows() {
+        let queued = FakeStore::email_submission();
+        let mut delivered = queued.clone();
+        delivered.delivery_status = "delivered".to_string();
+        let queued_service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            email_submissions: vec![queued.clone()],
+            ..Default::default()
+        });
+        let delivered_service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            email_submissions: vec![delivered],
+            ..Default::default()
+        });
+
+        let queued_response = queued_service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "EmailSubmission/get".to_string(),
+                        json!({"ids": [queued.id.to_string()]}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        let delivered_response = delivered_service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "EmailSubmission/get".to_string(),
+                        json!({"ids": [queued.id.to_string()]}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        let queued_state = queued_response.method_responses[0].1["state"]
+            .as_str()
+            .unwrap();
+        let delivered_state = delivered_response.method_responses[0].1["state"]
+            .as_str()
+            .unwrap();
+        let decoded = decode_state(queued_state).unwrap();
+
+        assert_eq!(decoded.kind, "EmailSubmission");
+        assert_eq!(decoded.entries.len(), 1);
+        assert_eq!(decoded.entries[0].id, queued.id.to_string());
+        assert_ne!(queued_state, delivered_state);
     }
 
     #[tokio::test]

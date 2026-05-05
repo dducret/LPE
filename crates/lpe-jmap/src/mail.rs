@@ -581,7 +581,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .filter(|id| !submissions.iter().any(|submission| submission.id == *id))
             .map(|id| Value::String(id.to_string()))
             .collect::<Vec<_>>();
-        let state = self.mail_object_state(&account_access, "Email").await?;
+        let state = self.email_submission_object_state(account_id).await?;
 
         Ok(json!({
             "accountId": account_id.to_string(),
@@ -623,7 +623,12 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .filter(|id| !identities.iter().any(|identity| identity.id == *id))
             .map(Value::String)
             .collect::<Vec<_>>();
-        let state = self.object_state(account_id, "Identity").await?;
+        let state = if crate::mailboxes::mailbox_account_may_submit(&account_access) {
+            self.identity_object_state(account.account_id, account_id)
+                .await?
+        } else {
+            crate::state::encode_state(account_id, "Identity", Vec::new())?
+        };
 
         Ok(json!({
             "accountId": account_id.to_string(),
