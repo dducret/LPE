@@ -4114,6 +4114,11 @@ mod tests {
 
         assert!(response.created_ids["b1"].starts_with("upload:"));
         assert!(response.created_ids["b2"].starts_with("upload:"));
+        assert_eq!(response.method_responses[0].1["oldState"], Value::Null);
+        assert_eq!(response.method_responses[0].1["updated"], Value::Null);
+        assert_eq!(response.method_responses[0].1["destroyed"], Value::Null);
+        assert_eq!(response.method_responses[0].1["notUpdated"], Value::Null);
+        assert_eq!(response.method_responses[0].1["notDestroyed"], Value::Null);
         assert_eq!(
             response.method_responses[2].1["list"][0]["id"],
             response.created_ids["b2"]

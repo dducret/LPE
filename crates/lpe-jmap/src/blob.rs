@@ -121,8 +121,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         Ok(json!({
             "accountId": account_access.account_id.to_string(),
+            "oldState": Value::Null,
             "created": Value::Object(created),
+            "updated": Value::Null,
+            "destroyed": Value::Null,
             "notCreated": Value::Object(not_created),
+            "notUpdated": Value::Null,
+            "notDestroyed": Value::Null,
         }))
     }
 
