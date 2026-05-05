@@ -3513,7 +3513,7 @@ mod tests {
         assert!(response.method_responses[0].1["queryState"].is_string());
         assert_eq!(
             response.method_responses[0].1["canCalculateChanges"],
-            Value::Bool(false)
+            Value::Bool(true)
         );
     }
 
@@ -3561,6 +3561,70 @@ mod tests {
             1
         );
         assert_eq!(decoded.ids.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn thread_query_changes_reports_added_threads_from_full_snapshot() {
+        let mut second_thread_email = FakeStore::draft_email();
+        second_thread_email.thread_id =
+            Uuid::parse_str("12121212-3434-5656-7878-909090909090").unwrap();
+        let initial = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            emails: vec![FakeStore::inbox_email()],
+            ..Default::default()
+        });
+        let initial_response = initial
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Thread/query".to_string(),
+                        json!({"position": 0, "limit": 1}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        let query_state = initial_response.method_responses[0].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let updated = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            emails: vec![FakeStore::inbox_email(), second_thread_email.clone()],
+            ..Default::default()
+        });
+        let response = updated
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                    method_calls: vec![JmapMethodCall(
+                        "Thread/queryChanges".to_string(),
+                        json!({
+                            "sinceQueryState": query_state,
+                            "maxChanges": 1
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.method_responses[0].0, "Thread/queryChanges");
+        assert_eq!(
+            response.method_responses[0].1["added"][0]["id"],
+            Value::String(second_thread_email.thread_id.to_string())
+        );
+        assert_eq!(response.method_responses[0].1["added"][0]["index"], 1);
+        assert_eq!(
+            response.method_responses[0].1["hasMoreChanges"],
+            Value::Bool(false)
+        );
     }
 
     #[tokio::test]

@@ -316,6 +316,7 @@ pub(crate) fn query_changes_response(
     let diff = if matches!(
         kind,
         "Email/query"
+            | "Thread/query"
             | "Task"
             | "Mailbox/query"
             | "AddressBook/query"

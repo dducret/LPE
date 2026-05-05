@@ -696,11 +696,61 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         Ok(json!({
             "accountId": account_id.to_string(),
             "queryState": query_state,
-            "canCalculateChanges": false,
+            "canCalculateChanges": true,
             "position": position,
             "ids": ids,
             "total": query.total,
         }))
+    }
+
+    pub(crate) async fn handle_thread_query_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: QueryChangesArguments<EmailQueryFilter, EmailQuerySort> =
+            serde_json::from_value(arguments)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
+        validate_query_sort(arguments.sort.as_deref())?;
+
+        let mailbox_id = arguments
+            .filter
+            .as_ref()
+            .and_then(|filter| filter.in_mailbox.as_deref())
+            .map(parse_uuid)
+            .transpose()?;
+        let search_text = arguments
+            .filter
+            .as_ref()
+            .and_then(|filter| filter.text.as_deref());
+        let query = self
+            .store
+            .query_jmap_thread_ids(account_id, mailbox_id, search_text, 0, MAX_QUERY_LIMIT)
+            .await?;
+        let current_ids = self
+            .resolve_full_thread_query_ids(account_id, mailbox_id, search_text, &query)
+            .await?;
+        query_changes_response(
+            account_id,
+            "Thread/query",
+            arguments.since_query_state,
+            arguments
+                .filter
+                .as_ref()
+                .map(serialize_email_query_filter)
+                .transpose()?,
+            arguments
+                .sort
+                .as_ref()
+                .map(|sort| serialize_email_query_sort(sort))
+                .transpose()?,
+            current_ids,
+            query.total,
+            arguments.max_changes,
+        )
     }
 
     pub(crate) async fn handle_thread_get(

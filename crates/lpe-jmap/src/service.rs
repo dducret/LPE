@@ -313,6 +313,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     }
                     "Identity/get" => self.handle_identity_get(account, arguments).await,
                     "Thread/query" => self.handle_thread_query(account, arguments).await,
+                    "Thread/queryChanges" => {
+                        self.handle_thread_query_changes(account, arguments).await
+                    }
                     "Thread/get" => self.handle_thread_get(account, arguments).await,
                     "Thread/changes" => self.handle_thread_changes(account, arguments).await,
                     "Quota/get" => self.handle_quota_get(account, arguments).await,
@@ -715,6 +718,7 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         | "Email/copy"
         | "Email/import"
         | "Thread/query"
+        | "Thread/queryChanges"
         | "Thread/get"
         | "Thread/changes"
         | "Quota/get"

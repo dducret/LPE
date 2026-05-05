@@ -45,6 +45,7 @@ The WebSocket capability is advertised only when the `/jmap/ws` endpoint is actu
 - `EmailSubmission/set` for draft submission through the canonical `LPE` submission model
 - `Identity/get`
 - `Thread/query`
+- `Thread/queryChanges`
 - `Thread/get`
 - `Thread/changes`
 - `Quota/get`
@@ -89,7 +90,7 @@ Additional supported `JMAP` routes:
 
 - `Email/query` and `Thread/query` support only descending `receivedAt` sort
 - `Email/query` supports only the `inMailbox` filter
-- `Email/queryChanges` and `Mailbox/queryChanges` use a stateless snapshot `queryState` token derived from the ordered result set instead of a durable per-query history table
+- `Email/queryChanges`, `Thread/queryChanges`, and `Mailbox/queryChanges` use a stateless snapshot `queryState` token derived from the ordered result set instead of a durable per-query history table
 - `queryChanges` compares the full ordered result set for the logical query even when the original `query` response was paginated, and is intended for incremental client refresh, not for long-lived durable sync cursors
 - `changes` accepts `sinceState: "0"` as the explicit initial-sync state and otherwise requires an opaque state token bound to the requested account and method; malformed, cross-account, or cross-method tokens are rejected instead of being treated as a fresh initial sync
 - `Email/get` exposes a practical subset of `JMAP Mail` properties
