@@ -1534,7 +1534,7 @@ fn rpc_header_ext_rop_buffer(payload: Vec<u8>) -> Vec<u8> {
 
 fn rop_logon_response_body(principal: &AccountPrincipal, request: &RopRequest) -> Vec<u8> {
     let output_handle_index = request.output_handle_index.unwrap_or(0);
-    let logon_flags = request.payload.first().copied().unwrap_or(0x01) | 0x01;
+    let logon_flags = request.payload.first().copied().unwrap_or(0x01) & 0x07 | 0x01;
     let mut response = Vec::new();
     response.push(0xFE);
     response.push(output_handle_index);

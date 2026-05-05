@@ -1499,7 +1499,7 @@ async fn mapi_over_http_execute_returns_private_mailbox_logon() {
         u32::from_le_bytes(response_rop[2..6].try_into().unwrap()),
         0
     );
-    assert_eq!(response_rop[6] & 0x01, 0x01);
+    assert_eq!(response_rop[6], 0x01);
     assert_eq!(response_rop_size, 166);
     assert_eq!(
         u32::from_le_bytes(
