@@ -4351,6 +4351,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn blob_get_returns_sha256_digest_for_selected_range() {
+        let store = FakeStore {
+            session: Some(FakeStore::account()),
+            uploads: Arc::new(Mutex::new(vec![JmapUploadBlob {
+                id: Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap(),
+                account_id: FakeStore::account().account_id,
+                media_type: "text/plain".to_string(),
+                octet_size: 11,
+                blob_bytes: b"hello world".to_vec(),
+            }])),
+            ..Default::default()
+        };
+        let service = JmapService::new(store);
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_BLOB_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Blob/get".to_string(),
+                            json!({
+                                "accountId": FakeStore::account().account_id.to_string(),
+                                "ids": ["upload:99999999-9999-9999-9999-999999999999"],
+                                "properties": ["digest:sha-256", "size"],
+                                "offset": 6,
+                                "length": 5
+                            }),
+                            "g1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Blob/get".to_string(),
+                            json!({
+                                "accountId": FakeStore::account().account_id.to_string(),
+                                "ids": ["upload:99999999-9999-9999-9999-999999999999"],
+                                "properties": ["digest:sha"]
+                            }),
+                            "g2".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        let blob = &response.method_responses[0].1["list"][0];
+        assert_eq!(blob["size"], 11);
+        assert_eq!(
+            blob["digest:sha-256"],
+            "SG6kYiTRu0+2gPNPfJrZao8k7Ii+c+qOWmxlJg6cuKc="
+        );
+        assert_eq!(response.method_responses[1].1["type"], "invalidArguments");
+        assert_eq!(
+            response.method_responses[1].1["description"],
+            "digest:sha is not supported"
+        );
+    }
+
+    #[tokio::test]
     async fn blob_lookup_projects_visible_canonical_message_references() {
         let store = FakeStore {
             session: Some(FakeStore::account()),
@@ -4477,6 +4540,11 @@ mod tests {
             session.accounts[&FakeStore::account().account_id.to_string()].account_capabilities
                 [JMAP_BLOB_CAPABILITY]["maxDataSources"],
             MAX_BLOB_DATA_SOURCES
+        );
+        assert_eq!(
+            session.accounts[&FakeStore::account().account_id.to_string()].account_capabilities
+                [JMAP_BLOB_CAPABILITY]["supportedDigestAlgorithms"],
+            json!(["sha-256"])
         );
         assert_eq!(
             session.primary_accounts[JMAP_CONTACTS_CAPABILITY],

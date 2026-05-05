@@ -3,6 +3,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use sha2::{Digest as _, Sha256};
 use std::collections::{HashMap, HashSet};
 
 use lpe_storage::{AuthenticatedAccount, JmapEmail, MailboxAccountAccess};
@@ -138,10 +139,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let properties = arguments
             .properties
             .unwrap_or_else(|| vec!["data".to_string(), "size".to_string()]);
-        let unsupported_digest = properties
-            .iter()
-            .find(|property| property.starts_with("digest:"));
-        if let Some(property) = unsupported_digest {
+        if let Some(property) = unsupported_blob_get_property(&properties) {
             bail!("{property} is not supported");
         }
         let mut list = Vec::new();
@@ -486,6 +484,12 @@ fn blob_get_object(
                     Value::String(BASE64.encode(selected)),
                 );
             }
+            "digest:sha-256" => {
+                object.insert(
+                    "digest:sha-256".to_string(),
+                    Value::String(BASE64.encode(Sha256::digest(selected))),
+                );
+            }
             _ => {}
         }
     }
@@ -508,4 +512,11 @@ fn readable_blob_range(bytes: &[u8], offset: usize, length: Option<u64>) -> Resu
     let available = requested.min(remaining);
     let is_truncated = requested > remaining;
     Ok((&bytes[offset..offset + available], is_truncated))
+}
+
+fn unsupported_blob_get_property(properties: &[String]) -> Option<&str> {
+    properties
+        .iter()
+        .find(|property| property.starts_with("digest:") && property.as_str() != "digest:sha-256")
+        .map(String::as_str)
 }

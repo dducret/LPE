@@ -237,7 +237,7 @@ fn account_capability_value(
             "maxSizeBlobSet": if access.is_owned || access.may_write { MAX_SIZE_UPLOAD } else { 0 },
             "maxDataSources": MAX_BLOB_DATA_SOURCES,
             "supportedTypeNames": ["Mailbox", "Thread", "Email"],
-            "supportedDigestAlgorithms": [],
+            "supportedDigestAlgorithms": ["sha-256"],
         })
     } else {
         global_value.clone()
