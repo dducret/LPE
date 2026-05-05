@@ -67,6 +67,7 @@ Additional supported `JMAP` routes:
 
 - `GET /.well-known/jmap` for RFC 8620 service autodiscovery; it redirects to the configured public `JMAP` session URL and follows `LPE_AUTOCONFIG_JMAP_SESSION_URL` when that override is set
 - `POST /api/jmap/api` enforces the `Session` core `maxSizeRequest`, `maxCallsInRequest`, `maxObjectsInGet`, `maxObjectsInSet`, and `maxConcurrentRequests` limits
+- request-level HTTP failures that `lpe-jmap` handles directly return RFC 7807-style JMAP problem details; limit failures include the required `limit` field
 - `POST /api/jmap/upload/{accountId}` for temporary `JMAP` blob upload; the `Session` core capability advertises the enforced `maxSizeUpload` and concurrent upload limit for real-client interoperability
 - `GET /api/jmap/download/{accountId}/{blobId}/{name}` for temporary blob download
 - `GET /api/jmap/ws` for `JMAP` over WebSocket with the `jmap` subprotocol

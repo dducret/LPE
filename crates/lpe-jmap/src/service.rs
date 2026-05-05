@@ -26,7 +26,9 @@ use uuid::Uuid;
 
 use crate::{
     convert::format_addresses,
-    error::{http_error, method_error},
+    error::{
+        http_error, jmap_problem, method_error, JMAP_PROBLEM_LIMIT, JMAP_PROBLEM_UNKNOWN_CAPABILITY,
+    },
     parse::parse_uuid,
     protocol::{
         JmapApiRequest, JmapApiResponse, JmapMethodCall, JmapMethodResponse, SessionDocument,
@@ -61,7 +63,7 @@ pub(crate) const MAX_OBJECTS_IN_GET: u64 = 250;
 pub(crate) const MAX_OBJECTS_IN_SET: u64 = 128;
 pub(crate) const MAX_BLOB_DATA_SOURCES: u64 = 64;
 
-type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
+type HttpResult<T> = std::result::Result<Json<T>, (StatusCode, Json<Value>)>;
 static API_REQUEST_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
 static UPLOAD_REQUEST_SEMAPHORE: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
@@ -133,13 +135,20 @@ async fn api_handler(
     Json(request): Json<JmapApiRequest>,
 ) -> HttpResult<JmapApiResponse> {
     if api_request_exceeds_call_limit(&request) {
-        return Err((
+        return Err(jmap_problem(
+            JMAP_PROBLEM_LIMIT,
             StatusCode::PAYLOAD_TOO_LARGE,
-            "JMAP request exceeds maxCallsInRequest".to_string(),
+            "JMAP request exceeds maxCallsInRequest",
+            Some("maxCallsInRequest"),
         ));
     }
     if let Err(error) = validate_declared_capabilities(&request) {
-        return Err((StatusCode::BAD_REQUEST, error.to_string()));
+        return Err(jmap_problem(
+            JMAP_PROBLEM_UNKNOWN_CAPABILITY,
+            StatusCode::BAD_REQUEST,
+            error.to_string(),
+            None,
+        ));
     }
     let service = JmapService::new(storage);
     let authorization = authorization_header(&headers);
@@ -153,11 +162,13 @@ async fn api_handler(
 
 async fn api_concurrency_limit(request: Request<Body>, next: Next) -> Response {
     let Some(_permit) = try_acquire_api_request_permit() else {
-        return (
+        return jmap_problem(
+            JMAP_PROBLEM_LIMIT,
             StatusCode::TOO_MANY_REQUESTS,
             "JMAP request exceeds maxConcurrentRequests",
+            Some("maxConcurrentRequests"),
         )
-            .into_response();
+        .into_response();
     };
     next.run(request).await
 }
@@ -172,11 +183,13 @@ pub(crate) fn try_acquire_api_request_permit() -> Option<OwnedSemaphorePermit> {
 
 async fn upload_concurrency_limit(request: Request<Body>, next: Next) -> Response {
     let Some(_permit) = try_acquire_upload_request_permit() else {
-        return (
+        return jmap_problem(
+            JMAP_PROBLEM_LIMIT,
             StatusCode::TOO_MANY_REQUESTS,
             "JMAP upload exceeds maxConcurrentUpload",
+            Some("maxConcurrentUpload"),
         )
-            .into_response();
+        .into_response();
     };
     next.run(request).await
 }
@@ -194,7 +207,7 @@ async fn upload_handler(
     axum::extract::Path(account_id): axum::extract::Path<String>,
     headers: HeaderMap,
     body: Bytes,
-) -> std::result::Result<impl IntoResponse, (StatusCode, String)> {
+) -> std::result::Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let service = JmapService::new(storage);
     let authorization = authorization_header(&headers);
     let content_type = headers
@@ -222,7 +235,7 @@ async fn download_handler(
         String,
     )>,
     headers: HeaderMap,
-) -> std::result::Result<impl IntoResponse, (StatusCode, String)> {
+) -> std::result::Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let service = JmapService::new(storage);
     let authorization = authorization_header(&headers);
     let blob = service
@@ -236,7 +249,7 @@ async fn websocket_handler(
     ws: WebSocketUpgrade,
     State(storage): State<Storage>,
     headers: HeaderMap,
-) -> std::result::Result<impl IntoResponse, (StatusCode, String)> {
+) -> std::result::Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let service = JmapService::new(storage);
     let authorization = authorization_header(&headers);
     let account = service
