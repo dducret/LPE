@@ -134,6 +134,45 @@ assert_https_security_headers() {
   done
 }
 
+assert_published_core_route() {
+  local method="$1"
+  local path="$2"
+  local label="$3"
+  local body="${4:-}"
+  local base_url="https://${HOST}:${HTTPS_PORT}"
+  local host_header="${LPE_CT_PUBLICATION_TEST_HOST:-${LPE_CT_PUBLIC_HOSTNAME:-${LPE_CT_SERVER_NAME:-localhost}}}"
+  local status
+  local -a curl_args
+
+  curl_args=(
+    --silent
+    --show-error
+    --insecure
+    --http1.1
+    --request "${method}"
+    --header "Host: ${host_header}"
+    --output /dev/null
+    --write-out "%{http_code}"
+  )
+  if [[ -n "${body}" ]]; then
+    curl_args+=(--header "Content-Type: application/json" --data "${body}")
+  fi
+
+  status="$(curl "${curl_args[@]}" "${base_url}${path}" 2>/dev/null || true)"
+  case "${status}" in
+    000)
+      fail "${label} did not return an HTTP response through LPE-CT"
+      ;;
+    404)
+      fail "${label} returned 404 through LPE-CT; check nginx route publication for ${path}"
+      ;;
+    502|503|504)
+      fail "${label} returned ${status} through LPE-CT; check the configured core upstream"
+      ;;
+  esac
+  pass "${label} is published through LPE-CT (${method} ${path} -> HTTP ${status})"
+}
+
 check_tls_file_readable() {
   local label="$1"
   local path="$2"
@@ -644,6 +683,13 @@ probe_client_publication() {
     }
   rm -f "${headers_file}"
   pass "MAPI EMSMDB OPTIONS is published through LPE-CT"
+
+  assert_published_core_route "POST" "/api/mail/auth/login" "Mailbox login API" "{}"
+  assert_published_core_route "GET" "/api/jmap/session" "JMAP session endpoint"
+  assert_published_core_route "POST" "/api/jmap/api" "JMAP API endpoint" "{}"
+  assert_published_core_route "POST" "/api/jmap/upload/00000000-0000-0000-0000-000000000000" "JMAP upload endpoint" "test"
+  assert_published_core_route "GET" "/api/jmap/download/00000000-0000-0000-0000-000000000000/test/test.eml" "JMAP download endpoint"
+  assert_published_core_route "GET" "/api/jmap/ws" "JMAP WebSocket endpoint"
 }
 
 SMTP_BIND="${LPE_CT_SMTP_BIND_ADDRESS:-}"

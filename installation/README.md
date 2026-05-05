@@ -602,8 +602,9 @@ certificate files may be reused for `465` submission through
 `LPE_CT_IMAPS_TLS_KEY_PATH`. The certificate must cover the public `LPE-CT`
 hostname used by clients.
 
-`LPE-CT` must publish the `JMAP` HTTPS/WSS paths and proxy
-them to the core `LPE` service: `/api/jmap/session`, `/api/jmap/api`,
+`LPE-CT` must publish the mailbox login and `JMAP` HTTPS/WSS paths and proxy
+them to the core `LPE` service: `/api/mail/auth/login`,
+`/api/jmap/session`, `/api/jmap/api`,
 `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`,
 and `/api/jmap/ws`.
 

@@ -145,7 +145,7 @@ For a domain `example.test`:
 - publish `autoconfig.example.test` or `mail.example.test` toward the public `LPE-CT` front end
 - publish `autodiscover.example.test` or reuse `mail.example.test` toward the same front end
 - re-expose the `/autoconfig/...`, `/.well-known/autoconfig/...`, `/autodiscover/...`, `/Autodiscover/...`, `/Microsoft-Server-ActiveSync`, `/EWS/Exchange.asmx`, `/ews/exchange.asmx`, and `/mapi/...` routes over HTTPS
-- re-expose `/api/jmap/session`, `/api/jmap/api`, `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`, `/api/jmap/ws`, and `/.well-known/jmap` from `LPE-CT` to the core `LPE` service
+- re-expose `/api/mail/auth/login`, `/api/jmap/session`, `/api/jmap/api`, `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`, `/api/jmap/ws`, and `/.well-known/jmap` from `LPE-CT` to the core `LPE` service
 - publish `IMAPS` on the same hostname when native `IMAP` access is exposed
 - publish the authenticated `SMTPS` submission listener only when `LPE-CT` really exposes it
 - do not reuse the internal `LPE -> LPE-CT` relay as a client-submission endpoint

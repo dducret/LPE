@@ -89,6 +89,11 @@ When client submission is enabled, `LPE-CT` terminates the external `TLS` sessio
 
 When published, the `JMAP` WebSocket endpoint remains a reverse-proxied `LPE` protocol adapter behind `LPE-CT`; it does not change the rule that `LPE-CT` is the only external exposure point.
 
+`JMAP` uses the mailbox-account authentication surface owned by the core
+`LPE` service, so `LPE-CT` must also publish:
+
+- `/api/mail/auth/login`
+
 The public `JMAP` paths published by `LPE-CT` are:
 
 - `/api/jmap/session`

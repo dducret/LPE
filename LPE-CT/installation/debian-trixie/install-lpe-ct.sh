@@ -422,6 +422,11 @@ render_service_files() {
 validate_publication_config() {
   local nginx_site="${NGINX_AVAILABLE_DIR}/${NGINX_SITE_NAME}"
   local required_patterns=(
+    "location /api/mail/"
+    "location /api/jmap/"
+    "location = /api/jmap/ws"
+    "location = /.well-known/jmap"
+    "proxy_set_header X-Forwarded-Prefix /api/jmap;"
     "location = /Microsoft-Server-ActiveSync"
     "proxy_read_timeout 1800s;"
     "proxy_send_timeout 1800s;"
