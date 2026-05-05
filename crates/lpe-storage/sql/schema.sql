@@ -21,7 +21,7 @@ CREATE SEQUENCE message_modseq_seq START WITH 2;
 
 CREATE TABLE schema_metadata (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton = TRUE),
-    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.11'),
+    schema_version TEXT NOT NULL CHECK (schema_version = '0.1.12'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -39,6 +39,9 @@ CREATE INDEX canonical_change_journal_tenant_sequence_idx
 
 CREATE INDEX canonical_change_journal_tenant_category_sequence_idx
     ON canonical_change_journal (tenant_id, category, sequence ASC);
+
+CREATE INDEX canonical_change_journal_tenant_created_idx
+    ON canonical_change_journal (tenant_id, created_at ASC);
 
 CREATE INDEX canonical_change_journal_principals_gin_idx
     ON canonical_change_journal USING GIN (principal_account_ids);
@@ -69,6 +72,8 @@ CREATE TABLE domains (
     outbound_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     default_quota_mb INTEGER NOT NULL DEFAULT 4096 CHECK (default_quota_mb >= 0),
     default_sieve_script TEXT NOT NULL DEFAULT '',
+    jmap_push_journal_retention_days INTEGER NOT NULL DEFAULT 30
+        CHECK (jmap_push_journal_retention_days > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, name)
@@ -992,7 +997,7 @@ LEFT JOIN attachments a
 GROUP BY m.id, m.account_id, m.mailbox_id, m.received_at, m.subject_normalized, mb.search_vector;
 
 INSERT INTO schema_metadata (singleton, schema_version)
-VALUES (TRUE, '0.1.11');
+VALUES (TRUE, '0.1.12');
 
 INSERT INTO security_settings (
     tenant_id,

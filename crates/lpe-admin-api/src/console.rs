@@ -381,6 +381,7 @@ pub(crate) async fn create_domain(
                 inbound_enabled: request.inbound_enabled,
                 outbound_enabled: request.outbound_enabled,
                 default_sieve_script: request.default_sieve_script.unwrap_or_default(),
+                jmap_push_journal_retention_days: request.jmap_push_journal_retention_days.max(1),
             },
             AuditEntryInput {
                 actor: admin.email,
@@ -409,6 +410,7 @@ pub(crate) async fn update_domain(
                 inbound_enabled: request.inbound_enabled,
                 outbound_enabled: request.outbound_enabled,
                 default_sieve_script: request.default_sieve_script.unwrap_or_default(),
+                jmap_push_journal_retention_days: request.jmap_push_journal_retention_days.max(1),
             },
             AuditEntryInput {
                 actor: admin.email,

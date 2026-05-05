@@ -412,6 +412,16 @@ impl Storage {
             .iter()
             .map(|category| category.as_str())
             .collect::<Vec<_>>();
+        let earliest_retained_cursor = sqlx::query_scalar::<_, Option<i64>>(
+            r#"
+            SELECT MIN(sequence)
+            FROM canonical_change_journal
+            WHERE tenant_id = $1
+            "#,
+        )
+        .bind(&tenant_id)
+        .fetch_one(&self.pool)
+        .await?;
         let rows = sqlx::query_as::<_, CanonicalChangeJournalRow>(
             r#"
             SELECT sequence, category, account_ids
@@ -432,7 +442,12 @@ impl Storage {
         .fetch_all(&self.pool)
         .await?;
 
-        let truncated = rows.len() > max_rows as usize;
+        let truncated = rows.len() > max_rows as usize
+            || cursor_is_before_retained_floor(
+                after_cursor,
+                earliest_retained_cursor,
+                current_cursor,
+            );
         let rows = rows.into_iter().take(max_rows as usize).collect::<Vec<_>>();
         let mut change_set = CanonicalPushChangeSet::default();
         for row in &rows {
@@ -449,6 +464,27 @@ impl Storage {
             truncated,
         })
     }
+
+    pub async fn purge_canonical_change_journals(&self) -> Result<u64> {
+        let result = sqlx::query(
+            r#"
+            WITH retention AS (
+                SELECT tenant_id, MAX(jmap_push_journal_retention_days) AS retention_days
+                FROM domains
+                GROUP BY tenant_id
+            )
+            DELETE FROM canonical_change_journal journal
+            USING retention
+            WHERE journal.tenant_id = retention.tenant_id
+              AND journal.created_at < NOW() - (
+                  GREATEST(retention.retention_days, 1)::INTEGER * INTERVAL '1 day'
+              )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -463,4 +499,35 @@ fn dedup_sorted_uuids(values: &[Uuid]) -> Vec<Uuid> {
     values.sort();
     values.dedup();
     values
+}
+
+fn cursor_is_before_retained_floor(
+    after_cursor: i64,
+    earliest_retained_cursor: Option<i64>,
+    current_cursor: Option<i64>,
+) -> bool {
+    matches!(
+        (earliest_retained_cursor, current_cursor),
+        (Some(earliest), Some(current)) if after_cursor < earliest && after_cursor < current
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cursor_is_before_retained_floor;
+
+    #[test]
+    fn retained_floor_detects_stale_cursor_with_newer_journal() {
+        assert!(cursor_is_before_retained_floor(10, Some(25), Some(50)));
+    }
+
+    #[test]
+    fn retained_floor_accepts_current_retained_cursor() {
+        assert!(!cursor_is_before_retained_floor(25, Some(25), Some(50)));
+    }
+
+    #[test]
+    fn retained_floor_ignores_empty_journal() {
+        assert!(!cursor_is_before_retained_floor(10, None, None));
+    }
 }

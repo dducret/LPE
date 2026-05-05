@@ -31,6 +31,8 @@ The `crates/lpe-jmap` crate acts as a `JMAP` adapter on top of the canonical mod
 
 The `JMAP` session exposes the authenticated mailbox account as the primary account and may expose additional accessible shared mailbox accounts in the session account map. Address books and calendars are exposed as stable canonical collections inside the same tenant, with owned and shared access resolved from the same underlying collection rights.
 
+For the current `JMAP` finalization milestone, Contacts and simple Calendar events are in the primary interoperability scope alongside Mail. Complex scheduling, cross-account data movement, and durable search/query-history behavior remain next-release work.
+
 ### Supported methods
 
 Contacts:

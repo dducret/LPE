@@ -137,7 +137,8 @@ impl Storage {
                 inbound_enabled,
                 outbound_enabled,
                 default_quota_mb,
-                default_sieve_script
+                default_sieve_script,
+                jmap_push_journal_retention_days
             FROM domains
             WHERE tenant_id = $1
             ORDER BY created_at ASC
@@ -155,6 +156,7 @@ impl Storage {
             outbound_enabled: row.outbound_enabled,
             default_quota_mb: row.default_quota_mb as u32,
             default_sieve_script: row.default_sieve_script,
+            jmap_push_journal_retention_days: row.jmap_push_journal_retention_days.max(1) as u32,
         })
         .collect::<Vec<_>>();
 
@@ -543,9 +545,9 @@ impl Storage {
             r#"
             INSERT INTO domains (
                 id, tenant_id, name, status, inbound_enabled, outbound_enabled, default_quota_mb,
-                default_sieve_script
+                default_sieve_script, jmap_push_journal_retention_days
             )
-            VALUES ($1, $2, $3, 'active', $4, $5, $6, $7)
+            VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8)
             ON CONFLICT (tenant_id, name) DO NOTHING
             "#,
         )
@@ -556,6 +558,7 @@ impl Storage {
         .bind(input.outbound_enabled)
         .bind(input.default_quota_mb as i32)
         .bind(input.default_sieve_script.trim())
+        .bind(input.jmap_push_journal_retention_days.max(1) as i32)
         .execute(&mut *tx)
         .await?;
 
@@ -576,14 +579,16 @@ impl Storage {
             SET default_quota_mb = $1,
                 inbound_enabled = $2,
                 outbound_enabled = $3,
-                default_sieve_script = $4
-            WHERE tenant_id = $5 AND id = $6
+                default_sieve_script = $4,
+                jmap_push_journal_retention_days = $5
+            WHERE tenant_id = $6 AND id = $7
             "#,
         )
         .bind(input.default_quota_mb.max(256) as i32)
         .bind(input.inbound_enabled)
         .bind(input.outbound_enabled)
         .bind(input.default_sieve_script.trim())
+        .bind(input.jmap_push_journal_retention_days.max(1) as i32)
         .bind(tenant_id)
         .bind(input.domain_id)
         .execute(&mut *tx)

@@ -33,6 +33,7 @@ pub(crate) struct DomainRow {
     pub(crate) outbound_enabled: bool,
     pub(crate) default_quota_mb: i32,
     pub(crate) default_sieve_script: String,
+    pub(crate) jmap_push_journal_retention_days: i32,
 }
 
 #[derive(Debug, FromRow)]

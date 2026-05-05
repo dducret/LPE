@@ -209,6 +209,8 @@ pub struct CreateDomainRequest {
     pub outbound_enabled: bool,
     #[serde(default)]
     pub default_sieve_script: Option<String>,
+    #[serde(default = "default_jmap_push_journal_retention_days")]
+    pub jmap_push_journal_retention_days: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -218,6 +220,12 @@ pub struct UpdateDomainRequest {
     pub outbound_enabled: bool,
     #[serde(default)]
     pub default_sieve_script: Option<String>,
+    #[serde(default = "default_jmap_push_journal_retention_days")]
+    pub jmap_push_journal_retention_days: u32,
+}
+
+fn default_jmap_push_journal_retention_days() -> u32 {
+    30
 }
 
 #[derive(Debug, Deserialize)]

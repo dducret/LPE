@@ -27,6 +27,8 @@ The `JMAP` session is real: it is built from the authenticated mailbox account a
 Its session `state` is derived from the current accessible mailbox-account projection, so mailbox delegation or sender-right changes that alter advertised accounts or account capabilities change the session document state.
 The WebSocket capability is advertised only when the `/jmap/ws` endpoint is actually present in the running adapter.
 
+The current finalization target is the `JMAP` Big Three: Mail, Contacts, and simple Calendar events. `JMAP Tasks` remains implemented as a canonical adapter, but it is not the primary interoperability hardening target for this release. Cross-account data movement, durable search/query-history storage, and broader protocol-family expansion are deferred to a later release.
+
 ### Supported methods
 
 - `Mailbox/get`
@@ -119,15 +121,19 @@ Additional supported `JMAP` routes:
 - malformed known WebSocket message objects return `RequestError` frames instead of silently dropping an otherwise healthy connection
 - WebSocket push uses canonical `PostgreSQL` signaling end to end: `lpe-storage` writes a canonical change-journal row and emits principal-filtered `LISTEN` / `NOTIFY` wakeups after canonical commits, while `lpe-jmap` replays bounded missed reconnect work from that journal and recomputes only the affected canonical object states without introducing a second mailbox state engine
 - when reconnect recovery or a live push wakeup sees the canonical journal cursor advance without a subscribed object-state fingerprint change, `lpe-jmap` may emit a `StateChange` with an empty `changed` map so clients receive a fresher `pushState` cursor and avoid unnecessary future full-snapshot fallbacks
+- canonical change-journal retention defaults to 30 days and is managed per domain through `domains.jmap_push_journal_retention_days`; the `lpe-cli` maintenance worker purges older rows periodically, with `LPE_JMAP_JOURNAL_PURGE_INTERVAL_SECS` controlling the purge interval and a one-hour default; purge deletes older rows from the tenant-scoped journal using the longest configured retention for that tenant so shared-tenant deployments do not over-purge one domain's reconnect window because of another domain's shorter setting
+- reconnect replay treats a client cursor older than the retained journal floor as truncated, forcing a full state snapshot instead of returning an incomplete incremental `StateChange`
 - mail push state spans every mailbox account visible through canonical mailbox delegation so one authenticated session can receive `StateChange` payloads for owned and delegated mailboxes without a protocol-local sharing cache
 - collaboration and task push stay principal-scoped: shared contacts, calendars, and task lists notify every affected principal account, while mailbox push still spans the canonical owner plus delegated mailbox readers
 - supported push data types are limited to `Mailbox`, `Email`, `Thread`, `EmailDelivery`, `Identity`, `EmailSubmission`, `AddressBook`, `ContactCard`, `Calendar`, `CalendarEvent`, `TaskList`, and `Task`
 - `EmailDelivery` is a push-only state type derived from canonical message delivery presence; it changes for newly visible messages without exposing another method or local delivery cache
 - `VacationResponse/get` and `VacationResponse/set` project the authenticated account's canonical active `Sieve` script; `set` patch updates preserve omitted singleton fields from that projection, writes a bounded `jmap-vacation` Sieve script or disables the active script, and does not introduce a separate `JMAP` vacation store
 
-### Next methods to add
+### Deferred next-release work
 
-- journal retention, pruning, and resumable push cursors beyond the current bounded reconnect-replay window for very large mailbox counts
+- durable per-query history for long-lived `queryChanges` cursors
+- complex cross-account data movement beyond the current same-account mail operations and temporary blob-copy interoperability path
+- broader `JMAP` protocol-family expansion beyond Mail, Contacts, and simple Calendar interoperability hardening
 
 ### Current completion priorities
 
@@ -136,6 +142,6 @@ Before broadening `JMAP` method surface further, the current priority is to fini
 - complete canonical `state`, `changes`, and `queryChanges` behavior so refresh and resync semantics stay coherent under concurrent mailbox operations
 - harden WebSocket reliability, including wakeup delivery, reconnect behavior, principal filtering, and delegated-mailbox push consistency
 - validate mailbox delegation and shared collection behavior so `Session`, `Mailbox`, `Identity`, and push views stay aligned
-- add interoperability tests against real `JMAP` clients and keep those tests focused on canonical-state correctness rather than synthetic method-count growth
+- add interoperability tests against `JMAP::Tester` and Fastmail-style client behavior, keeping those tests focused on canonical-state correctness rather than synthetic method-count growth
 
 

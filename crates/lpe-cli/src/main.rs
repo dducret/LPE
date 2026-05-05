@@ -47,6 +47,7 @@ async fn main() -> Result<()> {
     let worker_storage = storage.clone();
     let imap_storage = storage.clone();
     let managesieve_storage = storage.clone();
+    let journal_storage = storage.clone();
     let api_task = tokio::spawn(async move {
         axum::serve(listener, router(api_storage)).await?;
         Result::<()>::Ok(())
@@ -59,12 +60,15 @@ async fn main() -> Result<()> {
             .await
     });
     let worker_task = tokio::spawn(async move { run_outbound_worker(worker_storage).await });
+    let journal_task =
+        tokio::spawn(async move { run_jmap_journal_purge_worker(journal_storage).await });
 
     tokio::select! {
         result = api_task => result??,
         result = imap_task => result??,
         result = managesieve_task => result??,
         result = worker_task => result??,
+        result = journal_task => result??,
     }
 
     Ok(())
@@ -171,6 +175,46 @@ async fn run_outbound_worker(storage: Storage) -> Result<()> {
         }
 
         sleep(Duration::from_millis(interval_ms)).await;
+    }
+}
+
+async fn run_jmap_journal_purge_worker(storage: Storage) -> Result<()> {
+    let interval_secs = env::var("LPE_JMAP_JOURNAL_PURGE_INTERVAL_SECS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(3_600)
+        .max(60);
+
+    info!(
+        "lpe jmap journal purge worker active with interval {} seconds",
+        interval_secs
+    );
+
+    loop {
+        match ha_allows_active_work() {
+            Ok(true) => {}
+            Ok(false) => {
+                sleep(Duration::from_secs(interval_secs)).await;
+                continue;
+            }
+            Err(error) => {
+                warn!(error = %error, "jmap journal purge paused because HA role state is invalid");
+                sleep(Duration::from_secs(interval_secs)).await;
+                continue;
+            }
+        }
+
+        match storage.purge_canonical_change_journals().await {
+            Ok(purged) if purged > 0 => {
+                info!(purged, "purged retained canonical jmap journal rows");
+            }
+            Ok(_) => {}
+            Err(error) => {
+                warn!(error = %error, "failed to purge canonical jmap journal rows");
+            }
+        }
+
+        sleep(Duration::from_secs(interval_secs)).await;
     }
 }
 

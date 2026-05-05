@@ -79,6 +79,7 @@ pub struct DomainRecord {
     pub outbound_enabled: bool,
     pub default_quota_mb: u32,
     pub default_sieve_script: String,
+    pub jmap_push_journal_retention_days: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -239,6 +240,7 @@ pub struct NewDomain {
     pub inbound_enabled: bool,
     pub outbound_enabled: bool,
     pub default_sieve_script: String,
+    pub jmap_push_journal_retention_days: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -248,6 +250,7 @@ pub struct UpdateDomain {
     pub inbound_enabled: bool,
     pub outbound_enabled: bool,
     pub default_sieve_script: String,
+    pub jmap_push_journal_retention_days: u32,
 }
 
 #[derive(Debug, Clone)]
