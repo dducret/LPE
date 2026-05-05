@@ -574,11 +574,14 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let account_id = account_access.account_id;
         let ids = parse_uuid_list(arguments.ids)?;
         let properties = email_submission_properties(arguments.properties);
-        let ids_ref = ids.as_deref().unwrap_or(&[]);
         let submissions = if crate::mailboxes::mailbox_account_may_submit(&account_access) {
-            self.store
-                .fetch_jmap_email_submissions(account_id, ids_ref)
-                .await?
+            if ids.as_ref().is_some_and(Vec::is_empty) {
+                Vec::new()
+            } else {
+                self.store
+                    .fetch_jmap_email_submissions(account_id, ids.as_deref().unwrap_or(&[]))
+                    .await?
+            }
         } else {
             Vec::new()
         };

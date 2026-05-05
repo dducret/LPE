@@ -5083,6 +5083,11 @@ mod tests {
                             "identity".to_string(),
                         ),
                         JmapMethodCall(
+                            "EmailSubmission/get".to_string(),
+                            json!({"ids": []}),
+                            "submission".to_string(),
+                        ),
+                        JmapMethodCall(
                             "AddressBook/get".to_string(),
                             json!({"ids": []}),
                             "addressbook".to_string(),
