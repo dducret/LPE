@@ -25,6 +25,8 @@ const SUPPORTED_PUSH_DATA_TYPES: &[&str] = &[
     "Mailbox",
     "Email",
     "Thread",
+    "Identity",
+    "EmailSubmission",
     "AddressBook",
     "ContactCard",
     "Calendar",
@@ -404,13 +406,9 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         .iter()
                         .filter(|value| self.is_mail_push_type(value))
                     {
-                        let state = if data_type == "Mailbox" {
-                            self.mailbox_object_state(access).await?
-                        } else if matches!(data_type.as_str(), "Email" | "Thread") {
-                            self.mail_object_state(access, data_type).await?
-                        } else {
-                            self.object_state(account_id, data_type).await?
-                        };
+                        let state = self
+                            .mail_push_type_state(principal_account_id, access, data_type)
+                            .await?;
                         current_type_states
                             .entry(account_key.clone())
                             .or_default()
@@ -562,7 +560,38 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     }
 
     fn is_mail_push_type(&self, data_type: &str) -> bool {
-        matches!(data_type, "Mailbox" | "Email" | "Thread")
+        matches!(
+            data_type,
+            "Mailbox" | "Email" | "Thread" | "Identity" | "EmailSubmission"
+        )
+    }
+
+    async fn mail_push_type_state(
+        &self,
+        principal_account_id: Uuid,
+        access: &lpe_storage::MailboxAccountAccess,
+        data_type: &str,
+    ) -> Result<String> {
+        match data_type {
+            "Mailbox" => self.mailbox_object_state(access).await,
+            "Email" | "Thread" => self.mail_object_state(access, data_type).await,
+            "Identity" => {
+                if crate::mailboxes::mailbox_account_may_submit(access) {
+                    self.identity_object_state(principal_account_id, access.account_id)
+                        .await
+                } else {
+                    crate::state::encode_state(access.account_id, "Identity", Vec::new())
+                }
+            }
+            "EmailSubmission" => {
+                if crate::mailboxes::mailbox_account_may_submit(access) {
+                    self.email_submission_object_state(access.account_id).await
+                } else {
+                    crate::state::encode_state(access.account_id, "EmailSubmission", Vec::new())
+                }
+            }
+            _ => self.object_state(access.account_id, data_type).await,
+        }
     }
 
     pub(crate) async fn current_push_states(
@@ -583,14 +612,9 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             let mut account_states = HashMap::new();
             for data_type in data_types {
                 if self.is_mail_push_type(data_type) {
-                    let state = if data_type == "Mailbox" {
-                        self.mailbox_object_state(&mailbox_account).await?
-                    } else if matches!(data_type.as_str(), "Email" | "Thread") {
-                        self.mail_object_state(&mailbox_account, data_type).await?
-                    } else {
-                        self.object_state(mailbox_account.account_id, data_type)
-                            .await?
-                    };
+                    let state = self
+                        .mail_push_type_state(principal_account_id, &mailbox_account, data_type)
+                        .await?;
                     account_states.insert(data_type.clone(), state);
                 }
             }

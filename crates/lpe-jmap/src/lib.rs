@@ -5029,6 +5029,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn websocket_push_states_include_submission_identity_mail_types() {
+        let shared = FakeStore::shared_account();
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(true, false),
+            ],
+            sender_identities: vec![SenderIdentity {
+                id: format!("send-as:{}", shared.account_id),
+                owner_account_id: shared.account_id,
+                email: shared.email,
+                display_name: shared.display_name,
+                authorization_kind: "send-as".to_string(),
+                sender_address: None,
+                sender_display: None,
+            }],
+            ..Default::default()
+        });
+        let states = service
+            .current_push_states(
+                FakeStore::account().account_id,
+                &HashSet::from([
+                    "Identity".to_string(),
+                    "EmailSubmission".to_string(),
+                    "AddressBook".to_string(),
+                ]),
+            )
+            .await
+            .unwrap();
+
+        assert!(states[&FakeStore::account().account_id.to_string()].contains_key("Identity"));
+        assert!(
+            states[&FakeStore::account().account_id.to_string()].contains_key("EmailSubmission")
+        );
+        assert!(states[&shared.account_id.to_string()].contains_key("Identity"));
+        assert!(states[&shared.account_id.to_string()].contains_key("EmailSubmission"));
+        assert!(!states[&shared.account_id.to_string()].contains_key("AddressBook"));
+    }
+
+    #[tokio::test]
     async fn websocket_push_enable_sends_full_state_for_missing_or_stale_push_state() {
         let shared = FakeStore::shared_account();
         let service = JmapService::new(FakeStore {
@@ -5397,6 +5438,61 @@ mod tests {
             changed[&shared.account_id.to_string()]["Mailbox"],
             current_type_states[&shared.account_id.to_string()]["Mailbox"]
         );
+    }
+
+    #[tokio::test]
+    async fn scoped_push_change_reports_delegated_identity_right_changes() {
+        let account = FakeStore::account();
+        let shared = FakeStore::shared_account();
+        let enabled_types = HashSet::from(["Identity".to_string()]);
+        let initial_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(true, false),
+            ],
+            sender_identities: vec![SenderIdentity {
+                id: format!("send-as:{}", shared.account_id),
+                owner_account_id: shared.account_id,
+                email: shared.email.clone(),
+                display_name: shared.display_name.clone(),
+                authorization_kind: "send-as".to_string(),
+                sender_address: None,
+                sender_display: None,
+            }],
+            ..Default::default()
+        });
+        let last_type_states = initial_service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+        let subscription = push_subscription(enabled_types, last_type_states);
+
+        let updated_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            ..Default::default()
+        });
+        let mut change_set = CanonicalPushChangeSet::default();
+        change_set.insert_accounts(CanonicalChangeCategory::Mail, [shared.account_id]);
+
+        let (changed, current_type_states) = updated_service
+            .compute_push_changes(account.account_id, &subscription, &change_set)
+            .await
+            .unwrap();
+
+        let shared_identity_state = &changed[&shared.account_id.to_string()]["Identity"];
+        assert_eq!(
+            shared_identity_state,
+            &current_type_states[&shared.account_id.to_string()]["Identity"]
+        );
+        assert!(decode_state(shared_identity_state)
+            .unwrap()
+            .entries
+            .is_empty());
     }
 
     #[tokio::test]
