@@ -256,6 +256,10 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     "EmailSubmission/get" => {
                         self.handle_email_submission_get(account, arguments).await
                     }
+                    "EmailSubmission/changes" => {
+                        self.handle_email_submission_changes(account, arguments)
+                            .await
+                    }
                     "EmailSubmission/set" => {
                         self.handle_email_submission_set(account, arguments, &mut created_ids)
                             .await
@@ -312,6 +316,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                             .await
                     }
                     "Identity/get" => self.handle_identity_get(account, arguments).await,
+                    "Identity/changes" => self.handle_identity_changes(account, arguments).await,
                     "Thread/query" => self.handle_thread_query(account, arguments).await,
                     "Thread/queryChanges" => {
                         self.handle_thread_query_changes(account, arguments).await
@@ -410,18 +415,27 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     }
 
     pub(crate) async fn email_submission_object_state(&self, account_id: Uuid) -> Result<String> {
+        let entries = self
+            .email_submission_object_state_entries(account_id)
+            .await?;
+        encode_state(account_id, "EmailSubmission", entries)
+    }
+
+    pub(crate) async fn email_submission_object_state_entries(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Vec<StateEntry>> {
         let submissions = self
             .store
             .fetch_jmap_email_submissions(account_id, &[])
             .await?;
-        let entries = submissions
+        Ok(submissions
             .into_iter()
             .map(|submission| StateEntry {
                 id: submission.id.to_string(),
                 fingerprint: email_submission_state_fingerprint(&submission),
             })
-            .collect();
-        encode_state(account_id, "EmailSubmission", entries)
+            .collect())
     }
 
     pub(crate) async fn identity_object_state(
@@ -429,18 +443,28 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         principal_account_id: Uuid,
         target_account_id: Uuid,
     ) -> Result<String> {
+        let entries = self
+            .identity_object_state_entries(principal_account_id, target_account_id)
+            .await?;
+        encode_state(target_account_id, "Identity", entries)
+    }
+
+    pub(crate) async fn identity_object_state_entries(
+        &self,
+        principal_account_id: Uuid,
+        target_account_id: Uuid,
+    ) -> Result<Vec<StateEntry>> {
         let identities = self
             .store
             .fetch_sender_identities(principal_account_id, target_account_id)
             .await?;
-        let entries = identities
+        Ok(identities
             .into_iter()
             .map(|identity| StateEntry {
                 id: identity.id.clone(),
                 fingerprint: identity_state_fingerprint(&identity),
             })
-            .collect();
-        encode_state(target_account_id, "Identity", entries)
+            .collect())
     }
 
     pub(crate) async fn mail_object_state_entries(
@@ -723,9 +747,11 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         | "Thread/changes"
         | "Quota/get"
         | "SearchSnippet/get" => Some(JMAP_MAIL_CAPABILITY),
-        "EmailSubmission/get" | "EmailSubmission/set" | "Identity/get" => {
-            Some(JMAP_SUBMISSION_CAPABILITY)
-        }
+        "EmailSubmission/get"
+        | "EmailSubmission/changes"
+        | "EmailSubmission/set"
+        | "Identity/get"
+        | "Identity/changes" => Some(JMAP_SUBMISSION_CAPABILITY),
         "AddressBook/get"
         | "AddressBook/query"
         | "AddressBook/queryChanges"

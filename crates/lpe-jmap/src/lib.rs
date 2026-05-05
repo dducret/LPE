@@ -1635,6 +1635,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn email_submission_get_hides_shared_account_without_submit_rights() {
+        let submission = FakeStore::email_submission();
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            accessible_mailbox_accounts: vec![
+                FakeStore::mailbox_access(),
+                FakeStore::shared_mailbox_access(false, false),
+            ],
+            email_submissions: vec![submission.clone()],
+            ..Default::default()
+        });
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "EmailSubmission/get".to_string(),
+                            json!({
+                                "accountId": FakeStore::shared_account().account_id.to_string(),
+                                "ids": [submission.id.to_string()]
+                            }),
+                            "c1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "EmailSubmission/changes".to_string(),
+                            json!({
+                                "accountId": FakeStore::shared_account().account_id.to_string(),
+                                "sinceState": "0"
+                            }),
+                            "c2".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(response.method_responses[0].1["list"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            response.method_responses[0].1["notFound"],
+            json!([submission.id.to_string()])
+        );
+        assert!(response.method_responses[1].1["created"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
     async fn session_omits_submission_for_read_only_shared_mailbox_with_sender_grant() {
         let store = FakeStore {
             session: Some(FakeStore::account()),
@@ -3422,6 +3480,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn identity_changes_tracks_sender_identity_projection() {
+        let account = FakeStore::account();
+        let identity = FakeStore::sender_identity();
+        let service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            sender_identities: vec![identity.clone()],
+            ..Default::default()
+        });
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "Identity/changes".to_string(),
+                        json!({"sinceState": "0"}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.method_responses[0].0, "Identity/changes");
+        assert_eq!(
+            response.method_responses[0].1["created"],
+            json!([identity.id])
+        );
+        assert_eq!(
+            decode_state(response.method_responses[0].1["newState"].as_str().unwrap())
+                .unwrap()
+                .kind,
+            "Identity"
+        );
+    }
+
+    #[tokio::test]
     async fn email_submission_get_state_tracks_submission_rows() {
         let queued = FakeStore::email_submission();
         let mut delivered = queued.clone();
@@ -3484,6 +3583,46 @@ mod tests {
         assert_eq!(decoded.entries.len(), 1);
         assert_eq!(decoded.entries[0].id, queued.id.to_string());
         assert_ne!(queued_state, delivered_state);
+    }
+
+    #[tokio::test]
+    async fn email_submission_changes_tracks_submission_rows() {
+        let queued = FakeStore::email_submission();
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            email_submissions: vec![queued.clone()],
+            ..Default::default()
+        });
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "EmailSubmission/changes".to_string(),
+                        json!({"sinceState": "0"}),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.method_responses[0].0, "EmailSubmission/changes");
+        assert_eq!(
+            response.method_responses[0].1["created"],
+            json!([queued.id.to_string()])
+        );
+        assert_eq!(
+            decode_state(response.method_responses[0].1["newState"].as_str().unwrap())
+                .unwrap()
+                .kind,
+            "EmailSubmission"
+        );
     }
 
     #[tokio::test]

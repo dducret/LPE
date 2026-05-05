@@ -571,17 +571,24 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let ids = parse_uuid_list(arguments.ids)?;
         let properties = email_submission_properties(arguments.properties);
         let ids_ref = ids.as_deref().unwrap_or(&[]);
-        let submissions = self
-            .store
-            .fetch_jmap_email_submissions(account_id, ids_ref)
-            .await?;
+        let submissions = if crate::mailboxes::mailbox_account_may_submit(&account_access) {
+            self.store
+                .fetch_jmap_email_submissions(account_id, ids_ref)
+                .await?
+        } else {
+            Vec::new()
+        };
         let not_found = ids
             .unwrap_or_default()
             .into_iter()
             .filter(|id| !submissions.iter().any(|submission| submission.id == *id))
             .map(|id| Value::String(id.to_string()))
             .collect::<Vec<_>>();
-        let state = self.email_submission_object_state(account_id).await?;
+        let state = if crate::mailboxes::mailbox_account_may_submit(&account_access) {
+            self.email_submission_object_state(account_id).await?
+        } else {
+            crate::state::encode_state(account_id, "EmailSubmission", Vec::new())?
+        };
 
         Ok(json!({
             "accountId": account_id.to_string(),
@@ -592,6 +599,31 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 .collect::<Vec<_>>(),
             "notFound": not_found,
         }))
+    }
+
+    pub(crate) async fn handle_email_submission_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: ChangesArguments = serde_json::from_value(arguments)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
+        let entries = if crate::mailboxes::mailbox_account_may_submit(&account_access) {
+            self.email_submission_object_state_entries(account_id)
+                .await?
+        } else {
+            Vec::new()
+        };
+        changes_response(
+            account_id,
+            "EmailSubmission",
+            &arguments.since_state,
+            arguments.max_changes,
+            entries,
+        )
     }
 
     pub(crate) async fn handle_identity_get(
@@ -636,6 +668,31 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             "list": list,
             "notFound": not_found,
         }))
+    }
+
+    pub(crate) async fn handle_identity_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: ChangesArguments = serde_json::from_value(arguments)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
+        let entries = if crate::mailboxes::mailbox_account_may_submit(&account_access) {
+            self.identity_object_state_entries(account.account_id, account_id)
+                .await?
+        } else {
+            Vec::new()
+        };
+        changes_response(
+            account_id,
+            "Identity",
+            &arguments.since_state,
+            arguments.max_changes,
+            entries,
+        )
     }
 
     pub(crate) async fn handle_thread_query(

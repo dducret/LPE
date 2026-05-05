@@ -42,8 +42,10 @@ The WebSocket capability is advertised only when the `/jmap/ws` endpoint is actu
 - `Email/copy`
 - `Email/import`
 - `EmailSubmission/get`
+- `EmailSubmission/changes`
 - `EmailSubmission/set` for draft submission through the canonical `LPE` submission model
 - `Identity/get`
+- `Identity/changes`
 - `Thread/query`
 - `Thread/queryChanges`
 - `Thread/get`
@@ -97,8 +99,8 @@ Additional supported `JMAP` routes:
 - one `LPE` email currently belongs to one `LPE` mailbox, so `mailboxIds` contains one entry
 - `EmailSubmission/set` currently supports only `create`
 - `EmailSubmission/set` expects an existing draft through `emailId` or a resolved creation reference in the same request
-- `EmailSubmission/get` and `EmailSubmission/set` return state tokens derived from canonical outbound submission rows, not from general `Email` state, so delivery-status and queue-row changes are visible to incremental clients
-- `Identity/get` exposes the standard MVP fields plus `LPE`-specific delegated-sender metadata for clients that request it, and returns a state token derived from the canonical sender-identity projection for the authenticated principal and requested mailbox account
+- `EmailSubmission/get`, `EmailSubmission/changes`, and `EmailSubmission/set` return state tokens derived from canonical outbound submission rows, not from general `Email` state, so delivery-status and queue-row changes are visible to incremental clients; shared accounts without canonical submission rights return an empty submission projection
+- `Identity/get` exposes the standard MVP fields plus `LPE`-specific delegated-sender metadata for clients that request it, and `Identity/changes` returns state changes derived from the canonical sender-identity projection for the authenticated principal and requested mailbox account
 - `Mailbox/set` cannot modify or delete system mailboxes (`Inbox`, `Sent`, `Drafts`, etc.)
 - `Email/copy` currently supports only same-account copy
 - `Email/import` consumes a validated `message/rfc822` blob, extracts visible multipart text with plaintext preference, preserves a first HTML body when available, validates each imported attachment with `Magika`, trims structural multipart boundary line endings from imported attachment bytes, and imports multipart attachments into the canonical attachment pipeline
