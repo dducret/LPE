@@ -1,11 +1,14 @@
 use axum::{
     body::Bytes,
+    extract::{Path, Query},
     http::{header::CONTENT_TYPE, header::LOCATION, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
-    Router,
+    Json, Router,
 };
 use lpe_storage::Storage;
+use serde::Deserialize;
+use serde_json::json;
 use std::env;
 
 pub fn router() -> Router<Storage> {
@@ -20,12 +23,28 @@ pub fn router() -> Router<Storage> {
         )
         .route("/.well-known/jmap", get(jmap_well_known))
         .route(
+            "/autodiscover",
+            get(outlook_autodiscover_get).post(outlook_autodiscover_post),
+        )
+        .route(
+            "/Autodiscover",
+            get(outlook_autodiscover_get).post(outlook_autodiscover_post),
+        )
+        .route(
             "/autodiscover/autodiscover.xml",
             get(outlook_autodiscover_get).post(outlook_autodiscover_post),
         )
         .route(
             "/Autodiscover/Autodiscover.xml",
             get(outlook_autodiscover_get).post(outlook_autodiscover_post),
+        )
+        .route(
+            "/autodiscover/autodiscover.json/v1.0/{email}",
+            get(outlook_autodiscover_json),
+        )
+        .route(
+            "/Autodiscover/Autodiscover.json/v1.0/{email}",
+            get(outlook_autodiscover_json),
         )
 }
 
@@ -76,6 +95,30 @@ async fn outlook_autodiscover_post(headers: HeaderMap, body: Bytes) -> Response 
     xml_response(response)
 }
 
+#[derive(Debug, Deserialize)]
+struct AutodiscoverJsonQuery {
+    #[serde(rename = "Protocol", alias = "protocol")]
+    protocol: Option<String>,
+}
+
+async fn outlook_autodiscover_json(
+    headers: HeaderMap,
+    Path(email): Path<String>,
+    Query(query): Query<AutodiscoverJsonQuery>,
+) -> Response {
+    let endpoints = PublishedEndpoints::from_headers(&headers, Some(&email));
+    match render_autodiscover_json(&endpoints, query.protocol.as_deref()) {
+        Some(response) => response,
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "Error": "requested Autodiscover protocol is not published"
+            })),
+        )
+            .into_response(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PublishedEndpoints {
     display_domain: String,
@@ -94,6 +137,7 @@ struct PublishedEndpoints {
     mapi_nspi_url: String,
     activesync_url: String,
     jmap_session_url: String,
+    autodiscover_xml_url: String,
 }
 
 impl PublishedEndpoints {
@@ -122,6 +166,8 @@ impl PublishedEndpoints {
 
         let jmap_session_url = env::var("LPE_AUTOCONFIG_JMAP_SESSION_URL")
             .unwrap_or_else(|_| format!("{public_scheme}://{public_host}/api/jmap/session"));
+        let autodiscover_xml_url =
+            format!("{public_scheme}://{public_host}/autodiscover/autodiscover.xml");
         let ews_enabled = env_flag("LPE_AUTOCONFIG_EWS_ENABLED");
         let ews_url = env::var("LPE_AUTOCONFIG_EWS_URL")
             .unwrap_or_else(|_| format!("{public_scheme}://{public_host}/EWS/Exchange.asmx"));
@@ -162,6 +208,7 @@ impl PublishedEndpoints {
             mapi_nspi_url,
             activesync_url,
             jmap_session_url,
+            autodiscover_xml_url,
         }
     }
 
@@ -172,6 +219,34 @@ impl PublishedEndpoints {
     fn soap_exchange_autodiscover_enabled(&self) -> bool {
         self.soap_exchange_autodiscover_enabled && self.exchange_autodiscover_enabled()
     }
+}
+
+fn render_autodiscover_json(
+    config: &PublishedEndpoints,
+    protocol: Option<&str>,
+) -> Option<Response> {
+    let requested = protocol
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("AutodiscoverV1");
+    let (protocol, url) = match requested.to_ascii_lowercase().as_str() {
+        "autodiscoverv1" | "autodiscover" => {
+            ("AutoDiscoverV1", config.autodiscover_xml_url.as_str())
+        }
+        "ews" if config.ews_enabled => ("EWS", config.ews_url.as_str()),
+        "activesync" | "mobilesync" => ("ActiveSync", config.activesync_url.as_str()),
+        "jmap" => ("JMAP", config.jmap_session_url.as_str()),
+        "mapihttp" if config.mapi_enabled => ("MapiHttp", config.mapi_emsmdb_url.as_str()),
+        _ => return None,
+    };
+
+    Some(
+        Json(json!({
+            "Protocol": protocol,
+            "Url": url,
+        }))
+        .into_response(),
+    )
 }
 
 fn render_thunderbird_autoconfig(config: &PublishedEndpoints) -> String {
@@ -795,12 +870,13 @@ fn xml_response(body: String) -> Response {
 #[cfg(test)]
 mod tests {
     use super::{
-        jmap_well_known_location, parse_autodiscover_email, render_mobilesync_autodiscover,
-        render_outlook_autodiscover, render_soap_user_settings_autodiscover,
-        render_soap_user_settings_response, render_thunderbird_autoconfig,
-        requested_mobilesync_schema, requested_soap_user_settings, PublishedEndpoints,
+        jmap_well_known_location, parse_autodiscover_email, render_autodiscover_json,
+        render_mobilesync_autodiscover, render_outlook_autodiscover,
+        render_soap_user_settings_autodiscover, render_soap_user_settings_response,
+        render_thunderbird_autoconfig, requested_mobilesync_schema, requested_soap_user_settings,
+        PublishedEndpoints,
     };
-    use axum::http::HeaderMap;
+    use axum::{body, http::HeaderMap};
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -825,6 +901,8 @@ mod tests {
                 .to_string(),
             activesync_url: "https://mail.example.test/Microsoft-Server-ActiveSync".to_string(),
             jmap_session_url: "https://mail.example.test/api/jmap/session".to_string(),
+            autodiscover_xml_url: "https://mail.example.test/autodiscover/autodiscover.xml"
+                .to_string(),
         }
     }
 
@@ -877,6 +955,68 @@ mod tests {
             "https://jmap.example.test/.well-known/jmap-session"
         );
         std::env::remove_var("LPE_AUTOCONFIG_JMAP_SESSION_URL");
+    }
+
+    #[tokio::test]
+    async fn autodiscover_json_defaults_to_pox_endpoint() {
+        let response = render_autodiscover_json(&sample_config(), None)
+            .expect("default AutodiscoverV1 response should be published");
+
+        assert_eq!(response.status(), 200);
+        let body = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["Protocol"], "AutoDiscoverV1");
+        assert_eq!(
+            payload["Url"],
+            "https://mail.example.test/autodiscover/autodiscover.xml"
+        );
+    }
+
+    #[tokio::test]
+    async fn autodiscover_json_publishes_ews_only_when_enabled() {
+        assert!(render_autodiscover_json(&sample_config(), Some("EWS")).is_none());
+
+        let config = PublishedEndpoints {
+            ews_enabled: true,
+            ..sample_config()
+        };
+        let response = render_autodiscover_json(&config, Some("EWS"))
+            .expect("EWS JSON discovery should be published when EWS is enabled");
+        let body = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["Protocol"], "EWS");
+        assert_eq!(
+            payload["Url"],
+            "https://mail.example.test/EWS/Exchange.asmx"
+        );
+    }
+
+    #[tokio::test]
+    async fn autodiscover_json_keeps_mapi_publication_gated() {
+        assert!(render_autodiscover_json(&sample_config(), Some("MapiHttp")).is_none());
+
+        let config = PublishedEndpoints {
+            mapi_enabled: true,
+            ..sample_config()
+        };
+        let response = render_autodiscover_json(&config, Some("MapiHttp"))
+            .expect("MAPI JSON discovery should be published when MAPI is enabled");
+        let body = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["Protocol"], "MapiHttp");
+        assert_eq!(
+            payload["Url"],
+            "https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test"
+        );
     }
 
     #[test]

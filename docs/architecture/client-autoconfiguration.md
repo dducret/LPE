@@ -10,10 +10,16 @@ The guiding principle is strict: publish only what is actually implemented and e
 
 - `GET /autoconfig/mail/config-v1.1.xml`
 - `GET /.well-known/autoconfig/mail/config-v1.1.xml`
+- `GET /autodiscover`
+- `POST /autodiscover`
 - `GET /autodiscover/autodiscover.xml`
 - `POST /autodiscover/autodiscover.xml`
+- `GET /autodiscover/autodiscover.json/v1.0/{email}`
+- `GET /Autodiscover`
+- `POST /Autodiscover`
 - `GET /Autodiscover/Autodiscover.xml`
 - `POST /Autodiscover/Autodiscover.xml`
+- `GET /Autodiscover/Autodiscover.json/v1.0/{email}`
 - `OPTIONS /EWS/Exchange.asmx`
 - `POST /EWS/Exchange.asmx`
 - `OPTIONS /ews/exchange.asmx`
@@ -76,6 +82,8 @@ SOAP autodiscover returns `MapiHttpEnabled` as `True` only when MAPI publication
 The `0.1.3` `EWS` endpoint is the Exchange-style compatibility focus for mailbox, contacts, and calendar synchronization. Autodiscovery publishes it only when `LPE_AUTOCONFIG_EWS_ENABLED` is explicitly set to a true value. This keeps `EWS` publication an administrator choice until the deployment accepts the current MVP limits.
 
 When `EWS` autodiscovery is enabled, the POX response publishes the configured `/EWS/Exchange.asmx` URL through a `WEB` protocol block with an `ASUrl`. This gives EWS-aware clients such as Thunderbird a discovery path without advertising top-level `EXCH` or `EXPR` mailbox protocols that Outlook for Windows desktop treats as a full Exchange/MAPI route.
+
+Autodiscover v2 JSON is exposed at `/autodiscover/autodiscover.json/v1.0/{email}` and the case-tolerant `/Autodiscover/Autodiscover.json/v1.0/{email}` form for endpoint probes that ask for a single protocol URL. `Protocol=AutoDiscoverV1` returns the canonical POX URL, `Protocol=EWS` returns the configured EWS URL only when `LPE_AUTOCONFIG_EWS_ENABLED` is enabled, `Protocol=MapiHttp` returns the configured EMSMDB URL only when `LPE_AUTOCONFIG_MAPI_ENABLED` is enabled, and `Protocol=ActiveSync` / `MobileSync` returns the ActiveSync endpoint for mobile-client probes. `Protocol=JMAP` returns the configured public JMAP session URL as an LPE-specific convenience; it is not an Exchange desktop route.
 
 Autodiscover responses include the POX `Response`, `User`, `Account`, and `Protocol` shape expected by Microsoft clients. The `User` block stays limited to the POX fields Microsoft documents for Outlook responses: `DisplayName`, `LegacyDN`, `AutoDiscoverSMTPAddress`, and `DeploymentId`. The request parser accepts both unprefixed and namespace-prefixed request elements, including the `a:EMailAddress` form used by Microsoft connectivity tooling. In legacy Exchange autodiscover interoperability-test mode, POX `EXCH` / `EXPR` provider sections are compatibility metadata for Outlook setup validation and must still route subsequent mailbox access through the implemented `MAPI over HTTP` and canonical `LPE` mailbox layers; they do not introduce a separate `RPC` or Outlook Anywhere implementation. That legacy mode must not be enabled on deployments where Outlook desktop is expected to create an `IMAP` account from autodiscover.
 
@@ -145,6 +153,7 @@ For a domain `example.test`:
 - publish `autoconfig.example.test` or `mail.example.test` toward the public `LPE-CT` front end
 - publish `autodiscover.example.test` or reuse `mail.example.test` toward the same front end
 - re-expose the `/autoconfig/...`, `/.well-known/autoconfig/...`, `/autodiscover/...`, `/Autodiscover/...`, `/Microsoft-Server-ActiveSync`, `/EWS/Exchange.asmx`, `/ews/exchange.asmx`, and `/mapi/...` routes over HTTPS
+- re-expose the bare `/autodiscover` and `/Autodiscover` routes as compatibility aliases for clients and test probes that omit `/autodiscover.xml`
 - re-expose `/api/mail/auth/login`, `/api/jmap/session`, `/api/jmap/api`, `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`, `/api/jmap/ws`, and `/.well-known/jmap` from `LPE-CT` to the core `LPE` service
 - publish `IMAPS` on the same hostname when native `IMAP` access is exposed
 - publish the authenticated `SMTPS` submission listener only when `LPE-CT` really exposes it

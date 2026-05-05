@@ -624,10 +624,12 @@ and `/api/jmap/ws`.
 
 `LPE-CT` must also publish the public client configuration, `ActiveSync`, EWS,
 and guarded MAPI paths: `/Microsoft-Server-ActiveSync`, `/mapi/`,
-`/EWS/Exchange.asmx`, `/ews/exchange.asmx`, `/autodiscover/`,
-`/Autodiscover/`, `/autoconfig/`, and `/.well-known/autoconfig/`. A healthy
-public publication returns an Outlook autodiscover XML response containing
-`IMAP`, an opt-in `WEB` EWS discovery block when
+`/EWS/Exchange.asmx`, `/ews/exchange.asmx`, `/autodiscover`,
+`/autodiscover/`, `/Autodiscover`, `/Autodiscover/`, `/autoconfig/`,
+`/.well-known/autoconfig/`, and `/.well-known/jmap`. A healthy public
+publication returns an Outlook autodiscover XML response containing `IMAP`,
+an Autodiscover v2 JSON response for single-protocol endpoint probes, an
+opt-in `WEB` EWS discovery block when
 `LPE_AUTOCONFIG_EWS_ENABLED` is enabled, an opt-in `mapiHttp` block when
 `LPE_AUTOCONFIG_MAPI_ENABLED` is enabled, or legacy `EXCH` / `EXPR` provider
 sections only when `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` is
