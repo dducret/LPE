@@ -493,7 +493,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         if !crate::mailboxes::mailbox_account_may_submit(&account_access) {
             bail!("sender delegation is required to submit from a delegated mailbox");
         }
-        let old_state = self.mail_object_state(&account_access, "Email").await?;
+        let old_state = self.email_submission_object_state(account_id).await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
 
@@ -548,7 +548,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             }
         }
 
-        let new_state = self.mail_object_state(&account_access, "Email").await?;
+        let new_state = self.email_submission_object_state(account_id).await?;
         Ok(json!({
             "accountId": account_id.to_string(),
             "oldState": old_state,

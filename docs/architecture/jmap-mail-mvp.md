@@ -97,7 +97,7 @@ Additional supported `JMAP` routes:
 - one `LPE` email currently belongs to one `LPE` mailbox, so `mailboxIds` contains one entry
 - `EmailSubmission/set` currently supports only `create`
 - `EmailSubmission/set` expects an existing draft through `emailId` or a resolved creation reference in the same request
-- `EmailSubmission/get` returns a state token derived from canonical outbound submission rows, not from general `Email` state, so delivery-status and queue-row changes are visible to incremental clients
+- `EmailSubmission/get` and `EmailSubmission/set` return state tokens derived from canonical outbound submission rows, not from general `Email` state, so delivery-status and queue-row changes are visible to incremental clients
 - `Identity/get` exposes the standard MVP fields plus `LPE`-specific delegated-sender metadata for clients that request it, and returns a state token derived from the canonical sender-identity projection for the authenticated principal and requested mailbox account
 - `Mailbox/set` cannot modify or delete system mailboxes (`Inbox`, `Sent`, `Drafts`, etc.)
 - `Email/copy` currently supports only same-account copy

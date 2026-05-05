@@ -2296,6 +2296,18 @@ mod tests {
         assert!(store.saved_drafts.lock().unwrap().is_empty());
         let payload = &response.method_responses[0].1;
         assert_eq!(
+            decode_state(payload["oldState"].as_str().unwrap())
+                .unwrap()
+                .kind,
+            "EmailSubmission"
+        );
+        assert_eq!(
+            decode_state(payload["newState"].as_str().unwrap())
+                .unwrap()
+                .kind,
+            "EmailSubmission"
+        );
+        assert_eq!(
             payload["created"]["send1"]["id"],
             Value::String("11111111-2222-3333-4444-555555555555".to_string())
         );
