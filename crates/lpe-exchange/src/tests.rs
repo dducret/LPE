@@ -2784,7 +2784,7 @@ async fn get_server_time_zones_returns_minimal_definitions() {
 }
 
 #[tokio::test]
-async fn resolve_names_returns_ews_no_results_error() {
+async fn resolve_names_returns_authenticated_mailbox_match() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -2801,9 +2801,36 @@ async fn resolve_names_returns_ews_no_results_error() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
+    assert!(body.contains("<m:ResolveNamesResponseMessage ResponseClass=\"Success\">"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<m:ResolutionSet TotalItemsInView=\"1\""));
+    assert!(body.contains("<t:Name>Alice</t:Name>"));
+    assert!(body.contains("<t:EmailAddress>alice@example.test</t:EmailAddress>"));
+    assert!(body.contains("<t:MailboxType>Mailbox</t:MailboxType>"));
+    assert!(body.contains("<t:ServerVersionInfo"));
+}
+
+#[tokio::test]
+async fn resolve_names_returns_no_results_for_non_directory_names() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ResolveNames><m:UnresolvedEntry>bob</m:UnresolvedEntry></m:ResolveNames></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
     assert!(body.contains("<m:ResolveNamesResponseMessage ResponseClass=\"Error\">"));
     assert!(body.contains("<m:ResponseCode>ErrorNameResolutionNoResults</m:ResponseCode>"));
-    assert!(body.contains("<t:ServerVersionInfo"));
+    assert!(!body.contains("bob@example.test"));
 }
 
 #[tokio::test]

@@ -174,7 +174,7 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
                     )
                 }),
             "GetServerTimeZones" => get_server_time_zones_response(),
-            "ResolveNames" => resolve_names_no_results_response(),
+            "ResolveNames" => resolve_names_response(&principal, &body),
             "GetUserAvailability" => self.get_user_availability(&principal, &body).await?,
             "CreateItem" => self.create_item(&principal, &body).await?,
             "UpdateItem" => self.update_item(&principal, &body).await?,
@@ -3930,6 +3930,42 @@ fn resolve_names_no_results_response() -> String {
         "</m:ResolveNamesResponse>"
     )
     .to_string()
+}
+
+fn resolve_names_response(principal: &AccountPrincipal, request: &str) -> String {
+    let query = element_text(request, "UnresolvedEntry")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    let email = principal.email.to_ascii_lowercase();
+    let display_name = principal.display_name.to_ascii_lowercase();
+    if query.is_empty() || (!email.contains(&query) && !display_name.contains(&query)) {
+        return resolve_names_no_results_response();
+    }
+
+    format!(
+        concat!(
+            "<m:ResolveNamesResponse>",
+            "<m:ResponseMessages>",
+            "<m:ResolveNamesResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:ResolutionSet TotalItemsInView=\"1\" IncludesLastItemInRange=\"true\">",
+            "<t:Resolution>",
+            "<t:Mailbox>",
+            "<t:Name>{}</t:Name>",
+            "<t:EmailAddress>{}</t:EmailAddress>",
+            "<t:RoutingType>SMTP</t:RoutingType>",
+            "<t:MailboxType>Mailbox</t:MailboxType>",
+            "</t:Mailbox>",
+            "</t:Resolution>",
+            "</m:ResolutionSet>",
+            "</m:ResolveNamesResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:ResolveNamesResponse>"
+        ),
+        escape_xml(&principal.display_name),
+        escape_xml(&principal.email),
+    )
 }
 
 fn get_user_availability_success_response(events: &[AccessibleEvent]) -> String {
