@@ -118,6 +118,27 @@ def check_get_user_oof_settings(client: EwsClient) -> None:
     )
 
 
+def check_resolve_names(client: EwsClient) -> None:
+    payload = client.call(
+        "ResolveNames",
+        f"""
+        <m:ResolveNames ReturnFullContactData="false">
+          <m:UnresolvedEntry>{xml_escape(client.email)}</m:UnresolvedEntry>
+        </m:ResolveNames>
+        """,
+    )
+    require_all(
+        "ResolveNames",
+        payload,
+        [
+            "<m:ResolveNamesResponse>",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:ResolutionSet TotalItemsInView=\"1\"",
+            f"<t:EmailAddress>{xml_escape(client.email)}</t:EmailAddress>",
+        ],
+    )
+
+
 def check_get_user_availability(client: EwsClient) -> None:
     start = datetime.now(timezone.utc).replace(microsecond=0)
     end = start + timedelta(days=14)
@@ -222,6 +243,7 @@ def main() -> int:
     checks = [
         check_get_server_time_zones,
         check_find_folder,
+        check_resolve_names,
         check_get_user_oof_settings,
         check_get_user_availability,
     ]

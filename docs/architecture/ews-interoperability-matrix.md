@@ -21,6 +21,7 @@ The default checks are read-only:
 
 - `GetServerTimeZones` returns the minimal supported time-zone catalog
 - `FindFolder` exposes mailbox, contacts, calendar, and task folders
+- `ResolveNames` resolves the authenticated mailbox identity
 - `GetUserOofSettings` projects canonical `Sieve` vacation state
 - `GetUserAvailability` returns authenticated-mailbox busy blocks
 
@@ -32,7 +33,7 @@ interoperability testing.
 
 Run these checks before enabling `LPE_AUTOCONFIG_EWS_ENABLED` for a deployment:
 
-- `EWS-01`: live smoke harness read-only mode against the public HTTPS endpoint
+- `EWS-01`: live smoke harness read-only mode against the public HTTPS endpoint, including authenticated-mailbox `ResolveNames`
 - `EWS-02`: live smoke harness `--mutating` mode against a disposable test mailbox
 - `EWS-03`: day-two `SyncFolderItems` replay for mailbox, contacts, calendar, and tasks
 - `EWS-04`: attachment get/create/delete with `Magika` validation and MIME export
