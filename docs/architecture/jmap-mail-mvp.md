@@ -121,7 +121,8 @@ Additional supported `JMAP` routes:
 - when reconnect recovery or a live push wakeup sees the canonical journal cursor advance without a subscribed object-state fingerprint change, `lpe-jmap` may emit a `StateChange` with an empty `changed` map so clients receive a fresher `pushState` cursor and avoid unnecessary future full-snapshot fallbacks
 - mail push state spans every mailbox account visible through canonical mailbox delegation so one authenticated session can receive `StateChange` payloads for owned and delegated mailboxes without a protocol-local sharing cache
 - collaboration and task push stay principal-scoped: shared contacts, calendars, and task lists notify every affected principal account, while mailbox push still spans the canonical owner plus delegated mailbox readers
-- supported push data types are limited to `Mailbox`, `Email`, `Thread`, `Identity`, `EmailSubmission`, `AddressBook`, `ContactCard`, `Calendar`, `CalendarEvent`, `TaskList`, and `Task`
+- supported push data types are limited to `Mailbox`, `Email`, `Thread`, `EmailDelivery`, `Identity`, `EmailSubmission`, `AddressBook`, `ContactCard`, `Calendar`, `CalendarEvent`, `TaskList`, and `Task`
+- `EmailDelivery` is a push-only state type derived from canonical message delivery presence; it changes for newly visible messages without exposing another method or local delivery cache
 - `VacationResponse/get` and `VacationResponse/set` project the authenticated account's canonical active `Sieve` script; `set` patch updates preserve omitted singleton fields from that projection, writes a bounded `jmap-vacation` Sieve script or disables the active script, and does not introduce a separate `JMAP` vacation store
 
 ### Next methods to add

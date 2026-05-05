@@ -25,6 +25,7 @@ const SUPPORTED_PUSH_DATA_TYPES: &[&str] = &[
     "Mailbox",
     "Email",
     "Thread",
+    "EmailDelivery",
     "Identity",
     "EmailSubmission",
     "AddressBook",
@@ -562,7 +563,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     fn is_mail_push_type(&self, data_type: &str) -> bool {
         matches!(
             data_type,
-            "Mailbox" | "Email" | "Thread" | "Identity" | "EmailSubmission"
+            "Mailbox" | "Email" | "Thread" | "EmailDelivery" | "Identity" | "EmailSubmission"
         )
     }
 
@@ -575,6 +576,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         match data_type {
             "Mailbox" => self.mailbox_object_state(access).await,
             "Email" | "Thread" => self.mail_object_state(access, data_type).await,
+            "EmailDelivery" => self.email_delivery_object_state(access.account_id).await,
             "Identity" => {
                 if crate::mailboxes::mailbox_account_may_submit(access) {
                     self.identity_object_state(principal_account_id, access.account_id)

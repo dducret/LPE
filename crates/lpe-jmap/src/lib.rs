@@ -5279,6 +5279,7 @@ mod tests {
                 &HashSet::from([
                     "Identity".to_string(),
                     "EmailSubmission".to_string(),
+                    "EmailDelivery".to_string(),
                     "AddressBook".to_string(),
                 ]),
             )
@@ -5289,8 +5290,10 @@ mod tests {
         assert!(
             states[&FakeStore::account().account_id.to_string()].contains_key("EmailSubmission")
         );
+        assert!(states[&FakeStore::account().account_id.to_string()].contains_key("EmailDelivery"));
         assert!(states[&shared.account_id.to_string()].contains_key("Identity"));
         assert!(states[&shared.account_id.to_string()].contains_key("EmailSubmission"));
+        assert!(states[&shared.account_id.to_string()].contains_key("EmailDelivery"));
         assert!(!states[&shared.account_id.to_string()].contains_key("AddressBook"));
     }
 
@@ -5718,6 +5721,67 @@ mod tests {
             .unwrap()
             .entries
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn scoped_push_change_reports_email_delivery_for_new_messages_only_state() {
+        let account = FakeStore::account();
+        let enabled_types = HashSet::from(["EmailDelivery".to_string()]);
+        let initial_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            emails: vec![FakeStore::inbox_email()],
+            ..Default::default()
+        });
+        let last_type_states = initial_service
+            .current_push_states(account.account_id, &enabled_types)
+            .await
+            .unwrap();
+
+        let mut changed_flags_email = FakeStore::inbox_email();
+        changed_flags_email.flagged = true;
+        changed_flags_email.preview = "Changed preview".to_string();
+        let changed_flags_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            emails: vec![changed_flags_email],
+            ..Default::default()
+        });
+        let mut change_set = CanonicalPushChangeSet::default();
+        change_set.insert_accounts(CanonicalChangeCategory::Mail, [account.account_id]);
+
+        let (unchanged, unchanged_type_states) = changed_flags_service
+            .compute_push_changes(
+                account.account_id,
+                &push_subscription(enabled_types.clone(), last_type_states.clone()),
+                &change_set,
+            )
+            .await
+            .unwrap();
+
+        assert!(unchanged.is_empty());
+        assert_eq!(unchanged_type_states, last_type_states);
+
+        let mut new_email = FakeStore::draft_email();
+        new_email.id = Uuid::parse_str("23232323-2323-2323-2323-232323232323").unwrap();
+        new_email.received_at = "2026-04-20T11:00:00Z".to_string();
+        let delivered_service = JmapService::new(FakeStore {
+            session: Some(account.clone()),
+            emails: vec![FakeStore::inbox_email(), new_email],
+            ..Default::default()
+        });
+
+        let (changed, current_type_states) = delivered_service
+            .compute_push_changes(
+                account.account_id,
+                &push_subscription(enabled_types, last_type_states),
+                &change_set,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            changed[&account.account_id.to_string()]["EmailDelivery"],
+            current_type_states[&account.account_id.to_string()]["EmailDelivery"]
+        );
     }
 
     #[tokio::test]

@@ -421,6 +421,19 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         encode_state(access.account_id, data_type, entries)
     }
 
+    pub(crate) async fn email_delivery_object_state(&self, account_id: Uuid) -> Result<String> {
+        let ids = self.store.fetch_all_jmap_email_ids(account_id).await?;
+        let emails = self.store.fetch_jmap_emails(account_id, &ids).await?;
+        let entries = emails
+            .into_iter()
+            .map(|email| StateEntry {
+                id: email.id.to_string(),
+                fingerprint: opaque_state_fingerprint(&email.received_at),
+            })
+            .collect();
+        encode_state(account_id, "EmailDelivery", entries)
+    }
+
     pub(crate) async fn email_submission_object_state(&self, account_id: Uuid) -> Result<String> {
         let entries = self
             .email_submission_object_state_entries(account_id)
