@@ -260,6 +260,13 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         self.handle_email_submission_changes(account, arguments)
                             .await
                     }
+                    "EmailSubmission/query" => {
+                        self.handle_email_submission_query(account, arguments).await
+                    }
+                    "EmailSubmission/queryChanges" => {
+                        self.handle_email_submission_query_changes(account, arguments)
+                            .await
+                    }
                     "EmailSubmission/set" => {
                         self.handle_email_submission_set(account, arguments, &mut created_ids)
                             .await
@@ -749,6 +756,8 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         | "SearchSnippet/get" => Some(JMAP_MAIL_CAPABILITY),
         "EmailSubmission/get"
         | "EmailSubmission/changes"
+        | "EmailSubmission/query"
+        | "EmailSubmission/queryChanges"
         | "EmailSubmission/set"
         | "Identity/get"
         | "Identity/changes" => Some(JMAP_SUBMISSION_CAPABILITY),

@@ -43,6 +43,8 @@ The WebSocket capability is advertised only when the `/jmap/ws` endpoint is actu
 - `Email/import`
 - `EmailSubmission/get`
 - `EmailSubmission/changes`
+- `EmailSubmission/query`
+- `EmailSubmission/queryChanges`
 - `EmailSubmission/set` for draft submission through the canonical `LPE` submission model
 - `Identity/get`
 - `Identity/changes`
@@ -99,7 +101,8 @@ Additional supported `JMAP` routes:
 - one `LPE` email currently belongs to one `LPE` mailbox, so `mailboxIds` contains one entry
 - `EmailSubmission/set` currently supports only `create`
 - `EmailSubmission/set` expects an existing draft through `emailId` or a resolved creation reference in the same request
-- `EmailSubmission/get`, `EmailSubmission/changes`, and `EmailSubmission/set` return state tokens derived from canonical outbound submission rows, not from general `Email` state, so delivery-status and queue-row changes are visible to incremental clients; shared accounts without canonical submission rights return an empty submission projection
+- `EmailSubmission/get`, `EmailSubmission/changes`, `EmailSubmission/query`, `EmailSubmission/queryChanges`, and `EmailSubmission/set` return state tokens derived from canonical outbound submission rows, not from general `Email` state, so delivery-status and queue-row changes are visible to incremental clients; shared accounts without canonical submission rights return an empty submission projection
+- `EmailSubmission/query` and `EmailSubmission/queryChanges` support the RFC `identityIds`, `emailIds`, `threadIds`, `undoStatus`, `before`, and `after` filters, with sorting by `emailId`, `threadId`, and `sentAt`
 - `Identity/get` exposes the standard MVP fields plus `LPE`-specific delegated-sender metadata for clients that request it, and `Identity/changes` returns state changes derived from the canonical sender-identity projection for the authenticated principal and requested mailbox account
 - `Mailbox/set` cannot modify or delete system mailboxes (`Inbox`, `Sent`, `Drafts`, etc.)
 - `Email/copy` currently supports only same-account copy

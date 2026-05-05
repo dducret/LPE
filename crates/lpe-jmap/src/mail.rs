@@ -6,7 +6,10 @@ use lpe_storage::{
     SavedDraftMessage, SenderIdentity, SubmitMessageInput,
 };
 use serde_json::{json, Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::{
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
+};
 use uuid::Uuid;
 
 use crate::{
@@ -20,7 +23,8 @@ use crate::{
     protocol::{
         ChangesArguments, EmailCopyArguments, EmailGetArguments, EmailImportArguments,
         EmailQueryArguments, EmailQueryFilter, EmailQuerySort, EmailSetArguments,
-        EmailSubmissionGetArguments, EmailSubmissionSetArguments, IdentityGetArguments,
+        EmailSubmissionGetArguments, EmailSubmissionQueryArguments, EmailSubmissionQueryFilter,
+        EmailSubmissionQuerySort, EmailSubmissionSetArguments, IdentityGetArguments,
         QueryChangesArguments, QuotaGetArguments, SearchSnippetGetArguments, ThreadGetArguments,
         ThreadQueryArguments,
     },
@@ -599,6 +603,99 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 .collect::<Vec<_>>(),
             "notFound": not_found,
         }))
+    }
+
+    pub(crate) async fn handle_email_submission_query(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: EmailSubmissionQueryArguments = serde_json::from_value(arguments)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
+        validate_email_submission_query(arguments.filter.as_ref(), arguments.sort.as_deref())?;
+        let mut submissions = if crate::mailboxes::mailbox_account_may_submit(&account_access) {
+            self.store
+                .fetch_jmap_email_submissions(account_id, &[])
+                .await?
+        } else {
+            Vec::new()
+        };
+        apply_email_submission_query(
+            &mut submissions,
+            arguments.filter.as_ref(),
+            arguments.sort.as_deref(),
+        );
+
+        let position = arguments.position.unwrap_or(0) as usize;
+        let limit = arguments
+            .limit
+            .unwrap_or(DEFAULT_GET_LIMIT)
+            .min(MAX_QUERY_LIMIT) as usize;
+        let ids = submissions
+            .iter()
+            .skip(position)
+            .take(limit)
+            .map(|submission| submission.id.to_string())
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "queryState": crate::encode_query_state(
+                account_id,
+                "EmailSubmission/query",
+                arguments.filter.map(serde_json::to_value).transpose()?,
+                serialize_email_submission_query_sort(arguments.sort.as_deref())?,
+                submissions.iter().map(|submission| submission.id.to_string()).collect(),
+            )?,
+            "canCalculateChanges": true,
+            "position": position,
+            "ids": ids,
+            "total": submissions.len(),
+        }))
+    }
+
+    pub(crate) async fn handle_email_submission_query_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+    ) -> Result<Value> {
+        let arguments: QueryChangesArguments<EmailSubmissionQueryFilter, EmailSubmissionQuerySort> =
+            serde_json::from_value(arguments)?;
+        let account_access = self
+            .requested_account_access(account, arguments.account_id.as_deref())
+            .await?;
+        let account_id = account_access.account_id;
+        validate_email_submission_query(arguments.filter.as_ref(), arguments.sort.as_deref())?;
+        let mut submissions = if crate::mailboxes::mailbox_account_may_submit(&account_access) {
+            self.store
+                .fetch_jmap_email_submissions(account_id, &[])
+                .await?
+        } else {
+            Vec::new()
+        };
+        apply_email_submission_query(
+            &mut submissions,
+            arguments.filter.as_ref(),
+            arguments.sort.as_deref(),
+        );
+        let current_ids = submissions
+            .iter()
+            .map(|submission| submission.id.to_string())
+            .collect::<Vec<_>>();
+
+        query_changes_response(
+            account_id,
+            "EmailSubmission/query",
+            arguments.since_query_state,
+            arguments.filter.map(serde_json::to_value).transpose()?,
+            serialize_email_submission_query_sort(arguments.sort.as_deref())?,
+            current_ids,
+            submissions.len() as u64,
+            arguments.max_changes,
+        )
     }
 
     pub(crate) async fn handle_email_submission_changes(
@@ -1253,6 +1350,117 @@ pub(crate) fn serialize_email_query_sort(sort: &[EmailQuerySort]) -> Result<Vec<
         .map(serde_json::to_value)
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(Into::into)
+}
+
+fn validate_email_submission_query(
+    filter: Option<&EmailSubmissionQueryFilter>,
+    sort: Option<&[EmailSubmissionQuerySort]>,
+) -> Result<()> {
+    if let Some(filter) = filter {
+        if let Some(before) = filter.before.as_deref() {
+            crate::parse::parse_local_datetime(before)?;
+        }
+        if let Some(after) = filter.after.as_deref() {
+            crate::parse::parse_local_datetime(after)?;
+        }
+    }
+    if let Some(sort) = sort {
+        for item in sort {
+            if !matches!(
+                item.property.as_str(),
+                "emailId" | "threadId" | "sentAt" | "sendAt"
+            ) {
+                bail!("only emailId, threadId, and sentAt sort are supported");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn apply_email_submission_query(
+    submissions: &mut Vec<JmapEmailSubmission>,
+    filter: Option<&EmailSubmissionQueryFilter>,
+    sort: Option<&[EmailSubmissionQuerySort]>,
+) {
+    if let Some(filter) = filter {
+        submissions.retain(|submission| email_submission_matches_filter(submission, filter));
+    }
+    if let Some(sort) = sort {
+        for item in sort.iter().rev() {
+            let ascending = item.is_ascending.unwrap_or(true);
+            submissions.sort_by(|left, right| {
+                let ordering = compare_email_submission_sort_key(left, right, &item.property);
+                if ascending {
+                    ordering
+                } else {
+                    ordering.reverse()
+                }
+            });
+        }
+    }
+}
+
+fn email_submission_matches_filter(
+    submission: &JmapEmailSubmission,
+    filter: &EmailSubmissionQueryFilter,
+) -> bool {
+    if let Some(identity_ids) = filter.identity_ids.as_ref() {
+        if !identity_ids.contains(&submission.identity_id) {
+            return false;
+        }
+    }
+    if let Some(email_ids) = filter.email_ids.as_ref() {
+        if !email_ids.contains(&submission.email_id.to_string()) {
+            return false;
+        }
+    }
+    if let Some(thread_ids) = filter.thread_ids.as_ref() {
+        if !thread_ids.contains(&submission.thread_id.to_string()) {
+            return false;
+        }
+    }
+    if let Some(undo_status) = filter.undo_status.as_deref() {
+        if submission.undo_status != undo_status {
+            return false;
+        }
+    }
+    if let Some(before) = filter.before.as_deref() {
+        if submission.send_at.as_str() >= before {
+            return false;
+        }
+    }
+    if let Some(after) = filter.after.as_deref() {
+        if submission.send_at.as_str() < after {
+            return false;
+        }
+    }
+    true
+}
+
+fn compare_email_submission_sort_key(
+    left: &JmapEmailSubmission,
+    right: &JmapEmailSubmission,
+    property: &str,
+) -> Ordering {
+    match property {
+        "emailId" => left.email_id.cmp(&right.email_id),
+        "threadId" => left.thread_id.cmp(&right.thread_id),
+        "sentAt" | "sendAt" => left.send_at.cmp(&right.send_at),
+        _ => left.id.cmp(&right.id),
+    }
+    .then_with(|| left.id.cmp(&right.id))
+}
+
+fn serialize_email_submission_query_sort(
+    sort: Option<&[EmailSubmissionQuerySort]>,
+) -> Result<Option<Vec<Value>>> {
+    sort.map(|sort| {
+        sort.iter()
+            .map(serde_json::to_value)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
+    })
+    .transpose()
 }
 
 pub(crate) fn email_properties(properties: Option<Vec<String>>) -> HashSet<String> {

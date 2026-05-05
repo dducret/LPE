@@ -214,6 +214,34 @@ pub struct EmailSubmissionGetArguments {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct EmailSubmissionQueryArguments {
+    pub account_id: Option<String>,
+    pub position: Option<u64>,
+    pub limit: Option<u64>,
+    pub filter: Option<EmailSubmissionQueryFilter>,
+    pub sort: Option<Vec<EmailSubmissionQuerySort>>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailSubmissionQueryFilter {
+    pub identity_ids: Option<Vec<String>>,
+    pub email_ids: Option<Vec<String>>,
+    pub thread_ids: Option<Vec<String>>,
+    pub undo_status: Option<String>,
+    pub before: Option<String>,
+    pub after: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmailSubmissionQuerySort {
+    pub property: String,
+    pub is_ascending: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IdentityGetArguments {
     pub account_id: Option<String>,
     pub ids: Option<Vec<String>>,

@@ -3626,6 +3626,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn email_submission_query_filters_sorts_and_reports_query_changes() {
+        let first = FakeStore::email_submission();
+        let mut second = first.clone();
+        second.id = Uuid::parse_str("22222222-3333-4444-5555-666666666666").unwrap();
+        second.email_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
+        second.thread_id = Uuid::parse_str("12121212-3434-5656-7878-909090909090").unwrap();
+        second.send_at = "2026-04-18T10:02:00Z".to_string();
+        let initial = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            email_submissions: vec![first.clone()],
+            ..Default::default()
+        });
+        let initial_response = initial
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "EmailSubmission/query".to_string(),
+                        json!({
+                            "filter": {"undoStatus": "final"},
+                            "sort": [{"property": "sentAt", "isAscending": true}],
+                            "limit": 1
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        let query_state = initial_response.method_responses[0].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        assert_eq!(
+            initial_response.method_responses[0].0,
+            "EmailSubmission/query"
+        );
+        assert_eq!(
+            initial_response.method_responses[0].1["canCalculateChanges"],
+            true
+        );
+        assert_eq!(
+            initial_response.method_responses[0].1["ids"],
+            json!([first.id.to_string()])
+        );
+
+        let updated = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            email_submissions: vec![first, second.clone()],
+            ..Default::default()
+        });
+        let response = updated
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![JmapMethodCall(
+                        "EmailSubmission/queryChanges".to_string(),
+                        json!({
+                            "sinceQueryState": query_state,
+                            "filter": {"undoStatus": "final"},
+                            "sort": [{"property": "sentAt", "isAscending": true}]
+                        }),
+                        "c1".to_string(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.method_responses[0].1["added"],
+            json!([{"id": second.id.to_string(), "index": 1}])
+        );
+        assert_eq!(response.method_responses[0].1["hasMoreChanges"], false);
+    }
+
+    #[tokio::test]
     async fn thread_query_returns_distinct_threads_for_filtered_emails() {
         let store = FakeStore {
             session: Some(FakeStore::account()),

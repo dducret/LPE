@@ -317,6 +317,7 @@ pub(crate) fn query_changes_response(
         kind,
         "Email/query"
             | "Thread/query"
+            | "EmailSubmission/query"
             | "Task"
             | "Mailbox/query"
             | "AddressBook/query"
