@@ -4766,6 +4766,119 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn jmap_tester_style_big_three_batch_has_stable_json_shapes() {
+        let account_id = FakeStore::account().account_id.to_string();
+        let contact_id = FakeStore::contact().id.to_string();
+        let event_id = FakeStore::event().id.to_string();
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::inbox_mailbox()],
+            contacts: Arc::new(Mutex::new(vec![FakeStore::contact()])),
+            events: Arc::new(Mutex::new(vec![FakeStore::event()])),
+            ..Default::default()
+        });
+        let request: JmapApiRequest = serde_json::from_value(json!({
+            "using": [
+                JMAP_CORE_CAPABILITY,
+                JMAP_MAIL_CAPABILITY,
+                JMAP_CONTACTS_CAPABILITY,
+                JMAP_CALENDARS_CAPABILITY
+            ],
+            "methodCalls": [
+                ["Mailbox/query", {
+                    "accountId": account_id,
+                    "position": 0,
+                    "limit": 50
+                }, "mailbox-query"],
+                ["Mailbox/get", {
+                    "accountId": account_id,
+                    "ids": null,
+                    "properties": ["id", "name", "role", "myRights"]
+                }, "mailbox-get"],
+                ["ContactCard/query", {
+                    "accountId": account_id,
+                    "position": 0,
+                    "limit": 50
+                }, "contact-query"],
+                ["ContactCard/get", {
+                    "accountId": account_id,
+                    "ids": [contact_id],
+                    "properties": ["id", "name", "emails"]
+                }, "contact-get"],
+                ["CalendarEvent/query", {
+                    "accountId": account_id,
+                    "position": 0,
+                    "limit": 50
+                }, "event-query"],
+                ["CalendarEvent/get", {
+                    "accountId": account_id,
+                    "ids": [event_id],
+                    "properties": ["id", "title", "calendarIds", "participants"]
+                }, "event-get"]
+            ]
+        }))
+        .unwrap();
+
+        let response = service
+            .handle_api_request(Some("Bearer token"), request)
+            .await
+            .unwrap();
+
+        assert!(response.created_ids.is_empty());
+        assert_eq!(response.method_responses.len(), 6);
+        assert_eq!(
+            response
+                .method_responses
+                .iter()
+                .map(|response| (response.0.as_str(), response.2.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Mailbox/query", "mailbox-query"),
+                ("Mailbox/get", "mailbox-get"),
+                ("ContactCard/query", "contact-query"),
+                ("ContactCard/get", "contact-get"),
+                ("CalendarEvent/query", "event-query"),
+                ("CalendarEvent/get", "event-get"),
+            ]
+        );
+
+        let mailbox_query = &response.method_responses[0].1;
+        assert_eq!(mailbox_query["accountId"], account_id);
+        assert_eq!(mailbox_query["position"].as_u64(), Some(0));
+        assert_eq!(mailbox_query["total"].as_u64(), Some(1));
+        assert_eq!(mailbox_query["canCalculateChanges"], true);
+        assert!(mailbox_query["ids"][0].as_str().is_some());
+
+        let mailbox_get = &response.method_responses[1].1;
+        assert_eq!(mailbox_get["list"].as_array().unwrap().len(), 1);
+        assert!(mailbox_get["notFound"].as_array().unwrap().is_empty());
+        assert!(mailbox_get["list"][0]["id"].as_str().is_some());
+        assert!(mailbox_get["list"][0]["myRights"]["mayReadItems"]
+            .as_bool()
+            .unwrap());
+
+        let contact_query = &response.method_responses[2].1;
+        assert_eq!(contact_query["total"].as_u64(), Some(1));
+        assert_eq!(contact_query["ids"][0], contact_id);
+
+        let contact_get = &response.method_responses[3].1;
+        assert_eq!(contact_get["list"][0]["id"], contact_id);
+        assert_eq!(
+            contact_get["list"][0]["emails"]["main"]["address"],
+            "bob@example.test"
+        );
+
+        let event_query = &response.method_responses[4].1;
+        assert_eq!(event_query["total"].as_u64(), Some(1));
+        assert_eq!(event_query["ids"][0], event_id);
+
+        let event_get = &response.method_responses[5].1;
+        assert_eq!(event_get["list"][0]["id"], event_id);
+        assert_eq!(event_get["list"][0]["title"], "Standup");
+        assert!(event_get["list"][0]["participants"].as_object().is_some());
+    }
+
+    #[tokio::test]
     async fn blob_get_reports_encoding_and_range_edge_cases() {
         let store = FakeStore {
             session: Some(FakeStore::account()),

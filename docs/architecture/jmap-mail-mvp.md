@@ -27,7 +27,7 @@ The `JMAP` session is real: it is built from the authenticated mailbox account a
 Its session `state` is derived from the current accessible mailbox-account projection, so mailbox delegation or sender-right changes that alter advertised accounts or account capabilities change the session document state.
 The WebSocket capability is advertised only when the `/jmap/ws` endpoint is actually present in the running adapter.
 
-The current finalization target is the `JMAP` Big Three: Mail, Contacts, and simple Calendar events. `JMAP Tasks` remains implemented as a canonical adapter, but it is not the primary interoperability hardening target for this release. Cross-account data movement, durable search/query-history storage, and broader protocol-family expansion are deferred to a later release.
+The current finalization target is the `JMAP` Big Three: Mail, Contacts, and simple Calendar events. `JMAP Tasks` remains implemented as a canonical adapter, but it is not the primary interoperability hardening target for this release. Cross-account data movement, durable search/query-history storage, and broader protocol-family expansion are deferred to a later release. The interoperability matrix is tracked in `docs/architecture/jmap-interoperability-matrix.md`.
 
 ### Supported methods
 
