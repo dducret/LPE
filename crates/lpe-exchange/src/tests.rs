@@ -2405,7 +2405,7 @@ async fn mapi_over_http_resolve_names_resolves_authenticated_mailbox() {
     assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
     assert_eq!(body[12], 1);
     assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
-    assert_ne!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
     assert_eq!(body[21], 1);
     assert_eq!(u32::from_le_bytes(body[22..26].try_into().unwrap()), 8);
     assert_eq!(u32::from_le_bytes(body[58..62].try_into().unwrap()), 1);
@@ -2439,6 +2439,7 @@ async fn mapi_over_http_resolve_names_honors_requested_rca_columns() {
     assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
     assert_eq!(body[12], 1);
     assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
     assert_eq!(body[21], 1);
     assert_eq!(u32::from_le_bytes(body[22..26].try_into().unwrap()), 2);
     assert_eq!(

@@ -29,6 +29,7 @@ const NSPI_COOKIE_PATH: &str = "/mapi/nspi";
 const MAPI_SESSION_MAX_AGE_SECONDS: u32 = 1_800;
 const NSPI_UNICODE_CODEPAGE: u32 = 1200;
 const MAPI_MAILUSER_OBJECT_TYPE: u32 = 6;
+const NSPI_MID_RESOLVED: u32 = 0x0000_0002;
 const NSPI_SERVER_GUID: [u8; 16] = [
     0x4c, 0x50, 0x45, 0x00, 0x4d, 0x41, 0x50, 0x49, 0x4e, 0x53, 0x50, 0x49, 0x00, 0x00, 0x00, 0x01,
 ];
@@ -456,7 +457,7 @@ fn resolve_names_response(
     write_u32(&mut body, NSPI_UNICODE_CODEPAGE);
     body.push(1);
     write_u32(&mut body, 1);
-    write_u32(&mut body, principal_minimal_entry_id(principal));
+    write_u32(&mut body, NSPI_MID_RESOLVED);
     body.push(1);
     write_large_property_tag_array(&mut body, &columns);
     write_u32(&mut body, 1);
