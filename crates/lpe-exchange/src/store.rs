@@ -124,6 +124,22 @@ pub trait ExchangeStore: AccountAuthStore {
         account_id: Uuid,
     ) -> StoreFuture<'a, Option<SieveScriptDocument>>;
 
+    fn put_sieve_script<'a>(
+        &'a self,
+        account_id: Uuid,
+        name: &'a str,
+        content: &'a str,
+        activate: bool,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, SieveScriptDocument>;
+
+    fn set_active_sieve_script<'a>(
+        &'a self,
+        account_id: Uuid,
+        name: Option<&'a str>,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Option<String>>;
+
     fn create_accessible_task<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -508,6 +524,29 @@ impl ExchangeStore for Storage {
         account_id: Uuid,
     ) -> StoreFuture<'a, Option<SieveScriptDocument>> {
         Box::pin(async move { self.fetch_active_sieve_script(account_id).await })
+    }
+
+    fn put_sieve_script<'a>(
+        &'a self,
+        account_id: Uuid,
+        name: &'a str,
+        content: &'a str,
+        activate: bool,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, SieveScriptDocument> {
+        Box::pin(async move {
+            self.put_sieve_script(account_id, name, content, activate, audit)
+                .await
+        })
+    }
+
+    fn set_active_sieve_script<'a>(
+        &'a self,
+        account_id: Uuid,
+        name: Option<&'a str>,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Option<String>> {
+        Box::pin(async move { self.set_active_sieve_script(account_id, name, audit).await })
     }
 
     fn create_accessible_task<'a>(

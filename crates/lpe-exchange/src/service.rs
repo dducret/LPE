@@ -187,6 +187,7 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
             "CreateAttachment" => self.create_attachment(&principal, &body).await?,
             "DeleteAttachment" => self.delete_attachment(&principal, &body).await?,
             "GetUserOofSettings" => self.get_user_oof_settings(&principal).await?,
+            "SetUserOofSettings" => self.set_user_oof_settings(&principal, &body).await?,
             "GetRoomLists" => unsupported_operation_response("GetRoomLists"),
             "FindPeople" => unsupported_operation_response("FindPeople"),
             "ExpandDL" => unsupported_operation_response("ExpandDL"),
@@ -809,6 +810,70 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
         Ok(get_user_oof_settings_response(&oof_projection_from_script(
             script.as_ref().map(|script| script.content.as_str()),
         )))
+    }
+
+    async fn set_user_oof_settings(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let settings = element_content(request, "OofSettings").unwrap_or(request);
+            let state =
+                element_text(settings, "OofState").unwrap_or_else(|| "Disabled".to_string());
+            match state.trim().to_ascii_lowercase().as_str() {
+                "disabled" => {
+                    self.store
+                        .set_active_sieve_script(
+                            principal.account_id,
+                            None,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-oof-disable".to_string(),
+                                subject: principal.account_id.to_string(),
+                            },
+                        )
+                        .await?;
+                }
+                "enabled" => {
+                    let message = element_content(settings, "InternalReply")
+                        .and_then(|reply| element_text(reply, "Message"))
+                        .or_else(|| {
+                            element_content(settings, "ExternalReply")
+                                .and_then(|reply| element_text(reply, "Message"))
+                        })
+                        .unwrap_or_default();
+                    if message.trim().is_empty() {
+                        bail!("OOF message is required when enabling OOF");
+                    }
+                    self.store
+                        .put_sieve_script(
+                            principal.account_id,
+                            "ews-oof",
+                            &vacation_sieve_script(&message),
+                            true,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-oof-enable".to_string(),
+                                subject: principal.account_id.to_string(),
+                            },
+                        )
+                        .await?;
+                }
+                "scheduled" => bail!("scheduled OOF is not supported by the canonical Sieve MVP"),
+                other => bail!("unsupported OofState {other}"),
+            }
+            Ok(set_user_oof_settings_success_response())
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "SetUserOofSettings",
+                "ErrorInvalidOperation",
+                &error.to_string(),
+            )
+        }))
     }
 
     async fn get_user_availability(
@@ -2242,6 +2307,15 @@ fn find_vacation_reason(statements: &[Statement]) -> Option<String> {
         }
     }
     None
+}
+
+fn vacation_sieve_script(text_body: &str) -> String {
+    let text_body = sieve_quote(text_body.trim());
+    format!("require [\"vacation\"];\r\nvacation :days 7 \"{text_body}\";\r\n")
+}
+
+fn sieve_quote(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 trait EmptyStringFallback {
@@ -3941,6 +4015,17 @@ fn get_user_oof_settings_response(projection: &OofProjection) -> String {
         audience = audience,
         message = message,
     )
+}
+
+fn set_user_oof_settings_success_response() -> String {
+    concat!(
+        "<m:SetUserOofSettingsResponse>",
+        "<m:ResponseMessage ResponseClass=\"Success\">",
+        "<m:ResponseCode>NoError</m:ResponseCode>",
+        "</m:ResponseMessage>",
+        "</m:SetUserOofSettingsResponse>"
+    )
+    .to_string()
 }
 
 fn unsupported_operation_response(operation: &str) -> String {

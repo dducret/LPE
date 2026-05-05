@@ -599,6 +599,39 @@ impl ExchangeStore for FakeStore {
         })
     }
 
+    fn put_sieve_script<'a>(
+        &'a self,
+        _account_id: Uuid,
+        name: &'a str,
+        content: &'a str,
+        activate: bool,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, SieveScriptDocument> {
+        if activate {
+            *self.active_sieve_script.lock().unwrap() = Some(content.to_string());
+        }
+        let script = SieveScriptDocument {
+            name: name.to_string(),
+            content: content.to_string(),
+            is_active: activate,
+            updated_at: "2026-05-05T08:00:00Z".to_string(),
+        };
+        Box::pin(async move { Ok(script) })
+    }
+
+    fn set_active_sieve_script<'a>(
+        &'a self,
+        _account_id: Uuid,
+        name: Option<&'a str>,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, Option<String>> {
+        if name.is_none() {
+            *self.active_sieve_script.lock().unwrap() = None;
+        }
+        let active_name = name.map(str::to_string);
+        Box::pin(async move { Ok(active_name) })
+    }
+
     fn create_accessible_task<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -3378,6 +3411,68 @@ async fn get_user_oof_settings_projects_canonical_sieve_vacation() {
     assert!(body.contains("<t:InternalReply><t:Message>Away until Monday</t:Message>"));
     assert!(body.contains("<t:ExternalReply><t:Message>Away until Monday</t:Message>"));
     assert!(body.contains("<t:ServerVersionInfo"));
+}
+
+#[tokio::test]
+async fn set_user_oof_settings_writes_canonical_sieve_vacation() {
+    let active_sieve_script = Arc::new(Mutex::new(None));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        active_sieve_script: active_sieve_script.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:SetUserOofSettings>
+                  <t:OofSettings>
+                    <t:OofState>Enabled</t:OofState>
+                    <t:InternalReply><t:Message>Back next week</t:Message></t:InternalReply>
+                  </t:OofSettings>
+                </m:SetUserOofSettings>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SetUserOofSettingsResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    let script = active_sieve_script.lock().unwrap().clone().unwrap();
+    assert!(script.contains("vacation :days 7 \"Back next week\";"));
+}
+
+#[tokio::test]
+async fn set_user_oof_settings_disables_active_sieve_script() {
+    let active_sieve_script = Arc::new(Mutex::new(Some(
+        r#"require ["vacation"]; vacation "Away";"#.to_string(),
+    )));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        active_sieve_script: active_sieve_script.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SetUserOofSettings><t:OofSettings><t:OofState>Disabled</t:OofState></t:OofSettings></m:SetUserOofSettings></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SetUserOofSettingsResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(active_sieve_script.lock().unwrap().is_none());
 }
 
 #[tokio::test]
