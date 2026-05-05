@@ -77,7 +77,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .await?;
         let account_id = account_access.account_id;
         let mut mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
-        mailboxes.sort_by_key(|mailbox| (mailbox.sort_order, mailbox.name.to_lowercase()));
+        mailboxes.sort_by_key(|mailbox| {
+            (
+                mailbox.sort_order,
+                mailbox.name.to_lowercase(),
+                mailbox.id.to_string(),
+            )
+        });
         let position = arguments.position.unwrap_or(0) as usize;
         let limit = arguments
             .limit
@@ -116,7 +122,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .await?;
         let account_id = account_access.account_id;
         let mut mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
-        mailboxes.sort_by_key(|mailbox| (mailbox.sort_order, mailbox.name.to_lowercase()));
+        mailboxes.sort_by_key(|mailbox| {
+            (
+                mailbox.sort_order,
+                mailbox.name.to_lowercase(),
+                mailbox.id.to_string(),
+            )
+        });
         let current_ids = mailboxes
             .into_iter()
             .map(|mailbox| mailbox.id.to_string())

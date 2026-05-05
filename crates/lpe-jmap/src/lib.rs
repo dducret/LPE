@@ -3194,6 +3194,169 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn big_three_query_changes_ignore_backend_order_for_equal_sort_keys() {
+        let first_mailbox = JmapMailbox {
+            id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+            role: "".to_string(),
+            name: "Same".to_string(),
+            sort_order: 10,
+            total_emails: 0,
+            unread_emails: 0,
+        };
+        let second_mailbox = JmapMailbox {
+            id: Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
+            role: "".to_string(),
+            name: "Same".to_string(),
+            sort_order: 10,
+            total_emails: 0,
+            unread_emails: 0,
+        };
+        let first_contact = ClientContact {
+            id: Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
+            name: "Same".to_string(),
+            role: "".to_string(),
+            email: "first@example.test".to_string(),
+            phone: "".to_string(),
+            team: "".to_string(),
+            notes: "".to_string(),
+        };
+        let second_contact = ClientContact {
+            id: Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap(),
+            name: "Same".to_string(),
+            role: "".to_string(),
+            email: "second@example.test".to_string(),
+            phone: "".to_string(),
+            team: "".to_string(),
+            notes: "".to_string(),
+        };
+        let first_event = ClientEvent {
+            id: Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap(),
+            date: "2026-05-01".to_string(),
+            time: "09:00".to_string(),
+            time_zone: "".to_string(),
+            duration_minutes: 30,
+            recurrence_rule: "".to_string(),
+            title: "Same".to_string(),
+            location: "".to_string(),
+            attendees: "".to_string(),
+            attendees_json: "".to_string(),
+            notes: "".to_string(),
+        };
+        let second_event = ClientEvent {
+            id: Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap(),
+            date: "2026-05-01".to_string(),
+            time: "09:00".to_string(),
+            time_zone: "".to_string(),
+            duration_minutes: 30,
+            recurrence_rule: "".to_string(),
+            title: "Same".to_string(),
+            location: "".to_string(),
+            attendees: "".to_string(),
+            attendees_json: "".to_string(),
+            notes: "".to_string(),
+        };
+
+        let initial = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![second_mailbox.clone(), first_mailbox.clone()],
+            contacts: Arc::new(Mutex::new(vec![
+                second_contact.clone(),
+                first_contact.clone(),
+            ])),
+            events: Arc::new(Mutex::new(vec![second_event.clone(), first_event.clone()])),
+            ..Default::default()
+        });
+        let initial_response = initial
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                        JMAP_CONTACTS_CAPABILITY.to_string(),
+                        JMAP_CALENDARS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall("Mailbox/query".to_string(), json!({}), "m".to_string()),
+                        JmapMethodCall("ContactCard/query".to_string(), json!({}), "c".to_string()),
+                        JmapMethodCall(
+                            "CalendarEvent/query".to_string(),
+                            json!({}),
+                            "e".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            initial_response.method_responses[0].1["ids"],
+            json!([first_mailbox.id.to_string(), second_mailbox.id.to_string()])
+        );
+        assert_eq!(
+            initial_response.method_responses[1].1["ids"],
+            json!([first_contact.id.to_string(), second_contact.id.to_string()])
+        );
+        assert_eq!(
+            initial_response.method_responses[2].1["ids"],
+            json!([first_event.id.to_string(), second_event.id.to_string()])
+        );
+
+        let updated = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![first_mailbox.clone(), second_mailbox.clone()],
+            contacts: Arc::new(Mutex::new(vec![
+                first_contact.clone(),
+                second_contact.clone(),
+            ])),
+            events: Arc::new(Mutex::new(vec![first_event.clone(), second_event.clone()])),
+            ..Default::default()
+        });
+        let response = updated
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                        JMAP_CONTACTS_CAPABILITY.to_string(),
+                        JMAP_CALENDARS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Mailbox/queryChanges".to_string(),
+                            json!({
+                                "sinceQueryState": initial_response.method_responses[0].1["queryState"]
+                            }),
+                            "m".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "ContactCard/queryChanges".to_string(),
+                            json!({
+                                "sinceQueryState": initial_response.method_responses[1].1["queryState"]
+                            }),
+                            "c".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/queryChanges".to_string(),
+                            json!({
+                                "sinceQueryState": initial_response.method_responses[2].1["queryState"]
+                            }),
+                            "e".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        for method in response.method_responses {
+            assert_eq!(method.1["removed"], json!([]));
+            assert_eq!(method.1["added"], json!([]));
+            assert_eq!(method.1["hasMoreChanges"], Value::Bool(false));
+        }
+    }
+
+    #[tokio::test]
     async fn mailbox_query_states_are_bound_to_the_requested_account() {
         let shared = FakeStore::shared_account();
         let service = JmapService::new(FakeStore {

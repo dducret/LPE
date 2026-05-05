@@ -30,10 +30,11 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
         let properties = address_book_properties(arguments.properties);
         let requested_ids = arguments.ids.unwrap_or_default();
-        let collections = self
+        let mut collections = self
             .store
             .fetch_accessible_contact_collections(account_id)
             .await?;
+        collections.sort_by_key(collection_sort_key);
         let list = collections
             .iter()
             .filter(|collection| requested_ids.is_empty() || requested_ids.contains(&collection.id))
@@ -61,10 +62,11 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: AddressBookQueryArguments = serde_json::from_value(arguments)?;
         let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
-        let collections = self
+        let mut collections = self
             .store
             .fetch_accessible_contact_collections(account_id)
             .await?;
+        collections.sort_by_key(collection_sort_key);
         let position = arguments.position.unwrap_or(0) as usize;
         let limit = arguments
             .limit
@@ -207,7 +209,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         if let Some(filter) = arguments.filter.as_ref() {
             contacts.retain(|contact| contact_matches_filter(contact, filter));
         }
-        contacts.sort_by_key(|contact| contact.name.to_lowercase());
+        contacts.sort_by_key(|contact| (contact.name.to_lowercase(), contact.id.to_string()));
 
         let position = arguments.position.unwrap_or(0) as usize;
         let limit = arguments
@@ -252,7 +254,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         if let Some(filter) = arguments.filter.as_ref() {
             contacts.retain(|contact| contact_matches_filter(contact, filter));
         }
-        contacts.sort_by_key(|contact| contact.name.to_lowercase());
+        contacts.sort_by_key(|contact| (contact.name.to_lowercase(), contact.id.to_string()));
 
         query_changes_response(
             account_id,
@@ -559,6 +561,13 @@ fn contact_matches_filter(contact: &AccessibleContact, filter: &ContactCardQuery
         }
     }
     true
+}
+
+fn collection_sort_key(collection: &CollaborationCollection) -> (String, String) {
+    (
+        collection.display_name.to_lowercase(),
+        collection.id.to_lowercase(),
+    )
 }
 
 fn serialize_entity_query_sort(sort: Option<Vec<EntityQuerySort>>) -> Result<Option<Vec<Value>>> {

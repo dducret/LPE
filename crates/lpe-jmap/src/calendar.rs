@@ -36,10 +36,11 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
         let properties = calendar_properties(arguments.properties);
         let requested_ids = arguments.ids.unwrap_or_default();
-        let collections = self
+        let mut collections = self
             .store
             .fetch_accessible_calendar_collections(account_id)
             .await?;
+        collections.sort_by_key(collection_sort_key);
         let list = collections
             .iter()
             .filter(|collection| requested_ids.is_empty() || requested_ids.contains(&collection.id))
@@ -67,10 +68,11 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     ) -> Result<Value> {
         let arguments: CalendarQueryArguments = serde_json::from_value(arguments)?;
         let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
-        let collections = self
+        let mut collections = self
             .store
             .fetch_accessible_calendar_collections(account_id)
             .await?;
+        collections.sort_by_key(collection_sort_key);
         let position = arguments.position.unwrap_or(0) as usize;
         let limit = arguments
             .limit
@@ -661,12 +663,19 @@ fn event_matches_filter(event: &AccessibleEvent, filter: &CalendarEventQueryFilt
     true
 }
 
-fn calendar_event_sort_key(event: &AccessibleEvent) -> String {
-    calendar_event_start(event)
+fn calendar_event_sort_key(event: &AccessibleEvent) -> (String, String) {
+    (calendar_event_start(event), event.id.to_string())
 }
 
 fn calendar_event_start(event: &AccessibleEvent) -> String {
     format!("{}T{}:00", event.date, event.time)
+}
+
+fn collection_sort_key(collection: &CollaborationCollection) -> (String, String) {
+    (
+        collection.display_name.to_lowercase(),
+        collection.id.to_lowercase(),
+    )
 }
 
 fn serialize_entity_query_sort(sort: Option<Vec<EntityQuerySort>>) -> Result<Option<Vec<Value>>> {
