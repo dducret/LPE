@@ -1971,7 +1971,7 @@ fn parse_create_event_input(
         time,
         time_zone: requested_time_zone(request).unwrap_or_else(|| "UTC".to_string()),
         duration_minutes,
-        recurrence_rule: String::new(),
+        recurrence_rule: parse_ews_recurrence(event)?,
         title: element_text(event, "Subject").unwrap_or_else(|| "Untitled event".to_string()),
         location: element_text(event, "Location").unwrap_or_default(),
         attendees: attendees.join(", "),
@@ -2024,7 +2024,13 @@ fn parse_update_event_input(
         time,
         time_zone: requested_time_zone(request).unwrap_or_else(|| existing.time_zone.clone()),
         duration_minutes,
-        recurrence_rule: existing.recurrence_rule.clone(),
+        recurrence_rule: if field_deleted(request, "calendar:Recurrence") {
+            String::new()
+        } else if element_content(event, "Recurrence").is_some() {
+            parse_ews_recurrence(event)?
+        } else {
+            existing.recurrence_rule.clone()
+        },
         title: deleted_or_updated_text(
             request,
             event,
@@ -2242,6 +2248,129 @@ fn parse_attendee(attendee: &str) -> Option<String> {
         }
         _ => mailbox.address,
     })
+}
+
+fn parse_ews_recurrence(event: &str) -> Result<String> {
+    let Some(recurrence) = element_content(event, "Recurrence") else {
+        return Ok(String::new());
+    };
+
+    let mut parts = Vec::new();
+    if let Some(daily) = element_content(recurrence, "DailyRecurrence") {
+        parts.push("FREQ=DAILY".to_string());
+        push_interval_part(&mut parts, daily);
+    } else if let Some(weekly) = element_content(recurrence, "WeeklyRecurrence") {
+        parts.push("FREQ=WEEKLY".to_string());
+        push_interval_part(&mut parts, weekly);
+        if let Some(days) = element_text(weekly, "DaysOfWeek") {
+            let byday = days
+                .split_whitespace()
+                .map(ews_weekday_to_rrule)
+                .collect::<Result<Vec<_>>>()?;
+            if !byday.is_empty() {
+                parts.push(format!("BYDAY={}", byday.join(",")));
+            }
+        }
+    } else if let Some(monthly) = element_content(recurrence, "AbsoluteMonthlyRecurrence") {
+        parts.push("FREQ=MONTHLY".to_string());
+        push_interval_part(&mut parts, monthly);
+        if let Some(day) = element_text(monthly, "DayOfMonth") {
+            parts.push(format!(
+                "BYMONTHDAY={}",
+                parse_positive_number(&day, "DayOfMonth")?
+            ));
+        }
+    } else if let Some(yearly) = element_content(recurrence, "AbsoluteYearlyRecurrence") {
+        parts.push("FREQ=YEARLY".to_string());
+        if let Some(day) = element_text(yearly, "DayOfMonth") {
+            parts.push(format!(
+                "BYMONTHDAY={}",
+                parse_positive_number(&day, "DayOfMonth")?
+            ));
+        }
+        if let Some(month) = element_text(yearly, "Month") {
+            parts.push(format!("BYMONTH={}", ews_month_to_number(&month)?));
+        }
+    } else {
+        bail!("unsupported EWS recurrence pattern");
+    }
+
+    if let Some(numbered) = element_content(recurrence, "NumberedRecurrence") {
+        if let Some(count) = element_text(numbered, "NumberOfOccurrences") {
+            parts.push(format!(
+                "COUNT={}",
+                parse_positive_number(&count, "NumberOfOccurrences")?
+            ));
+        }
+    } else if let Some(end_date) = element_content(recurrence, "EndDateRecurrence") {
+        if let Some(end) = element_text(end_date, "EndDate") {
+            parts.push(format!("UNTIL={}", rrule_date(&end)?));
+        }
+    }
+
+    Ok(parts.join(";"))
+}
+
+fn push_interval_part(parts: &mut Vec<String>, recurrence: &str) {
+    if let Some(interval) = element_text(recurrence, "Interval")
+        .and_then(|value| parse_positive_number(&value, "Interval").ok())
+        .filter(|value| *value > 1)
+    {
+        parts.push(format!("INTERVAL={interval}"));
+    }
+}
+
+fn parse_positive_number(value: &str, field: &str) -> Result<u32> {
+    let number = value
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| anyhow!("{field} must be a positive integer"))?;
+    if number == 0 {
+        bail!("{field} must be a positive integer");
+    }
+    Ok(number)
+}
+
+fn ews_weekday_to_rrule(value: &str) -> Result<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "monday" => Ok("MO"),
+        "tuesday" => Ok("TU"),
+        "wednesday" => Ok("WE"),
+        "thursday" => Ok("TH"),
+        "friday" => Ok("FR"),
+        "saturday" => Ok("SA"),
+        "sunday" => Ok("SU"),
+        other => bail!("unsupported recurrence weekday {other}"),
+    }
+}
+
+fn ews_month_to_number(value: &str) -> Result<u32> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "january" => Ok(1),
+        "february" => Ok(2),
+        "march" => Ok(3),
+        "april" => Ok(4),
+        "may" => Ok(5),
+        "june" => Ok(6),
+        "july" => Ok(7),
+        "august" => Ok(8),
+        "september" => Ok(9),
+        "october" => Ok(10),
+        "november" => Ok(11),
+        "december" => Ok(12),
+        other => bail!("unsupported recurrence month {other}"),
+    }
+}
+
+fn rrule_date(value: &str) -> Result<String> {
+    let date = value.trim().split('T').next().unwrap_or_default();
+    let mut parts = date.split('-');
+    let (Some(year), Some(month), Some(day), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        bail!("recurrence end date must be YYYY-MM-DD");
+    };
+    Ok(format!("{year}{month}{day}"))
 }
 
 fn parse_update_message_flags(request: &str) -> Result<Option<(Option<bool>, Option<bool>)>> {
@@ -4015,6 +4144,7 @@ fn calendar_item_xml_with_change_key(event: &AccessibleEvent, change_key: &str) 
             "<t:Location>{location}</t:Location>",
             "<t:Start>{start}</t:Start>",
             "<t:End>{end}</t:End>",
+            "{recurrence}",
             "<t:LegacyFreeBusyStatus>Busy</t:LegacyFreeBusyStatus>",
             "<t:Body BodyType=\"Text\">{notes}</t:Body>",
             "</t:CalendarItem>"
@@ -4026,8 +4156,164 @@ fn calendar_item_xml_with_change_key(event: &AccessibleEvent, change_key: &str) 
         location = escape_xml(&event.location),
         start = escape_xml(&ews_datetime(&event.date, &event.time)),
         end = escape_xml(&event_end_datetime(event)),
+        recurrence = ews_recurrence_xml(event),
         notes = escape_xml(&event.notes),
     )
+}
+
+fn ews_recurrence_xml(event: &AccessibleEvent) -> String {
+    let Some(recurrence) = rrule_to_ews_recurrence(&event.recurrence_rule, &event.date) else {
+        return String::new();
+    };
+    recurrence
+}
+
+fn rrule_to_ews_recurrence(rrule: &str, start_date: &str) -> Option<String> {
+    let fields = rrule_fields(rrule);
+    let freq = fields.get("FREQ")?.as_str();
+    let interval = fields
+        .get("INTERVAL")
+        .cloned()
+        .unwrap_or_else(|| "1".to_string());
+    let pattern = match freq {
+        "DAILY" => format!(
+            "<t:DailyRecurrence><t:Interval>{}</t:Interval></t:DailyRecurrence>",
+            escape_xml(&interval)
+        ),
+        "WEEKLY" => {
+            let days = fields
+                .get("BYDAY")
+                .map(|value| {
+                    value
+                        .split(',')
+                        .filter_map(rrule_weekday_to_ews)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "Monday".to_string());
+            format!(
+                concat!(
+                    "<t:WeeklyRecurrence>",
+                    "<t:Interval>{interval}</t:Interval>",
+                    "<t:DaysOfWeek>{days}</t:DaysOfWeek>",
+                    "</t:WeeklyRecurrence>"
+                ),
+                interval = escape_xml(&interval),
+                days = escape_xml(&days),
+            )
+        }
+        "MONTHLY" => {
+            let day = fields.get("BYMONTHDAY")?;
+            format!(
+                concat!(
+                    "<t:AbsoluteMonthlyRecurrence>",
+                    "<t:Interval>{interval}</t:Interval>",
+                    "<t:DayOfMonth>{day}</t:DayOfMonth>",
+                    "</t:AbsoluteMonthlyRecurrence>"
+                ),
+                interval = escape_xml(&interval),
+                day = escape_xml(day),
+            )
+        }
+        "YEARLY" => {
+            let day = fields.get("BYMONTHDAY")?;
+            let month = fields.get("BYMONTH").and_then(|value| {
+                value
+                    .parse::<u32>()
+                    .ok()
+                    .and_then(rrule_month_number_to_ews)
+            })?;
+            format!(
+                concat!(
+                    "<t:AbsoluteYearlyRecurrence>",
+                    "<t:DayOfMonth>{day}</t:DayOfMonth>",
+                    "<t:Month>{month}</t:Month>",
+                    "</t:AbsoluteYearlyRecurrence>"
+                ),
+                day = escape_xml(day),
+                month = month,
+            )
+        }
+        _ => return None,
+    };
+    let range = if let Some(count) = fields.get("COUNT") {
+        format!(
+            concat!(
+                "<t:NumberedRecurrence>",
+                "<t:StartDate>{}</t:StartDate>",
+                "<t:NumberOfOccurrences>{}</t:NumberOfOccurrences>",
+                "</t:NumberedRecurrence>"
+            ),
+            escape_xml(start_date),
+            escape_xml(count),
+        )
+    } else if let Some(until) = fields.get("UNTIL") {
+        format!(
+            concat!(
+                "<t:EndDateRecurrence>",
+                "<t:StartDate>{}</t:StartDate>",
+                "<t:EndDate>{}</t:EndDate>",
+                "</t:EndDateRecurrence>"
+            ),
+            escape_xml(start_date),
+            escape_xml(&rrule_until_to_ews_date(until)),
+        )
+    } else {
+        format!(
+            "<t:NoEndRecurrence><t:StartDate>{}</t:StartDate></t:NoEndRecurrence>",
+            escape_xml(start_date)
+        )
+    };
+    Some(format!("<t:Recurrence>{pattern}{range}</t:Recurrence>"))
+}
+
+fn rrule_fields(rrule: &str) -> HashMap<String, String> {
+    rrule
+        .split(';')
+        .filter_map(|part| part.split_once('='))
+        .map(|(key, value)| (key.trim().to_ascii_uppercase(), value.trim().to_string()))
+        .collect()
+}
+
+fn rrule_weekday_to_ews(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_uppercase().as_str() {
+        "MO" => Some("Monday"),
+        "TU" => Some("Tuesday"),
+        "WE" => Some("Wednesday"),
+        "TH" => Some("Thursday"),
+        "FR" => Some("Friday"),
+        "SA" => Some("Saturday"),
+        "SU" => Some("Sunday"),
+        _ => None,
+    }
+}
+
+fn rrule_month_number_to_ews(value: u32) -> Option<&'static str> {
+    match value {
+        1 => Some("January"),
+        2 => Some("February"),
+        3 => Some("March"),
+        4 => Some("April"),
+        5 => Some("May"),
+        6 => Some("June"),
+        7 => Some("July"),
+        8 => Some("August"),
+        9 => Some("September"),
+        10 => Some("October"),
+        11 => Some("November"),
+        12 => Some("December"),
+        _ => None,
+    }
+}
+
+fn rrule_until_to_ews_date(value: &str) -> String {
+    let date = value.split('T').next().unwrap_or(value);
+    if date.len() == 8 {
+        format!("{}-{}-{}", &date[0..4], &date[4..6], &date[6..8])
+    } else {
+        date.to_string()
+    }
 }
 
 fn task_item_summary_xml(task: &ClientTask) -> String {

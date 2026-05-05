@@ -3828,6 +3828,7 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
         ..Default::default()
     };
     let deleted_events = store.deleted_events.clone();
+    let events = store.events.clone();
     let service = ExchangeService::new(store);
 
     let response = service
@@ -3847,6 +3848,16 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
                       <t:Location>Room 1</t:Location>
                       <t:Start>2026-05-04T09:30:00Z</t:Start>
                       <t:End>2026-05-04T10:15:00Z</t:End>
+                      <t:Recurrence>
+                        <t:WeeklyRecurrence>
+                          <t:Interval>1</t:Interval>
+                          <t:DaysOfWeek>Monday Wednesday</t:DaysOfWeek>
+                        </t:WeeklyRecurrence>
+                        <t:NumberedRecurrence>
+                          <t:StartDate>2026-05-04</t:StartDate>
+                          <t:NumberOfOccurrences>5</t:NumberOfOccurrences>
+                        </t:NumberedRecurrence>
+                      </t:Recurrence>
                       <t:RequiredAttendees>
                         <t:Attendee><t:Mailbox><t:Name>Bob</t:Name><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox></t:Attendee>
                       </t:RequiredAttendees>
@@ -3864,6 +3875,10 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
     assert!(body.contains("<m:CreateItemResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("event:cccccccc-cccc-cccc-cccc-cccccccccccc"));
+    assert_eq!(
+        events.lock().unwrap()[0].recurrence_rule,
+        "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=5"
+    );
 
     let response = service
         .handle(
@@ -3878,6 +3893,9 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
     assert!(body.contains("<t:Subject>RCA Calendar</t:Subject>"));
     assert!(body.contains("<t:Start>2026-05-04T09:30:00Z</t:Start>"));
     assert!(body.contains("<t:End>2026-05-04T10:15:00Z</t:End>"));
+    assert!(body.contains("<t:WeeklyRecurrence>"));
+    assert!(body.contains("<t:DaysOfWeek>Monday Wednesday</t:DaysOfWeek>"));
+    assert!(body.contains("<t:NumberOfOccurrences>5</t:NumberOfOccurrences>"));
     assert!(
         body.contains("<m:SyncState>calendar:default:v2:cccccccc-cccc-cccc-cccc-cccccccccccc=ck-")
     );
