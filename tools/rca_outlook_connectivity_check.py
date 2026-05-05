@@ -11,6 +11,7 @@ import argparse
 import base64
 import json
 import os
+import struct
 import sys
 import textwrap
 import urllib.error
@@ -285,6 +286,87 @@ def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, 
     print("ok mapi_nspi_bind_octet_stream")
 
 
+def check_mapi_nspi_address_book(base_url: str, email: str, password: str, timeout: int) -> None:
+    token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
+    path = f"/mapi/nspi/?mailboxId={urllib.parse.quote(email, safe='@')}"
+    probes = {
+        "ResolveNames": assert_nspi_resolve_names_payload,
+        "GetMatches": assert_nspi_get_matches_payload,
+        "QueryRows": assert_nspi_query_rows_payload,
+        "GetProps": assert_nspi_get_props_payload,
+    }
+    for request_type, assert_payload in probes.items():
+        response = request(
+            "POST",
+            join_url(base_url, path),
+            bytes(128),
+            {
+                "Authorization": f"Basic {token}",
+                "Content-Type": "application/octet-stream",
+                "X-RequestType": request_type,
+                "X-RequestId": f"00000000-0000-0000-0000-000000000125:{request_type}",
+                "X-ClientInfo": "lpe-rca-connectivity-check",
+                "User-Agent": "MapiHttpClient",
+            },
+            timeout,
+        )
+        require(response.status == 200, f"MAPI NSPI {request_type} returned HTTP {response.status}: {response.text[:300]}")
+        require("application/mapi-http" in content_type(response.headers), f"MAPI NSPI {request_type} did not return MAPI content")
+        response_code = next((value for key, value in response.headers.items() if key.lower() == "x-responsecode"), "")
+        require(response_code == "0", f"MAPI NSPI {request_type} returned X-ResponseCode {response_code!r}: {response.text[:300]}")
+        assert_payload(mapi_http_binary_payload(response.body), request_type)
+    print("ok mapi_nspi_address_book")
+
+
+def mapi_http_binary_payload(body: bytes) -> bytes:
+    _, separator, payload = body.partition(b"\r\n\r\n")
+    require(separator == b"\r\n\r\n", "MAPI response body did not contain the header/body separator")
+    return payload
+
+
+def le_u32(payload: bytes, offset: int) -> int:
+    require(len(payload) >= offset + 4, f"MAPI payload is too short for u32 at offset {offset}")
+    return struct.unpack_from("<I", payload, offset)[0]
+
+
+def assert_nspi_common_success(payload: bytes, request_type: str) -> None:
+    require(len(payload) >= 12, f"MAPI NSPI {request_type} returned a truncated success payload")
+    require(le_u32(payload, 0) == 0, f"MAPI NSPI {request_type} returned nonzero StatusCode")
+    require(le_u32(payload, 4) == 0, f"MAPI NSPI {request_type} returned nonzero ErrorCode")
+
+
+def assert_nspi_resolve_names_payload(payload: bytes, request_type: str) -> None:
+    assert_nspi_common_success(payload, request_type)
+    require(le_u32(payload, 8) == 1200, "ResolveNames did not return Unicode CodePage 1200")
+    require(payload[12] == 1, "ResolveNames omitted MinimalIds")
+    require(le_u32(payload, 13) == 1, "ResolveNames returned an unexpected MinimalId count")
+    require(payload[21] == 1, "ResolveNames omitted row columns")
+    require(le_u32(payload, 22) >= 4, "ResolveNames returned too few property tags")
+
+
+def assert_nspi_get_matches_payload(payload: bytes, request_type: str) -> None:
+    assert_nspi_common_success(payload, request_type)
+    require(payload[8] == 0, "GetMatches unexpectedly returned STAT")
+    require(payload[9] == 1, "GetMatches omitted MinimalIds")
+    require(le_u32(payload, 10) == 1, "GetMatches returned an unexpected MinimalId count")
+    require(payload[18] == 1, "GetMatches omitted row columns")
+    require(le_u32(payload, 19) >= 4, "GetMatches returned too few property tags")
+
+
+def assert_nspi_query_rows_payload(payload: bytes, request_type: str) -> None:
+    assert_nspi_common_success(payload, request_type)
+    require(payload[8] == 0, "QueryRows unexpectedly returned STAT")
+    require(payload[9] == 1, "QueryRows omitted row columns")
+    require(le_u32(payload, 10) >= 4, "QueryRows returned too few property tags")
+
+
+def assert_nspi_get_props_payload(payload: bytes, request_type: str) -> None:
+    assert_nspi_common_success(payload, request_type)
+    require(le_u32(payload, 8) == 1200, "GetProps did not return Unicode CodePage 1200")
+    require(payload[12] == 1, "GetProps omitted property values")
+    require(le_u32(payload, 13) >= 4, "GetProps returned too few property values")
+
+
 def xml_escape(value: str) -> str:
     return (
         value.replace("&", "&amp;")
@@ -324,6 +406,11 @@ def main() -> int:
         action="store_true",
         help="Exercise RCA-style NSPI Bind with Content-Type application/octet-stream.",
     )
+    parser.add_argument(
+        "--check-mapi-nspi-address-book",
+        action="store_true",
+        help="Exercise RCA-style NSPI address-book Check Name operations.",
+    )
     args = parser.parse_args()
 
     base_url = args.base_url.rstrip("/")
@@ -345,9 +432,16 @@ def main() -> int:
             check_mapi_ping(base_url, args.email, args.password, args.timeout)
         if args.check_mapi_nspi_bind_octet_stream:
             check_mapi_nspi_bind_octet_stream(base_url, args.email, args.password, args.timeout)
+        if args.check_mapi_nspi_address_book:
+            check_mapi_nspi_address_book(base_url, args.email, args.password, args.timeout)
     else:
         print("skip jmap_session password not provided")
-        if args.check_ews_basic or args.check_mapi_ping or args.check_mapi_nspi_bind_octet_stream:
+        if (
+            args.check_ews_basic
+            or args.check_mapi_ping
+            or args.check_mapi_nspi_bind_octet_stream
+            or args.check_mapi_nspi_address_book
+        ):
             raise RuntimeError("requested authenticated checks require --password or LPE_RCA_PASSWORD")
 
     return 0

@@ -2391,15 +2391,17 @@ async fn mapi_over_http_resolve_names_resolves_authenticated_mailbox() {
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
     assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
-    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
-    assert_ne!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 0);
-    assert_eq!(u32::from_le_bytes(body[16..20].try_into().unwrap()), 1);
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
+    assert_eq!(body[12], 1);
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
+    assert_ne!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 0);
+    assert_eq!(body[21], 1);
+    assert_eq!(u32::from_le_bytes(body[22..26].try_into().unwrap()), 8);
+    assert_eq!(u32::from_le_bytes(body[58..62].try_into().unwrap()), 1);
+    assert_eq!(body[62], 0);
     assert!(contains_bytes(&body, &utf16z("alice@example.test")));
     assert!(contains_bytes(&body, &utf16z("Alice")));
-    assert!(contains_bytes(
-        &body,
-        &utf16z("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice-example-test")
-    ));
+    assert!(contains_bytes(&body, &utf16z("SMTP")));
 }
 
 #[tokio::test]
@@ -2454,16 +2456,59 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
         );
 
         match request_type {
-            "GetMatches" | "GetProps" | "GetTemplateInfo" | "QueryRows" | "ResortRestriction"
-            | "SeekEntries" => {
+            "GetMatches" => {
+                assert_eq!(body[8], 0, "{request_type}");
+                assert_eq!(body[9], 1, "{request_type}");
+                assert_eq!(
+                    u32::from_le_bytes(body[10..14].try_into().unwrap()),
+                    1,
+                    "{request_type}"
+                );
+                assert_ne!(
+                    u32::from_le_bytes(body[14..18].try_into().unwrap()),
+                    0,
+                    "{request_type}"
+                );
+                assert_eq!(body[18], 1, "{request_type}");
+                assert!(contains_bytes(&body, &0x3001_001Fu32.to_le_bytes()));
+                assert!(contains_bytes(&body, &0x39FE_001Fu32.to_le_bytes()));
                 assert!(contains_bytes(&body, &utf16z("alice@example.test")));
                 assert!(contains_bytes(&body, &utf16z("Alice")));
             }
+            "QueryRows" | "SeekEntries" => {
+                assert!(contains_bytes(&body, &0x3001_001Fu32.to_le_bytes()));
+                assert!(contains_bytes(&body, &0x39FE_001Fu32.to_le_bytes()));
+                assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+                assert!(contains_bytes(&body, &utf16z("Alice")));
+            }
+            "GetProps" | "GetTemplateInfo" => {
+                assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
+                assert_eq!(body[12], 1, "{request_type}");
+                assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+                assert!(contains_bytes(&body, &utf16z("Alice")));
+            }
+            "ResortRestriction" => {
+                assert!(body.len() >= 19, "{request_type}");
+                assert_eq!(body[8], 0, "{request_type}");
+                assert_eq!(body[9], 1, "{request_type}");
+                assert_eq!(
+                    u32::from_le_bytes(body[10..14].try_into().unwrap()),
+                    1,
+                    "{request_type}"
+                );
+                assert_ne!(
+                    u32::from_le_bytes(body[14..18].try_into().unwrap()),
+                    0,
+                    "{request_type}"
+                );
+            }
             "GetPropList" | "QueryColumns" => {
+                assert_eq!(body[8], 1, "{request_type}");
                 assert!(contains_bytes(&body, &0x3001_001Fu32.to_le_bytes()));
                 assert!(contains_bytes(&body, &0x39FE_001Fu32.to_le_bytes()));
             }
             "GetSpecialTable" => {
+                assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
                 assert!(contains_bytes(&body, &utf16z("Global Address List")));
             }
             "DNToMId" => {

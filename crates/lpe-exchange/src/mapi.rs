@@ -25,6 +25,8 @@ const NSPI_COOKIE: &str = "lpe_mapi_nspi";
 const EMSMDB_COOKIE_PATH: &str = "/mapi/emsmdb";
 const NSPI_COOKIE_PATH: &str = "/mapi/nspi";
 const MAPI_SESSION_MAX_AGE_SECONDS: u32 = 1_800;
+const NSPI_UNICODE_CODEPAGE: u32 = 1200;
+const MAPI_MAILUSER_OBJECT_TYPE: u32 = 6;
 const NSPI_SERVER_GUID: [u8; 16] = [
     0x4c, 0x50, 0x45, 0x00, 0x4d, 0x41, 0x50, 0x49, 0x4e, 0x53, 0x50, 0x49, 0x00, 0x00, 0x00, 0x01,
 ];
@@ -131,7 +133,7 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
             principal_minimal_entry_id(&principal),
         ),
         (MapiEndpoint::Nspi, MapiRequestType::GetMatches) => {
-            nspi_principal_rowset_response("GetMatches", &principal, &request_id)
+            nspi_matches_response(&principal, &request_id)
         }
         (MapiEndpoint::Nspi, MapiRequestType::GetPropList) => {
             nspi_property_tags_response("GetPropList", &request_id)
@@ -143,7 +145,7 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
             nspi_special_table_response(&request_id)
         }
         (MapiEndpoint::Nspi, MapiRequestType::GetTemplateInfo) => {
-            nspi_principal_props_response("GetTemplateInfo", &principal, &request_id)
+            nspi_template_info_response(&principal, &request_id)
         }
         (MapiEndpoint::Nspi, MapiRequestType::GetAddressBookUrl) => {
             endpoint_url_response("GetAddressBookUrl", &request_id, headers, "/mapi/nspi/")
@@ -161,7 +163,7 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
             resolve_names_response(&principal, &request_id)
         }
         (MapiEndpoint::Nspi, MapiRequestType::ResortRestriction) => {
-            nspi_principal_rowset_response("ResortRestriction", &principal, &request_id)
+            nspi_minimal_ids_response("ResortRestriction", &principal, &request_id)
         }
         (MapiEndpoint::Nspi, MapiRequestType::SeekEntries) => {
             nspi_principal_rowset_response("SeekEntries", &principal, &request_id)
@@ -423,10 +425,17 @@ fn resolve_names_response(principal: &AccountPrincipal, request_id: &str) -> Res
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
+    write_u32(&mut body, NSPI_UNICODE_CODEPAGE);
+    body.push(1);
     write_u32(&mut body, 1);
     write_u32(&mut body, principal_minimal_entry_id(principal));
+    body.push(1);
+    write_large_property_tag_array(&mut body, NSPI_BOOTSTRAP_PROPERTY_TAGS);
     write_u32(&mut body, 1);
-    body.extend_from_slice(&nspi_resolved_principal_row(principal));
+    body.extend_from_slice(&nspi_resolved_principal_row(
+        principal,
+        NSPI_BOOTSTRAP_PROPERTY_TAGS,
+    ));
     write_u32(&mut body, 0);
     mapi_response("ResolveNames", request_id, 0, body, None)
 }
@@ -444,10 +453,8 @@ fn nspi_property_tags_response(request_type: &str, request_id: &str) -> Response
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
-    write_u32(&mut body, NSPI_BOOTSTRAP_PROPERTY_TAGS.len() as u32);
-    for tag in NSPI_BOOTSTRAP_PROPERTY_TAGS {
-        write_u32(&mut body, *tag);
-    }
+    body.push(1);
+    write_large_property_tag_array(&mut body, NSPI_BOOTSTRAP_PROPERTY_TAGS);
     write_u32(&mut body, 0);
     mapi_response(request_type, request_id, 0, body, None)
 }
@@ -460,7 +467,12 @@ fn nspi_principal_props_response(
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
-    body.extend_from_slice(&nspi_resolved_principal_row(principal));
+    write_u32(&mut body, NSPI_UNICODE_CODEPAGE);
+    body.push(1);
+    body.extend_from_slice(&nspi_principal_property_value_list(
+        principal,
+        NSPI_BOOTSTRAP_PROPERTY_TAGS,
+    ));
     write_u32(&mut body, 0);
     mapi_response(request_type, request_id, 0, body, None)
 }
@@ -473,8 +485,49 @@ fn nspi_principal_rowset_response(
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
+    body.push(0);
+    body.push(1);
+    write_large_property_tag_array(&mut body, NSPI_BOOTSTRAP_PROPERTY_TAGS);
     write_u32(&mut body, 1);
-    body.extend_from_slice(&nspi_resolved_principal_row(principal));
+    body.extend_from_slice(&nspi_resolved_principal_row(
+        principal,
+        NSPI_BOOTSTRAP_PROPERTY_TAGS,
+    ));
+    write_u32(&mut body, 0);
+    mapi_response(request_type, request_id, 0, body, None)
+}
+
+fn nspi_matches_response(principal: &AccountPrincipal, request_id: &str) -> Response {
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    body.push(0);
+    body.push(1);
+    write_u32(&mut body, 1);
+    write_u32(&mut body, principal_minimal_entry_id(principal));
+    body.push(1);
+    write_large_property_tag_array(&mut body, NSPI_BOOTSTRAP_PROPERTY_TAGS);
+    write_u32(&mut body, 1);
+    body.extend_from_slice(&nspi_resolved_principal_row(
+        principal,
+        NSPI_BOOTSTRAP_PROPERTY_TAGS,
+    ));
+    write_u32(&mut body, 0);
+    mapi_response("GetMatches", request_id, 0, body, None)
+}
+
+fn nspi_minimal_ids_response(
+    request_type: &str,
+    principal: &AccountPrincipal,
+    request_id: &str,
+) -> Response {
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    body.push(0);
+    body.push(1);
+    write_u32(&mut body, 1);
+    write_u32(&mut body, principal_minimal_entry_id(principal));
     write_u32(&mut body, 0);
     mapi_response(request_type, request_id, 0, body, None)
 }
@@ -482,23 +535,46 @@ fn nspi_principal_rowset_response(
 fn nspi_special_table_response(request_id: &str) -> Response {
     let mut table_row = Vec::new();
     write_u32(&mut table_row, 4);
-    write_nspi_string_property(&mut table_row, 0x3001_001F, "Global Address List");
-    write_nspi_u32_property(&mut table_row, 0x0FFE_0003, 0);
-    write_nspi_u32_property(&mut table_row, 0x3000_0003, 1);
-    write_nspi_string_property(
+    write_address_book_tagged_property_value(
+        &mut table_row,
+        0x3001_001F,
+        &NspiValue::String("Global Address List"),
+    );
+    write_address_book_tagged_property_value(&mut table_row, 0x0FFE_0003, &NspiValue::U32(2));
+    write_address_book_tagged_property_value(&mut table_row, 0x3000_0003, &NspiValue::U32(1));
+    write_address_book_tagged_property_value(
         &mut table_row,
         0x3002_001F,
-        "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=Global Address List",
+        &NspiValue::String(
+            "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=Global Address List",
+        ),
     );
 
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
+    write_u32(&mut body, NSPI_UNICODE_CODEPAGE);
+    body.push(1);
     write_u32(&mut body, 1);
+    body.push(1);
     write_u32(&mut body, 1);
     body.extend_from_slice(&table_row);
     write_u32(&mut body, 0);
     mapi_response("GetSpecialTable", request_id, 0, body, None)
+}
+
+fn nspi_template_info_response(principal: &AccountPrincipal, request_id: &str) -> Response {
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    write_u32(&mut body, NSPI_UNICODE_CODEPAGE);
+    body.push(1);
+    body.extend_from_slice(&nspi_principal_property_value_list(
+        principal,
+        NSPI_BOOTSTRAP_PROPERTY_TAGS,
+    ));
+    write_u32(&mut body, 0);
+    mapi_response("GetTemplateInfo", request_id, 0, body, None)
 }
 
 fn nspi_update_stat_response(request_id: &str) -> Response {
@@ -516,30 +592,95 @@ fn principal_minimal_entry_id(principal: &AccountPrincipal) -> u32 {
     u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) | 0x8000_0000
 }
 
-fn nspi_resolved_principal_row(principal: &AccountPrincipal) -> Vec<u8> {
+fn nspi_resolved_principal_row(principal: &AccountPrincipal, columns: &[u32]) -> Vec<u8> {
     let mut row = Vec::new();
-    write_u32(&mut row, 8);
-    write_nspi_string_property(&mut row, 0x3001_001F, &principal.display_name);
-    write_nspi_string_property(&mut row, 0x39FE_001F, &principal.email);
-    write_nspi_string_property(&mut row, 0x3003_001F, &principal.email);
-    write_nspi_string_property(&mut row, 0x3A00_001F, &principal.display_name);
-    write_nspi_u32_property(&mut row, 0x0FFE_0003, principal_minimal_entry_id(principal));
-    write_nspi_u32_property(&mut row, 0x3000_0003, principal_minimal_entry_id(principal));
-    write_nspi_string_property(&mut row, 0x3004_001F, &principal.email);
-    write_nspi_string_property(&mut row, 0x3002_001F, &principal_legacy_dn(principal));
+    row.push(0);
+    for property_tag in columns {
+        write_address_book_property_value(
+            &mut row,
+            *property_tag,
+            &nspi_principal_value(principal, *property_tag),
+        );
+    }
     row
 }
 
-fn write_nspi_u32_property(row: &mut Vec<u8>, property_tag: u32, value: u32) {
-    write_u32(row, property_tag);
-    write_u32(row, 0);
-    write_u32(row, value);
+fn nspi_principal_property_value_list(principal: &AccountPrincipal, tags: &[u32]) -> Vec<u8> {
+    let mut values = Vec::new();
+    write_u32(&mut values, tags.len() as u32);
+    for property_tag in tags {
+        write_address_book_tagged_property_value(
+            &mut values,
+            *property_tag,
+            &nspi_principal_value(principal, *property_tag),
+        );
+    }
+    values
 }
 
-fn write_nspi_string_property(row: &mut Vec<u8>, property_tag: u32, value: &str) {
-    write_u32(row, property_tag);
-    write_u32(row, 0);
-    write_utf16z(row, value);
+enum NspiValue<'a> {
+    String(&'a str),
+    OwnedString(String),
+    U32(u32),
+}
+
+fn nspi_principal_value(principal: &AccountPrincipal, property_tag: u32) -> NspiValue<'_> {
+    match property_tag {
+        0x3001_001F => NspiValue::String(&principal.display_name),
+        0x39FE_001F => NspiValue::String(&principal.email),
+        0x3003_001F => NspiValue::String(&principal.email),
+        0x3A00_001F => NspiValue::String(&principal.display_name),
+        0x0FFE_0003 => NspiValue::U32(MAPI_MAILUSER_OBJECT_TYPE),
+        0x3000_0003 => NspiValue::U32(principal_minimal_entry_id(principal)),
+        0x3004_001F => NspiValue::String(&principal.email),
+        0x3002_001F => NspiValue::String("SMTP"),
+        0x3005_001F => NspiValue::OwnedString(principal_legacy_dn(principal)),
+        _ => match property_tag & 0xFFFF {
+            0x001F => NspiValue::String(""),
+            0x0003 => NspiValue::U32(0),
+            _ => NspiValue::U32(0),
+        },
+    }
+}
+
+fn write_large_property_tag_array(body: &mut Vec<u8>, tags: &[u32]) {
+    write_u32(body, tags.len() as u32);
+    for tag in tags {
+        write_u32(body, *tag);
+    }
+}
+
+fn write_address_book_tagged_property_value(
+    body: &mut Vec<u8>,
+    property_tag: u32,
+    value: &NspiValue<'_>,
+) {
+    write_u32(body, property_tag);
+    write_address_book_property_value(body, property_tag, value);
+}
+
+fn write_address_book_property_value(body: &mut Vec<u8>, property_tag: u32, value: &NspiValue<'_>) {
+    match (property_tag & 0xFFFF, value) {
+        (0x001F, NspiValue::String(value)) => {
+            body.push(0xFF);
+            write_utf16z(body, value);
+        }
+        (0x001F, NspiValue::OwnedString(value)) => {
+            body.push(0xFF);
+            write_utf16z(body, value);
+        }
+        (0x0003, NspiValue::U32(value)) => write_u32(body, *value),
+        (0x0003, _) => write_u32(body, 0),
+        (_, NspiValue::U32(value)) => write_u32(body, *value),
+        (_, NspiValue::String(value)) => {
+            body.push(0xFF);
+            write_utf16z(body, value);
+        }
+        (_, NspiValue::OwnedString(value)) => {
+            body.push(0xFF);
+            write_utf16z(body, value);
+        }
+    }
 }
 
 fn principal_legacy_dn(principal: &AccountPrincipal) -> String {
