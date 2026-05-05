@@ -3899,7 +3899,7 @@ mod tests {
                         json!({
                             "accountId": FakeStore::shared_account().account_id.to_string(),
                             "ids": ["message:cccccccc-cccc-cccc-cccc-cccccccccccc"],
-                            "properties": ["data:asText", "size"]
+                            "properties": ["data:asText", "digest:sha-256", "size"]
                         }),
                         "g1".to_string(),
                     )],
@@ -3914,6 +3914,14 @@ mod tests {
         assert!(message.contains("Subject: Draft subject\r\n"));
         assert!(!message.contains("Bcc:"));
         assert!(!message.contains("hidden@example.test"));
+        use base64::Engine as _;
+        use sha2::Digest as _;
+        let digest = base64::engine::general_purpose::STANDARD
+            .encode(sha2::Sha256::digest(message.as_bytes()));
+        assert_eq!(
+            response.method_responses[0].1["list"][0]["digest:sha-256"],
+            digest
+        );
     }
 
     #[tokio::test]
