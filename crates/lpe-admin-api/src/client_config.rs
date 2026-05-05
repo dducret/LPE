@@ -1,6 +1,6 @@
 use axum::{
     body::Bytes,
-    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode},
+    http::{header::CONTENT_TYPE, header::LOCATION, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
     Router,
@@ -18,6 +18,7 @@ pub fn router() -> Router<Storage> {
             "/.well-known/autoconfig/mail/config-v1.1.xml",
             get(thunderbird_autoconfig),
         )
+        .route("/.well-known/jmap", get(jmap_well_known))
         .route(
             "/autodiscover/autodiscover.xml",
             get(outlook_autodiscover_get).post(outlook_autodiscover_post),
@@ -32,6 +33,18 @@ async fn thunderbird_autoconfig(headers: HeaderMap) -> Response {
     xml_response(render_thunderbird_autoconfig(
         &PublishedEndpoints::from_headers(&headers, None),
     ))
+}
+
+async fn jmap_well_known(headers: HeaderMap) -> Response {
+    (
+        StatusCode::TEMPORARY_REDIRECT,
+        [(LOCATION, jmap_well_known_location(&headers))],
+    )
+        .into_response()
+}
+
+fn jmap_well_known_location(headers: &HeaderMap) -> String {
+    PublishedEndpoints::from_headers(headers, None).jmap_session_url
 }
 
 async fn outlook_autodiscover_get(headers: HeaderMap) -> Response {
@@ -782,10 +795,10 @@ fn xml_response(body: String) -> Response {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_autodiscover_email, render_mobilesync_autodiscover, render_outlook_autodiscover,
-        render_soap_user_settings_autodiscover, render_soap_user_settings_response,
-        render_thunderbird_autoconfig, requested_mobilesync_schema, requested_soap_user_settings,
-        PublishedEndpoints,
+        jmap_well_known_location, parse_autodiscover_email, render_mobilesync_autodiscover,
+        render_outlook_autodiscover, render_soap_user_settings_autodiscover,
+        render_soap_user_settings_response, render_thunderbird_autoconfig,
+        requested_mobilesync_schema, requested_soap_user_settings, PublishedEndpoints,
     };
     use axum::http::HeaderMap;
     use std::sync::Mutex;
@@ -840,6 +853,30 @@ mod tests {
         assert!(xml.contains("<outgoingServer type=\"smtp\">"));
         assert!(xml.contains("<hostname>submit.example.test</hostname>"));
         assert!(xml.contains("<port>465</port>"));
+    }
+
+    #[test]
+    fn jmap_well_known_redirects_to_public_session_url() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("LPE_AUTOCONFIG_JMAP_SESSION_URL");
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-proto", "https".parse().unwrap());
+        headers.insert("x-forwarded-host", "mail.example.test".parse().unwrap());
+
+        assert_eq!(
+            jmap_well_known_location(&headers),
+            "https://mail.example.test/api/jmap/session"
+        );
+
+        std::env::set_var(
+            "LPE_AUTOCONFIG_JMAP_SESSION_URL",
+            "https://jmap.example.test/.well-known/jmap-session",
+        );
+        assert_eq!(
+            jmap_well_known_location(&headers),
+            "https://jmap.example.test/.well-known/jmap-session"
+        );
+        std::env::remove_var("LPE_AUTOCONFIG_JMAP_SESSION_URL");
     }
 
     #[test]

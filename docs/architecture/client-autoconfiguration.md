@@ -107,10 +107,13 @@ The externally published paths are:
 - `POST /api/jmap/upload/{accountId}`
 - `GET /api/jmap/download/{accountId}/{blobId}/{name}`
 - `GET /api/jmap/ws`
+- `GET /.well-known/jmap`
 
 The MVP client-autoconfiguration layer only embeds a documentation pointer to
-the published `JMAP` session endpoint. The MVP does not yet publish a dedicated
-`JMAP` well-known endpoint.
+the published `JMAP` session endpoint for Thunderbird-style configuration.
+The `/.well-known/jmap` endpoint redirects to the configured public `JMAP`
+session URL so RFC 8620 service autodiscovery can find the same session
+resource. `LPE_AUTOCONFIG_JMAP_SESSION_URL` overrides the redirect target.
 
 `EmailSubmission/set` must continue to call the canonical `LPE` submission
 workflow after loading a draft. It must not hand the message directly to
@@ -133,7 +136,7 @@ workflow after loading a draft. It must not hand the message directly to
 - `LPE_AUTOCONFIG_MAPI_EMSMDB_URL`, optional; default `{public_scheme}://{public_host}/mapi/emsmdb/?MailboxId={email}`
 - `LPE_AUTOCONFIG_MAPI_NSPI_URL`, optional; default `{public_scheme}://{public_host}/mapi/nspi/?MailboxId={email}`
 - `LPE_AUTOCONFIG_ACTIVESYNC_URL`, optional; default `{public_scheme}://{public_host}/Microsoft-Server-ActiveSync`
-- `LPE_AUTOCONFIG_JMAP_SESSION_URL`, optional
+- `LPE_AUTOCONFIG_JMAP_SESSION_URL`, optional; default `{public_scheme}://{public_host}/api/jmap/session`
 
 ### Recommended DNS and HTTP publication
 
@@ -142,7 +145,7 @@ For a domain `example.test`:
 - publish `autoconfig.example.test` or `mail.example.test` toward the public `LPE-CT` front end
 - publish `autodiscover.example.test` or reuse `mail.example.test` toward the same front end
 - re-expose the `/autoconfig/...`, `/.well-known/autoconfig/...`, `/autodiscover/...`, `/Autodiscover/...`, `/Microsoft-Server-ActiveSync`, `/EWS/Exchange.asmx`, `/ews/exchange.asmx`, and `/mapi/...` routes over HTTPS
-- re-expose `/api/jmap/session`, `/api/jmap/api`, `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`, and `/api/jmap/ws` from `LPE-CT` to the core `LPE` service
+- re-expose `/api/jmap/session`, `/api/jmap/api`, `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`, `/api/jmap/ws`, and `/.well-known/jmap` from `LPE-CT` to the core `LPE` service
 - publish `IMAPS` on the same hostname when native `IMAP` access is exposed
 - publish the authenticated `SMTPS` submission listener only when `LPE-CT` really exposes it
 - do not reuse the internal `LPE -> LPE-CT` relay as a client-submission endpoint
