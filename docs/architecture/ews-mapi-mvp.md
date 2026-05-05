@@ -8,6 +8,8 @@ The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchang
 
 `MAPI` implementation has started as a guarded `MAPI over HTTP` foundation for future Outlook desktop support. It is not Outlook-ready. `mapiHttp` autodiscover publication is available only through an explicit administrator interoperability-test switch. The current slice implements authenticated transport request classification, session-context cookies, and the first mailbox-folder bootstrap ROPs. Legacy `EXCH` / `EXPR` provider metadata for Outlook setup probes that do not yet send `X-MapiHttpCapability` requires a separate explicit interoperability-test switch; requests that do send that header receive the dedicated `mapiHttp` provider instead.
 
+The repeatable `EWS` live smoke and release-gate checks are tracked in `docs/architecture/ews-interoperability-matrix.md`.
+
 ### Full-support boundary
 
 For `LPE`, "full support" for Exchange compatibility means production-quality support for the client and interoperability surfaces that map cleanly onto the canonical `LPE` model. It does not mean becoming a complete Microsoft Exchange Server clone.
