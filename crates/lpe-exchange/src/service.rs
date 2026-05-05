@@ -4,7 +4,7 @@ use axum::{
     extract::State,
     http::{
         header::{CONTENT_TYPE, WWW_AUTHENTICATE},
-        HeaderMap, HeaderValue, StatusCode,
+        HeaderMap, HeaderValue, StatusCode, Uri,
     },
     response::{IntoResponse, Response},
     routing::{on, MethodFilter},
@@ -27,6 +27,8 @@ use lpe_storage::{
     UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
@@ -104,12 +106,43 @@ async fn options_handler() -> Response {
     response
 }
 
-async fn post_handler(State(storage): State<Storage>, headers: HeaderMap, body: Bytes) -> Response {
+async fn post_handler(
+    State(storage): State<Storage>,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let started_at = Instant::now();
+    let operation = ews_operation_hint(&headers, body.as_ref());
     let service = ExchangeService::new(storage);
-    match service.handle(&headers, body.as_ref()).await {
+    let response = match service.handle(&headers, body.as_ref()).await {
         Ok(response) => response,
-        Err(error) => error_response(&error),
-    }
+        Err(error) => {
+            let response = error_response(&error);
+            log_ews_connection(
+                &uri,
+                &headers,
+                body.len(),
+                operation.as_deref().unwrap_or("unknown"),
+                ews_response_code(&response),
+                &response,
+                started_at.elapsed().as_secs_f64() * 1000.0,
+                Some(error.to_string().as_str()),
+            );
+            return response;
+        }
+    };
+    log_ews_connection(
+        &uri,
+        &headers,
+        body.len(),
+        operation.as_deref().unwrap_or("unknown"),
+        ews_response_code(&response),
+        &response,
+        started_at.elapsed().as_secs_f64() * 1000.0,
+        None,
+    );
+    response
 }
 
 async fn mapi_options_handler() -> Response {
@@ -126,31 +159,229 @@ async fn mapi_options_handler() -> Response {
 
 async fn mapi_emsmdb_post_handler(
     State(storage): State<Storage>,
+    uri: Uri,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    mapi_post_handler(MapiEndpoint::Emsmdb, storage, headers, body).await
+    mapi_post_handler(MapiEndpoint::Emsmdb, storage, uri, headers, body).await
 }
 
 async fn mapi_nspi_post_handler(
     State(storage): State<Storage>,
+    uri: Uri,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    mapi_post_handler(MapiEndpoint::Nspi, storage, headers, body).await
+    mapi_post_handler(MapiEndpoint::Nspi, storage, uri, headers, body).await
 }
 
 async fn mapi_post_handler(
     endpoint: MapiEndpoint,
     storage: Storage,
+    uri: Uri,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    let started_at = Instant::now();
     let service = ExchangeService::new(storage);
-    match service.handle_mapi(endpoint, &headers, body.as_ref()).await {
+    let response = match service.handle_mapi(endpoint, &headers, body.as_ref()).await {
         Ok(response) => response,
-        Err(error) => mapi::mapi_error_response(&error),
+        Err(error) => {
+            let response = mapi::mapi_error_response(&error);
+            log_mapi_transport_connection(
+                endpoint,
+                &uri,
+                &headers,
+                body.len(),
+                &response,
+                started_at.elapsed().as_secs_f64() * 1000.0,
+                Some(error.to_string().as_str()),
+            );
+            return response;
+        }
+    };
+    log_mapi_transport_connection(
+        endpoint,
+        &uri,
+        &headers,
+        body.len(),
+        &response,
+        started_at.elapsed().as_secs_f64() * 1000.0,
+        None,
+    );
+    response
+}
+
+fn ews_operation_hint(headers: &HeaderMap, body: &[u8]) -> Option<String> {
+    decode_ews_body(headers, body)
+        .ok()
+        .and_then(|decoded| operation_name(&decoded))
+}
+
+fn log_ews_connection(
+    uri: &Uri,
+    headers: &HeaderMap,
+    request_body_bytes: usize,
+    operation: &str,
+    ews_response_code: Option<&str>,
+    response: &Response,
+    duration_ms: f64,
+    error: Option<&str>,
+) {
+    let status = response.status().as_u16();
+    let trace_id = mapi::safe_header(headers, "x-trace-id").unwrap_or_default();
+    let user_agent = mapi::safe_header(headers, "user-agent").unwrap_or_default();
+    let client_request_id = mapi::safe_header(headers, "client-request-id").unwrap_or_default();
+    let x_request_id = mapi::safe_header(headers, "x-requestid").unwrap_or_default();
+    let client_application = mapi::safe_header(headers, "x-clientapplication").unwrap_or_default();
+    let message = "rca debug ews connection";
+
+    if status < 400 {
+        info!(
+            rca_debug = true,
+            adapter = "ews",
+            path = %uri.path(),
+            query = %uri.query().unwrap_or_default(),
+            operation = %operation,
+            ews_response_code = %ews_response_code.unwrap_or_default(),
+            trace_id = %trace_id,
+            client_request_id = %client_request_id,
+            x_request_id = %x_request_id,
+            client_application = %client_application,
+            http_status = status,
+            request_body_bytes,
+            duration_ms,
+            user_agent = %user_agent,
+            "{message}"
+        );
+    } else {
+        warn!(
+            rca_debug = true,
+            adapter = "ews",
+            path = %uri.path(),
+            query = %uri.query().unwrap_or_default(),
+            operation = %operation,
+            ews_response_code = %ews_response_code.unwrap_or_default(),
+            trace_id = %trace_id,
+            client_request_id = %client_request_id,
+            x_request_id = %x_request_id,
+            client_application = %client_application,
+            http_status = status,
+            request_body_bytes,
+            duration_ms,
+            user_agent = %user_agent,
+            error = %error.unwrap_or_default(),
+            "{message}"
+        );
     }
+}
+
+#[derive(Clone, Debug)]
+struct EwsResponseDebug {
+    response_code: String,
+}
+
+fn ews_response_code(response: &Response) -> Option<&str> {
+    response
+        .extensions()
+        .get::<EwsResponseDebug>()
+        .map(|debug| debug.response_code.as_str())
+}
+
+fn log_mapi_transport_connection(
+    endpoint: MapiEndpoint,
+    uri: &Uri,
+    headers: &HeaderMap,
+    request_body_bytes: usize,
+    response: &Response,
+    duration_ms: f64,
+    error: Option<&str>,
+) {
+    let endpoint = match endpoint {
+        MapiEndpoint::Emsmdb => "emsmdb",
+        MapiEndpoint::Nspi => "nspi",
+    };
+    let status = response.status().as_u16();
+    let mapi_response_code = response_header(response, "x-responsecode").unwrap_or_default();
+    let mapi_request_id = response_header(response, "x-requestid")
+        .or_else(|| mapi::safe_header(headers, "x-requestid"))
+        .unwrap_or_default();
+    let request_type = response_header(response, "x-requesttype")
+        .or_else(|| mapi::safe_header(headers, "x-requesttype"))
+        .unwrap_or_default();
+    let mailbox_id = query_parameter(uri.query().unwrap_or_default(), "mailboxId");
+    let client_request_id = mapi::safe_header(headers, "client-request-id").unwrap_or_default();
+    let client_info = mapi::safe_header(headers, "x-clientinfo").unwrap_or_default();
+    let client_application = mapi::safe_header(headers, "x-clientapplication").unwrap_or_default();
+    let trace_id = mapi::safe_header(headers, "x-trace-id").unwrap_or_default();
+    let user_agent = mapi::safe_header(headers, "user-agent").unwrap_or_default();
+    let response_payload_bytes = mapi::mapi_response_payload_bytes(response).unwrap_or(0);
+    let message = "rca debug mapi transport connection";
+
+    if status < 400 && mapi_response_code == "0" {
+        info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint,
+            path = %uri.path(),
+            query = %uri.query().unwrap_or_default(),
+            mailbox_id = %mailbox_id.unwrap_or_default(),
+            request_type = %request_type,
+            mapi_request_id = %mapi_request_id,
+            client_request_id = %client_request_id,
+            client_info = %client_info,
+            client_application = %client_application,
+            trace_id = %trace_id,
+            http_status = status,
+            mapi_response_code = %mapi_response_code,
+            request_body_bytes,
+            response_payload_bytes,
+            duration_ms,
+            user_agent = %user_agent,
+            "{message}"
+        );
+    } else {
+        warn!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint,
+            path = %uri.path(),
+            query = %uri.query().unwrap_or_default(),
+            mailbox_id = %mailbox_id.unwrap_or_default(),
+            request_type = %request_type,
+            mapi_request_id = %mapi_request_id,
+            client_request_id = %client_request_id,
+            client_info = %client_info,
+            client_application = %client_application,
+            trace_id = %trace_id,
+            http_status = status,
+            mapi_response_code = %mapi_response_code,
+            request_body_bytes,
+            response_payload_bytes,
+            duration_ms,
+            user_agent = %user_agent,
+            error = %error.unwrap_or_default(),
+            "{message}"
+        );
+    }
+}
+
+fn response_header(response: &Response, name: &str) -> Option<String> {
+    response
+        .headers()
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn query_parameter(query: &str, name: &str) -> Option<String> {
+    query.split('&').find_map(|part| {
+        let (key, value) = part.split_once('=')?;
+        key.eq_ignore_ascii_case(name)
+            .then(|| value.chars().take(240).collect())
+    })
 }
 
 impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
@@ -203,7 +434,12 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
             _ => unsupported_operation_response(&operation),
         };
 
-        Ok(soap_response(payload))
+        let response_code = element_text(&payload, "ResponseCode").unwrap_or_default();
+        let mut response = soap_response(payload);
+        response
+            .extensions_mut()
+            .insert(EwsResponseDebug { response_code });
+        Ok(response)
     }
 
     pub(crate) async fn handle_mapi(

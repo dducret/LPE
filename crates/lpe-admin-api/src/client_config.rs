@@ -1,7 +1,7 @@
 use axum::{
     body::Bytes,
     extract::{Path, Query},
-    http::{header::CONTENT_TYPE, header::LOCATION, HeaderMap, HeaderValue, StatusCode},
+    http::{header::CONTENT_TYPE, header::LOCATION, HeaderMap, HeaderValue, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::get,
     Json, Router,
@@ -10,6 +10,7 @@ use lpe_storage::Storage;
 use serde::Deserialize;
 use serde_json::json;
 use std::env;
+use tracing::{info, warn};
 
 pub fn router() -> Router<Storage> {
     Router::new()
@@ -66,33 +67,64 @@ fn jmap_well_known_location(headers: &HeaderMap) -> String {
     PublishedEndpoints::from_headers(headers, None).jmap_session_url
 }
 
-async fn outlook_autodiscover_get(headers: HeaderMap) -> Response {
-    xml_response(render_outlook_autodiscover(
+async fn outlook_autodiscover_get(uri: Uri, headers: HeaderMap) -> Response {
+    let response = xml_response(render_outlook_autodiscover(
         &PublishedEndpoints::from_headers(&headers, None),
         None,
-    ))
+    ));
+    log_autodiscover_connection("GET", &uri, &headers, None, "pox", 0, &response, None);
+    response
 }
 
-async fn outlook_autodiscover_post(headers: HeaderMap, body: Bytes) -> Response {
+async fn outlook_autodiscover_post(uri: Uri, headers: HeaderMap, body: Bytes) -> Response {
     let email = parse_autodiscover_email(body.as_ref());
     let endpoints = PublishedEndpoints::from_headers(&headers, email.as_deref());
-    let response = if requested_soap_user_settings(body.as_ref()) {
+    let response_kind = if requested_soap_user_settings(body.as_ref()) {
+        "soap_user_settings"
+    } else if requested_mobilesync_schema(body.as_ref()) {
+        "mobilesync"
+    } else {
+        "pox"
+    };
+    let response = if response_kind == "soap_user_settings" {
         match render_soap_user_settings_response(&endpoints, email.as_deref()) {
             Some(response) => response,
             None => {
-                return (
+                let response = (
                     StatusCode::NOT_FOUND,
                     "SOAP Autodiscover is not published for the default Outlook IMAP profile.\n",
                 )
                     .into_response();
+                log_autodiscover_connection(
+                    "POST",
+                    &uri,
+                    &headers,
+                    email.as_deref(),
+                    response_kind,
+                    body.len(),
+                    &response,
+                    Some("SOAP Exchange autodiscover is not published"),
+                );
+                return response;
             }
         }
-    } else if requested_mobilesync_schema(body.as_ref()) {
+    } else if response_kind == "mobilesync" {
         render_mobilesync_autodiscover(&endpoints, email.as_deref())
     } else {
         render_outlook_autodiscover(&endpoints, email.as_deref())
     };
-    xml_response(response)
+    let response = xml_response(response);
+    log_autodiscover_connection(
+        "POST",
+        &uri,
+        &headers,
+        email.as_deref(),
+        response_kind,
+        body.len(),
+        &response,
+        None,
+    );
+    response
 }
 
 #[derive(Debug, Deserialize)]
@@ -102,12 +134,13 @@ struct AutodiscoverJsonQuery {
 }
 
 async fn outlook_autodiscover_json(
+    uri: Uri,
     headers: HeaderMap,
     Path(email): Path<String>,
     Query(query): Query<AutodiscoverJsonQuery>,
 ) -> Response {
     let endpoints = PublishedEndpoints::from_headers(&headers, Some(&email));
-    match render_autodiscover_json(&endpoints, query.protocol.as_deref()) {
+    let response = match render_autodiscover_json(&endpoints, query.protocol.as_deref()) {
         Some(response) => response,
         None => (
             StatusCode::NOT_FOUND,
@@ -116,7 +149,18 @@ async fn outlook_autodiscover_json(
             })),
         )
             .into_response(),
-    }
+    };
+    log_autodiscover_connection(
+        "GET",
+        &uri,
+        &headers,
+        Some(&email),
+        query.protocol.as_deref().unwrap_or("AutoDiscoverV1"),
+        0,
+        &response,
+        None,
+    );
+    response
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -771,6 +815,73 @@ fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.split(',').next().unwrap_or(value).trim().to_string())
+}
+
+fn safe_header(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(240).collect())
+}
+
+fn log_autodiscover_connection(
+    method: &str,
+    uri: &Uri,
+    headers: &HeaderMap,
+    email: Option<&str>,
+    response_kind: &str,
+    request_body_bytes: usize,
+    response: &Response,
+    error: Option<&str>,
+) {
+    let status = response.status().as_u16();
+    let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
+    let user_agent = safe_header(headers, "user-agent").unwrap_or_default();
+    let x_request_id = safe_header(headers, "x-requestid").unwrap_or_default();
+    let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
+    let x_mapi_http_capability = safe_header(headers, "x-mapihttpcapability").unwrap_or_default();
+    let message = "rca debug autodiscover connection";
+
+    if status < 400 {
+        info!(
+            rca_debug = true,
+            adapter = "autodiscover",
+            method = %method,
+            path = %uri.path(),
+            query = %uri.query().unwrap_or_default(),
+            mailbox = %email.unwrap_or_default(),
+            response_kind = %response_kind,
+            trace_id = %trace_id,
+            client_request_id = %client_request_id,
+            x_request_id = %x_request_id,
+            x_mapi_http_capability = %x_mapi_http_capability,
+            http_status = status,
+            request_body_bytes,
+            user_agent = %user_agent,
+            "{message}"
+        );
+    } else {
+        warn!(
+            rca_debug = true,
+            adapter = "autodiscover",
+            method = %method,
+            path = %uri.path(),
+            query = %uri.query().unwrap_or_default(),
+            mailbox = %email.unwrap_or_default(),
+            response_kind = %response_kind,
+            trace_id = %trace_id,
+            client_request_id = %client_request_id,
+            x_request_id = %x_request_id,
+            x_mapi_http_capability = %x_mapi_http_capability,
+            http_status = status,
+            request_body_bytes,
+            user_agent = %user_agent,
+            error = %error.unwrap_or_default(),
+            "{message}"
+        );
+    }
 }
 
 fn host_without_port(value: &str) -> String {

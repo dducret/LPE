@@ -13,6 +13,7 @@ use std::{
     sync::{Mutex, OnceLock},
     time::{Duration, SystemTime},
 };
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::store::ExchangeStore;
@@ -97,15 +98,26 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
 ) -> Result<Response> {
     let principal = authenticate_account(store, None, headers, "mapi").await?;
     let request_type = request_type(headers)?;
+    let request_type_label = request_type.header_value().to_string();
     let request_id = request_id(headers);
     if !is_mapi_content_type(headers) {
         let response = mapi_diagnostic_response(
-            request_type.header_value(),
+            &request_type_label,
             &request_id,
             4,
             "MAPI requests must use Content-Type application/mapi-http.",
         );
-        return Ok(finalize_mapi_response(response, headers));
+        let response = finalize_mapi_response(response, headers);
+        log_mapi_connection(
+            endpoint,
+            &principal,
+            headers,
+            _body.len(),
+            &request_type_label,
+            &request_id,
+            &response,
+        );
+        return Ok(response);
     }
 
     let response = match (endpoint, request_type) {
@@ -190,7 +202,17 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
         ),
     };
 
-    Ok(finalize_mapi_response(response, headers))
+    let response = finalize_mapi_response(response, headers);
+    log_mapi_connection(
+        endpoint,
+        &principal,
+        headers,
+        _body.len(),
+        &request_type_label,
+        &request_id,
+        &response,
+    );
+    Ok(response)
 }
 
 pub(crate) fn mapi_error_response(error: &anyhow::Error) -> Response {
@@ -874,6 +896,9 @@ fn mapi_response(
     framed_body.extend_from_slice(&body);
 
     let mut response = (StatusCode::OK, framed_body).into_response();
+    response.extensions_mut().insert(MapiResponseDebug {
+        payload_bytes: body.len(),
+    });
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static(MAPI_CONTENT_TYPE));
@@ -893,6 +918,18 @@ fn mapi_response(
     response
 }
 
+#[derive(Clone, Copy, Debug)]
+struct MapiResponseDebug {
+    payload_bytes: usize,
+}
+
+pub(crate) fn mapi_response_payload_bytes(response: &Response) -> Option<usize> {
+    response
+        .extensions()
+        .get::<MapiResponseDebug>()
+        .map(|debug| debug.payload_bytes)
+}
+
 fn finalize_mapi_response(mut response: Response, request_headers: &HeaderMap) -> Response {
     insert_header(
         &mut response,
@@ -906,6 +943,96 @@ fn finalize_mapi_response(mut response: Response, request_headers: &HeaderMap) -
             .insert("x-clientinfo", client_info.clone());
     }
     response
+}
+
+fn log_mapi_connection(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    headers: &HeaderMap,
+    request_body_bytes: usize,
+    request_type: &str,
+    request_id: &str,
+    response: &Response,
+) {
+    let response_code = response_header(response, "x-responsecode").unwrap_or_default();
+    let status = response.status().as_u16();
+    let payload_bytes = mapi_response_payload_bytes(response).unwrap_or(0);
+    let endpoint = match endpoint {
+        MapiEndpoint::Emsmdb => "emsmdb",
+        MapiEndpoint::Nspi => "nspi",
+    };
+    let content_type = safe_header(headers, "content-type").unwrap_or_default();
+    let user_agent = safe_header(headers, "user-agent").unwrap_or_default();
+    let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
+    let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
+    let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
+    let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
+    let message = "rca debug mapi connection";
+
+    if response_code == "0" {
+        info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = %request_type,
+            mapi_request_id = %request_id,
+            client_request_id = %client_request_id,
+            client_info = %client_info,
+            client_application = %client_application,
+            trace_id = %trace_id,
+            http_status = status,
+            mapi_response_code = %response_code,
+            request_body_bytes,
+            response_payload_bytes = payload_bytes,
+            content_type = %content_type,
+            user_agent = %user_agent,
+            "{message}"
+        );
+    } else {
+        warn!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = %request_type,
+            mapi_request_id = %request_id,
+            client_request_id = %client_request_id,
+            client_info = %client_info,
+            client_application = %client_application,
+            trace_id = %trace_id,
+            http_status = status,
+            mapi_response_code = %response_code,
+            request_body_bytes,
+            response_payload_bytes = payload_bytes,
+            content_type = %content_type,
+            user_agent = %user_agent,
+            "{message}"
+        );
+    }
+}
+
+fn response_header(response: &Response, name: &str) -> Option<String> {
+    response
+        .headers()
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+pub(crate) fn safe_header(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(240).collect())
 }
 
 struct ExecuteRequest {
