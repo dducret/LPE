@@ -3,6 +3,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use sha1::Sha1;
 use sha2::{Digest as _, Sha256};
 use std::collections::{HashMap, HashSet};
 
@@ -489,6 +490,12 @@ fn blob_get_object(
                     Value::String(BASE64.encode(selected)),
                 );
             }
+            "digest:sha" => {
+                object.insert(
+                    "digest:sha".to_string(),
+                    Value::String(BASE64.encode(Sha1::digest(selected))),
+                );
+            }
             "digest:sha-256" => {
                 object.insert(
                     "digest:sha-256".to_string(),
@@ -522,6 +529,9 @@ fn readable_blob_range(bytes: &[u8], offset: usize, length: Option<u64>) -> Resu
 fn unsupported_blob_get_property(properties: &[String]) -> Option<&str> {
     properties
         .iter()
-        .find(|property| property.starts_with("digest:") && property.as_str() != "digest:sha-256")
+        .find(|property| {
+            property.starts_with("digest:")
+                && !matches!(property.as_str(), "digest:sha" | "digest:sha-256")
+        })
         .map(String::as_str)
 }
