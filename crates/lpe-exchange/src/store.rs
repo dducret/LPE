@@ -4,7 +4,7 @@ use lpe_storage::{
     AttachmentUploadInput, AuditEntryInput, ClientTask, CollaborationCollection, JmapEmail,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
     Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
-    UpsertClientEventInput,
+    UpsertClientEventInput, UpsertClientTaskInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -118,6 +118,19 @@ pub trait ExchangeStore: AccountAuthStore {
         principal_account_id: Uuid,
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<ClientTask>>;
+
+    fn create_accessible_task<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        input: UpsertClientTaskInput,
+    ) -> StoreFuture<'a, ClientTask>;
+
+    fn update_accessible_task<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        task_id: Uuid,
+        input: UpsertClientTaskInput,
+    ) -> StoreFuture<'a, ClientTask>;
 
     fn delete_accessible_task<'a>(
         &'a self,
@@ -482,6 +495,26 @@ impl ExchangeStore for Storage {
         Box::pin(async move {
             self.fetch_client_tasks_by_ids(principal_account_id, ids)
                 .await
+        })
+    }
+
+    fn create_accessible_task<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        input: UpsertClientTaskInput,
+    ) -> StoreFuture<'a, ClientTask> {
+        Box::pin(async move { self.upsert_client_task(input).await })
+    }
+
+    fn update_accessible_task<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        task_id: Uuid,
+        mut input: UpsertClientTaskInput,
+    ) -> StoreFuture<'a, ClientTask> {
+        Box::pin(async move {
+            input.id = Some(task_id);
+            self.upsert_client_task(input).await
         })
     }
 

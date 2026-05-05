@@ -9,7 +9,7 @@ use lpe_storage::{
     CollaborationCollection, CollaborationRights, JmapEmail, JmapEmailAddress, JmapEmailQuery,
     JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
     StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
-    UpsertClientEventInput,
+    UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::{
     collections::HashMap,
@@ -581,6 +581,70 @@ impl ExchangeStore for FakeStore {
             .cloned()
             .collect();
         Box::pin(async move { Ok(tasks) })
+    }
+
+    fn create_accessible_task<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        input: UpsertClientTaskInput,
+    ) -> StoreFuture<'a, ClientTask> {
+        let account = Self::account();
+        let task = ClientTask {
+            id: input.id.unwrap_or_else(|| {
+                Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap()
+            }),
+            owner_account_id: principal_account_id,
+            owner_email: account.email,
+            owner_display_name: account.display_name,
+            is_owned: true,
+            rights: Self::rights(),
+            task_list_id: input.task_list_id.unwrap_or_else(|| {
+                Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap()
+            }),
+            task_list_sort_order: 0,
+            title: input.title,
+            description: input.description,
+            status: input.status,
+            due_at: input.due_at,
+            completed_at: input.completed_at,
+            sort_order: input.sort_order,
+            updated_at: "2026-05-05T08:00:00Z".to_string(),
+        };
+        self.task_versions.lock().unwrap().insert(task.id, 1);
+        self.tasks.lock().unwrap().push(task.clone());
+        Box::pin(async move { Ok(task) })
+    }
+
+    fn update_accessible_task<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        task_id: Uuid,
+        input: UpsertClientTaskInput,
+    ) -> StoreFuture<'a, ClientTask> {
+        let mut tasks = self.tasks.lock().unwrap();
+        let task = tasks.iter_mut().find(|task| task.id == task_id).unwrap();
+        task.task_list_id = input.task_list_id.unwrap_or(task.task_list_id);
+        task.title = input.title;
+        task.description = input.description;
+        task.status = input.status;
+        task.due_at = input.due_at;
+        task.completed_at = if task.status == "completed" {
+            input
+                .completed_at
+                .or_else(|| Some("2026-05-05T10:00:00Z".to_string()))
+        } else {
+            None
+        };
+        task.sort_order = input.sort_order;
+        let mut versions = self.task_versions.lock().unwrap();
+        let version = versions
+            .get(&task_id)
+            .copied()
+            .unwrap_or_default()
+            .saturating_add(1);
+        versions.insert(task_id, version);
+        let task = task.clone();
+        Box::pin(async move { Ok(task) })
     }
 
     fn delete_accessible_task<'a>(
@@ -2846,6 +2910,115 @@ async fn delete_item_deletes_canonical_task() {
     assert!(body.contains("<m:DeleteItemResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert_eq!(deleted_tasks.lock().unwrap().as_slice(), &[task_id]);
+}
+
+#[tokio::test]
+async fn create_update_task_round_trips_through_sync_folder_items() {
+    let task_list_id = Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000001").unwrap();
+    let collection =
+        FakeStore::collection("aaaaaaaa-0000-0000-0000-000000000001", "tasks", "Tasks");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        task_collections: Arc::new(Mutex::new(vec![collection])),
+        ..Default::default()
+    };
+    let tasks = store.tasks.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:CreateItem>
+                  <m:SavedItemFolderId><t:FolderId Id="aaaaaaaa-0000-0000-0000-000000000001"/></m:SavedItemFolderId>
+                  <m:Items>
+                    <t:Task>
+                      <t:Subject>Review JMAP parity</t:Subject>
+                      <t:Body BodyType="Text">Check EWS task coverage</t:Body>
+                      <t:Status>InProgress</t:Status>
+                      <t:DueDate>2026-05-06T09:00:00Z</t:DueDate>
+                    </t:Task>
+                  </m:Items>
+                </m:CreateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("task:eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"));
+    assert_eq!(tasks.lock().unwrap()[0].task_list_id, task_list_id);
+    assert_eq!(tasks.lock().unwrap()[0].status, "in-progress");
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:ItemShape><t:BaseShape>AllProperties</t:BaseShape></m:ItemShape><m:SyncFolderId><t:FolderId Id="aaaaaaaa-0000-0000-0000-000000000001"/></m:SyncFolderId><m:SyncState>tasks:aaaaaaaa-0000-0000-0000-000000000001:0</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Create><t:Task>"));
+    assert!(body.contains("<t:Subject>Review JMAP parity</t:Subject>"));
+    let old_sync_state = body
+        .split("<m:SyncState>")
+        .nth(1)
+        .and_then(|rest| rest.split("</m:SyncState>").next())
+        .unwrap()
+        .to_string();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:UpdateItem ConflictResolution="AlwaysOverwrite">
+                  <m:ItemChanges>
+                    <t:ItemChange>
+                      <t:ItemId Id="task:eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"/>
+                      <t:Updates>
+                        <t:SetItemField>
+                          <t:FieldURI FieldURI="task:Subject"/>
+                          <t:Task>
+                            <t:Subject>Complete JMAP parity review</t:Subject>
+                            <t:Body BodyType="Text">Validated through EWS sync</t:Body>
+                            <t:Status>Completed</t:Status>
+                            <t:CompleteDate>2026-05-06T10:00:00Z</t:CompleteDate>
+                          </t:Task>
+                        </t:SetItemField>
+                      </t:Updates>
+                    </t:ItemChange>
+                  </m:ItemChanges>
+                </m:UpdateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UpdateItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:Subject>Complete JMAP parity review</t:Subject>"));
+    assert!(body.contains("<t:Status>Completed</t:Status>"));
+
+    let request = format!(
+        r#"<s:Envelope><s:Body><m:SyncFolderItems><m:ItemShape><t:BaseShape>AllProperties</t:BaseShape></m:ItemShape><m:SyncFolderId><t:FolderId Id="aaaaaaaa-0000-0000-0000-000000000001"/></m:SyncFolderId><m:SyncState>{old_sync_state}</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#
+    );
+    let response = service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Update><t:Task>"));
+    assert!(body.contains("<t:Subject>Complete JMAP parity review</t:Subject>"));
+    assert!(body.contains("<t:CompleteDate>2026-05-06T10:00:00Z</t:CompleteDate>"));
 }
 
 #[tokio::test]
