@@ -463,7 +463,12 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 Ok(payload) => payload,
                 Err(error) => method_error("invalidArguments", &error.to_string()),
             };
-            method_responses.push(JmapMethodResponse(method_name, payload, call_id));
+            let response_name = if is_method_error_payload(&payload) {
+                "error".to_string()
+            } else {
+                method_name
+            };
+            method_responses.push(JmapMethodResponse(response_name, payload, call_id));
         }
 
         let accessible_accounts = self
@@ -920,6 +925,14 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         "VacationResponse/get" | "VacationResponse/set" => Some(JMAP_VACATION_RESPONSE_CAPABILITY),
         _ => None,
     }
+}
+
+fn is_method_error_payload(payload: &Value) -> bool {
+    payload
+        .as_object()
+        .and_then(|object| object.get("type"))
+        .and_then(Value::as_str)
+        .is_some()
 }
 
 fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Value> {

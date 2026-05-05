@@ -4905,11 +4905,13 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(response.method_responses[0].0, "error");
         assert_eq!(response.method_responses[0].1["type"], "unknownMethod");
         assert_eq!(
             response.method_responses[0].1["description"],
             "method capability is not requested"
         );
+        assert_eq!(response.method_responses[1].0, "error");
         assert_eq!(response.method_responses[1].1["type"], "unknownMethod");
         assert_eq!(
             response.method_responses[1].1["description"],
@@ -4935,11 +4937,55 @@ mod tests {
             .await
             .unwrap();
 
+        assert_eq!(response.method_responses[0].0, "error");
         assert_eq!(response.method_responses[0].1["type"], "unknownMethod");
         assert_eq!(
             response.method_responses[0].1["description"],
             "method capability is not requested"
         );
+    }
+
+    #[tokio::test]
+    async fn method_errors_use_standard_error_response_name() {
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            ..Default::default()
+        });
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                        JMAP_BLOB_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Mailbox/queryChanges".to_string(),
+                            json!({"sinceQueryState": "not-a-query-state"}),
+                            "c1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Blob/lookup".to_string(),
+                            json!({
+                                "typeNames": ["UnknownThing"],
+                                "ids": ["draft-message:cccccccc-cccc-cccc-cccc-cccccccccccc"]
+                            }),
+                            "c2".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.method_responses[0].0, "error");
+        assert_eq!(response.method_responses[0].1["type"], "invalidArguments");
+        assert_eq!(response.method_responses[1].0, "error");
+        assert_eq!(response.method_responses[1].1["type"], "unknownDataType");
     }
 
     #[tokio::test]

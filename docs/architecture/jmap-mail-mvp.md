@@ -121,6 +121,7 @@ Additional supported `JMAP` routes:
 - temporary blob creation through HTTP upload, `Blob/upload`, and `Blob/copy` destinations requires canonical write access to the target account; read-only shared accounts can still read accessible blobs, but advertise `maxSizeBlobSet: 0`
 - `Blob/get` returns requested byte ranges from readable temporary upload blobs or reconstructed canonical message blobs, including `digest:sha` and `digest:sha-256` over the returned octet range; non-owner delegated/shared mailbox reads use the same Bcc-safe reconstruction path as HTTP download
 - `Blob/lookup` is limited to canonical mail references for `Mailbox`, `Thread`, and `Email`, and requires both `urn:ietf:params:jmap:blob` and `urn:ietf:params:jmap:mail` in the request `using` list; it never exposes inaccessible blobs and does not inspect unrelated collaboration stores or introduce a separate blob-reference index
+- method-level failures use the standard JMAP `["error", {"type": ...}, callId]` response tuple shape; successful method responses keep their method name
 - the session keeps `eventSourceUrl` empty; this MVP uses `JMAP` over WebSocket rather than the older event-source transport
 - `WebSocketPushEnable` follows `RFC 8887` `dataTypes` semantics: `null` or omitted `dataTypes` subscribes to all supported push data types, while unsupported data-type names are filtered out
 - malformed known WebSocket message objects return `RequestError` frames instead of silently dropping an otherwise healthy connection
