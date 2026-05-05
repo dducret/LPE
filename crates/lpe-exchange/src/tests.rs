@@ -2733,9 +2733,47 @@ async fn resolve_names_returns_ews_no_results_error() {
 }
 
 #[tokio::test]
-async fn get_user_availability_returns_ews_not_available_error() {
+async fn get_user_availability_returns_canonical_busy_events() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        events: Arc::new(Mutex::new(vec![
+            AccessibleEvent {
+                id: Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap(),
+                collection_id: "default".to_string(),
+                owner_account_id: FakeStore::account().account_id,
+                owner_email: "alice@example.test".to_string(),
+                owner_display_name: "Alice".to_string(),
+                rights: FakeStore::rights(),
+                date: "2026-05-04".to_string(),
+                time: "09:30".to_string(),
+                time_zone: "UTC".to_string(),
+                duration_minutes: 45,
+                recurrence_rule: String::new(),
+                title: "Planning".to_string(),
+                location: "Room 1".to_string(),
+                attendees: String::new(),
+                attendees_json: String::new(),
+                notes: "Agenda".to_string(),
+            },
+            AccessibleEvent {
+                id: Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap(),
+                collection_id: "default".to_string(),
+                owner_account_id: FakeStore::account().account_id,
+                owner_email: "alice@example.test".to_string(),
+                owner_display_name: "Alice".to_string(),
+                rights: FakeStore::rights(),
+                date: "2026-05-07".to_string(),
+                time: "09:30".to_string(),
+                time_zone: "UTC".to_string(),
+                duration_minutes: 45,
+                recurrence_rule: String::new(),
+                title: "Outside window".to_string(),
+                location: String::new(),
+                attendees: String::new(),
+                attendees_json: String::new(),
+                notes: String::new(),
+            },
+        ])),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -2743,7 +2781,25 @@ async fn get_user_availability_returns_ews_not_available_error() {
     let response = service
         .handle(
             &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:GetUserAvailabilityRequest /></s:Body></s:Envelope>"#,
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:GetUserAvailabilityRequest>
+                  <m:MailboxDataArray>
+                    <t:MailboxData>
+                      <t:Email><t:Address>alice@example.test</t:Address></t:Email>
+                    </t:MailboxData>
+                  </m:MailboxDataArray>
+                  <t:FreeBusyViewOptions>
+                    <t:TimeWindow>
+                      <t:StartTime>2026-05-04T00:00:00Z</t:StartTime>
+                      <t:EndTime>2026-05-05T00:00:00Z</t:EndTime>
+                    </t:TimeWindow>
+                  </t:FreeBusyViewOptions>
+                </m:GetUserAvailabilityRequest>
+              </s:Body>
+            </s:Envelope>
+            "#,
         )
         .await
         .unwrap();
@@ -2751,7 +2807,11 @@ async fn get_user_availability_returns_ews_not_available_error() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
     assert!(body.contains("<m:GetUserAvailabilityResponse>"));
-    assert!(body.contains("<m:ResponseCode>ErrorFreeBusyGenerationFailed</m:ResponseCode>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:FreeBusyViewType>Detailed</t:FreeBusyViewType>"));
+    assert!(body.contains("<t:StartTime>2026-05-04T09:30:00Z</t:StartTime>"));
+    assert!(body.contains("<t:EndTime>2026-05-04T10:15:00Z</t:EndTime>"));
+    assert!(!body.contains("2026-05-07T09:30:00Z"));
     assert!(body.contains("<t:ServerVersionInfo"));
 }
 

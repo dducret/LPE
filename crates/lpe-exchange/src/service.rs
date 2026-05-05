@@ -175,7 +175,7 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
                 }),
             "GetServerTimeZones" => get_server_time_zones_response(),
             "ResolveNames" => resolve_names_no_results_response(),
-            "GetUserAvailability" => get_user_availability_unavailable_response(),
+            "GetUserAvailability" => self.get_user_availability(&principal, &body).await?,
             "CreateItem" => self.create_item(&principal, &body).await?,
             "UpdateItem" => self.update_item(&principal, &body).await?,
             "DeleteItem" => self.delete_item(&principal, &body).await?,
@@ -809,6 +809,36 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
         Ok(get_user_oof_settings_response(&oof_projection_from_script(
             script.as_ref().map(|script| script.content.as_str()),
         )))
+    }
+
+    async fn get_user_availability(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        if let Some(mailbox) = element_content(request, "MailboxData")
+            .and_then(|mailbox_data| element_content(mailbox_data, "Email"))
+            .and_then(parse_mailbox)
+        {
+            if !mailbox.address.eq_ignore_ascii_case(&principal.email) {
+                return Ok(get_user_availability_error_response(
+                    "Free/busy is currently available only for the authenticated mailbox.",
+                ));
+            }
+        }
+
+        let (window_start, window_end) = requested_availability_window(request);
+        let mut events = self
+            .store
+            .fetch_accessible_events_in_collection(principal.account_id, DEFAULT_COLLECTION_ID)
+            .await?;
+        events.retain(|event| {
+            event_overlaps_window(event, window_start.as_deref(), window_end.as_deref())
+        });
+        events.sort_by(|left, right| {
+            ews_datetime(&left.date, &left.time).cmp(&ews_datetime(&right.date, &right.time))
+        });
+        Ok(get_user_availability_success_response(&events))
     }
 
     async fn root_child_folder_count(&self, principal: &AccountPrincipal) -> Result<usize> {
@@ -2404,6 +2434,21 @@ fn requested_time_zone(request: &str) -> Option<String> {
     attribute_value(time_zone, "Id").map(str::to_string)
 }
 
+fn requested_availability_window(request: &str) -> (Option<String>, Option<String>) {
+    let time_window = element_content(request, "TimeWindow").unwrap_or(request);
+    (
+        element_text(time_window, "StartTime"),
+        element_text(time_window, "EndTime"),
+    )
+}
+
+fn event_overlaps_window(event: &AccessibleEvent, start: Option<&str>, end: Option<&str>) -> bool {
+    let event_start = ews_datetime(&event.date, &event.time);
+    let event_end = event_end_datetime(event);
+    start.is_none_or(|start| event_end.as_str() > start)
+        && end.is_none_or(|end| event_start.as_str() < end)
+}
+
 fn ews_datetime_parts(value: &str) -> Option<(String, String)> {
     let trimmed = value.trim();
     if trimmed.len() < 16 {
@@ -3813,21 +3858,60 @@ fn resolve_names_no_results_response() -> String {
     .to_string()
 }
 
-fn get_user_availability_unavailable_response() -> String {
-    concat!(
-        "<m:GetUserAvailabilityResponse>",
-        "<m:FreeBusyResponseArray>",
-        "<m:FreeBusyResponse>",
-        "<m:ResponseMessage ResponseClass=\"Error\">",
-        "<m:MessageText>Free/busy is not implemented by the EWS MVP.</m:MessageText>",
-        "<m:ResponseCode>ErrorFreeBusyGenerationFailed</m:ResponseCode>",
-        "<m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>",
-        "</m:ResponseMessage>",
-        "</m:FreeBusyResponse>",
-        "</m:FreeBusyResponseArray>",
-        "</m:GetUserAvailabilityResponse>"
+fn get_user_availability_success_response(events: &[AccessibleEvent]) -> String {
+    let events = events
+        .iter()
+        .map(|event| {
+            format!(
+                concat!(
+                    "<t:CalendarEvent>",
+                    "<t:StartTime>{}</t:StartTime>",
+                    "<t:EndTime>{}</t:EndTime>",
+                    "<t:BusyType>Busy</t:BusyType>",
+                    "</t:CalendarEvent>"
+                ),
+                escape_xml(&ews_datetime(&event.date, &event.time)),
+                escape_xml(&event_end_datetime(event)),
+            )
+        })
+        .collect::<String>();
+    format!(
+        concat!(
+            "<m:GetUserAvailabilityResponse>",
+            "<m:FreeBusyResponseArray>",
+            "<m:FreeBusyResponse>",
+            "<m:ResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "</m:ResponseMessage>",
+            "<m:FreeBusyView>",
+            "<t:FreeBusyViewType>Detailed</t:FreeBusyViewType>",
+            "<t:CalendarEventArray>{events}</t:CalendarEventArray>",
+            "</m:FreeBusyView>",
+            "</m:FreeBusyResponse>",
+            "</m:FreeBusyResponseArray>",
+            "</m:GetUserAvailabilityResponse>"
+        ),
+        events = events,
     )
-    .to_string()
+}
+
+fn get_user_availability_error_response(message: &str) -> String {
+    format!(
+        concat!(
+            "<m:GetUserAvailabilityResponse>",
+            "<m:FreeBusyResponseArray>",
+            "<m:FreeBusyResponse>",
+            "<m:ResponseMessage ResponseClass=\"Error\">",
+            "<m:MessageText>{message}</m:MessageText>",
+            "<m:ResponseCode>ErrorFreeBusyGenerationFailed</m:ResponseCode>",
+            "<m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>",
+            "</m:ResponseMessage>",
+            "</m:FreeBusyResponse>",
+            "</m:FreeBusyResponseArray>",
+            "</m:GetUserAvailabilityResponse>"
+        ),
+        message = escape_xml(message),
+    )
 }
 
 fn get_user_oof_settings_response(projection: &OofProjection) -> String {
