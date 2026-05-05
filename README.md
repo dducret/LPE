@@ -4,7 +4,7 @@
 
 The repository is aligned for release `0.1.3`.
 
-Release `0.1.3` is the EWS implementation release and remains a breaking change. Legacy updates are not supported. A fresh install and database recreation are required.
+Release `0.1.3` is the EWS plus full MAPI/Outlook implementation release and remains a breaking change. Legacy updates are not supported. A fresh install and database recreation are required.
 
 See `docs/releases/0.1.3.md` for the short release note.
 
@@ -17,20 +17,20 @@ See `docs/releases/0.1.3.md` for the short release note.
 - `IMAP` is a permanently supported mailbox-access communication protocol and compatibility layer, with the first major development push completed through `0.1.2`
 - inbound and outbound `SMTP` transport is handled by the `LPE-CT` sorting center
 - `ActiveSync` is the first targeted native mobile compatibility layer for clients that support `Exchange ActiveSync`
-- `EWS` is the `0.1.3` Exchange compatibility implementation, with guarded `MAPI over HTTP` groundwork started for future Outlook desktop support
-- full Outlook support is a project goal: Outlook mobile through `ActiveSync`, Exchange-style mail, contacts, calendar, and task compatibility through `EWS`, and classic Outlook for Windows Exchange-account support through the guarded `MAPI over HTTP` track
+- `EWS` is the `0.1.3` Exchange compatibility implementation for Exchange-style mail, contacts, calendar, and task clients
+- full Outlook support is a `0.1.3` release goal: Outlook mobile through `ActiveSync`, Exchange-style compatibility through `EWS`, and classic Outlook for Windows Exchange-account support through the `MAPI over HTTP` track
 - the architecture remains compatible with future local AI without data leaving the server
 
 ## Current Priority
 
-The current repository priority is implementing `EWS` in `0.1.3` while preserving the canonical `LPE` mailbox, contacts, calendar, tasks, and submission model.
+The current repository priority is implementing `EWS` and full classic Outlook `MAPI over HTTP` support in `0.1.3` while preserving the canonical `LPE` mailbox, contacts, calendar, tasks, and submission model.
 
 The near-term order is:
 
 - `JMAP` depth first: state or change semantics, WebSocket reliability, delegation, and shared-collection consistency
 - `IMAP` support as a continuing client communication protocol: sync behavior, `UID` handling, flags, and client compatibility
 - `EWS` in `0.1.3`: Exchange-style folder, mail, contacts, calendar, and task synchronization without `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox`
-- `MAPI over HTTP` groundwork in `0.1.3`: authenticated `/mapi/emsmdb` and `/mapi/nspi` routes with guarded transport, session, NSPI bootstrap, and early read-only mailbox ROP behavior; autodiscover publication remains opt-in for interoperability testing until Outlook-usable EMSMDB and NSPI behavior is proven
+- `MAPI over HTTP` in `0.1.3`: complete the classic Outlook for Windows Exchange-account path over authenticated `/mapi/emsmdb` and `/mapi/nspi`; supported publication remains gated until profile creation, mailbox sync, NSPI, send, reconnect, and canonical `Sent` behavior pass the Outlook interoperability matrix
 - `ActiveSync` as the flagship compatibility target for Outlook mobile and other native mobile clients
 - `DAV` and `ManageSieve` interoperability work after the higher-priority mail protocols are stable
 

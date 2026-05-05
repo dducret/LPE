@@ -6,7 +6,7 @@ This document describes the `0.1.3` `Exchange` compatibility work in `LPE`.
 
 The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchange`. `IMAP` carried the initial desktop compatibility work through `0.1.2`; `0.1.3` moves the Exchange-style compatibility focus to `EWS`. Its goal is to let Exchange-style clients read and synchronize canonical mailbox, `Contacts`, `Calendar`, and `Tasks` data from the `LPE` server without introducing a second collaboration or mailbox store.
 
-`MAPI` implementation has started as a guarded `MAPI over HTTP` foundation for future Outlook desktop support. It is not Outlook-ready. `mapiHttp` autodiscover publication is available only through an explicit administrator interoperability-test switch. The current slice implements authenticated transport request classification, session-context cookies, and the first mailbox-folder bootstrap ROPs. Legacy `EXCH` / `EXPR` provider metadata for Outlook setup probes that do not yet send `X-MapiHttpCapability` requires a separate explicit interoperability-test switch and an explicitly published EWS or MAPI surface; requests that do send that header receive the dedicated `mapiHttp` provider instead.
+`MAPI` implementation is the `0.1.3` release path for full classic Outlook for Windows Exchange-account support over `MAPI over HTTP`. `mapiHttp` autodiscover publication is available only through an explicit administrator switch until the Outlook interoperability matrix proves profile creation, first sync, day-two sync, cached mode, `NSPI`, send, reconnect, and canonical `Sent` behavior. The current slice implements authenticated transport request classification, session-context cookies, and the first mailbox-folder bootstrap ROPs. Legacy `EXCH` / `EXPR` provider metadata for Outlook setup probes that do not yet send `X-MapiHttpCapability` requires a separate explicit interoperability-test switch and an explicitly published EWS or MAPI surface; requests that do send that header receive the dedicated `mapiHttp` provider instead.
 
 The repeatable `EWS` live smoke and release-gate checks are tracked in `docs/architecture/ews-interoperability-matrix.md`.
 
@@ -29,7 +29,7 @@ The explicitly unsupported surface unless a later architecture document widens i
 - cross-tenant directory or collaboration visibility
 - Exchange-specific mailbox, contact, calendar, task, `Sent`, `Outbox`, GAL, or rights stores
 
-This boundary is also the release gate. `EWS` can be administrator-published when its documented MVP limits are acceptable for a deployment. `MAPI over HTTP` remains an interoperability-test surface until Outlook desktop can create a profile, synchronize canonical mailbox state, resolve names through `NSPI`, send through canonical submission, reconnect after session loss, and keep the authoritative `Sent` view consistent.
+This boundary is also the release gate. `EWS` can be administrator-published when its documented MVP limits are acceptable for a deployment. Full classic Outlook support in `0.1.3` requires `MAPI over HTTP` to create an Outlook profile, synchronize canonical mailbox state, resolve names through `NSPI`, send through canonical submission, reconnect after session loss, and keep the authoritative `Sent` view consistent.
 
 ### Milestone roadmap
 
@@ -51,11 +51,11 @@ This boundary is also the release gate. `EWS` can be administrator-published whe
 - `JMAP` remains the primary modern protocol
 - `ActiveSync` remains the flagship mobile/native-client layer for clients that actually support `Exchange ActiveSync`
 - `EWS` is an adapter over canonical mailbox, `contacts`, and `calendar_events` storage
-- `MAPI` is being introduced incrementally through `MAPI over HTTP`, starting with authenticated route and scope wiring plus opt-in autodiscover publication for testing
+- `MAPI` is the `0.1.3` full classic Outlook path through `MAPI over HTTP`, built incrementally but release-gated on real Outlook profile creation and day-two use
 - `EWS` must not introduce parallel contact, calendar, mailbox, rights, `Sent`, or `Outbox` state
 - `EWS` and `MAPI` authentication reuse mailbox-account authentication
 - `EWS` must not perform or advertise `SMTP`; outbound transport remains in `LPE-CT`
-- `MAPI` autodiscover publication must remain opt-in and clearly experimental until EMSMDB, NSPI, session context, and mailbox synchronization semantics are implemented against canonical `LPE` state; legacy `EXCH` / `EXPR` publication must remain separately opt-in so it cannot hijack Outlook desktop `IMAP` setup
+- `MAPI` autodiscover publication must remain explicit until EMSMDB, NSPI, session context, and mailbox synchronization semantics are implemented against canonical `LPE` state and proven with Outlook; legacy `EXCH` / `EXPR` publication must remain separately opt-in so it cannot hijack Outlook desktop `IMAP` setup
 - no `Stalwart` code is reused
 
 ### Endpoints
@@ -74,7 +74,7 @@ The first `MAPI over HTTP` implementation surface exists as authenticated transp
 - `OPTIONS /mapi/nspi`
 - `POST /mapi/nspi`
 
-`/mapi/emsmdb` is reserved for mailbox ROP processing. `/mapi/nspi` is reserved for address book and name service provider interface behavior. `OPTIONS` returns the supported HTTP methods with `x-lpe-mapi-status: transport-session-ready`. `POST` requires mailbox authentication and `Content-Type: application/mapi-http`, and returns `application/mapi-http` responses with `X-RequestType`, `X-ResponseCode`, `X-RequestId`, and `X-ServerApplication`. Client-supplied non-empty `X-RequestId` values are echoed for diagnostics; if a client omits the header, `LPE` generates a non-zero per-request UUID instead of reusing a placeholder. Response bodies use the MAPI/HTTP common response framing, including the `PROCESSING` and `DONE` meta-tags before the request-specific binary response body, so strict Outlook and Remote Connectivity Analyzer clients do not parse raw binary as the transport envelope.
+`/mapi/emsmdb` is reserved for mailbox ROP processing. `/mapi/nspi` is reserved for address book and name service provider interface behavior. `OPTIONS` returns the supported HTTP methods with `x-lpe-mapi-status: transport-session-ready`. `POST` requires mailbox authentication and `Content-Type: application/mapi-http`, and returns `application/mapi-http` responses with `X-RequestType`, `X-ResponseCode`, `X-RequestId`, and `X-ServerApplication`. Client-supplied non-empty `X-RequestId` values are echoed for diagnostics; if a client omits the header, `LPE` generates a non-zero per-request UUID instead of reusing a placeholder. Response bodies use the MAPI/HTTP common response framing, including the `PROCESSING` and `DONE` meta-tags before the request-specific binary response body, so strict Outlook and Remote Connectivity Analyzer clients do not parse raw binary as the transport envelope. For `0.1.3`, this endpoint pair must progress from bootstrap behavior to complete Outlook profile creation, mailbox synchronization, address book lookup, send/draft support, reconnect behavior, and cached-mode day-two usage.
 
 Implemented request types:
 
@@ -171,7 +171,7 @@ Request element names ending in `Request`, such as `GetUserOofSettingsRequest`, 
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
 - enabled `EWS` POX autodiscover publishes the configured EWS URL through a `WEB` protocol block with `ASUrl` for EWS-aware clients; top-level `EXCH` and `EXPR` provider sections remain reserved for explicit legacy Exchange autodiscover interoperability-test mode and can be published for RCA validation by combining `LPE_AUTOCONFIG_EWS_ENABLED=true` with `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED=true`
 - SOAP `GetUserSettings` autodiscover publishes the same configured `EWS` endpoint as `ExternalEwsUrl` and `InternalEwsUrl` for EWS clients that prefer SOAP autodiscover over POX
-- `MAPI over HTTP` currently has authenticated transport, session-context wiring, a private-mailbox logon skeleton, read-only canonical mailbox-folder bootstrap ROPs, an initial read-only contents-table view over canonical message rows, read-only message open/property bootstrap, and visible recipient-row reads; it is not an Outlook-ready mailbox service and must advertise `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled for interoperability testing, with legacy `EXCH` / `EXPR` provider sections requiring the additional `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` switch
+- `MAPI over HTTP` currently has authenticated transport, session-context wiring, a private-mailbox logon skeleton, read-only canonical mailbox-folder bootstrap ROPs, an initial read-only contents-table view over canonical message rows, read-only message open/property bootstrap, and visible recipient-row reads; the remaining `0.1.3` work is to make this an Outlook-ready mailbox service before supported `mapiHttp` publication, with legacy `EXCH` / `EXPR` provider sections requiring the additional `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` switch
 
 ### Completion priorities
 
@@ -181,9 +181,9 @@ The next EWS phase should focus on:
 - persistent incremental `SyncFolderItems` state over canonical contact and calendar change notifications
 - deeper `UpdateItem` coverage for contacts and calendar events, routed through canonical collaboration rights
 
-The next MAPI phase should focus on:
+The `0.1.3` MAPI/Outlook completion phase should focus on:
 
-- complete the `EXHTTP` / `MapiHttp` autodiscover design and keep it behind `LPE_AUTOCONFIG_MAPI_ENABLED` until real Outlook login succeeds
+- complete the `EXHTTP` / `MapiHttp` autodiscover design and keep supported publication behind `LPE_AUTOCONFIG_MAPI_ENABLED` plus successful real Outlook login and sync testing
 - add attachment table bootstrap, body stream handling, protected sent-message `Bcc` handling, and synchronization ROPs over canonical mailbox data
 - NSPI `GetSpecialTable`, `QueryRows`, `GetProps`, and `ResolveNames` without introducing a parallel GAL store
-- binary protocol parsing and response serialization with focused conformance fixtures before any route is advertised to Outlook
+- binary protocol parsing and response serialization with focused conformance fixtures before the route is documented as supported for Outlook
