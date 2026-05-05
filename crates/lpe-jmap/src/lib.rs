@@ -1420,7 +1420,7 @@ mod tests {
         assert_eq!(session.upload_url, "/api/jmap/upload/{accountId}");
         assert_eq!(
             session.download_url,
-            "/api/jmap/download/{accountId}/{blobId}/{name}"
+            "/api/jmap/download/{accountId}/{blobId}/{name}?accept={type}"
         );
 
         let mut headers = axum::http::HeaderMap::new();

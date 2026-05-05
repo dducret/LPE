@@ -64,7 +64,9 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             primary_accounts,
             username: account.email,
             api_url: format!("{public_base_path}/api"),
-            download_url: format!("{public_base_path}/download/{{accountId}}/{{blobId}}/{{name}}"),
+            download_url: format!(
+                "{public_base_path}/download/{{accountId}}/{{blobId}}/{{name}}?accept={{type}}"
+            ),
             upload_url: format!("{public_base_path}/upload/{{accountId}}"),
             event_source_url: String::new(),
             state: session_state(&accessible_accounts),
