@@ -57,6 +57,15 @@ pub(crate) fn method_error(kind: &str, description: &str) -> Value {
     })
 }
 
+pub(crate) fn method_error_from_error(error: Error) -> Value {
+    let description = error.to_string();
+    if description == "anchorNotFound" {
+        method_error("anchorNotFound", "anchor was not found in query results")
+    } else {
+        method_error("invalidArguments", &description)
+    }
+}
+
 pub(crate) fn set_error(description: &str) -> Value {
     method_error("invalidProperties", description)
 }

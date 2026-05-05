@@ -21,7 +21,7 @@ use crate::{
         CalendarEventSetArguments, CalendarGetArguments, CalendarQueryArguments, ChangesArguments,
         EntityQuerySort, QueryChangesArguments,
     },
-    state::{changes_response, query_changes_response, StateEntry},
+    state::{changes_response, query_changes_response, query_position, StateEntry},
     validation::{validate_calendar_event_filter, validate_entity_sort},
     JmapService, DEFAULT_GET_LIMIT, MAX_QUERY_LIMIT,
 };
@@ -79,16 +79,25 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .fetch_accessible_calendar_collections(account_id)
             .await?;
         collections.sort_by_key(collection_sort_key);
-        let position = arguments.position.unwrap_or(0) as usize;
+        let all_ids = collections
+            .iter()
+            .map(|collection| collection.id.clone())
+            .collect::<Vec<_>>();
+        let position = query_position(
+            &all_ids,
+            arguments.position,
+            arguments.anchor.as_deref(),
+            arguments.anchor_offset,
+        )?;
         let limit = arguments
             .limit
             .unwrap_or(DEFAULT_GET_LIMIT)
             .min(MAX_QUERY_LIMIT) as usize;
-        let ids = collections
+        let ids = all_ids
             .iter()
-            .map(|collection| collection.id.clone())
             .skip(position)
             .take(limit)
+            .cloned()
             .collect::<Vec<_>>();
 
         Ok(json!({
@@ -98,7 +107,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 "Calendar/query",
                 None,
                 None,
-                collections.iter().map(|collection| collection.id.clone()).collect(),
+                all_ids,
             )?,
             "canCalculateChanges": true,
             "position": position,
@@ -223,16 +232,25 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         }
         events.sort_by_key(calendar_event_sort_key);
 
-        let position = arguments.position.unwrap_or(0) as usize;
+        let all_ids = events
+            .iter()
+            .map(|event| event.id.to_string())
+            .collect::<Vec<_>>();
+        let position = query_position(
+            &all_ids,
+            arguments.position,
+            arguments.anchor.as_deref(),
+            arguments.anchor_offset,
+        )?;
         let limit = arguments
             .limit
             .unwrap_or(DEFAULT_GET_LIMIT)
             .min(MAX_QUERY_LIMIT) as usize;
-        let ids = events
+        let ids = all_ids
             .iter()
             .skip(position)
             .take(limit)
-            .map(|event| event.id.to_string())
+            .cloned()
             .collect::<Vec<_>>();
 
         Ok(json!({
@@ -242,7 +260,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 "CalendarEvent",
                 arguments.filter.map(serde_json::to_value).transpose()?,
                 serialize_entity_query_sort(arguments.sort)?,
-                events.iter().map(|event| event.id.to_string()).collect(),
+                all_ids,
             )?,
             "canCalculateChanges": true,
             "position": position,

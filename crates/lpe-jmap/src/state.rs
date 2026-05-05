@@ -343,6 +343,30 @@ pub(crate) fn query_changes_response(
     }))
 }
 
+pub(crate) fn query_position(
+    ids: &[String],
+    position: Option<i64>,
+    anchor: Option<&str>,
+    anchor_offset: Option<i64>,
+) -> Result<usize> {
+    let position = if let Some(anchor) = anchor {
+        let anchor_position = ids
+            .iter()
+            .position(|id| id == anchor)
+            .ok_or_else(|| anyhow!("anchorNotFound"))? as i64;
+        anchor_position.saturating_add(anchor_offset.unwrap_or(0))
+    } else {
+        let position = position.unwrap_or(0);
+        if position < 0 {
+            ids.len() as i64 + position
+        } else {
+            position
+        }
+    };
+
+    Ok(usize::try_from(position.max(0)).map_err(|_| anyhow!("query position is too large"))?)
+}
+
 pub(crate) fn compute_query_diff(
     previous_ids: &[String],
     current_ids: &[String],
@@ -666,6 +690,29 @@ mod tests {
                 .unwrap()
                 .ids,
             current_ids
+        );
+    }
+
+    #[test]
+    fn query_position_supports_anchors_and_negative_offsets() {
+        let ids = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+
+        assert_eq!(query_position(&ids, Some(1), None, Some(-1)).unwrap(), 1);
+        assert_eq!(query_position(&ids, Some(-1), None, None).unwrap(), 2);
+        assert_eq!(query_position(&ids, Some(-10), None, None).unwrap(), 0);
+        assert_eq!(
+            query_position(&ids, Some(0), Some("b"), Some(-1)).unwrap(),
+            0
+        );
+        assert_eq!(
+            query_position(&ids, Some(0), Some("b"), Some(1)).unwrap(),
+            2
+        );
+        assert_eq!(
+            query_position(&ids, Some(0), Some("missing"), None)
+                .unwrap_err()
+                .to_string(),
+            "anchorNotFound"
         );
     }
 }

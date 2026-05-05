@@ -15,7 +15,7 @@ use crate::{
         ChangesArguments, QueryChangesArguments, TaskGetArguments, TaskListGetArguments,
         TaskListSetArguments, TaskQueryArguments, TaskQueryFilter, TaskQuerySort, TaskSetArguments,
     },
-    state::{changes_response, query_changes_response},
+    state::{changes_response, query_changes_response, query_position},
     validation::{validate_task_filter, validate_task_sort},
     JmapService, DEFAULT_GET_LIMIT, MAX_QUERY_LIMIT,
 };
@@ -227,16 +227,25 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         }
         tasks.sort_by_key(task_sort_key);
 
-        let position = arguments.position.unwrap_or(0) as usize;
+        let all_ids = tasks
+            .iter()
+            .map(|task| task.id.to_string())
+            .collect::<Vec<_>>();
+        let position = query_position(
+            &all_ids,
+            arguments.position,
+            arguments.anchor.as_deref(),
+            arguments.anchor_offset,
+        )?;
         let limit = arguments
             .limit
             .unwrap_or(DEFAULT_GET_LIMIT)
             .min(MAX_QUERY_LIMIT) as usize;
-        let ids = tasks
+        let ids = all_ids
             .iter()
             .skip(position)
             .take(limit)
-            .map(|task| task.id.to_string())
+            .cloned()
             .collect::<Vec<_>>();
 
         Ok(json!({
@@ -253,7 +262,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                             .collect::<std::result::Result<Vec<_>, _>>()
                     })
                     .transpose()?,
-                tasks.iter().map(|task| task.id.to_string()).collect(),
+                all_ids,
             )?,
             "canCalculateChanges": true,
             "position": position,

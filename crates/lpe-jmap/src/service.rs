@@ -27,7 +27,8 @@ use uuid::Uuid;
 use crate::{
     convert::format_addresses,
     error::{
-        http_error, jmap_problem, method_error, JMAP_PROBLEM_LIMIT, JMAP_PROBLEM_UNKNOWN_CAPABILITY,
+        http_error, jmap_problem, method_error, method_error_from_error, JMAP_PROBLEM_LIMIT,
+        JMAP_PROBLEM_UNKNOWN_CAPABILITY,
     },
     parse::parse_uuid,
     protocol::{
@@ -474,7 +475,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
             let payload = match response {
                 Ok(payload) => payload,
-                Err(error) => method_error("invalidArguments", &error.to_string()),
+                Err(error) => method_error_from_error(error),
             };
             let response_name = if is_method_error_payload(&payload) {
                 "error".to_string()

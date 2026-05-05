@@ -28,7 +28,7 @@ use crate::{
         QueryChangesArguments, QuotaGetArguments, SearchSnippetGetArguments, ThreadGetArguments,
         ThreadQueryArguments,
     },
-    state::{changes_response, query_changes_response},
+    state::{changes_response, query_changes_response, query_position},
     upload::{expected_attachment_kind, parse_upload_blob_id},
     validation::validate_query_sort,
     JmapService, DEFAULT_GET_LIMIT, MAX_QUERY_LIMIT, SESSION_STATE,
@@ -57,22 +57,36 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .filter
             .as_ref()
             .and_then(|filter| filter.text.as_deref());
-        let position = arguments.position.unwrap_or(0);
+        let requested_position = arguments.position;
+        let storage_position = if arguments.anchor.is_some()
+            || requested_position.is_some_and(|position| position < 0)
+        {
+            0
+        } else {
+            requested_position.unwrap_or(0) as u64
+        };
         let limit = arguments
             .limit
             .unwrap_or(DEFAULT_GET_LIMIT)
             .min(MAX_QUERY_LIMIT);
         let query = self
             .store
-            .query_jmap_email_ids(account_id, mailbox_id, search_text, position, limit)
+            .query_jmap_email_ids(account_id, mailbox_id, search_text, storage_position, limit)
             .await?;
         let full_ids = self
             .resolve_full_email_query_ids(account_id, mailbox_id, search_text, &query)
             .await?;
-        let ids = query
-            .ids
-            .into_iter()
-            .map(|id| id.to_string())
+        let position = query_position(
+            &full_ids,
+            requested_position,
+            arguments.anchor.as_deref(),
+            arguments.anchor_offset,
+        )?;
+        let ids = full_ids
+            .iter()
+            .skip(position)
+            .take(limit as usize)
+            .cloned()
             .collect::<Vec<_>>();
         let query_state = crate::encode_query_state(
             account_id,
@@ -632,16 +646,25 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             arguments.sort.as_deref(),
         );
 
-        let position = arguments.position.unwrap_or(0) as usize;
+        let current_ids = submissions
+            .iter()
+            .map(|submission| submission.id.to_string())
+            .collect::<Vec<_>>();
+        let position = query_position(
+            &current_ids,
+            arguments.position,
+            arguments.anchor.as_deref(),
+            arguments.anchor_offset,
+        )?;
         let limit = arguments
             .limit
             .unwrap_or(DEFAULT_GET_LIMIT)
             .min(MAX_QUERY_LIMIT) as usize;
-        let ids = submissions
+        let ids = current_ids
             .iter()
             .skip(position)
             .take(limit)
-            .map(|submission| submission.id.to_string())
+            .cloned()
             .collect::<Vec<_>>();
 
         Ok(json!({
@@ -651,7 +674,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 "EmailSubmission/query",
                 arguments.filter.map(serde_json::to_value).transpose()?,
                 serialize_email_submission_query_sort(arguments.sort.as_deref())?,
-                submissions.iter().map(|submission| submission.id.to_string()).collect(),
+                current_ids,
             )?,
             "canCalculateChanges": true,
             "position": position,
@@ -823,22 +846,36 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .filter
             .as_ref()
             .and_then(|filter| filter.text.as_deref());
-        let position = arguments.position.unwrap_or(0);
+        let requested_position = arguments.position;
+        let storage_position = if arguments.anchor.is_some()
+            || requested_position.is_some_and(|position| position < 0)
+        {
+            0
+        } else {
+            requested_position.unwrap_or(0) as u64
+        };
         let limit = arguments
             .limit
             .unwrap_or(DEFAULT_GET_LIMIT)
             .min(MAX_QUERY_LIMIT);
         let query = self
             .store
-            .query_jmap_thread_ids(account_id, mailbox_id, search_text, position, limit)
+            .query_jmap_thread_ids(account_id, mailbox_id, search_text, storage_position, limit)
             .await?;
         let full_ids = self
             .resolve_full_thread_query_ids(account_id, mailbox_id, search_text, &query)
             .await?;
-        let ids = query
-            .ids
-            .into_iter()
-            .map(|id| id.to_string())
+        let position = query_position(
+            &full_ids,
+            requested_position,
+            arguments.anchor.as_deref(),
+            arguments.anchor_offset,
+        )?;
+        let ids = full_ids
+            .iter()
+            .skip(position)
+            .take(limit as usize)
+            .cloned()
             .collect::<Vec<_>>();
         let query_state = crate::encode_query_state(
             account_id,

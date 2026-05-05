@@ -3122,6 +3122,124 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn query_methods_support_anchor_windows_and_missing_anchor_errors() {
+        let mut second_contact = FakeStore::contact();
+        second_contact.id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+        second_contact.name = "Carol Example".to_string();
+        let mut second_event = FakeStore::event();
+        second_event.id = Uuid::parse_str("45454545-4545-4545-4545-454545454545").unwrap();
+        second_event.date = "2026-04-21".to_string();
+        second_event.time = "10:00".to_string();
+
+        let service = JmapService::new_with_validator(
+            FakeStore {
+                session: Some(FakeStore::account()),
+                mailboxes: vec![FakeStore::inbox_mailbox(), FakeStore::draft_mailbox()],
+                emails: vec![FakeStore::inbox_email(), FakeStore::draft_email()],
+                contacts: Arc::new(Mutex::new(vec![
+                    FakeStore::contact(),
+                    second_contact.clone(),
+                ])),
+                events: Arc::new(Mutex::new(vec![FakeStore::event(), second_event.clone()])),
+                ..Default::default()
+            },
+            validator_ok("message/rfc822", "email", "eml", 0.99),
+        );
+
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_MAIL_CAPABILITY.to_string(),
+                        JMAP_CONTACTS_CAPABILITY.to_string(),
+                        JMAP_CALENDARS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Mailbox/query".to_string(),
+                            json!({
+                                "anchor": FakeStore::draft_mailbox().id.to_string(),
+                                "anchorOffset": -1,
+                                "limit": 2
+                            }),
+                            "m1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Email/query".to_string(),
+                            json!({
+                                "anchor": FakeStore::draft_email().id.to_string(),
+                                "anchorOffset": -1,
+                                "limit": 2
+                            }),
+                            "e1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "ContactCard/query".to_string(),
+                            json!({
+                                "anchor": second_contact.id.to_string(),
+                                "anchorOffset": -1,
+                                "limit": 2
+                            }),
+                            "c1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/query".to_string(),
+                            json!({
+                                "anchor": second_event.id.to_string(),
+                                "anchorOffset": -1,
+                                "limit": 2
+                            }),
+                            "cal1".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Mailbox/query".to_string(),
+                            json!({"anchor": "missing-anchor"}),
+                            "m2".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.method_responses[0].1["position"], 0);
+        assert_eq!(
+            response.method_responses[0].1["ids"],
+            json!([
+                FakeStore::inbox_mailbox().id.to_string(),
+                FakeStore::draft_mailbox().id.to_string()
+            ])
+        );
+        assert_eq!(response.method_responses[1].1["position"], 0);
+        assert_eq!(
+            response.method_responses[1].1["ids"],
+            json!([
+                FakeStore::inbox_email().id.to_string(),
+                FakeStore::draft_email().id.to_string()
+            ])
+        );
+        assert_eq!(response.method_responses[2].1["position"], 0);
+        assert_eq!(
+            response.method_responses[2].1["ids"],
+            json!([
+                FakeStore::contact().id.to_string(),
+                second_contact.id.to_string()
+            ])
+        );
+        assert_eq!(response.method_responses[3].1["position"], 0);
+        assert_eq!(
+            response.method_responses[3].1["ids"],
+            json!([
+                FakeStore::event().id.to_string(),
+                second_event.id.to_string()
+            ])
+        );
+        assert_eq!(response.method_responses[4].0, "error");
+        assert_eq!(response.method_responses[4].1["type"], "anchorNotFound");
+    }
+
+    #[tokio::test]
     async fn email_query_changes_reports_existing_message_reorders() {
         let initial = JmapService::new_with_validator(
             FakeStore {

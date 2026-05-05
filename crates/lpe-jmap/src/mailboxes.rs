@@ -16,7 +16,7 @@ use crate::{
         ChangesArguments, MailboxCreateInput, MailboxGetArguments, MailboxQueryArguments,
         MailboxSetArguments, MailboxUpdateInput, QueryChangesArguments,
     },
-    state::{changes_response, encode_query_state, query_changes_response},
+    state::{changes_response, encode_query_state, query_changes_response, query_position},
     JmapService, DEFAULT_GET_LIMIT, MAX_QUERY_LIMIT,
 };
 
@@ -84,15 +84,20 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 mailbox.id.to_string(),
             )
         });
-        let position = arguments.position.unwrap_or(0) as usize;
-        let limit = arguments
-            .limit
-            .unwrap_or(DEFAULT_GET_LIMIT)
-            .min(MAX_QUERY_LIMIT) as usize;
         let all_ids = mailboxes
             .iter()
             .map(|mailbox| mailbox.id.to_string())
             .collect::<Vec<_>>();
+        let position = query_position(
+            &all_ids,
+            arguments.position,
+            arguments.anchor.as_deref(),
+            arguments.anchor_offset,
+        )?;
+        let limit = arguments
+            .limit
+            .unwrap_or(DEFAULT_GET_LIMIT)
+            .min(MAX_QUERY_LIMIT) as usize;
         let ids = all_ids
             .iter()
             .skip(position)

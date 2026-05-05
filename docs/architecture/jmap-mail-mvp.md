@@ -100,6 +100,7 @@ Additional supported `JMAP` routes:
 
 - `Email/query` and `Thread/query` support only descending `receivedAt` sort
 - `Email/query` supports only the `inMailbox` filter
+- supported `query` methods honor RFC `position`, negative `position`, `anchor`, and `anchorOffset` windowing; missing anchors return method-level `anchorNotFound` errors instead of silently returning an unrelated page
 - `Email/queryChanges`, `Thread/queryChanges`, and `Mailbox/queryChanges` use a stateless snapshot `queryState` token derived from the ordered result set instead of a durable per-query history table
 - `queryChanges` compares the full ordered result set for the logical query even when the original `query` response was paginated, and is intended for incremental client refresh, not for long-lived durable sync cursors
 - mailbox and Big Three collaboration query snapshots use deterministic canonical-id tie-breakers for equal visible sort keys so backend row-order changes do not create false `queryChanges` reorders

@@ -125,7 +125,9 @@ pub struct MailboxGetArguments {
 #[serde(rename_all = "camelCase")]
 pub struct MailboxQueryArguments {
     pub account_id: Option<String>,
-    pub position: Option<u64>,
+    pub position: Option<i64>,
+    pub anchor: Option<String>,
+    pub anchor_offset: Option<i64>,
     pub limit: Option<u64>,
 }
 
@@ -168,7 +170,9 @@ pub struct EmailGetArguments {
 #[serde(rename_all = "camelCase")]
 pub struct EmailQueryArguments {
     pub account_id: Option<String>,
-    pub position: Option<u64>,
+    pub position: Option<i64>,
+    pub anchor: Option<String>,
+    pub anchor_offset: Option<i64>,
     pub limit: Option<u64>,
     pub filter: Option<EmailQueryFilter>,
     pub sort: Option<Vec<EmailQuerySort>>,
@@ -216,7 +220,9 @@ pub struct EmailSubmissionGetArguments {
 #[serde(rename_all = "camelCase")]
 pub struct EmailSubmissionQueryArguments {
     pub account_id: Option<String>,
-    pub position: Option<u64>,
+    pub position: Option<i64>,
+    pub anchor: Option<String>,
+    pub anchor_offset: Option<i64>,
     pub limit: Option<u64>,
     pub filter: Option<EmailSubmissionQueryFilter>,
     pub sort: Option<Vec<EmailSubmissionQuerySort>>,
@@ -260,7 +266,9 @@ pub struct ThreadGetArguments {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadQueryArguments {
     pub account_id: Option<String>,
-    pub position: Option<u64>,
+    pub position: Option<i64>,
+    pub anchor: Option<String>,
+    pub anchor_offset: Option<i64>,
     pub limit: Option<u64>,
     pub filter: Option<EmailQueryFilter>,
     pub sort: Option<Vec<EmailQuerySort>>,
@@ -307,7 +315,9 @@ pub struct AddressBookGetArguments {
 #[serde(rename_all = "camelCase")]
 pub struct AddressBookQueryArguments {
     pub account_id: Option<String>,
-    pub position: Option<u64>,
+    pub position: Option<i64>,
+    pub anchor: Option<String>,
+    pub anchor_offset: Option<i64>,
     pub limit: Option<u64>,
 }
 
@@ -323,7 +333,9 @@ pub struct ContactCardGetArguments {
 #[serde(rename_all = "camelCase")]
 pub struct ContactCardQueryArguments {
     pub account_id: Option<String>,
-    pub position: Option<u64>,
+    pub position: Option<i64>,
+    pub anchor: Option<String>,
+    pub anchor_offset: Option<i64>,
     pub limit: Option<u64>,
     pub filter: Option<ContactCardQueryFilter>,
     pub sort: Option<Vec<EntityQuerySort>>,
@@ -357,7 +369,9 @@ pub struct CalendarGetArguments {
 #[serde(rename_all = "camelCase")]
 pub struct CalendarQueryArguments {
     pub account_id: Option<String>,
-    pub position: Option<u64>,
+    pub position: Option<i64>,
+    pub anchor: Option<String>,
+    pub anchor_offset: Option<i64>,
     pub limit: Option<u64>,
 }
 
@@ -390,7 +404,9 @@ pub struct TaskGetArguments {
 #[serde(rename_all = "camelCase")]
 pub struct TaskQueryArguments {
     pub account_id: Option<String>,
-    pub position: Option<u64>,
+    pub position: Option<i64>,
+    pub anchor: Option<String>,
+    pub anchor_offset: Option<i64>,
     pub limit: Option<u64>,
     pub filter: Option<TaskQueryFilter>,
     pub sort: Option<Vec<TaskQuerySort>>,
@@ -432,7 +448,9 @@ pub struct CalendarEventGetArguments {
 #[serde(rename_all = "camelCase")]
 pub struct CalendarEventQueryArguments {
     pub account_id: Option<String>,
-    pub position: Option<u64>,
+    pub position: Option<i64>,
+    pub anchor: Option<String>,
+    pub anchor_offset: Option<i64>,
     pub limit: Option<u64>,
     pub filter: Option<CalendarEventQueryFilter>,
     pub sort: Option<Vec<EntityQuerySort>>,
