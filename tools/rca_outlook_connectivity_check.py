@@ -83,7 +83,13 @@ def content_type(headers: dict[str, str]) -> str:
     return ""
 
 
-def check_pox_autodiscover(base_url: str, email: str, expect_ews: bool, timeout: int) -> None:
+def check_pox_autodiscover(
+    base_url: str,
+    email: str,
+    expect_ews: bool,
+    expect_mapi: bool,
+    timeout: int,
+) -> None:
     body = POX_BODY.format(email=xml_escape(email)).encode("utf-8")
     for path in [
         "/autodiscover",
@@ -111,10 +117,35 @@ def check_pox_autodiscover(base_url: str, email: str, expect_ews: bool, timeout:
         if expect_ews:
             require("<Type>WEB</Type>" in text, f"{path} missing opt-in EWS WEB block")
             require("<ASUrl>" in text, f"{path} missing EWS ASUrl")
+
+    if expect_mapi:
+        response = request(
+            "POST",
+            join_url(base_url, "/autodiscover"),
+            body,
+            {
+                "Content-Type": "text/xml; charset=utf-8",
+                "Accept": "text/xml",
+                "User-Agent": "lpe-rca-connectivity-check/0.1",
+                "X-MapiHttpCapability": "1",
+            },
+            timeout,
+        )
+        text = response.text
+        require(response.status == 200, f"POX MAPI probe returned HTTP {response.status}: {text[:300]}")
+        require("mapiHttp" in text, "POX MAPI probe did not publish mapiHttp")
+        require("/mapi/emsmdb/" in text, "POX MAPI probe missing EMSMDB URL")
+        require("/mapi/nspi/" in text, "POX MAPI probe missing NSPI URL")
     print("ok autodiscover_pox")
 
 
-def check_json_autodiscover(base_url: str, email: str, expect_ews: bool, timeout: int) -> None:
+def check_json_autodiscover(
+    base_url: str,
+    email: str,
+    expect_ews: bool,
+    expect_mapi: bool,
+    timeout: int,
+) -> None:
     encoded_email = urllib.parse.quote(email, safe="")
     url = join_url(base_url, f"/autodiscover/autodiscover.json/v1.0/{encoded_email}?Protocol=AutoDiscoverV1")
     response = request("GET", url, timeout=timeout)
@@ -131,7 +162,17 @@ def check_json_autodiscover(base_url: str, email: str, expect_ews: bool, timeout
         require(ews_payload.get("Protocol") == "EWS", "Autodiscover JSON EWS returned wrong protocol")
         require(ews_payload.get("Url", "").endswith("/EWS/Exchange.asmx"), "Autodiscover JSON EWS returned unexpected URL")
     else:
-        require(ews_response.status == 404, "Autodiscover JSON EWS should stay unpublished until EWS is enabled")
+        require(ews_response.status in {200, 404}, f"Autodiscover JSON EWS returned unexpected HTTP {ews_response.status}")
+
+    mapi_url = join_url(base_url, f"/autodiscover/autodiscover.json/v1.0/{encoded_email}?Protocol=MapiHttp")
+    mapi_response = request("GET", mapi_url, timeout=timeout)
+    if expect_mapi:
+        require(mapi_response.status == 200, f"Autodiscover JSON MAPI returned HTTP {mapi_response.status}: {mapi_response.text[:300]}")
+        mapi_payload = json.loads(mapi_response.text)
+        require(mapi_payload.get("Protocol") == "MapiHttp", "Autodiscover JSON MAPI returned wrong protocol")
+        require("/mapi/emsmdb/" in mapi_payload.get("Url", ""), "Autodiscover JSON MAPI returned unexpected URL")
+    else:
+        require(mapi_response.status in {200, 404}, f"Autodiscover JSON MAPI returned unexpected HTTP {mapi_response.status}")
     print("ok autodiscover_json")
 
 
@@ -183,6 +224,28 @@ def check_ews_basic(base_url: str, email: str, password: str, timeout: int) -> N
     print("ok ews_basic")
 
 
+def check_mapi_ping(base_url: str, email: str, password: str, timeout: int) -> None:
+    token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
+    for path in ["/mapi/emsmdb", "/mapi/nspi"]:
+        response = request(
+            "POST",
+            join_url(base_url, path),
+            b"",
+            {
+                "Authorization": f"Basic {token}",
+                "Content-Type": "application/mapi-http",
+                "X-RequestType": "PING",
+                "X-RequestId": "00000000-0000-0000-0000-000000000123",
+            },
+            timeout,
+        )
+        require(response.status == 200, f"MAPI PING {path} returned HTTP {response.status}: {response.text[:300]}")
+        require("application/mapi-http" in content_type(response.headers), f"MAPI PING {path} did not return MAPI content")
+        response_code = next((value for key, value in response.headers.items() if key.lower() == "x-responsecode"), "")
+        require(response_code == "0", f"MAPI PING {path} returned X-ResponseCode {response_code!r}")
+    print("ok mapi_ping")
+
+
 def xml_escape(value: str) -> str:
     return (
         value.replace("&", "&amp;")
@@ -209,21 +272,25 @@ def main() -> int:
     parser.add_argument("--password", default=os.getenv("LPE_RCA_PASSWORD"))
     parser.add_argument("--timeout", type=int, default=int(os.getenv("LPE_RCA_TIMEOUT", "20")))
     parser.add_argument("--expect-ews", action="store_true", help="Require EWS discovery to be published.")
+    parser.add_argument("--expect-mapi", action="store_true", help="Require MAPI/HTTP discovery to be published.")
     parser.add_argument("--check-ews-basic", action="store_true", help="Exercise Basic auth against /EWS/Exchange.asmx.")
+    parser.add_argument("--check-mapi-ping", action="store_true", help="Exercise Basic auth PING against /mapi/emsmdb and /mapi/nspi.")
     args = parser.parse_args()
 
     base_url = args.base_url.rstrip("/")
-    check_pox_autodiscover(base_url, args.email, args.expect_ews, args.timeout)
-    check_json_autodiscover(base_url, args.email, args.expect_ews, args.timeout)
+    check_pox_autodiscover(base_url, args.email, args.expect_ews, args.expect_mapi, args.timeout)
+    check_json_autodiscover(base_url, args.email, args.expect_ews, args.expect_mapi, args.timeout)
 
     if args.password:
         check_jmap_session(base_url, args.email, args.password, args.timeout)
         if args.check_ews_basic:
             check_ews_basic(base_url, args.email, args.password, args.timeout)
+        if args.check_mapi_ping:
+            check_mapi_ping(base_url, args.email, args.password, args.timeout)
     else:
         print("skip jmap_session password not provided")
-        if args.check_ews_basic:
-            raise RuntimeError("--check-ews-basic requires --password or LPE_RCA_PASSWORD")
+        if args.check_ews_basic or args.check_mapi_ping:
+            raise RuntimeError("--check-ews-basic and --check-mapi-ping require --password or LPE_RCA_PASSWORD")
 
     return 0
 
