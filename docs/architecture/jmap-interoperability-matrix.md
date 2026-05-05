@@ -11,6 +11,7 @@ The release target is the `JMAP` Big Three: Mail, Contacts, and simple Calendar 
 - `JMAP::Tester` is the external black-box protocol harness for request/response shape, JSON type stability, upload/download behavior, method batching, and state-change assertions.
 - Fastmail-style client behavior is the real-client reference for session discovery, bearer-token authentication, capability scoping, typed JSON responses, and practical Mail plus Contacts workflows.
 - Fastmail Calendar-over-JMAP behavior is not treated as a production reference until its public API support is finalized; `LPE` keeps simple Calendar event interoperability bounded to the implemented JMAP Calendars shape and canonical `calendar_events` rows.
+- `tools/jmap_live_shared_delegated_check.py` is the operator-run live fixture check for same-tenant mailbox delegation, sender delegation, shared contacts, shared calendars, and WebSocket replay. It requires two real mailbox credentials and creates temporary canonical grants through the account API before cleaning them up.
 
 `JMAP::Tester` is not vendored and is not a repository dependency. It remains an operator-run external harness because the repository dependency policy only allows Apache-2.0 code and documented MIT exceptions. In-repo Rust tests should still mimic the key `JMAP::Tester` assertions: exact method-response order, call-id preservation, JSON string/number/boolean shapes, capability-gated dispatch, and canonical state transitions.
 

@@ -5,6 +5,8 @@
 **/dist/
 **/*.tsbuildinfo
 /.DS_Store
+**/__pycache__/
+**/*.pyc
 /takeri-inspect/
 /.codex-takeri-inspect/
 
