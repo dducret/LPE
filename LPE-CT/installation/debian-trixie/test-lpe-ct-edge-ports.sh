@@ -134,6 +134,31 @@ assert_https_security_headers() {
   done
 }
 
+diagnose_core_upstream_failure() {
+  local label="$1"
+  local status="$2"
+  local path="$3"
+  local core_base="${LPE_CT_CORE_DELIVERY_BASE_URL:-}"
+  local health_status
+
+  echo "[DIAG] ${label} returned HTTP ${status} through LPE-CT for ${path}."
+  echo "[DIAG] nginx should proxy this route to LPE_CT_CORE_DELIVERY_BASE_URL=${core_base:-unset}"
+  if [[ -z "${core_base}" ]]; then
+    fail "LPE_CT_CORE_DELIVERY_BASE_URL is not configured; set it to the core LPE private HTTP listener, for example http://10.20.0.40:8080"
+  fi
+
+  core_base="${core_base%/}"
+  health_status="$(curl --silent --show-error --output /dev/null --write-out "%{http_code}" "${core_base}/health/live" 2>/dev/null || true)"
+  echo "[DIAG] Direct core health probe from LPE-CT: ${core_base}/health/live -> HTTP ${health_status:-000}"
+  case "${core_base}" in
+    http://127.*|https://127.*|http://localhost*|https://localhost*)
+      echo "[DIAG] The configured core URL is loopback-only. That is valid only when core LPE and LPE-CT run on the same host."
+      echo "[DIAG] In a split DMZ/LAN topology, set LPE_BIND_ADDRESS on the core node to its private LAN address, then set LPE_CT_CORE_DELIVERY_BASE_URL on LPE-CT to that same host and port."
+      ;;
+  esac
+  fail "${label} cannot reach the configured core LPE upstream; check that lpe.service is active, LPE_BIND_ADDRESS is not loopback-only for split deployments, and the LAN firewall allows LPE-CT to connect to port 8080."
+}
+
 assert_published_core_route() {
   local method="$1"
   local path="$2"
@@ -167,7 +192,7 @@ assert_published_core_route() {
       fail "${label} returned 404 through LPE-CT; check nginx route publication for ${path}"
       ;;
     502|503|504)
-      fail "${label} returned ${status} through LPE-CT; check the configured core upstream"
+      diagnose_core_upstream_failure "${label}" "${status}" "${path}"
       ;;
   esac
   pass "${label} is published through LPE-CT (${method} ${path} -> HTTP ${status})"

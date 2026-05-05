@@ -525,6 +525,11 @@ Example unattended `LPE` first install:
 ```bash
 LPE_PUBLIC_HOSTNAME=mail.example.com \
 LPE_SERVER_NAME=mail.example.com \
+LPE_LOCAL_BIND_HOST=10.20.0.40 \
+LPE_LOCAL_BIND_PORT=8080 \
+LPE_IMAP_BIND_ADDRESS=10.20.0.40:1143 \
+LPE_IMAP_BIND_HOST=10.20.0.40 \
+LPE_IMAP_BIND_PORT=1143 \
 LPE_DB_HOST=127.0.0.1 \
 LPE_DB_PORT=5432 \
 LPE_DB_NAME=lpe \
@@ -550,7 +555,7 @@ LPE_CT_NGINX_LISTEN_PORT=443 \
 LPE_CT_PUBLIC_TLS_CERT_PATH=/etc/lpe-ct/tls/fullchain.pem \
 LPE_CT_PUBLIC_TLS_KEY_PATH=/etc/lpe-ct/tls/privkey.pem \
 LPE_CT_IMAPS_BIND_ADDRESS=0.0.0.0:993 \
-LPE_CT_IMAPS_UPSTREAM_ADDRESS=127.0.0.1:1143 \
+LPE_CT_IMAPS_UPSTREAM_ADDRESS=10.20.0.40:1143 \
 LPE_CT_IMAPS_TLS_CERT_PATH=/etc/lpe-ct/tls/fullchain.pem \
 LPE_CT_IMAPS_TLS_KEY_PATH=/etc/lpe-ct/tls/privkey.pem \
 LPE_CT_SUBMISSION_BIND_ADDRESS=0.0.0.0:465 \
@@ -589,6 +594,15 @@ By default:
 - `nginx` also publishes `/Microsoft-Server-ActiveSync`
 - `nginx` also publishes `/autodiscover/autodiscover.xml` and `/Autodiscover/Autodiscover.xml`
 - `nginx` also publishes `/autoconfig/mail/config-v1.1.xml` and `/.well-known/autoconfig/mail/config-v1.1.xml`
+
+In a split `DMZ` / `LAN` topology, the default core HTTP listener is not enough:
+`127.0.0.1:8080` is reachable only from the core host itself. Set
+`LPE_LOCAL_BIND_HOST` / `LPE_LOCAL_BIND_PORT`, or `LPE_BIND_ADDRESS`, on the
+core `LPE` node to its private LAN address, for example `10.20.0.40:8080`, then
+set `LPE_CT_CORE_DELIVERY_BASE_URL=http://10.20.0.40:8080` on the `LPE-CT`
+node. After changing the core bind address, run `update-lpe.sh`, restart
+`lpe.service`, and verify from the `LPE-CT` node with
+`curl http://10.20.0.40:8080/health/live` before rerunning the edge tests.
 
 The core `LPE` nginx template also emits the non-HSTS baseline browser security
 headers for its local administration and webmail publication. HSTS remains the

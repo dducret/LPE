@@ -159,6 +159,13 @@ The implemented v1 HTTP topology is:
 - client `SMTP` submission port `465` -> `LPE-CT` -> `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/submission-auth` and `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/submissions` on `LPE`
 - core outbound queue -> `LPE` worker -> `POST ${LPE_CT_API_BASE_URL}/api/v1/integration/outbound-messages` on `LPE-CT`, default `LPE-CT` API port `8380`
 
+For split `DMZ` / `LAN` deployments, `${LPE_CT_CORE_DELIVERY_BASE_URL}` must
+point at the core `LPE` private LAN HTTP listener. A loopback URL such as
+`http://127.0.0.1:8080` is valid only when `LPE` and `LPE-CT` run on the same
+host. If they run on separate hosts, the core `LPE_BIND_ADDRESS` must also use
+the private LAN address instead of loopback, and the LAN firewall must allow
+the `LPE-CT` host to reach that port.
+
 Port `2525` is not part of this canonical `LPE <-> LPE-CT` bridge. If used, it is only a configured technical `SMTP` upstream relay target owned by `LPE-CT`.
 
 The dedicated local-store boundary for `LPE-CT`, including private `5432` use, is documented in `docs/architecture/lpe-ct-local-data-stores.md`.
