@@ -6798,8 +6798,20 @@ mod tests {
             .unwrap()
             .to_string();
 
-        contact_collections.lock().unwrap().reverse();
-        calendar_collections.lock().unwrap().reverse();
+        contact_collections
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|collection| collection.id == "shared-contacts")
+            .unwrap()
+            .display_name = "A Shared Contacts".to_string();
+        calendar_collections
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|collection| collection.id == "shared-calendar")
+            .unwrap()
+            .display_name = "A Shared Calendar".to_string();
 
         let changes = service
             .handle_api_request(
@@ -6849,6 +6861,103 @@ mod tests {
                 {"id": "default", "index": 1}
             ])
         );
+    }
+
+    #[tokio::test]
+    async fn collection_query_changes_ignore_backend_order_for_equal_sort_keys() {
+        let mut first_address_book = FakeStore::contact_collection();
+        first_address_book.id = "111-address-book".to_string();
+        first_address_book.display_name = "Same".to_string();
+        let mut second_address_book = FakeStore::contact_collection();
+        second_address_book.id = "222-address-book".to_string();
+        second_address_book.display_name = "Same".to_string();
+        let mut first_calendar = FakeStore::calendar_collection();
+        first_calendar.id = "111-calendar".to_string();
+        first_calendar.display_name = "Same".to_string();
+        let mut second_calendar = FakeStore::calendar_collection();
+        second_calendar.id = "222-calendar".to_string();
+        second_calendar.display_name = "Same".to_string();
+
+        let contact_collections = Arc::new(Mutex::new(vec![
+            second_address_book.clone(),
+            first_address_book.clone(),
+        ]));
+        let calendar_collections = Arc::new(Mutex::new(vec![
+            second_calendar.clone(),
+            first_calendar.clone(),
+        ]));
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            contact_collections: contact_collections.clone(),
+            calendar_collections: calendar_collections.clone(),
+            ..Default::default()
+        });
+
+        let initial = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_CONTACTS_CAPABILITY.to_string(),
+                        JMAP_CALENDARS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "AddressBook/query".to_string(),
+                            json!({}),
+                            "ab1".to_string(),
+                        ),
+                        JmapMethodCall("Calendar/query".to_string(), json!({}), "cal1".to_string()),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            initial.method_responses[0].1["ids"],
+            json!(["111-address-book", "222-address-book"])
+        );
+        assert_eq!(
+            initial.method_responses[1].1["ids"],
+            json!(["111-calendar", "222-calendar"])
+        );
+
+        contact_collections.lock().unwrap().reverse();
+        calendar_collections.lock().unwrap().reverse();
+
+        let changes = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: vec![
+                        JMAP_CORE_CAPABILITY.to_string(),
+                        JMAP_CONTACTS_CAPABILITY.to_string(),
+                        JMAP_CALENDARS_CAPABILITY.to_string(),
+                    ],
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "AddressBook/queryChanges".to_string(),
+                            json!({"sinceQueryState": initial.method_responses[0].1["queryState"]}),
+                            "ab2".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Calendar/queryChanges".to_string(),
+                            json!({"sinceQueryState": initial.method_responses[1].1["queryState"]}),
+                            "cal2".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        for method in changes.method_responses {
+            assert_eq!(method.1["removed"], json!([]));
+            assert_eq!(method.1["added"], json!([]));
+            assert_eq!(method.1["hasMoreChanges"], Value::Bool(false));
+        }
     }
 
     #[tokio::test]

@@ -113,10 +113,11 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             arguments.sort.as_ref(),
             "Calendar/query",
         )?;
-        let collections = self
+        let mut collections = self
             .store
             .fetch_accessible_calendar_collections(account_id)
             .await?;
+        collections.sort_by_key(collection_sort_key);
         query_changes_response(
             account_id,
             "Calendar/query",

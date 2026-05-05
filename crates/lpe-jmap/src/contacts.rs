@@ -107,10 +107,11 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             arguments.sort.as_ref(),
             "AddressBook/query",
         )?;
-        let collections = self
+        let mut collections = self
             .store
             .fetch_accessible_contact_collections(account_id)
             .await?;
+        collections.sort_by_key(collection_sort_key);
         query_changes_response(
             account_id,
             "AddressBook/query",
