@@ -10,6 +10,7 @@ use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{JmapEmail, JmapEmailAddress, JmapMailbox};
 use std::{
     collections::HashMap,
+    env,
     sync::{Mutex, OnceLock},
     time::{Duration, SystemTime},
 };
@@ -112,7 +113,7 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
             endpoint,
             &principal,
             headers,
-            _body.len(),
+            _body,
             &request_type_label,
             &request_id,
             &response,
@@ -207,7 +208,7 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
         endpoint,
         &principal,
         headers,
-        _body.len(),
+        _body,
         &request_type_label,
         &request_id,
         &response,
@@ -899,6 +900,14 @@ fn mapi_response(
     response.extensions_mut().insert(MapiResponseDebug {
         payload_bytes: body.len(),
     });
+    let payload_preview_hex = debug_payload_preview_hex(&body);
+    if !payload_preview_hex.is_empty() {
+        response
+            .extensions_mut()
+            .insert(MapiResponsePayloadPreview {
+                hex: payload_preview_hex,
+            });
+    }
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static(MAPI_CONTENT_TYPE));
@@ -923,11 +932,23 @@ struct MapiResponseDebug {
     payload_bytes: usize,
 }
 
+#[derive(Clone, Debug)]
+struct MapiResponsePayloadPreview {
+    hex: String,
+}
+
 pub(crate) fn mapi_response_payload_bytes(response: &Response) -> Option<usize> {
     response
         .extensions()
         .get::<MapiResponseDebug>()
         .map(|debug| debug.payload_bytes)
+}
+
+pub(crate) fn mapi_response_payload_preview_hex(response: &Response) -> Option<&str> {
+    response
+        .extensions()
+        .get::<MapiResponsePayloadPreview>()
+        .map(|preview| preview.hex.as_str())
 }
 
 fn finalize_mapi_response(mut response: Response, request_headers: &HeaderMap) -> Response {
@@ -949,7 +970,7 @@ fn log_mapi_connection(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
     headers: &HeaderMap,
-    request_body_bytes: usize,
+    request_body: &[u8],
     request_type: &str,
     request_id: &str,
     response: &Response,
@@ -957,6 +978,10 @@ fn log_mapi_connection(
     let response_code = response_header(response, "x-responsecode").unwrap_or_default();
     let status = response.status().as_u16();
     let payload_bytes = mapi_response_payload_bytes(response).unwrap_or(0);
+    let request_body_bytes = request_body.len();
+    let request_body_preview_hex = debug_payload_preview_hex(request_body);
+    let response_payload_preview_hex =
+        mapi_response_payload_preview_hex(response).unwrap_or_default();
     let endpoint = match endpoint {
         MapiEndpoint::Emsmdb => "emsmdb",
         MapiEndpoint::Nspi => "nspi",
@@ -987,6 +1012,8 @@ fn log_mapi_connection(
             mapi_response_code = %response_code,
             request_body_bytes,
             response_payload_bytes = payload_bytes,
+            request_body_preview_hex = %request_body_preview_hex,
+            response_payload_preview_hex = %response_payload_preview_hex,
             content_type = %content_type,
             user_agent = %user_agent,
             "{message}"
@@ -1009,6 +1036,8 @@ fn log_mapi_connection(
             mapi_response_code = %response_code,
             request_body_bytes,
             response_payload_bytes = payload_bytes,
+            request_body_preview_hex = %request_body_preview_hex,
+            response_payload_preview_hex = %response_payload_preview_hex,
             content_type = %content_type,
             user_agent = %user_agent,
             "{message}"
@@ -1033,6 +1062,31 @@ pub(crate) fn safe_header(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.chars().take(240).collect())
+}
+
+pub(crate) fn debug_payload_preview_hex(bytes: &[u8]) -> String {
+    let limit = debug_payload_preview_limit();
+    if limit == 0 {
+        return String::new();
+    }
+    hex_preview(bytes, limit)
+}
+
+fn debug_payload_preview_limit() -> usize {
+    env::var("LPE_RCA_DEBUG_PAYLOAD_PREVIEW_BYTES")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(0)
+        .min(512)
+}
+
+pub(crate) fn hex_preview(bytes: &[u8], limit: usize) -> String {
+    bytes
+        .iter()
+        .take(limit)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 struct ExecuteRequest {

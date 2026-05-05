@@ -658,8 +658,12 @@ Those events include the public path, mailbox hint, EWS operation, MAPI endpoint
 `X-RequestType`, `X-RequestId`, `client-request-id`, `X-ClientInfo`,
 `X-ClientApplication`, HTTP status, MAPI `X-ResponseCode`, and request/response
 payload sizes where available. They intentionally do not log credentials,
-authorization headers, or request bodies. During an RCA run, capture the last
-few minutes with:
+authorization headers, or request bodies by default. When RCA still fails after
+a protocol-success response, temporarily set
+`LPE_RCA_DEBUG_PAYLOAD_PREVIEW_BYTES=256` to include a capped hexadecimal
+preview of MAPI/HTTP binary request and response payloads; unset it again after
+the RCA run because those previews can contain mailbox names or address-book
+lookup values. During an RCA run, capture the last few minutes with:
 
 ```bash
 journalctl -u lpe.service --since "10 minutes ago" --no-pager | grep 'rca debug'

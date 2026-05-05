@@ -192,7 +192,7 @@ async fn mapi_post_handler(
                 endpoint,
                 &uri,
                 &headers,
-                body.len(),
+                body.as_ref(),
                 &response,
                 started_at.elapsed().as_secs_f64() * 1000.0,
                 Some(error.to_string().as_str()),
@@ -204,7 +204,7 @@ async fn mapi_post_handler(
         endpoint,
         &uri,
         &headers,
-        body.len(),
+        body.as_ref(),
         &response,
         started_at.elapsed().as_secs_f64() * 1000.0,
         None,
@@ -292,7 +292,7 @@ fn log_mapi_transport_connection(
     endpoint: MapiEndpoint,
     uri: &Uri,
     headers: &HeaderMap,
-    request_body_bytes: usize,
+    request_body: &[u8],
     response: &Response,
     duration_ms: f64,
     error: Option<&str>,
@@ -316,6 +316,10 @@ fn log_mapi_transport_connection(
     let trace_id = mapi::safe_header(headers, "x-trace-id").unwrap_or_default();
     let user_agent = mapi::safe_header(headers, "user-agent").unwrap_or_default();
     let response_payload_bytes = mapi::mapi_response_payload_bytes(response).unwrap_or(0);
+    let request_body_bytes = request_body.len();
+    let request_body_preview_hex = mapi::debug_payload_preview_hex(request_body);
+    let response_payload_preview_hex =
+        mapi::mapi_response_payload_preview_hex(response).unwrap_or_default();
     let message = "rca debug mapi transport connection";
 
     if status < 400 && mapi_response_code == "0" {
@@ -336,6 +340,8 @@ fn log_mapi_transport_connection(
             mapi_response_code = %mapi_response_code,
             request_body_bytes,
             response_payload_bytes,
+            request_body_preview_hex = %request_body_preview_hex,
+            response_payload_preview_hex = %response_payload_preview_hex,
             duration_ms,
             user_agent = %user_agent,
             "{message}"
@@ -358,6 +364,8 @@ fn log_mapi_transport_connection(
             mapi_response_code = %mapi_response_code,
             request_body_bytes,
             response_payload_bytes,
+            request_body_preview_hex = %request_body_preview_hex,
+            response_payload_preview_hex = %response_payload_preview_hex,
             duration_ms,
             user_agent = %user_agent,
             error = %error.unwrap_or_default(),
