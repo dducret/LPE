@@ -11,6 +11,7 @@ use lpe_storage::{JmapEmail, JmapEmailAddress, JmapMailbox};
 use std::{
     collections::HashMap,
     sync::{Mutex, OnceLock},
+    time::{Duration, SystemTime},
 };
 use uuid::Uuid;
 
@@ -65,6 +66,7 @@ struct MapiSession {
     tenant_id: String,
     account_id: Uuid,
     email: String,
+    last_seen_at: SystemTime,
     next_handle: u32,
     handles: HashMap<u32, MapiObject>,
 }
@@ -572,41 +574,63 @@ fn public_endpoint_url(headers: &HeaderMap, path: &str) -> String {
 
 fn create_session(endpoint: MapiEndpoint, principal: &AccountPrincipal) -> String {
     let session_id = Uuid::new_v4().to_string();
+    let now = SystemTime::now();
     let session = MapiSession {
         endpoint,
         tenant_id: principal.tenant_id.clone(),
         account_id: principal.account_id,
         email: principal.email.clone(),
+        last_seen_at: now,
         next_handle: 1,
         handles: HashMap::new(),
     };
-    sessions()
+    let mut guard = sessions()
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .insert(session_id.clone(), session);
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_expired_sessions_locked(&mut guard, now);
+    guard.insert(session_id.clone(), session);
     session_id
 }
 
 fn remove_session(session_id: &str) -> Option<MapiSession> {
-    sessions()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .remove(session_id)
-}
-
-fn get_session(session_id: &str) -> Option<MapiSession> {
-    sessions()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get(session_id)
-        .cloned()
-}
-
-fn with_session_mut<T>(session_id: &str, f: impl FnOnce(&mut MapiSession) -> T) -> Option<T> {
+    let now = SystemTime::now();
     let mut guard = sessions()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    guard.get_mut(session_id).map(f)
+    prune_expired_sessions_locked(&mut guard, now);
+    guard.remove(session_id)
+}
+
+fn get_session(session_id: &str) -> Option<MapiSession> {
+    let now = SystemTime::now();
+    let mut guard = sessions()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_expired_sessions_locked(&mut guard, now);
+    guard.get(session_id).cloned()
+}
+
+fn with_session_mut<T>(session_id: &str, f: impl FnOnce(&mut MapiSession) -> T) -> Option<T> {
+    let now = SystemTime::now();
+    let mut guard = sessions()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_expired_sessions_locked(&mut guard, now);
+    guard.get_mut(session_id).map(|session| {
+        session.last_seen_at = now;
+        f(session)
+    })
+}
+
+fn prune_expired_sessions_locked(sessions: &mut HashMap<String, MapiSession>, now: SystemTime) {
+    sessions.retain(|_, session| !session_is_expired(session, now));
+}
+
+fn session_is_expired(session: &MapiSession, now: SystemTime) -> bool {
+    let max_age = Duration::from_secs(u64::from(MAPI_SESSION_MAX_AGE_SECONDS));
+    now.duration_since(session.last_seen_at)
+        .map(|idle| idle > max_age)
+        .unwrap_or(false)
 }
 
 fn session_matches(
@@ -1938,5 +1962,31 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload: Vec::new(),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_idle_expiry_follows_cookie_max_age() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(10_000);
+        let fresh = MapiSession {
+            endpoint: MapiEndpoint::Emsmdb,
+            tenant_id: "tenant".to_string(),
+            account_id: Uuid::nil(),
+            email: "user@example.test".to_string(),
+            last_seen_at: now - Duration::from_secs(u64::from(MAPI_SESSION_MAX_AGE_SECONDS)),
+            next_handle: 1,
+            handles: HashMap::new(),
+        };
+        let stale = MapiSession {
+            last_seen_at: now - Duration::from_secs(u64::from(MAPI_SESSION_MAX_AGE_SECONDS) + 1),
+            ..fresh.clone()
+        };
+
+        assert!(!session_is_expired(&fresh, now));
+        assert!(session_is_expired(&stale, now));
     }
 }
