@@ -5417,6 +5417,100 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn big_three_batches_resolve_query_get_result_references() {
+        let account_id = FakeStore::account().account_id.to_string();
+        let service = JmapService::new(FakeStore {
+            session: Some(FakeStore::account()),
+            emails: vec![FakeStore::draft_email()],
+            contacts: Arc::new(Mutex::new(vec![FakeStore::contact()])),
+            events: Arc::new(Mutex::new(vec![FakeStore::event()])),
+            ..Default::default()
+        });
+        let request: JmapApiRequest = serde_json::from_value(json!({
+            "using": [
+                JMAP_CORE_CAPABILITY,
+                JMAP_MAIL_CAPABILITY,
+                JMAP_CONTACTS_CAPABILITY,
+                JMAP_CALENDARS_CAPABILITY
+            ],
+            "methodCalls": [
+                ["Email/query", {
+                    "accountId": account_id,
+                    "limit": 1
+                }, "email-query"],
+                ["Email/get", {
+                    "accountId": account_id,
+                    "#ids": {
+                        "resultOf": "email-query",
+                        "name": "Email/query",
+                        "path": "/ids"
+                    },
+                    "properties": ["id", "subject"]
+                }, "email-get"],
+                ["ContactCard/query", {
+                    "accountId": account_id,
+                    "limit": 1
+                }, "contact-query"],
+                ["ContactCard/get", {
+                    "accountId": account_id,
+                    "#ids": {
+                        "resultOf": "contact-query",
+                        "name": "ContactCard/query",
+                        "path": "/ids"
+                    },
+                    "properties": ["id", "name", "emails"]
+                }, "contact-get"],
+                ["CalendarEvent/query", {
+                    "accountId": account_id,
+                    "limit": 1
+                }, "event-query"],
+                ["CalendarEvent/get", {
+                    "accountId": account_id,
+                    "#ids": {
+                        "resultOf": "event-query",
+                        "name": "CalendarEvent/query",
+                        "path": "/ids"
+                    },
+                    "properties": ["id", "title", "calendarIds"]
+                }, "event-get"],
+                ["Email/get", {
+                    "accountId": account_id,
+                    "#ids": {
+                        "resultOf": "missing-call",
+                        "name": "Email/query",
+                        "path": "/ids"
+                    }
+                }, "bad-reference"]
+            ]
+        }))
+        .unwrap();
+
+        let response = service
+            .handle_api_request(Some("Bearer token"), request)
+            .await
+            .unwrap();
+
+        assert_eq!(response.method_responses.len(), 7);
+        assert_eq!(response.method_responses[1].0, "Email/get");
+        assert_eq!(
+            response.method_responses[1].1["list"][0]["id"],
+            FakeStore::draft_email().id.to_string()
+        );
+        assert_eq!(response.method_responses[3].0, "ContactCard/get");
+        assert_eq!(
+            response.method_responses[3].1["list"][0]["id"],
+            FakeStore::contact().id.to_string()
+        );
+        assert_eq!(response.method_responses[5].0, "CalendarEvent/get");
+        assert_eq!(
+            response.method_responses[5].1["list"][0]["id"],
+            FakeStore::event().id.to_string()
+        );
+        assert_eq!(response.method_responses[6].0, "error");
+        assert_eq!(response.method_responses[6].1["type"], "resultReference");
+    }
+
+    #[tokio::test]
     async fn blob_get_reports_encoding_and_range_edge_cases() {
         let store = FakeStore {
             session: Some(FakeStore::account()),

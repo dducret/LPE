@@ -301,8 +301,19 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let declared_capabilities = request.using_capabilities;
         let mut method_responses = Vec::with_capacity(request.method_calls.len());
         let mut created_ids = HashMap::new();
+        let mut previous_results: HashMap<String, (String, Value)> = HashMap::new();
 
         for JmapMethodCall(method_name, arguments, call_id) in request.method_calls {
+            let arguments = match resolve_result_references(arguments, &previous_results) {
+                Ok(arguments) => arguments,
+                Err(payload) => {
+                    let response_name = "error".to_string();
+                    previous_results
+                        .insert(call_id.clone(), (response_name.clone(), payload.clone()));
+                    method_responses.push(JmapMethodResponse(response_name, payload, call_id));
+                    continue;
+                }
+            };
             let response = if method_capability(method_name.as_str())
                 .map(|capability| {
                     declared_capabilities
@@ -480,8 +491,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             let response_name = if is_method_error_payload(&payload) {
                 "error".to_string()
             } else {
-                method_name
+                method_name.clone()
             };
+            previous_results.insert(call_id.clone(), (response_name.clone(), payload.clone()));
             method_responses.push(JmapMethodResponse(response_name, payload, call_id));
         }
 
@@ -947,6 +959,70 @@ fn is_method_error_payload(payload: &Value) -> bool {
         .and_then(|object| object.get("type"))
         .and_then(Value::as_str)
         .is_some()
+}
+
+fn resolve_result_references(
+    arguments: Value,
+    previous_results: &HashMap<String, (String, Value)>,
+) -> std::result::Result<Value, Value> {
+    let Value::Object(mut object) = arguments else {
+        return Ok(arguments);
+    };
+    let references = object
+        .iter()
+        .filter_map(|(key, value)| {
+            key.strip_prefix('#')
+                .map(|property| (key.clone(), property.to_string(), value.clone()))
+        })
+        .collect::<Vec<_>>();
+
+    for (reference_key, property, reference) in references {
+        if object.contains_key(&property) {
+            return Err(result_reference_error(&format!(
+                "result reference {reference_key} conflicts with explicit {property}"
+            )));
+        }
+        let reference = reference.as_object().ok_or_else(|| {
+            result_reference_error(&format!(
+                "result reference {reference_key} must be an object"
+            ))
+        })?;
+        let result_of = reference
+            .get("resultOf")
+            .and_then(Value::as_str)
+            .ok_or_else(|| result_reference_error("result reference is missing resultOf"))?;
+        let expected_name = reference
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or_else(|| result_reference_error("result reference is missing name"))?;
+        let path = reference
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| result_reference_error("result reference is missing path"))?;
+        let (actual_name, payload) = previous_results.get(result_of).ok_or_else(|| {
+            result_reference_error(&format!(
+                "result reference target {result_of} is not available"
+            ))
+        })?;
+        if actual_name != expected_name {
+            return Err(result_reference_error(&format!(
+                "result reference target {result_of} is {actual_name}, not {expected_name}"
+            )));
+        }
+        let resolved = payload.pointer(path).ok_or_else(|| {
+            result_reference_error(&format!(
+                "result reference path {path} is not available on {result_of}"
+            ))
+        })?;
+        object.remove(&reference_key);
+        object.insert(property, resolved.clone());
+    }
+
+    Ok(Value::Object(object))
+}
+
+fn result_reference_error(description: &str) -> Value {
+    method_error("resultReference", description)
 }
 
 fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Value> {

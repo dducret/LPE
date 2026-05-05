@@ -127,6 +127,7 @@ Organizer and participant status are exposed through `participants`:
 - sharing and delegation remain limited to the same tenant
 - `ContactCard/query` and `ContactCard/queryChanges` support only ascending `name` sort and simple text filtering, with `inAddressBook` limited to one target collection
 - supported contact and calendar `query` methods honor RFC `position`, negative `position`, `anchor`, and `anchorOffset` windowing; missing anchors return method-level `anchorNotFound` errors
+- JMAP request result references are resolved for top-level argument properties, including `#ids` links from `ContactCard/query` or `CalendarEvent/query` responses to following `get` calls, without creating adapter-local state
 - `CalendarEvent/query` and `CalendarEvent/queryChanges` support only ascending `start` sort and the `inCalendar`, `text`, `after`, and `before` filters
 - `ContactCard/set` supports only `kind=individual`
 - `CalendarEvent/set` supports only `@type=Event`
