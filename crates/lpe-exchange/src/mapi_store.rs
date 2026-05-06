@@ -111,6 +111,17 @@ impl MapiMailStoreSnapshot {
             .map(|message| message.attachments.as_slice())
     }
 
+    pub(crate) fn attachment_for_message(
+        &self,
+        folder_id: u64,
+        message_id: u64,
+        attach_num: u32,
+    ) -> Option<&MapiAttachment> {
+        self.attachments_for_message(folder_id, message_id)?
+            .iter()
+            .find(|attachment| attachment.attach_num == attach_num)
+    }
+
     #[cfg(test)]
     pub(crate) fn folders(&self) -> &[MapiFolder] {
         &self.folders
