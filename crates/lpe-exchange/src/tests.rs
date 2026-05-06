@@ -1,5 +1,5 @@
-use axum::body::to_bytes;
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
+use axum::body::{to_bytes, Body};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
@@ -2881,6 +2881,34 @@ async fn rpc_proxy_answers_authenticated_msrpch_out_data_ping() {
     assert_eq!(
         u32::from_le_bytes([body[60], body[61], body[62], body[63]]),
         0x0000_8000
+    );
+}
+
+#[tokio::test]
+async fn rpc_proxy_opens_authenticated_in_data_channel_without_waiting_for_body_eof() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let method = Method::from_bytes(b"RPC_IN_DATA").expect("valid RPC method");
+    let uri: Uri = "/rpc/rpcproxy.dll?mail.example.test:6001".parse().unwrap();
+    let mut headers = bearer_headers();
+    headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
+    headers.insert("accept", HeaderValue::from_static("application/rpc"));
+
+    let response = service
+        .handle_rpc_proxy_in_data_channel(&method, &uri, &headers, Body::from("bind-bytes"))
+        .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type"),
+        Some(&HeaderValue::from_static("application/rpc"))
+    );
+    assert_eq!(
+        response.headers().get("x-lpe-rpc-proxy-status"),
+        Some(&HeaderValue::from_static("in-channel-open"))
     );
 }
 

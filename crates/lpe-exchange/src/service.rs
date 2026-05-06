@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use axum::{
-    body::{Body, Bytes},
+    body::{to_bytes, Body, Bytes},
     extract::State,
     http::{
         header::{CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, WWW_AUTHENTICATE},
@@ -28,7 +28,7 @@ use lpe_storage::{
 };
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -46,7 +46,9 @@ const MAPI_NSPI_TRAILING_PATH: &str = "/mapi/nspi/";
 const RPC_PROXY_PATH: &str = "/rpc/rpcproxy.dll";
 const RPC_PROXY_COMPAT_STATUS: &str = "x-lpe-rpc-proxy-status";
 const RPC_PROXY_ECHO_STATUS: &str = "echo";
+const RPC_PROXY_IN_CHANNEL_STATUS: &str = "in-channel-open";
 const RPC_PROXY_RTS_CONNECT_STATUS: &str = "rts-connect";
+const RPC_PROXY_MAX_FINITE_BODY_BYTES: usize = 1024 * 1024;
 const RPC_PROXY_RECEIVE_WINDOW_SIZE: u32 = 0x0001_0000;
 const RPC_PROXY_OUT_CHANNEL_CONTENT_LENGTH: u32 = 0x0002_0000;
 const RPC_PROXY_CONNECTION_TIMEOUT_MS: u32 = 120_000;
@@ -230,10 +232,45 @@ async fn rpc_proxy_handler(
     method: Method,
     uri: Uri,
     headers: HeaderMap,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     let started_at = Instant::now();
     let service = ExchangeService::new(storage);
+
+    if is_rpc_proxy_in_data_channel_request(&method, &uri, &headers) {
+        let response = service
+            .handle_rpc_proxy_in_data_channel(&method, &uri, &headers, body)
+            .await;
+        log_rpc_proxy_connection(
+            &method,
+            &uri,
+            &headers,
+            b"",
+            &response,
+            started_at.elapsed().as_secs_f64() * 1000.0,
+        );
+        return response;
+    }
+
+    let body = match to_bytes(body, RPC_PROXY_MAX_FINITE_BODY_BYTES).await {
+        Ok(body) => body,
+        Err(error) => {
+            let response = (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                format!("LPE RPC proxy request body rejected: {error}\n"),
+            )
+                .into_response();
+            log_rpc_proxy_connection(
+                &method,
+                &uri,
+                &headers,
+                b"",
+                &response,
+                started_at.elapsed().as_secs_f64() * 1000.0,
+            );
+            return response;
+        }
+    };
     let response = service
         .handle_rpc_proxy(&method, &headers, body.as_ref())
         .await;
@@ -576,6 +613,22 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
                 } else {
                     rpc_proxy_accepted_response(&principal)
                 }
+            }
+            Err(error) => rpc_proxy_auth_challenge_response(&error.to_string()),
+        }
+    }
+
+    pub(crate) async fn handle_rpc_proxy_in_data_channel(
+        &self,
+        method: &Method,
+        uri: &Uri,
+        headers: &HeaderMap,
+        body: Body,
+    ) -> Response {
+        match authenticate_account(&self.store, None, headers, "mapi").await {
+            Ok(_) => {
+                spawn_rpc_proxy_in_data_drain(method, uri, headers, body);
+                rpc_proxy_in_channel_response()
             }
             Err(error) => rpc_proxy_auth_challenge_response(&error.to_string()),
         }
@@ -5119,6 +5172,12 @@ fn is_rpc_proxy_echo_request(method: &Method, headers: &HeaderMap) -> bool {
     is_rpc_proxy_msrpc_request(headers)
 }
 
+fn is_rpc_proxy_in_data_channel_request(method: &Method, uri: &Uri, headers: &HeaderMap) -> bool {
+    method.as_str() == "RPC_IN_DATA"
+        && uri.query().is_some_and(|query| query.contains(":6001"))
+        && is_rpc_proxy_msrpc_request(headers)
+}
+
 fn is_rpc_proxy_msrpc_request(headers: &HeaderMap) -> bool {
     let user_agent = mapi::safe_header(headers, "user-agent")
         .unwrap_or_default()
@@ -5254,6 +5313,17 @@ fn rpc_proxy_echo_response() -> Response {
     rpc_proxy_binary_response(RPC_PROXY_ECHO_BODY.to_vec(), RPC_PROXY_ECHO_STATUS)
 }
 
+fn rpc_proxy_in_channel_response() -> Response {
+    let mut response = StatusCode::OK.into_response();
+    decorate_rpc_proxy_binary_response(
+        &mut response,
+        0,
+        String::new(),
+        RPC_PROXY_IN_CHANNEL_STATUS,
+    );
+    response
+}
+
 fn rpc_proxy_binary_response(body: Vec<u8>, status: &'static str) -> Response {
     if status == RPC_PROXY_RTS_CONNECT_STATUS && rpc_proxy_out_channel_hold_ms() > 0 {
         return rpc_proxy_streaming_binary_response(body, status, rpc_proxy_out_channel_hold_ms());
@@ -5338,6 +5408,85 @@ fn rpc_proxy_response_payload_preview_hex(response: &Response) -> Option<&str> {
         .extensions()
         .get::<RpcProxyResponsePayloadPreview>()
         .map(|preview| preview.hex.as_str())
+}
+
+fn spawn_rpc_proxy_in_data_drain(method: &Method, uri: &Uri, headers: &HeaderMap, body: Body) {
+    let method = method.to_string();
+    let path = uri.path().to_string();
+    let query = uri.query().unwrap_or_default().to_string();
+    let trace_id = mapi::safe_header(headers, "x-trace-id").unwrap_or_default();
+    let client_request_id = mapi::safe_header(headers, "client-request-id").unwrap_or_default();
+    let x_request_id = mapi::safe_header(headers, "x-requestid").unwrap_or_default();
+    let user_agent = mapi::safe_header(headers, "user-agent").unwrap_or_default();
+
+    tokio::spawn(async move {
+        let started_at = Instant::now();
+        let mut stream = body.into_data_stream();
+        let mut total_body_bytes = 0usize;
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(bytes) => {
+                    total_body_bytes += bytes.len();
+                    let request_body_preview_hex = mapi::debug_payload_preview_hex(bytes.as_ref());
+                    info!(
+                        rca_debug = true,
+                        adapter = "rpcproxy",
+                        method = %method,
+                        path = %path,
+                        query = %query,
+                        response_kind = "in-channel-data",
+                        trace_id = %trace_id,
+                        client_request_id = %client_request_id,
+                        x_request_id = %x_request_id,
+                        http_status = 200u16,
+                        request_body_bytes = bytes.len(),
+                        total_request_body_bytes = total_body_bytes,
+                        request_body_preview_hex = %request_body_preview_hex,
+                        duration_ms = started_at.elapsed().as_secs_f64() * 1000.0,
+                        user_agent = %user_agent,
+                        message = "rca debug rpc proxy in data chunk"
+                    );
+                }
+                Err(error) => {
+                    warn!(
+                        rca_debug = true,
+                        adapter = "rpcproxy",
+                        method = %method,
+                        path = %path,
+                        query = %query,
+                        response_kind = "in-channel-error",
+                        trace_id = %trace_id,
+                        client_request_id = %client_request_id,
+                        x_request_id = %x_request_id,
+                        http_status = 200u16,
+                        total_request_body_bytes = total_body_bytes,
+                        duration_ms = started_at.elapsed().as_secs_f64() * 1000.0,
+                        user_agent = %user_agent,
+                        error = %error,
+                        message = "rca debug rpc proxy in data stream error"
+                    );
+                    return;
+                }
+            }
+        }
+
+        info!(
+            rca_debug = true,
+            adapter = "rpcproxy",
+            method = %method,
+            path = %path,
+            query = %query,
+            response_kind = "in-channel-finished",
+            trace_id = %trace_id,
+            client_request_id = %client_request_id,
+            x_request_id = %x_request_id,
+            http_status = 200u16,
+            total_request_body_bytes = total_body_bytes,
+            duration_ms = started_at.elapsed().as_secs_f64() * 1000.0,
+            user_agent = %user_agent,
+            message = "rca debug rpc proxy in data stream finished"
+        );
+    });
 }
 
 #[cfg(not(test))]
