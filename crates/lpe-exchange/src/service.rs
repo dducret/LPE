@@ -233,13 +233,13 @@ async fn rpc_proxy_handler(
     let started_at = Instant::now();
     let service = ExchangeService::new(storage);
     let response = service
-        .handle_rpc_proxy(&method, &headers, body.len())
+        .handle_rpc_proxy(&method, &headers, body.as_ref())
         .await;
     log_rpc_proxy_connection(
         &method,
         &uri,
         &headers,
-        body.len(),
+        body.as_ref(),
         &response,
         started_at.elapsed().as_secs_f64() * 1000.0,
     );
@@ -412,7 +412,7 @@ fn log_rpc_proxy_connection(
     method: &Method,
     uri: &Uri,
     headers: &HeaderMap,
-    request_body_bytes: usize,
+    request_body: &[u8],
     response: &Response,
     duration_ms: f64,
 ) {
@@ -423,6 +423,10 @@ fn log_rpc_proxy_connection(
     let x_request_id = mapi::safe_header(headers, "x-requestid").unwrap_or_default();
     let response_kind = response_header(response, RPC_PROXY_COMPAT_STATUS)
         .unwrap_or_else(|| "auth-challenge".into());
+    let response_payload_bytes = rpc_proxy_response_payload_bytes(response).unwrap_or(0);
+    let request_body_preview_hex = mapi::debug_payload_preview_hex(request_body);
+    let response_payload_preview_hex =
+        rpc_proxy_response_payload_preview_hex(response).unwrap_or_default();
     let message = "rca debug rpc proxy connection";
 
     if status < 400 {
@@ -437,7 +441,10 @@ fn log_rpc_proxy_connection(
             client_request_id = %client_request_id,
             x_request_id = %x_request_id,
             http_status = status,
-            request_body_bytes,
+            request_body_bytes = request_body.len(),
+            response_payload_bytes,
+            request_body_preview_hex = %request_body_preview_hex,
+            response_payload_preview_hex = %response_payload_preview_hex,
             duration_ms,
             user_agent = %user_agent,
             message
@@ -454,7 +461,10 @@ fn log_rpc_proxy_connection(
             client_request_id = %client_request_id,
             x_request_id = %x_request_id,
             http_status = status,
-            request_body_bytes,
+            request_body_bytes = request_body.len(),
+            response_payload_bytes,
+            request_body_preview_hex = %request_body_preview_hex,
+            response_payload_preview_hex = %response_payload_preview_hex,
             duration_ms,
             user_agent = %user_agent,
             message
@@ -551,12 +561,14 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
         &self,
         method: &Method,
         headers: &HeaderMap,
-        request_body_bytes: usize,
+        request_body: &[u8],
     ) -> Response {
         match authenticate_account(&self.store, None, headers, "mapi").await {
             Ok(principal) => {
-                if is_rpc_proxy_out_data_connect_request(method, headers, request_body_bytes) {
-                    rpc_proxy_rts_connect_response()
+                if let Some(connect) =
+                    parse_rpc_proxy_out_data_connect_request(method, headers, request_body)
+                {
+                    rpc_proxy_rts_connect_response(connect.receive_window_size)
                 } else if is_rpc_proxy_echo_request(method, headers) {
                     rpc_proxy_echo_response()
                 } else {
@@ -5105,16 +5117,6 @@ fn is_rpc_proxy_echo_request(method: &Method, headers: &HeaderMap) -> bool {
     is_rpc_proxy_msrpc_request(headers)
 }
 
-fn is_rpc_proxy_out_data_connect_request(
-    method: &Method,
-    headers: &HeaderMap,
-    request_body_bytes: usize,
-) -> bool {
-    method.as_str() == "RPC_OUT_DATA"
-        && request_body_bytes > 0
-        && is_rpc_proxy_msrpc_request(headers)
-}
-
 fn is_rpc_proxy_msrpc_request(headers: &HeaderMap) -> bool {
     let user_agent = mapi::safe_header(headers, "user-agent")
         .unwrap_or_default()
@@ -5125,9 +5127,88 @@ fn is_rpc_proxy_msrpc_request(headers: &HeaderMap) -> bool {
     user_agent == "msrpc" || accept.contains("application/rpc")
 }
 
-fn rpc_proxy_rts_connect_body() -> Vec<u8> {
+#[derive(Debug, Clone, Copy)]
+struct RpcProxyOutDataConnect {
+    receive_window_size: u32,
+}
+
+fn parse_rpc_proxy_out_data_connect_request(
+    method: &Method,
+    headers: &HeaderMap,
+    request_body: &[u8],
+) -> Option<RpcProxyOutDataConnect> {
+    if method.as_str() != "RPC_OUT_DATA"
+        || request_body.is_empty()
+        || !is_rpc_proxy_msrpc_request(headers)
+    {
+        return None;
+    }
+    parse_rpc_proxy_conn_a1_rts_pdu(request_body)
+}
+
+fn parse_rpc_proxy_conn_a1_rts_pdu(body: &[u8]) -> Option<RpcProxyOutDataConnect> {
+    if body.len() < 20 || body.get(0..4) != Some(&[0x05, 0x00, 0x14, 0x03]) {
+        return None;
+    }
+    let fragment_length = u16::from_le_bytes([body[8], body[9]]) as usize;
+    let flags = u16::from_le_bytes([body[16], body[17]]);
+    let command_count = u16::from_le_bytes([body[18], body[19]]);
+    if fragment_length != body.len() || flags != 0 || command_count != 4 {
+        return None;
+    }
+
+    let mut offset = 20;
+    let version = parse_rpc_rts_u32_command(body, &mut offset, 6)?;
+    if version == 0 {
+        return None;
+    }
+    parse_rpc_rts_cookie_command(body, &mut offset, 3)?;
+    parse_rpc_rts_cookie_command(body, &mut offset, 3)?;
+    let receive_window_size = parse_rpc_rts_u32_command(body, &mut offset, 0)?;
+    (offset == body.len()).then_some(RpcProxyOutDataConnect {
+        receive_window_size,
+    })
+}
+
+fn parse_rpc_rts_u32_command(
+    body: &[u8],
+    offset: &mut usize,
+    expected_command: u32,
+) -> Option<u32> {
+    let command = read_le_u32(body, *offset)?;
+    let value = read_le_u32(body, *offset + 4)?;
+    if command != expected_command {
+        return None;
+    }
+    *offset += 8;
+    Some(value)
+}
+
+fn parse_rpc_rts_cookie_command(
+    body: &[u8],
+    offset: &mut usize,
+    expected_command: u32,
+) -> Option<[u8; 16]> {
+    let command = read_le_u32(body, *offset)?;
+    let cookie = body.get(*offset + 4..*offset + 20)?;
+    if command != expected_command {
+        return None;
+    }
+    let mut result = [0u8; 16];
+    result.copy_from_slice(cookie);
+    *offset += 20;
+    Some(result)
+}
+
+fn read_le_u32(body: &[u8], offset: usize) -> Option<u32> {
+    let bytes = body.get(offset..offset + 4)?;
+    Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+fn rpc_proxy_rts_connect_body(client_receive_window_size: u32) -> Vec<u8> {
+    let receive_window_size = client_receive_window_size.clamp(1, RPC_PROXY_RECEIVE_WINDOW_SIZE);
     let mut body = rpc_proxy_connection_timeout_pdu();
-    body.extend_from_slice(&rpc_proxy_connection_established_pdu());
+    body.extend_from_slice(&rpc_proxy_connection_established_pdu(receive_window_size));
     body
 }
 
@@ -5138,12 +5219,12 @@ fn rpc_proxy_connection_timeout_pdu() -> Vec<u8> {
     body
 }
 
-fn rpc_proxy_connection_established_pdu() -> Vec<u8> {
+fn rpc_proxy_connection_established_pdu(receive_window_size: u32) -> Vec<u8> {
     let mut body = rpc_proxy_rts_header(0, 3, 44);
     body.extend_from_slice(&6u32.to_le_bytes());
     body.extend_from_slice(&1u32.to_le_bytes());
     body.extend_from_slice(&0u32.to_le_bytes());
-    body.extend_from_slice(&RPC_PROXY_RECEIVE_WINDOW_SIZE.to_le_bytes());
+    body.extend_from_slice(&receive_window_size.to_le_bytes());
     body.extend_from_slice(&2u32.to_le_bytes());
     body.extend_from_slice(&RPC_PROXY_CONNECTION_TIMEOUT_MS.to_le_bytes());
     body
@@ -5160,28 +5241,62 @@ fn rpc_proxy_rts_header(flags: u16, command_count: u16, fragment_length: u16) ->
     body
 }
 
-fn rpc_proxy_rts_connect_response() -> Response {
-    let mut response = (StatusCode::OK, rpc_proxy_rts_connect_body()).into_response();
-    response
-        .headers_mut()
-        .insert(CONTENT_TYPE, HeaderValue::from_static("application/rpc"));
-    response.headers_mut().insert(
-        RPC_PROXY_COMPAT_STATUS,
-        HeaderValue::from_static(RPC_PROXY_RTS_CONNECT_STATUS),
-    );
-    response
+fn rpc_proxy_rts_connect_response(client_receive_window_size: u32) -> Response {
+    rpc_proxy_binary_response(
+        rpc_proxy_rts_connect_body(client_receive_window_size),
+        RPC_PROXY_RTS_CONNECT_STATUS,
+    )
 }
 
 fn rpc_proxy_echo_response() -> Response {
-    let mut response = (StatusCode::OK, RPC_PROXY_ECHO_BODY.to_vec()).into_response();
+    rpc_proxy_binary_response(RPC_PROXY_ECHO_BODY.to_vec(), RPC_PROXY_ECHO_STATUS)
+}
+
+fn rpc_proxy_binary_response(body: Vec<u8>, status: &'static str) -> Response {
+    let payload_bytes = body.len();
+    let payload_preview_hex = mapi::debug_payload_preview_hex(&body);
+    let mut response = (StatusCode::OK, body).into_response();
+    response
+        .extensions_mut()
+        .insert(RpcProxyResponseDebug { payload_bytes });
+    if !payload_preview_hex.is_empty() {
+        response
+            .extensions_mut()
+            .insert(RpcProxyResponsePayloadPreview {
+                hex: payload_preview_hex,
+            });
+    }
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static("application/rpc"));
-    response.headers_mut().insert(
-        RPC_PROXY_COMPAT_STATUS,
-        HeaderValue::from_static(RPC_PROXY_ECHO_STATUS),
-    );
     response
+        .headers_mut()
+        .insert(RPC_PROXY_COMPAT_STATUS, HeaderValue::from_static(status));
+    response
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RpcProxyResponseDebug {
+    payload_bytes: usize,
+}
+
+#[derive(Clone, Debug)]
+struct RpcProxyResponsePayloadPreview {
+    hex: String,
+}
+
+fn rpc_proxy_response_payload_bytes(response: &Response) -> Option<usize> {
+    response
+        .extensions()
+        .get::<RpcProxyResponseDebug>()
+        .map(|debug| debug.payload_bytes)
+}
+
+fn rpc_proxy_response_payload_preview_hex(response: &Response) -> Option<&str> {
+    response
+        .extensions()
+        .get::<RpcProxyResponsePayloadPreview>()
+        .map(|preview| preview.hex.as_str())
 }
 
 fn rpc_proxy_accepted_response(principal: &AccountPrincipal) -> Response {

@@ -438,6 +438,7 @@ fn render_exchange_provider_autodiscover_protocols(
         "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Servers/cn={mailbox_server}"
     );
     let mdb_dn = format!("{server_dn}/cn=LPE Private MDB");
+    let cert_principal = format!("msstd:{mailbox_server}");
     format!(
         concat!(
             "      <Protocol>\n",
@@ -454,6 +455,22 @@ fn render_exchange_provider_autodiscover_protocols(
             "        <AD>{mailbox_server}</AD>\n",
             "        <PublicFolderServer>{mailbox_server}</PublicFolderServer>\n",
             "        <ServerExclusiveConnect>off</ServerExclusiveConnect>\n",
+            "      </Protocol>\n",
+            "      <Protocol>\n",
+            "        <Type>EXPR</Type>\n",
+            "        <Server>{mailbox_server}</Server>\n",
+            "        <ServerDN>{server_dn}</ServerDN>\n",
+            "        <MdbDN>{mdb_dn}</MdbDN>\n",
+            "        <ASUrl>{ews_url}</ASUrl>\n",
+            "        <OOFUrl>{ews_url}</OOFUrl>\n",
+            "        <EwsUrl>{ews_url}</EwsUrl>\n",
+            "        <Port>0</Port>\n",
+            "        <DirectoryPort>0</DirectoryPort>\n",
+            "        <ReferralPort>0</ReferralPort>\n",
+            "        <SSL>On</SSL>\n",
+            "        <AuthPackage>Basic</AuthPackage>\n",
+            "        <CertPrincipalName>{cert_principal}</CertPrincipalName>\n",
+            "        <LoginName>{email}</LoginName>\n",
             "      </Protocol>\n",
             "      <Protocol>\n",
             "        <Type>WEB</Type>\n",
@@ -480,6 +497,7 @@ fn render_exchange_provider_autodiscover_protocols(
         mailbox_server = escape_xml(mailbox_server),
         server_dn = escape_xml(&server_dn),
         mdb_dn = escape_xml(&mdb_dn),
+        cert_principal = escape_xml(&cert_principal),
         ews_url = escape_xml(&config.ews_url),
         email = escape_xml(email),
     )
@@ -1209,7 +1227,8 @@ mod tests {
         assert!(xml.contains("<MdbDN>/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Servers/cn=mail.example.test/cn=LPE Private MDB</MdbDN>"));
         assert!(xml.contains("<AuthPackage>Basic</AuthPackage>"));
         assert!(xml.contains("<EwsUrl>https://mail.example.test/EWS/Exchange.asmx</EwsUrl>"));
-        assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+        assert!(xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+        assert!(xml.contains("<CertPrincipalName>msstd:mail.example.test</CertPrincipalName>"));
         assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
     }
 
@@ -1224,9 +1243,9 @@ mod tests {
         let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
 
         assert!(xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+        assert!(xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
         assert!(xml.contains("<EwsUrl>https://mail.example.test/EWS/Exchange.asmx</EwsUrl>"));
         assert!(xml.contains("<ASUrl>https://mail.example.test/EWS/Exchange.asmx</ASUrl>"));
-        assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
         assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
     }
 
@@ -1299,7 +1318,7 @@ mod tests {
         assert!(config.mapi_enabled);
         assert!(config.legacy_exchange_autodiscover_enabled);
         assert!(xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
-        assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+        assert!(xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
         assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
 
         std::env::remove_var("LPE_AUTOCONFIG_MAPI_ENABLED");
@@ -1327,7 +1346,7 @@ mod tests {
         assert!(!config.mapi_enabled);
         assert!(config.legacy_exchange_autodiscover_enabled);
         assert!(xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
-        assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+        assert!(xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
         assert!(xml.contains("<EwsUrl>https://mail.example.test/EWS/Exchange.asmx</EwsUrl>"));
         assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
 

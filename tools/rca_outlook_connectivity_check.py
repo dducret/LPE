@@ -99,6 +99,21 @@ def mapi_request_id(sequence: str | int | None = None) -> str:
     return value
 
 
+def rpc_rts_conn_a1_body(receive_window_size: int = 0x00010000) -> bytes:
+    virtual_connection_cookie = uuid.uuid4().bytes_le
+    out_channel_cookie = uuid.uuid4().bytes_le
+    body = bytearray()
+    body.extend(b"\x05\x00\x14\x03\x10\x00\x00\x00")
+    body.extend(struct.pack("<HHIHH", 76, 0, 0, 0, 4))
+    body.extend(struct.pack("<II", 6, 1))
+    body.extend(struct.pack("<I", 3))
+    body.extend(virtual_connection_cookie)
+    body.extend(struct.pack("<I", 3))
+    body.extend(out_channel_cookie)
+    body.extend(struct.pack("<II", 0, receive_window_size))
+    return bytes(body)
+
+
 def check_pox_autodiscover(
     base_url: str,
     email: str,
@@ -140,9 +155,10 @@ def check_pox_autodiscover(
                 f"{path} missing legacy EXCH provider section",
             )
             require(
-                "      <Protocol>\n        <Type>EXPR</Type>" not in text,
-                f"{path} published top-level EXPR without full Outlook Anywhere support",
+                "      <Protocol>\n        <Type>EXPR</Type>" in text,
+                f"{path} missing legacy EXPR provider section required for Outlook Anywhere/RPC over HTTP",
             )
+            require("<CertPrincipalName>" in text, f"{path} missing EXPR certificate principal")
             require("<EwsUrl>" in text, f"{path} missing EWS URL in legacy Exchange provider section")
 
     if expect_mapi:
@@ -359,7 +375,7 @@ def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, timeou
         authenticated_headers["Authorization"] = f"Basic {token}"
         for method, body, expected_status, expected_length in [
             ("RPC_IN_DATA", b"", "echo", 20),
-            ("RPC_OUT_DATA", bytes(76), "rts-connect", 72),
+            ("RPC_OUT_DATA", rpc_rts_conn_a1_body(), "rts-connect", 72),
         ]:
             authenticated = request(method, rpc_url, body, authenticated_headers, timeout)
             require(
@@ -368,7 +384,7 @@ def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, timeou
             )
             require(
                 "application/rpc" in content_type(authenticated.headers),
-                f"authenticated RPC proxy {method} echo did not return application/rpc",
+                f"authenticated RPC proxy {method} probe did not return application/rpc",
             )
             require(
                 header_value(authenticated.headers, "x-lpe-rpc-proxy-status") == expected_status,
@@ -459,7 +475,7 @@ def main() -> int:
     parser.add_argument(
         "--expect-exchange-providers",
         action="store_true",
-        help="Require the POX legacy EXCH provider and reject top-level EXPR unless full Outlook Anywhere is implemented.",
+        help="Require the POX legacy EXCH and EXPR providers for RCA Outlook Anywhere validation.",
     )
     parser.add_argument("--expect-mapi", action="store_true", help="Require MAPI/HTTP discovery to be published.")
     parser.add_argument("--check-ews-basic", action="store_true", help="Exercise Basic auth against /EWS/Exchange.asmx.")

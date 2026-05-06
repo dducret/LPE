@@ -1059,6 +1059,25 @@ fn bearer_headers() -> HeaderMap {
     headers
 }
 
+fn rpc_proxy_conn_a1_request_body(receive_window_size: u32) -> Vec<u8> {
+    let mut body = Vec::with_capacity(76);
+    body.extend_from_slice(&[0x05, 0x00, 0x14, 0x03, 0x10, 0x00, 0x00, 0x00]);
+    body.extend_from_slice(&76u16.to_le_bytes());
+    body.extend_from_slice(&0u16.to_le_bytes());
+    body.extend_from_slice(&0u32.to_le_bytes());
+    body.extend_from_slice(&0u16.to_le_bytes());
+    body.extend_from_slice(&4u16.to_le_bytes());
+    body.extend_from_slice(&6u32.to_le_bytes());
+    body.extend_from_slice(&1u32.to_le_bytes());
+    body.extend_from_slice(&3u32.to_le_bytes());
+    body.extend_from_slice(&[0x11; 16]);
+    body.extend_from_slice(&3u32.to_le_bytes());
+    body.extend_from_slice(&[0x22; 16]);
+    body.extend_from_slice(&0u32.to_le_bytes());
+    body.extend_from_slice(&receive_window_size.to_le_bytes());
+    body
+}
+
 fn mapi_headers(request_type: &str) -> HeaderMap {
     let mut headers = bearer_headers();
     headers.insert(
@@ -2754,7 +2773,7 @@ async fn rpc_proxy_challenges_missing_authentication_with_basic() {
     let service = ExchangeService::new(store);
 
     let response = service
-        .handle_rpc_proxy(&Method::GET, &HeaderMap::new(), 0)
+        .handle_rpc_proxy(&Method::GET, &HeaderMap::new(), b"")
         .await;
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -2775,7 +2794,7 @@ async fn rpc_proxy_challenges_anonymous_msrpch_echo_ping() {
     headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
     headers.insert("accept", HeaderValue::from_static("application/rpc"));
 
-    let response = service.handle_rpc_proxy(&method, &headers, 0).await;
+    let response = service.handle_rpc_proxy(&method, &headers, b"").await;
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(
@@ -2798,7 +2817,7 @@ async fn rpc_proxy_answers_authenticated_msrpch_echo_ping() {
     headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
     headers.insert("accept", HeaderValue::from_static("application/rpc"));
 
-    let response = service.handle_rpc_proxy(&method, &headers, 0).await;
+    let response = service.handle_rpc_proxy(&method, &headers, b"").await;
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
@@ -2831,7 +2850,10 @@ async fn rpc_proxy_answers_authenticated_msrpch_out_data_ping() {
     headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
     headers.insert("accept", HeaderValue::from_static("application/rpc"));
 
-    let response = service.handle_rpc_proxy(&method, &headers, 76).await;
+    let connect_body = rpc_proxy_conn_a1_request_body(0x0000_8000);
+    let response = service
+        .handle_rpc_proxy(&method, &headers, &connect_body)
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
@@ -2856,6 +2878,10 @@ async fn rpc_proxy_answers_authenticated_msrpch_out_data_ping() {
         u32::from_le_bytes([body[48], body[49], body[50], body[51]]),
         6
     );
+    assert_eq!(
+        u32::from_le_bytes([body[60], body[61], body[62], body[63]]),
+        0x0000_8000
+    );
 }
 
 #[tokio::test]
@@ -2867,7 +2893,7 @@ async fn rpc_proxy_accepts_authenticated_rca_probe_without_405() {
     let service = ExchangeService::new(store);
 
     let response = service
-        .handle_rpc_proxy(&Method::GET, &bearer_headers(), 0)
+        .handle_rpc_proxy(&Method::GET, &bearer_headers(), b"")
         .await;
 
     assert_eq!(response.status(), StatusCode::OK);

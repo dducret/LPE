@@ -17,7 +17,7 @@ Its stable architectural base is:
 - `IMAP` as a permanently supported mailbox-access communication protocol and compatibility layer, with the first major development push completed through `0.1.2`
 - `ActiveSync` as the first mobile/native compatibility target for clients that support `Exchange ActiveSync`
 - `EWS` as the active `0.1.3` Exchange compatibility implementation, without moving `SMTP` or canonical mailbox state out of `LPE`
-- `MAPI over HTTP` as the mandatory `0.1.3` implementation track for full classic Outlook for Windows Exchange-account support, with public edge routing present and autodiscover publication gated until the Outlook interoperability matrix passes; full Outlook Anywhere / RPC over HTTP is not a `0.1.3` release gate
+- `MAPI over HTTP` and Outlook Anywhere / RPC over HTTP as mandatory `0.1.3` implementation tracks for full classic Outlook for Windows Exchange-account support, with public edge routing present and autodiscover publication gated until the Outlook interoperability matrix passes
 - full Outlook support as an explicit `0.1.3` release goal: Outlook mobile through `ActiveSync`, Exchange-style mail, contacts, calendar, and task compatibility through `EWS`, and classic Outlook for Windows Exchange-account support through `MAPI over HTTP`
 - `LPE-CT` as the distinct DMZ sorting center for external exposure, inbound `SMTP`, outbound relay, quarantine, and perimeter enforcement
 - `LPE` as the system of record for mailboxes, contacts, calendars, tasks, rights, and user-visible state
@@ -37,8 +37,8 @@ That means:
 - `ActiveSync` as the flagship mobile/native-client story for clients that support `Exchange ActiveSync`: prioritize Outlook mobile and iOS compatibility labs, long-poll stability, send-flow correctness, and folder-sync edge cases
 - `EWS` is the `0.1.3` Exchange compatibility focus for Exchange-style folder, mail, contacts, calendar, and task synchronization; it must not imply `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox` model
 - `MAPI over HTTP` must be completed in `0.1.3` for classic Outlook for Windows desktop: profile creation, EMSMDB mailbox synchronization, NSPI address book behavior, send and draft flows through canonical submission, reconnect behavior, and authoritative `Sent` visibility
-- full Outlook Anywhere / RPC over HTTP is not mandatory for the `0.1.3` Outlook goal; only the bounded `/rpc/rpcproxy.dll` authentication shim is required when legacy `EXCH` / `EXPR` RCA validation is enabled
-- Outlook for Windows desktop can continue to use the supported `IMAP` communication path when configured that way; administrators can explicitly publish `EWS` plus legacy `EXCH` / `EXPR` autodiscover metadata for RCA Outlook Connectivity validation, and supported Exchange-account publication requires the completed `MAPI over HTTP` release gate
+- full Outlook Anywhere / RPC over HTTP is mandatory when administrators publish legacy `EXCH` / `EXPR` autodiscover metadata for RCA Outlook Connectivity validation; `/rpc/rpcproxy.dll` must implement authenticated RPC/HTTP mailbox transport, not only HTTP authentication
+- Outlook for Windows desktop can continue to use the supported `IMAP` communication path when configured that way; administrators can explicitly publish `EWS` plus legacy `EXCH` / `EXPR` autodiscover metadata for RCA Outlook Connectivity validation, and supported Exchange-account publication requires the completed `MAPI over HTTP` plus RPC/HTTP release gates
 - `DAV` and `ManageSieve` after that: focus on correctness, canonical execution, and client-matrix interoperability rather than feature sprawl
 
 Any proposal to add protocol breadth must be weighed against unfinished interoperability, sync, and canonical-state work in these existing adapters.
