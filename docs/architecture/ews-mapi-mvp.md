@@ -31,6 +31,12 @@ The explicitly unsupported surface unless a later architecture document widens i
 
 This boundary is also the release gate. `EWS` can be administrator-published when its documented MVP limits are acceptable for a deployment. Full classic Outlook support in `0.1.3` requires `MAPI over HTTP` to create an Outlook profile, synchronize canonical mailbox state, resolve names through `NSPI`, send through canonical submission, reconnect after session loss, and keep the authoritative `Sent` view consistent.
 
+### Outlook transport decision
+
+Full classic Outlook for Windows support in `0.1.3` is defined by `MAPI over HTTP`, not by full Outlook Anywhere / RPC over HTTP. The mandatory release path is Outlook profile creation and day-two mailbox use through `/mapi/emsmdb` and `/mapi/nspi`, backed by canonical `LPE` mailbox, contacts, calendar, task, submission, and `Sent` state.
+
+The `/rpc/rpcproxy.dll` route is mandatory only for deployments that enable legacy `EXCH` / `EXPR` autodiscover metadata for RCA or legacy setup validation. It must satisfy the HTTP authentication probe, but it must not be treated as a supported RPC mailbox transport until a later architecture document explicitly promotes full Outlook Anywhere / RPC over HTTP into scope.
+
 ### Milestone roadmap
 
 1. Documentation and scope lock: resolve documentation divergence, define the support boundary above, and keep autodiscover publication gates explicit.
