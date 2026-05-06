@@ -1,4 +1,5 @@
 mod mapi;
+mod mapi_store;
 mod service;
 mod store;
 

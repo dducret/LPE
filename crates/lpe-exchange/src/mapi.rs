@@ -17,7 +17,7 @@ use std::{
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::store::ExchangeStore;
+use crate::{mapi_store::MapiStore, store::ExchangeStore};
 
 const MAPI_CONTENT_TYPE: &str = "application/mapi-http";
 const MAPI_OCTET_STREAM_CONTENT_TYPE: &str = "application/octet-stream";
@@ -303,44 +303,19 @@ async fn execute_response<S: ExchangeStore>(
             );
         }
     };
-    let mailboxes = match store.fetch_jmap_mailboxes(principal.account_id).await {
-        Ok(mailboxes) => mailboxes,
+    let snapshot = match store.load_mapi_mail_store(principal.account_id, 500).await {
+        Ok(snapshot) => snapshot,
         Err(error) => {
             return execute_failure_response(
                 request_id,
                 4,
-                &format!("failed to load mailbox folders: {error}"),
+                &format!("failed to load MAPI mail store snapshot: {error}"),
                 Some(session_cookie(endpoint, &session_id, false)),
             );
         }
     };
-    let emails = match store
-        .query_jmap_email_ids(principal.account_id, None, None, 0, 500)
-        .await
-    {
-        Ok(query) => match store
-            .fetch_jmap_emails(principal.account_id, &query.ids)
-            .await
-        {
-            Ok(emails) => emails,
-            Err(error) => {
-                return execute_failure_response(
-                    request_id,
-                    4,
-                    &format!("failed to load mailbox messages: {error}"),
-                    Some(session_cookie(endpoint, &session_id, false)),
-                );
-            }
-        },
-        Err(error) => {
-            return execute_failure_response(
-                request_id,
-                4,
-                &format!("failed to query mailbox messages: {error}"),
-                Some(session_cookie(endpoint, &session_id, false)),
-            );
-        }
-    };
+    let mailboxes = snapshot.mailboxes();
+    let emails = snapshot.emails();
     let Some(rop_buffer) = with_session_mut(&session_id, |session| {
         if !session_matches(session, endpoint, principal) {
             return None;
