@@ -1337,7 +1337,13 @@ async fn execute_rops<S: ExchangeStore>(
                 snapshot,
             )),
             0x16 => responses.extend_from_slice(&rop_get_status_response(&request)),
-            0x17 => responses.extend_from_slice(&rop_query_position_response(&request)),
+            0x17 => responses.extend_from_slice(&rop_query_position_response(
+                &request,
+                input_object(session, &handle_slots, &request),
+                mailboxes,
+                emails,
+                snapshot,
+            )),
             0x21 => {
                 let Some(MapiObject::Message {
                     folder_id,
@@ -2306,12 +2312,55 @@ fn rop_get_status_response(request: &RopRequest) -> Vec<u8> {
     response
 }
 
-fn rop_query_position_response(request: &RopRequest) -> Vec<u8> {
+fn rop_query_position_response(
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    let (position, row_count) = table_position_and_count(object, mailboxes, emails, snapshot);
     let mut response = vec![0x17, request.response_handle_index()];
     write_u32(&mut response, 0);
-    write_u32(&mut response, 0);
-    write_u32(&mut response, 0);
+    write_u32(&mut response, position as u32);
+    write_u32(&mut response, row_count as u32);
     response
+}
+
+fn table_position_and_count(
+    object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> (usize, usize) {
+    match object {
+        Some(MapiObject::HierarchyTable {
+            folder_id,
+            position,
+            ..
+        }) if is_root_hierarchy_folder(*folder_id) => (*position, mailboxes.len()),
+        Some(MapiObject::ContentsTable {
+            folder_id,
+            position,
+            ..
+        }) => (
+            *position,
+            emails_for_folder(*folder_id, mailboxes, emails).len(),
+        ),
+        Some(MapiObject::AttachmentTable {
+            folder_id,
+            message_id,
+            position,
+            ..
+        }) => (
+            *position,
+            snapshot
+                .attachments_for_message(*folder_id, *message_id)
+                .unwrap_or_default()
+                .len(),
+        ),
+        _ => (0, 0),
+    }
 }
 
 fn rop_get_receive_folder_response(request: &RopRequest) -> Vec<u8> {
