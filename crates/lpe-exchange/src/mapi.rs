@@ -108,6 +108,10 @@ enum MapiObject {
         message_id: u64,
         attach_num: u32,
     },
+    AttachmentStream {
+        data: Vec<u8>,
+        position: usize,
+    },
 }
 
 static MAPI_SESSIONS: OnceLock<Mutex<HashMap<String, MapiSession>>> = OnceLock::new();
@@ -340,20 +344,7 @@ async fn execute_response<S: ExchangeStore>(
     };
     let mailboxes = snapshot.mailboxes();
     let emails = snapshot.emails();
-    let Some(rop_buffer) = with_session_mut(&session_id, |session| {
-        if !session_matches(session, endpoint, principal) {
-            return None;
-        }
-        Some(execute_rops(
-            principal,
-            session,
-            &mailboxes,
-            &emails,
-            &snapshot,
-            &execute.rop_buffer,
-        ))
-    })
-    .flatten() else {
+    let Some(mut session) = remove_session(&session_id) else {
         return execute_failure_response(
             request_id,
             10,
@@ -361,6 +352,25 @@ async fn execute_response<S: ExchangeStore>(
             Some(session_cookie(endpoint, &session_id, false)),
         );
     };
+    if !session_matches(&session, endpoint, principal) {
+        return execute_failure_response(
+            request_id,
+            10,
+            "MAPI authentication context changed",
+            Some(session_cookie(endpoint, &session_id, false)),
+        );
+    }
+    let rop_buffer = execute_rops(
+        store,
+        principal,
+        &mut session,
+        &mailboxes,
+        &emails,
+        &snapshot,
+        &execute.rop_buffer,
+    )
+    .await;
+    store_session(session_id.clone(), session);
     let response_body = execute_success_body(rop_buffer, Vec::new());
     mapi_response(
         "Execute",
@@ -798,6 +808,16 @@ fn remove_session(session_id: &str) -> Option<MapiSession> {
     guard.remove(session_id)
 }
 
+fn store_session(session_id: String, mut session: MapiSession) {
+    let now = SystemTime::now();
+    session.last_seen_at = now;
+    let mut guard = sessions()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    prune_expired_sessions_locked(&mut guard, now);
+    guard.insert(session_id, session);
+}
+
 fn get_session(session_id: &str) -> Option<MapiSession> {
     let now = SystemTime::now();
     let mut guard = sessions()
@@ -805,18 +825,6 @@ fn get_session(session_id: &str) -> Option<MapiSession> {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     prune_expired_sessions_locked(&mut guard, now);
     guard.get(session_id).cloned()
-}
-
-fn with_session_mut<T>(session_id: &str, f: impl FnOnce(&mut MapiSession) -> T) -> Option<T> {
-    let now = SystemTime::now();
-    let mut guard = sessions()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    prune_expired_sessions_locked(&mut guard, now);
-    guard.get_mut(session_id).map(|session| {
-        session.last_seen_at = now;
-        f(session)
-    })
 }
 
 fn prune_expired_sessions_locked(sessions: &mut HashMap<String, MapiSession>, now: SystemTime) {
@@ -1135,7 +1143,8 @@ fn parse_execute_request(body: &[u8]) -> Result<ExecuteRequest> {
     Ok(ExecuteRequest { rop_buffer })
 }
 
-fn execute_rops(
+async fn execute_rops<S: ExchangeStore>(
+    store: &S,
     principal: &AccountPrincipal,
     session: &mut MapiSession,
     mailboxes: &[JmapMailbox],
@@ -1332,6 +1341,72 @@ fn execute_rops(
                     ));
                 }
             }
+            0x2B => {
+                let Some(MapiObject::Attachment {
+                    folder_id,
+                    message_id,
+                    attach_num,
+                }) = input_object(session, &handle_slots, &request)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x2B,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                if request.stream_property_tag() != Some(PID_TAG_ATTACH_DATA_BINARY) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x2B,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
+                let Some(attachment) =
+                    snapshot.attachment_for_message(*folder_id, *message_id, *attach_num)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x2B,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                let content = store
+                    .fetch_attachment_content(principal.account_id, &attachment.file_reference)
+                    .await;
+                let Ok(Some(content)) = content else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x2B,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                let stream_size = content.blob_bytes.len();
+                let handle = session.allocate_output_handle(
+                    request.output_handle_index,
+                    MapiObject::AttachmentStream {
+                        data: content.blob_bytes,
+                        position: 0,
+                    },
+                );
+                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                responses.extend_from_slice(&rop_open_stream_response(&request, stream_size));
+                output_handles.push(handle);
+            }
+            0x2C => {
+                let Some(stream) = input_object_mut(session, &handle_slots, &request) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x2C,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                responses.extend_from_slice(&rop_read_stream_response(&request, stream));
+            }
             0x27 => responses.extend_from_slice(&rop_get_receive_folder_response(&request)),
             0x68 => responses.extend_from_slice(&rop_get_receive_folder_table_response(&request)),
             0x7B => responses.extend_from_slice(&rop_get_store_state_response(&request)),
@@ -1419,6 +1494,7 @@ const PID_TAG_BODY_W: u32 = 0x1000_001F;
 const PID_TAG_INTERNET_MESSAGE_ID_W: u32 = 0x1035_001F;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_MID: u32 = 0x674A_0014;
+const PID_TAG_ATTACH_DATA_BINARY: u32 = 0x3701_0102;
 const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
 const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
 const PID_TAG_ATTACH_FILENAME_W: u32 = 0x3704_001F;
@@ -1449,6 +1525,7 @@ impl MapiSession {
 impl MapiObject {
     fn folder_id(&self) -> Option<u64> {
         match self {
+            MapiObject::AttachmentStream { .. } => None,
             MapiObject::Logon => Some(ROOT_FOLDER_ID),
             MapiObject::Folder { folder_id }
             | MapiObject::Message { folder_id, .. }
@@ -1767,6 +1844,34 @@ fn rop_get_attachment_table_response(request: &RopRequest, row_count: u32) -> Ve
 fn rop_open_attachment_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x22, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
+    response
+}
+
+fn rop_open_stream_response(request: &RopRequest, stream_size: usize) -> Vec<u8> {
+    let mut response = vec![0x2B, request.output_handle_index.unwrap_or(0)];
+    write_u32(&mut response, 0);
+    write_u64(&mut response, stream_size as u64);
+    response
+}
+
+fn rop_read_stream_response(request: &RopRequest, stream: &mut MapiObject) -> Vec<u8> {
+    let input_handle_index = request.input_handle_index().unwrap_or(0);
+    let MapiObject::AttachmentStream { data, position } = stream else {
+        return rop_error_response(0x2C, input_handle_index, 0x8004_010F);
+    };
+    let requested = request
+        .read_byte_count()
+        .map(usize::from)
+        .unwrap_or(0)
+        .min(u16::MAX as usize);
+    let end = position.saturating_add(requested).min(data.len());
+    let chunk = data[*position..end].to_vec();
+    *position = end;
+
+    let mut response = vec![0x2C, input_handle_index];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&(chunk.len() as u16).to_le_bytes());
+    response.extend_from_slice(&chunk);
     response
 }
 
@@ -2491,6 +2596,16 @@ impl RopRequest {
         Some(u32::from_le_bytes(bytes.try_into().ok()?))
     }
 
+    fn stream_property_tag(&self) -> Option<u32> {
+        let bytes = self.payload.get(..4)?;
+        Some(u32::from_le_bytes(bytes.try_into().ok()?))
+    }
+
+    fn read_byte_count(&self) -> Option<u16> {
+        let bytes = self.payload.get(..2)?;
+        Some(u16::from_le_bytes(bytes.try_into().ok()?))
+    }
+
     fn property_tags(&self) -> Vec<u32> {
         let start = match self.rop_id {
             0x07 => 4,
@@ -2572,6 +2687,30 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
+        0x2B => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+            payload.push(cursor.read_u8()?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
+        0x2C => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
                 payload,
             })
         }
