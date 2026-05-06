@@ -9,6 +9,7 @@ use axum::{
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
     AuditEntryInput, JmapEmail, JmapEmailAddress, JmapImportedEmailInput, JmapMailbox,
+    SubmittedRecipientInput,
 };
 use std::{
     cmp::Ordering,
@@ -130,6 +131,20 @@ enum MapiValue {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingRecipient {
+    row_id: u32,
+    recipient_type: u8,
+    address: String,
+    display_name: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PendingRecipientChange {
+    Upsert(PendingRecipient),
+    Delete(u32),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum MapiObject {
     Logon,
     Folder {
@@ -142,6 +157,7 @@ enum MapiObject {
     PendingMessage {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
+        recipients: Vec<PendingRecipient>,
     },
     HierarchyTable {
         folder_id: u64,
@@ -1347,6 +1363,7 @@ async fn execute_rops<S: ExchangeStore>(
                     MapiObject::PendingMessage {
                         folder_id,
                         properties: HashMap::new(),
+                        recipients: Vec::new(),
                     },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -1405,6 +1422,7 @@ async fn execute_rops<S: ExchangeStore>(
                 let Some(MapiObject::PendingMessage {
                     folder_id,
                     properties,
+                    recipients,
                 }) = session.handles.get(&handle).cloned()
                 else {
                     responses.extend_from_slice(&rop_error_response(
@@ -1422,7 +1440,8 @@ async fn execute_rops<S: ExchangeStore>(
                     ));
                     continue;
                 };
-                let input = jmap_import_from_pending_message(principal, mailbox, &properties);
+                let input =
+                    jmap_import_from_pending_message(principal, mailbox, &properties, &recipients);
                 match store
                     .import_jmap_email(
                         input,
@@ -1454,6 +1473,37 @@ async fn execute_rops<S: ExchangeStore>(
                     )),
                 }
             }
+            0x0D => match input_object_mut(session, &handle_slots, &request) {
+                Some(MapiObject::PendingMessage { recipients, .. }) => {
+                    recipients.clear();
+                    responses.extend_from_slice(&rop_simple_success_response(&request));
+                }
+                _ => responses.extend_from_slice(&rop_error_response(
+                    0x0D,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                )),
+            },
+            0x0E => match input_object_mut(session, &handle_slots, &request) {
+                Some(MapiObject::PendingMessage { recipients, .. }) => {
+                    match request.modify_recipients() {
+                        Ok(changes) => {
+                            apply_pending_recipient_changes(recipients, changes);
+                            responses.extend_from_slice(&rop_simple_success_response(&request));
+                        }
+                        Err(_) => responses.extend_from_slice(&rop_error_response(
+                            0x0E,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        )),
+                    }
+                }
+                _ => responses.extend_from_slice(&rop_error_response(
+                    0x0E,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                )),
+            },
             0x0F => responses.extend_from_slice(&rop_read_recipients_response(
                 &request,
                 input_object(session, &handle_slots, &request),
@@ -2049,6 +2099,7 @@ const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
 const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 const PID_TAG_SENDER_NAME_W: u32 = 0x0C1A_001F;
 const PID_TAG_SENDER_EMAIL_ADDRESS_W: u32 = 0x0C1F_001F;
+const PID_TAG_RECIPIENT_TYPE: u32 = 0x0C15_0003;
 const PID_TAG_DISPLAY_TO_W: u32 = 0x0E04_001F;
 const PID_TAG_MESSAGE_DELIVERY_TIME: u32 = 0x0E06_0040;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
@@ -2069,6 +2120,8 @@ const PID_TAG_ATTACH_METHOD: u32 = 0x3705_0003;
 const PID_TAG_ATTACH_LONG_FILENAME_W: u32 = 0x3707_001F;
 const PID_TAG_RENDERING_POSITION: u32 = 0x370B_0003;
 const PID_TAG_ATTACH_MIME_TAG_W: u32 = 0x370E_001F;
+const PID_TAG_EMAIL_ADDRESS_W: u32 = 0x3003_001F;
+const PID_TAG_SMTP_ADDRESS_W: u32 = 0x39FE_001F;
 
 impl MapiSession {
     fn allocate_output_handle(
@@ -2520,6 +2573,12 @@ fn rop_set_properties_response(request: &RopRequest) -> Vec<u8> {
     response
 }
 
+fn rop_simple_success_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![request.rop_id, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response
+}
+
 fn rop_save_changes_message_response(request: &RopRequest, message_id: u64) -> Vec<u8> {
     let mut response = vec![0x0C, request.response_handle_index()];
     write_u32(&mut response, 0);
@@ -2680,32 +2739,48 @@ fn rop_read_recipients_response(
     emails: &[JmapEmail],
 ) -> Vec<u8> {
     let input_handle_index = request.input_handle_index().unwrap_or(0);
-    let Some(MapiObject::Message {
-        folder_id,
-        message_id,
-    }) = object
-    else {
-        return rop_error_response(0x0F, input_handle_index, 0x0000_04B9);
-    };
-    let Some(email) = message_for_id(*folder_id, *message_id, mailboxes, emails) else {
-        return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
-    };
     let start = request.row_id().unwrap_or(0) as usize;
-    let recipients = message_recipients(email);
-    if start >= recipients.len() {
-        return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
-    }
 
     let mut response = vec![0x0F, input_handle_index];
     write_u32(&mut response, 0);
-    for (offset, recipient) in recipients.into_iter().enumerate().skip(start) {
-        write_u32(&mut response, offset as u32);
-        response.push(recipient.recipient_type);
-        response.extend_from_slice(&0x0FFFu16.to_le_bytes());
-        response.extend_from_slice(&0u16.to_le_bytes());
-        let row = serialize_recipient_row(recipient.address);
-        response.extend_from_slice(&(row.len() as u16).to_le_bytes());
-        response.extend_from_slice(&row);
+
+    match object {
+        Some(MapiObject::Message {
+            folder_id,
+            message_id,
+        }) => {
+            let Some(email) = message_for_id(*folder_id, *message_id, mailboxes, emails) else {
+                return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
+            };
+            let recipients = message_recipients(email);
+            if start >= recipients.len() {
+                return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
+            }
+            for (offset, recipient) in recipients.into_iter().enumerate().skip(start) {
+                write_u32(&mut response, offset as u32);
+                response.push(recipient.recipient_type);
+                response.extend_from_slice(&0x0FFFu16.to_le_bytes());
+                response.extend_from_slice(&0u16.to_le_bytes());
+                let row = serialize_recipient_row(recipient.address);
+                response.extend_from_slice(&(row.len() as u16).to_le_bytes());
+                response.extend_from_slice(&row);
+            }
+        }
+        Some(MapiObject::PendingMessage { recipients, .. }) => {
+            if start >= recipients.len() {
+                return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
+            }
+            for recipient in recipients.iter().skip(start) {
+                write_u32(&mut response, recipient.row_id);
+                response.push(recipient.recipient_type);
+                response.extend_from_slice(&0x0FFFu16.to_le_bytes());
+                response.extend_from_slice(&0u16.to_le_bytes());
+                let row = serialize_pending_recipient_row(recipient);
+                response.extend_from_slice(&(row.len() as u16).to_le_bytes());
+                response.extend_from_slice(&row);
+            }
+        }
+        _ => return rop_error_response(0x0F, input_handle_index, 0x0000_04B9),
     }
     response
 }
@@ -3777,6 +3852,7 @@ fn jmap_import_from_pending_message(
     principal: &AccountPrincipal,
     mailbox: &JmapMailbox,
     properties: &HashMap<u32, MapiValue>,
+    recipients: &[PendingRecipient],
 ) -> JmapImportedEmailInput {
     let subject = pending_text_property(
         properties,
@@ -3794,6 +3870,7 @@ fn jmap_import_from_pending_message(
         .len()
         .saturating_add(body_text.len())
         .min(i64::MAX as usize) as i64;
+    let (to, cc, bcc) = pending_recipients_for_import(recipients);
 
     JmapImportedEmailInput {
         account_id: principal.account_id,
@@ -3804,9 +3881,9 @@ fn jmap_import_from_pending_message(
         from_address,
         sender_display: None,
         sender_address: None,
-        to: Vec::new(),
-        cc: Vec::new(),
-        bcc: Vec::new(),
+        to,
+        cc,
+        bcc,
         subject,
         body_text,
         body_html_sanitized: None,
@@ -3816,6 +3893,54 @@ fn jmap_import_from_pending_message(
         received_at: None,
         attachments: Vec::new(),
     }
+}
+
+fn pending_recipients_for_import(
+    recipients: &[PendingRecipient],
+) -> (
+    Vec<SubmittedRecipientInput>,
+    Vec<SubmittedRecipientInput>,
+    Vec<SubmittedRecipientInput>,
+) {
+    let mut to = Vec::new();
+    let mut cc = Vec::new();
+    let mut bcc = Vec::new();
+    for recipient in recipients {
+        let input = SubmittedRecipientInput {
+            address: recipient.address.clone(),
+            display_name: recipient.display_name.clone(),
+        };
+        match recipient.recipient_type {
+            0x02 => cc.push(input),
+            0x03 => bcc.push(input),
+            _ => to.push(input),
+        }
+    }
+    (to, cc, bcc)
+}
+
+fn apply_pending_recipient_changes(
+    recipients: &mut Vec<PendingRecipient>,
+    changes: Vec<PendingRecipientChange>,
+) {
+    for change in changes {
+        match change {
+            PendingRecipientChange::Delete(row_id) => {
+                recipients.retain(|recipient| recipient.row_id != row_id);
+            }
+            PendingRecipientChange::Upsert(recipient) => {
+                if let Some(existing) = recipients
+                    .iter_mut()
+                    .find(|existing| existing.row_id == recipient.row_id)
+                {
+                    *existing = recipient;
+                } else {
+                    recipients.push(recipient);
+                }
+            }
+        }
+    }
+    recipients.sort_by_key(|recipient| recipient.row_id);
 }
 
 fn write_mapi_value(row: &mut Vec<u8>, property_tag: u32, value: &MapiValue) {
@@ -3892,6 +4017,14 @@ fn serialize_recipient_row(address: &JmapEmailAddress) -> Vec<u8> {
     );
     row.extend_from_slice(&0u16.to_le_bytes());
     row
+}
+
+fn serialize_pending_recipient_row(recipient: &PendingRecipient) -> Vec<u8> {
+    let address = JmapEmailAddress {
+        address: recipient.address.clone(),
+        display_name: recipient.display_name.clone(),
+    };
+    serialize_recipient_row(&address)
 }
 
 fn message_flags(email: &JmapEmail) -> u32 {
@@ -4445,6 +4578,86 @@ impl RopRequest {
         }
         Ok(values)
     }
+
+    fn modify_recipients(&self) -> Result<Vec<PendingRecipientChange>> {
+        let Some(count_bytes) = self.payload.get(..2) else {
+            return Ok(Vec::new());
+        };
+        let column_count = u16::from_le_bytes([count_bytes[0], count_bytes[1]]) as usize;
+        let columns_end = 2 + column_count * 4;
+        let columns = self
+            .payload
+            .get(2..columns_end)
+            .ok_or_else(|| anyhow!("truncated recipient columns"))?
+            .chunks_exact(4)
+            .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+            .collect::<Vec<_>>();
+        let row_count_bytes = self
+            .payload
+            .get(columns_end..columns_end + 2)
+            .ok_or_else(|| anyhow!("missing recipient row count"))?;
+        let row_count = u16::from_le_bytes([row_count_bytes[0], row_count_bytes[1]]) as usize;
+        let mut cursor = Cursor::new(
+            self.payload
+                .get(columns_end + 2..)
+                .ok_or_else(|| anyhow!("missing recipient rows"))?,
+        );
+        let mut changes = Vec::with_capacity(row_count);
+        for _ in 0..row_count {
+            let row_id = cursor.read_u32()?;
+            let recipient_type = cursor.read_u8()?;
+            let row_size = cursor.read_u16()? as usize;
+            if row_size == 0 {
+                changes.push(PendingRecipientChange::Delete(row_id));
+                continue;
+            }
+            let row = cursor.read_bytes(row_size)?;
+            changes.push(PendingRecipientChange::Upsert(parse_pending_recipient_row(
+                row_id,
+                recipient_type,
+                &columns,
+                row,
+            )?));
+        }
+        Ok(changes)
+    }
+}
+
+fn parse_pending_recipient_row(
+    row_id: u32,
+    fallback_recipient_type: u8,
+    columns: &[u32],
+    row: &[u8],
+) -> Result<PendingRecipient> {
+    let mut cursor = Cursor::new(row);
+    let mut values = HashMap::new();
+    for column in columns {
+        values.insert(*column, parse_property_value_for_tag(&mut cursor, *column)?);
+    }
+    let recipient_type = values
+        .get(&PID_TAG_RECIPIENT_TYPE)
+        .and_then(MapiValue::as_i64)
+        .and_then(|value| u8::try_from(value).ok())
+        .unwrap_or(fallback_recipient_type);
+    let address =
+        optional_mapi_value_text(&values, &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W])
+            .ok_or_else(|| anyhow!("recipient address is required"))?;
+    let display_name = optional_mapi_value_text(&values, &[PID_TAG_DISPLAY_NAME_W])
+        .filter(|value| !value.eq_ignore_ascii_case(&address));
+
+    Ok(PendingRecipient {
+        row_id,
+        recipient_type,
+        address,
+        display_name,
+    })
+}
+
+fn optional_mapi_value_text(values: &HashMap<u32, MapiValue>, tags: &[u32]) -> Option<String> {
+    tags.iter()
+        .find_map(|tag| values.get(tag).and_then(|value| value.clone().into_text()))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn parse_mapi_restriction(bytes: &[u8]) -> Result<MapiRestriction> {
@@ -4528,6 +4741,11 @@ fn parse_tagged_property_value(cursor: &mut Cursor<'_>) -> Result<MapiValue> {
 
 fn parse_tagged_property(cursor: &mut Cursor<'_>) -> Result<(u32, MapiValue)> {
     let property_tag = cursor.read_u32()?;
+    let value = parse_property_value_for_tag(cursor, property_tag)?;
+    Ok((property_tag, value))
+}
+
+fn parse_property_value_for_tag(cursor: &mut Cursor<'_>, property_tag: u32) -> Result<MapiValue> {
     let value = match property_tag & 0xFFFF {
         0x0003 => MapiValue::I32(cursor.read_i32()?),
         0x000B => MapiValue::Bool(cursor.read_u8()? != 0),
@@ -4540,7 +4758,7 @@ fn parse_tagged_property(cursor: &mut Cursor<'_>) -> Result<(u32, MapiValue)> {
         }
         _ => return Err(anyhow!("unsupported MAPI tagged value type")),
     };
-    Ok((property_tag, value))
+    Ok(value)
 }
 
 fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
@@ -4772,6 +4990,38 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: Some(response_handle_index),
+                payload,
+            })
+        }
+        0x0D => {
+            let input_handle_index = cursor.read_u8()?;
+            let _reserved = cursor.read_u16()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload: Vec::new(),
+            })
+        }
+        0x0E => {
+            let input_handle_index = cursor.read_u8()?;
+            let column_count = cursor.read_u16()? as usize;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&(column_count as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(column_count * 4)?);
+            let row_count = cursor.read_u16()? as usize;
+            payload.extend_from_slice(&(row_count as u16).to_le_bytes());
+            for _ in 0..row_count {
+                payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+                payload.push(cursor.read_u8()?);
+                let row_size = cursor.read_u16()? as usize;
+                payload.extend_from_slice(&(row_size as u16).to_le_bytes());
+                payload.extend_from_slice(cursor.read_bytes(row_size)?);
+            }
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
                 payload,
             })
         }
