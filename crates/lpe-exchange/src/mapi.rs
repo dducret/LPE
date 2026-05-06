@@ -1261,6 +1261,55 @@ async fn execute_rops<S: ExchangeStore>(
                 mailboxes,
                 emails,
             )),
+            0x11 => {
+                let Some(MapiObject::Message {
+                    folder_id,
+                    message_id,
+                }) = input_object(session, &handle_slots, &request)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x11,
+                        request.response_handle_index(),
+                        0x0000_04B9,
+                    ));
+                    continue;
+                };
+                let Some(email) = message_for_id(*folder_id, *message_id, mailboxes, emails) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x11,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                let unread = unread_from_read_flags(request.read_flags());
+                let changed = unread.is_some_and(|unread| unread != email.unread);
+                if let Some(unread) = unread {
+                    if store
+                        .update_jmap_email_flags(
+                            principal.account_id,
+                            email.id,
+                            Some(unread),
+                            None,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "mapi-set-message-read-flag".to_string(),
+                                subject: format!("message:{}", email.id),
+                            },
+                        )
+                        .await
+                        .is_err()
+                    {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x11,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        ));
+                        continue;
+                    }
+                }
+                responses.extend_from_slice(&rop_set_message_read_flag_response(&request, changed));
+            }
             0x12 => {
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::HierarchyTable { columns, .. })
@@ -1427,12 +1476,7 @@ async fn execute_rops<S: ExchangeStore>(
                         continue;
                     }
                 };
-                let unread = match request.read_flags() {
-                    Some(flags) if flags & 0x10 != 0 => None,
-                    Some(flags) if flags & 0x04 != 0 => Some(true),
-                    Some(_) => Some(false),
-                    None => Some(false),
-                };
+                let unread = unread_from_read_flags(request.read_flags());
                 let mut partial_completion = false;
                 for message_id in request.message_ids() {
                     let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
@@ -2113,6 +2157,13 @@ fn rop_read_recipients_response(
     response
 }
 
+fn rop_set_message_read_flag_response(request: &RopRequest, read_status_changed: bool) -> Vec<u8> {
+    let mut response = vec![0x11, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.push(read_status_changed as u8);
+    response
+}
+
 fn rop_query_rows_response(
     request: &RopRequest,
     object: Option<&MapiObject>,
@@ -2446,6 +2497,15 @@ fn message_flags(email: &JmapEmail) -> u32 {
     flags
 }
 
+fn unread_from_read_flags(read_flags: Option<u8>) -> Option<bool> {
+    match read_flags {
+        Some(flags) if flags & 0x10 != 0 => None,
+        Some(flags) if flags & 0x04 != 0 => Some(true),
+        Some(_) => Some(false),
+        None => Some(false),
+    }
+}
+
 fn folder_message_class(mailbox: &JmapMailbox) -> &'static str {
     match mailbox.role.as_str() {
         "contacts" => "IPF.Contact",
@@ -2712,6 +2772,9 @@ impl RopRequest {
     }
 
     fn response_handle_index(&self) -> u8 {
+        if self.rop_id == 0x11 {
+            return self.output_handle_index.unwrap_or(0);
+        }
         self.input_handle_index
             .unwrap_or(self.output_handle_index.unwrap_or(0))
     }
@@ -2747,7 +2810,11 @@ impl RopRequest {
     }
 
     fn read_flags(&self) -> Option<u8> {
-        self.payload.get(1).copied()
+        match self.rop_id {
+            0x11 => self.payload.first().copied(),
+            0x66 => self.payload.get(1).copied(),
+            _ => None,
+        }
     }
 
     fn message_ids(&self) -> Vec<u64> {
@@ -2915,6 +2982,17 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: None,
+                payload,
+            })
+        }
+        0x11 => {
+            let response_handle_index = cursor.read_u8()?;
+            let input_handle_index = cursor.read_u8()?;
+            let payload = vec![cursor.read_u8()?];
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(response_handle_index),
                 payload,
             })
         }
