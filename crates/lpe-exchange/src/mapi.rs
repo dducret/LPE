@@ -2320,11 +2320,25 @@ fn rop_query_rows_response(
         _ => Vec::new(),
     };
     let row_count = request.query_row_count().unwrap_or(rows.len());
-    let selected = rows
-        .into_iter()
-        .skip(start_position)
-        .take(row_count)
-        .collect::<Vec<_>>();
+    let forward_read = request.query_forward_read();
+    let (selected, next_position) = if forward_read {
+        let selected = rows
+            .into_iter()
+            .skip(start_position)
+            .take(row_count)
+            .collect::<Vec<_>>();
+        let next_position = start_position.saturating_add(selected.len());
+        (selected, next_position)
+    } else {
+        let end_position = start_position.min(rows.len());
+        let selected_start = end_position.saturating_sub(row_count);
+        let selected = rows[selected_start..end_position]
+            .iter()
+            .rev()
+            .cloned()
+            .collect::<Vec<_>>();
+        (selected, selected_start)
+    };
     if !request.query_no_advance() {
         if let Some(
             MapiObject::HierarchyTable { position, .. }
@@ -2332,7 +2346,7 @@ fn rop_query_rows_response(
             | MapiObject::AttachmentTable { position, .. },
         ) = object
         {
-            *position = start_position.saturating_add(selected.len());
+            *position = next_position;
         }
     }
     response.extend_from_slice(&(selected.len() as u16).to_le_bytes());
@@ -3137,6 +3151,13 @@ impl RopRequest {
 
     fn query_no_advance(&self) -> bool {
         self.payload.first().is_some_and(|flags| flags & 0x01 != 0)
+    }
+
+    fn query_forward_read(&self) -> bool {
+        self.payload
+            .get(1)
+            .map(|forward| *forward != 0)
+            .unwrap_or(true)
     }
 
     fn seek_origin(&self) -> Option<u8> {
