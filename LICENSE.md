@@ -16,6 +16,7 @@ All source code produced in `LPE` is distributed under `Apache-2.0`.
 These exceptions are currently accepted because they are common in the Rust ecosystem or required by the current implementation, and no reasonable `Apache-2.0` replacement has been selected yet:
 
 - `tokio`
+- `tokio-stream` for bounded RPC/HTTP streaming responses that keep Outlook Anywhere `RPC_OUT_DATA` channels open without adding a custom stream implementation
 - `axum`
 - `multer` (transitive dependency enabled by `axum` multipart upload support)
 - `tracing`

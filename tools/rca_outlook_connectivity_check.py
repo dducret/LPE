@@ -60,13 +60,16 @@ def request(
     body: bytes | None = None,
     headers: dict[str, str] | None = None,
     timeout: int = 20,
+    read_limit: int | None = None,
 ) -> HttpResponse:
     req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return HttpResponse(resp.status, dict(resp.headers.items()), resp.read())
+            response_body = resp.read(read_limit) if read_limit is not None else resp.read()
+            return HttpResponse(resp.status, dict(resp.headers.items()), response_body)
     except urllib.error.HTTPError as error:
-        return HttpResponse(error.code, dict(error.headers.items()), error.read())
+        response_body = error.read(read_limit) if read_limit is not None else error.read()
+        return HttpResponse(error.code, dict(error.headers.items()), response_body)
 
 
 def join_url(base_url: str, path: str) -> str:
@@ -377,7 +380,14 @@ def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, timeou
             ("RPC_IN_DATA", b"", "echo", 20),
             ("RPC_OUT_DATA", rpc_rts_conn_a1_body(), "rts-connect", 72),
         ]:
-            authenticated = request(method, rpc_url, body, authenticated_headers, timeout)
+            authenticated = request(
+                method,
+                rpc_url,
+                body,
+                authenticated_headers,
+                timeout,
+                read_limit=expected_length,
+            )
             require(
                 authenticated.status == 200,
                 f"authenticated RPC proxy {method} probe returned HTTP {authenticated.status}: {authenticated.text[:300]}",

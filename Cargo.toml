@@ -41,6 +41,7 @@ sha2 = "0.10"
 sqlx = { version = "0.8", default-features = false, features = ["postgres", "runtime-tokio-rustls", "macros", "uuid", "chrono"] }
 thiserror = "2.0"
 tokio = { version = "1.48", features = ["full"] }
+tokio-stream = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

@@ -648,7 +648,10 @@ that `401` challenge; after mailbox authentication, `RPC_IN_DATA` probes
 receive a `200 application/rpc` 20-byte RTS echo response, while
 authenticated `RPC_OUT_DATA` mail-store ping bodies are parsed as client
 `CONN/A1` RTS requests and receive the initial RTS connection-establishment
-response for the RCA OUT-channel ping.
+response for the RCA OUT-channel ping. The `RPC_OUT_DATA` response advertises
+a long RPC/HTTP content length and stays open after the initial RTS response;
+`LPE_RPC_PROXY_OUT_CHANNEL_HOLD_MS` can tune the hold-open duration and
+defaults to the RPC/HTTP connection timeout.
 
 For public client auto-configuration, the exposed front end must remain `LPE-CT` or an equivalent HTTPS publication layer. In v1:
 

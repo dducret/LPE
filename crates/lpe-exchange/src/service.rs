@@ -1,9 +1,9 @@
 use anyhow::{anyhow, bail, Result};
 use axum::{
-    body::Bytes,
+    body::{Body, Bytes},
     extract::State,
     http::{
-        header::{CONTENT_TYPE, WWW_AUTHENTICATE},
+        header::{CONNECTION, CONTENT_LENGTH, CONTENT_TYPE, WWW_AUTHENTICATE},
         HeaderMap, HeaderValue, Method, StatusCode, Uri,
     },
     response::{IntoResponse, Response},
@@ -27,7 +27,8 @@ use lpe_storage::{
     UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -47,6 +48,7 @@ const RPC_PROXY_COMPAT_STATUS: &str = "x-lpe-rpc-proxy-status";
 const RPC_PROXY_ECHO_STATUS: &str = "echo";
 const RPC_PROXY_RTS_CONNECT_STATUS: &str = "rts-connect";
 const RPC_PROXY_RECEIVE_WINDOW_SIZE: u32 = 0x0001_0000;
+const RPC_PROXY_OUT_CHANNEL_CONTENT_LENGTH: u32 = 0x0002_0000;
 const RPC_PROXY_CONNECTION_TIMEOUT_MS: u32 = 120_000;
 const RPC_PROXY_ECHO_BODY: [u8; 20] = [
     0x05, 0x00, 0x14, 0x03, 0x10, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -5253,9 +5255,46 @@ fn rpc_proxy_echo_response() -> Response {
 }
 
 fn rpc_proxy_binary_response(body: Vec<u8>, status: &'static str) -> Response {
+    if status == RPC_PROXY_RTS_CONNECT_STATUS && rpc_proxy_out_channel_hold_ms() > 0 {
+        return rpc_proxy_streaming_binary_response(body, status, rpc_proxy_out_channel_hold_ms());
+    }
+
     let payload_bytes = body.len();
     let payload_preview_hex = mapi::debug_payload_preview_hex(&body);
     let mut response = (StatusCode::OK, body).into_response();
+    decorate_rpc_proxy_binary_response(&mut response, payload_bytes, payload_preview_hex, status);
+    response
+}
+
+fn rpc_proxy_streaming_binary_response(
+    body: Vec<u8>,
+    status: &'static str,
+    hold_open_ms: u64,
+) -> Response {
+    let payload_bytes = body.len();
+    let payload_preview_hex = mapi::debug_payload_preview_hex(&body);
+    let (sender, receiver) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(1);
+    tokio::spawn(async move {
+        let _ = sender.send(Ok(Bytes::from(body))).await;
+        tokio::time::sleep(Duration::from_millis(hold_open_ms)).await;
+    });
+
+    let mut response = Response::new(Body::from_stream(ReceiverStream::new(receiver)));
+    decorate_rpc_proxy_binary_response(&mut response, payload_bytes, payload_preview_hex, status);
+    response.headers_mut().insert(
+        CONTENT_LENGTH,
+        HeaderValue::from_str(&RPC_PROXY_OUT_CHANNEL_CONTENT_LENGTH.to_string())
+            .unwrap_or_else(|_| HeaderValue::from_static("131072")),
+    );
+    response
+}
+
+fn decorate_rpc_proxy_binary_response(
+    response: &mut Response,
+    payload_bytes: usize,
+    payload_preview_hex: String,
+    status: &'static str,
+) {
     response
         .extensions_mut()
         .insert(RpcProxyResponseDebug { payload_bytes });
@@ -5271,8 +5310,10 @@ fn rpc_proxy_binary_response(body: Vec<u8>, status: &'static str) -> Response {
         .insert(CONTENT_TYPE, HeaderValue::from_static("application/rpc"));
     response
         .headers_mut()
-        .insert(RPC_PROXY_COMPAT_STATUS, HeaderValue::from_static(status));
+        .insert(CONNECTION, HeaderValue::from_static("Keep-Alive"));
     response
+        .headers_mut()
+        .insert(RPC_PROXY_COMPAT_STATUS, HeaderValue::from_static(status));
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -5297,6 +5338,20 @@ fn rpc_proxy_response_payload_preview_hex(response: &Response) -> Option<&str> {
         .extensions()
         .get::<RpcProxyResponsePayloadPreview>()
         .map(|preview| preview.hex.as_str())
+}
+
+#[cfg(not(test))]
+fn rpc_proxy_out_channel_hold_ms() -> u64 {
+    std::env::var("LPE_RPC_PROXY_OUT_CHANNEL_HOLD_MS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(u64::from(RPC_PROXY_CONNECTION_TIMEOUT_MS))
+        .min(14_400_000)
+}
+
+#[cfg(test)]
+fn rpc_proxy_out_channel_hold_ms() -> u64 {
+    0
 }
 
 fn rpc_proxy_accepted_response(principal: &AccountPrincipal) -> Response {
