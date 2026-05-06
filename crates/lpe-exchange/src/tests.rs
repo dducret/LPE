@@ -2181,6 +2181,106 @@ async fn mapi_over_http_read_recipients_returns_canonical_message_recipients() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_attachment_table_lists_canonical_message_attachments() {
+    let message_id = "33333333-3333-3333-3333-333333333333";
+    let message_uuid = Uuid::parse_str(message_id).unwrap();
+    let attachment_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let mut email = FakeStore::email(
+        message_id,
+        "55555555-5555-5555-5555-555555555555",
+        "inbox",
+        "Attachment message",
+    );
+    email.has_attachments = true;
+    let file_reference = format!("attachment:{message_uuid}:{attachment_id}");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        attachments: Arc::new(Mutex::new(HashMap::from([(
+            message_uuid,
+            vec![ActiveSyncAttachment {
+                id: attachment_id,
+                message_id: message_uuid,
+                file_name: "brief.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                size_octets: 5,
+                file_reference,
+            }],
+        )]))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x03, 0x00, 0x01, 0x02, // RopOpenMessage
+    ]);
+    rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    rops.extend_from_slice(&[
+        0x21, 0x00, 0x02, 0x03, 0x00, // RopGetAttachmentTable
+        0x12, 0x00, 0x03, 0x00, // RopSetColumns
+    ]);
+    rops.extend_from_slice(&5u16.to_le_bytes());
+    rops.extend_from_slice(&0x0E21_0003u32.to_le_bytes());
+    rops.extend_from_slice(&0x3707_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x370E_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x0E20_0003u32.to_le_bytes());
+    rops.extend_from_slice(&0x3705_0003u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x15, 0x00, 0x03, 0x00, 0x01, // RopQueryRows
+    ]);
+    rops.extend_from_slice(&50u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &rop_buffer[2..2 + response_rop_size];
+
+    assert!(contains_bytes(
+        response_rops,
+        &[0x21, 0x03, 0, 0, 0, 0, 1, 0, 0, 0]
+    ));
+    assert!(contains_bytes(response_rops, &utf16z("brief.pdf")));
+    assert!(contains_bytes(response_rops, &utf16z("application/pdf")));
+    assert!(contains_bytes(response_rops, &5u32.to_le_bytes()));
+}
+
+#[tokio::test]
 async fn mapi_over_http_get_properties_specific_returns_folder_properties() {
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     inbox.total_emails = 7;

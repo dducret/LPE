@@ -17,7 +17,10 @@ use std::{
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::{mapi_store::MapiStore, store::ExchangeStore};
+use crate::{
+    mapi_store::{MapiAttachment, MapiMailStoreSnapshot, MapiStore},
+    store::ExchangeStore,
+};
 
 const MAPI_CONTENT_TYPE: &str = "application/mapi-http";
 const MAPI_OCTET_STREAM_CONTENT_TYPE: &str = "application/octet-stream";
@@ -80,10 +83,26 @@ struct MapiSession {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum MapiObject {
     Logon,
-    Folder { folder_id: u64 },
-    Message { folder_id: u64, message_id: u64 },
-    HierarchyTable { folder_id: u64, columns: Vec<u32> },
-    ContentsTable { folder_id: u64, columns: Vec<u32> },
+    Folder {
+        folder_id: u64,
+    },
+    Message {
+        folder_id: u64,
+        message_id: u64,
+    },
+    HierarchyTable {
+        folder_id: u64,
+        columns: Vec<u32>,
+    },
+    ContentsTable {
+        folder_id: u64,
+        columns: Vec<u32>,
+    },
+    AttachmentTable {
+        folder_id: u64,
+        message_id: u64,
+        columns: Vec<u32>,
+    },
 }
 
 static MAPI_SESSIONS: OnceLock<Mutex<HashMap<String, MapiSession>>> = OnceLock::new();
@@ -325,6 +344,7 @@ async fn execute_response<S: ExchangeStore>(
             session,
             &mailboxes,
             &emails,
+            &snapshot,
             &execute.rop_buffer,
         ))
     })
@@ -1115,6 +1135,7 @@ fn execute_rops(
     session: &mut MapiSession,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
     rop_buffer: &[u8],
 ) -> Vec<u8> {
     let Some((requests, handle_table)) = split_rop_buffer(rop_buffer) else {
@@ -1221,7 +1242,8 @@ fn execute_rops(
             0x12 => {
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::HierarchyTable { columns, .. })
-                    | Some(MapiObject::ContentsTable { columns, .. }) => {
+                    | Some(MapiObject::ContentsTable { columns, .. })
+                    | Some(MapiObject::AttachmentTable { columns, .. }) => {
                         *columns = request.property_tags();
                     }
                     _ => {}
@@ -1233,9 +1255,40 @@ fn execute_rops(
                 input_object(session, &handle_slots, &request),
                 mailboxes,
                 emails,
+                snapshot,
             )),
             0x16 => responses.extend_from_slice(&rop_get_status_response(&request)),
             0x17 => responses.extend_from_slice(&rop_query_position_response(&request)),
+            0x21 => {
+                let Some(MapiObject::Message {
+                    folder_id,
+                    message_id,
+                }) = input_object(session, &handle_slots, &request)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x21,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                let row_count = snapshot
+                    .attachments_for_message(*folder_id, *message_id)
+                    .unwrap_or_default()
+                    .len() as u32;
+                let handle = session.allocate_output_handle(
+                    request.output_handle_index,
+                    MapiObject::AttachmentTable {
+                        folder_id: *folder_id,
+                        message_id: *message_id,
+                        columns: Vec::new(),
+                    },
+                );
+                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                responses
+                    .extend_from_slice(&rop_get_attachment_table_response(&request, row_count));
+                output_handles.push(handle);
+            }
             0x27 => responses.extend_from_slice(&rop_get_receive_folder_response(&request)),
             0x68 => responses.extend_from_slice(&rop_get_receive_folder_table_response(&request)),
             0x7B => responses.extend_from_slice(&rop_get_store_state_response(&request)),
@@ -1323,6 +1376,13 @@ const PID_TAG_BODY_W: u32 = 0x1000_001F;
 const PID_TAG_INTERNET_MESSAGE_ID_W: u32 = 0x1035_001F;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_MID: u32 = 0x674A_0014;
+const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
+const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
+const PID_TAG_ATTACH_FILENAME_W: u32 = 0x3704_001F;
+const PID_TAG_ATTACH_METHOD: u32 = 0x3705_0003;
+const PID_TAG_ATTACH_LONG_FILENAME_W: u32 = 0x3707_001F;
+const PID_TAG_RENDERING_POSITION: u32 = 0x370B_0003;
+const PID_TAG_ATTACH_MIME_TAG_W: u32 = 0x370E_001F;
 
 impl MapiSession {
     fn allocate_output_handle(
@@ -1350,7 +1410,8 @@ impl MapiObject {
             MapiObject::Folder { folder_id }
             | MapiObject::Message { folder_id, .. }
             | MapiObject::HierarchyTable { folder_id, .. }
-            | MapiObject::ContentsTable { folder_id, .. } => Some(*folder_id),
+            | MapiObject::ContentsTable { folder_id, .. }
+            | MapiObject::AttachmentTable { folder_id, .. } => Some(*folder_id),
         }
     }
 }
@@ -1433,6 +1494,20 @@ fn default_contents_columns() -> Vec<u32> {
         PID_TAG_SENDER_EMAIL_ADDRESS_W,
         PID_TAG_DISPLAY_TO_W,
         PID_TAG_HAS_ATTACHMENTS,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+    ]
+}
+
+fn default_attachment_columns() -> Vec<u32> {
+    vec![
+        PID_TAG_ATTACH_NUM,
+        PID_TAG_ATTACH_LONG_FILENAME_W,
+        PID_TAG_ATTACH_FILENAME_W,
+        PID_TAG_ATTACH_MIME_TAG_W,
+        PID_TAG_ATTACH_SIZE,
+        PID_TAG_ATTACH_METHOD,
+        PID_TAG_RENDERING_POSITION,
         PID_TAG_ENTRY_ID,
         PID_TAG_INSTANCE_KEY,
     ]
@@ -1638,6 +1713,13 @@ fn rop_get_contents_table_response(request: &RopRequest, row_count: u32) -> Vec<
     response
 }
 
+fn rop_get_attachment_table_response(request: &RopRequest, row_count: u32) -> Vec<u8> {
+    let mut response = vec![0x21, request.output_handle_index.unwrap_or(0)];
+    write_u32(&mut response, 0);
+    write_u32(&mut response, row_count);
+    response
+}
+
 fn rop_set_columns_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x12, request.response_handle_index()];
     write_u32(&mut response, 0);
@@ -1737,6 +1819,7 @@ fn rop_query_rows_response(
     object: Option<&MapiObject>,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
     let mut response = vec![0x15, request.response_handle_index()];
     write_u32(&mut response, 0);
@@ -1766,6 +1849,23 @@ fn rop_query_rows_response(
                 .map(|email| serialize_message_row(email, &columns))
                 .collect::<Vec<_>>()
         }
+        Some(MapiObject::AttachmentTable {
+            folder_id,
+            message_id,
+            columns,
+        }) => {
+            let columns = if columns.is_empty() {
+                default_attachment_columns()
+            } else {
+                columns.clone()
+            };
+            snapshot
+                .attachments_for_message(*folder_id, *message_id)
+                .unwrap_or_default()
+                .iter()
+                .map(|attachment| serialize_attachment_row(attachment, &columns))
+                .collect::<Vec<_>>()
+        }
         _ => Vec::new(),
     };
     response.extend_from_slice(&(rows.len() as u16).to_le_bytes());
@@ -1773,6 +1873,32 @@ fn rop_query_rows_response(
         response.extend_from_slice(&row);
     }
     response
+}
+
+fn serialize_attachment_row(attachment: &MapiAttachment, columns: &[u32]) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match *column {
+            PID_TAG_ATTACH_NUM => write_u32(&mut row, attachment.attach_num),
+            PID_TAG_ATTACH_FILENAME_W | PID_TAG_ATTACH_LONG_FILENAME_W => {
+                write_utf16z(&mut row, &attachment.file_name)
+            }
+            PID_TAG_ATTACH_MIME_TAG_W => write_utf16z(&mut row, &attachment.media_type),
+            PID_TAG_ATTACH_SIZE => {
+                write_u32(&mut row, attachment.size_octets.min(u32::MAX as u64) as u32)
+            }
+            PID_TAG_ATTACH_METHOD => write_u32(&mut row, 1),
+            PID_TAG_RENDERING_POSITION => write_u32(&mut row, u32::MAX),
+            PID_TAG_ENTRY_ID => {
+                write_u16_prefixed_bytes(&mut row, attachment.canonical_id.as_bytes())
+            }
+            PID_TAG_INSTANCE_KEY => {
+                write_u16_prefixed_bytes(&mut row, attachment.file_reference.as_bytes())
+            }
+            _ => write_property_default(&mut row, *column),
+        }
+    }
+    row
 }
 
 fn rop_get_status_response(request: &RopRequest) -> Vec<u8> {
@@ -2352,7 +2478,7 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
-        0x04 | 0x05 => {
+        0x04 | 0x05 | 0x21 => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let payload = vec![cursor.read_u8()?];
