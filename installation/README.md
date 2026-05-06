@@ -264,7 +264,7 @@ the checks Outlook desktop needs for `IMAP` account setup. If autodiscover is
 intentionally published on a different IMAP or SMTP hostname, set
 `LPE_CT_EXPECTED_AUTODISCOVER_IMAP_HOST` or
 `LPE_CT_EXPECTED_AUTODISCOVER_SMTP_HOST` for that run. The same scope fails if
-autodiscover publishes Exchange-style `EXCH`, `EXPR`, `WEB`, or `mapiHttp`
+autodiscover publishes Exchange-style `EXCH`, `WEB`, or `mapiHttp`
 blocks unless `LPE_CT_EXPECTED_OUTLOOK_EXCHANGE_AUTODISCOVER=true` is set,
 because those blocks can make Outlook choose the unfinished Exchange route
 instead of the working `IMAP` profile. It does not require `ActiveSync` or
@@ -634,8 +634,8 @@ publication returns an Outlook autodiscover XML response containing `IMAP`,
 an Autodiscover v2 JSON response for single-protocol endpoint probes, an
 opt-in `WEB` EWS discovery block when
 `LPE_AUTOCONFIG_EWS_ENABLED` is enabled, an opt-in `mapiHttp` block when
-`LPE_AUTOCONFIG_MAPI_ENABLED` is enabled, or legacy `EXCH` / `EXPR` provider
-sections only when `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` is
+`LPE_AUTOCONFIG_MAPI_ENABLED` is enabled, or a legacy top-level `EXCH` provider
+section only when `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` is
 also enabled with an explicitly published EWS or MAPI surface. `OPTIONS
 /Microsoft-Server-ActiveSync` returns the `ms-asprotocolversions` and
 `ms-asprotocolcommands` headers. `OPTIONS /mapi/emsmdb` returns
@@ -655,8 +655,8 @@ For public client auto-configuration, the exposed front end must remain `LPE-CT`
 - Outlook support is a `0.1.3` goal: Outlook mobile uses `ActiveSync`, Outlook for Windows desktop receives an `IMAP` profile by default when configured that way, `0.1.3` deployments may explicitly enable EWS autodiscovery for Exchange-style mail, contacts, calendar, and task compatibility, and full classic Outlook desktop Exchange-account support is the `MAPI over HTTP` release path
 - `ActiveSync` remains exposed for mobile/native clients that actually support `Exchange ActiveSync`
 - `EWS` remains opt-in through `LPE_AUTOCONFIG_EWS_ENABLED` and must not be treated as `MAPI`, `RPC`, or client `SMTP`
-- `MAPI over HTTP` routes are the `0.1.3` classic Outlook desktop Exchange-account path; the public edge publishes `/mapi/` so Outlook can reach the authenticated endpoints, but autodiscover publishes `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled, SOAP Exchange `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled, and legacy `EXCH` / `EXPR` provider sections only when `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled with an explicitly published EWS or MAPI surface
-- full Outlook Anywhere / RPC over HTTP is not required for the `0.1.3` Outlook goal; `/rpc/rpcproxy.dll` is only an authenticated RCA/legacy setup compatibility shim for Outlook Anywhere HTTP authentication probes and does not implement the RPC mailbox protocol
+- `MAPI over HTTP` routes are the `0.1.3` classic Outlook desktop Exchange-account path; the public edge publishes `/mapi/` so Outlook can reach the authenticated endpoints, but autodiscover publishes `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled, SOAP Exchange `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled, and legacy `EXCH` provider metadata only when `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled with an explicitly published EWS or MAPI surface
+- full Outlook Anywhere / RPC over HTTP is not required for the `0.1.3` Outlook goal; `/rpc/rpcproxy.dll` is only an authenticated RCA/legacy setup compatibility shim for direct Outlook Anywhere HTTP authentication probes and does not implement the RPC mailbox protocol. Do not publish top-level `EXPR` autodiscover metadata unless full RPC/HTTP mailbox transport is implemented.
 - Microsoft Remote Connectivity Analyzer Outlook Connectivity expects a top-level `EXCH` provider section; the error "The EXCH provider section is missing from the Autodiscover response" means the legacy Exchange provider metadata is not published. For the EWS compatibility path, set both `LPE_AUTOCONFIG_EWS_ENABLED=true` and `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED=true`
 - no client `SMTP` endpoint should be advertised unless the authenticated `LPE-CT` submission listener is configured, exposed on `465`, and covered by the public certificate
 - the internal `LPE -> LPE-CT` relay must never be advertised as a client-submission endpoint

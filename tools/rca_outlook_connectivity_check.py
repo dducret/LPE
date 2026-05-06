@@ -140,8 +140,8 @@ def check_pox_autodiscover(
                 f"{path} missing legacy EXCH provider section",
             )
             require(
-                "      <Protocol>\n        <Type>EXPR</Type>" in text,
-                f"{path} missing legacy EXPR provider section",
+                "      <Protocol>\n        <Type>EXPR</Type>" not in text,
+                f"{path} published top-level EXPR without full Outlook Anywhere support",
             )
             require("<EwsUrl>" in text, f"{path} missing EWS URL in legacy Exchange provider section")
 
@@ -459,7 +459,7 @@ def main() -> int:
     parser.add_argument(
         "--expect-exchange-providers",
         action="store_true",
-        help="Require POX legacy EXCH and EXPR provider sections for RCA Outlook Connectivity.",
+        help="Require the POX legacy EXCH provider and reject top-level EXPR unless full Outlook Anywhere is implemented.",
     )
     parser.add_argument("--expect-mapi", action="store_true", help="Require MAPI/HTTP discovery to be published.")
     parser.add_argument("--check-ews-basic", action="store_true", help="Exercise Basic auth against /EWS/Exchange.asmx.")

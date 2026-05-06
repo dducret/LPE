@@ -59,6 +59,7 @@ The core `LPE` server is multi-tenant. Each tenant manages its domain and domain
 - prioritize protocol completion depth before protocol breadth: `JMAP`, `IMAP`, `ActiveSync`, the active `EWS` compatibility adapter, guarded `MAPI over HTTP` groundwork for Outlook desktop, `DAV`, then `ManageSieve` / mailbox `Sieve`
 - internet-facing `SMTP` must stay in `LPE-CT`, not move back into the core `LPE` server
 - client autodiscovery and autoconfiguration must publish only endpoints that are truly implemented and exposed
+- top-level Outlook `EXPR` autodiscover metadata must not be published unless full Outlook Anywhere / RPC over HTTP mailbox transport is implemented and documented
 - the internal `LPE -> LPE-CT` relay must never be advertised as a client `SMTP` submission endpoint unless a real authenticated client-submission service is explicitly deployed and documented
 
 The sorting center is responsible for:
