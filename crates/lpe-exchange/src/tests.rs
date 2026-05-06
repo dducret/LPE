@@ -1267,6 +1267,11 @@ fn utf16z(value: &str) -> Vec<u8> {
     bytes
 }
 
+fn append_mapi_utf16_property(values: &mut Vec<u8>, property_tag: u32, value: &str) {
+    values.extend_from_slice(&property_tag.to_le_bytes());
+    values.extend_from_slice(&utf16z(value));
+}
+
 fn mapi_content_restriction(property_tag: u32, value: &str) -> Vec<u8> {
     let mut restriction = vec![0x03];
     restriction.extend_from_slice(&0u32.to_le_bytes());
@@ -2748,6 +2753,124 @@ async fn mapi_over_http_table_bookmarks_restore_contents_cursor() {
         second_response_rops,
         &[0x89, 0x02, 0, 0, 0, 0]
     ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_create_set_save_message_imports_canonical_email() {
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let imported_emails = store.imported_emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "MAPI saved subject");
+    append_mapi_utf16_property(&mut property_values, 0x1000_001F, "Body saved through MAPI");
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x1035_001F,
+        "<mapi-save@example.test>",
+    );
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x06, 0x00, 0x01, 0x02, // RopCreateMessage
+    ]);
+    rops.extend_from_slice(&1200u16.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x0A, 0x00, 0x02, // RopSetProperties
+    ]);
+    rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
+    rops.extend_from_slice(&3u16.to_le_bytes());
+    rops.extend_from_slice(&property_values);
+    rops.extend_from_slice(&[
+        0x07, 0x00, 0x02, // RopGetPropertiesSpecific on pending message
+    ]);
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&2u16.to_le_bytes());
+    rops.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x1000_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x0C, 0x00, 0x01, 0x02, 0x00, // RopSaveChangesMessage
+    ]);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &rop_buffer[2..2 + response_rop_size];
+
+    assert!(contains_bytes(response_rops, &[0x06, 0x02, 0, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        response_rops,
+        &[0x0A, 0x02, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(response_rops, &utf16z("MAPI saved subject")));
+    assert!(contains_bytes(
+        response_rops,
+        &utf16z("Body saved through MAPI")
+    ));
+    assert!(contains_bytes(
+        response_rops,
+        &[0x0C, 0x01, 0, 0, 0, 0, 0x02]
+    ));
+    assert!(contains_bytes(
+        response_rops,
+        &test_mapi_message_id("99999999-9999-9999-9999-999999999999").to_le_bytes()
+    ));
+
+    let recorded = imported_emails.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].mailbox_id, inbox_id);
+    assert_eq!(recorded[0].source, "mapi-save-message");
+    assert_eq!(recorded[0].from_address, "alice@example.test");
+    assert_eq!(recorded[0].from_display.as_deref(), Some("Alice"));
+    assert_eq!(recorded[0].subject, "MAPI saved subject");
+    assert_eq!(recorded[0].body_text, "Body saved through MAPI");
+    assert_eq!(
+        recorded[0].internet_message_id.as_deref(),
+        Some("<mapi-save@example.test>")
+    );
+    assert!(recorded[0].to.is_empty());
+    assert!(recorded[0].cc.is_empty());
+    assert!(recorded[0].bcc.is_empty());
 }
 
 #[tokio::test]
