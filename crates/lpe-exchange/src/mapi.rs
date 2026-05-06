@@ -1518,7 +1518,12 @@ async fn execute_rops<S: ExchangeStore>(
             }
             0x68 => responses.extend_from_slice(&rop_get_receive_folder_table_response(&request)),
             0x7B => responses.extend_from_slice(&rop_get_store_state_response(&request)),
-            0x81 => responses.extend_from_slice(&rop_reset_table_response(&request)),
+            0x81 => {
+                if let Some(table) = input_object_mut(session, &handle_slots, &request) {
+                    reset_table_position(table);
+                }
+                responses.extend_from_slice(&rop_reset_table_response(&request));
+            }
             0xFE => {
                 let handle =
                     session.allocate_output_handle(request.output_handle_index, MapiObject::Logon);
@@ -1678,6 +1683,15 @@ fn set_handle_slot(handle_slots: &mut Vec<u32>, output_handle_index: Option<u8>,
         handle_slots.resize(index + 1, u32::MAX);
     }
     handle_slots[index] = handle;
+}
+
+fn reset_table_position(object: &mut MapiObject) {
+    match object {
+        MapiObject::HierarchyTable { position, .. }
+        | MapiObject::ContentsTable { position, .. }
+        | MapiObject::AttachmentTable { position, .. } => *position = 0,
+        _ => {}
+    }
 }
 
 fn read_handle_table(handle_table: &[u8]) -> Vec<u32> {

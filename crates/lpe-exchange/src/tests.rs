@@ -2042,6 +2042,11 @@ async fn mapi_over_http_query_rows_advances_table_position() {
         0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x81, 0x00, 0x02, // RopResetTable
+        0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -2064,9 +2069,10 @@ async fn mapi_over_http_query_rows_advances_table_position() {
         .filter_map(|(offset, window)| (window == [0x15, 0x02, 0, 0, 0, 0, 0x02]).then_some(offset))
         .collect::<Vec<_>>();
 
-    assert_eq!(query_offsets.len(), 2);
+    assert_eq!(query_offsets.len(), 3);
     let first_query = &response_rops[query_offsets[0]..query_offsets[1]];
-    let second_query = &response_rops[query_offsets[1]..];
+    let second_query = &response_rops[query_offsets[1]..query_offsets[2]];
+    let reset_query = &response_rops[query_offsets[2]..];
     assert_eq!(u16::from_le_bytes(first_query[7..9].try_into().unwrap()), 1);
     assert_eq!(
         u16::from_le_bytes(second_query[7..9].try_into().unwrap()),
@@ -2075,6 +2081,8 @@ async fn mapi_over_http_query_rows_advances_table_position() {
     assert!(contains_bytes(first_query, &utf16z("First page message")));
     assert!(!contains_bytes(first_query, &utf16z("Second page message")));
     assert!(contains_bytes(second_query, &utf16z("Second page message")));
+    assert!(contains_bytes(reset_query, &utf16z("First page message")));
+    assert!(!contains_bytes(reset_query, &utf16z("Second page message")));
 }
 
 #[tokio::test]
