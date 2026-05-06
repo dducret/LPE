@@ -9,7 +9,7 @@ use axum::{
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
     AuditEntryInput, JmapEmail, JmapEmailAddress, JmapImportedEmailInput, JmapMailbox,
-    SubmittedRecipientInput,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
 };
 use std::{
     cmp::Ordering,
@@ -1930,6 +1930,91 @@ async fn execute_rops<S: ExchangeStore>(
                     continue;
                 };
                 responses.extend_from_slice(&rop_read_stream_response(&request, stream));
+            }
+            0x32 => {
+                let Some(handle) = input_handle(&handle_slots, &request) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x32,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                let Some(object) = session.handles.get(&handle).cloned() else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x32,
+                        request.response_handle_index(),
+                        0x0000_04B9,
+                    ));
+                    continue;
+                };
+                let input = match object {
+                    MapiObject::PendingMessage {
+                        properties,
+                        recipients,
+                        ..
+                    } => mapi_submit_from_pending_message(principal, &properties, &recipients),
+                    MapiObject::Message {
+                        folder_id,
+                        message_id,
+                    } => {
+                        let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
+                        else {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x32,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            ));
+                            continue;
+                        };
+                        if email.mailbox_role != "drafts" {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x32,
+                                request.response_handle_index(),
+                                0x8004_0102,
+                            ));
+                            continue;
+                        }
+                        mapi_submit_from_email(principal, email)
+                    }
+                    _ => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x32,
+                            request.response_handle_index(),
+                            0x0000_04B9,
+                        ));
+                        continue;
+                    }
+                };
+                match store
+                    .submit_message(
+                        input,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "mapi-submit-message".to_string(),
+                            subject: format!("handle:{handle}"),
+                        },
+                    )
+                    .await
+                {
+                    Ok(submitted) => {
+                        session.handles.insert(
+                            handle,
+                            MapiObject::Message {
+                                folder_id: submitted_mapi_folder_id(&submitted, mailboxes),
+                                message_id: mapi_store_id(uuid_global_counter(
+                                    &submitted.message_id,
+                                )),
+                            },
+                        );
+                        responses.extend_from_slice(&rop_simple_success_response(&request));
+                    }
+                    Err(_) => responses.extend_from_slice(&rop_error_response(
+                        0x32,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    )),
+                }
             }
             0x33 => {
                 let source_folder_id = match input_object(session, &handle_slots, &request) {
@@ -4011,6 +4096,94 @@ fn pending_recipients_for_import(
     (to, cc, bcc)
 }
 
+fn mapi_submit_from_pending_message(
+    principal: &AccountPrincipal,
+    properties: &HashMap<u32, MapiValue>,
+    recipients: &[PendingRecipient],
+) -> SubmitMessageInput {
+    let subject = pending_text_property(
+        properties,
+        &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
+    );
+    let body_text = pending_text_property(properties, &[PID_TAG_BODY_W]);
+    let from_address =
+        optional_pending_text_property(properties, &[PID_TAG_SENDER_EMAIL_ADDRESS_W])
+            .unwrap_or_else(|| principal.email.clone());
+    let from_display = optional_pending_text_property(properties, &[PID_TAG_SENDER_NAME_W])
+        .or_else(|| Some(principal.display_name.clone()));
+    let internet_message_id =
+        optional_pending_text_property(properties, &[PID_TAG_INTERNET_MESSAGE_ID_W]);
+    let (to, cc, bcc) = pending_recipients_for_import(recipients);
+
+    SubmitMessageInput {
+        draft_message_id: None,
+        account_id: principal.account_id,
+        submitted_by_account_id: principal.account_id,
+        source: "mapi-submit-message".to_string(),
+        from_display,
+        from_address,
+        sender_display: None,
+        sender_address: None,
+        to,
+        cc,
+        bcc,
+        subject,
+        body_text,
+        body_html_sanitized: None,
+        internet_message_id,
+        mime_blob_ref: Some(format!("mapi-submit-message:{}", Uuid::new_v4())),
+        size_octets: pending_message_size(properties),
+        unread: Some(false),
+        flagged: Some(false),
+        attachments: Vec::new(),
+    }
+}
+
+fn mapi_submit_from_email(principal: &AccountPrincipal, email: &JmapEmail) -> SubmitMessageInput {
+    SubmitMessageInput {
+        draft_message_id: Some(email.id),
+        account_id: principal.account_id,
+        submitted_by_account_id: principal.account_id,
+        source: "mapi-submit-message".to_string(),
+        from_display: email.from_display.clone(),
+        from_address: email.from_address.clone(),
+        sender_display: email.sender_display.clone(),
+        sender_address: email.sender_address.clone(),
+        to: submitted_recipients_from_addresses(&email.to),
+        cc: submitted_recipients_from_addresses(&email.cc),
+        bcc: submitted_recipients_from_addresses(&email.bcc),
+        subject: email.subject.clone(),
+        body_text: email.body_text.clone(),
+        body_html_sanitized: email.body_html_sanitized.clone(),
+        internet_message_id: email.internet_message_id.clone(),
+        mime_blob_ref: email.mime_blob_ref.clone(),
+        size_octets: i64::try_from(email.size_octets).unwrap_or(i64::MAX),
+        unread: Some(email.unread),
+        flagged: Some(email.flagged),
+        attachments: Vec::new(),
+    }
+}
+
+fn submitted_recipients_from_addresses(
+    addresses: &[JmapEmailAddress],
+) -> Vec<SubmittedRecipientInput> {
+    addresses
+        .iter()
+        .map(|address| SubmittedRecipientInput {
+            address: address.address.clone(),
+            display_name: address.display_name.clone(),
+        })
+        .collect()
+}
+
+fn submitted_mapi_folder_id(submitted: &SubmittedMessage, mailboxes: &[JmapMailbox]) -> u64 {
+    mailboxes
+        .iter()
+        .find(|mailbox| mailbox.id == submitted.sent_mailbox_id)
+        .map(mapi_folder_id)
+        .unwrap_or(SENT_FOLDER_ID)
+}
+
 fn apply_pending_recipient_changes(
     recipients: &mut Vec<PendingRecipient>,
     changes: Vec<PendingRecipientChange>,
@@ -5266,6 +5439,16 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                     break;
                 }
             }
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x32 => {
+            let input_handle_index = cursor.read_u8()?;
+            let payload = vec![cursor.read_u8()?];
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
