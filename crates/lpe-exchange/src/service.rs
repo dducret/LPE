@@ -5314,19 +5314,26 @@ fn rpc_proxy_echo_response() -> Response {
 }
 
 fn rpc_proxy_in_channel_response() -> Response {
-    let mut response = StatusCode::OK.into_response();
-    decorate_rpc_proxy_binary_response(
-        &mut response,
-        0,
-        String::new(),
+    let mut response = rpc_proxy_held_open_binary_response(
+        Vec::new(),
         RPC_PROXY_IN_CHANNEL_STATUS,
+        rpc_proxy_out_channel_hold_ms(),
+        false,
     );
+    response
+        .headers_mut()
+        .insert(CONTENT_LENGTH, HeaderValue::from_static("131072"));
     response
 }
 
 fn rpc_proxy_binary_response(body: Vec<u8>, status: &'static str) -> Response {
     if status == RPC_PROXY_RTS_CONNECT_STATUS && rpc_proxy_out_channel_hold_ms() > 0 {
-        return rpc_proxy_streaming_binary_response(body, status, rpc_proxy_out_channel_hold_ms());
+        return rpc_proxy_held_open_binary_response(
+            body,
+            status,
+            rpc_proxy_out_channel_hold_ms(),
+            true,
+        );
     }
 
     let payload_bytes = body.len();
@@ -5336,16 +5343,19 @@ fn rpc_proxy_binary_response(body: Vec<u8>, status: &'static str) -> Response {
     response
 }
 
-fn rpc_proxy_streaming_binary_response(
+fn rpc_proxy_held_open_binary_response(
     body: Vec<u8>,
     status: &'static str,
     hold_open_ms: u64,
+    send_initial_body: bool,
 ) -> Response {
     let payload_bytes = body.len();
     let payload_preview_hex = mapi::debug_payload_preview_hex(&body);
     let (sender, receiver) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(1);
     tokio::spawn(async move {
-        let _ = sender.send(Ok(Bytes::from(body))).await;
+        if send_initial_body {
+            let _ = sender.send(Ok(Bytes::from(body))).await;
+        }
         tokio::time::sleep(Duration::from_millis(hold_open_ms)).await;
     });
 
