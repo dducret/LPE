@@ -76,6 +76,8 @@ validate_publication_config() {
     'location ~* ^/rpc/rpcproxy\.dll$'
     "rewrite ^ /rpc/rpcproxy.dll break;"
     "proxy_pass ${LPE_CT_CORE_DELIVERY_BASE_URL};"
+    "proxy_buffering off;"
+    "proxy_request_buffering off;"
     'proxy_set_header Authorization $http_authorization;'
     "Strict-Transport-Security"
     "X-Content-Type-Options"
