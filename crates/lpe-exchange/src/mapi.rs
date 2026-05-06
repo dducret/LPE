@@ -93,15 +93,18 @@ enum MapiObject {
     HierarchyTable {
         folder_id: u64,
         columns: Vec<u32>,
+        position: usize,
     },
     ContentsTable {
         folder_id: u64,
         columns: Vec<u32>,
+        position: usize,
     },
     AttachmentTable {
         folder_id: u64,
         message_id: u64,
         columns: Vec<u32>,
+        position: usize,
     },
     Attachment {
         folder_id: u64,
@@ -1210,7 +1213,11 @@ async fn execute_rops<S: ExchangeStore>(
                 let columns = default_hierarchy_columns();
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
-                    MapiObject::HierarchyTable { folder_id, columns },
+                    MapiObject::HierarchyTable {
+                        folder_id,
+                        columns,
+                        position: 0,
+                    },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 responses.extend_from_slice(&rop_get_hierarchy_table_response(
@@ -1228,6 +1235,7 @@ async fn execute_rops<S: ExchangeStore>(
                     MapiObject::ContentsTable {
                         folder_id,
                         columns: Vec::new(),
+                        position: 0,
                     },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -1323,7 +1331,7 @@ async fn execute_rops<S: ExchangeStore>(
             }
             0x15 => responses.extend_from_slice(&rop_query_rows_response(
                 &request,
-                input_object(session, &handle_slots, &request),
+                input_object_mut(session, &handle_slots, &request),
                 mailboxes,
                 emails,
                 snapshot,
@@ -1353,6 +1361,7 @@ async fn execute_rops<S: ExchangeStore>(
                         folder_id: *folder_id,
                         message_id: *message_id,
                         columns: Vec::new(),
+                        position: 0,
                     },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -2166,7 +2175,7 @@ fn rop_set_message_read_flag_response(request: &RopRequest, read_status_changed:
 
 fn rop_query_rows_response(
     request: &RopRequest,
-    object: Option<&MapiObject>,
+    object: Option<&mut MapiObject>,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
@@ -2174,10 +2183,14 @@ fn rop_query_rows_response(
     let mut response = vec![0x15, request.response_handle_index()];
     write_u32(&mut response, 0);
     response.push(0x02);
+    let mut start_position = 0usize;
     let rows = match object {
-        Some(MapiObject::HierarchyTable { folder_id, columns })
-            if is_root_hierarchy_folder(*folder_id) =>
-        {
+        Some(MapiObject::HierarchyTable {
+            folder_id,
+            columns,
+            position: table_position,
+        }) if is_root_hierarchy_folder(*folder_id) => {
+            start_position = *table_position;
             let columns = if columns.is_empty() {
                 default_hierarchy_columns()
             } else {
@@ -2188,7 +2201,12 @@ fn rop_query_rows_response(
                 .map(|mailbox| serialize_folder_row(mailbox, &columns))
                 .collect::<Vec<_>>()
         }
-        Some(MapiObject::ContentsTable { folder_id, columns }) => {
+        Some(MapiObject::ContentsTable {
+            folder_id,
+            columns,
+            position: table_position,
+        }) => {
+            start_position = *table_position;
             let columns = if columns.is_empty() {
                 default_contents_columns()
             } else {
@@ -2203,7 +2221,9 @@ fn rop_query_rows_response(
             folder_id,
             message_id,
             columns,
+            position: table_position,
         }) => {
+            start_position = *table_position;
             let columns = if columns.is_empty() {
                 default_attachment_columns()
             } else {
@@ -2218,8 +2238,22 @@ fn rop_query_rows_response(
         }
         _ => Vec::new(),
     };
-    response.extend_from_slice(&(rows.len() as u16).to_le_bytes());
-    for row in rows {
+    let row_count = request.query_row_count().unwrap_or(rows.len());
+    let selected = rows
+        .into_iter()
+        .skip(start_position)
+        .take(row_count)
+        .collect::<Vec<_>>();
+    if let Some(
+        MapiObject::HierarchyTable { position, .. }
+        | MapiObject::ContentsTable { position, .. }
+        | MapiObject::AttachmentTable { position, .. },
+    ) = object
+    {
+        *position = start_position.saturating_add(selected.len());
+    }
+    response.extend_from_slice(&(selected.len() as u16).to_le_bytes());
+    for row in selected {
         response.extend_from_slice(&row);
     }
     response
@@ -2827,6 +2861,11 @@ impl RopRequest {
             .take(count)
             .map(|bytes| u64::from_le_bytes(bytes.try_into().unwrap_or_default()))
             .collect()
+    }
+
+    fn query_row_count(&self) -> Option<usize> {
+        let bytes = self.payload.get(2..4)?;
+        Some(u16::from_le_bytes(bytes.try_into().ok()?) as usize)
     }
 
     fn property_tags(&self) -> Vec<u32> {

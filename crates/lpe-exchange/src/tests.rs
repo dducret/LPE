@@ -1985,6 +1985,99 @@ async fn mapi_over_http_contents_table_lists_canonical_messages() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_query_rows_advances_table_position() {
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 2;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(
+                "81818181-8181-8181-8181-818181818181",
+                "55555555-5555-5555-5555-555555555555",
+                "inbox",
+                "First page message",
+            ),
+            FakeStore::email(
+                "82828282-8282-8282-8282-828282828282",
+                "55555555-5555-5555-5555-555555555555",
+                "inbox",
+                "Second page message",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
+        0x12, 0x00, 0x02, 0x00, // RopSetColumns
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &rop_buffer[2..2 + response_rop_size];
+    let query_offsets = response_rops
+        .windows(7)
+        .enumerate()
+        .filter_map(|(offset, window)| (window == [0x15, 0x02, 0, 0, 0, 0, 0x02]).then_some(offset))
+        .collect::<Vec<_>>();
+
+    assert_eq!(query_offsets.len(), 2);
+    let first_query = &response_rops[query_offsets[0]..query_offsets[1]];
+    let second_query = &response_rops[query_offsets[1]..];
+    assert_eq!(u16::from_le_bytes(first_query[7..9].try_into().unwrap()), 1);
+    assert_eq!(
+        u16::from_le_bytes(second_query[7..9].try_into().unwrap()),
+        1
+    );
+    assert!(contains_bytes(first_query, &utf16z("First page message")));
+    assert!(!contains_bytes(first_query, &utf16z("Second page message")));
+    assert!(contains_bytes(second_query, &utf16z("Second page message")));
+}
+
+#[tokio::test]
 async fn mapi_over_http_open_message_then_gets_canonical_message_properties() {
     let message_id = "11111111-1111-1111-1111-111111111111";
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
