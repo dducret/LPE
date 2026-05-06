@@ -2617,6 +2617,140 @@ async fn mapi_over_http_find_row_returns_matching_contents_row() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_table_bookmarks_restore_contents_cursor() {
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 2;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(
+                "99999999-9999-9999-9999-999999999999",
+                "55555555-5555-5555-5555-555555555555",
+                "inbox",
+                "Bookmark first",
+            ),
+            FakeStore::email(
+                "9a9a9a9a-9a9a-9a9a-9a9a-9a9a9a9a9a9a",
+                "55555555-5555-5555-5555-555555555555",
+                "inbox",
+                "Bookmark second",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut first_rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    first_rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    first_rops.push(0);
+    first_rops.extend_from_slice(&[
+        0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
+        0x12, 0x00, 0x02, 0x00, // RopSetColumns
+    ]);
+    first_rops.extend_from_slice(&1u16.to_le_bytes());
+    first_rops.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    first_rops.extend_from_slice(&[
+        0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
+    ]);
+    first_rops.extend_from_slice(&1u16.to_le_bytes());
+    first_rops.extend_from_slice(&[
+        0x1B, 0x00, 0x02, // RopCreateBookmark
+    ]);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let first_request = execute_body(&rop_buffer(&first_rops, &[1, u32::MAX, u32::MAX]));
+    let first_response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &first_request)
+        .await
+        .unwrap();
+    let first_body = response_bytes(first_response).await;
+    let first_rop_buffer_size = u32::from_le_bytes(first_body[12..16].try_into().unwrap()) as usize;
+    let first_rop_buffer = &first_body[16..16 + first_rop_buffer_size];
+    let first_response_rop_size =
+        u16::from_le_bytes(first_rop_buffer[0..2].try_into().unwrap()) as usize;
+    let first_response_rops = &first_rop_buffer[2..2 + first_response_rop_size];
+
+    assert!(contains_bytes(
+        first_response_rops,
+        &utf16z("Bookmark first")
+    ));
+    assert!(contains_bytes(
+        first_response_rops,
+        &[0x1B, 0x02, 0, 0, 0, 0, 4, 0, 1, 0, 0, 0]
+    ));
+
+    let bookmark = 1u32.to_le_bytes();
+    let mut second_rops = vec![0x19, 0x00, 0x02]; // RopSeekRowBookmark
+    second_rops.extend_from_slice(&(bookmark.len() as u16).to_le_bytes());
+    second_rops.extend_from_slice(&bookmark);
+    second_rops.extend_from_slice(&0i32.to_le_bytes());
+    second_rops.push(1);
+    second_rops.extend_from_slice(&[
+        0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
+    ]);
+    second_rops.extend_from_slice(&1u16.to_le_bytes());
+    second_rops.extend_from_slice(&[
+        0x89, 0x00, 0x02, // RopFreeBookmark
+    ]);
+    second_rops.extend_from_slice(&(bookmark.len() as u16).to_le_bytes());
+    second_rops.extend_from_slice(&bookmark);
+
+    let second_request = execute_body(&rop_buffer(&second_rops, &[u32::MAX, u32::MAX, 3]));
+    let second_response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &second_request)
+        .await
+        .unwrap();
+
+    assert_eq!(second_response.status(), StatusCode::OK);
+    assert_eq!(
+        second_response.headers().get("x-responsecode").unwrap(),
+        "0"
+    );
+    let second_body = response_bytes(second_response).await;
+    let second_rop_buffer_size =
+        u32::from_le_bytes(second_body[12..16].try_into().unwrap()) as usize;
+    let second_rop_buffer = &second_body[16..16 + second_rop_buffer_size];
+    let second_response_rop_size =
+        u16::from_le_bytes(second_rop_buffer[0..2].try_into().unwrap()) as usize;
+    let second_response_rops = &second_rop_buffer[2..2 + second_response_rop_size];
+
+    assert!(contains_bytes(
+        second_response_rops,
+        &[0x19, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(!contains_bytes(
+        second_response_rops,
+        &utf16z("Bookmark first")
+    ));
+    assert!(contains_bytes(
+        second_response_rops,
+        &utf16z("Bookmark second")
+    ));
+    assert!(contains_bytes(
+        second_response_rops,
+        &[0x89, 0x02, 0, 0, 0, 0]
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_seek_row_moves_contents_table_cursor() {
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     inbox.total_emails = 2;

@@ -142,6 +142,8 @@ enum MapiObject {
         columns: Vec<u32>,
         sort_orders: Vec<MapiSortOrder>,
         restriction: Option<MapiRestriction>,
+        bookmarks: HashMap<Vec<u8>, usize>,
+        next_bookmark: u32,
         position: usize,
     },
     ContentsTable {
@@ -149,6 +151,8 @@ enum MapiObject {
         columns: Vec<u32>,
         sort_orders: Vec<MapiSortOrder>,
         restriction: Option<MapiRestriction>,
+        bookmarks: HashMap<Vec<u8>, usize>,
+        next_bookmark: u32,
         position: usize,
     },
     AttachmentTable {
@@ -157,6 +161,8 @@ enum MapiObject {
         columns: Vec<u32>,
         sort_orders: Vec<MapiSortOrder>,
         restriction: Option<MapiRestriction>,
+        bookmarks: HashMap<Vec<u8>, usize>,
+        next_bookmark: u32,
         position: usize,
     },
     Attachment {
@@ -1271,6 +1277,8 @@ async fn execute_rops<S: ExchangeStore>(
                         columns,
                         sort_orders: Vec::new(),
                         restriction: None,
+                        bookmarks: HashMap::new(),
+                        next_bookmark: 1,
                         position: 0,
                     },
                 );
@@ -1292,6 +1300,8 @@ async fn execute_rops<S: ExchangeStore>(
                         columns: Vec::new(),
                         sort_orders: Vec::new(),
                         restriction: None,
+                        bookmarks: HashMap::new(),
+                        next_bookmark: 1,
                         position: 0,
                     },
                 );
@@ -1390,20 +1400,24 @@ async fn execute_rops<S: ExchangeStore>(
                 Some(MapiObject::HierarchyTable {
                     sort_orders,
                     position,
+                    bookmarks,
                     ..
                 })
                 | Some(MapiObject::ContentsTable {
                     sort_orders,
                     position,
+                    bookmarks,
                     ..
                 })
                 | Some(MapiObject::AttachmentTable {
                     sort_orders,
                     position,
+                    bookmarks,
                     ..
                 }) => {
                     *sort_orders = request.sort_orders();
                     *position = 0;
+                    bookmarks.clear();
                     responses.extend_from_slice(&rop_sort_table_response(&request));
                 }
                 _ => responses.extend_from_slice(&rop_error_response(
@@ -1416,21 +1430,25 @@ async fn execute_rops<S: ExchangeStore>(
                 Some(MapiObject::HierarchyTable {
                     restriction,
                     position,
+                    bookmarks,
                     ..
                 })
                 | Some(MapiObject::ContentsTable {
                     restriction,
                     position,
+                    bookmarks,
                     ..
                 })
                 | Some(MapiObject::AttachmentTable {
                     restriction,
                     position,
+                    bookmarks,
                     ..
                 }) => match request.restriction() {
                     Ok(parsed) => {
                         *restriction = parsed;
                         *position = 0;
+                        bookmarks.clear();
                         responses.extend_from_slice(&rop_restrict_response(&request));
                     }
                     Err(_) => responses.extend_from_slice(&rop_error_response(
@@ -1467,6 +1485,17 @@ async fn execute_rops<S: ExchangeStore>(
                 emails,
                 snapshot,
             )),
+            0x19 => responses.extend_from_slice(&rop_seek_row_bookmark_response(
+                &request,
+                input_object_mut(session, &handle_slots, &request),
+                mailboxes,
+                emails,
+                snapshot,
+            )),
+            0x1B => responses.extend_from_slice(&rop_create_bookmark_response(
+                &request,
+                input_object_mut(session, &handle_slots, &request),
+            )),
             0x4F => responses.extend_from_slice(&rop_find_row_response(
                 &request,
                 input_object_mut(session, &handle_slots, &request),
@@ -1499,6 +1528,8 @@ async fn execute_rops<S: ExchangeStore>(
                         columns: Vec::new(),
                         sort_orders: Vec::new(),
                         restriction: None,
+                        bookmarks: HashMap::new(),
+                        next_bookmark: 1,
                         position: 0,
                     },
                 );
@@ -1662,6 +1693,10 @@ async fn execute_rops<S: ExchangeStore>(
                 }
                 responses.extend_from_slice(&rop_reset_table_response(&request));
             }
+            0x89 => responses.extend_from_slice(&rop_free_bookmark_response(
+                &request,
+                input_object_mut(session, &handle_slots, &request),
+            )),
             0xFE => {
                 let handle =
                     session.allocate_output_handle(request.output_handle_index, MapiObject::Logon);
@@ -1825,9 +1860,24 @@ fn set_handle_slot(handle_slots: &mut Vec<u32>, output_handle_index: Option<u8>,
 
 fn reset_table_position(object: &mut MapiObject) {
     match object {
-        MapiObject::HierarchyTable { position, .. }
-        | MapiObject::ContentsTable { position, .. }
-        | MapiObject::AttachmentTable { position, .. } => *position = 0,
+        MapiObject::HierarchyTable {
+            position,
+            bookmarks,
+            ..
+        }
+        | MapiObject::ContentsTable {
+            position,
+            bookmarks,
+            ..
+        }
+        | MapiObject::AttachmentTable {
+            position,
+            bookmarks,
+            ..
+        } => {
+            *position = 0;
+            bookmarks.clear();
+        }
         _ => {}
     }
 }
@@ -2357,6 +2407,7 @@ fn rop_query_rows_response(
             sort_orders,
             restriction,
             position: table_position,
+            ..
         }) if is_root_hierarchy_folder(*folder_id) => {
             start_position = *table_position;
             let columns = if columns.is_empty() {
@@ -2377,6 +2428,7 @@ fn rop_query_rows_response(
             sort_orders,
             restriction,
             position: table_position,
+            ..
         }) => {
             start_position = *table_position;
             let columns = if columns.is_empty() {
@@ -2398,6 +2450,7 @@ fn rop_query_rows_response(
             sort_orders,
             restriction,
             position: table_position,
+            ..
         }) => {
             start_position = *table_position;
             let columns = if columns.is_empty() {
@@ -2866,6 +2919,77 @@ fn rop_seek_row_response(
     response
 }
 
+fn rop_create_bookmark_response(request: &RopRequest, object: Option<&mut MapiObject>) -> Vec<u8> {
+    let Some(object) = object else {
+        return rop_error_response(0x1B, request.response_handle_index(), 0x8004_0102);
+    };
+    let Some((position, bookmarks, next_bookmark)) = table_bookmark_state_mut(object) else {
+        return rop_error_response(0x1B, request.response_handle_index(), 0x8004_0102);
+    };
+    let bookmark = next_bookmark.to_le_bytes().to_vec();
+    bookmarks.insert(bookmark.clone(), *position);
+    *next_bookmark = next_bookmark.saturating_add(1).max(1);
+
+    let mut response = vec![0x1B, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&(bookmark.len() as u16).to_le_bytes());
+    response.extend_from_slice(&bookmark);
+    response
+}
+
+fn rop_seek_row_bookmark_response(
+    request: &RopRequest,
+    object: Option<&mut MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    let Some(object) = object else {
+        return rop_error_response(0x19, request.response_handle_index(), 0x8004_0102);
+    };
+    let total_rows = table_position_and_count(Some(object), mailboxes, emails, snapshot).1;
+    let Some((position, bookmarks, _next_bookmark)) = table_bookmark_state_mut(object) else {
+        return rop_error_response(0x19, request.response_handle_index(), 0x8004_0102);
+    };
+    let Some(base_position) = bookmarks.get(request.bookmark()).copied() else {
+        return rop_error_response(0x19, request.response_handle_index(), 0x8004_0405);
+    };
+
+    let requested_rows = request.bookmark_row_count().unwrap_or(0);
+    let requested_position = (base_position as isize).saturating_add(requested_rows as isize);
+    let new_position = requested_position.clamp(0, total_rows as isize);
+    let rows_sought = (new_position - base_position as isize) as i32;
+    *position = new_position as usize;
+
+    let mut response = vec![0x19, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.push(0);
+    response.push((request.bookmark_want_row_moved_count() && rows_sought != requested_rows) as u8);
+    response.extend_from_slice(
+        &if request.bookmark_want_row_moved_count() {
+            rows_sought
+        } else {
+            0
+        }
+        .to_le_bytes(),
+    );
+    response
+}
+
+fn rop_free_bookmark_response(request: &RopRequest, object: Option<&mut MapiObject>) -> Vec<u8> {
+    let Some(object) = object else {
+        return rop_error_response(0x89, request.response_handle_index(), 0x8004_0102);
+    };
+    let Some((_position, bookmarks, _next_bookmark)) = table_bookmark_state_mut(object) else {
+        return rop_error_response(0x89, request.response_handle_index(), 0x8004_0102);
+    };
+    bookmarks.remove(request.bookmark());
+
+    let mut response = vec![0x89, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response
+}
+
 fn rop_find_row_response(
     request: &RopRequest,
     object: Option<&mut MapiObject>,
@@ -2894,6 +3018,7 @@ fn rop_find_row_response(
             sort_orders,
             restriction: table_restriction,
             position,
+            ..
         } if is_root_hierarchy_folder(*folder_id) => {
             let columns = if columns.is_empty() {
                 default_hierarchy_columns()
@@ -2921,6 +3046,7 @@ fn rop_find_row_response(
             sort_orders,
             restriction: table_restriction,
             position,
+            ..
         } => {
             let columns = if columns.is_empty() {
                 default_contents_columns()
@@ -2947,6 +3073,7 @@ fn rop_find_row_response(
             sort_orders,
             restriction: table_restriction,
             position,
+            ..
         } => {
             let columns = if columns.is_empty() {
                 default_attachment_columns()
@@ -3064,6 +3191,26 @@ fn table_position_mut(object: &mut MapiObject) -> Option<&mut usize> {
         MapiObject::HierarchyTable { position, .. }
         | MapiObject::ContentsTable { position, .. }
         | MapiObject::AttachmentTable { position, .. } => Some(position),
+        _ => None,
+    }
+}
+
+fn table_bookmark_state_mut(
+    object: &mut MapiObject,
+) -> Option<(&mut usize, &mut HashMap<Vec<u8>, usize>, &mut u32)> {
+    match object {
+        MapiObject::HierarchyTable {
+            position,
+            bookmarks,
+            next_bookmark,
+            ..
+        }
+        | MapiObject::ContentsTable {
+            position,
+            bookmarks,
+            next_bookmark,
+            ..
+        } => Some((position, bookmarks, next_bookmark)),
         _ => None,
     }
 }
@@ -3708,6 +3855,35 @@ impl RopRequest {
         self.payload.first().is_some_and(|flags| flags & 0x01 != 0)
     }
 
+    fn bookmark(&self) -> &[u8] {
+        let size = self
+            .payload
+            .get(..2)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .unwrap_or(0) as usize;
+        self.payload.get(2..2 + size).unwrap_or_default()
+    }
+
+    fn bookmark_row_count(&self) -> Option<i32> {
+        let size = u16::from_le_bytes(self.payload.get(..2)?.try_into().ok()?) as usize;
+        let bytes = self.payload.get(2 + size..6 + size)?;
+        Some(i32::from_le_bytes(bytes.try_into().ok()?))
+    }
+
+    fn bookmark_want_row_moved_count(&self) -> bool {
+        let Some(size) = self
+            .payload
+            .get(..2)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .map(usize::from)
+        else {
+            return false;
+        };
+        self.payload.get(6 + size).is_some_and(|want| *want != 0)
+    }
+
     fn seek_origin(&self) -> Option<u8> {
         self.payload.first().copied()
     }
@@ -3986,6 +4162,30 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
+        0x19 => {
+            let input_handle_index = cursor.read_u8()?;
+            let bookmark_size = cursor.read_u16()? as usize;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&(bookmark_size as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(bookmark_size)?);
+            payload.extend_from_slice(&cursor.read_i32()?.to_le_bytes());
+            payload.push(cursor.read_u8()?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x1B => {
+            let input_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload: Vec::new(),
+            })
+        }
         0x0F => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
@@ -4108,6 +4308,19 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
             payload.extend_from_slice(cursor.read_bytes(restriction_size)?);
             payload.push(cursor.read_u8()?);
             let bookmark_size = cursor.read_u16()? as usize;
+            payload.extend_from_slice(&(bookmark_size as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(bookmark_size)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x89 => {
+            let input_handle_index = cursor.read_u8()?;
+            let bookmark_size = cursor.read_u16()? as usize;
+            let mut payload = Vec::new();
             payload.extend_from_slice(&(bookmark_size as u16).to_le_bytes());
             payload.extend_from_slice(cursor.read_bytes(bookmark_size)?);
             Ok(RopRequest {
