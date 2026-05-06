@@ -6,10 +6,14 @@ use axum::{
     },
     response::{IntoResponse, Response},
 };
+use lpe_magika::{
+    Detector, ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator,
+};
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
-    AuditEntryInput, JmapEmail, JmapEmailAddress, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    AttachmentUploadInput, AuditEntryInput, JmapEmail, JmapEmailAddress, JmapImportedEmailInput,
+    JmapMailbox, JmapMailboxCreateInput, SubmitMessageInput, SubmittedMessage,
+    SubmittedRecipientInput,
 };
 use std::{
     cmp::Ordering,
@@ -193,9 +197,26 @@ enum MapiObject {
         message_id: u64,
         attach_num: u32,
     },
+    PendingAttachment {
+        folder_id: u64,
+        message_id: u64,
+        attach_num: u32,
+        properties: HashMap<u32, MapiValue>,
+        data: Vec<u8>,
+    },
+    SavedAttachment {
+        folder_id: u64,
+        message_id: u64,
+        attach_num: u32,
+        file_reference: String,
+        file_name: String,
+        media_type: String,
+        size_octets: u64,
+    },
     AttachmentStream {
         data: Vec<u8>,
         position: usize,
+        writable_attachment_handle: Option<u32>,
     },
 }
 
@@ -205,12 +226,17 @@ fn sessions() -> &'static Mutex<HashMap<String, MapiSession>> {
     MAPI_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-pub(crate) async fn handle_mapi<S: ExchangeStore>(
+pub(crate) async fn handle_mapi<S, V>(
     store: &S,
+    validator: &Validator<V>,
     endpoint: MapiEndpoint,
     headers: &HeaderMap,
     _body: &[u8],
-) -> Result<Response> {
+) -> Result<Response>
+where
+    S: ExchangeStore,
+    V: Detector,
+{
     let principal = authenticate_account(store, None, headers, "mapi").await?;
     let request_type = request_type(headers)?;
     let request_type_label = request_type.header_value().to_string();
@@ -243,7 +269,16 @@ pub(crate) async fn handle_mapi<S: ExchangeStore>(
             disconnect_response(endpoint, &principal, headers, &request_id, "Disconnect")
         }
         (MapiEndpoint::Emsmdb, MapiRequestType::Execute) => {
-            execute_response(store, endpoint, &principal, headers, _body, &request_id).await
+            execute_response(
+                store,
+                validator,
+                endpoint,
+                &principal,
+                headers,
+                _body,
+                &request_id,
+            )
+            .await
         }
         (MapiEndpoint::Nspi, MapiRequestType::Bind) => {
             bind_response(endpoint, &principal, &request_id)
@@ -378,14 +413,19 @@ fn bind_response(
     mapi_response("Bind", request_id, 0, body, Some(cookie))
 }
 
-async fn execute_response<S: ExchangeStore>(
+async fn execute_response<S, V>(
     store: &S,
+    validator: &Validator<V>,
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
     headers: &HeaderMap,
     body: &[u8],
     request_id: &str,
-) -> Response {
+) -> Response
+where
+    S: ExchangeStore,
+    V: Detector,
+{
     let Some(session_id) = request_cookie(endpoint, headers) else {
         return execute_failure_response(request_id, 13, "missing MAPI session cookie", None);
     };
@@ -452,6 +492,7 @@ async fn execute_response<S: ExchangeStore>(
         &mailboxes,
         &emails,
         &snapshot,
+        validator,
         &execute.rop_buffer,
     )
     .await;
@@ -1229,15 +1270,20 @@ fn parse_execute_request(body: &[u8]) -> Result<ExecuteRequest> {
     Ok(ExecuteRequest { rop_buffer })
 }
 
-async fn execute_rops<S: ExchangeStore>(
+async fn execute_rops<S, V>(
     store: &S,
     principal: &AccountPrincipal,
     session: &mut MapiSession,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    validator: &Validator<V>,
     rop_buffer: &[u8],
-) -> Vec<u8> {
+) -> Vec<u8>
+where
+    S: ExchangeStore,
+    V: Detector,
+{
     let Some((requests, handle_table)) = split_rop_buffer(rop_buffer) else {
         return rop_buffer_with_response(unsupported_rop_response(0, 0), &[]);
     };
@@ -1406,6 +1452,26 @@ async fn execute_rops<S: ExchangeStore>(
                         )),
                     }
                 }
+                Some(MapiObject::PendingAttachment {
+                    properties, data, ..
+                }) => match request.property_values() {
+                    Ok(values) => {
+                        for (tag, value) in values {
+                            if tag == PID_TAG_ATTACH_DATA_BINARY {
+                                if let MapiValue::Binary(bytes) = &value {
+                                    *data = bytes.clone();
+                                }
+                            }
+                            properties.insert(tag, value);
+                        }
+                        responses.extend_from_slice(&rop_set_properties_response(&request));
+                    }
+                    Err(_) => responses.extend_from_slice(&rop_error_response(
+                        0x0A,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    )),
+                },
                 _ => responses.extend_from_slice(&rop_error_response(
                     0x0A,
                     request.response_handle_index(),
@@ -2009,20 +2075,193 @@ async fn execute_rops<S: ExchangeStore>(
                     ));
                 }
             }
-            0x2B => {
-                let Some(MapiObject::Attachment {
+            0x23 => {
+                let Some(MapiObject::Message {
                     folder_id,
                     message_id,
-                    attach_num,
                 }) = input_object(session, &handle_slots, &request)
                 else {
                     responses.extend_from_slice(&rop_error_response(
-                        0x2B,
+                        0x23,
+                        request.output_handle_index.unwrap_or(0),
+                        0x0000_04B9,
+                    ));
+                    continue;
+                };
+                if message_for_id(*folder_id, *message_id, mailboxes, emails).is_none() {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x23,
                         request.output_handle_index.unwrap_or(0),
                         0x8004_010F,
                     ));
                     continue;
+                }
+
+                let attach_num =
+                    next_pending_attachment_num(session, *folder_id, *message_id, snapshot);
+                let handle = session.allocate_output_handle(
+                    request.output_handle_index,
+                    MapiObject::PendingAttachment {
+                        folder_id: *folder_id,
+                        message_id: *message_id,
+                        attach_num,
+                        properties: HashMap::new(),
+                        data: Vec::new(),
+                    },
+                );
+                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                responses.extend_from_slice(&rop_create_attachment_response(&request, attach_num));
+                output_handles.push(handle);
+            }
+            0x24 => {
+                let Some(MapiObject::Message {
+                    folder_id,
+                    message_id,
+                }) = input_object(session, &handle_slots, &request)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x24,
+                        request.response_handle_index(),
+                        0x0000_04B9,
+                    ));
+                    continue;
                 };
+                let attach_num = request.attach_num().unwrap_or(u32::MAX);
+                let Some(attachment) =
+                    snapshot.attachment_for_message(*folder_id, *message_id, attach_num)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x24,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                match store
+                    .delete_message_attachment(
+                        principal.account_id,
+                        &attachment.file_reference,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "mapi-delete-attachment".to_string(),
+                            subject: attachment.file_reference.clone(),
+                        },
+                    )
+                    .await
+                {
+                    Ok(Some(_)) => {
+                        responses.extend_from_slice(&rop_simple_success_response(&request))
+                    }
+                    _ => responses.extend_from_slice(&rop_error_response(
+                        0x24,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    )),
+                }
+            }
+            0x25 => {
+                let Some(handle) = input_handle(&handle_slots, &request) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x25,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                let Some(MapiObject::PendingAttachment {
+                    folder_id,
+                    message_id,
+                    attach_num,
+                    properties,
+                    data,
+                }) = session.handles.get(&handle).cloned()
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x25,
+                        request.response_handle_index(),
+                        0x0000_04B9,
+                    ));
+                    continue;
+                };
+                let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x25,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                let attachment = pending_attachment_upload(attach_num, &properties, data);
+                let validation = validator.validate_bytes(
+                    ValidationRequest {
+                        ingress_context: IngressContext::ExchangeAttachment,
+                        declared_mime: Some(attachment.media_type.clone()),
+                        filename: Some(attachment.file_name.clone()),
+                        expected_kind: mapi_expected_attachment_kind(
+                            &attachment.media_type,
+                            &attachment.file_name,
+                        ),
+                    },
+                    &attachment.blob_bytes,
+                );
+                let Ok(outcome) = validation else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x25,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                };
+                if outcome.policy_decision != PolicyDecision::Accept {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x25,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
+                let mut attachment = attachment;
+                if attachment.media_type == "application/octet-stream"
+                    && !outcome.detected_mime.trim().is_empty()
+                {
+                    attachment.media_type = outcome.detected_mime;
+                }
+                match store
+                    .add_message_attachment(
+                        principal.account_id,
+                        email.id,
+                        attachment,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "mapi-save-attachment".to_string(),
+                            subject: format!("message:{}", email.id),
+                        },
+                    )
+                    .await
+                {
+                    Ok(Some((_email, stored))) => {
+                        session.handles.insert(
+                            handle,
+                            MapiObject::SavedAttachment {
+                                folder_id,
+                                message_id,
+                                attach_num,
+                                file_reference: stored.file_reference,
+                                file_name: stored.file_name,
+                                media_type: stored.media_type,
+                                size_octets: stored.size_octets,
+                            },
+                        );
+                        responses.extend_from_slice(&rop_simple_success_response(&request));
+                    }
+                    _ => responses.extend_from_slice(&rop_error_response(
+                        0x25,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    )),
+                }
+            }
+            0x2B => {
                 if request.stream_property_tag() != Some(PID_TAG_ATTACH_DATA_BINARY) {
                     responses.extend_from_slice(&rop_error_response(
                         0x2B,
@@ -2031,8 +2270,16 @@ async fn execute_rops<S: ExchangeStore>(
                     ));
                     continue;
                 }
-                let Some(attachment) =
-                    snapshot.attachment_for_message(*folder_id, *message_id, *attach_num)
+                let Some(input_handle) = input_handle(&handle_slots, &request) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x2B,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                let Some((stream_data, writable_attachment_handle)) =
+                    attachment_stream_data(store, principal, session, input_handle, snapshot).await
                 else {
                     responses.extend_from_slice(&rop_error_response(
                         0x2B,
@@ -2041,23 +2288,13 @@ async fn execute_rops<S: ExchangeStore>(
                     ));
                     continue;
                 };
-                let content = store
-                    .fetch_attachment_content(principal.account_id, &attachment.file_reference)
-                    .await;
-                let Ok(Some(content)) = content else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x2B,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8004_010F,
-                    ));
-                    continue;
-                };
-                let stream_size = content.blob_bytes.len();
+                let stream_size = stream_data.len();
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
                     MapiObject::AttachmentStream {
-                        data: content.blob_bytes,
+                        data: stream_data,
                         position: 0,
+                        writable_attachment_handle,
                     },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -2075,6 +2312,36 @@ async fn execute_rops<S: ExchangeStore>(
                 };
                 responses.extend_from_slice(&rop_read_stream_response(&request, stream));
             }
+            0x2D | 0x90 => {
+                let Some(stream_handle) = input_handle(&handle_slots, &request) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                match write_attachment_stream(session, stream_handle, request.stream_write_data()) {
+                    Some(written) => {
+                        responses.extend_from_slice(&rop_write_stream_response(&request, written))
+                    }
+                    None => responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    )),
+                }
+            }
+            0x5D => match input_object(session, &handle_slots, &request) {
+                Some(MapiObject::AttachmentStream { .. }) => {
+                    responses.extend_from_slice(&rop_simple_success_response(&request))
+                }
+                _ => responses.extend_from_slice(&rop_error_response(
+                    0x5D,
+                    request.response_handle_index(),
+                    0x8004_010F,
+                )),
+            },
             0x32 => {
                 let Some(handle) = input_handle(&handle_slots, &request) else {
                     responses.extend_from_slice(&rop_error_response(
@@ -2426,7 +2693,9 @@ impl MapiObject {
             | MapiObject::HierarchyTable { folder_id, .. }
             | MapiObject::ContentsTable { folder_id, .. }
             | MapiObject::AttachmentTable { folder_id, .. }
-            | MapiObject::Attachment { folder_id, .. } => Some(*folder_id),
+            | MapiObject::Attachment { folder_id, .. }
+            | MapiObject::PendingAttachment { folder_id, .. }
+            | MapiObject::SavedAttachment { folder_id, .. } => Some(*folder_id),
         }
     }
 }
@@ -2822,6 +3091,13 @@ fn rop_open_attachment_response(request: &RopRequest) -> Vec<u8> {
     response
 }
 
+fn rop_create_attachment_response(request: &RopRequest, attach_num: u32) -> Vec<u8> {
+    let mut response = vec![0x23, request.output_handle_index.unwrap_or(0)];
+    write_u32(&mut response, 0);
+    write_u32(&mut response, attach_num);
+    response
+}
+
 fn rop_open_stream_response(request: &RopRequest, stream_size: usize) -> Vec<u8> {
     let mut response = vec![0x2B, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
@@ -2831,7 +3107,7 @@ fn rop_open_stream_response(request: &RopRequest, stream_size: usize) -> Vec<u8>
 
 fn rop_read_stream_response(request: &RopRequest, stream: &mut MapiObject) -> Vec<u8> {
     let input_handle_index = request.input_handle_index().unwrap_or(0);
-    let MapiObject::AttachmentStream { data, position } = stream else {
+    let MapiObject::AttachmentStream { data, position, .. } = stream else {
         return rop_error_response(0x2C, input_handle_index, 0x8004_010F);
     };
     let requested = request
@@ -2847,6 +3123,13 @@ fn rop_read_stream_response(request: &RopRequest, stream: &mut MapiObject) -> Ve
     write_u32(&mut response, 0);
     response.extend_from_slice(&(chunk.len() as u16).to_le_bytes());
     response.extend_from_slice(&chunk);
+    response
+}
+
+fn rop_write_stream_response(request: &RopRequest, written: usize) -> Vec<u8> {
+    let mut response = vec![request.rop_id, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&(written.min(u16::MAX as usize) as u16).to_le_bytes());
     response
 }
 
@@ -2919,7 +3202,11 @@ fn rop_save_changes_message_response(request: &RopRequest, message_id: u64) -> V
 
 fn rop_get_properties_list_response(request: &RopRequest, object: Option<&MapiObject>) -> Vec<u8> {
     let tags = match object {
-        Some(MapiObject::Attachment { .. }) => default_attachment_columns(),
+        Some(
+            MapiObject::Attachment { .. }
+            | MapiObject::PendingAttachment { .. }
+            | MapiObject::SavedAttachment { .. },
+        ) => default_attachment_columns(),
         Some(MapiObject::Message { .. }) | Some(MapiObject::PendingMessage { .. }) => {
             default_message_property_tags()
         }
@@ -2978,6 +3265,27 @@ fn rop_get_properties_specific_response(
             };
             serialize_attachment_row(attachment, &columns)
         }
+        Some(MapiObject::PendingAttachment {
+            attach_num,
+            properties,
+            data,
+            ..
+        }) => serialize_pending_attachment_row(*attach_num, properties, data, &columns),
+        Some(MapiObject::SavedAttachment {
+            attach_num,
+            file_reference,
+            file_name,
+            media_type,
+            size_octets,
+            ..
+        }) => serialize_saved_attachment_row(
+            *attach_num,
+            file_reference,
+            file_name,
+            media_type,
+            *size_octets,
+            &columns,
+        ),
         _ => {
             let folder_id = object
                 .and_then(MapiObject::folder_id)
@@ -3002,7 +3310,11 @@ fn rop_get_properties_all_response(
     let mut response = vec![0x08, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
     let tags = match object {
-        Some(MapiObject::Attachment { .. }) => default_attachment_columns(),
+        Some(
+            MapiObject::Attachment { .. }
+            | MapiObject::PendingAttachment { .. }
+            | MapiObject::SavedAttachment { .. },
+        ) => default_attachment_columns(),
         Some(MapiObject::Message { .. }) | Some(MapiObject::PendingMessage { .. }) => {
             default_message_property_tags()
         }
@@ -3051,6 +3363,27 @@ fn serialize_object_property(
                 write_property_default(&mut value, tag);
                 value
             }),
+        Some(MapiObject::PendingAttachment {
+            attach_num,
+            properties,
+            data,
+            ..
+        }) => serialize_pending_attachment_row(*attach_num, properties, data, &[tag]),
+        Some(MapiObject::SavedAttachment {
+            attach_num,
+            file_reference,
+            file_name,
+            media_type,
+            size_octets,
+            ..
+        }) => serialize_saved_attachment_row(
+            *attach_num,
+            file_reference,
+            file_name,
+            media_type,
+            *size_octets,
+            &[tag],
+        ),
         _ => {
             let folder_id = object
                 .and_then(MapiObject::folder_id)
@@ -4009,6 +4342,114 @@ fn message_for_id<'a>(
     })
 }
 
+fn next_pending_attachment_num(
+    session: &MapiSession,
+    folder_id: u64,
+    message_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+) -> u32 {
+    let snapshot_max = snapshot
+        .attachments_for_message(folder_id, message_id)
+        .unwrap_or_default()
+        .iter()
+        .map(|attachment| attachment.attach_num)
+        .max();
+    let session_max = session
+        .handles
+        .values()
+        .filter_map(|object| match object {
+            MapiObject::PendingAttachment {
+                folder_id: pending_folder_id,
+                message_id: pending_message_id,
+                attach_num,
+                ..
+            }
+            | MapiObject::SavedAttachment {
+                folder_id: pending_folder_id,
+                message_id: pending_message_id,
+                attach_num,
+                ..
+            } if *pending_folder_id == folder_id && *pending_message_id == message_id => {
+                Some(*attach_num)
+            }
+            _ => None,
+        })
+        .max();
+    snapshot_max
+        .into_iter()
+        .chain(session_max)
+        .max()
+        .map(|value| value.saturating_add(1))
+        .unwrap_or(0)
+}
+
+async fn attachment_stream_data<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &MapiSession,
+    input_handle: u32,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Option<(Vec<u8>, Option<u32>)> {
+    match session.handles.get(&input_handle)?.clone() {
+        MapiObject::Attachment {
+            folder_id,
+            message_id,
+            attach_num,
+        } => {
+            let attachment = snapshot.attachment_for_message(folder_id, message_id, attach_num)?;
+            let content = store
+                .fetch_attachment_content(principal.account_id, &attachment.file_reference)
+                .await
+                .ok()??;
+            Some((content.blob_bytes, None))
+        }
+        MapiObject::PendingAttachment { data, .. } => Some((data, Some(input_handle))),
+        MapiObject::SavedAttachment { file_reference, .. } => {
+            let content = store
+                .fetch_attachment_content(principal.account_id, &file_reference)
+                .await
+                .ok()??;
+            Some((content.blob_bytes, None))
+        }
+        _ => None,
+    }
+}
+
+fn write_attachment_stream(
+    session: &mut MapiSession,
+    stream_handle: u32,
+    bytes: &[u8],
+) -> Option<usize> {
+    let (updated_data, writable_attachment_handle, written) = {
+        let Some(MapiObject::AttachmentStream {
+            data,
+            position,
+            writable_attachment_handle,
+        }) = session.handles.get_mut(&stream_handle)
+        else {
+            return None;
+        };
+        let start = *position;
+        let end = start.checked_add(bytes.len())?;
+        if data.len() < end {
+            data.resize(end, 0);
+        }
+        data[start..end].copy_from_slice(bytes);
+        *position = end;
+        (data.clone(), *writable_attachment_handle, bytes.len())
+    };
+
+    if let Some(attachment_handle) = writable_attachment_handle {
+        if let Some(MapiObject::PendingAttachment { data, .. }) =
+            session.handles.get_mut(&attachment_handle)
+        {
+            *data = updated_data;
+        }
+    }
+
+    Some(written)
+}
+
 fn email_matches_folder(email: &JmapEmail, folder_id: u64, mailboxes: &[JmapMailbox]) -> bool {
     if let Some(role) = role_for_folder_id(folder_id) {
         return email.mailbox_role == role;
@@ -4046,6 +4487,65 @@ fn serialize_root_folder_row(mailboxes: &[JmapMailbox], columns: &[u32]) -> Vec<
             PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPF.Root"),
             PID_TAG_LAST_MODIFICATION_TIME => write_u64(&mut row, 0),
+            _ => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+fn serialize_pending_attachment_row(
+    attach_num: u32,
+    properties: &HashMap<u32, MapiValue>,
+    data: &[u8],
+    columns: &[u32],
+) -> Vec<u8> {
+    let file_name = pending_attachment_file_name(attach_num, properties);
+    let media_type = pending_attachment_media_type(properties);
+    let size = data.len().min(u32::MAX as usize) as u32;
+    let mut row = Vec::new();
+    for column in columns {
+        if let Some(value) = properties.get(column) {
+            write_mapi_value(&mut row, *column, value);
+            continue;
+        }
+        match *column {
+            PID_TAG_ATTACH_NUM => write_u32(&mut row, attach_num),
+            PID_TAG_ATTACH_FILENAME_W | PID_TAG_ATTACH_LONG_FILENAME_W => {
+                write_utf16z(&mut row, &file_name)
+            }
+            PID_TAG_ATTACH_MIME_TAG_W => write_utf16z(&mut row, &media_type),
+            PID_TAG_ATTACH_SIZE => write_u32(&mut row, size),
+            PID_TAG_ATTACH_METHOD => write_u32(&mut row, 1),
+            PID_TAG_RENDERING_POSITION => write_u32(&mut row, u32::MAX),
+            PID_TAG_ATTACH_DATA_BINARY => write_u16_prefixed_bytes(&mut row, data),
+            _ => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+fn serialize_saved_attachment_row(
+    attach_num: u32,
+    file_reference: &str,
+    file_name: &str,
+    media_type: &str,
+    size_octets: u64,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match *column {
+            PID_TAG_ATTACH_NUM => write_u32(&mut row, attach_num),
+            PID_TAG_ATTACH_FILENAME_W | PID_TAG_ATTACH_LONG_FILENAME_W => {
+                write_utf16z(&mut row, file_name)
+            }
+            PID_TAG_ATTACH_MIME_TAG_W => write_utf16z(&mut row, media_type),
+            PID_TAG_ATTACH_SIZE => write_u32(&mut row, size_octets.min(u32::MAX as u64) as u32),
+            PID_TAG_ATTACH_METHOD => write_u32(&mut row, 1),
+            PID_TAG_RENDERING_POSITION => write_u32(&mut row, u32::MAX),
+            PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => {
+                write_u16_prefixed_bytes(&mut row, file_reference.as_bytes())
+            }
             _ => write_property_default(&mut row, *column),
         }
     }
@@ -4176,6 +4676,49 @@ fn optional_pending_text_property(
                 .and_then(|value| value.clone().into_text())
         })
         .filter(|value| !value.trim().is_empty())
+}
+
+fn pending_attachment_upload(
+    attach_num: u32,
+    properties: &HashMap<u32, MapiValue>,
+    data: Vec<u8>,
+) -> AttachmentUploadInput {
+    AttachmentUploadInput {
+        file_name: pending_attachment_file_name(attach_num, properties),
+        media_type: pending_attachment_media_type(properties),
+        blob_bytes: data,
+    }
+}
+
+fn pending_attachment_file_name(attach_num: u32, properties: &HashMap<u32, MapiValue>) -> String {
+    optional_pending_text_property(
+        properties,
+        &[PID_TAG_ATTACH_LONG_FILENAME_W, PID_TAG_ATTACH_FILENAME_W],
+    )
+    .unwrap_or_else(|| format!("mapi-attachment-{attach_num}.bin"))
+}
+
+fn pending_attachment_media_type(properties: &HashMap<u32, MapiValue>) -> String {
+    optional_pending_text_property(properties, &[PID_TAG_ATTACH_MIME_TAG_W])
+        .unwrap_or_else(|| "application/octet-stream".to_string())
+}
+
+fn mapi_expected_attachment_kind(media_type: &str, file_name: &str) -> ExpectedKind {
+    let media_type = media_type.trim().to_ascii_lowercase();
+    let file_name = file_name.trim().to_ascii_lowercase();
+    if matches!(
+        media_type.as_str(),
+        "application/pdf"
+            | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            | "application/vnd.oasis.opendocument.text"
+    ) || file_name.ends_with(".pdf")
+        || file_name.ends_with(".docx")
+        || file_name.ends_with(".odt")
+    {
+        ExpectedKind::SupportedAttachmentText
+    } else {
+        ExpectedKind::Any
+    }
 }
 
 fn jmap_import_from_pending_message(
@@ -4775,7 +5318,7 @@ impl RopRequest {
     }
 
     fn response_handle_index(&self) -> u8 {
-        if matches!(self.rop_id, 0x0C | 0x11) {
+        if matches!(self.rop_id, 0x0C | 0x11 | 0x25) {
             return self.output_handle_index.unwrap_or(0);
         }
         self.input_handle_index
@@ -4798,7 +5341,11 @@ impl RopRequest {
     }
 
     fn attach_num(&self) -> Option<u32> {
-        let bytes = self.payload.get(1..5)?;
+        let bytes = if self.rop_id == 0x24 {
+            self.payload.get(..4)?
+        } else {
+            self.payload.get(1..5)?
+        };
         Some(u32::from_le_bytes(bytes.try_into().ok()?))
     }
 
@@ -4810,6 +5357,17 @@ impl RopRequest {
     fn read_byte_count(&self) -> Option<u16> {
         let bytes = self.payload.get(..2)?;
         Some(u16::from_le_bytes(bytes.try_into().ok()?))
+    }
+
+    fn stream_write_data(&self) -> &[u8] {
+        let size = self
+            .payload
+            .get(..2)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .map(usize::from)
+            .unwrap_or(0);
+        self.payload.get(2..2 + size).unwrap_or_default()
     }
 
     fn read_flags(&self) -> Option<u8> {
@@ -5305,6 +5863,38 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
+        0x23 => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload: Vec::new(),
+            })
+        }
+        0x24 => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x25 => {
+            let response_handle_index = cursor.read_u8()?;
+            let input_handle_index = cursor.read_u8()?;
+            let payload = vec![cursor.read_u8()?];
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(response_handle_index),
+                payload,
+            })
+        }
         0x08 => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
@@ -5339,6 +5929,28 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: None,
                 payload,
+            })
+        }
+        0x2D | 0x90 => {
+            let input_handle_index = cursor.read_u8()?;
+            let size = cursor.read_u16()? as usize;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&(size as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(size)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x5D => {
+            let input_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload: Vec::new(),
             })
         }
         0x66 => {

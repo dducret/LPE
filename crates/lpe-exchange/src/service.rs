@@ -593,7 +593,7 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
         headers: &HeaderMap,
         body: &[u8],
     ) -> Result<Response> {
-        mapi::handle_mapi(&self.store, endpoint, headers, body).await
+        mapi::handle_mapi(&self.store, &self.validator, endpoint, headers, body).await
     }
 
     pub(crate) async fn handle_rpc_proxy(
