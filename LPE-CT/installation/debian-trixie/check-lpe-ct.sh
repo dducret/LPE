@@ -219,6 +219,28 @@ grep -qi '^x-lpe-mapi-status: transport-session-ready' "$mapi_headers" \
 rm -f "$mapi_headers"
 pass "MAPI EMSMDB OPTIONS is published through LPE-CT"
 
+rpc_headers="$(mktemp)"
+rpc_status="$(curl --silent --show-error --insecure --http1.1 \
+  --header "Host: ${PUBLIC_HOST_HEADER}" \
+  --dump-header "$rpc_headers" \
+  --output /dev/null \
+  --write-out "%{http_code}" \
+  "${PUBLIC_HTTPS_BASE}/rpc/rpcproxy.dll" 2>/dev/null || true)"
+[[ "$rpc_status" == "401" ]] \
+  || {
+    sed -n '1,40p' "$rpc_headers" >&2 || true
+    rm -f "$rpc_headers"
+    fail "RPC proxy auth shim should return HTTP 401 through LPE-CT, got ${rpc_status:-000}"
+  }
+grep -qi '^www-authenticate: Basic realm="LPE RPC"' "$rpc_headers" \
+  || {
+    sed -n '1,40p' "$rpc_headers" >&2 || true
+    rm -f "$rpc_headers"
+    fail "RPC proxy auth shim response is missing Basic realm=\"LPE RPC\""
+  }
+rm -f "$rpc_headers"
+pass "RPC proxy auth shim is published through LPE-CT"
+
 [[ -n "$SMTP_TEST_SENDER" ]] || fail "Set LPE_CT_SMTP_TEST_SENDER in $ENV_FILE or the shell environment"
 [[ -n "$SMTP_TEST_RECIPIENT" ]] || fail "Set LPE_CT_SMTP_TEST_RECIPIENT in $ENV_FILE or the shell environment"
 

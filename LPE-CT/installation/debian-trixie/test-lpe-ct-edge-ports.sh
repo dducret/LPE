@@ -709,6 +709,44 @@ probe_client_publication() {
   rm -f "${headers_file}"
   pass "MAPI EMSMDB OPTIONS is published through LPE-CT"
 
+  headers_file="$(mktemp)"
+  local rpc_status
+  rpc_status="$(curl --silent --show-error --insecure --http1.1 \
+    --header "Host: ${host_header}" \
+    --dump-header "${headers_file}" \
+    --output /dev/null \
+    --write-out "%{http_code}" \
+    "${base_url}/rpc/rpcproxy.dll" 2>/dev/null || true)"
+  case "${rpc_status}" in
+    401)
+      ;;
+    000)
+      rm -f "${headers_file}"
+      fail "RPC proxy auth shim did not return an HTTP response through LPE-CT"
+      ;;
+    404)
+      rm -f "${headers_file}"
+      fail "RPC proxy auth shim returned 404 through LPE-CT; check nginx route publication for /rpc/rpcproxy.dll"
+      ;;
+    502|503|504)
+      rm -f "${headers_file}"
+      diagnose_core_upstream_failure "RPC proxy auth shim" "${rpc_status}" "/rpc/rpcproxy.dll"
+      ;;
+    *)
+      sed -n '1,40p' "${headers_file}" || true
+      rm -f "${headers_file}"
+      fail "RPC proxy auth shim should return HTTP 401 through LPE-CT, got ${rpc_status}"
+      ;;
+  esac
+  grep -qi '^www-authenticate: Basic realm="LPE RPC"' "${headers_file}" \
+    || {
+      sed -n '1,40p' "${headers_file}" || true
+      rm -f "${headers_file}"
+      fail "RPC proxy auth shim response is missing Basic realm=\"LPE RPC\""
+    }
+  rm -f "${headers_file}"
+  pass "RPC proxy auth shim is published through LPE-CT"
+
   assert_published_core_route "POST" "/api/mail/auth/login" "Mailbox login API" "{}"
   assert_published_core_route "GET" "/api/jmap/session" "JMAP session endpoint"
   assert_published_core_route "POST" "/api/jmap/api" "JMAP API endpoint" "{}"

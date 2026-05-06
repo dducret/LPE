@@ -22,6 +22,10 @@ The core `LPE` server must not be directly reachable from the public Internet an
 - plain `HTTP` on port `80` only as a redirect to the `HTTPS` edge; port `80`
   must not be configured as the `HTTPS` listener
 - `ActiveSync` over `HTTPS` under `/Microsoft-Server-ActiveSync`
+- `EWS` over `HTTPS` under `/EWS/Exchange.asmx` and `/ews/exchange.asmx`
+- guarded `MAPI over HTTP` over `HTTPS` under `/mapi/`
+- the bounded RPC proxy authentication shim under `/rpc/rpcproxy.dll` for
+  legacy `EXCH` / `EXPR` RCA probes when that compatibility mode is enabled
 - exposed `JMAP` endpoints over `TLS` toward `LPE` under `/api/jmap/*`
 - secure `JMAP` WebSockets over `TLS` under the same published `JMAP` origin when the `JMAP` WebSocket endpoint is enabled
 - `IMAPS` on port `993`, with `LPE-CT` terminating client `TLS` and proxying the internal clear IMAP stream to the core `LPE` IMAP adapter

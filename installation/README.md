@@ -52,12 +52,14 @@ The `LPE-CT` scripts also install the SMTP ingress listener on `25`, publish the
 
 The generated `LPE-CT` `nginx` site also re-exposes the core client publication
 routes on the public HTTPS edge: `/Microsoft-Server-ActiveSync`, `/mapi/`,
+`/rpc/rpcproxy.dll`, `/EWS/Exchange.asmx`, `/ews/exchange.asmx`,
 `/autodiscover/`, `/Autodiscover/`, `/autoconfig/`, and
 `/.well-known/autoconfig/`. ActiveSync and MAPI use long proxy timeouts so
 mobile and Outlook long-poll requests are not cut off by the edge proxy. The
 `install-lpe-ct.sh` and `update-lpe-ct.sh` scripts validate the rendered nginx
 publication settings, while `check-lpe-ct.sh` and `test-lpe-ct-edge-ports.sh`
-validate the live autodiscover and ActiveSync responses through the public edge.
+validate the live autodiscover, ActiveSync, MAPI, and RPC proxy auth-shim
+responses through the public edge.
 The same generated `HTTPS` site now emits baseline security headers:
 `Strict-Transport-Security: max-age=31536000`, `X-Content-Type-Options:
 nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,

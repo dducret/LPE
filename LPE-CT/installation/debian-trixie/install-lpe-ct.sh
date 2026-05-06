@@ -435,6 +435,8 @@ validate_publication_config() {
     "location /autoconfig/"
     "location /.well-known/autoconfig/"
     "location /mapi/"
+    "location = /rpc/rpcproxy.dll"
+    'proxy_set_header Authorization $http_authorization;'
     "Strict-Transport-Security"
     "X-Content-Type-Options"
     "Referrer-Policy"
