@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
-use lpe_storage::{JmapEmail, JmapEmailAddress, JmapMailbox};
+use lpe_storage::{AuditEntryInput, JmapEmail, JmapEmailAddress, JmapMailbox};
 use std::{
     collections::HashMap,
     env,
@@ -1408,6 +1408,54 @@ async fn execute_rops<S: ExchangeStore>(
                 responses.extend_from_slice(&rop_read_stream_response(&request, stream));
             }
             0x27 => responses.extend_from_slice(&rop_get_receive_folder_response(&request)),
+            0x66 => {
+                let folder_id = match input_object(session, &handle_slots, &request) {
+                    Some(MapiObject::Folder { folder_id }) => *folder_id,
+                    _ => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x66,
+                            request.response_handle_index(),
+                            0x0000_04B9,
+                        ));
+                        continue;
+                    }
+                };
+                let unread = match request.read_flags() {
+                    Some(flags) if flags & 0x10 != 0 => None,
+                    Some(flags) if flags & 0x04 != 0 => Some(true),
+                    Some(_) => Some(false),
+                    None => Some(false),
+                };
+                let mut partial_completion = false;
+                for message_id in request.message_ids() {
+                    let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
+                    else {
+                        partial_completion = true;
+                        continue;
+                    };
+                    if let Some(unread) = unread {
+                        if store
+                            .update_jmap_email_flags(
+                                principal.account_id,
+                                email.id,
+                                Some(unread),
+                                None,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "mapi-set-read-flags".to_string(),
+                                    subject: format!("message:{}", email.id),
+                                },
+                            )
+                            .await
+                            .is_err()
+                        {
+                            partial_completion = true;
+                        }
+                    }
+                }
+                responses
+                    .extend_from_slice(&rop_set_read_flags_response(&request, partial_completion));
+            }
             0x68 => responses.extend_from_slice(&rop_get_receive_folder_table_response(&request)),
             0x7B => responses.extend_from_slice(&rop_get_store_state_response(&request)),
             0x81 => responses.extend_from_slice(&rop_reset_table_response(&request)),
@@ -1872,6 +1920,13 @@ fn rop_read_stream_response(request: &RopRequest, stream: &mut MapiObject) -> Ve
     write_u32(&mut response, 0);
     response.extend_from_slice(&(chunk.len() as u16).to_le_bytes());
     response.extend_from_slice(&chunk);
+    response
+}
+
+fn rop_set_read_flags_response(request: &RopRequest, partial_completion: bool) -> Vec<u8> {
+    let mut response = vec![0x66, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.push(partial_completion as u8);
     response
 }
 
@@ -2620,6 +2675,22 @@ impl RopRequest {
         Some(u16::from_le_bytes(bytes.try_into().ok()?))
     }
 
+    fn read_flags(&self) -> Option<u8> {
+        self.payload.get(1).copied()
+    }
+
+    fn message_ids(&self) -> Vec<u64> {
+        let Some(count_bytes) = self.payload.get(2..4) else {
+            return Vec::new();
+        };
+        let count = u16::from_le_bytes([count_bytes[0], count_bytes[1]]) as usize;
+        self.payload[4..]
+            .chunks_exact(8)
+            .take(count)
+            .map(|bytes| u64::from_le_bytes(bytes.try_into().unwrap_or_default()))
+            .collect()
+    }
+
     fn property_tags(&self) -> Vec<u32> {
         let start = match self.rop_id {
             0x07 => 4,
@@ -2721,6 +2792,21 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x66 => {
+            let input_handle_index = cursor.read_u8()?;
+            let want_asynchronous = cursor.read_u8()?;
+            let read_flags = cursor.read_u8()?;
+            let message_id_count = cursor.read_u16()? as usize;
+            let mut payload = vec![want_asynchronous, read_flags];
+            payload.extend_from_slice(&(message_id_count as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(message_id_count * 8)?);
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
