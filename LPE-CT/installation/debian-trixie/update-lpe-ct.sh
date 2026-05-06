@@ -74,6 +74,7 @@ validate_publication_config() {
     "location /.well-known/autoconfig/"
     "location /mapi/"
     "location = /rpc/rpcproxy.dll"
+    "proxy_pass ${LPE_CT_CORE_DELIVERY_BASE_URL}/rpc/rpcproxy.dll;"
     'proxy_set_header Authorization $http_authorization;'
     "Strict-Transport-Security"
     "X-Content-Type-Options"

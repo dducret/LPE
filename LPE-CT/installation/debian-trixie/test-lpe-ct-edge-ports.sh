@@ -758,19 +758,19 @@ probe_client_publication() {
     --output /dev/null \
     --write-out "%{http_code}" \
     "${base_url}/rpc/rpcproxy.dll?${host_header}:6002" 2>/dev/null || true)"
-  if [[ "${rpc_echo_status}" != "200" ]]; then
+  if [[ "${rpc_echo_status}" != "401" ]]; then
     sed -n '1,40p' "${headers_file}" || true
     rm -f "${headers_file}"
-    fail "RPC proxy MS-RPCH echo should return HTTP 200 through LPE-CT, got ${rpc_echo_status}"
+    fail "Anonymous RPC proxy MS-RPCH echo should return HTTP 401 through LPE-CT, got ${rpc_echo_status}"
   fi
-  grep -qi '^content-type: application/rpc' "${headers_file}" \
+  grep -qi '^www-authenticate: Basic realm="LPE RPC"' "${headers_file}" \
     || {
       sed -n '1,40p' "${headers_file}" || true
       rm -f "${headers_file}"
-      fail "RPC proxy MS-RPCH echo response is missing application/rpc content type"
+      fail "Anonymous RPC proxy MS-RPCH echo response is missing Basic realm=\"LPE RPC\""
     }
   rm -f "${headers_file}"
-  pass "RPC proxy MS-RPCH echo is published through LPE-CT"
+  pass "Anonymous RPC proxy MS-RPCH echo is challenged through LPE-CT"
 
   assert_published_core_route "POST" "/api/mail/auth/login" "Mailbox login API" "{}"
   assert_published_core_route "GET" "/api/jmap/session" "JMAP session endpoint"
