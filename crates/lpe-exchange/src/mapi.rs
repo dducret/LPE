@@ -1344,6 +1344,13 @@ async fn execute_rops<S: ExchangeStore>(
                 emails,
                 snapshot,
             )),
+            0x18 => responses.extend_from_slice(&rop_seek_row_response(
+                &request,
+                input_object_mut(session, &handle_slots, &request),
+                mailboxes,
+                emails,
+                snapshot,
+            )),
             0x21 => {
                 let Some(MapiObject::Message {
                     folder_id,
@@ -2329,6 +2336,40 @@ fn rop_query_position_response(
     response
 }
 
+fn rop_seek_row_response(
+    request: &RopRequest,
+    object: Option<&mut MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    let Some(object) = object else {
+        return rop_error_response(0x18, request.response_handle_index(), 0x8004_0102);
+    };
+    let total_rows = table_position_and_count(Some(object), mailboxes, emails, snapshot).1;
+    let Some(position) = table_position_mut(object) else {
+        return rop_error_response(0x18, request.response_handle_index(), 0x8004_0102);
+    };
+
+    let requested_rows = request.seek_row_count().unwrap_or(0);
+    let base_position = match request.seek_origin().unwrap_or(1) {
+        0 => 0isize,
+        2 => total_rows as isize,
+        _ => *position as isize,
+    };
+    let requested_position = base_position.saturating_add(requested_rows as isize);
+    let new_position = requested_position.clamp(0, total_rows as isize);
+    let rows_sought = (new_position - base_position) as i32;
+    *position = new_position as usize;
+
+    let mut response = vec![0x18, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    let want_row_moved_count = request.want_row_moved_count();
+    response.push((want_row_moved_count && rows_sought != requested_rows) as u8);
+    response.extend_from_slice(&if want_row_moved_count { rows_sought } else { 0 }.to_le_bytes());
+    response
+}
+
 fn table_position_and_count(
     object: Option<&MapiObject>,
     mailboxes: &[JmapMailbox],
@@ -2362,6 +2403,15 @@ fn table_position_and_count(
                 .len(),
         ),
         _ => (0, 0),
+    }
+}
+
+fn table_position_mut(object: &mut MapiObject) -> Option<&mut usize> {
+    match object {
+        MapiObject::HierarchyTable { position, .. }
+        | MapiObject::ContentsTable { position, .. }
+        | MapiObject::AttachmentTable { position, .. } => Some(position),
+        _ => None,
     }
 }
 
@@ -2937,6 +2987,19 @@ impl RopRequest {
         self.payload.first().is_some_and(|flags| flags & 0x01 != 0)
     }
 
+    fn seek_origin(&self) -> Option<u8> {
+        self.payload.first().copied()
+    }
+
+    fn seek_row_count(&self) -> Option<i32> {
+        let bytes = self.payload.get(1..5)?;
+        Some(i32::from_le_bytes(bytes.try_into().ok()?))
+    }
+
+    fn want_row_moved_count(&self) -> bool {
+        self.payload.get(5).is_some_and(|want| *want != 0)
+    }
+
     fn property_tags(&self) -> Vec<u32> {
         let start = match self.rop_id {
             0x07 => 4,
@@ -3079,6 +3142,19 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: None,
                 payload: Vec::new(),
+            })
+        }
+        0x18 => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.push(cursor.read_u8()?);
+            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+            payload.push(cursor.read_u8()?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
             })
         }
         0x0F => {
