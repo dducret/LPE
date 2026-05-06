@@ -2279,7 +2279,21 @@ fn message_recipients(email: &JmapEmail) -> Vec<MapiRecipient<'_>> {
             recipient_type: 0x02,
             address,
         }))
+        .chain(
+            message_can_expose_bcc(email)
+                .then_some(email.bcc.iter())
+                .into_iter()
+                .flatten()
+                .map(|address| MapiRecipient {
+                    recipient_type: 0x03,
+                    address,
+                }),
+        )
         .collect()
+}
+
+fn message_can_expose_bcc(email: &JmapEmail) -> bool {
+    matches!(email.mailbox_role.as_str(), "drafts" | "sent")
 }
 
 fn serialize_recipient_row(address: &JmapEmailAddress) -> Vec<u8> {
