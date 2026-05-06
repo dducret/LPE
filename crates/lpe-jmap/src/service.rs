@@ -1,7 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use axum::{
     body::{Body, Bytes},
-    extract::{ws::WebSocketUpgrade, DefaultBodyLimit, State},
+    extract::{ws::WebSocketUpgrade, DefaultBodyLimit, Query, State},
     http::{HeaderMap, Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -30,6 +30,7 @@ use crate::{
         http_error, jmap_problem, method_error, method_error_from_error, JMAP_PROBLEM_LIMIT,
         JMAP_PROBLEM_UNKNOWN_CAPABILITY,
     },
+    eventsource::EventSourceQuery,
     parse::parse_uuid,
     protocol::{
         JmapApiRequest, JmapApiResponse, JmapMethodCall, JmapMethodResponse, SessionDocument,
@@ -78,6 +79,7 @@ pub fn router() -> Router<Storage> {
                 .layer(DefaultBodyLimit::max(MAX_SIZE_REQUEST as usize)),
         )
         .route("/ws", get(websocket_handler))
+        .route("/events", get(event_source_handler))
         .route(
             "/upload/{account_id}",
             post(upload_handler)
@@ -261,6 +263,27 @@ async fn websocket_handler(
     Ok(ws.protocols(["jmap"]).on_upgrade(move |socket| async move {
         service.handle_websocket(socket, account).await;
     }))
+}
+
+async fn event_source_handler(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Query(query): Query<EventSourceQuery>,
+) -> std::result::Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    let service = JmapService::new(storage);
+    let authorization = authorization_header(&headers);
+    let account = service
+        .authenticate(authorization.as_deref())
+        .await
+        .map_err(http_error)?;
+    let last_event_id = headers
+        .get("last-event-id")
+        .and_then(|value| value.to_str().ok())
+        .map(ToString::to_string);
+    service
+        .handle_event_source(account, query, last_event_id)
+        .await
+        .map_err(http_error)
 }
 
 impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {

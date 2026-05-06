@@ -105,8 +105,10 @@ The public `JMAP` paths published by `LPE-CT` are:
 - `/api/jmap/upload/{accountId}`
 - `/api/jmap/download/{accountId}/{blobId}/{name}`
 - `/api/jmap/ws`
+- `/api/jmap/events`
 
 `/api/jmap/ws` must support `HTTP` upgrade and long-lived `WSS` sessions. `EmailSubmission/set` remains a `JMAP` adapter over the canonical `LPE` submission model and must never hand mail directly to `SMTP`.
+`/api/jmap/events` publishes the same canonical push-state stream over EventSource / Server-Sent Events for clients that cannot use WebSocket.
 
 ### Separation between publication and protocol logic
 

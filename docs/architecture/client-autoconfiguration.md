@@ -128,6 +128,7 @@ The externally published paths are:
 - `POST /api/jmap/upload/{accountId}`
 - `GET /api/jmap/download/{accountId}/{blobId}/{name}`
 - `GET /api/jmap/ws`
+- `GET /api/jmap/events`
 - `GET /.well-known/jmap`
 
 The MVP client-autoconfiguration layer only embeds a documentation pointer to
@@ -167,7 +168,7 @@ For a domain `example.test`:
 - publish `autodiscover.example.test` or reuse `mail.example.test` toward the same front end
 - re-expose the `/autoconfig/...`, `/.well-known/autoconfig/...`, `/autodiscover/...`, `/Autodiscover/...`, `/Microsoft-Server-ActiveSync`, `/EWS/Exchange.asmx`, `/ews/exchange.asmx`, `/mapi/...`, and `/rpc/rpcproxy.dll` routes over HTTPS
 - re-expose the bare `/autodiscover` and `/Autodiscover` routes as compatibility aliases for clients and test probes that omit `/autodiscover.xml`
-- re-expose `/api/mail/auth/login`, `/api/jmap/session`, `/api/jmap/api`, `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`, `/api/jmap/ws`, and `/.well-known/jmap` from `LPE-CT` to the core `LPE` service
+- re-expose `/api/mail/auth/login`, `/api/jmap/session`, `/api/jmap/api`, `/api/jmap/upload/{accountId}`, `/api/jmap/download/{accountId}/{blobId}/{name}`, `/api/jmap/ws`, `/api/jmap/events`, and `/.well-known/jmap` from `LPE-CT` to the core `LPE` service
 - publish `IMAPS` on the same hostname when native `IMAP` access is exposed
 - publish the authenticated `SMTPS` submission listener only when `LPE-CT` really exposes it
 - do not reuse the internal `LPE -> LPE-CT` relay as a client-submission endpoint

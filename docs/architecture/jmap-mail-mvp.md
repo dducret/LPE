@@ -10,8 +10,8 @@ This document describes the `JMAP Mail` scope currently supported by `LPE` for t
 
 - the `JMAP` client reuses the existing mailbox-account authentication
 - login remains `/api/mail/auth/login`
-- the existing account bearer token must then be sent to `/api/jmap/session`, `/api/jmap/api`, and `/api/jmap/ws`
-- without the Debian reverse proxy, the same routes are exposed directly as `/jmap/session`, `/jmap/api`, and `/jmap/ws`
+- the existing account bearer token must then be sent to `/api/jmap/session`, `/api/jmap/api`, `/api/jmap/ws`, and `/api/jmap/events`
+- without the Debian reverse proxy, the same routes are exposed directly as `/jmap/session`, `/jmap/api`, `/jmap/ws`, and `/jmap/events`
 - the Debian reverse proxy sets `X-Forwarded-Prefix: /api/jmap` so the `Session` document advertises public `/api/jmap/*` URLs instead of direct internal `/jmap/*` URLs
 
 ### Supported session capabilities
@@ -71,6 +71,7 @@ Additional supported `JMAP` routes:
 - `POST /api/jmap/upload/{accountId}` for temporary `JMAP` blob upload; the `Session` core capability advertises the enforced `maxSizeUpload` and concurrent upload limit for real-client interoperability
 - `GET /api/jmap/download/{accountId}/{blobId}/{name}` for temporary blob download
 - `GET /api/jmap/ws` for `JMAP` over WebSocket with the `jmap` subprotocol
+- `GET /api/jmap/events` for JMAP push over EventSource / Server-Sent Events using the same canonical push-state computation as WebSocket push
 
 ### Important MVP rules
 
@@ -127,7 +128,7 @@ Additional supported `JMAP` routes:
 - `Blob/get` returns requested byte ranges from readable temporary upload blobs or reconstructed canonical message blobs, including `digest:sha` and `digest:sha-256` over the returned octet range; non-owner delegated/shared mailbox reads use the same Bcc-safe reconstruction path as HTTP download
 - `Blob/lookup` is limited to canonical mail references for `Mailbox`, `Thread`, and `Email`, and requires both `urn:ietf:params:jmap:blob` and `urn:ietf:params:jmap:mail` in the request `using` list; it never exposes inaccessible blobs and does not inspect unrelated collaboration stores or introduce a separate blob-reference index
 - method-level failures use the standard JMAP `["error", {"type": ...}, callId]` response tuple shape; successful method responses keep their method name
-- the session keeps `eventSourceUrl` empty; this MVP uses `JMAP` over WebSocket rather than the older event-source transport
+- the session advertises `eventSourceUrl` as `/events?types={types}&closeafter={closeafter}` under the public JMAP base URL; EventSource emits `StateChange` events with the same changed-state payload and push-state cursor semantics as WebSocket push
 - `WebSocketPushEnable` follows `RFC 8887` `dataTypes` semantics: `null` or omitted `dataTypes` subscribes to all supported push data types, while unsupported data-type names are filtered out
 - malformed known WebSocket message objects return `RequestError` frames instead of silently dropping an otherwise healthy connection
 - WebSocket push uses canonical `PostgreSQL` signaling end to end: `lpe-storage` writes a canonical change-journal row and emits principal-filtered `LISTEN` / `NOTIFY` wakeups after canonical commits, while `lpe-jmap` replays bounded missed reconnect work from that journal and recomputes only the affected canonical object states without introducing a second mailbox state engine

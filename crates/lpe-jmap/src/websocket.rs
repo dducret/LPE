@@ -21,7 +21,7 @@ use crate::{
 };
 
 const MAX_PUSH_REPLAY_ROWS: u64 = 512;
-const SUPPORTED_PUSH_DATA_TYPES: &[&str] = &[
+pub(crate) const SUPPORTED_PUSH_DATA_TYPES: &[&str] = &[
     "Mailbox",
     "Email",
     "Thread",
@@ -568,7 +568,10 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         Ok(())
     }
 
-    fn push_categories(&self, data_types: &HashSet<String>) -> Vec<CanonicalChangeCategory> {
+    pub(crate) fn push_categories(
+        &self,
+        data_types: &HashSet<String>,
+    ) -> Vec<CanonicalChangeCategory> {
         let mut categories = Vec::new();
         if data_types.iter().any(|value| self.is_mail_push_type(value)) {
             categories.push(CanonicalChangeCategory::Mail);
@@ -673,7 +676,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
     }
 }
 
-fn normalize_push_data_types(data_types: Option<Vec<String>>) -> HashSet<String> {
+pub(crate) fn normalize_push_data_types(data_types: Option<Vec<String>>) -> HashSet<String> {
     data_types
         .unwrap_or_else(|| {
             SUPPORTED_PUSH_DATA_TYPES
@@ -752,7 +755,7 @@ fn merge_journal_cursor(left: Option<i64>, right: Option<i64>) -> Option<i64> {
     }
 }
 
-fn finalize_push_change(
+pub(crate) fn finalize_push_change(
     subscription: &mut PushSubscription,
     changed: HashMap<String, HashMap<String, String>>,
     current_type_states: HashMap<String, HashMap<String, String>>,

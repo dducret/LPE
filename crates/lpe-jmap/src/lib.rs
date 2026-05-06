@@ -1,9 +1,11 @@
+mod backbone;
 mod blob;
 mod calendar;
 mod contacts;
 mod convert;
 mod drafts;
 mod error;
+mod eventsource;
 mod mail;
 mod mailboxes;
 mod parse;
@@ -18,6 +20,9 @@ mod vacation;
 mod validation;
 mod websocket;
 
+pub use crate::backbone::{
+    JmapAddressObject, JmapEmailObject, JmapMailboxObject, JmapMailboxRights, JmapThreadObject,
+};
 pub use crate::service::{router, JmapService};
 
 pub(crate) use crate::convert::resolve_creation_reference;
@@ -1397,7 +1402,10 @@ mod tests {
             session.capabilities[JMAP_WEBSOCKET_CAPABILITY]["url"],
             "wss://mail.example.test/jmap/ws"
         );
-        assert_eq!(session.event_source_url, "");
+        assert_eq!(
+            session.event_source_url,
+            "/jmap/events?types={types}&closeafter={closeafter}"
+        );
     }
 
     #[tokio::test]
@@ -1424,6 +1432,10 @@ mod tests {
         assert_eq!(
             session.download_url,
             "https://mail.example.test/api/jmap/download/{accountId}/{blobId}/{name}?accept={type}"
+        );
+        assert_eq!(
+            session.event_source_url,
+            "https://mail.example.test/api/jmap/events?types={types}&closeafter={closeafter}"
         );
 
         let mut headers = axum::http::HeaderMap::new();
