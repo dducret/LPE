@@ -1576,10 +1576,18 @@ fn rop_logon_response_body(principal: &AccountPrincipal, request: &RopRequest) -
     response.extend_from_slice(principal.account_id.as_bytes());
     response.extend_from_slice(&1u16.to_le_bytes());
     response.extend_from_slice(principal.account_id.as_bytes());
-    response.extend_from_slice(&logon_time_bytes(SystemTime::now()));
-    write_u64(&mut response, 1);
+    let now = SystemTime::now();
+    response.extend_from_slice(&logon_time_bytes(now));
+    write_u64(&mut response, gwart_time_marker(now));
     write_u32(&mut response, 0);
     response
+}
+
+fn gwart_time_marker(now: SystemTime) -> u64 {
+    now.duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_secs()
+        .max(1)
 }
 
 fn logon_time_bytes(now: SystemTime) -> [u8; 8] {
@@ -2525,5 +2533,14 @@ mod tests {
         let bytes = logon_time_bytes(SystemTime::UNIX_EPOCH + Duration::from_secs(1_778_046_495));
 
         assert_eq!(bytes, [15, 48, 5, 3, 6, 5, 0xEA, 0x07]);
+    }
+
+    #[test]
+    fn gwart_time_marker_uses_real_timestamp_and_stays_nonzero() {
+        assert_eq!(
+            gwart_time_marker(SystemTime::UNIX_EPOCH + Duration::from_secs(1_778_046_495)),
+            1_778_046_495
+        );
+        assert_eq!(gwart_time_marker(SystemTime::UNIX_EPOCH), 1);
     }
 }

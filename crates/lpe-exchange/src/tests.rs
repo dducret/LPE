@@ -1133,6 +1133,64 @@ fn rop_buffer(rops: &[u8], handles: &[u32]) -> Vec<u8> {
     buffer
 }
 
+fn rca_wrapped_private_logon_execute_body(mailbox: &str, client: &str) -> Vec<u8> {
+    let mut rops = Vec::new();
+    rops.push(0xFE);
+    rops.push(0x01);
+    rops.push(0x00);
+    rops.push(0x41);
+    rops.extend_from_slice(&0x0100_040Cu32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&((mailbox.len() + 1) as u16).to_le_bytes());
+    rops.extend_from_slice(&8u32.to_le_bytes());
+    rops.extend_from_slice(mailbox.as_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&0x001Fu16.to_le_bytes());
+    rops.extend_from_slice(client.as_bytes());
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&((rops.len() + 2) as u16).to_le_bytes());
+    payload.extend_from_slice(&rops);
+    payload.extend_from_slice(&u32::MAX.to_le_bytes());
+
+    let mut rpc_header_ext = Vec::new();
+    rpc_header_ext.extend_from_slice(&0u16.to_le_bytes());
+    rpc_header_ext.extend_from_slice(&0x0004u16.to_le_bytes());
+    rpc_header_ext.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+    rpc_header_ext.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+    rpc_header_ext.extend_from_slice(&payload);
+
+    let mut body = Vec::new();
+    body.extend_from_slice(&0u32.to_le_bytes());
+    body.extend_from_slice(&(rpc_header_ext.len() as u32).to_le_bytes());
+    body.extend_from_slice(&rpc_header_ext);
+    body.extend_from_slice(&0x8007u32.to_le_bytes());
+    body.extend_from_slice(&0u32.to_le_bytes());
+    body
+}
+
+fn resolve_names_request(search_address: &str, columns: &[u32]) -> Vec<u8> {
+    let mut request = Vec::new();
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.push(0xFF);
+    request.extend_from_slice(&[0; 24]);
+    request.extend_from_slice(&1252u32.to_le_bytes());
+    request.extend_from_slice(&0x0409u32.to_le_bytes());
+    request.extend_from_slice(&0x0409u32.to_le_bytes());
+    request.push(0xFF);
+    request.extend_from_slice(&(columns.len() as u32).to_le_bytes());
+    for column in columns {
+        request.extend_from_slice(&column.to_le_bytes());
+    }
+    request.push(0xFF);
+    request.extend_from_slice(&1u32.to_le_bytes());
+    let unresolved_name = utf16z(&format!("=SMTP:{search_address}"));
+    request.extend_from_slice(&(unresolved_name.len() as u16).to_le_bytes());
+    request.extend_from_slice(&unresolved_name);
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request
+}
+
 async fn response_text(response: axum::response::Response) -> String {
     let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     String::from_utf8(bytes.to_vec()).unwrap()
@@ -1179,17 +1237,6 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     haystack
         .windows(needle.len())
         .any(|window| window == needle)
-}
-
-fn hex_bytes(value: &str) -> Vec<u8> {
-    value
-        .as_bytes()
-        .chunks(2)
-        .map(|chunk| {
-            let hex = std::str::from_utf8(chunk).unwrap();
-            u8::from_str_radix(hex, 16).unwrap()
-        })
-        .collect()
 }
 
 fn utf16z(value: &str) -> Vec<u8> {
@@ -1544,9 +1591,8 @@ async fn mapi_over_http_execute_accepts_rca_wrapped_private_mailbox_logon() {
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request = hex_bytes(
-        "000000004f00000000000400470047004300fe0100410c040001000000000e000800000074657374406c2d702d652e6368001f00436c69656e743d4d5320436f6e6e656374697669747920416e616c797a6572ffffffff0780000000000000",
-    );
+    let request =
+        rca_wrapped_private_logon_execute_body("test@l-p-e.ch", "Client=MS Connectivity Analyzer");
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
         .await
@@ -1578,7 +1624,7 @@ async fn mapi_over_http_execute_accepts_rca_wrapped_private_mailbox_logon() {
         0
     );
     assert_eq!(response_rop[6] & 0x01, 0x01);
-    assert_eq!(response_rop_size, 168);
+    assert_eq!(response_rop_size, response_rop.len() + 2);
     assert_eq!(
         u32::from_le_bytes(
             payload[response_rop_size..response_rop_size + 4]
@@ -2500,9 +2546,7 @@ async fn mapi_over_http_resolve_names_honors_requested_rca_columns() {
         ..Default::default()
     };
     let service = ExchangeService::new(store);
-    let request = hex_bytes(
-        "00000000ff000000000000000000000000000000000000000000000000e40400000904000009040000ff020000001f0003301f000130ff010000003d0053004d00540050003a0061006c0069006300650040006500780061006d0070006c0065002e007400650073007400000000000000",
-    );
+    let request = resolve_names_request("alice@example.test", &[0x3003_001F, 0x3001_001F]);
 
     let response = service
         .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &request)

@@ -117,6 +117,7 @@ Web interfaces must support at least `en`, `fr`, `de`, `it`, and `es`, with Engl
 - do not contradict documented architecture choices without updating the documentation explicitly
 - if a change affects behavior, prerequisites, installation, release framing, or architecture, update the relevant documentation in the same work
 - if a new durable rule appears, update `AGENTS.md`
+- tests should use realistic parameters and protocol builders; fixed literals belong only to deterministic fixtures, timestamps, IDs, or golden vectors
 - when protocol work is planned, prefer correctness, state consistency, long-lived sync reliability, and real-client interoperability testing over introducing additional protocol surface area
 - prefer explicit architectural documentation over leaving structural assumptions implicit in code
 - for Rust crates, `lib.rs` must act only as a central hub for module declarations, re-exports, and minimal crate wiring; do not add implementation code to `lib.rs` when that code can be placed in helper modules
