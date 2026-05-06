@@ -9,6 +9,7 @@ use axum::{
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{AuditEntryInput, JmapEmail, JmapEmailAddress, JmapMailbox};
 use std::{
+    cmp::Ordering,
     collections::HashMap,
     env,
     sync::{Mutex, OnceLock},
@@ -81,6 +82,12 @@ struct MapiSession {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+struct MapiSortOrder {
+    property_tag: u32,
+    order: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum MapiObject {
     Logon,
     Folder {
@@ -93,17 +100,20 @@ enum MapiObject {
     HierarchyTable {
         folder_id: u64,
         columns: Vec<u32>,
+        sort_orders: Vec<MapiSortOrder>,
         position: usize,
     },
     ContentsTable {
         folder_id: u64,
         columns: Vec<u32>,
+        sort_orders: Vec<MapiSortOrder>,
         position: usize,
     },
     AttachmentTable {
         folder_id: u64,
         message_id: u64,
         columns: Vec<u32>,
+        sort_orders: Vec<MapiSortOrder>,
         position: usize,
     },
     Attachment {
@@ -1216,6 +1226,7 @@ async fn execute_rops<S: ExchangeStore>(
                     MapiObject::HierarchyTable {
                         folder_id,
                         columns,
+                        sort_orders: Vec::new(),
                         position: 0,
                     },
                 );
@@ -1235,6 +1246,7 @@ async fn execute_rops<S: ExchangeStore>(
                     MapiObject::ContentsTable {
                         folder_id,
                         columns: Vec::new(),
+                        sort_orders: Vec::new(),
                         position: 0,
                     },
                 );
@@ -1329,6 +1341,32 @@ async fn execute_rops<S: ExchangeStore>(
                 }
                 responses.extend_from_slice(&rop_set_columns_response(&request));
             }
+            0x13 => match input_object_mut(session, &handle_slots, &request) {
+                Some(MapiObject::HierarchyTable {
+                    sort_orders,
+                    position,
+                    ..
+                })
+                | Some(MapiObject::ContentsTable {
+                    sort_orders,
+                    position,
+                    ..
+                })
+                | Some(MapiObject::AttachmentTable {
+                    sort_orders,
+                    position,
+                    ..
+                }) => {
+                    *sort_orders = request.sort_orders();
+                    *position = 0;
+                    responses.extend_from_slice(&rop_sort_table_response(&request));
+                }
+                _ => responses.extend_from_slice(&rop_error_response(
+                    0x13,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                )),
+            },
             0x15 => responses.extend_from_slice(&rop_query_rows_response(
                 &request,
                 input_object_mut(session, &handle_slots, &request),
@@ -1374,6 +1412,7 @@ async fn execute_rops<S: ExchangeStore>(
                         folder_id: *folder_id,
                         message_id: *message_id,
                         columns: Vec::new(),
+                        sort_orders: Vec::new(),
                         position: 0,
                     },
                 );
@@ -2024,6 +2063,13 @@ fn rop_set_columns_response(request: &RopRequest) -> Vec<u8> {
     response
 }
 
+fn rop_sort_table_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![0x13, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.push(0);
+    response
+}
+
 fn rop_get_properties_list_response(request: &RopRequest, object: Option<&MapiObject>) -> Vec<u8> {
     let tags = match object {
         Some(MapiObject::Attachment { .. }) => default_attachment_columns(),
@@ -2215,6 +2261,7 @@ fn rop_query_rows_response(
         Some(MapiObject::HierarchyTable {
             folder_id,
             columns,
+            sort_orders,
             position: table_position,
         }) if is_root_hierarchy_folder(*folder_id) => {
             start_position = *table_position;
@@ -2223,14 +2270,16 @@ fn rop_query_rows_response(
             } else {
                 columns.clone()
             };
-            mailboxes
-                .iter()
+            let mut rows = mailboxes.iter().collect::<Vec<_>>();
+            sort_mailboxes(&mut rows, sort_orders);
+            rows.into_iter()
                 .map(|mailbox| serialize_folder_row(mailbox, &columns))
                 .collect::<Vec<_>>()
         }
         Some(MapiObject::ContentsTable {
             folder_id,
             columns,
+            sort_orders,
             position: table_position,
         }) => {
             start_position = *table_position;
@@ -2239,8 +2288,9 @@ fn rop_query_rows_response(
             } else {
                 columns.clone()
             };
-            emails_for_folder(*folder_id, mailboxes, emails)
-                .into_iter()
+            let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
+            sort_emails(&mut rows, sort_orders);
+            rows.into_iter()
                 .map(|email| serialize_message_row(email, &columns))
                 .collect::<Vec<_>>()
         }
@@ -2248,6 +2298,7 @@ fn rop_query_rows_response(
             folder_id,
             message_id,
             columns,
+            sort_orders,
             position: table_position,
         }) => {
             start_position = *table_position;
@@ -2256,10 +2307,13 @@ fn rop_query_rows_response(
             } else {
                 columns.clone()
             };
-            snapshot
+            let mut rows = snapshot
                 .attachments_for_message(*folder_id, *message_id)
                 .unwrap_or_default()
                 .iter()
+                .collect::<Vec<_>>();
+            sort_attachments(&mut rows, sort_orders);
+            rows.into_iter()
                 .map(|attachment| serialize_attachment_row(attachment, &columns))
                 .collect::<Vec<_>>()
         }
@@ -2286,6 +2340,104 @@ fn rop_query_rows_response(
         response.extend_from_slice(&row);
     }
     response
+}
+
+fn sort_mailboxes(rows: &mut [&JmapMailbox], sort_orders: &[MapiSortOrder]) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match sort_order.property_tag {
+                PID_TAG_DISPLAY_NAME_W => compare_case_insensitive(&left.name, &right.name),
+                PID_TAG_CONTENT_COUNT => left.total_emails.cmp(&right.total_emails),
+                PID_TAG_CONTENT_UNREAD_COUNT => left.unread_emails.cmp(&right.unread_emails),
+                PID_TAG_FOLDER_ID => mapi_folder_id(left).cmp(&mapi_folder_id(right)),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        Ordering::Equal
+    });
+}
+
+fn sort_emails(rows: &mut [&JmapEmail], sort_orders: &[MapiSortOrder]) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match sort_order.property_tag {
+                PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+                    compare_case_insensitive(&left.subject, &right.subject)
+                }
+                PID_TAG_SENDER_NAME_W => compare_case_insensitive(
+                    left.from_display.as_deref().unwrap_or(&left.from_address),
+                    right.from_display.as_deref().unwrap_or(&right.from_address),
+                ),
+                PID_TAG_SENDER_EMAIL_ADDRESS_W => {
+                    compare_case_insensitive(&left.from_address, &right.from_address)
+                }
+                PID_TAG_DISPLAY_TO_W => {
+                    compare_case_insensitive(&display_to(left), &display_to(right))
+                }
+                PID_TAG_MESSAGE_DELIVERY_TIME | PID_TAG_LAST_MODIFICATION_TIME => {
+                    left.received_at.cmp(&right.received_at)
+                }
+                PID_TAG_MESSAGE_FLAGS => message_flags(left).cmp(&message_flags(right)),
+                PID_TAG_MESSAGE_SIZE => left.size_octets.cmp(&right.size_octets),
+                PID_TAG_HAS_ATTACHMENTS => left.has_attachments.cmp(&right.has_attachments),
+                PID_TAG_MID => mapi_message_id(left).cmp(&mapi_message_id(right)),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        Ordering::Equal
+    });
+}
+
+fn sort_attachments(rows: &mut [&MapiAttachment], sort_orders: &[MapiSortOrder]) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match sort_order.property_tag {
+                PID_TAG_ATTACH_NUM => left.attach_num.cmp(&right.attach_num),
+                PID_TAG_ATTACH_FILENAME_W | PID_TAG_ATTACH_LONG_FILENAME_W => {
+                    compare_case_insensitive(&left.file_name, &right.file_name)
+                }
+                PID_TAG_ATTACH_MIME_TAG_W => {
+                    compare_case_insensitive(&left.media_type, &right.media_type)
+                }
+                PID_TAG_ATTACH_SIZE => left.size_octets.cmp(&right.size_octets),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        Ordering::Equal
+    });
+}
+
+fn apply_sort_direction(ordering: Ordering, sort_order: u8) -> Ordering {
+    if sort_order == 0x01 {
+        ordering.reverse()
+    } else {
+        ordering
+    }
+}
+
+fn compare_case_insensitive(left: &str, right: &str) -> Ordering {
+    left.to_ascii_lowercase().cmp(&right.to_ascii_lowercase())
 }
 
 fn serialize_attachment_row(attachment: &MapiAttachment, columns: &[u32]) -> Vec<u8> {
@@ -3000,6 +3152,23 @@ impl RopRequest {
         self.payload.get(5).is_some_and(|want| *want != 0)
     }
 
+    fn sort_orders(&self) -> Vec<MapiSortOrder> {
+        let Some(count_bytes) = self.payload.get(1..3) else {
+            return Vec::new();
+        };
+        let count = u16::from_le_bytes([count_bytes[0], count_bytes[1]]) as usize;
+        self.payload
+            .get(7..)
+            .unwrap_or_default()
+            .chunks_exact(5)
+            .take(count)
+            .map(|bytes| MapiSortOrder {
+                property_tag: u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+                order: bytes[4],
+            })
+            .collect()
+    }
+
     fn property_tags(&self) -> Vec<u32> {
         let start = match self.rop_id {
             0x07 => 4,
@@ -3187,6 +3356,24 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
             let mut payload = vec![set_columns_flags];
             payload.extend_from_slice(&(property_tag_count as u16).to_le_bytes());
             payload.extend_from_slice(cursor.read_bytes(property_tag_count * 4)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x13 => {
+            let input_handle_index = cursor.read_u8()?;
+            let sort_table_flags = cursor.read_u8()?;
+            let sort_order_count = cursor.read_u16()? as usize;
+            let category_count = cursor.read_u16()?;
+            let expanded_count = cursor.read_u16()?;
+            let mut payload = vec![sort_table_flags];
+            payload.extend_from_slice(&(sort_order_count as u16).to_le_bytes());
+            payload.extend_from_slice(&category_count.to_le_bytes());
+            payload.extend_from_slice(&expanded_count.to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(sort_order_count * 5)?);
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
