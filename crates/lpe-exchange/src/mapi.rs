@@ -1244,6 +1244,13 @@ async fn execute_rops<S: ExchangeStore>(
                 emails,
                 snapshot,
             )),
+            0x08 => responses.extend_from_slice(&rop_get_properties_all_response(
+                &request,
+                input_object(session, &handle_slots, &request),
+                mailboxes,
+                emails,
+                snapshot,
+            )),
             0x09 => responses.extend_from_slice(&rop_get_properties_list_response(
                 &request,
                 input_object(session, &handle_slots, &request),
@@ -2003,6 +2010,70 @@ fn rop_get_properties_specific_response(
     };
     response.extend_from_slice(&row);
     response
+}
+
+fn rop_get_properties_all_response(
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    let mut response = vec![0x08, request.input_handle_index().unwrap_or(0)];
+    write_u32(&mut response, 0);
+    let tags = match object {
+        Some(MapiObject::Attachment { .. }) => default_attachment_columns(),
+        Some(MapiObject::Message { .. }) => default_message_property_tags(),
+        _ => default_folder_property_tags(),
+    };
+    response.extend_from_slice(&(tags.len() as u16).to_le_bytes());
+    for tag in tags {
+        write_u32(&mut response, tag);
+        let value = serialize_object_property(object, mailboxes, emails, snapshot, tag);
+        response.extend_from_slice(&value);
+    }
+    response
+}
+
+fn serialize_object_property(
+    object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    tag: u32,
+) -> Vec<u8> {
+    match object {
+        Some(MapiObject::Message {
+            folder_id,
+            message_id,
+        }) => message_for_id(*folder_id, *message_id, mailboxes, emails)
+            .map(|email| serialize_message_row(email, &[tag]))
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
+        Some(MapiObject::Attachment {
+            folder_id,
+            message_id,
+            attach_num,
+        }) => snapshot
+            .attachment_for_message(*folder_id, *message_id, *attach_num)
+            .map(|attachment| serialize_attachment_row(attachment, &[tag]))
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
+        _ => {
+            let folder_id = object
+                .and_then(MapiObject::folder_id)
+                .unwrap_or(ROOT_FOLDER_ID);
+            folder_row_for_id(folder_id, mailboxes)
+                .map(|mailbox| serialize_folder_row(mailbox, &[tag]))
+                .unwrap_or_else(|| serialize_root_folder_row(mailboxes, &[tag]))
+        }
+    }
 }
 
 fn rop_read_recipients_response(
@@ -2772,6 +2843,18 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
+        0x08 => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
+            payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
                 payload,
             })
         }
