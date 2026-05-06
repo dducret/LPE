@@ -2264,13 +2264,15 @@ fn rop_query_rows_response(
         .skip(start_position)
         .take(row_count)
         .collect::<Vec<_>>();
-    if let Some(
-        MapiObject::HierarchyTable { position, .. }
-        | MapiObject::ContentsTable { position, .. }
-        | MapiObject::AttachmentTable { position, .. },
-    ) = object
-    {
-        *position = start_position.saturating_add(selected.len());
+    if !request.query_no_advance() {
+        if let Some(
+            MapiObject::HierarchyTable { position, .. }
+            | MapiObject::ContentsTable { position, .. }
+            | MapiObject::AttachmentTable { position, .. },
+        ) = object
+        {
+            *position = start_position.saturating_add(selected.len());
+        }
     }
     response.extend_from_slice(&(selected.len() as u16).to_le_bytes());
     for row in selected {
@@ -2929,6 +2931,10 @@ impl RopRequest {
     fn query_row_count(&self) -> Option<usize> {
         let bytes = self.payload.get(2..4)?;
         Some(u16::from_le_bytes(bytes.try_into().ok()?) as usize)
+    }
+
+    fn query_no_advance(&self) -> bool {
+        self.payload.first().is_some_and(|flags| flags & 0x01 != 0)
     }
 
     fn property_tags(&self) -> Vec<u32> {
