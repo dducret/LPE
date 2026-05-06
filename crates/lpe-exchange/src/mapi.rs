@@ -9,7 +9,7 @@ use axum::{
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
     AuditEntryInput, JmapEmail, JmapEmailAddress, JmapImportedEmailInput, JmapMailbox,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    JmapMailboxCreateInput, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
 };
 use std::{
     cmp::Ordering,
@@ -1678,6 +1678,150 @@ async fn execute_rops<S: ExchangeStore>(
                 &request,
                 input_object_mut(session, &handle_slots, &request),
             )),
+            0x1C => {
+                let parent_folder_id = match input_object(session, &handle_slots, &request)
+                    .and_then(MapiObject::folder_id)
+                {
+                    Some(folder_id) => folder_id,
+                    None => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x1C,
+                            request.output_handle_index.unwrap_or(0),
+                            0x0000_04B9,
+                        ));
+                        continue;
+                    }
+                };
+                if !is_root_hierarchy_folder(parent_folder_id)
+                    && folder_row_for_id(parent_folder_id, mailboxes).is_none()
+                    && role_for_folder_id(parent_folder_id).is_none()
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x1C,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_010F,
+                    ));
+                    continue;
+                }
+
+                let display_name = request.create_folder_display_name();
+                let display_name = display_name.trim();
+                if display_name.is_empty() || request.create_folder_type() == 0 {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x1C,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
+
+                if request.create_folder_open_existing() {
+                    if let Some(existing) = mailboxes
+                        .iter()
+                        .find(|mailbox| mailbox.name.eq_ignore_ascii_case(display_name))
+                    {
+                        let folder_id = mapi_folder_id(existing);
+                        let handle = session.allocate_output_handle(
+                            request.output_handle_index,
+                            MapiObject::Folder { folder_id },
+                        );
+                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                        responses.extend_from_slice(&rop_create_folder_response(
+                            &request, folder_id, true,
+                        ));
+                        output_handles.push(handle);
+                        continue;
+                    }
+                }
+
+                match store
+                    .create_jmap_mailbox(
+                        JmapMailboxCreateInput {
+                            account_id: principal.account_id,
+                            name: display_name.to_string(),
+                            sort_order: None,
+                        },
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "mapi-create-folder".to_string(),
+                            subject: display_name.to_string(),
+                        },
+                    )
+                    .await
+                {
+                    Ok(mailbox) => {
+                        let folder_id = mapi_folder_id(&mailbox);
+                        let handle = session.allocate_output_handle(
+                            request.output_handle_index,
+                            MapiObject::Folder { folder_id },
+                        );
+                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                        responses.extend_from_slice(&rop_create_folder_response(
+                            &request, folder_id, false,
+                        ));
+                        output_handles.push(handle);
+                    }
+                    Err(_) => responses.extend_from_slice(&rop_error_response(
+                        0x1C,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_0102,
+                    )),
+                }
+            }
+            0x1D => {
+                let Some(_parent_folder_id) =
+                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x1D,
+                        request.response_handle_index(),
+                        0x0000_04B9,
+                    ));
+                    continue;
+                };
+                let Some(folder_id) = request.delete_folder_id() else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x1D,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                };
+                let Some(mailbox) = folder_row_for_id(folder_id, mailboxes) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x1D,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                if mailbox.role != "custom" {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x1D,
+                        request.response_handle_index(),
+                        0x8007_0005,
+                    ));
+                    continue;
+                }
+
+                let partial_completion = store
+                    .destroy_jmap_mailbox(
+                        principal.account_id,
+                        mailbox.id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "mapi-delete-folder".to_string(),
+                            subject: format!("folder:{}", mailbox.id),
+                        },
+                    )
+                    .await
+                    .is_err();
+                responses.extend_from_slice(&rop_partial_completion_response(
+                    0x1D,
+                    request.response_handle_index(),
+                    partial_completion,
+                ));
+            }
             0x1E | 0x91 => {
                 let folder_id = match input_object(session, &handle_slots, &request) {
                     Some(MapiObject::Folder { folder_id }) => *folder_id,
@@ -2639,6 +2783,15 @@ fn rop_message_status_response(request: &RopRequest, old_status: u32) -> Vec<u8>
     let mut response = vec![0x20, request.response_handle_index()];
     write_u32(&mut response, 0);
     write_u32(&mut response, old_status);
+    response
+}
+
+fn rop_create_folder_response(request: &RopRequest, folder_id: u64, existing: bool) -> Vec<u8> {
+    let mut response = vec![0x1C, request.output_handle_index.unwrap_or(0)];
+    write_u32(&mut response, 0);
+    write_u64(&mut response, folder_id);
+    response.push(existing as u8);
+    response.push(0);
     response
 }
 
@@ -4466,6 +4619,13 @@ fn write_u16_prefixed_bytes(body: &mut Vec<u8>, value: &[u8]) {
     body.extend_from_slice(value);
 }
 
+fn read_u16_prefixed_string(bytes: &[u8], offset: usize) -> Option<String> {
+    let size_bytes = bytes.get(offset..offset + 2)?;
+    let size = u16::from_le_bytes(size_bytes.try_into().ok()?) as usize;
+    let value = bytes.get(offset + 2..offset + 2 + size)?;
+    Some(String::from_utf8_lossy(value).into_owned())
+}
+
 fn write_u64(body: &mut Vec<u8>, value: u64) {
     body.extend_from_slice(&value.to_le_bytes());
 }
@@ -4691,6 +4851,25 @@ impl RopRequest {
             .and_then(|bytes| bytes.try_into().ok())
             .map(u32::from_le_bytes)
             .unwrap_or(0)
+    }
+
+    fn create_folder_type(&self) -> u8 {
+        self.payload.first().copied().unwrap_or(0)
+    }
+
+    fn create_folder_open_existing(&self) -> bool {
+        self.payload
+            .get(2)
+            .is_some_and(|open_existing| *open_existing != 0)
+    }
+
+    fn create_folder_display_name(&self) -> String {
+        read_u16_prefixed_string(&self.payload, 3).unwrap_or_default()
+    }
+
+    fn delete_folder_id(&self) -> Option<u64> {
+        let bytes = self.payload.get(1..9)?;
+        Some(u64::from_le_bytes(bytes.try_into().ok()?))
     }
 
     fn move_copy_message_ids(&self) -> Vec<u64> {
@@ -5255,6 +5434,44 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: None,
                 payload: Vec::new(),
+            })
+        }
+        0x1C => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            let folder_type = cursor.read_u8()?;
+            let use_unicode = cursor.read_u8()? != 0;
+            let open_existing = cursor.read_u8()?;
+            let _reserved = cursor.read_u8()?;
+            let display_name = if use_unicode {
+                cursor.read_utf16z()?
+            } else {
+                cursor.read_ascii_z()?
+            };
+            let comment = if use_unicode {
+                cursor.read_utf16z()?
+            } else {
+                cursor.read_ascii_z()?
+            };
+            let mut payload = vec![folder_type, use_unicode as u8, open_existing];
+            write_u16_prefixed_bytes(&mut payload, display_name.as_bytes());
+            write_u16_prefixed_bytes(&mut payload, comment.as_bytes());
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
+        0x1D => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = vec![cursor.read_u8()?];
+            payload.extend_from_slice(cursor.read_bytes(8)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
             })
         }
         0x1E | 0x91 => {

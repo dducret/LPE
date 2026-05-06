@@ -1758,6 +1758,208 @@ async fn mapi_over_http_execute_opens_folder_and_gets_empty_hierarchy_table() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_create_folder_creates_canonical_mailbox() {
+    let created_mailboxes = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        created_mailboxes: created_mailboxes.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Root
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x1C, 0x00, 0x01, 0x02, // RopCreateFolder
+        0x01, // generic folder
+        0x01, // Unicode names
+        0x00, // do not open existing
+        0x00, // reserved
+    ]);
+    rops.extend_from_slice(&utf16z("MAPI Projects"));
+    rops.extend_from_slice(&utf16z(""));
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &rop_buffer[2..2 + response_rop_size];
+    let create = &response_rops[8..];
+
+    assert_eq!(create[0], 0x1C);
+    assert_eq!(create[1], 0x02);
+    assert_eq!(u32::from_le_bytes(create[2..6].try_into().unwrap()), 0);
+    assert_eq!(
+        u64::from_le_bytes(create[6..14].try_into().unwrap()),
+        test_mapi_uuid_id(&Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap())
+    );
+    assert_eq!(create[14], 0);
+    assert_eq!(create[15], 0);
+
+    let created = created_mailboxes.lock().unwrap();
+    assert_eq!(created.len(), 1);
+    assert_eq!(created[0].account_id, FakeStore::account().account_id);
+    assert_eq!(created[0].name, "MAPI Projects");
+}
+
+#[tokio::test]
+async fn mapi_over_http_delete_folder_removes_custom_canonical_mailbox() {
+    let custom_id = Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap();
+    let destroyed_mailboxes = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "66666666-6666-6666-6666-666666666666",
+            "custom",
+            "Archive",
+        )])),
+        destroyed_mailboxes: destroyed_mailboxes.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Root
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x1D, 0x00, 0x01, // RopDeleteFolder
+        0x00, // deletion flags
+    ]);
+    rops.extend_from_slice(&test_mapi_uuid_id(&custom_id).to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &rop_buffer[2..2 + response_rop_size];
+    let delete = &response_rops[8..];
+
+    assert_eq!(delete[0], 0x1D);
+    assert_eq!(delete[1], 0x01);
+    assert_eq!(u32::from_le_bytes(delete[2..6].try_into().unwrap()), 0);
+    assert_eq!(delete[6], 0);
+    assert_eq!(destroyed_mailboxes.lock().unwrap().as_slice(), &[custom_id]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_delete_folder_rejects_system_mailbox() {
+    let destroyed_mailboxes = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        destroyed_mailboxes: destroyed_mailboxes.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Root
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x1D, 0x00, 0x01, // RopDeleteFolder
+        0x00, // deletion flags
+    ]);
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &rop_buffer[2..2 + response_rop_size];
+    let delete = &response_rops[8..];
+
+    assert_eq!(delete[0], 0x1D);
+    assert_eq!(delete[1], 0x01);
+    assert_eq!(
+        u32::from_le_bytes(delete[2..6].try_into().unwrap()),
+        0x8007_0005
+    );
+    assert!(destroyed_mailboxes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn mapi_over_http_execute_sets_columns_and_queries_empty_rows() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
