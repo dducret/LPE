@@ -1,5 +1,5 @@
 use axum::body::to_bytes;
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
@@ -2753,7 +2753,9 @@ async fn rpc_proxy_challenges_missing_authentication_with_basic() {
     let store = FakeStore::default();
     let service = ExchangeService::new(store);
 
-    let response = service.handle_rpc_proxy(&HeaderMap::new()).await;
+    let response = service
+        .handle_rpc_proxy(&Method::GET, &HeaderMap::new(), 0)
+        .await;
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(
@@ -2765,6 +2767,36 @@ async fn rpc_proxy_challenges_missing_authentication_with_basic() {
 }
 
 #[tokio::test]
+async fn rpc_proxy_answers_msrpch_echo_ping_without_authentication() {
+    let store = FakeStore::default();
+    let service = ExchangeService::new(store);
+    let method = Method::from_bytes(b"RPC_IN_DATA").expect("valid RPC method");
+    let mut headers = HeaderMap::new();
+    headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
+    headers.insert("accept", HeaderValue::from_static("application/rpc"));
+
+    let response = service.handle_rpc_proxy(&method, &headers, 0).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type"),
+        Some(&HeaderValue::from_static("application/rpc"))
+    );
+    assert_eq!(
+        response.headers().get("x-lpe-rpc-proxy-status"),
+        Some(&HeaderValue::from_static("echo"))
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(
+        body.as_ref(),
+        &[
+            0x05, 0x00, 0x14, 0x03, 0x10, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x40, 0x00, 0x00, 0x00
+        ]
+    );
+}
+
+#[tokio::test]
 async fn rpc_proxy_accepts_authenticated_rca_probe_without_405() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -2772,7 +2804,9 @@ async fn rpc_proxy_accepts_authenticated_rca_probe_without_405() {
     };
     let service = ExchangeService::new(store);
 
-    let response = service.handle_rpc_proxy(&bearer_headers()).await;
+    let response = service
+        .handle_rpc_proxy(&Method::GET, &bearer_headers(), 0)
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(

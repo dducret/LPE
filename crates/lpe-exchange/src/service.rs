@@ -44,6 +44,11 @@ const MAPI_NSPI_PATH: &str = "/mapi/nspi";
 const MAPI_NSPI_TRAILING_PATH: &str = "/mapi/nspi/";
 const RPC_PROXY_PATH: &str = "/rpc/rpcproxy.dll";
 const RPC_PROXY_COMPAT_STATUS: &str = "x-lpe-rpc-proxy-status";
+const RPC_PROXY_ECHO_STATUS: &str = "echo";
+const RPC_PROXY_ECHO_BODY: [u8; 20] = [
+    0x05, 0x00, 0x14, 0x03, 0x10, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x40, 0x00, 0x00, 0x00,
+];
 const CONTACTS_FOLDER_ID: &str = "contacts";
 const CALENDAR_FOLDER_ID: &str = "calendar";
 const TASKS_FOLDER_ID: &str = "tasks";
@@ -224,7 +229,9 @@ async fn rpc_proxy_handler(
 ) -> Response {
     let started_at = Instant::now();
     let service = ExchangeService::new(storage);
-    let response = service.handle_rpc_proxy(&headers).await;
+    let response = service
+        .handle_rpc_proxy(&method, &headers, body.len())
+        .await;
     log_rpc_proxy_connection(
         &method,
         &uri,
@@ -537,7 +544,16 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
         mapi::handle_mapi(&self.store, endpoint, headers, body).await
     }
 
-    pub(crate) async fn handle_rpc_proxy(&self, headers: &HeaderMap) -> Response {
+    pub(crate) async fn handle_rpc_proxy(
+        &self,
+        method: &Method,
+        headers: &HeaderMap,
+        request_body_bytes: usize,
+    ) -> Response {
+        if is_rpc_proxy_echo_request(method, headers, request_body_bytes) {
+            return rpc_proxy_echo_response();
+        }
+
         match authenticate_account(&self.store, None, headers, "mapi").await {
             Ok(principal) => rpc_proxy_accepted_response(&principal),
             Err(error) => rpc_proxy_auth_challenge_response(&error.to_string()),
@@ -5071,6 +5087,40 @@ fn soap_response(body: String) -> Response {
         body = body,
     );
     xml_response(StatusCode::OK, envelope)
+}
+
+fn is_rpc_proxy_echo_request(
+    method: &Method,
+    headers: &HeaderMap,
+    request_body_bytes: usize,
+) -> bool {
+    let method = method.as_str();
+    if method != "RPC_IN_DATA" && method != "RPC_OUT_DATA" {
+        return false;
+    }
+    if request_body_bytes > 0x10 || headers.contains_key(axum::http::header::AUTHORIZATION) {
+        return false;
+    }
+
+    let user_agent = mapi::safe_header(headers, "user-agent")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let accept = mapi::safe_header(headers, "accept")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    user_agent == "msrpc" || accept.contains("application/rpc")
+}
+
+fn rpc_proxy_echo_response() -> Response {
+    let mut response = (StatusCode::OK, RPC_PROXY_ECHO_BODY.to_vec()).into_response();
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/rpc"));
+    response.headers_mut().insert(
+        RPC_PROXY_COMPAT_STATUS,
+        HeaderValue::from_static(RPC_PROXY_ECHO_STATUS),
+    );
+    response
 }
 
 fn rpc_proxy_accepted_response(principal: &AccountPrincipal) -> Response {

@@ -640,9 +640,11 @@ also enabled with an explicitly published EWS or MAPI surface. `OPTIONS
 /Microsoft-Server-ActiveSync` returns the `ms-asprotocolversions` and
 `ms-asprotocolcommands` headers. `OPTIONS /mapi/emsmdb` returns
 `x-lpe-mapi-status: transport-session-ready`. Unauthenticated
-`/rpc/rpcproxy.dll` probes return a `401` `Basic realm="LPE RPC"` challenge so
-RCA can discover supported HTTP authentication instead of receiving a static
-web-server `405`.
+`/rpc/rpcproxy.dll` HTTP authentication probes return a `401` `Basic
+realm="LPE RPC"` challenge so RCA can discover supported HTTP authentication
+instead of receiving a static web-server `405`. `MSRPC` echo discovery probes
+sent with `RPC_IN_DATA` or `RPC_OUT_DATA` receive a `200 application/rpc`
+20-byte RTS echo response.
 
 For public client auto-configuration, the exposed front end must remain `LPE-CT` or an equivalent HTTPS publication layer. In v1:
 

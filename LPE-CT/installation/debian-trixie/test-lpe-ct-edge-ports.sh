@@ -747,6 +747,31 @@ probe_client_publication() {
   rm -f "${headers_file}"
   pass "RPC proxy auth shim is published through LPE-CT"
 
+  headers_file="$(mktemp)"
+  local rpc_echo_status
+  rpc_echo_status="$(curl --silent --show-error --insecure --http1.1 \
+    --request RPC_IN_DATA \
+    --header "Host: ${host_header}" \
+    --header "User-Agent: MSRPC" \
+    --header "Accept: application/rpc" \
+    --dump-header "${headers_file}" \
+    --output /dev/null \
+    --write-out "%{http_code}" \
+    "${base_url}/rpc/rpcproxy.dll?${host_header}:6002" 2>/dev/null || true)"
+  if [[ "${rpc_echo_status}" != "200" ]]; then
+    sed -n '1,40p' "${headers_file}" || true
+    rm -f "${headers_file}"
+    fail "RPC proxy MS-RPCH echo should return HTTP 200 through LPE-CT, got ${rpc_echo_status}"
+  fi
+  grep -qi '^content-type: application/rpc' "${headers_file}" \
+    || {
+      sed -n '1,40p' "${headers_file}" || true
+      rm -f "${headers_file}"
+      fail "RPC proxy MS-RPCH echo response is missing application/rpc content type"
+    }
+  rm -f "${headers_file}"
+  pass "RPC proxy MS-RPCH echo is published through LPE-CT"
+
   assert_published_core_route "POST" "/api/mail/auth/login" "Mailbox login API" "{}"
   assert_published_core_route "GET" "/api/jmap/session" "JMAP session endpoint"
   assert_published_core_route "POST" "/api/jmap/api" "JMAP API endpoint" "{}"
