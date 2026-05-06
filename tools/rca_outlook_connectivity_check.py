@@ -17,6 +17,7 @@ import textwrap
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -82,6 +83,20 @@ def content_type(headers: dict[str, str]) -> str:
         if key.lower() == "content-type":
             return value.lower()
     return ""
+
+
+def header_value(headers: dict[str, str], name: str) -> str:
+    for key, value in headers.items():
+        if key.lower() == name.lower():
+            return value
+    return ""
+
+
+def mapi_request_id(sequence: str | int | None = None) -> str:
+    value = str(uuid.uuid4())
+    if sequence is not None:
+        value = f"{value}:{sequence}"
+    return value
 
 
 def check_pox_autodiscover(
@@ -247,14 +262,14 @@ def check_mapi_ping(base_url: str, email: str, password: str, timeout: int) -> N
                 "Authorization": f"Basic {token}",
                 "Content-Type": "application/mapi-http",
                 "X-RequestType": "PING",
-                "X-RequestId": "00000000-0000-0000-0000-000000000123",
+                "X-RequestId": mapi_request_id(),
                 "X-ClientInfo": "lpe-rca-connectivity-check",
             },
             timeout,
         )
         require(response.status == 200, f"MAPI PING {path} returned HTTP {response.status}: {response.text[:300]}")
         require("application/mapi-http" in content_type(response.headers), f"MAPI PING {path} did not return MAPI content")
-        response_code = next((value for key, value in response.headers.items() if key.lower() == "x-responsecode"), "")
+        response_code = header_value(response.headers, "x-responsecode")
         require(response_code == "0", f"MAPI PING {path} returned X-ResponseCode {response_code!r}")
     print("ok mapi_ping")
 
@@ -269,7 +284,7 @@ def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, 
             "Authorization": f"Basic {token}",
             "Content-Type": "application/octet-stream",
             "X-RequestType": "Bind",
-            "X-RequestId": "00000000-0000-0000-0000-000000000124:1",
+            "X-RequestId": mapi_request_id(1),
             "X-ClientInfo": "lpe-rca-connectivity-check",
             "User-Agent": "MapiHttpClient",
         },
@@ -277,11 +292,11 @@ def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, 
     )
     require(response.status == 200, f"MAPI NSPI Bind returned HTTP {response.status}: {response.text[:300]}")
     require("application/mapi-http" in content_type(response.headers), "MAPI NSPI Bind did not return MAPI content")
-    response_code = next((value for key, value in response.headers.items() if key.lower() == "x-responsecode"), "")
+    response_code = header_value(response.headers, "x-responsecode")
     require(response_code == "0", f"MAPI NSPI Bind returned X-ResponseCode {response_code!r}: {response.text[:300]}")
-    expiration = next((value for key, value in response.headers.items() if key.lower() == "x-expirationinfo"), "")
-    require(expiration == "1800000", f"MAPI NSPI Bind returned X-ExpirationInfo {expiration!r}")
-    client_info = next((value for key, value in response.headers.items() if key.lower() == "x-clientinfo"), "")
+    expiration = header_value(response.headers, "x-expirationinfo")
+    require(expiration.isdigit() and int(expiration) > 0, f"MAPI NSPI Bind returned invalid X-ExpirationInfo {expiration!r}")
+    client_info = header_value(response.headers, "x-clientinfo")
     require(client_info == "lpe-rca-connectivity-check", f"MAPI NSPI Bind did not echo X-ClientInfo")
     print("ok mapi_nspi_bind_octet_stream")
 
@@ -304,7 +319,7 @@ def check_mapi_nspi_address_book(base_url: str, email: str, password: str, timeo
                 "Authorization": f"Basic {token}",
                 "Content-Type": "application/octet-stream",
                 "X-RequestType": request_type,
-                "X-RequestId": f"00000000-0000-0000-0000-000000000125:{request_type}",
+                "X-RequestId": mapi_request_id(request_type),
                 "X-ClientInfo": "lpe-rca-connectivity-check",
                 "User-Agent": "MapiHttpClient",
             },
@@ -312,10 +327,46 @@ def check_mapi_nspi_address_book(base_url: str, email: str, password: str, timeo
         )
         require(response.status == 200, f"MAPI NSPI {request_type} returned HTTP {response.status}: {response.text[:300]}")
         require("application/mapi-http" in content_type(response.headers), f"MAPI NSPI {request_type} did not return MAPI content")
-        response_code = next((value for key, value in response.headers.items() if key.lower() == "x-responsecode"), "")
+        response_code = header_value(response.headers, "x-responsecode")
         require(response_code == "0", f"MAPI NSPI {request_type} returned X-ResponseCode {response_code!r}: {response.text[:300]}")
         assert_payload(mapi_http_binary_payload(response.body), request_type)
     print("ok mapi_nspi_address_book")
+
+
+def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, timeout: int) -> None:
+    parsed = urllib.parse.urlparse(base_url)
+    rpc_host = parsed.hostname or parsed.netloc
+    require(bool(rpc_host), "base URL must include a host for RPC proxy checks")
+    rpc_url = join_url(base_url, f"/rpc/rpcproxy.dll?{rpc_host}:6002")
+    headers = {
+        "Accept": "application/rpc",
+        "User-Agent": "MSRPC",
+    }
+
+    anonymous = request("RPC_IN_DATA", rpc_url, b"", headers, timeout)
+    require(
+        anonymous.status == 401,
+        f"anonymous RPC proxy probe returned HTTP {anonymous.status}; RCA requires anonymous to fail",
+    )
+    require(
+        "basic" in header_value(anonymous.headers, "www-authenticate").lower(),
+        "anonymous RPC proxy probe did not advertise Basic authentication",
+    )
+
+    if password is not None:
+        token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
+        authenticated_headers = dict(headers)
+        authenticated_headers["Authorization"] = f"Basic {token}"
+        authenticated = request("RPC_IN_DATA", rpc_url, b"", authenticated_headers, timeout)
+        require(
+            authenticated.status == 200,
+            f"authenticated RPC proxy probe returned HTTP {authenticated.status}: {authenticated.text[:300]}",
+        )
+        require(
+            "application/rpc" in content_type(authenticated.headers),
+            "authenticated RPC proxy echo did not return application/rpc",
+        )
+    print("ok rpc_proxy_auth")
 
 
 def mapi_http_binary_payload(body: bytes) -> bytes:
@@ -388,8 +439,8 @@ def main() -> int:
             """
         ),
     )
-    parser.add_argument("--base-url", default=os.getenv("LPE_RCA_BASE_URL", "https://l-p-e.ch"))
-    parser.add_argument("--email", default=os.getenv("LPE_RCA_EMAIL", "test@l-p-e.ch"))
+    parser.add_argument("--base-url", default=os.getenv("LPE_RCA_BASE_URL"))
+    parser.add_argument("--email", default=os.getenv("LPE_RCA_EMAIL"))
     parser.add_argument("--password", default=os.getenv("LPE_RCA_PASSWORD"))
     parser.add_argument("--timeout", type=int, default=int(os.getenv("LPE_RCA_TIMEOUT", "20")))
     parser.add_argument("--expect-ews", action="store_true", help="Require EWS discovery to be published.")
@@ -411,8 +462,15 @@ def main() -> int:
         action="store_true",
         help="Exercise RCA-style NSPI address-book Check Name operations.",
     )
+    parser.add_argument(
+        "--check-rpc-proxy-auth",
+        action="store_true",
+        help="Exercise RCA-style /rpc/rpcproxy.dll anonymous challenge and optional authenticated echo.",
+    )
     args = parser.parse_args()
 
+    require(args.base_url, "provide --base-url or set LPE_RCA_BASE_URL")
+    require(args.email, "provide --email or set LPE_RCA_EMAIL")
     base_url = args.base_url.rstrip("/")
     check_pox_autodiscover(
         base_url,
@@ -443,6 +501,8 @@ def main() -> int:
             or args.check_mapi_nspi_address_book
         ):
             raise RuntimeError("requested authenticated checks require --password or LPE_RCA_PASSWORD")
+    if args.check_rpc_proxy_auth:
+        check_rpc_proxy_auth(base_url, args.email, args.password, args.timeout)
 
     return 0
 

@@ -2767,11 +2767,34 @@ async fn rpc_proxy_challenges_missing_authentication_with_basic() {
 }
 
 #[tokio::test]
-async fn rpc_proxy_answers_msrpch_echo_ping_without_authentication() {
+async fn rpc_proxy_challenges_anonymous_msrpch_echo_ping() {
     let store = FakeStore::default();
     let service = ExchangeService::new(store);
     let method = Method::from_bytes(b"RPC_IN_DATA").expect("valid RPC method");
     let mut headers = HeaderMap::new();
+    headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
+    headers.insert("accept", HeaderValue::from_static("application/rpc"));
+
+    let response = service.handle_rpc_proxy(&method, &headers, 0).await;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response.headers().get(axum::http::header::WWW_AUTHENTICATE),
+        Some(&HeaderValue::from_static("Basic realm=\"LPE RPC\""))
+    );
+    let body = response_text(response).await;
+    assert!(body.contains("missing account authentication"));
+}
+
+#[tokio::test]
+async fn rpc_proxy_answers_authenticated_msrpch_echo_ping() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let method = Method::from_bytes(b"RPC_IN_DATA").expect("valid RPC method");
+    let mut headers = bearer_headers();
     headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
     headers.insert("accept", HeaderValue::from_static("application/rpc"));
 

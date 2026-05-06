@@ -550,12 +550,14 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
         headers: &HeaderMap,
         request_body_bytes: usize,
     ) -> Response {
-        if is_rpc_proxy_echo_request(method, headers, request_body_bytes) {
-            return rpc_proxy_echo_response();
-        }
-
         match authenticate_account(&self.store, None, headers, "mapi").await {
-            Ok(principal) => rpc_proxy_accepted_response(&principal),
+            Ok(principal) => {
+                if is_rpc_proxy_echo_request(method, headers, request_body_bytes) {
+                    rpc_proxy_echo_response()
+                } else {
+                    rpc_proxy_accepted_response(&principal)
+                }
+            }
             Err(error) => rpc_proxy_auth_challenge_response(&error.to_string()),
         }
     }
@@ -5098,7 +5100,7 @@ fn is_rpc_proxy_echo_request(
     if method != "RPC_IN_DATA" && method != "RPC_OUT_DATA" {
         return false;
     }
-    if request_body_bytes > 0x10 || headers.contains_key(axum::http::header::AUTHORIZATION) {
+    if request_body_bytes > 0x10 {
         return false;
     }
 
