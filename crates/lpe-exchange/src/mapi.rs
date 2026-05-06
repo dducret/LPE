@@ -88,6 +88,46 @@ struct MapiSortOrder {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+enum MapiRestriction {
+    And(Vec<MapiRestriction>),
+    Or(Vec<MapiRestriction>),
+    Not(Box<MapiRestriction>),
+    Content {
+        property_tag: u32,
+        value: String,
+    },
+    Property {
+        relop: u8,
+        property_tag: u32,
+        value: MapiValue,
+    },
+    Bitmask {
+        property_tag: u32,
+        mask: u32,
+        must_be_nonzero: bool,
+    },
+    Size {
+        relop: u8,
+        property_tag: u32,
+        size: u32,
+    },
+    Exist {
+        property_tag: u32,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum MapiValue {
+    Bool(bool),
+    I32(i32),
+    I64(i64),
+    U32(u32),
+    U64(u64),
+    String(String),
+    Binary(Vec<u8>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum MapiObject {
     Logon,
     Folder {
@@ -101,12 +141,14 @@ enum MapiObject {
         folder_id: u64,
         columns: Vec<u32>,
         sort_orders: Vec<MapiSortOrder>,
+        restriction: Option<MapiRestriction>,
         position: usize,
     },
     ContentsTable {
         folder_id: u64,
         columns: Vec<u32>,
         sort_orders: Vec<MapiSortOrder>,
+        restriction: Option<MapiRestriction>,
         position: usize,
     },
     AttachmentTable {
@@ -114,6 +156,7 @@ enum MapiObject {
         message_id: u64,
         columns: Vec<u32>,
         sort_orders: Vec<MapiSortOrder>,
+        restriction: Option<MapiRestriction>,
         position: usize,
     },
     Attachment {
@@ -1227,6 +1270,7 @@ async fn execute_rops<S: ExchangeStore>(
                         folder_id,
                         columns,
                         sort_orders: Vec::new(),
+                        restriction: None,
                         position: 0,
                     },
                 );
@@ -1247,6 +1291,7 @@ async fn execute_rops<S: ExchangeStore>(
                         folder_id,
                         columns: Vec::new(),
                         sort_orders: Vec::new(),
+                        restriction: None,
                         position: 0,
                     },
                 );
@@ -1367,6 +1412,39 @@ async fn execute_rops<S: ExchangeStore>(
                     0x8004_0102,
                 )),
             },
+            0x14 => match input_object_mut(session, &handle_slots, &request) {
+                Some(MapiObject::HierarchyTable {
+                    restriction,
+                    position,
+                    ..
+                })
+                | Some(MapiObject::ContentsTable {
+                    restriction,
+                    position,
+                    ..
+                })
+                | Some(MapiObject::AttachmentTable {
+                    restriction,
+                    position,
+                    ..
+                }) => match request.restriction() {
+                    Ok(parsed) => {
+                        *restriction = parsed;
+                        *position = 0;
+                        responses.extend_from_slice(&rop_restrict_response(&request));
+                    }
+                    Err(_) => responses.extend_from_slice(&rop_error_response(
+                        0x14,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    )),
+                },
+                _ => responses.extend_from_slice(&rop_error_response(
+                    0x14,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                )),
+            },
             0x15 => responses.extend_from_slice(&rop_query_rows_response(
                 &request,
                 input_object_mut(session, &handle_slots, &request),
@@ -1383,6 +1461,13 @@ async fn execute_rops<S: ExchangeStore>(
                 snapshot,
             )),
             0x18 => responses.extend_from_slice(&rop_seek_row_response(
+                &request,
+                input_object_mut(session, &handle_slots, &request),
+                mailboxes,
+                emails,
+                snapshot,
+            )),
+            0x4F => responses.extend_from_slice(&rop_find_row_response(
                 &request,
                 input_object_mut(session, &handle_slots, &request),
                 mailboxes,
@@ -1413,6 +1498,7 @@ async fn execute_rops<S: ExchangeStore>(
                         message_id: *message_id,
                         columns: Vec::new(),
                         sort_orders: Vec::new(),
+                        restriction: None,
                         position: 0,
                     },
                 );
@@ -2070,6 +2156,13 @@ fn rop_sort_table_response(request: &RopRequest) -> Vec<u8> {
     response
 }
 
+fn rop_restrict_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![0x14, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.push(0);
+    response
+}
+
 fn rop_get_properties_list_response(request: &RopRequest, object: Option<&MapiObject>) -> Vec<u8> {
     let tags = match object {
         Some(MapiObject::Attachment { .. }) => default_attachment_columns(),
@@ -2262,6 +2355,7 @@ fn rop_query_rows_response(
             folder_id,
             columns,
             sort_orders,
+            restriction,
             position: table_position,
         }) if is_root_hierarchy_folder(*folder_id) => {
             start_position = *table_position;
@@ -2271,6 +2365,7 @@ fn rop_query_rows_response(
                 columns.clone()
             };
             let mut rows = mailboxes.iter().collect::<Vec<_>>();
+            rows.retain(|mailbox| restriction_matches_mailbox(restriction.as_ref(), mailbox));
             sort_mailboxes(&mut rows, sort_orders);
             rows.into_iter()
                 .map(|mailbox| serialize_folder_row(mailbox, &columns))
@@ -2280,6 +2375,7 @@ fn rop_query_rows_response(
             folder_id,
             columns,
             sort_orders,
+            restriction,
             position: table_position,
         }) => {
             start_position = *table_position;
@@ -2289,6 +2385,7 @@ fn rop_query_rows_response(
                 columns.clone()
             };
             let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
+            rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
             sort_emails(&mut rows, sort_orders);
             rows.into_iter()
                 .map(|email| serialize_message_row(email, &columns))
@@ -2299,6 +2396,7 @@ fn rop_query_rows_response(
             message_id,
             columns,
             sort_orders,
+            restriction,
             position: table_position,
         }) => {
             start_position = *table_position;
@@ -2312,6 +2410,9 @@ fn rop_query_rows_response(
                 .unwrap_or_default()
                 .iter()
                 .collect::<Vec<_>>();
+            rows.retain(|attachment| {
+                restriction_matches_attachment(restriction.as_ref(), attachment)
+            });
             sort_attachments(&mut rows, sort_orders);
             rows.into_iter()
                 .map(|attachment| serialize_attachment_row(attachment, &columns))
@@ -2454,6 +2555,235 @@ fn compare_case_insensitive(left: &str, right: &str) -> Ordering {
     left.to_ascii_lowercase().cmp(&right.to_ascii_lowercase())
 }
 
+fn restriction_matches_mailbox(
+    restriction: Option<&MapiRestriction>,
+    mailbox: &JmapMailbox,
+) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        mailbox_property_value(mailbox, property_tag)
+    })
+}
+
+fn restriction_matches_email(restriction: Option<&MapiRestriction>, email: &JmapEmail) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        email_property_value(email, property_tag)
+    })
+}
+
+fn restriction_matches_attachment(
+    restriction: Option<&MapiRestriction>,
+    attachment: &MapiAttachment,
+) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        attachment_property_value(attachment, property_tag)
+    })
+}
+
+fn restriction_matches(
+    restriction: Option<&MapiRestriction>,
+    value_for: impl Copy + Fn(u32) -> Option<MapiValue>,
+) -> bool {
+    let Some(restriction) = restriction else {
+        return true;
+    };
+    match restriction {
+        MapiRestriction::And(children) => children
+            .iter()
+            .all(|child| restriction_matches(Some(child), value_for)),
+        MapiRestriction::Or(children) => children
+            .iter()
+            .any(|child| restriction_matches(Some(child), value_for)),
+        MapiRestriction::Not(child) => !restriction_matches(Some(child), value_for),
+        MapiRestriction::Content {
+            property_tag,
+            value,
+        } => value_for(*property_tag)
+            .and_then(|property| property.into_text())
+            .is_some_and(|property| {
+                property
+                    .to_ascii_lowercase()
+                    .contains(&value.to_ascii_lowercase())
+            }),
+        MapiRestriction::Property {
+            relop,
+            property_tag,
+            value,
+        } => value_for(*property_tag)
+            .is_some_and(|property| compare_mapi_values(&property, value, *relop)),
+        MapiRestriction::Bitmask {
+            property_tag,
+            mask,
+            must_be_nonzero,
+        } => value_for(*property_tag)
+            .and_then(|value| value.into_u32())
+            .is_some_and(|value| ((value & mask) != 0) == *must_be_nonzero),
+        MapiRestriction::Size {
+            relop,
+            property_tag,
+            size,
+        } => value_for(*property_tag)
+            .map(|value| value.size() as i64)
+            .is_some_and(|actual| compare_i64(actual, *size as i64, *relop)),
+        MapiRestriction::Exist { property_tag } => value_for(*property_tag).is_some(),
+    }
+}
+
+fn mailbox_property_value(mailbox: &JmapMailbox, property_tag: u32) -> Option<MapiValue> {
+    match property_tag {
+        PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(mailbox.name.clone())),
+        PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(mailbox.total_emails)),
+        PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(mailbox.unread_emails)),
+        PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(false)),
+        PID_TAG_FOLDER_ID => Some(MapiValue::U64(mapi_folder_id(mailbox))),
+        _ => None,
+    }
+}
+
+fn email_property_value(email: &JmapEmail, property_tag: u32) -> Option<MapiValue> {
+    match property_tag {
+        PID_TAG_MID => Some(MapiValue::U64(mapi_message_id(email))),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+            Some(MapiValue::String(email.subject.clone()))
+        }
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Note".to_string())),
+        PID_TAG_MESSAGE_DELIVERY_TIME | PID_TAG_LAST_MODIFICATION_TIME => {
+            Some(MapiValue::String(email.received_at.clone()))
+        }
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(email.size_octets)),
+        PID_TAG_SENDER_NAME_W => Some(MapiValue::String(
+            email
+                .from_display
+                .clone()
+                .unwrap_or_else(|| email.from_address.clone()),
+        )),
+        PID_TAG_SENDER_EMAIL_ADDRESS_W => Some(MapiValue::String(email.from_address.clone())),
+        PID_TAG_DISPLAY_TO_W => Some(MapiValue::String(display_to(email))),
+        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(email.has_attachments)),
+        PID_TAG_BODY_W => Some(MapiValue::String(email.body_text.clone())),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => {
+            Some(MapiValue::Binary(email.id.as_bytes().to_vec()))
+        }
+        PID_TAG_INTERNET_MESSAGE_ID_W => email.internet_message_id.clone().map(MapiValue::String),
+        _ => None,
+    }
+}
+
+fn attachment_property_value(attachment: &MapiAttachment, property_tag: u32) -> Option<MapiValue> {
+    match property_tag {
+        PID_TAG_ATTACH_NUM => Some(MapiValue::U32(attachment.attach_num)),
+        PID_TAG_ATTACH_FILENAME_W | PID_TAG_ATTACH_LONG_FILENAME_W => {
+            Some(MapiValue::String(attachment.file_name.clone()))
+        }
+        PID_TAG_ATTACH_MIME_TAG_W => Some(MapiValue::String(attachment.media_type.clone())),
+        PID_TAG_ATTACH_SIZE => Some(MapiValue::U64(attachment.size_octets)),
+        PID_TAG_ATTACH_METHOD => Some(MapiValue::U32(1)),
+        PID_TAG_RENDERING_POSITION => Some(MapiValue::U32(u32::MAX)),
+        PID_TAG_ENTRY_ID => Some(MapiValue::Binary(
+            attachment.canonical_id.as_bytes().to_vec(),
+        )),
+        PID_TAG_INSTANCE_KEY => Some(MapiValue::String(attachment.file_reference.clone())),
+        _ => None,
+    }
+}
+
+fn compare_mapi_values(left: &MapiValue, right: &MapiValue, relop: u8) -> bool {
+    if let (Some(left), Some(right)) = (left.as_i64(), right.as_i64()) {
+        return compare_i64(left, right, relop);
+    }
+    if let (Some(left), Some(right)) = (left.as_text(), right.as_text()) {
+        return compare_ordering(compare_case_insensitive(left, right), relop);
+    }
+    if let (Some(left), Some(right)) = (left.as_bool(), right.as_bool()) {
+        return compare_ordering(left.cmp(&right), relop);
+    }
+    compare_ordering(left.cmp_value(right), relop)
+}
+
+fn compare_i64(left: i64, right: i64, relop: u8) -> bool {
+    compare_ordering(left.cmp(&right), relop)
+}
+
+fn compare_ordering(ordering: Ordering, relop: u8) -> bool {
+    match relop {
+        0x00 => ordering == Ordering::Less,
+        0x01 => matches!(ordering, Ordering::Less | Ordering::Equal),
+        0x02 => ordering == Ordering::Greater,
+        0x03 => matches!(ordering, Ordering::Greater | Ordering::Equal),
+        0x04 => ordering == Ordering::Equal,
+        0x05 => ordering != Ordering::Equal,
+        _ => false,
+    }
+}
+
+impl MapiValue {
+    fn as_i64(&self) -> Option<i64> {
+        match self {
+            MapiValue::Bool(value) => Some(i64::from(*value)),
+            MapiValue::I32(value) => Some(i64::from(*value)),
+            MapiValue::I64(value) => Some(*value),
+            MapiValue::U32(value) => Some(i64::from(*value)),
+            MapiValue::U64(value) => i64::try_from(*value).ok(),
+            MapiValue::String(_) | MapiValue::Binary(_) => None,
+        }
+    }
+
+    fn as_bool(&self) -> Option<bool> {
+        match self {
+            MapiValue::Bool(value) => Some(*value),
+            MapiValue::I32(value) => Some(*value != 0),
+            MapiValue::I64(value) => Some(*value != 0),
+            MapiValue::U32(value) => Some(*value != 0),
+            MapiValue::U64(value) => Some(*value != 0),
+            MapiValue::String(_) | MapiValue::Binary(_) => None,
+        }
+    }
+
+    fn as_text(&self) -> Option<&str> {
+        match self {
+            MapiValue::String(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    fn into_text(self) -> Option<String> {
+        match self {
+            MapiValue::Bool(value) => Some(value.to_string()),
+            MapiValue::I32(value) => Some(value.to_string()),
+            MapiValue::I64(value) => Some(value.to_string()),
+            MapiValue::U32(value) => Some(value.to_string()),
+            MapiValue::U64(value) => Some(value.to_string()),
+            MapiValue::String(value) => Some(value),
+            MapiValue::Binary(_) => None,
+        }
+    }
+
+    fn into_u32(self) -> Option<u32> {
+        match self {
+            MapiValue::Bool(value) => Some(u32::from(value)),
+            MapiValue::I32(value) => u32::try_from(value).ok(),
+            MapiValue::I64(value) => u32::try_from(value).ok(),
+            MapiValue::U32(value) => Some(value),
+            MapiValue::U64(value) => u32::try_from(value).ok(),
+            MapiValue::String(_) | MapiValue::Binary(_) => None,
+        }
+    }
+
+    fn size(&self) -> usize {
+        match self {
+            MapiValue::Bool(_) => 1,
+            MapiValue::I32(_) | MapiValue::U32(_) => 4,
+            MapiValue::I64(_) | MapiValue::U64(_) => 8,
+            MapiValue::String(value) => value.encode_utf16().count() * 2,
+            MapiValue::Binary(value) => value.len(),
+        }
+    }
+
+    fn cmp_value(&self, other: &MapiValue) -> Ordering {
+        format!("{self:?}").cmp(&format!("{other:?}"))
+    }
+}
+
 fn serialize_attachment_row(attachment: &MapiAttachment, columns: &[u32]) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
@@ -2536,6 +2866,147 @@ fn rop_seek_row_response(
     response
 }
 
+fn rop_find_row_response(
+    request: &RopRequest,
+    object: Option<&mut MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    let Ok(restriction) = request.restriction() else {
+        return rop_error_response(0x4F, request.response_handle_index(), 0x8004_0102);
+    };
+    let Some(restriction) = restriction else {
+        return rop_error_response(0x4F, request.response_handle_index(), 0x8004_0102);
+    };
+
+    let Some(object) = object else {
+        return rop_error_response(0x4F, request.response_handle_index(), 0x8004_0102);
+    };
+    let mut response = vec![0x4F, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.push(0);
+
+    match object {
+        MapiObject::HierarchyTable {
+            folder_id,
+            columns,
+            sort_orders,
+            restriction: table_restriction,
+            position,
+        } if is_root_hierarchy_folder(*folder_id) => {
+            let columns = if columns.is_empty() {
+                default_hierarchy_columns()
+            } else {
+                columns.clone()
+            };
+            let mut rows = mailboxes.iter().collect::<Vec<_>>();
+            rows.retain(|mailbox| restriction_matches_mailbox(table_restriction.as_ref(), mailbox));
+            sort_mailboxes(&mut rows, sort_orders);
+            if let Some((index, mailbox)) =
+                find_row(rows.as_slice(), *position, request, |mailbox| {
+                    restriction_matches_mailbox(Some(&restriction), mailbox)
+                })
+            {
+                *position = index;
+                response.push(1);
+                response.extend_from_slice(&serialize_folder_row(mailbox, &columns));
+            } else {
+                response.push(0);
+            }
+        }
+        MapiObject::ContentsTable {
+            folder_id,
+            columns,
+            sort_orders,
+            restriction: table_restriction,
+            position,
+        } => {
+            let columns = if columns.is_empty() {
+                default_contents_columns()
+            } else {
+                columns.clone()
+            };
+            let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
+            rows.retain(|email| restriction_matches_email(table_restriction.as_ref(), email));
+            sort_emails(&mut rows, sort_orders);
+            if let Some((index, email)) = find_row(rows.as_slice(), *position, request, |email| {
+                restriction_matches_email(Some(&restriction), email)
+            }) {
+                *position = index;
+                response.push(1);
+                response.extend_from_slice(&serialize_message_row(email, &columns));
+            } else {
+                response.push(0);
+            }
+        }
+        MapiObject::AttachmentTable {
+            folder_id,
+            message_id,
+            columns,
+            sort_orders,
+            restriction: table_restriction,
+            position,
+        } => {
+            let columns = if columns.is_empty() {
+                default_attachment_columns()
+            } else {
+                columns.clone()
+            };
+            let mut rows = snapshot
+                .attachments_for_message(*folder_id, *message_id)
+                .unwrap_or_default()
+                .iter()
+                .collect::<Vec<_>>();
+            rows.retain(|attachment| {
+                restriction_matches_attachment(table_restriction.as_ref(), attachment)
+            });
+            sort_attachments(&mut rows, sort_orders);
+            if let Some((index, attachment)) =
+                find_row(rows.as_slice(), *position, request, |attachment| {
+                    restriction_matches_attachment(Some(&restriction), attachment)
+                })
+            {
+                *position = index;
+                response.push(1);
+                response.extend_from_slice(&serialize_attachment_row(attachment, &columns));
+            } else {
+                response.push(0);
+            }
+        }
+        _ => return rop_error_response(0x4F, request.response_handle_index(), 0x8004_0102),
+    }
+
+    response
+}
+
+fn find_row<'a, T>(
+    rows: &'a [&'a T],
+    current_position: usize,
+    request: &RopRequest,
+    matches: impl Fn(&T) -> bool,
+) -> Option<(usize, &'a T)> {
+    if rows.is_empty() {
+        return None;
+    }
+    let start = match request.find_origin().unwrap_or(1) {
+        0 => 0,
+        2 => rows.len().saturating_sub(1),
+        _ => current_position.min(rows.len()),
+    };
+    if request.find_backward() {
+        let end = start.min(rows.len().saturating_sub(1));
+        (0..=end)
+            .rev()
+            .find_map(|index| matches(rows[index]).then_some((index, rows[index])))
+    } else {
+        rows.iter()
+            .enumerate()
+            .skip(start)
+            .find_map(|(index, row)| matches(row).then_some((index, *row)))
+    }
+}
+
 fn table_position_and_count(
     object: Option<&MapiObject>,
     mailboxes: &[JmapMailbox],
@@ -2546,27 +3017,43 @@ fn table_position_and_count(
         Some(MapiObject::HierarchyTable {
             folder_id,
             position,
+            restriction,
             ..
-        }) if is_root_hierarchy_folder(*folder_id) => (*position, mailboxes.len()),
+        }) if is_root_hierarchy_folder(*folder_id) => (
+            *position,
+            mailboxes
+                .iter()
+                .filter(|mailbox| restriction_matches_mailbox(restriction.as_ref(), mailbox))
+                .count(),
+        ),
         Some(MapiObject::ContentsTable {
             folder_id,
             position,
+            restriction,
             ..
         }) => (
             *position,
-            emails_for_folder(*folder_id, mailboxes, emails).len(),
+            emails_for_folder(*folder_id, mailboxes, emails)
+                .into_iter()
+                .filter(|email| restriction_matches_email(restriction.as_ref(), email))
+                .count(),
         ),
         Some(MapiObject::AttachmentTable {
             folder_id,
             message_id,
             position,
+            restriction,
             ..
         }) => (
             *position,
             snapshot
                 .attachments_for_message(*folder_id, *message_id)
                 .unwrap_or_default()
-                .len(),
+                .iter()
+                .filter(|attachment| {
+                    restriction_matches_attachment(restriction.as_ref(), attachment)
+                })
+                .count(),
         ),
         _ => (0, 0),
     }
@@ -3046,6 +3533,18 @@ impl<'a> Cursor<'a> {
         Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 
+    fn read_i32(&mut self) -> Result<i32> {
+        let bytes = self.read_bytes(4)?;
+        Ok(i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    }
+
+    fn read_i64(&mut self) -> Result<i64> {
+        let bytes = self.read_bytes(8)?;
+        Ok(i64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ]))
+    }
+
     fn read_u16(&mut self) -> Result<u16> {
         let bytes = self.read_bytes(2)?;
         Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
@@ -3067,6 +3566,31 @@ impl<'a> Cursor<'a> {
             .ok_or_else(|| anyhow!("request body is truncated"))?;
         self.position = end;
         Ok(bytes)
+    }
+
+    fn read_ascii_z(&mut self) -> Result<String> {
+        let start = self.position;
+        while self.remaining() > 0 {
+            if self.bytes[self.position] == 0 {
+                let bytes = &self.bytes[start..self.position];
+                self.position += 1;
+                return Ok(String::from_utf8_lossy(bytes).into_owned());
+            }
+            self.position += 1;
+        }
+        Err(anyhow!("unterminated ASCII string"))
+    }
+
+    fn read_utf16z(&mut self) -> Result<String> {
+        let mut units = Vec::new();
+        loop {
+            let unit = self.read_u16()?;
+            if unit == 0 {
+                return String::from_utf16(&units)
+                    .map_err(|_| anyhow!("invalid UTF-16 string in restriction"));
+            }
+            units.push(unit);
+        }
     }
 
     fn remaining(&self) -> usize {
@@ -3160,6 +3684,30 @@ impl RopRequest {
             .unwrap_or(true)
     }
 
+    fn restriction(&self) -> Result<Option<MapiRestriction>> {
+        let Some(size_bytes) = self.payload.get(1..3) else {
+            return Ok(None);
+        };
+        let size = u16::from_le_bytes([size_bytes[0], size_bytes[1]]) as usize;
+        if size == 0 {
+            return Ok(None);
+        }
+        let bytes = self
+            .payload
+            .get(3..3 + size)
+            .ok_or_else(|| anyhow!("restriction data is truncated"))?;
+        parse_mapi_restriction(bytes).map(Some)
+    }
+
+    fn find_origin(&self) -> Option<u8> {
+        let size = u16::from_le_bytes(self.payload.get(1..3)?.try_into().ok()?) as usize;
+        self.payload.get(3 + size).copied()
+    }
+
+    fn find_backward(&self) -> bool {
+        self.payload.first().is_some_and(|flags| flags & 0x01 != 0)
+    }
+
     fn seek_origin(&self) -> Option<u8> {
         self.payload.first().copied()
     }
@@ -3206,6 +3754,97 @@ impl RopRequest {
             .take(count)
             .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
             .collect()
+    }
+}
+
+fn parse_mapi_restriction(bytes: &[u8]) -> Result<MapiRestriction> {
+    let mut cursor = Cursor::new(bytes);
+    parse_mapi_restriction_from(&mut cursor)
+}
+
+fn parse_mapi_restriction_from(cursor: &mut Cursor<'_>) -> Result<MapiRestriction> {
+    match cursor.read_u8()? {
+        0x00 => {
+            let count = cursor.read_u16()? as usize;
+            let mut children = Vec::with_capacity(count);
+            for _ in 0..count {
+                children.push(parse_mapi_restriction_from(cursor)?);
+            }
+            Ok(MapiRestriction::And(children))
+        }
+        0x01 => {
+            let count = cursor.read_u16()? as usize;
+            let mut children = Vec::with_capacity(count);
+            for _ in 0..count {
+                children.push(parse_mapi_restriction_from(cursor)?);
+            }
+            Ok(MapiRestriction::Or(children))
+        }
+        0x02 => Ok(MapiRestriction::Not(Box::new(parse_mapi_restriction_from(
+            cursor,
+        )?))),
+        0x03 => {
+            let _fuzzy_level = cursor.read_u32()?;
+            let property_tag = cursor.read_u32()?;
+            let value = parse_tagged_property_value(cursor)?
+                .into_text()
+                .ok_or_else(|| anyhow!("content restriction requires a text value"))?;
+            Ok(MapiRestriction::Content {
+                property_tag,
+                value,
+            })
+        }
+        0x04 => {
+            let relop = cursor.read_u8()?;
+            let property_tag = cursor.read_u32()?;
+            let value = parse_tagged_property_value(cursor)?;
+            Ok(MapiRestriction::Property {
+                relop,
+                property_tag,
+                value,
+            })
+        }
+        0x06 => {
+            let rel_bmr = cursor.read_u8()?;
+            let property_tag = cursor.read_u32()?;
+            let mask = cursor.read_u32()?;
+            Ok(MapiRestriction::Bitmask {
+                property_tag,
+                mask,
+                must_be_nonzero: rel_bmr != 0,
+            })
+        }
+        0x07 => {
+            let relop = cursor.read_u8()?;
+            let property_tag = cursor.read_u32()?;
+            let size = cursor.read_u32()?;
+            Ok(MapiRestriction::Size {
+                relop,
+                property_tag,
+                size,
+            })
+        }
+        0x08 => {
+            let property_tag = cursor.read_u32()?;
+            Ok(MapiRestriction::Exist { property_tag })
+        }
+        _ => Err(anyhow!("unsupported MAPI restriction type")),
+    }
+}
+
+fn parse_tagged_property_value(cursor: &mut Cursor<'_>) -> Result<MapiValue> {
+    let property_tag = cursor.read_u32()?;
+    match property_tag & 0xFFFF {
+        0x0003 => Ok(MapiValue::I32(cursor.read_i32()?)),
+        0x000B => Ok(MapiValue::Bool(cursor.read_u8()? != 0)),
+        0x0014 => Ok(MapiValue::I64(cursor.read_i64()?)),
+        0x001E => Ok(MapiValue::String(cursor.read_ascii_z()?)),
+        0x001F => Ok(MapiValue::String(cursor.read_utf16z()?)),
+        0x0102 => {
+            let len = cursor.read_u16()? as usize;
+            Ok(MapiValue::Binary(cursor.read_bytes(len)?.to_vec()))
+        }
+        _ => Err(anyhow!("unsupported MAPI tagged value type")),
     }
 }
 
@@ -3402,6 +4041,20 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
+        0x14 => {
+            let input_handle_index = cursor.read_u8()?;
+            let restrict_flags = cursor.read_u8()?;
+            let restriction_size = cursor.read_u16()? as usize;
+            let mut payload = vec![restrict_flags];
+            payload.extend_from_slice(&(restriction_size as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(restriction_size)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
         0x07 => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
@@ -3439,6 +4092,24 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                     break;
                 }
             }
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x4F => {
+            let input_handle_index = cursor.read_u8()?;
+            let find_row_flags = cursor.read_u8()?;
+            let restriction_size = cursor.read_u16()? as usize;
+            let mut payload = vec![find_row_flags];
+            payload.extend_from_slice(&(restriction_size as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(restriction_size)?);
+            payload.push(cursor.read_u8()?);
+            let bookmark_size = cursor.read_u16()? as usize;
+            payload.extend_from_slice(&(bookmark_size as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(bookmark_size)?);
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
