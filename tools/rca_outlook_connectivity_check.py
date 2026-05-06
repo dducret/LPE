@@ -357,15 +357,20 @@ def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, timeou
         token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
         authenticated_headers = dict(headers)
         authenticated_headers["Authorization"] = f"Basic {token}"
-        authenticated = request("RPC_IN_DATA", rpc_url, b"", authenticated_headers, timeout)
-        require(
-            authenticated.status == 200,
-            f"authenticated RPC proxy probe returned HTTP {authenticated.status}: {authenticated.text[:300]}",
-        )
-        require(
-            "application/rpc" in content_type(authenticated.headers),
-            "authenticated RPC proxy echo did not return application/rpc",
-        )
+        for method, body in [("RPC_IN_DATA", b""), ("RPC_OUT_DATA", bytes(76))]:
+            authenticated = request(method, rpc_url, body, authenticated_headers, timeout)
+            require(
+                authenticated.status == 200,
+                f"authenticated RPC proxy {method} probe returned HTTP {authenticated.status}: {authenticated.text[:300]}",
+            )
+            require(
+                "application/rpc" in content_type(authenticated.headers),
+                f"authenticated RPC proxy {method} echo did not return application/rpc",
+            )
+            require(
+                len(authenticated.body) == 20,
+                f"authenticated RPC proxy {method} echo returned unexpected body length {len(authenticated.body)}",
+            )
     print("ok rpc_proxy_auth")
 
 

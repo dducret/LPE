@@ -2820,6 +2820,33 @@ async fn rpc_proxy_answers_authenticated_msrpch_echo_ping() {
 }
 
 #[tokio::test]
+async fn rpc_proxy_answers_authenticated_msrpch_out_data_ping() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let method = Method::from_bytes(b"RPC_OUT_DATA").expect("valid RPC method");
+    let mut headers = bearer_headers();
+    headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
+    headers.insert("accept", HeaderValue::from_static("application/rpc"));
+
+    let response = service.handle_rpc_proxy(&method, &headers, 76).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type"),
+        Some(&HeaderValue::from_static("application/rpc"))
+    );
+    assert_eq!(
+        response.headers().get("x-lpe-rpc-proxy-status"),
+        Some(&HeaderValue::from_static("echo"))
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(body.len(), 20);
+}
+
+#[tokio::test]
 async fn rpc_proxy_accepts_authenticated_rca_probe_without_405() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

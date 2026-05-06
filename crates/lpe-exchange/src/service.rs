@@ -548,11 +548,11 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
         &self,
         method: &Method,
         headers: &HeaderMap,
-        request_body_bytes: usize,
+        _request_body_bytes: usize,
     ) -> Response {
         match authenticate_account(&self.store, None, headers, "mapi").await {
             Ok(principal) => {
-                if is_rpc_proxy_echo_request(method, headers, request_body_bytes) {
+                if is_rpc_proxy_echo_request(method, headers) {
                     rpc_proxy_echo_response()
                 } else {
                     rpc_proxy_accepted_response(&principal)
@@ -5091,16 +5091,9 @@ fn soap_response(body: String) -> Response {
     xml_response(StatusCode::OK, envelope)
 }
 
-fn is_rpc_proxy_echo_request(
-    method: &Method,
-    headers: &HeaderMap,
-    request_body_bytes: usize,
-) -> bool {
+fn is_rpc_proxy_echo_request(method: &Method, headers: &HeaderMap) -> bool {
     let method = method.as_str();
     if method != "RPC_IN_DATA" && method != "RPC_OUT_DATA" {
-        return false;
-    }
-    if request_body_bytes > 0x10 {
         return false;
     }
 
