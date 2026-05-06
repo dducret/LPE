@@ -87,6 +87,21 @@ struct MapiSession {
     next_handle: u32,
     handles: HashMap<u32, MapiObject>,
     message_statuses: HashMap<(u64, u64), u32>,
+    named_properties: HashMap<MapiNamedProperty, u16>,
+    named_property_ids: HashMap<u16, MapiNamedProperty>,
+    next_named_property_id: u16,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct MapiNamedProperty {
+    guid: [u8; 16],
+    kind: MapiNamedPropertyKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum MapiNamedPropertyKind {
+    Lid(u32),
+    Name(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -917,6 +932,9 @@ fn create_session(endpoint: MapiEndpoint, principal: &AccountPrincipal) -> Strin
         next_handle: 1,
         handles: HashMap::new(),
         message_statuses: HashMap::new(),
+        named_properties: HashMap::new(),
+        named_property_ids: HashMap::new(),
+        next_named_property_id: FIRST_NAMED_PROPERTY_ID,
     };
     let mut guard = sessions()
         .lock()
@@ -1438,46 +1456,38 @@ where
                 &request,
                 input_object(session, &handle_slots, &request),
             )),
-            0x0A => match input_object_mut(session, &handle_slots, &request) {
-                Some(MapiObject::PendingMessage { properties, .. }) => {
-                    match request.property_values() {
-                        Ok(values) => {
-                            properties.extend(values);
-                            responses.extend_from_slice(&rop_set_properties_response(&request));
-                        }
-                        Err(_) => responses.extend_from_slice(&rop_error_response(
-                            0x0A,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        )),
-                    }
-                }
-                Some(MapiObject::PendingAttachment {
-                    properties, data, ..
-                }) => match request.property_values() {
-                    Ok(values) => {
-                        for (tag, value) in values {
-                            if tag == PID_TAG_ATTACH_DATA_BINARY {
-                                if let MapiValue::Binary(bytes) = &value {
-                                    *data = bytes.clone();
-                                }
-                            }
-                            properties.insert(tag, value);
-                        }
-                        responses.extend_from_slice(&rop_set_properties_response(&request));
-                    }
+            0x0A | 0x79 => {
+                let set_result = request.property_values().and_then(|values| {
+                    apply_mapi_property_values(
+                        input_object_mut(session, &handle_slots, &request),
+                        values,
+                    )
+                });
+                match set_result {
+                    Ok(()) => responses.extend_from_slice(&rop_set_properties_response(&request)),
                     Err(_) => responses.extend_from_slice(&rop_error_response(
-                        0x0A,
+                        request.rop_id,
                         request.response_handle_index(),
                         0x8004_0102,
                     )),
-                },
-                _ => responses.extend_from_slice(&rop_error_response(
-                    0x0A,
-                    request.response_handle_index(),
-                    0x8004_0102,
-                )),
-            },
+                }
+            }
+            0x0B | 0x7A => {
+                let deleted = delete_mapi_properties(
+                    input_object_mut(session, &handle_slots, &request),
+                    &request.property_tags(),
+                );
+                match deleted {
+                    Ok(()) => {
+                        responses.extend_from_slice(&rop_delete_properties_response(&request))
+                    }
+                    Err(_) => responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    )),
+                }
+            }
             0x0C => {
                 let Some(handle) = input_handle(&handle_slots, &request) else {
                     responses.extend_from_slice(&rop_error_response(
@@ -2001,6 +2011,11 @@ where
                 input_object_mut(session, &handle_slots, &request),
                 mailboxes,
                 emails,
+                snapshot,
+            )),
+            0x52 => responses.extend_from_slice(&rop_get_valid_attachments_response(
+                &request,
+                input_object(session, &handle_slots, &request),
                 snapshot,
             )),
             0x21 => {
@@ -2557,6 +2572,65 @@ where
                     .extend_from_slice(&rop_set_read_flags_response(&request, partial_completion));
             }
             0x68 => responses.extend_from_slice(&rop_get_receive_folder_table_response(&request)),
+            0x55 => responses
+                .extend_from_slice(&rop_get_names_from_property_ids_response(&request, session)),
+            0x56 => {
+                let properties = match request.named_property_names() {
+                    Ok(properties) => properties,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x56,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        continue;
+                    }
+                };
+                if properties.is_empty()
+                    && matches!(
+                        input_object(session, &handle_slots, &request),
+                        Some(MapiObject::Logon)
+                    )
+                {
+                    let property_ids = session
+                        .named_properties_for_query(None)
+                        .into_iter()
+                        .map(|(property_id, _property)| property_id)
+                        .collect::<Vec<_>>();
+                    responses.extend_from_slice(&rop_get_property_ids_from_names_response(
+                        &request,
+                        &property_ids,
+                    ));
+                    continue;
+                }
+                let mut property_ids = Vec::with_capacity(properties.len());
+                let mut exhausted = false;
+                for property in properties {
+                    match session.property_id_for_name(property, request.named_property_create()) {
+                        Some(property_id) => property_ids.push(property_id),
+                        None if request.named_property_create() => {
+                            exhausted = true;
+                            break;
+                        }
+                        None => property_ids.push(0),
+                    }
+                }
+                if exhausted {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x56,
+                        request.response_handle_index(),
+                        0x8007_000E,
+                    ));
+                } else {
+                    responses.extend_from_slice(&rop_get_property_ids_from_names_response(
+                        &request,
+                        &property_ids,
+                    ));
+                }
+            }
+            0x5F => {
+                responses.extend_from_slice(&rop_query_named_properties_response(&request, session))
+            }
             0x7B => responses.extend_from_slice(&rop_get_store_state_response(&request)),
             0x81 => {
                 if let Some(table) = input_object_mut(session, &handle_slots, &request) {
@@ -2662,6 +2736,14 @@ const PID_TAG_RENDERING_POSITION: u32 = 0x370B_0003;
 const PID_TAG_ATTACH_MIME_TAG_W: u32 = 0x370E_001F;
 const PID_TAG_EMAIL_ADDRESS_W: u32 = 0x3003_001F;
 const PID_TAG_SMTP_ADDRESS_W: u32 = 0x39FE_001F;
+const FIRST_NAMED_PROPERTY_ID: u16 = 0x8001;
+const MAX_NAMED_PROPERTY_ID: u16 = 0xFFFE;
+const PS_MAPI_GUID: [u8; 16] = [
+    0x28, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
+const PS_INTERNET_HEADERS_GUID: [u8; 16] = [
+    0x86, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
 
 impl MapiSession {
     fn allocate_output_handle(
@@ -2680,6 +2762,62 @@ impl MapiSession {
         self.handles.insert(handle, object);
         handle
     }
+
+    fn property_id_for_name(&mut self, property: MapiNamedProperty, create: bool) -> Option<u16> {
+        let property = normalize_named_property(property);
+        if property.guid == PS_MAPI_GUID {
+            if let MapiNamedPropertyKind::Lid(lid) = &property.kind {
+                return u16::try_from(*lid)
+                    .ok()
+                    .filter(|id| *id < FIRST_NAMED_PROPERTY_ID);
+            }
+        }
+        if let Some(property_id) = self.named_properties.get(&property).copied() {
+            return Some(property_id);
+        }
+        if !create || self.next_named_property_id > MAX_NAMED_PROPERTY_ID {
+            return None;
+        }
+
+        let property_id = self.next_named_property_id;
+        self.next_named_property_id = self.next_named_property_id.saturating_add(1);
+        self.named_properties.insert(property.clone(), property_id);
+        self.named_property_ids.insert(property_id, property);
+        Some(property_id)
+    }
+
+    fn property_name_for_id(&self, property_id: u16) -> MapiNamedProperty {
+        self.named_property_ids
+            .get(&property_id)
+            .cloned()
+            .unwrap_or(MapiNamedProperty {
+                guid: PS_MAPI_GUID,
+                kind: MapiNamedPropertyKind::Lid(u32::from(property_id)),
+            })
+    }
+
+    fn named_properties_for_query(&self, guid: Option<[u8; 16]>) -> Vec<(u16, MapiNamedProperty)> {
+        let mut properties = self
+            .named_property_ids
+            .iter()
+            .filter(|(_property_id, property)| match guid {
+                Some(guid) => property.guid == guid,
+                None => true,
+            })
+            .map(|(property_id, property)| (*property_id, property.clone()))
+            .collect::<Vec<_>>();
+        properties.sort_by_key(|(property_id, _property)| *property_id);
+        properties
+    }
+}
+
+fn normalize_named_property(mut property: MapiNamedProperty) -> MapiNamedProperty {
+    if property.guid == PS_INTERNET_HEADERS_GUID {
+        if let MapiNamedPropertyKind::Name(name) = property.kind {
+            property.kind = MapiNamedPropertyKind::Name(name.to_ascii_lowercase());
+        }
+    }
+    property
 }
 
 impl MapiObject {
@@ -3180,7 +3318,14 @@ fn rop_create_message_response(request: &RopRequest) -> Vec<u8> {
 }
 
 fn rop_set_properties_response(request: &RopRequest) -> Vec<u8> {
-    let mut response = vec![0x0A, request.response_handle_index()];
+    let mut response = vec![request.rop_id, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&0u16.to_le_bytes());
+    response
+}
+
+fn rop_delete_properties_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![request.rop_id, request.response_handle_index()];
     write_u32(&mut response, 0);
     response.extend_from_slice(&0u16.to_le_bytes());
     response
@@ -3325,6 +3470,68 @@ fn rop_get_properties_all_response(
         write_u32(&mut response, tag);
         let value = serialize_object_property(object, principal, mailboxes, emails, snapshot, tag);
         response.extend_from_slice(&value);
+    }
+    response
+}
+
+fn rop_get_valid_attachments_response(
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    let Some(MapiObject::Message {
+        folder_id,
+        message_id,
+    }) = object
+    else {
+        return rop_error_response(0x52, request.response_handle_index(), 0x0000_04B9);
+    };
+    let attachments = snapshot
+        .attachments_for_message(*folder_id, *message_id)
+        .unwrap_or_default();
+    let mut response = vec![0x52, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&(attachments.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    for attachment in attachments.iter().take(u16::MAX as usize) {
+        write_u32(&mut response, attachment.attach_num);
+    }
+    response
+}
+
+fn rop_get_property_ids_from_names_response(request: &RopRequest, property_ids: &[u16]) -> Vec<u8> {
+    let mut response = vec![0x56, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&(property_ids.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    for property_id in property_ids.iter().take(u16::MAX as usize) {
+        response.extend_from_slice(&property_id.to_le_bytes());
+    }
+    response
+}
+
+fn rop_get_names_from_property_ids_response(
+    request: &RopRequest,
+    session: &MapiSession,
+) -> Vec<u8> {
+    let property_ids = request.property_ids();
+    let mut response = vec![0x55, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&(property_ids.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    for property_id in property_ids.iter().take(u16::MAX as usize) {
+        write_named_property(&mut response, &session.property_name_for_id(*property_id));
+    }
+    response
+}
+
+fn rop_query_named_properties_response(request: &RopRequest, session: &MapiSession) -> Vec<u8> {
+    let properties = session.named_properties_for_query(request.named_property_query_guid());
+    let mut response = vec![0x5F, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&(properties.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    for (property_id, _property) in properties.iter().take(u16::MAX as usize) {
+        response.extend_from_slice(&property_id.to_le_bytes());
+    }
+    for (_property_id, property) in properties.iter().take(u16::MAX as usize) {
+        write_named_property(&mut response, property);
     }
     response
 }
@@ -4904,6 +5111,55 @@ fn apply_pending_recipient_changes(
     recipients.sort_by_key(|recipient| recipient.row_id);
 }
 
+fn apply_mapi_property_values(
+    object: Option<&mut MapiObject>,
+    values: Vec<(u32, MapiValue)>,
+) -> Result<()> {
+    match object {
+        Some(MapiObject::PendingMessage { properties, .. }) => {
+            properties.extend(values);
+            Ok(())
+        }
+        Some(MapiObject::PendingAttachment {
+            properties, data, ..
+        }) => {
+            for (tag, value) in values {
+                if tag == PID_TAG_ATTACH_DATA_BINARY {
+                    if let MapiValue::Binary(bytes) = &value {
+                        *data = bytes.clone();
+                    }
+                }
+                properties.insert(tag, value);
+            }
+            Ok(())
+        }
+        _ => Err(anyhow!("MAPI object does not support property mutation")),
+    }
+}
+
+fn delete_mapi_properties(object: Option<&mut MapiObject>, property_tags: &[u32]) -> Result<()> {
+    match object {
+        Some(MapiObject::PendingMessage { properties, .. }) => {
+            for tag in property_tags {
+                properties.remove(tag);
+            }
+            Ok(())
+        }
+        Some(MapiObject::PendingAttachment {
+            properties, data, ..
+        }) => {
+            for tag in property_tags {
+                properties.remove(tag);
+                if *tag == PID_TAG_ATTACH_DATA_BINARY {
+                    data.clear();
+                }
+            }
+            Ok(())
+        }
+        _ => Err(anyhow!("MAPI object does not support property deletion")),
+    }
+}
+
 fn write_mapi_value(row: &mut Vec<u8>, property_tag: u32, value: &MapiValue) {
     match property_tag & 0xFFFF {
         0x0003 => write_u32(row, value.clone().into_u32().unwrap_or_default()),
@@ -4915,6 +5171,28 @@ fn write_mapi_value(row: &mut Vec<u8>, property_tag: u32, value: &MapiValue) {
             _ => write_u16_prefixed_bytes(row, &[]),
         },
         _ => write_property_default(row, property_tag),
+    }
+}
+
+fn write_named_property(row: &mut Vec<u8>, property: &MapiNamedProperty) {
+    match &property.kind {
+        MapiNamedPropertyKind::Lid(lid) => {
+            row.push(0x00);
+            row.extend_from_slice(&property.guid);
+            write_u32(row, *lid);
+        }
+        MapiNamedPropertyKind::Name(name) => {
+            row.push(0x01);
+            row.extend_from_slice(&property.guid);
+            let mut name_bytes = name
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>();
+            name_bytes.extend_from_slice(&0u16.to_le_bytes());
+            let size = name_bytes.len().min(u8::MAX as usize);
+            row.push(size as u8);
+            row.extend_from_slice(&name_bytes[..size]);
+        }
     }
 }
 
@@ -5563,6 +5841,7 @@ impl RopRequest {
     fn property_tags(&self) -> Vec<u32> {
         let start = match self.rop_id {
             0x07 => 4,
+            0x0B | 0x7A => 2,
             _ => 3,
         };
         if self.payload.len() < start {
@@ -5576,6 +5855,48 @@ impl RopRequest {
             .take(count)
             .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
             .collect()
+    }
+
+    fn property_ids(&self) -> Vec<u16> {
+        let Some(count_bytes) = self.payload.get(..2) else {
+            return Vec::new();
+        };
+        let count = u16::from_le_bytes([count_bytes[0], count_bytes[1]]) as usize;
+        self.payload
+            .get(2..)
+            .unwrap_or_default()
+            .chunks_exact(2)
+            .take(count)
+            .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+            .collect()
+    }
+
+    fn named_property_create(&self) -> bool {
+        self.payload.first().is_some_and(|flags| *flags == 0x02)
+    }
+
+    fn named_property_names(&self) -> Result<Vec<MapiNamedProperty>> {
+        let Some(count_bytes) = self.payload.get(1..3) else {
+            return Ok(Vec::new());
+        };
+        let count = u16::from_le_bytes([count_bytes[0], count_bytes[1]]) as usize;
+        let mut cursor = Cursor::new(
+            self.payload
+                .get(3..)
+                .ok_or_else(|| anyhow!("missing named property payload"))?,
+        );
+        let mut properties = Vec::with_capacity(count);
+        for _ in 0..count {
+            properties.push(parse_named_property(&mut cursor)?);
+        }
+        Ok(properties)
+    }
+
+    fn named_property_query_guid(&self) -> Option<[u8; 16]> {
+        if self.payload.get(1).copied().unwrap_or_default() == 0 {
+            return None;
+        }
+        self.payload.get(2..18)?.try_into().ok()
     }
 
     fn property_values(&self) -> Result<Vec<(u32, MapiValue)>> {
@@ -5766,6 +6087,34 @@ fn parse_tagged_property(cursor: &mut Cursor<'_>) -> Result<(u32, MapiValue)> {
     let property_tag = cursor.read_u32()?;
     let value = parse_property_value_for_tag(cursor, property_tag)?;
     Ok((property_tag, value))
+}
+
+fn parse_named_property(cursor: &mut Cursor<'_>) -> Result<MapiNamedProperty> {
+    let kind = cursor.read_u8()?;
+    let guid: [u8; 16] = cursor
+        .read_bytes(16)?
+        .try_into()
+        .map_err(|_| anyhow!("invalid named property GUID"))?;
+    let kind = match kind {
+        0x00 => MapiNamedPropertyKind::Lid(cursor.read_u32()?),
+        0x01 => {
+            let name_size = cursor.read_u8()? as usize;
+            let name_bytes = cursor.read_bytes(name_size)?;
+            MapiNamedPropertyKind::Name(decode_utf16z_bytes(name_bytes))
+        }
+        _ => return Err(anyhow!("unsupported named property kind")),
+    };
+    Ok(MapiNamedProperty { guid, kind })
+}
+
+fn decode_utf16z_bytes(bytes: &[u8]) -> String {
+    String::from_utf16_lossy(
+        &bytes
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .take_while(|unit| *unit != 0)
+            .collect::<Vec<_>>(),
+    )
 }
 
 fn parse_property_value_for_tag(cursor: &mut Cursor<'_>, property_tag: u32) -> Result<MapiValue> {
@@ -5968,7 +6317,7 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
-        0x09 | 0x16 | 0x17 | 0x68 | 0x7B | 0x81 => {
+        0x09 | 0x16 | 0x17 | 0x52 | 0x68 | 0x7B | 0x81 => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -6101,7 +6450,7 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
-        0x0A => {
+        0x0A | 0x79 => {
             let input_handle_index = cursor.read_u8()?;
             let property_value_size = cursor.read_u16()? as usize;
             let property_value_count = cursor.read_u16()?;
@@ -6112,6 +6461,19 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 .checked_sub(2)
                 .ok_or_else(|| anyhow!("invalid RopSetProperties value size"))?;
             payload.extend_from_slice(cursor.read_bytes(values_size)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x0B | 0x7A => {
+            let input_handle_index = cursor.read_u8()?;
+            let property_tag_count = cursor.read_u16()? as usize;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&(property_tag_count as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(property_tag_count * 4)?);
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
@@ -6319,6 +6681,61 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
+        0x55 => {
+            let input_handle_index = cursor.read_u8()?;
+            let property_id_count = cursor.read_u16()? as usize;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&(property_id_count as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(property_id_count * 2)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x56 => {
+            let input_handle_index = cursor.read_u8()?;
+            let flags = cursor.read_u8()?;
+            let property_name_count = cursor.read_u16()? as usize;
+            let mut payload = vec![flags];
+            payload.extend_from_slice(&(property_name_count as u16).to_le_bytes());
+            for _ in 0..property_name_count {
+                let kind = cursor.read_u8()?;
+                payload.push(kind);
+                payload.extend_from_slice(cursor.read_bytes(16)?);
+                match kind {
+                    0x00 => payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes()),
+                    0x01 => {
+                        let name_size = cursor.read_u8()? as usize;
+                        payload.push(name_size as u8);
+                        payload.extend_from_slice(cursor.read_bytes(name_size)?);
+                    }
+                    _ => return Err(anyhow!("unsupported named property kind")),
+                }
+            }
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x5F => {
+            let input_handle_index = cursor.read_u8()?;
+            let query_flags = cursor.read_u8()?;
+            let has_guid = cursor.read_u8()?;
+            let mut payload = vec![query_flags, has_guid];
+            if has_guid != 0 {
+                payload.extend_from_slice(cursor.read_bytes(16)?);
+            }
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
         0x89 => {
             let input_handle_index = cursor.read_u8()?;
             let bookmark_size = cursor.read_u16()? as usize;
@@ -6384,6 +6801,9 @@ mod tests {
             next_handle: 1,
             handles: HashMap::new(),
             message_statuses: HashMap::new(),
+            named_properties: HashMap::new(),
+            named_property_ids: HashMap::new(),
+            next_named_property_id: FIRST_NAMED_PROPERTY_ID,
         };
         let stale = MapiSession {
             last_seen_at: now - Duration::from_secs(u64::from(MAPI_SESSION_MAX_AGE_SECONDS) + 1),
