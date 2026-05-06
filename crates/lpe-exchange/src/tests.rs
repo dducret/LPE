@@ -2910,6 +2910,7 @@ async fn rpc_proxy_opens_authenticated_in_data_channel_without_waiting_for_body_
         response.headers().get("x-lpe-rpc-proxy-status"),
         Some(&HeaderValue::from_static("in-channel-open"))
     );
+    assert_eq!(response.headers().get("content-length"), None);
 }
 
 #[tokio::test]

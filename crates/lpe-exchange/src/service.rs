@@ -5314,15 +5314,13 @@ fn rpc_proxy_echo_response() -> Response {
 }
 
 fn rpc_proxy_in_channel_response() -> Response {
-    let mut response = rpc_proxy_held_open_binary_response(
-        Vec::new(),
+    let mut response = StatusCode::OK.into_response();
+    decorate_rpc_proxy_binary_response(
+        &mut response,
+        0,
+        String::new(),
         RPC_PROXY_IN_CHANNEL_STATUS,
-        rpc_proxy_out_channel_hold_ms(),
-        false,
     );
-    response
-        .headers_mut()
-        .insert(CONTENT_LENGTH, HeaderValue::from_static("131072"));
     response
 }
 
