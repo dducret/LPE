@@ -82,6 +82,7 @@ struct MapiSession {
     last_seen_at: SystemTime,
     next_handle: u32,
     handles: HashMap<u32, MapiObject>,
+    message_statuses: HashMap<(u64, u64), u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -874,6 +875,7 @@ fn create_session(endpoint: MapiEndpoint, principal: &AccountPrincipal) -> Strin
         last_seen_at: now,
         next_handle: 1,
         handles: HashMap::new(),
+        message_statuses: HashMap::new(),
     };
     let mut guard = sessions()
         .lock()
@@ -1510,6 +1512,12 @@ async fn execute_rops<S: ExchangeStore>(
                 mailboxes,
                 emails,
             )),
+            0x10 => responses.extend_from_slice(&rop_reload_cached_information_response(
+                &request,
+                input_object(session, &handle_slots, &request),
+                mailboxes,
+                emails,
+            )),
             0x11 => {
                 let Some(MapiObject::Message {
                     folder_id,
@@ -1741,6 +1749,42 @@ async fn execute_rops<S: ExchangeStore>(
                     request.response_handle_index(),
                     partial_completion,
                 ));
+            }
+            0x1F | 0x20 => {
+                let folder_id = match input_object(session, &handle_slots, &request)
+                    .and_then(MapiObject::folder_id)
+                {
+                    Some(folder_id) => folder_id,
+                    None => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x20,
+                            request.response_handle_index(),
+                            0x0000_04B9,
+                        ));
+                        continue;
+                    }
+                };
+                let message_id = request.status_message_id().unwrap_or(0);
+                if message_for_id(folder_id, message_id, mailboxes, emails).is_none() {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x20,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                }
+                let key = (folder_id, message_id);
+                let old_status = session.message_statuses.get(&key).copied().unwrap_or(0);
+                if request.rop_id == 0x20 {
+                    let mask = request.message_status_mask();
+                    let new_status = (old_status & !mask) | (request.message_status_flags() & mask);
+                    if new_status == 0 {
+                        session.message_statuses.remove(&key);
+                    } else {
+                        session.message_statuses.insert(key, new_status);
+                    }
+                }
+                responses.extend_from_slice(&rop_message_status_response(&request, old_status));
             }
             0x4F => responses.extend_from_slice(&rop_find_row_response(
                 &request,
@@ -2462,6 +2506,54 @@ fn rop_open_message_response(request: &RopRequest, email: &JmapEmail) -> Vec<u8>
     response.extend_from_slice(&(message_recipients(email).len() as u16).to_le_bytes());
     response.extend_from_slice(&0u16.to_le_bytes());
     response.push(0);
+    response
+}
+
+fn rop_reload_cached_information_response(
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+) -> Vec<u8> {
+    let (subject, recipient_count) = match object {
+        Some(MapiObject::Message {
+            folder_id,
+            message_id,
+        }) => match message_for_id(*folder_id, *message_id, mailboxes, emails) {
+            Some(email) => (email.subject.clone(), message_recipients(email).len()),
+            None => {
+                return rop_error_response(0x10, request.response_handle_index(), 0x8004_010F);
+            }
+        },
+        Some(MapiObject::PendingMessage {
+            properties,
+            recipients,
+            ..
+        }) => (
+            pending_text_property(
+                properties,
+                &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
+            ),
+            recipients.len(),
+        ),
+        _ => return rop_error_response(0x10, request.response_handle_index(), 0x0000_04B9),
+    };
+
+    let mut response = vec![0x10, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.push(0);
+    write_typed_string(&mut response, "");
+    write_typed_string(&mut response, &subject);
+    response.extend_from_slice(&(recipient_count as u16).to_le_bytes());
+    response.extend_from_slice(&0u16.to_le_bytes());
+    response.push(0);
+    response
+}
+
+fn rop_message_status_response(request: &RopRequest, old_status: u32) -> Vec<u8> {
+    let mut response = vec![0x20, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    write_u32(&mut response, old_status);
     response
 }
 
@@ -4407,6 +4499,27 @@ impl RopRequest {
             .collect()
     }
 
+    fn status_message_id(&self) -> Option<u64> {
+        let bytes = self.payload.get(..8)?;
+        Some(u64::from_le_bytes(bytes.try_into().ok()?))
+    }
+
+    fn message_status_flags(&self) -> u32 {
+        self.payload
+            .get(8..12)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u32::from_le_bytes)
+            .unwrap_or(0)
+    }
+
+    fn message_status_mask(&self) -> u32 {
+        self.payload
+            .get(12..16)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u32::from_le_bytes)
+            .unwrap_or(0)
+    }
+
     fn move_copy_message_ids(&self) -> Vec<u64> {
         let Some(count_bytes) = self.payload.get(..2) else {
             return Vec::new();
@@ -4900,6 +5013,16 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload: Vec::new(),
             })
         }
+        0x10 => {
+            let input_handle_index = cursor.read_u8()?;
+            let _reserved = cursor.read_u16()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload: Vec::new(),
+            })
+        }
         0x18 => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
@@ -4921,6 +5044,30 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
             payload.extend_from_slice(cursor.read_bytes(bookmark_size)?);
             payload.extend_from_slice(&cursor.read_i32()?.to_le_bytes());
             payload.push(cursor.read_u8()?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x1F => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(cursor.read_bytes(8)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x20 => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(cursor.read_bytes(8)?);
+            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
@@ -4995,7 +5142,7 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
         }
         0x0D => {
             let input_handle_index = cursor.read_u8()?;
-            let _reserved = cursor.read_u16()?;
+            let _reserved = cursor.read_u32()?;
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
@@ -5224,6 +5371,7 @@ mod tests {
             last_seen_at: now - Duration::from_secs(u64::from(MAPI_SESSION_MAX_AGE_SECONDS)),
             next_handle: 1,
             handles: HashMap::new(),
+            message_statuses: HashMap::new(),
         };
         let stale = MapiSession {
             last_seen_at: now - Duration::from_secs(u64::from(MAPI_SESSION_MAX_AGE_SECONDS) + 1),
