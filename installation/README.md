@@ -623,7 +623,8 @@ them to the core `LPE` service: `/api/mail/auth/login`,
 and `/api/jmap/ws`.
 
 `LPE-CT` must also publish the public client configuration, `ActiveSync`, EWS,
-and guarded MAPI paths: `/Microsoft-Server-ActiveSync`, `/mapi/`,
+guarded MAPI paths, and the bounded RCA RPC proxy auth shim:
+`/Microsoft-Server-ActiveSync`, `/mapi/`, `/rpc/rpcproxy.dll`,
 `/EWS/Exchange.asmx`, `/ews/exchange.asmx`, `/autodiscover`,
 `/autodiscover/`, `/Autodiscover`, `/Autodiscover/`, `/autoconfig/`,
 `/.well-known/autoconfig/`, and `/.well-known/jmap`. A healthy public
@@ -636,7 +637,10 @@ sections only when `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` is
 also enabled with an explicitly published EWS or MAPI surface. `OPTIONS
 /Microsoft-Server-ActiveSync` returns the `ms-asprotocolversions` and
 `ms-asprotocolcommands` headers. `OPTIONS /mapi/emsmdb` returns
-`x-lpe-mapi-status: transport-session-ready`.
+`x-lpe-mapi-status: transport-session-ready`. Unauthenticated
+`/rpc/rpcproxy.dll` probes return a `401` `Basic realm="LPE RPC"` challenge so
+RCA can discover supported HTTP authentication instead of receiving a static
+web-server `405`.
 
 For public client auto-configuration, the exposed front end must remain `LPE-CT` or an equivalent HTTPS publication layer. In v1:
 
@@ -645,6 +649,7 @@ For public client auto-configuration, the exposed front end must remain `LPE-CT`
 - `ActiveSync` remains exposed for mobile/native clients that actually support `Exchange ActiveSync`
 - `EWS` remains opt-in through `LPE_AUTOCONFIG_EWS_ENABLED` and must not be treated as `MAPI`, `RPC`, or client `SMTP`
 - `MAPI over HTTP` routes are the `0.1.3` classic Outlook desktop Exchange-account path; the public edge publishes `/mapi/` so Outlook can reach the authenticated endpoints, but autodiscover publishes `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled, SOAP Exchange `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled, and legacy `EXCH` / `EXPR` provider sections only when `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled with an explicitly published EWS or MAPI surface
+- `/rpc/rpcproxy.dll` is only an authenticated RCA/legacy setup compatibility shim for Outlook Anywhere HTTP authentication probes; it does not implement the RPC mailbox protocol
 - Microsoft Remote Connectivity Analyzer Outlook Connectivity expects a top-level `EXCH` provider section; the error "The EXCH provider section is missing from the Autodiscover response" means the legacy Exchange provider metadata is not published. For the EWS compatibility path, set both `LPE_AUTOCONFIG_EWS_ENABLED=true` and `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED=true`
 - no client `SMTP` endpoint should be advertised unless the authenticated `LPE-CT` submission listener is configured, exposed on `465`, and covered by the public certificate
 - the internal `LPE -> LPE-CT` relay must never be advertised as a client-submission endpoint
@@ -653,11 +658,13 @@ The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE
 
 For Microsoft Remote Connectivity Analyzer troubleshooting, run `LPE` with
 `RUST_LOG=info` and preferably `LPE_LOG_FORMAT=json`. The core service emits
-`rca_debug=true` structured events for Autodiscover, EWS, and MAPI/HTTP probes.
+`rca_debug=true` structured events for Autodiscover, EWS, MAPI/HTTP, and RPC
+proxy authentication probes.
 Those events include the public path, mailbox hint, EWS operation, MAPI endpoint,
 `X-RequestType`, `X-RequestId`, `client-request-id`, `X-ClientInfo`,
-`X-ClientApplication`, HTTP status, MAPI `X-ResponseCode`, and request/response
-payload sizes where available. They intentionally do not log credentials,
+`X-ClientApplication`, RPC proxy auth outcome, HTTP status, MAPI
+`X-ResponseCode`, and request/response payload sizes where available. They
+intentionally do not log credentials,
 authorization headers, or request bodies by default. When RCA still fails after
 a protocol-success response, temporarily set
 `LPE_RCA_DEBUG_PAYLOAD_PREVIEW_BYTES=256` to include a capped hexadecimal

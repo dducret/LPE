@@ -4,10 +4,10 @@ use axum::{
     extract::State,
     http::{
         header::{CONTENT_TYPE, WWW_AUTHENTICATE},
-        HeaderMap, HeaderValue, StatusCode, Uri,
+        HeaderMap, HeaderValue, Method, StatusCode, Uri,
     },
     response::{IntoResponse, Response},
-    routing::{on, MethodFilter},
+    routing::{any, on, MethodFilter},
     Router,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -42,6 +42,8 @@ const MAPI_EMSMDB_PATH: &str = "/mapi/emsmdb";
 const MAPI_EMSMDB_TRAILING_PATH: &str = "/mapi/emsmdb/";
 const MAPI_NSPI_PATH: &str = "/mapi/nspi";
 const MAPI_NSPI_TRAILING_PATH: &str = "/mapi/nspi/";
+const RPC_PROXY_PATH: &str = "/rpc/rpcproxy.dll";
+const RPC_PROXY_COMPAT_STATUS: &str = "x-lpe-rpc-proxy-status";
 const CONTACTS_FOLDER_ID: &str = "contacts";
 const CALENDAR_FOLDER_ID: &str = "calendar";
 const TASKS_FOLDER_ID: &str = "tasks";
@@ -74,6 +76,7 @@ pub fn router() -> Router<Storage> {
             MAPI_NSPI_TRAILING_PATH,
             on(MethodFilter::OPTIONS, mapi_options_handler).post(mapi_nspi_post_handler),
         )
+        .route(RPC_PROXY_PATH, any(rpc_proxy_handler))
 }
 
 #[derive(Clone)]
@@ -208,6 +211,27 @@ async fn mapi_post_handler(
         &response,
         started_at.elapsed().as_secs_f64() * 1000.0,
         None,
+    );
+    response
+}
+
+async fn rpc_proxy_handler(
+    State(storage): State<Storage>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let started_at = Instant::now();
+    let service = ExchangeService::new(storage);
+    let response = service.handle_rpc_proxy(&headers).await;
+    log_rpc_proxy_connection(
+        &method,
+        &uri,
+        &headers,
+        body.len(),
+        &response,
+        started_at.elapsed().as_secs_f64() * 1000.0,
     );
     response
 }
@@ -374,6 +398,60 @@ fn log_mapi_transport_connection(
     }
 }
 
+fn log_rpc_proxy_connection(
+    method: &Method,
+    uri: &Uri,
+    headers: &HeaderMap,
+    request_body_bytes: usize,
+    response: &Response,
+    duration_ms: f64,
+) {
+    let status = response.status().as_u16();
+    let trace_id = mapi::safe_header(headers, "x-trace-id").unwrap_or_default();
+    let user_agent = mapi::safe_header(headers, "user-agent").unwrap_or_default();
+    let client_request_id = mapi::safe_header(headers, "client-request-id").unwrap_or_default();
+    let x_request_id = mapi::safe_header(headers, "x-requestid").unwrap_or_default();
+    let response_kind = response_header(response, RPC_PROXY_COMPAT_STATUS)
+        .unwrap_or_else(|| "auth-challenge".into());
+    let message = "rca debug rpc proxy connection";
+
+    if status < 400 {
+        info!(
+            rca_debug = true,
+            adapter = "rpcproxy",
+            method = %method,
+            path = %uri.path(),
+            query = %uri.query().unwrap_or_default(),
+            response_kind = %response_kind,
+            trace_id = %trace_id,
+            client_request_id = %client_request_id,
+            x_request_id = %x_request_id,
+            http_status = status,
+            request_body_bytes,
+            duration_ms,
+            user_agent = %user_agent,
+            message
+        );
+    } else {
+        warn!(
+            rca_debug = true,
+            adapter = "rpcproxy",
+            method = %method,
+            path = %uri.path(),
+            query = %uri.query().unwrap_or_default(),
+            response_kind = %response_kind,
+            trace_id = %trace_id,
+            client_request_id = %client_request_id,
+            x_request_id = %x_request_id,
+            http_status = status,
+            request_body_bytes,
+            duration_ms,
+            user_agent = %user_agent,
+            message
+        );
+    }
+}
+
 fn response_header(response: &Response, name: &str) -> Option<String> {
     response
         .headers()
@@ -457,6 +535,13 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
         body: &[u8],
     ) -> Result<Response> {
         mapi::handle_mapi(&self.store, endpoint, headers, body).await
+    }
+
+    pub(crate) async fn handle_rpc_proxy(&self, headers: &HeaderMap) -> Response {
+        match authenticate_account(&self.store, None, headers, "mapi").await {
+            Ok(principal) => rpc_proxy_accepted_response(&principal),
+            Err(error) => rpc_proxy_auth_challenge_response(&error.to_string()),
+        }
     }
 
     async fn find_folder(&self, principal: &AccountPrincipal) -> Result<String> {
@@ -4986,6 +5071,43 @@ fn soap_response(body: String) -> Response {
         body = body,
     );
     xml_response(StatusCode::OK, envelope)
+}
+
+fn rpc_proxy_accepted_response(principal: &AccountPrincipal) -> Response {
+    let mut response = (
+        StatusCode::OK,
+        format!(
+            "LPE RPC proxy compatibility authentication accepted for {}. Use MAPI over HTTP for mailbox access.\n",
+            principal.email
+        ),
+    )
+        .into_response();
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response.headers_mut().insert(
+        RPC_PROXY_COMPAT_STATUS,
+        HeaderValue::from_static("auth-accepted"),
+    );
+    response
+}
+
+fn rpc_proxy_auth_challenge_response(message: &str) -> Response {
+    let mut response = (
+        StatusCode::UNAUTHORIZED,
+        format!("LPE RPC proxy authentication required: {message}\n"),
+    )
+        .into_response();
+    response.headers_mut().insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response.headers_mut().insert(
+        WWW_AUTHENTICATE,
+        HeaderValue::from_static("Basic realm=\"LPE RPC\""),
+    );
+    response
 }
 
 pub(crate) fn error_response(error: &anyhow::Error) -> Response {

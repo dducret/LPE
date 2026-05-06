@@ -2749,6 +2749,41 @@ async fn mapi_over_http_rejects_missing_authentication() {
 }
 
 #[tokio::test]
+async fn rpc_proxy_challenges_missing_authentication_with_basic() {
+    let store = FakeStore::default();
+    let service = ExchangeService::new(store);
+
+    let response = service.handle_rpc_proxy(&HeaderMap::new()).await;
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response.headers().get(axum::http::header::WWW_AUTHENTICATE),
+        Some(&HeaderValue::from_static("Basic realm=\"LPE RPC\""))
+    );
+    let body = response_text(response).await;
+    assert!(body.contains("missing account authentication"));
+}
+
+#[tokio::test]
+async fn rpc_proxy_accepts_authenticated_rca_probe_without_405() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service.handle_rpc_proxy(&bearer_headers()).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-lpe-rpc-proxy-status"),
+        Some(&HeaderValue::from_static("auth-accepted"))
+    );
+    let body = response_text(response).await;
+    assert!(body.contains("Use MAPI over HTTP for mailbox access"));
+}
+
+#[tokio::test]
 async fn find_folder_lists_contact_and_calendar_folders() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

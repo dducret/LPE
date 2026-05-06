@@ -25,7 +25,7 @@ The explicitly unsupported surface unless a later architecture document widens i
 
 - Exchange administration APIs and Exchange control-plane compatibility
 - public folders, archive mailbox parity, journaling, unified messaging, transport rules, litigation/eDiscovery parity, or Exchange Online service integration
-- Outlook Anywhere, legacy RPC/HTTP, MAPI/RPC, POP-before-SMTP, or any direct client `SMTP` path inside the core `LPE` service
+- full Outlook Anywhere, legacy RPC/HTTP data channels, MAPI/RPC, POP-before-SMTP, or any direct client `SMTP` path inside the core `LPE` service; the bounded `/rpc/rpcproxy.dll` route is only an authenticated RCA/legacy setup compatibility shim and does not implement the RPC mailbox protocol
 - cross-tenant directory or collaboration visibility
 - Exchange-specific mailbox, contact, calendar, task, `Sent`, `Outbox`, GAL, or rights stores
 
@@ -73,8 +73,11 @@ The first `MAPI over HTTP` implementation surface exists as authenticated transp
 - `POST /mapi/emsmdb`
 - `OPTIONS /mapi/nspi`
 - `POST /mapi/nspi`
+- `/rpc/rpcproxy.dll`
 
 `/mapi/emsmdb` is reserved for mailbox ROP processing. `/mapi/nspi` is reserved for address book and name service provider interface behavior. `OPTIONS` returns the supported HTTP methods with `x-lpe-mapi-status: transport-session-ready`. `POST` requires mailbox authentication and accepts `Content-Type: application/mapi-http`; it also accepts `application/octet-stream` for Outlook and Remote Connectivity Analyzer MAPI/HTTP probes such as `NSPI Bind`. Responses always use `application/mapi-http` with `X-RequestType`, `X-ResponseCode`, `X-RequestId`, `X-ServerApplication`, `X-ExpirationInfo`, and `X-PendingPeriod`, and they echo `X-ClientInfo` when the client sends it. Client-supplied non-empty `X-RequestId` values are echoed for diagnostics; if a client omits the header, `LPE` generates a non-zero per-request UUID instead of reusing a placeholder. Response bodies use the MAPI/HTTP common response framing, including the `PROCESSING` and `DONE` meta-tags before the request-specific binary response body, so strict Outlook and Remote Connectivity Analyzer clients do not parse raw binary as the transport envelope. For `0.1.3`, this endpoint pair must progress from bootstrap behavior to complete Outlook profile creation, mailbox synchronization, address book lookup, send/draft support, reconnect behavior, and cached-mode day-two usage.
+
+`/rpc/rpcproxy.dll` exists only because legacy `EXPR` / Outlook Anywhere setup probes in Microsoft Remote Connectivity Analyzer test HTTP authentication against that URL. It reuses mailbox `MAPI` authentication, advertises `Basic` through a normal `401` challenge when credentials are missing, and returns a small authenticated compatibility response instead of a web-server `405`. It does not publish or implement the Outlook Anywhere RPC data channel; real Outlook desktop mailbox access remains the `/mapi/emsmdb` and `/mapi/nspi` `MAPI over HTTP` path.
 
 For RCA and Outlook desktop diagnosis, the adapter emits `rca_debug=true`
 structured log events through the normal `tracing` pipeline when `RUST_LOG`
@@ -82,7 +85,9 @@ allows `info` logs. Autodiscover logs include the response kind and mailbox
 hint. EWS logs include the SOAP operation and EWS response code when available.
 MAPI/HTTP logs include the endpoint, `X-RequestType`, `X-RequestId`,
 `client-request-id`, `X-ClientInfo`, `X-ClientApplication`, response code, and
-request/response payload sizes where available. These logs are operational
+request/response payload sizes where available. RPC proxy compatibility logs
+include the method, path, query, auth outcome, request identifiers, status, and
+request size. These logs are operational
 diagnostics only; they must not include authorization headers, credentials, or
 request bodies by default. `LPE_RCA_DEBUG_PAYLOAD_PREVIEW_BYTES` can temporarily
 enable a capped hexadecimal preview of MAPI/HTTP request and response payloads
