@@ -644,9 +644,10 @@ also enabled with an explicitly published EWS or MAPI surface. `OPTIONS
 realm="LPE RPC"` challenge so RCA can discover supported HTTP authentication
 instead of receiving a static web-server `405`. Anonymous `MSRPC` echo
 discovery probes sent with `RPC_IN_DATA` or `RPC_OUT_DATA` must also receive
-that `401` challenge; after mailbox authentication, the same echo probes
-receive a `200 application/rpc` 20-byte RTS echo response, including RCA
-mail-store pings that send an `RPC_OUT_DATA` body.
+that `401` challenge; after mailbox authentication, `RPC_IN_DATA` probes
+receive a `200 application/rpc` 20-byte RTS echo response, while
+authenticated `RPC_OUT_DATA` mail-store ping bodies receive a minimal RTS
+connection-establishment response for the RCA OUT-channel ping.
 
 For public client auto-configuration, the exposed front end must remain `LPE-CT` or an equivalent HTTPS publication layer. In v1:
 

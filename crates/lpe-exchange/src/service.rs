@@ -45,6 +45,9 @@ const MAPI_NSPI_TRAILING_PATH: &str = "/mapi/nspi/";
 const RPC_PROXY_PATH: &str = "/rpc/rpcproxy.dll";
 const RPC_PROXY_COMPAT_STATUS: &str = "x-lpe-rpc-proxy-status";
 const RPC_PROXY_ECHO_STATUS: &str = "echo";
+const RPC_PROXY_RTS_CONNECT_STATUS: &str = "rts-connect";
+const RPC_PROXY_RECEIVE_WINDOW_SIZE: u32 = 0x0001_0000;
+const RPC_PROXY_CONNECTION_TIMEOUT_MS: u32 = 120_000;
 const RPC_PROXY_ECHO_BODY: [u8; 20] = [
     0x05, 0x00, 0x14, 0x03, 0x10, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x40, 0x00, 0x00, 0x00,
@@ -548,11 +551,13 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
         &self,
         method: &Method,
         headers: &HeaderMap,
-        _request_body_bytes: usize,
+        request_body_bytes: usize,
     ) -> Response {
         match authenticate_account(&self.store, None, headers, "mapi").await {
             Ok(principal) => {
-                if is_rpc_proxy_echo_request(method, headers) {
+                if is_rpc_proxy_out_data_connect_request(method, headers, request_body_bytes) {
+                    rpc_proxy_rts_connect_response()
+                } else if is_rpc_proxy_echo_request(method, headers) {
                     rpc_proxy_echo_response()
                 } else {
                     rpc_proxy_accepted_response(&principal)
@@ -5097,6 +5102,20 @@ fn is_rpc_proxy_echo_request(method: &Method, headers: &HeaderMap) -> bool {
         return false;
     }
 
+    is_rpc_proxy_msrpc_request(headers)
+}
+
+fn is_rpc_proxy_out_data_connect_request(
+    method: &Method,
+    headers: &HeaderMap,
+    request_body_bytes: usize,
+) -> bool {
+    method.as_str() == "RPC_OUT_DATA"
+        && request_body_bytes > 0
+        && is_rpc_proxy_msrpc_request(headers)
+}
+
+fn is_rpc_proxy_msrpc_request(headers: &HeaderMap) -> bool {
     let user_agent = mapi::safe_header(headers, "user-agent")
         .unwrap_or_default()
         .to_ascii_lowercase();
@@ -5104,6 +5123,53 @@ fn is_rpc_proxy_echo_request(method: &Method, headers: &HeaderMap) -> bool {
         .unwrap_or_default()
         .to_ascii_lowercase();
     user_agent == "msrpc" || accept.contains("application/rpc")
+}
+
+fn rpc_proxy_rts_connect_body() -> Vec<u8> {
+    let mut body = rpc_proxy_connection_timeout_pdu();
+    body.extend_from_slice(&rpc_proxy_connection_established_pdu());
+    body
+}
+
+fn rpc_proxy_connection_timeout_pdu() -> Vec<u8> {
+    let mut body = rpc_proxy_rts_header(0, 1, 28);
+    body.extend_from_slice(&2u32.to_le_bytes());
+    body.extend_from_slice(&RPC_PROXY_CONNECTION_TIMEOUT_MS.to_le_bytes());
+    body
+}
+
+fn rpc_proxy_connection_established_pdu() -> Vec<u8> {
+    let mut body = rpc_proxy_rts_header(0, 3, 44);
+    body.extend_from_slice(&6u32.to_le_bytes());
+    body.extend_from_slice(&1u32.to_le_bytes());
+    body.extend_from_slice(&0u32.to_le_bytes());
+    body.extend_from_slice(&RPC_PROXY_RECEIVE_WINDOW_SIZE.to_le_bytes());
+    body.extend_from_slice(&2u32.to_le_bytes());
+    body.extend_from_slice(&RPC_PROXY_CONNECTION_TIMEOUT_MS.to_le_bytes());
+    body
+}
+
+fn rpc_proxy_rts_header(flags: u16, command_count: u16, fragment_length: u16) -> Vec<u8> {
+    let mut body = Vec::with_capacity(fragment_length as usize);
+    body.extend_from_slice(&[0x05, 0x00, 0x14, 0x03, 0x10, 0x00, 0x00, 0x00]);
+    body.extend_from_slice(&fragment_length.to_le_bytes());
+    body.extend_from_slice(&0u16.to_le_bytes());
+    body.extend_from_slice(&0u32.to_le_bytes());
+    body.extend_from_slice(&flags.to_le_bytes());
+    body.extend_from_slice(&command_count.to_le_bytes());
+    body
+}
+
+fn rpc_proxy_rts_connect_response() -> Response {
+    let mut response = (StatusCode::OK, rpc_proxy_rts_connect_body()).into_response();
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/rpc"));
+    response.headers_mut().insert(
+        RPC_PROXY_COMPAT_STATUS,
+        HeaderValue::from_static(RPC_PROXY_RTS_CONNECT_STATUS),
+    );
+    response
 }
 
 fn rpc_proxy_echo_response() -> Response {

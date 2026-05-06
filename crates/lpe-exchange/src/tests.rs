@@ -2840,10 +2840,22 @@ async fn rpc_proxy_answers_authenticated_msrpch_out_data_ping() {
     );
     assert_eq!(
         response.headers().get("x-lpe-rpc-proxy-status"),
-        Some(&HeaderValue::from_static("echo"))
+        Some(&HeaderValue::from_static("rts-connect"))
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 20);
+    assert_eq!(body.len(), 72);
+    assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
+    assert_eq!(u16::from_le_bytes([body[18], body[19]]), 1);
+    assert_eq!(
+        u32::from_le_bytes([body[20], body[21], body[22], body[23]]),
+        2
+    );
+    assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
+    assert_eq!(u16::from_le_bytes([body[46], body[47]]), 3);
+    assert_eq!(
+        u32::from_le_bytes([body[48], body[49], body[50], body[51]]),
+        6
+    );
 }
 
 #[tokio::test]

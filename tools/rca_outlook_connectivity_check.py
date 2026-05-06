@@ -357,7 +357,10 @@ def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, timeou
         token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
         authenticated_headers = dict(headers)
         authenticated_headers["Authorization"] = f"Basic {token}"
-        for method, body in [("RPC_IN_DATA", b""), ("RPC_OUT_DATA", bytes(76))]:
+        for method, body, expected_status, expected_length in [
+            ("RPC_IN_DATA", b"", "echo", 20),
+            ("RPC_OUT_DATA", bytes(76), "rts-connect", 72),
+        ]:
             authenticated = request(method, rpc_url, body, authenticated_headers, timeout)
             require(
                 authenticated.status == 200,
@@ -368,8 +371,12 @@ def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, timeou
                 f"authenticated RPC proxy {method} echo did not return application/rpc",
             )
             require(
-                len(authenticated.body) == 20,
-                f"authenticated RPC proxy {method} echo returned unexpected body length {len(authenticated.body)}",
+                header_value(authenticated.headers, "x-lpe-rpc-proxy-status") == expected_status,
+                f"authenticated RPC proxy {method} returned unexpected compatibility status",
+            )
+            require(
+                len(authenticated.body) == expected_length,
+                f"authenticated RPC proxy {method} returned unexpected body length {len(authenticated.body)}",
             )
     print("ok rpc_proxy_auth")
 
