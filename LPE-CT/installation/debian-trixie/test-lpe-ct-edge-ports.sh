@@ -757,7 +757,7 @@ probe_client_publication() {
     --dump-header "${headers_file}" \
     --output /dev/null \
     --write-out "%{http_code}" \
-    "${base_url}/rpc/rpcproxy.dll?${host_header}:6002" 2>/dev/null || true)"
+    "${base_url}/RPC/RpcProxy.dll?${host_header}:6002" 2>/dev/null || true)"
   if [[ "${rpc_echo_status}" != "401" ]]; then
     sed -n '1,40p' "${headers_file}" || true
     rm -f "${headers_file}"

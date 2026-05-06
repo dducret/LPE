@@ -435,8 +435,9 @@ validate_publication_config() {
     "location /autoconfig/"
     "location /.well-known/autoconfig/"
     "location /mapi/"
-    "location = /rpc/rpcproxy.dll"
-    "proxy_pass ${LPE_CT_CORE_DELIVERY_BASE_URL}/rpc/rpcproxy.dll;"
+    'location ~* ^/rpc/rpcproxy\.dll$'
+    "rewrite ^ /rpc/rpcproxy.dll break;"
+    "proxy_pass ${LPE_CT_CORE_DELIVERY_BASE_URL};"
     'proxy_set_header Authorization $http_authorization;'
     "Strict-Transport-Security"
     "X-Content-Type-Options"
