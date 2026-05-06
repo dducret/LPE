@@ -1290,12 +1290,41 @@ fn execute_rops(
     }
 }
 
-const ROOT_FOLDER_ID: u64 = 1;
-const IPM_SUBTREE_FOLDER_ID: u64 = 4;
-const INBOX_FOLDER_ID: u64 = 5;
-const DRAFTS_FOLDER_ID: u64 = 6;
-const SENT_FOLDER_ID: u64 = 7;
-const TRASH_FOLDER_ID: u64 = 8;
+const STORE_REPLICA_ID: u64 = 1;
+const ROOT_FOLDER_ID: u64 = mapi_store_id(1);
+const DEFERRED_ACTION_FOLDER_ID: u64 = mapi_store_id(2);
+const SPOOLER_QUEUE_FOLDER_ID: u64 = mapi_store_id(3);
+const IPM_SUBTREE_FOLDER_ID: u64 = mapi_store_id(4);
+const INBOX_FOLDER_ID: u64 = mapi_store_id(5);
+const OUTBOX_FOLDER_ID: u64 = mapi_store_id(6);
+const SENT_FOLDER_ID: u64 = mapi_store_id(7);
+const TRASH_FOLDER_ID: u64 = mapi_store_id(8);
+const COMMON_VIEWS_FOLDER_ID: u64 = mapi_store_id(9);
+const SCHEDULE_FOLDER_ID: u64 = mapi_store_id(10);
+const SEARCH_FOLDER_ID: u64 = mapi_store_id(11);
+const VIEWS_FOLDER_ID: u64 = mapi_store_id(12);
+const SHORTCUTS_FOLDER_ID: u64 = mapi_store_id(13);
+const DRAFTS_FOLDER_ID: u64 = mapi_store_id(14);
+
+const fn mapi_store_id(global_counter: u64) -> u64 {
+    ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | STORE_REPLICA_ID
+}
+
+const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
+    ROOT_FOLDER_ID,
+    DEFERRED_ACTION_FOLDER_ID,
+    SPOOLER_QUEUE_FOLDER_ID,
+    IPM_SUBTREE_FOLDER_ID,
+    INBOX_FOLDER_ID,
+    OUTBOX_FOLDER_ID,
+    SENT_FOLDER_ID,
+    TRASH_FOLDER_ID,
+    COMMON_VIEWS_FOLDER_ID,
+    SCHEDULE_FOLDER_ID,
+    SEARCH_FOLDER_ID,
+    VIEWS_FOLDER_ID,
+    SHORTCUTS_FOLDER_ID,
+];
 
 const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
 const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
@@ -1540,7 +1569,7 @@ fn rop_logon_response_body(principal: &AccountPrincipal, request: &RopRequest) -
     response.push(output_handle_index);
     write_u32(&mut response, 0);
     response.push(logon_flags);
-    for folder_id in 1..=13u64 {
+    for folder_id in PRIVATE_LOGON_SPECIAL_FOLDER_IDS {
         write_u64(&mut response, folder_id);
     }
     response.push(0x03);
@@ -1821,6 +1850,7 @@ fn role_for_folder_id(folder_id: u64) -> Option<&'static str> {
         DRAFTS_FOLDER_ID => Some("drafts"),
         SENT_FOLDER_ID => Some("sent"),
         TRASH_FOLDER_ID => Some("trash"),
+        OUTBOX_FOLDER_ID => Some("outbox"),
         _ => None,
     }
 }
@@ -1977,17 +2007,26 @@ fn write_property_default(row: &mut Vec<u8>, property_tag: u32) {
 }
 
 fn mapi_folder_id(mailbox: &JmapMailbox) -> u64 {
-    let bytes = mailbox.id.as_bytes();
-    u64::from_le_bytes([
-        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-    ]) | 0x8000_0000_0000_0000
+    match mailbox.role.as_str() {
+        "inbox" => INBOX_FOLDER_ID,
+        "drafts" => DRAFTS_FOLDER_ID,
+        "outbox" => OUTBOX_FOLDER_ID,
+        "sent" => SENT_FOLDER_ID,
+        "trash" => TRASH_FOLDER_ID,
+        _ => mapi_store_id(uuid_global_counter(&mailbox.id)),
+    }
 }
 
 fn mapi_message_id(email: &JmapEmail) -> u64 {
-    let bytes = email.id.as_bytes();
-    u64::from_le_bytes([
+    mapi_store_id(uuid_global_counter(&email.id))
+}
+
+fn uuid_global_counter(id: &Uuid) -> u64 {
+    let bytes = id.as_bytes();
+    let value = u64::from_le_bytes([
         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-    ]) | 0x4000_0000_0000_0000
+    ]) & 0x0000_FFFF_FFFF_FFFF;
+    value.max(0x100)
 }
 
 fn unsupported_rop_response(rop_id: u8, handle_index: u8) -> Vec<u8> {

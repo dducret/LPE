@@ -1203,10 +1203,19 @@ fn utf16z(value: &str) -> Vec<u8> {
 
 fn test_mapi_message_id(id: &str) -> u64 {
     let uuid = Uuid::parse_str(id).unwrap();
+    test_mapi_uuid_id(&uuid)
+}
+
+fn test_mapi_folder_id(global_counter: u64) -> u64 {
+    ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | 1
+}
+
+fn test_mapi_uuid_id(uuid: &Uuid) -> u64 {
     let bytes = uuid.as_bytes();
-    u64::from_le_bytes([
+    let value = u64::from_le_bytes([
         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-    ]) | 0x4000_0000_0000_0000
+    ]) & 0x0000_FFFF_FFFF_FFFF;
+    test_mapi_folder_id(value.max(0x100))
 }
 
 fn utf16z_string_bytes(value: &[u8]) -> Vec<u8> {
@@ -1605,7 +1614,7 @@ async fn mapi_over_http_execute_opens_folder_and_gets_empty_hierarchy_table() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&1u64.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
     rops.push(0);
     rops.extend_from_slice(&[
         0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable
@@ -1760,7 +1769,7 @@ async fn mapi_over_http_query_rows_lists_canonical_mailbox_folders() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&1u64.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
     rops.push(0);
     rops.extend_from_slice(&[
         0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable
@@ -1848,7 +1857,7 @@ async fn mapi_over_http_contents_table_lists_canonical_messages() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&5u64.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -1945,13 +1954,13 @@ async fn mapi_over_http_open_message_then_gets_canonical_message_properties() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&5u64.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&5u64.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
     rops.push(0);
     rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
     rops.extend_from_slice(&[
@@ -2053,13 +2062,13 @@ async fn mapi_over_http_read_recipients_returns_canonical_message_recipients() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&5u64.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&5u64.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
     rops.push(0);
     rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
     rops.extend_from_slice(&[
@@ -2111,7 +2120,7 @@ async fn mapi_over_http_get_properties_specific_returns_folder_properties() {
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     inbox.total_emails = 7;
     inbox.unread_emails = 2;
-    let folder_id = 5u64;
+    let folder_id = test_mapi_folder_id(5);
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
@@ -2204,7 +2213,7 @@ async fn mapi_over_http_execute_handles_mailbox_store_bootstrap_rops() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&5u64.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
     rops.push(0);
     rops.extend_from_slice(&[
         0x09, 0x00, 0x01, // RopGetPropertiesList
@@ -2344,7 +2353,7 @@ async fn mapi_over_http_execute_returns_receive_folder_and_store_state() {
     assert_eq!(response_rops[0], 0x27);
     assert_eq!(
         u64::from_le_bytes(response_rops[6..14].try_into().unwrap()),
-        5
+        test_mapi_folder_id(5)
     );
     assert!(contains_bytes(response_rops, b"IPM.Note\0"));
 
