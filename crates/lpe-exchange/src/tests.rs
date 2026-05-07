@@ -6693,7 +6693,7 @@ async fn rpc_proxy_mailstore_endpoint_ping_includes_bind_ack_after_rts_connect()
     );
     assert_eq!(
         response.headers().get("x-lpe-rpc-proxy-status"),
-        Some(&HeaderValue::from_static("mailstore-ping"))
+        Some(&HeaderValue::from_static("endpoint-ping"))
     );
     assert_eq!(
         response.headers().get("content-length"),
@@ -6725,6 +6725,45 @@ async fn rpc_proxy_mailstore_endpoint_ping_includes_bind_ack_after_rts_connect()
 }
 
 #[tokio::test]
+async fn rpc_proxy_address_book_endpoint_ping_includes_bind_ack_after_rts_connect() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let method = Method::from_bytes(b"RPC_OUT_DATA").expect("valid RPC method");
+    let uri: Uri = "/rpc/rpcproxy.dll?mail.example.test:6004".parse().unwrap();
+    let mut headers = bearer_headers();
+    headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
+    headers.insert("accept", HeaderValue::from_static("application/rpc"));
+
+    let connect_body = rpc_proxy_conn_a1_request_body(0x0000_8000);
+    let response = service
+        .handle_rpc_proxy(&method, &uri, &headers, &connect_body)
+        .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type"),
+        Some(&HeaderValue::from_static("application/rpc"))
+    );
+    assert_eq!(
+        response.headers().get("x-lpe-rpc-proxy-status"),
+        Some(&HeaderValue::from_static("endpoint-ping"))
+    );
+    assert_eq!(
+        response.headers().get("content-length"),
+        Some(&HeaderValue::from_static("131072"))
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(body.len(), 184);
+    assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
+    assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
+    assert_eq!(body[72], 0x05);
+    assert_eq!(body[74], 0x0c);
+}
+
+#[tokio::test]
 async fn rpc_proxy_opens_authenticated_in_data_channel_without_waiting_for_body_eof() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -6733,6 +6772,48 @@ async fn rpc_proxy_opens_authenticated_in_data_channel_without_waiting_for_body_
     let service = ExchangeService::new(store);
     let method = Method::from_bytes(b"RPC_IN_DATA").expect("valid RPC method");
     let uri: Uri = "/rpc/rpcproxy.dll?mail.example.test:6001".parse().unwrap();
+    let mut headers = bearer_headers();
+    headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
+    headers.insert("accept", HeaderValue::from_static("application/rpc"));
+
+    let response = service
+        .handle_rpc_proxy_in_data_channel(&method, &uri, &headers, Body::from("bind-bytes"))
+        .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type"),
+        Some(&HeaderValue::from_static("application/rpc"))
+    );
+    assert_eq!(
+        response.headers().get("x-lpe-rpc-proxy-status"),
+        Some(&HeaderValue::from_static("in-channel-open"))
+    );
+    assert_eq!(
+        response.headers().get("content-length"),
+        Some(&HeaderValue::from_static("0"))
+    );
+
+    let response = service
+        .handle_rpc_proxy_in_data_channel(&method, &uri, &headers, Body::from("bind-bytes"))
+        .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-length"),
+        Some(&HeaderValue::from_static("131072"))
+    );
+}
+
+#[tokio::test]
+async fn rpc_proxy_opens_authenticated_address_book_in_data_channel_without_waiting_for_body_eof() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let method = Method::from_bytes(b"RPC_IN_DATA").expect("valid RPC method");
+    let uri: Uri = "/rpc/rpcproxy.dll?mail.example.test:6004".parse().unwrap();
     let mut headers = bearer_headers();
     headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
     headers.insert("accept", HeaderValue::from_static("application/rpc"));

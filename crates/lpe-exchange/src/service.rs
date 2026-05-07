@@ -50,7 +50,7 @@ const RPC_PROXY_COMPAT_STATUS: &str = "x-lpe-rpc-proxy-status";
 const RPC_PROXY_ECHO_STATUS: &str = "echo";
 const RPC_PROXY_IN_CHANNEL_STATUS: &str = "in-channel-open";
 const RPC_PROXY_RTS_CONNECT_STATUS: &str = "rts-connect";
-const RPC_PROXY_MAILSTORE_PING_STATUS: &str = "mailstore-ping";
+const RPC_PROXY_ENDPOINT_PING_STATUS: &str = "endpoint-ping";
 const RPC_PROXY_MAX_FINITE_BODY_BYTES: usize = 1024 * 1024;
 const RPC_PROXY_RECEIVE_WINDOW_SIZE: u32 = 0x0001_0000;
 const RPC_PROXY_OUT_CHANNEL_CONTENT_LENGTH: u32 = 0x0002_0000;
@@ -611,7 +611,7 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
                 if let Some(connect) =
                     parse_rpc_proxy_out_data_connect_request(method, headers, request_body)
                 {
-                    if is_rpc_proxy_mailstore_endpoint_ping(uri) {
+                    if is_rpc_proxy_endpoint_ping(uri) {
                         rpc_proxy_mailstore_ping_response(uri, connect.receive_window_size)
                     } else {
                         rpc_proxy_rts_connect_response(connect.receive_window_size)
@@ -5182,12 +5182,13 @@ fn is_rpc_proxy_echo_request(method: &Method, headers: &HeaderMap) -> bool {
 
 fn is_rpc_proxy_in_data_channel_request(method: &Method, uri: &Uri, headers: &HeaderMap) -> bool {
     method.as_str() == "RPC_IN_DATA"
-        && uri.query().is_some_and(|query| query.contains(":6001"))
+        && is_rpc_proxy_endpoint_ping(uri)
         && is_rpc_proxy_msrpc_request(headers)
 }
 
-fn is_rpc_proxy_mailstore_endpoint_ping(uri: &Uri) -> bool {
-    uri.query().is_some_and(|query| query.contains(":6001"))
+fn is_rpc_proxy_endpoint_ping(uri: &Uri) -> bool {
+    uri.query()
+        .is_some_and(|query| query.contains(":6001") || query.contains(":6004"))
 }
 
 fn is_rpc_proxy_msrpc_request(headers: &HeaderMap) -> bool {
@@ -5407,11 +5408,11 @@ fn rpc_proxy_in_channel_response(uri: &Uri) -> Response {
 
 fn rpc_proxy_mailstore_held_open_response(uri: &Uri, body: Vec<u8>) -> Response {
     let Some(query) = uri.query() else {
-        return rpc_proxy_binary_response(body, RPC_PROXY_MAILSTORE_PING_STATUS);
+        return rpc_proxy_binary_response(body, RPC_PROXY_ENDPOINT_PING_STATUS);
     };
     let hold_open_ms = rpc_proxy_channel_hold_ms();
     if hold_open_ms == 0 {
-        return rpc_proxy_binary_response(body, RPC_PROXY_MAILSTORE_PING_STATUS);
+        return rpc_proxy_binary_response(body, RPC_PROXY_ENDPOINT_PING_STATUS);
     }
 
     let payload_bytes = body.len();
@@ -5433,7 +5434,7 @@ fn rpc_proxy_mailstore_held_open_response(uri: &Uri, body: Vec<u8>) -> Response 
         &mut response,
         payload_bytes,
         payload_preview_hex,
-        RPC_PROXY_MAILSTORE_PING_STATUS,
+        RPC_PROXY_ENDPOINT_PING_STATUS,
     );
     response.headers_mut().insert(
         CONTENT_LENGTH,
@@ -5477,7 +5478,10 @@ fn rpc_proxy_out_channels(
 }
 
 fn should_hold_rpc_proxy_in_channel(uri: &Uri) -> bool {
-    let Some(query) = uri.query().filter(|query| query.contains(":6001")) else {
+    let Some(query) = uri
+        .query()
+        .filter(|query| query.contains(":6001") || query.contains(":6004"))
+    else {
         return false;
     };
     let hold_open_ms = rpc_proxy_channel_hold_ms();
@@ -5501,7 +5505,7 @@ fn rpc_proxy_in_channel_openers() -> &'static Mutex<HashMap<String, Instant>> {
 }
 
 fn rpc_proxy_binary_response(body: Vec<u8>, status: &'static str) -> Response {
-    if (status == RPC_PROXY_RTS_CONNECT_STATUS || status == RPC_PROXY_MAILSTORE_PING_STATUS)
+    if (status == RPC_PROXY_RTS_CONNECT_STATUS || status == RPC_PROXY_ENDPOINT_PING_STATUS)
         && rpc_proxy_channel_hold_ms() > 0
     {
         return rpc_proxy_held_open_binary_response(
