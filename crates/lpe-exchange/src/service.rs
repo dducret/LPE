@@ -5380,7 +5380,7 @@ fn rpc_proxy_in_channel_response() -> Response {
             RPC_PROXY_IN_CHANNEL_STATUS,
             hold_open_ms,
             true,
-            false,
+            true,
         );
     }
 
@@ -5602,7 +5602,7 @@ fn rpc_proxy_channel_hold_ms() -> u64 {
 
 #[cfg(test)]
 fn rpc_proxy_channel_hold_ms() -> u64 {
-    0
+    1
 }
 
 fn rpc_proxy_accepted_response(principal: &AccountPrincipal) -> Response {
