@@ -437,6 +437,7 @@ validate_publication_config() {
     "location /mapi/"
     'location ~* ^/rpc/rpcproxy\.dll$'
     "rewrite ^ /rpc/rpcproxy.dll break;"
+    "client_max_body_size 0;"
     "proxy_pass ${LPE_CT_CORE_DELIVERY_BASE_URL};"
     "proxy_buffering off;"
     "proxy_request_buffering off;"
