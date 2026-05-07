@@ -5373,6 +5373,17 @@ fn rpc_proxy_echo_response() -> Response {
 }
 
 fn rpc_proxy_in_channel_response() -> Response {
+    let hold_open_ms = rpc_proxy_channel_hold_ms();
+    if hold_open_ms > 0 {
+        return rpc_proxy_held_open_binary_response(
+            Vec::new(),
+            RPC_PROXY_IN_CHANNEL_STATUS,
+            hold_open_ms,
+            false,
+            true,
+        );
+    }
+
     let mut response = StatusCode::OK.into_response();
     response
         .headers_mut()
