@@ -6696,19 +6696,27 @@ async fn rpc_proxy_mailstore_endpoint_ping_includes_bind_ack_after_rts_connect()
         Some(&HeaderValue::from_static("mailstore-ping"))
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 128);
+    assert_eq!(body.len(), 184);
     assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
     assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
     assert_eq!(body[72], 0x05);
     assert_eq!(body[74], 0x0c);
     assert_eq!(body[75], 0x03);
-    assert_eq!(u16::from_le_bytes([body[80], body[81]]), 56);
+    assert_eq!(u16::from_le_bytes([body[80], body[81]]), 112);
+    assert_eq!(u16::from_le_bytes([body[82], body[83]]), 48);
     assert_eq!(
         &body[108..128],
         &[
             0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11, 0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10,
             0x48, 0x60, 0x02, 0x00, 0x00, 0x00
         ]
+    );
+    assert_eq!(body[128], 10);
+    assert_eq!(body[129], 2);
+    assert_eq!(&body[136..144], b"NTLMSSP\0");
+    assert_eq!(
+        u32::from_le_bytes([body[144], body[145], body[146], body[147]]),
+        2
     );
 }
 
@@ -6740,7 +6748,7 @@ async fn rpc_proxy_opens_authenticated_in_data_channel_without_waiting_for_body_
     );
     assert_eq!(
         response.headers().get("content-length"),
-        Some(&HeaderValue::from_static("131072"))
+        Some(&HeaderValue::from_static("0"))
     );
 }
 

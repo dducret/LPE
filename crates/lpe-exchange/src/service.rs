@@ -5334,6 +5334,9 @@ fn rpc_proxy_mailstore_bind_ack_body() -> Vec<u8> {
         0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11, 0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10, 0x48,
         0x60, 0x02, 0x00, 0x00, 0x00,
     ];
+    const DCE_RPC_AUTH_TYPE_NTLM: u8 = 10;
+    const DCE_RPC_AUTH_LEVEL_CONNECT: u8 = 2;
+    const DCE_RPC_AUTH_CONTEXT_ID: u32 = 0;
 
     let mut body = Vec::new();
     body.extend_from_slice(&DCE_RPC_MAX_FRAG.to_le_bytes());
@@ -5349,6 +5352,14 @@ fn rpc_proxy_mailstore_bind_ack_body() -> Vec<u8> {
     body.extend_from_slice(&0u16.to_le_bytes());
     body.extend_from_slice(&DCE_RPC_NDR_TRANSFER_SYNTAX);
 
+    let auth_value = rpc_proxy_ntlm_challenge_token();
+    body.push(DCE_RPC_AUTH_TYPE_NTLM);
+    body.push(DCE_RPC_AUTH_LEVEL_CONNECT);
+    body.push(0);
+    body.push(0);
+    body.extend_from_slice(&DCE_RPC_AUTH_CONTEXT_ID.to_le_bytes());
+    body.extend_from_slice(&auth_value);
+
     let fragment_length = (16 + body.len()) as u16;
     let mut packet = Vec::with_capacity(fragment_length as usize);
     packet.extend_from_slice(&[
@@ -5362,10 +5373,40 @@ fn rpc_proxy_mailstore_bind_ack_body() -> Vec<u8> {
         0x00,
     ]);
     packet.extend_from_slice(&fragment_length.to_le_bytes());
-    packet.extend_from_slice(&0u16.to_le_bytes());
+    packet.extend_from_slice(&(auth_value.len() as u16).to_le_bytes());
     packet.extend_from_slice(&1u32.to_le_bytes());
     packet.extend_from_slice(&body);
     packet
+}
+
+fn rpc_proxy_ntlm_challenge_token() -> Vec<u8> {
+    const NTLMSSP_NEGOTIATE_UNICODE: u32 = 0x0000_0001;
+    const NTLMSSP_REQUEST_TARGET: u32 = 0x0000_0004;
+    const NTLMSSP_NEGOTIATE_NTLM: u32 = 0x0000_0200;
+    const NTLMSSP_NEGOTIATE_ALWAYS_SIGN: u32 = 0x0000_8000;
+    const NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY: u32 = 0x0008_0000;
+    const NTLM_CHALLENGE: [u8; 8] = [0x4c, 0x50, 0x45, 0x52, 0x43, 0x41, 0x30, 0x31];
+    const SECURITY_BUFFER_OFFSET: u32 = 48;
+
+    let flags = NTLMSSP_NEGOTIATE_UNICODE
+        | NTLMSSP_REQUEST_TARGET
+        | NTLMSSP_NEGOTIATE_NTLM
+        | NTLMSSP_NEGOTIATE_ALWAYS_SIGN
+        | NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY;
+
+    let mut token = Vec::with_capacity(SECURITY_BUFFER_OFFSET as usize);
+    token.extend_from_slice(b"NTLMSSP\0");
+    token.extend_from_slice(&2u32.to_le_bytes());
+    token.extend_from_slice(&0u16.to_le_bytes());
+    token.extend_from_slice(&0u16.to_le_bytes());
+    token.extend_from_slice(&SECURITY_BUFFER_OFFSET.to_le_bytes());
+    token.extend_from_slice(&flags.to_le_bytes());
+    token.extend_from_slice(&NTLM_CHALLENGE);
+    token.extend_from_slice(&[0u8; 8]);
+    token.extend_from_slice(&0u16.to_le_bytes());
+    token.extend_from_slice(&0u16.to_le_bytes());
+    token.extend_from_slice(&SECURITY_BUFFER_OFFSET.to_le_bytes());
+    token
 }
 
 fn rpc_proxy_echo_response() -> Response {
@@ -5373,17 +5414,6 @@ fn rpc_proxy_echo_response() -> Response {
 }
 
 fn rpc_proxy_in_channel_response() -> Response {
-    let hold_open_ms = rpc_proxy_channel_hold_ms();
-    if hold_open_ms > 0 {
-        return rpc_proxy_held_open_binary_response(
-            Vec::new(),
-            RPC_PROXY_IN_CHANNEL_STATUS,
-            hold_open_ms,
-            false,
-            true,
-        );
-    }
-
     let mut response = StatusCode::OK.into_response();
     response
         .headers_mut()
