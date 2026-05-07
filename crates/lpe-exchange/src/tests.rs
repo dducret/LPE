@@ -6963,6 +6963,31 @@ fn rpc_proxy_in_channel_bind_request_gets_bind_ack_response() {
 }
 
 #[test]
+fn rpc_proxy_in_channel_alter_context_request_gets_alter_context_response() {
+    let alter_context = hex_bytes(
+        "05000e03100000007400000004000000\
+         f80ff80f010000000200000002000100\
+         00dbf1a447ca6710b31f00dd010662da00005100\
+         045d888aeb1cc9119fe808002b10486002000000\
+         0300010000dbf1a447ca6710b31f00dd010662da00005100\
+         33057171babe37498319b5dbef9ccc3601000000",
+    );
+    let mut buffer = alter_context;
+
+    let response =
+        rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("alter context response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x0f, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        4
+    );
+    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 112);
+    assert_eq!(u16::from_le_bytes([response[10], response[11]]), 48);
+    assert_eq!(&response[64..72], b"NTLMSSP\0");
+}
+
+#[test]
 fn rpc_proxy_mailstore_in_channel_skips_duplicate_bind_ack() {
     let endpoint_query = "mail.l-p-e.ch:6001";
     mark_rpc_proxy_out_endpoint_bind_ack(endpoint_query);

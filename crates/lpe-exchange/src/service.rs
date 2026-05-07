@@ -5370,6 +5370,15 @@ fn rpc_proxy_out_endpoint_bind_acks() -> &'static Mutex<HashMap<String, usize>> 
 
 fn rpc_proxy_dce_bind_ack_body(call_id: u32) -> Vec<u8> {
     const DCE_RPC_BIND_ACK: u8 = 0x0c;
+    rpc_proxy_dce_context_ack_body(call_id, DCE_RPC_BIND_ACK)
+}
+
+fn rpc_proxy_dce_alter_context_response_body(call_id: u32) -> Vec<u8> {
+    const DCE_RPC_ALTER_CONTEXT_RESPONSE: u8 = 0x0f;
+    rpc_proxy_dce_context_ack_body(call_id, DCE_RPC_ALTER_CONTEXT_RESPONSE)
+}
+
+fn rpc_proxy_dce_context_ack_body(call_id: u32, packet_type: u8) -> Vec<u8> {
     const DCE_RPC_FIRST_FRAG: u8 = 0x01;
     const DCE_RPC_LAST_FRAG: u8 = 0x02;
     const DCE_RPC_MAX_FRAG: u16 = 5840;
@@ -5404,7 +5413,7 @@ fn rpc_proxy_dce_bind_ack_body(call_id: u32) -> Vec<u8> {
     packet.extend_from_slice(&[
         0x05,
         0x00,
-        DCE_RPC_BIND_ACK,
+        packet_type,
         DCE_RPC_FIRST_FRAG | DCE_RPC_LAST_FRAG,
         0x10,
         0x00,
@@ -5839,6 +5848,7 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
             }
             return Some(rpc_proxy_dce_bind_ack_body(call_id));
         }
+        0x0e => return Some(rpc_proxy_dce_alter_context_response_body(call_id)),
         0x00 => {}
         _ => return None,
     }
