@@ -20,7 +20,10 @@ use uuid::Uuid;
 use crate::{
     mapi::MapiEndpoint,
     mapi_mailstore,
-    service::{error_response, rpc_proxy_in_channel_response_for_chunk, ExchangeService},
+    service::{
+        error_response, rpc_proxy_in_channel_response_for_buffer,
+        rpc_proxy_in_channel_response_for_chunk, ExchangeService,
+    },
     store::ExchangeStore,
 };
 
@@ -6777,15 +6780,31 @@ fn rpc_proxy_in_channel_endpoint_ping_request_gets_success_response() {
     let response = rpc_proxy_in_channel_response_for_chunk(&request).expect("endpoint response");
 
     assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
-    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 28);
+    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 88);
+    assert_eq!(u16::from_le_bytes([response[10], response[11]]), 16);
     assert_eq!(
         u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
         2
     );
     assert_eq!(
-        u32::from_le_bytes([response[24], response[25], response[26], response[27]]),
-        0x32
+        u32::from_le_bytes([response[16], response[17], response[18], response[19]]),
+        28
     );
+    assert_eq!(
+        u32::from_le_bytes([response[24], response[25], response[26], response[27]]),
+        4
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[28], response[29], response[30], response[31]]),
+        4
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[48], response[49], response[50], response[51]]),
+        0
+    );
+    assert_eq!(response[64], 10);
+    assert_eq!(response[65], 2);
+    assert_eq!(response[66], 12);
 }
 
 #[test]
@@ -6810,6 +6829,30 @@ fn rpc_proxy_in_channel_scans_endpoint_ping_after_auth_fragment() {
     assert_eq!(
         u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
         3
+    );
+}
+
+#[test]
+fn rpc_proxy_in_channel_buffers_split_endpoint_ping_request() {
+    let request = [
+        0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00,
+        0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x32, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+    ];
+    let mut buffer = request[..18].to_vec();
+
+    assert!(rpc_proxy_in_channel_response_for_buffer(&mut buffer).is_none());
+    assert_eq!(buffer, request[..18]);
+
+    buffer.extend_from_slice(&request[18..]);
+    let response =
+        rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("endpoint response");
+
+    assert!(buffer.is_empty());
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        4
     );
 }
 
