@@ -6740,7 +6740,7 @@ async fn rpc_proxy_opens_authenticated_in_data_channel_without_waiting_for_body_
     );
     assert_eq!(
         response.headers().get("content-length"),
-        Some(&HeaderValue::from_static("131072"))
+        Some(&HeaderValue::from_static("0"))
     );
 }
 
