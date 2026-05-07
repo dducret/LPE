@@ -6,7 +6,7 @@ This document describes the `0.1.3` `Exchange` compatibility work in `LPE`.
 
 The implementation is a deliberately scoped `EWS` adapter in `crates/lpe-exchange`. `IMAP` carried the initial desktop compatibility work through `0.1.2`; `0.1.3` moves the Exchange-style compatibility focus to `EWS`. Its goal is to let Exchange-style clients read and synchronize canonical mailbox, `Contacts`, `Calendar`, and `Tasks` data from the `LPE` server without introducing a second collaboration or mailbox store.
 
-`MAPI` implementation is the `0.1.3` release path for full classic Outlook for Windows Exchange-account support over `MAPI over HTTP` and Outlook Anywhere / RPC over HTTP. `mapiHttp` and legacy `EXCH` / `EXPR` autodiscover publication are available only through explicit administrator switches until the Outlook interoperability matrix proves profile creation, first sync, day-two sync, cached mode, `NSPI`, RPC proxy channel establishment, send, reconnect, and canonical `Sent` behavior. The current slice implements authenticated transport request classification, session-context cookies, the first mailbox-folder bootstrap ROPs, authenticated RPC/HTTP EMSMDB routing into the same canonical mailbox execution path as `/mapi/emsmdb`, and the initial RPC/HTTP RTS virtual-connection handshake required by RCA.
+`MAPI` implementation is the `0.1.3` release path for full classic Outlook for Windows Exchange-account support over `MAPI over HTTP` and Outlook Anywhere / RPC over HTTP. `mapiHttp`, legacy `EXCH`, and legacy `EXPR` autodiscover publication are available only through explicit administrator switches until the Outlook interoperability matrix proves profile creation, first sync, day-two sync, cached mode, `NSPI`, RPC proxy channel establishment, send, reconnect, and canonical `Sent` behavior. The current slice implements authenticated transport request classification, session-context cookies, the first mailbox-folder bootstrap ROPs, authenticated RPC/HTTP EMSMDB routing into the same canonical mailbox execution path as `/mapi/emsmdb`, and the initial RPC/HTTP RTS virtual-connection handshake required by RCA.
 
 The repeatable `EWS` live smoke and release-gate checks are tracked in `docs/architecture/ews-interoperability-matrix.md`.
 
@@ -18,7 +18,7 @@ The intended supported surface is:
 
 - `EWS` for mailbox folders, messages, contacts, calendars, tasks, attachments, search, availability, delegation discovery, and the common EWS client-library flows that can be backed by canonical `LPE` storage
 - `MAPI over HTTP` for classic Outlook for Windows desktop profile creation, mailbox synchronization, cached-mode operation, address book lookup through `NSPI`, send and draft flows through canonical submission, attachments, delegated mailbox projection, and reconnect behavior
-- autodiscover that publishes only the Exchange surfaces an administrator has explicitly enabled and that the interoperability matrix has proven, including legacy `EXCH` provider metadata for RCA only when the legacy Exchange autodiscover switch is enabled
+- autodiscover that publishes only the Exchange surfaces an administrator has explicitly enabled and that the interoperability matrix has proven, including legacy `EXCH` and `EXPR` provider metadata for RCA only when their separate provider switches are enabled
 - mailbox `Basic`, mailbox app-password, and mailbox OAuth bearer authentication scoped through the existing mailbox-account model
 
 The explicitly unsupported surface unless a later architecture document widens it is:
@@ -61,7 +61,7 @@ The `/rpc/rpcproxy.dll` route is mandatory for deployments that publish top-leve
 - `EWS` must not introduce parallel contact, calendar, mailbox, rights, `Sent`, or `Outbox` state
 - `EWS` and `MAPI` authentication reuse mailbox-account authentication
 - `EWS` must not perform or advertise `SMTP`; outbound transport remains in `LPE-CT`
-- `MAPI` autodiscover publication must remain explicit until EMSMDB, NSPI, RPC/HTTP session context, and mailbox synchronization semantics are implemented against canonical `LPE` state and proven with Outlook; legacy `EXCH` / `EXPR` publication must remain separately opt-in so it cannot hijack Outlook desktop `IMAP` setup
+- `MAPI` autodiscover publication must remain explicit until EMSMDB, NSPI, RPC/HTTP session context, and mailbox synchronization semantics are implemented against canonical `LPE` state and proven with Outlook; legacy `EXCH` and legacy `EXPR` publication must each remain separately opt-in so they cannot hijack Outlook desktop `IMAP` setup
 - no `Stalwart` code is reused
 
 ### Endpoints
@@ -204,9 +204,9 @@ Request element names ending in `Request`, such as `GetUserOofSettingsRequest`, 
 - EWS attachment support is limited to file attachments over `GetItem`, `GetAttachment`, `CreateAttachment`, and `DeleteAttachment`; item attachments, inline attachment metadata, attachment creation through `CreateItem` / `UpdateItem`, and byte-for-byte original RFC822 source replay are not implemented yet
 - cross-mailbox free/busy, recurrence expansion, recurrence exceptions, detached recurrence instances, alarms, meeting scheduling, extended properties, and GAL are not implemented through `EWS` yet
 - autodiscover does not publish `EWS` by default; it is only published when explicitly enabled through `LPE_AUTOCONFIG_EWS_ENABLED`
-- enabled `EWS` POX autodiscover publishes the configured EWS URL through a `WEB` protocol block with `ASUrl` for EWS-aware clients; the top-level `EXCH` provider section remains reserved for explicit legacy Exchange autodiscover interoperability-test mode and can be published for RCA validation by combining `LPE_AUTOCONFIG_EWS_ENABLED=true` with `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED=true`
+- enabled `EWS` POX autodiscover publishes the configured EWS URL through a `WEB` protocol block with `ASUrl` for EWS-aware clients; the top-level `EXCH` provider section remains reserved for explicit legacy Exchange autodiscover interoperability-test mode and can be published for RCA validation by combining `LPE_AUTOCONFIG_EWS_ENABLED=true` with `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED=true`; top-level `EXPR` publication additionally requires `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED=true` and a real `/rpc/rpcproxy.dll` Outlook Anywhere path
 - SOAP `GetUserSettings` autodiscover publishes the same configured `EWS` endpoint as `ExternalEwsUrl` and `InternalEwsUrl` for EWS clients that prefer SOAP autodiscover over POX
-- `MAPI over HTTP` currently has authenticated transport, session-context wiring, a private-mailbox logon skeleton, read-only canonical mailbox-folder bootstrap ROPs, an initial read-only contents-table view over canonical message rows, read-only message open/property bootstrap, and visible recipient-row reads; the remaining `0.1.3` work is to make this an Outlook-ready mailbox service before supported `mapiHttp` publication, with legacy `EXCH` provider metadata requiring the additional `LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED` switch
+- `MAPI over HTTP` currently has authenticated transport, session-context wiring, a private-mailbox logon skeleton, read-only canonical mailbox-folder bootstrap ROPs, an initial read-only contents-table view over canonical message rows, read-only message open/property bootstrap, and visible recipient-row reads; the remaining `0.1.3` work is to make this an Outlook-ready mailbox service before supported `mapiHttp` publication, with legacy `EXCH` provider metadata requiring `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` and legacy `EXPR` provider metadata requiring `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`
 
 ### Completion priorities
 

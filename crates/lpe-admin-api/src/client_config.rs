@@ -175,7 +175,8 @@ struct PublishedEndpoints {
     ews_url: String,
     mapi_enabled: bool,
     mapi_http_requested: bool,
-    legacy_exchange_autodiscover_enabled: bool,
+    legacy_exch_autodiscover_enabled: bool,
+    legacy_expr_autodiscover_enabled: bool,
     soap_exchange_autodiscover_enabled: bool,
     mapi_emsmdb_url: String,
     mapi_nspi_url: String,
@@ -220,8 +221,8 @@ impl PublishedEndpoints {
             .get("x-mapihttpcapability")
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| !value.trim().is_empty());
-        let legacy_exchange_autodiscover_enabled =
-            env_flag("LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED");
+        let legacy_exch_autodiscover_enabled = env_flag("LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED");
+        let legacy_expr_autodiscover_enabled = env_flag("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED");
         let soap_exchange_autodiscover_enabled =
             env_flag("LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED");
         let mapi_mailbox_id = email_hint.unwrap_or_default();
@@ -246,7 +247,8 @@ impl PublishedEndpoints {
             ews_url,
             mapi_enabled,
             mapi_http_requested,
-            legacy_exchange_autodiscover_enabled,
+            legacy_exch_autodiscover_enabled,
+            legacy_expr_autodiscover_enabled,
             soap_exchange_autodiscover_enabled,
             mapi_emsmdb_url,
             mapi_nspi_url,
@@ -258,6 +260,14 @@ impl PublishedEndpoints {
 
     fn exchange_autodiscover_enabled(&self) -> bool {
         self.ews_enabled || self.mapi_enabled
+    }
+
+    fn exch_autodiscover_enabled(&self) -> bool {
+        self.legacy_exch_autodiscover_enabled && self.exchange_autodiscover_enabled()
+    }
+
+    fn expr_autodiscover_enabled(&self) -> bool {
+        self.legacy_expr_autodiscover_enabled && self.exchange_autodiscover_enabled()
     }
 
     fn soap_exchange_autodiscover_enabled(&self) -> bool {
@@ -407,15 +417,15 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
         ));
     }
 
-    if (config.ews_enabled || config.mapi_enabled)
-        && config.legacy_exchange_autodiscover_enabled
+    if config.ews_enabled && !config.mapi_http_requested {
+        xml.push_str(&render_ews_web_autodiscover_protocol(config, email));
+    }
+    if (config.exch_autodiscover_enabled() || config.expr_autodiscover_enabled())
         && !config.mapi_http_requested
     {
         xml.push_str(&render_exchange_provider_autodiscover_protocols(
             config, email,
         ));
-    } else if config.ews_enabled && !config.mapi_enabled {
-        xml.push_str(&render_ews_web_autodiscover_protocol(config, email));
     }
     if config.mapi_enabled && config.mapi_http_requested {
         xml.push_str(&render_mapi_http_autodiscover_protocol(config));
@@ -439,67 +449,70 @@ fn render_exchange_provider_autodiscover_protocols(
     );
     let mdb_dn = format!("{server_dn}/cn=LPE Private MDB");
     let cert_principal = format!("msstd:{mailbox_server}");
+    let mut xml = String::new();
+    if config.exch_autodiscover_enabled() {
+        xml.push_str(&format!(
+            concat!(
+                "      <Protocol>\n",
+                "        <Type>EXCH</Type>\n",
+                "        <Server>{mailbox_server}</Server>\n",
+                "        <ServerDN>{server_dn}</ServerDN>\n",
+                "        <MdbDN>{mdb_dn}</MdbDN>\n",
+                "{ews_url_fields}",
+                "        <Port>0</Port>\n",
+                "        <DirectoryPort>0</DirectoryPort>\n",
+                "        <ReferralPort>0</ReferralPort>\n",
+                "        <AD>{mailbox_server}</AD>\n",
+                "        <PublicFolderServer>{mailbox_server}</PublicFolderServer>\n",
+                "        <ServerExclusiveConnect>off</ServerExclusiveConnect>\n",
+                "      </Protocol>\n",
+            ),
+            mailbox_server = escape_xml(mailbox_server),
+            server_dn = escape_xml(&server_dn),
+            mdb_dn = escape_xml(&mdb_dn),
+            ews_url_fields = exchange_provider_ews_url_fields(config),
+        ));
+    }
+    if config.expr_autodiscover_enabled() {
+        xml.push_str(&format!(
+            concat!(
+                "      <Protocol>\n",
+                "        <Type>EXPR</Type>\n",
+                "        <Server>{mailbox_server}</Server>\n",
+                "        <ServerDN>{server_dn}</ServerDN>\n",
+                "        <MdbDN>{mdb_dn}</MdbDN>\n",
+                "{ews_url_fields}",
+                "        <Port>0</Port>\n",
+                "        <DirectoryPort>0</DirectoryPort>\n",
+                "        <ReferralPort>0</ReferralPort>\n",
+                "        <SSL>On</SSL>\n",
+                "        <AuthPackage>Basic</AuthPackage>\n",
+                "        <CertPrincipalName>{cert_principal}</CertPrincipalName>\n",
+                "        <LoginName>{email}</LoginName>\n",
+                "      </Protocol>\n",
+            ),
+            mailbox_server = escape_xml(mailbox_server),
+            server_dn = escape_xml(&server_dn),
+            mdb_dn = escape_xml(&mdb_dn),
+            cert_principal = escape_xml(&cert_principal),
+            ews_url_fields = exchange_provider_ews_url_fields(config),
+            email = escape_xml(email),
+        ));
+    }
+    xml
+}
+
+fn exchange_provider_ews_url_fields(config: &PublishedEndpoints) -> String {
+    if !config.ews_enabled {
+        return String::new();
+    }
     format!(
         concat!(
-            "      <Protocol>\n",
-            "        <Type>EXCH</Type>\n",
-            "        <Server>{mailbox_server}</Server>\n",
-            "        <ServerDN>{server_dn}</ServerDN>\n",
-            "        <MdbDN>{mdb_dn}</MdbDN>\n",
             "        <ASUrl>{ews_url}</ASUrl>\n",
             "        <OOFUrl>{ews_url}</OOFUrl>\n",
             "        <EwsUrl>{ews_url}</EwsUrl>\n",
-            "        <Port>0</Port>\n",
-            "        <DirectoryPort>0</DirectoryPort>\n",
-            "        <ReferralPort>0</ReferralPort>\n",
-            "        <AD>{mailbox_server}</AD>\n",
-            "        <PublicFolderServer>{mailbox_server}</PublicFolderServer>\n",
-            "        <ServerExclusiveConnect>off</ServerExclusiveConnect>\n",
-            "      </Protocol>\n",
-            "      <Protocol>\n",
-            "        <Type>EXPR</Type>\n",
-            "        <Server>{mailbox_server}</Server>\n",
-            "        <ServerDN>{server_dn}</ServerDN>\n",
-            "        <MdbDN>{mdb_dn}</MdbDN>\n",
-            "        <ASUrl>{ews_url}</ASUrl>\n",
-            "        <OOFUrl>{ews_url}</OOFUrl>\n",
-            "        <EwsUrl>{ews_url}</EwsUrl>\n",
-            "        <Port>0</Port>\n",
-            "        <DirectoryPort>0</DirectoryPort>\n",
-            "        <ReferralPort>0</ReferralPort>\n",
-            "        <SSL>On</SSL>\n",
-            "        <AuthPackage>Basic</AuthPackage>\n",
-            "        <CertPrincipalName>{cert_principal}</CertPrincipalName>\n",
-            "        <LoginName>{email}</LoginName>\n",
-            "      </Protocol>\n",
-            "      <Protocol>\n",
-            "        <Type>WEB</Type>\n",
-            "        <Server>{mailbox_server}</Server>\n",
-            "        <LoginName>{email}</LoginName>\n",
-            "        <SSL>on</SSL>\n",
-            "        <AuthPackage>Basic</AuthPackage>\n",
-            "        <External>\n",
-            "          <OWAUrl AuthenticationMethod=\"Basic\">{ews_url}</OWAUrl>\n",
-            "          <Protocol>\n",
-            "            <Type>EXPR</Type>\n",
-            "            <ASUrl>{ews_url}</ASUrl>\n",
-            "          </Protocol>\n",
-            "        </External>\n",
-            "        <Internal>\n",
-            "          <OWAUrl AuthenticationMethod=\"Basic\">{ews_url}</OWAUrl>\n",
-            "          <Protocol>\n",
-            "            <Type>EXCH</Type>\n",
-            "            <ASUrl>{ews_url}</ASUrl>\n",
-            "          </Protocol>\n",
-            "        </Internal>\n",
-            "      </Protocol>\n"
         ),
-        mailbox_server = escape_xml(mailbox_server),
-        server_dn = escape_xml(&server_dn),
-        mdb_dn = escape_xml(&mdb_dn),
-        cert_principal = escape_xml(&cert_principal),
         ews_url = escape_xml(&config.ews_url),
-        email = escape_xml(email),
     )
 }
 
@@ -533,10 +546,7 @@ fn render_ews_web_autodiscover_protocol(config: &PublishedEndpoints, email: &str
             "        <AuthPackage>Basic</AuthPackage>\n",
             "        <External>\n",
             "          <OWAUrl AuthenticationMethod=\"Basic\">{ews_url}</OWAUrl>\n",
-            "          <Protocol>\n",
-            "            <Type>EXPR</Type>\n",
-            "            <ASUrl>{ews_url}</ASUrl>\n",
-            "          </Protocol>\n",
+            "          <ASUrl>{ews_url}</ASUrl>\n",
             "        </External>\n",
             "      </Protocol>\n"
         ),
@@ -1003,7 +1013,8 @@ mod tests {
             ews_url: "https://mail.example.test/EWS/Exchange.asmx".to_string(),
             mapi_enabled: false,
             mapi_http_requested: false,
-            legacy_exchange_autodiscover_enabled: false,
+            legacy_exch_autodiscover_enabled: false,
+            legacy_expr_autodiscover_enabled: false,
             soap_exchange_autodiscover_enabled: false,
             mapi_emsmdb_url: "https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test"
                 .to_string(),
@@ -1177,8 +1188,8 @@ mod tests {
 
         assert!(xml.contains("<Type>WEB</Type>"));
         assert!(xml.contains("<OWAUrl AuthenticationMethod=\"Basic\">https://mail.example.test/EWS/Exchange.asmx</OWAUrl>"));
-        assert!(xml.contains("<Type>EXPR</Type>"));
         assert!(xml.contains("<ASUrl>https://mail.example.test/EWS/Exchange.asmx</ASUrl>"));
+        assert!(!xml.contains("<Type>EXPR</Type>"));
         assert!(xml.contains("<Server>mail.example.test</Server>"));
         assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
         assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
@@ -1216,7 +1227,8 @@ mod tests {
         let config = PublishedEndpoints {
             mapi_enabled: true,
             mapi_http_requested: false,
-            legacy_exchange_autodiscover_enabled: true,
+            legacy_exch_autodiscover_enabled: true,
+            legacy_expr_autodiscover_enabled: true,
             ..sample_config()
         };
 
@@ -1226,7 +1238,8 @@ mod tests {
         assert!(xml.contains("<ServerDN>/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Servers/cn=mail.example.test</ServerDN>"));
         assert!(xml.contains("<MdbDN>/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Servers/cn=mail.example.test/cn=LPE Private MDB</MdbDN>"));
         assert!(xml.contains("<AuthPackage>Basic</AuthPackage>"));
-        assert!(xml.contains("<EwsUrl>https://mail.example.test/EWS/Exchange.asmx</EwsUrl>"));
+        assert!(!xml.contains("<EwsUrl>"));
+        assert!(!xml.contains("<ASUrl>"));
         assert!(xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
         assert!(xml.contains("<CertPrincipalName>msstd:mail.example.test</CertPrincipalName>"));
         assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
@@ -1236,7 +1249,8 @@ mod tests {
     fn outlook_autodiscover_can_publish_exchange_providers_for_legacy_ews_probe() {
         let config = PublishedEndpoints {
             ews_enabled: true,
-            legacy_exchange_autodiscover_enabled: true,
+            legacy_exch_autodiscover_enabled: true,
+            legacy_expr_autodiscover_enabled: true,
             ..sample_config()
         };
 
@@ -1254,7 +1268,8 @@ mod tests {
         let config = PublishedEndpoints {
             mapi_enabled: true,
             mapi_http_requested: false,
-            legacy_exchange_autodiscover_enabled: false,
+            legacy_exch_autodiscover_enabled: false,
+            legacy_expr_autodiscover_enabled: false,
             ..sample_config()
         };
 
@@ -1271,7 +1286,8 @@ mod tests {
     fn mapi_autodiscover_publication_is_env_opt_in() {
         let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("LPE_AUTOCONFIG_MAPI_ENABLED", "true");
-        std::env::remove_var("LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED");
+        std::env::remove_var("LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED");
+        std::env::remove_var("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED");
         std::env::remove_var("LPE_AUTOCONFIG_MAPI_EMSMDB_URL");
         std::env::remove_var("LPE_AUTOCONFIG_MAPI_NSPI_URL");
         std::env::remove_var("LPE_PUBLIC_HOSTNAME");
@@ -1285,7 +1301,8 @@ mod tests {
 
         assert!(config.mapi_enabled);
         assert!(config.mapi_http_requested);
-        assert!(!config.legacy_exchange_autodiscover_enabled);
+        assert!(!config.legacy_exch_autodiscover_enabled);
+        assert!(!config.legacy_expr_autodiscover_enabled);
         assert_eq!(
             config.mapi_emsmdb_url,
             "https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test"
@@ -1300,13 +1317,11 @@ mod tests {
     }
 
     #[test]
-    fn legacy_exchange_autodiscover_publication_has_separate_opt_in() {
+    fn legacy_exchange_autodiscover_publication_has_separate_provider_opt_ins() {
         let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("LPE_AUTOCONFIG_MAPI_ENABLED", "true");
-        std::env::set_var(
-            "LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED",
-            "true",
-        );
+        std::env::set_var("LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED", "true");
+        std::env::remove_var("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED");
         std::env::remove_var("LPE_PUBLIC_HOSTNAME");
         std::env::remove_var("LPE_PUBLIC_SCHEME");
 
@@ -1316,24 +1331,34 @@ mod tests {
         let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
 
         assert!(config.mapi_enabled);
-        assert!(config.legacy_exchange_autodiscover_enabled);
+        assert!(config.legacy_exch_autodiscover_enabled);
+        assert!(!config.legacy_expr_autodiscover_enabled);
         assert!(xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
-        assert!(xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
         assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
 
+        std::env::set_var("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED", "true");
+        std::env::remove_var("LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED");
+        let config = PublishedEndpoints::from_headers(&headers, Some("alice@example.test"));
+        let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(!config.legacy_exch_autodiscover_enabled);
+        assert!(config.legacy_expr_autodiscover_enabled);
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+        assert!(xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+
         std::env::remove_var("LPE_AUTOCONFIG_MAPI_ENABLED");
-        std::env::remove_var("LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED");
+        std::env::remove_var("LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED");
+        std::env::remove_var("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED");
     }
 
     #[test]
-    fn legacy_exchange_autodiscover_publication_works_with_ews_opt_in() {
+    fn legacy_exchange_autodiscover_publication_works_with_ews_provider_opt_ins() {
         let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("LPE_AUTOCONFIG_EWS_ENABLED", "true");
         std::env::remove_var("LPE_AUTOCONFIG_MAPI_ENABLED");
-        std::env::set_var(
-            "LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED",
-            "true",
-        );
+        std::env::set_var("LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED", "true");
+        std::env::set_var("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED", "true");
         std::env::remove_var("LPE_PUBLIC_HOSTNAME");
         std::env::remove_var("LPE_PUBLIC_SCHEME");
 
@@ -1344,14 +1369,16 @@ mod tests {
 
         assert!(config.ews_enabled);
         assert!(!config.mapi_enabled);
-        assert!(config.legacy_exchange_autodiscover_enabled);
+        assert!(config.legacy_exch_autodiscover_enabled);
+        assert!(config.legacy_expr_autodiscover_enabled);
         assert!(xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
         assert!(xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
         assert!(xml.contains("<EwsUrl>https://mail.example.test/EWS/Exchange.asmx</EwsUrl>"));
         assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
 
         std::env::remove_var("LPE_AUTOCONFIG_EWS_ENABLED");
-        std::env::remove_var("LPE_AUTOCONFIG_LEGACY_EXCHANGE_AUTODISCOVER_ENABLED");
+        std::env::remove_var("LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED");
+        std::env::remove_var("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED");
     }
 
     #[test]
@@ -1373,8 +1400,8 @@ mod tests {
             "https://mail.example.test/EWS/Exchange.asmx"
         );
         assert!(xml.contains("<Type>WEB</Type>"));
-        assert!(xml.contains("<Type>EXPR</Type>"));
         assert!(xml.contains("<ASUrl>https://mail.example.test/EWS/Exchange.asmx</ASUrl>"));
+        assert!(!xml.contains("<Type>EXPR</Type>"));
         assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
         assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
 

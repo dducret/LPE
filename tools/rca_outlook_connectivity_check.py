@@ -11,6 +11,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import ssl
 import struct
 import sys
@@ -20,6 +21,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
@@ -42,6 +44,27 @@ EWS_TIMEZONES_BODY = """\
   </s:Body>
 </s:Envelope>
 """
+
+EWS_BODY_TEMPLATE = """\
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+            xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages"
+            xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+  <s:Body>
+{body}
+  </s:Body>
+</s:Envelope>
+"""
+
+NSPI_BOOTSTRAP_PROPERTY_TAGS = [
+    0x3001_001F,
+    0x39FE_001F,
+    0x3003_001F,
+    0x3A00_001F,
+    0x0FFE_0003,
+    0x3000_0003,
+    0x3004_001F,
+    0x3002_001F,
+]
 
 
 @dataclass
@@ -129,6 +152,83 @@ def mapi_request_id(sequence: str | int | None = None) -> str:
     return value
 
 
+def basic_auth_header(email: str, password: str) -> str:
+    token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
+    return f"Basic {token}"
+
+
+def ews_envelope(body: str) -> bytes:
+    indented = textwrap.indent(textwrap.dedent(body).strip(), "    ")
+    return EWS_BODY_TEMPLATE.format(body=indented).encode("utf-8")
+
+
+def ews_call(
+    base_url: str,
+    email: str,
+    password: str,
+    operation: str,
+    body: str,
+    insecure_tls: bool,
+    timeout: int,
+) -> str:
+    response = request(
+        "POST",
+        join_url(base_url, "/EWS/Exchange.asmx"),
+        ews_envelope(body),
+        {
+            "Authorization": basic_auth_header(email, password),
+            "Content-Type": "text/xml; charset=utf-8",
+            "Accept": "text/xml",
+            "User-Agent": "lpe-rca-connectivity-check/0.1",
+            "X-LPE-RCA-Operation": operation,
+        },
+        timeout,
+        insecure_tls=insecure_tls,
+    )
+    require(response.status == 200, f"EWS {operation} returned HTTP {response.status}: {response.text[:500]}")
+    require("xml" in content_type(response.headers), f"EWS {operation} did not return XML headers")
+    return response.text
+
+
+def require_ews_no_error(name: str, payload: str) -> None:
+    require("<m:ResponseCode>NoError</m:ResponseCode>" in payload, f"{name} did not return EWS NoError: {payload[:800]}")
+
+
+def extract_ews_item_id(payload: str, prefix: str, name: str) -> str:
+    match = re.search(rf'Id="({re.escape(prefix)}[0-9a-fA-F-]{{36}})"', payload)
+    require(match is not None, f"{name} did not return an {prefix} item id: {payload[:800]}")
+    return match.group(1)
+
+
+def utf16z(value: str) -> bytes:
+    return value.encode("utf-16le") + b"\x00\x00"
+
+
+def contains_bytes(haystack: bytes, needle: bytes) -> bool:
+    return any(haystack[index : index + len(needle)] == needle for index in range(0, len(haystack) - len(needle) + 1))
+
+
+def resolve_names_request(search_address: str, columns: list[int]) -> bytes:
+    body = bytearray()
+    body.extend(struct.pack("<I", 0))
+    body.append(0xFF)
+    body.extend(bytes(24))
+    body.extend(struct.pack("<I", 1252))
+    body.extend(struct.pack("<I", 0x0409))
+    body.extend(struct.pack("<I", 0x0409))
+    body.append(0xFF)
+    body.extend(struct.pack("<I", len(columns)))
+    for column in columns:
+        body.extend(struct.pack("<I", column))
+    body.append(0xFF)
+    body.extend(struct.pack("<I", 1))
+    unresolved_name = utf16z(f"=SMTP:{search_address}")
+    body.extend(struct.pack("<H", len(unresolved_name)))
+    body.extend(unresolved_name)
+    body.extend(struct.pack("<I", 0))
+    return bytes(body)
+
+
 def rpc_rts_conn_a1_body(receive_window_size: int = 0x00010000) -> bytes:
     virtual_connection_cookie = uuid.uuid4().bytes_le
     out_channel_cookie = uuid.uuid4().bytes_le
@@ -148,7 +248,8 @@ def check_pox_autodiscover(
     base_url: str,
     email: str,
     expect_ews: bool,
-    expect_exchange_providers: bool,
+    expect_exch_provider: bool,
+    expect_expr_provider: bool,
     expect_mapi: bool,
     expected_service_host: str | None,
     insecure_tls: bool,
@@ -191,37 +292,54 @@ def check_pox_autodiscover(
                 not expected_service_host or f"https://{expected_service_host}/EWS/Exchange.asmx" in text,
                 f"{path} does not publish EWS on expected service host {expected_service_host}",
             )
-        if expect_exchange_providers:
+        else:
+            require("<Type>WEB</Type>" not in text, f"{path} unexpectedly published EWS WEB block")
+        if expect_exch_provider:
             require(
                 "      <Protocol>\n        <Type>EXCH</Type>" in text,
                 f"{path} missing legacy EXCH provider section",
             )
+        else:
+            require(
+                "      <Protocol>\n        <Type>EXCH</Type>" not in text,
+                f"{path} unexpectedly published legacy EXCH provider section",
+            )
+        if expect_expr_provider:
             require(
                 "      <Protocol>\n        <Type>EXPR</Type>" in text,
                 f"{path} missing legacy EXPR provider section required for Outlook Anywhere/RPC over HTTP",
             )
             require("<CertPrincipalName>" in text, f"{path} missing EXPR certificate principal")
-            require("<EwsUrl>" in text, f"{path} missing EWS URL in legacy Exchange provider section")
+        else:
+            require(
+                "      <Protocol>\n        <Type>EXPR</Type>" not in text,
+                f"{path} unexpectedly published legacy EXPR provider section",
+            )
+        if expect_exch_provider or expect_expr_provider:
+            if expect_ews:
+                require("<EwsUrl>" in text, f"{path} missing EWS URL in legacy Exchange provider section")
 
+    response = request(
+        "POST",
+        join_url(base_url, "/autodiscover"),
+        body,
+        {
+            "Content-Type": "text/xml; charset=utf-8",
+            "Accept": "text/xml",
+            "User-Agent": "lpe-rca-connectivity-check/0.1",
+            "X-MapiHttpCapability": "1",
+        },
+        timeout,
+        insecure_tls=insecure_tls,
+    )
+    text = response.text
+    require(response.status == 200, f"POX MAPI probe returned HTTP {response.status}: {text[:300]}")
     if expect_mapi:
-        response = request(
-            "POST",
-            join_url(base_url, "/autodiscover"),
-            body,
-            {
-                "Content-Type": "text/xml; charset=utf-8",
-                "Accept": "text/xml",
-                "User-Agent": "lpe-rca-connectivity-check/0.1",
-                "X-MapiHttpCapability": "1",
-            },
-            timeout,
-            insecure_tls=insecure_tls,
-        )
-        text = response.text
-        require(response.status == 200, f"POX MAPI probe returned HTTP {response.status}: {text[:300]}")
         require("mapiHttp" in text, "POX MAPI probe did not publish mapiHttp")
         require("/mapi/emsmdb/" in text, "POX MAPI probe missing EMSMDB URL")
         require("/mapi/nspi/" in text, "POX MAPI probe missing NSPI URL")
+    else:
+        require("mapiHttp" not in text, "POX MAPI probe unexpectedly published mapiHttp")
     print("ok autodiscover_pox")
 
 
@@ -343,13 +461,12 @@ def check_jmap_session(base_url: str, email: str, password: str, insecure_tls: b
 
 
 def check_ews_basic(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
-    token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
     response = request(
         "POST",
         join_url(base_url, "/EWS/Exchange.asmx"),
         EWS_TIMEZONES_BODY.encode("utf-8"),
         {
-            "Authorization": f"Basic {token}",
+            "Authorization": basic_auth_header(email, password),
             "Content-Type": "text/xml; charset=utf-8",
             "Accept": "text/xml",
             "User-Agent": "lpe-rca-connectivity-check/0.1",
@@ -364,15 +481,289 @@ def check_ews_basic(base_url: str, email: str, password: str, insecure_tls: bool
     print("ok ews_basic")
 
 
+def check_ews_mailbox_access(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
+    payload = ews_call(
+        base_url,
+        email,
+        password,
+        "FindFolder",
+        """
+        <m:FindFolder Traversal="Shallow">
+          <m:FolderShape><t:BaseShape>AllProperties</t:BaseShape></m:FolderShape>
+          <m:ParentFolderIds><t:DistinguishedFolderId Id="msgfolderroot"/></m:ParentFolderIds>
+        </m:FindFolder>
+        """,
+        insecure_tls,
+        timeout,
+    )
+    require_ews_no_error("EWS FindFolder", payload)
+    for fragment in ["<t:ContactsFolder>", "<t:CalendarFolder>", "<t:TasksFolder>"]:
+        require(fragment in payload, f"EWS FindFolder did not expose mailbox collaboration folder {fragment}")
+    print("ok ews_mailbox_access")
+
+
+def check_ews_send_sent(
+    base_url: str,
+    email: str,
+    password: str,
+    recipient: str,
+    insecure_tls: bool,
+    timeout: int,
+) -> None:
+    marker = uuid.uuid4().hex[:12]
+    subject = f"LPE RCA canonical send {marker}"
+    body_text = f"RCA canonical Sent proof {marker}"
+    message_id: str | None = None
+    try:
+        created = ews_call(
+            base_url,
+            email,
+            password,
+            "CreateItem SendAndSaveCopy",
+            f"""
+            <m:CreateItem MessageDisposition="SendAndSaveCopy">
+              <m:Items>
+                <t:Message>
+                  <t:Subject>{xml_escape(subject)}</t:Subject>
+                  <t:Body BodyType="Text">{xml_escape(body_text)}</t:Body>
+                  <t:ToRecipients>
+                    <t:Mailbox><t:EmailAddress>{xml_escape(recipient)}</t:EmailAddress></t:Mailbox>
+                  </t:ToRecipients>
+                </t:Message>
+              </m:Items>
+            </m:CreateItem>
+            """,
+            insecure_tls,
+            timeout,
+        )
+        require_ews_no_error("EWS CreateItem SendAndSaveCopy", created)
+        message_id = extract_ews_item_id(created, "message:", "EWS CreateItem SendAndSaveCopy")
+
+        fetched = ews_call(
+            base_url,
+            email,
+            password,
+            "GetItem sent message",
+            f"""
+            <m:GetItem>
+              <m:ItemShape><t:BaseShape>AllProperties</t:BaseShape></m:ItemShape>
+              <m:ItemIds><t:ItemId Id="{xml_escape(message_id)}"/></m:ItemIds>
+            </m:GetItem>
+            """,
+            insecure_tls,
+            timeout,
+        )
+        require_ews_no_error("EWS GetItem sent message", fetched)
+        require(subject in fetched, "EWS GetItem did not return the canonical sent message subject")
+
+        sent = ews_call(
+            base_url,
+            email,
+            password,
+            "FindItem sentitems",
+            """
+            <m:FindItem Traversal="Shallow">
+              <m:ItemShape><t:BaseShape>AllProperties</t:BaseShape></m:ItemShape>
+              <m:ParentFolderIds><t:DistinguishedFolderId Id="sentitems"/></m:ParentFolderIds>
+            </m:FindItem>
+            """,
+            insecure_tls,
+            timeout,
+        )
+        require_ews_no_error("EWS FindItem sentitems", sent)
+        require(message_id in sent or subject in sent, "EWS Sent folder did not expose the submitted canonical message")
+    finally:
+        if message_id:
+            delete_ews_item(base_url, email, password, message_id, insecure_tls, timeout, required=False)
+    print("ok ews_canonical_send_sent")
+
+
+def check_ews_contact_calendar_and_mapi_fixture(
+    base_url: str,
+    email: str,
+    password: str,
+    insecure_tls: bool,
+    timeout: int,
+    check_mapi: bool,
+) -> None:
+    marker = uuid.uuid4().hex[:10]
+    contact_name = f"LPE RCA Contact {marker}"
+    contact_email = f"lpe-rca-{marker}@example.test"
+    event_subject = f"LPE RCA Calendar {marker}"
+    start = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=3)
+    end = start + timedelta(minutes=30)
+    contact_id: str | None = None
+    event_id: str | None = None
+    try:
+        created_contact = ews_call(
+            base_url,
+            email,
+            password,
+            "CreateItem Contact",
+            f"""
+            <m:CreateItem>
+              <m:SavedItemFolderId><t:DistinguishedFolderId Id="contacts"/></m:SavedItemFolderId>
+              <m:Items>
+                <t:Contact>
+                  <t:DisplayName>{xml_escape(contact_name)}</t:DisplayName>
+                  <t:GivenName>LPE</t:GivenName>
+                  <t:Surname>RCA</t:Surname>
+                  <t:EmailAddresses>
+                    <t:Entry Key="EmailAddress1">{xml_escape(contact_email)}</t:Entry>
+                  </t:EmailAddresses>
+                  <t:Body BodyType="Text">Temporary RCA contact fixture</t:Body>
+                </t:Contact>
+              </m:Items>
+            </m:CreateItem>
+            """,
+            insecure_tls,
+            timeout,
+        )
+        require_ews_no_error("EWS CreateItem Contact", created_contact)
+        contact_id = extract_ews_item_id(created_contact, "contact:", "EWS CreateItem Contact")
+
+        fetched_contact = ews_call(
+            base_url,
+            email,
+            password,
+            "GetItem Contact",
+            f"""
+            <m:GetItem>
+              <m:ItemShape><t:BaseShape>AllProperties</t:BaseShape></m:ItemShape>
+              <m:ItemIds><t:ItemId Id="{xml_escape(contact_id)}"/></m:ItemIds>
+            </m:GetItem>
+            """,
+            insecure_tls,
+            timeout,
+        )
+        require_ews_no_error("EWS GetItem Contact", fetched_contact)
+        require(contact_name in fetched_contact and contact_email in fetched_contact, "EWS contact read did not return the created fixture data")
+
+        if check_mapi:
+            check_mapi_nspi_address_book(
+                base_url,
+                email,
+                password,
+                insecure_tls,
+                timeout,
+                expected_name=contact_name,
+                expected_email=contact_email,
+            )
+
+        created_event = ews_call(
+            base_url,
+            email,
+            password,
+            "CreateItem CalendarItem",
+            f"""
+            <m:CreateItem>
+              <m:SavedItemFolderId><t:DistinguishedFolderId Id="calendar"/></m:SavedItemFolderId>
+              <m:Items>
+                <t:CalendarItem>
+                  <t:Subject>{xml_escape(event_subject)}</t:Subject>
+                  <t:Location>RCA fixture</t:Location>
+                  <t:Start>{start.isoformat().replace("+00:00", "Z")}</t:Start>
+                  <t:End>{end.isoformat().replace("+00:00", "Z")}</t:End>
+                  <t:Body BodyType="Text">Temporary RCA calendar fixture</t:Body>
+                </t:CalendarItem>
+              </m:Items>
+            </m:CreateItem>
+            """,
+            insecure_tls,
+            timeout,
+        )
+        require_ews_no_error("EWS CreateItem CalendarItem", created_event)
+        event_id = extract_ews_item_id(created_event, "event:", "EWS CreateItem CalendarItem")
+
+        fetched_event = ews_call(
+            base_url,
+            email,
+            password,
+            "GetItem CalendarItem",
+            f"""
+            <m:GetItem>
+              <m:ItemShape><t:BaseShape>AllProperties</t:BaseShape></m:ItemShape>
+              <m:ItemIds><t:ItemId Id="{xml_escape(event_id)}"/></m:ItemIds>
+            </m:GetItem>
+            """,
+            insecure_tls,
+            timeout,
+        )
+        require_ews_no_error("EWS GetItem CalendarItem", fetched_event)
+        require(event_subject in fetched_event and event_id in fetched_event, "EWS calendar read did not return the created fixture data")
+    finally:
+        if event_id:
+            delete_ews_item(base_url, email, password, event_id, insecure_tls, timeout, required=False)
+        if contact_id:
+            delete_ews_item(base_url, email, password, contact_id, insecure_tls, timeout, required=False)
+
+    require_deleted_ews_item(base_url, email, password, contact_id, "contact", insecure_tls, timeout)
+    require_deleted_ews_item(base_url, email, password, event_id, "calendar", insecure_tls, timeout)
+    print("ok ews_contact_calendar_live_fixtures")
+
+
+def delete_ews_item(
+    base_url: str,
+    email: str,
+    password: str,
+    item_id: str,
+    insecure_tls: bool,
+    timeout: int,
+    required: bool,
+) -> None:
+    payload = ews_call(
+        base_url,
+        email,
+        password,
+        "DeleteItem cleanup",
+        f"""
+        <m:DeleteItem DeleteType="HardDelete">
+          <m:ItemIds><t:ItemId Id="{xml_escape(item_id)}"/></m:ItemIds>
+        </m:DeleteItem>
+        """,
+        insecure_tls,
+        timeout,
+    )
+    if required:
+        require_ews_no_error("EWS DeleteItem", payload)
+
+
+def require_deleted_ews_item(
+    base_url: str,
+    email: str,
+    password: str,
+    item_id: str | None,
+    label: str,
+    insecure_tls: bool,
+    timeout: int,
+) -> None:
+    if not item_id:
+        return
+    payload = ews_call(
+        base_url,
+        email,
+        password,
+        f"GetItem deleted {label}",
+        f"""
+        <m:GetItem>
+          <m:ItemShape><t:BaseShape>Default</t:BaseShape></m:ItemShape>
+          <m:ItemIds><t:ItemId Id="{xml_escape(item_id)}"/></m:ItemIds>
+        </m:GetItem>
+        """,
+        insecure_tls,
+        timeout,
+    )
+    require("ErrorItemNotFound" in payload, f"EWS deleted {label} fixture was still readable: {payload[:800]}")
+
+
 def check_mapi_ping(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
-    token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
     for path in ["/mapi/emsmdb", "/mapi/nspi"]:
         response = request(
             "POST",
             join_url(base_url, path),
             b"",
             {
-                "Authorization": f"Basic {token}",
+                "Authorization": basic_auth_header(email, password),
                 "Content-Type": "application/mapi-http",
                 "X-RequestType": "PING",
                 "X-RequestId": mapi_request_id(),
@@ -389,13 +780,12 @@ def check_mapi_ping(base_url: str, email: str, password: str, insecure_tls: bool
 
 
 def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
-    token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
     response = request(
         "POST",
         join_url(base_url, f"/mapi/nspi/?mailboxId={urllib.parse.quote(email, safe='@')}"),
         bytes(45),
         {
-            "Authorization": f"Basic {token}",
+            "Authorization": basic_auth_header(email, password),
             "Content-Type": "application/octet-stream",
             "X-RequestType": "Bind",
             "X-RequestId": mapi_request_id(1),
@@ -416,22 +806,38 @@ def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, 
     print("ok mapi_nspi_bind_octet_stream")
 
 
-def check_mapi_nspi_address_book(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
-    token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
+def check_mapi_nspi_address_book(
+    base_url: str,
+    email: str,
+    password: str,
+    insecure_tls: bool,
+    timeout: int,
+    expected_name: str | None = None,
+    expected_email: str | None = None,
+) -> None:
     path = f"/mapi/nspi/?mailboxId={urllib.parse.quote(email, safe='@')}"
-    probes = {
+    probe_bodies: dict[str, bytes] = {
+        "ResolveNames": resolve_names_request(
+            expected_email or email,
+            [0x3003_001F, 0x3001_001F],
+        ),
+        "GetMatches": (expected_email or email).encode("utf-8"),
+        "QueryRows": (expected_email or email).encode("utf-8"),
+        "GetProps": (expected_email or email).encode("utf-8"),
+    }
+    probe_assertions = {
         "ResolveNames": assert_nspi_resolve_names_payload,
         "GetMatches": assert_nspi_get_matches_payload,
         "QueryRows": assert_nspi_query_rows_payload,
         "GetProps": assert_nspi_get_props_payload,
     }
-    for request_type, assert_payload in probes.items():
+    for request_type, body in probe_bodies.items():
         response = request(
             "POST",
             join_url(base_url, path),
-            bytes(128),
+            body,
             {
-                "Authorization": f"Basic {token}",
+                "Authorization": basic_auth_header(email, password),
                 "Content-Type": "application/octet-stream",
                 "X-RequestType": request_type,
                 "X-RequestId": mapi_request_id(request_type),
@@ -445,8 +851,14 @@ def check_mapi_nspi_address_book(base_url: str, email: str, password: str, insec
         require("application/mapi-http" in content_type(response.headers), f"MAPI NSPI {request_type} did not return MAPI content")
         response_code = header_value(response.headers, "x-responsecode")
         require(response_code == "0", f"MAPI NSPI {request_type} returned X-ResponseCode {response_code!r}: {response.text[:300]}")
-        assert_payload(mapi_http_binary_payload(response.body), request_type)
-    print("ok mapi_nspi_address_book")
+        payload = mapi_http_binary_payload(response.body)
+        probe_assertions[request_type](payload, request_type)
+        if expected_name and expected_email:
+            assert_nspi_fixture_payload(payload, request_type, expected_name, expected_email)
+    if expected_name and expected_email:
+        print("ok mapi_nspi_address_book_fixture")
+    else:
+        print("ok mapi_nspi_address_book")
 
 
 def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, insecure_tls: bool, timeout: int) -> None:
@@ -470,9 +882,8 @@ def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, insecu
     )
 
     if password is not None:
-        token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
         authenticated_headers = dict(headers)
-        authenticated_headers["Authorization"] = f"Basic {token}"
+        authenticated_headers["Authorization"] = basic_auth_header(email, password)
         for method, body, expected_status, expected_length in [
             ("RPC_IN_DATA", b"", "echo", 20),
             ("RPC_OUT_DATA", rpc_rts_conn_a1_body(), "rts-connect", 72),
@@ -515,11 +926,10 @@ def check_rpc_proxy_mailstore_ping(
     parsed = urllib.parse.urlparse(base_url)
     rpc_host = parsed.hostname or parsed.netloc
     require(bool(rpc_host), "base URL must include a host for RPC proxy checks")
-    token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
     rpc_url = join_url(base_url, f"/rpc/rpcproxy.dll?{rpc_host}:6001")
     headers = {
         "Accept": "application/rpc",
-        "Authorization": f"Basic {token}",
+        "Authorization": basic_auth_header(email, password),
         "User-Agent": "MSRPC",
     }
 
@@ -572,7 +982,7 @@ def assert_nspi_resolve_names_payload(payload: bytes, request_type: str) -> None
     require(payload[12] == 1, "ResolveNames omitted MinimalIds")
     require(le_u32(payload, 13) == 1, "ResolveNames returned an unexpected MinimalId count")
     require(payload[21] == 1, "ResolveNames omitted row columns")
-    require(le_u32(payload, 22) >= 4, "ResolveNames returned too few property tags")
+    require(le_u32(payload, 22) >= 2, "ResolveNames returned too few property tags")
 
 
 def assert_nspi_get_matches_payload(payload: bytes, request_type: str) -> None:
@@ -598,6 +1008,17 @@ def assert_nspi_get_props_payload(payload: bytes, request_type: str) -> None:
     require(le_u32(payload, 13) >= 4, "GetProps returned too few property values")
 
 
+def assert_nspi_fixture_payload(payload: bytes, request_type: str, expected_name: str, expected_email: str) -> None:
+    require(
+        contains_bytes(payload, utf16z(expected_email)),
+        f"MAPI NSPI {request_type} did not return fixture email {expected_email}",
+    )
+    require(
+        contains_bytes(payload, utf16z(expected_name)),
+        f"MAPI NSPI {request_type} did not return fixture display name {expected_name}",
+    )
+
+
 def xml_escape(value: str) -> str:
     return (
         value.replace("&", "&amp;")
@@ -615,7 +1036,7 @@ def main() -> int:
             """\
             Examples:
               LPE_RCA_PASSWORD='...' tools/rca_outlook_connectivity_check.py --expect-ews --expect-exchange-providers --check-ews-basic
-              tools/rca_outlook_connectivity_check.py --base-url https://l-p-e.ch --email test@l-p-e.ch --expected-service-host mail.l-p-e.ch --expect-ews --expect-exchange-providers --insecure
+              tools/rca_outlook_connectivity_check.py --base-url https://l-p-e.ch --email test@l-p-e.ch --expected-service-host mail.l-p-e.ch --expect-ews --expect-exchange-providers --check-live-fixtures --insecure
             """
         ),
     )
@@ -636,10 +1057,30 @@ def main() -> int:
     parser.add_argument(
         "--expect-exchange-providers",
         action="store_true",
-        help="Require the POX legacy EXCH and EXPR providers for RCA Outlook Anywhere validation.",
+        help="Require both POX legacy EXCH and EXPR providers for RCA Outlook Anywhere validation.",
+    )
+    parser.add_argument(
+        "--expect-exch-provider",
+        action="store_true",
+        help="Require the POX legacy EXCH provider without requiring EXPR.",
+    )
+    parser.add_argument(
+        "--expect-expr-provider",
+        action="store_true",
+        help="Require the POX legacy EXPR provider without requiring EXCH.",
     )
     parser.add_argument("--expect-mapi", action="store_true", help="Require MAPI/HTTP discovery to be published.")
     parser.add_argument("--check-ews-basic", action="store_true", help="Exercise Basic auth against /EWS/Exchange.asmx.")
+    parser.add_argument(
+        "--check-live-fixtures",
+        action="store_true",
+        help="Create/read/delete live EWS message, Sent, contact, calendar fixtures and prove the contact through MAPI/NSPI.",
+    )
+    parser.add_argument(
+        "--send-recipient",
+        default=os.getenv("LPE_RCA_SEND_RECIPIENT"),
+        help="Recipient for the canonical send/Sent live fixture. Defaults to --email.",
+    )
     parser.add_argument("--check-mapi-ping", action="store_true", help="Exercise Basic auth PING against /mapi/emsmdb and /mapi/nspi.")
     parser.add_argument(
         "--check-mapi-nspi-bind-octet-stream",
@@ -670,7 +1111,8 @@ def main() -> int:
         base_url,
         args.email,
         args.expect_ews,
-        args.expect_exchange_providers,
+        args.expect_exchange_providers or args.expect_exch_provider,
+        args.expect_exchange_providers or args.expect_expr_provider,
         args.expect_mapi,
         args.expected_service_host,
         args.insecure,
@@ -691,6 +1133,24 @@ def main() -> int:
         check_jmap_session(base_url, args.email, args.password, args.insecure, args.timeout)
         if args.check_ews_basic:
             check_ews_basic(base_url, args.email, args.password, args.insecure, args.timeout)
+        if args.check_live_fixtures:
+            check_ews_mailbox_access(base_url, args.email, args.password, args.insecure, args.timeout)
+            check_ews_send_sent(
+                base_url,
+                args.email,
+                args.password,
+                args.send_recipient or args.email,
+                args.insecure,
+                args.timeout,
+            )
+            check_ews_contact_calendar_and_mapi_fixture(
+                base_url,
+                args.email,
+                args.password,
+                args.insecure,
+                args.timeout,
+                check_mapi=True,
+            )
         if args.check_mapi_ping:
             check_mapi_ping(base_url, args.email, args.password, args.insecure, args.timeout)
         if args.check_mapi_nspi_bind_octet_stream:
@@ -704,6 +1164,7 @@ def main() -> int:
             or args.check_mapi_ping
             or args.check_mapi_nspi_bind_octet_stream
             or args.check_mapi_nspi_address_book
+            or args.check_live_fixtures
             or args.check_rpc_proxy_mailstore_ping
         ):
             raise RuntimeError("requested authenticated checks require --password or LPE_RCA_PASSWORD")
