@@ -36,7 +36,7 @@ use uuid::Uuid;
 use crate::{
     mapi::{self, MapiEndpoint},
     ntlm,
-    store::ExchangeStore,
+    store::{ExchangeAddressBookEntry, ExchangeAddressBookEntryKind, ExchangeStore},
 };
 
 const EWS_PATH: &str = "/EWS/Exchange.asmx";
@@ -6075,37 +6075,42 @@ where
         (2, 0) if alloc_hint >= 44 => Some(rpc_proxy_nspi_bind_response(call_id)),
         (2, 1) if alloc_hint >= 20 => Some(rpc_proxy_nspi_unbind_response(call_id)),
         (2, 2) if alloc_hint >= 20 => Some(rpc_proxy_nspi_update_stat_response(call_id)),
-        (2, 3) if alloc_hint >= 20 => Some(rpc_proxy_nspi_query_rows_response_for_principal(
-            call_id, bytes, principal,
-        )),
-        (2, 4) if alloc_hint >= 20 => Some(rpc_proxy_nspi_query_rows_response_for_principal(
-            call_id, bytes, principal,
-        )),
-        (2, 5) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_matches_response_for_principal(
-            call_id, bytes, principal,
-        )),
+        (2, 3) if alloc_hint >= 20 => Some(
+            rpc_proxy_nspi_query_rows_response_for_principal(store, call_id, bytes, principal)
+                .await,
+        ),
+        (2, 4) if alloc_hint >= 20 => Some(
+            rpc_proxy_nspi_query_rows_response_for_principal(store, call_id, bytes, principal)
+                .await,
+        ),
+        (2, 5) if alloc_hint >= 20 => Some(
+            rpc_proxy_nspi_get_matches_response_for_principal(store, call_id, bytes, principal)
+                .await,
+        ),
         (2, 6) if alloc_hint >= 20 => Some(rpc_proxy_nspi_resort_restriction_response(call_id)),
         (2, 7) if alloc_hint >= 20 => Some(rpc_proxy_nspi_minimal_ids_response(call_id)),
         (2, 8) if alloc_hint >= 16 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
-        (2, 9) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_props_response_for_principal(
-            call_id, bytes, principal,
-        )),
+        (2, 9) if alloc_hint >= 20 => Some(
+            rpc_proxy_nspi_get_props_response_for_principal(store, call_id, bytes, principal).await,
+        ),
         (2, 10) if alloc_hint >= 20 => Some(rpc_proxy_nspi_compare_mids_response(call_id)),
         (2, 12) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_special_table_response(call_id)),
-        (2, 13) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_props_response_for_principal(
-            call_id, bytes, principal,
-        )),
+        (2, 13) if alloc_hint >= 20 => Some(
+            rpc_proxy_nspi_get_props_response_for_principal(store, call_id, bytes, principal).await,
+        ),
         (2, 16) if alloc_hint >= 12 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
         (2, 17) if alloc_hint >= 12 => {
             Some(rpc_proxy_nspi_get_names_from_ids_response(call_id, bytes))
         }
         (2, 18) if alloc_hint >= 20 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
-        (2, 19) if alloc_hint >= 24 => Some(rpc_proxy_nspi_resolve_names_response_for_principal(
-            call_id, bytes, principal,
-        )),
-        (2, 20) if alloc_hint >= 24 => Some(rpc_proxy_nspi_resolve_names_response_for_principal(
-            call_id, bytes, principal,
-        )),
+        (2, 19) if alloc_hint >= 24 => Some(
+            rpc_proxy_nspi_resolve_names_response_for_principal(store, call_id, bytes, principal)
+                .await,
+        ),
+        (2, 20) if alloc_hint >= 24 => Some(
+            rpc_proxy_nspi_resolve_names_response_for_principal(store, call_id, bytes, principal)
+                .await,
+        ),
         _ => None,
     }
 }
@@ -6458,16 +6463,24 @@ fn rpc_proxy_nspi_query_rows_response(call_id: u32, request: &[u8]) -> Vec<u8> {
     rpc_proxy_dce_response(call_id, &stub)
 }
 
-fn rpc_proxy_nspi_query_rows_response_for_principal(
+async fn rpc_proxy_nspi_query_rows_response_for_principal<S>(
+    store: &S,
     call_id: u32,
     request: &[u8],
     principal: &AccountPrincipal,
-) -> Vec<u8> {
+) -> Vec<u8>
+where
+    S: ExchangeStore,
+{
     let tags = rpc_proxy_nspi_requested_property_tags(request);
-    let row_values = rpc_proxy_nspi_row_values_for_principal(request, &tags, principal);
+    let entries = rpc_proxy_address_book_entries(store, principal).await;
+    let rows = rpc_proxy_filter_nspi_entries(&entries, request)
+        .into_iter()
+        .map(|entry| rpc_proxy_nspi_row_values_for_entry(&tags, entry))
+        .collect::<Vec<_>>();
     let mut stub = Vec::with_capacity(256);
     rpc_proxy_push_stat(&mut stub);
-    rpc_proxy_push_rowset_pointer(&mut stub, &[row_values]);
+    rpc_proxy_push_rowset_pointer(&mut stub, &rows);
     push_le_u32(&mut stub, 0);
 
     rpc_proxy_dce_response(call_id, &stub)
@@ -6487,18 +6500,31 @@ fn rpc_proxy_nspi_get_matches_response(call_id: u32, request: &[u8]) -> Vec<u8> 
     rpc_proxy_dce_response(call_id, &stub)
 }
 
-fn rpc_proxy_nspi_get_matches_response_for_principal(
+async fn rpc_proxy_nspi_get_matches_response_for_principal<S>(
+    store: &S,
     call_id: u32,
     request: &[u8],
     principal: &AccountPrincipal,
-) -> Vec<u8> {
+) -> Vec<u8>
+where
+    S: ExchangeStore,
+{
     let tags = rpc_proxy_nspi_requested_property_tags(request);
-    let row_values = rpc_proxy_nspi_row_values_for_principal(request, &tags, principal);
+    let entries = rpc_proxy_address_book_entries(store, principal).await;
+    let matched = rpc_proxy_filter_nspi_entries(&entries, request);
+    let rows = matched
+        .iter()
+        .map(|entry| rpc_proxy_nspi_row_values_for_entry(&tags, entry))
+        .collect::<Vec<_>>();
+    let mids = matched
+        .iter()
+        .map(|entry| rpc_proxy_nspi_entry_id(entry))
+        .collect::<Vec<_>>();
     let mut stub = Vec::with_capacity(280);
     rpc_proxy_push_stat(&mut stub);
     push_le_u32(&mut stub, 0x0002_0000);
-    rpc_proxy_push_property_tag_array(&mut stub, &[principal_minimal_entry_id_for_rpc(principal)]);
-    rpc_proxy_push_rowset_pointer(&mut stub, &[row_values]);
+    rpc_proxy_push_property_tag_array(&mut stub, &mids);
+    rpc_proxy_push_rowset_pointer(&mut stub, &rows);
     push_le_u32(&mut stub, 0);
 
     rpc_proxy_dce_response(call_id, &stub)
@@ -6560,13 +6586,25 @@ fn rpc_proxy_nspi_get_props_response(call_id: u32, request: &[u8]) -> Vec<u8> {
     rpc_proxy_dce_response(call_id, &stub)
 }
 
-fn rpc_proxy_nspi_get_props_response_for_principal(
+async fn rpc_proxy_nspi_get_props_response_for_principal<S>(
+    store: &S,
     call_id: u32,
     request: &[u8],
     principal: &AccountPrincipal,
-) -> Vec<u8> {
+) -> Vec<u8>
+where
+    S: ExchangeStore,
+{
     let tags = rpc_proxy_nspi_requested_property_tags(request);
-    let row_values = rpc_proxy_nspi_row_values_for_principal(request, &tags, principal);
+    let entries = rpc_proxy_address_book_entries(store, principal).await;
+    let row_values = rpc_proxy_requested_nspi_entry(&entries, request)
+        .or_else(|| {
+            entries
+                .iter()
+                .find(|entry| rpc_proxy_nspi_entry_is_principal(entry, principal))
+        })
+        .map(|entry| rpc_proxy_nspi_row_values_for_entry(&tags, entry))
+        .unwrap_or_default();
     let mut stub = Vec::with_capacity(192);
     push_le_u32(&mut stub, 0x0002_0000);
     rpc_proxy_push_property_row(&mut stub, &row_values);
@@ -6657,17 +6695,44 @@ fn rpc_proxy_nspi_resolve_names_response(call_id: u32, request: &[u8]) -> Vec<u8
     rpc_proxy_dce_response(call_id, &stub)
 }
 
-fn rpc_proxy_nspi_resolve_names_response_for_principal(
+async fn rpc_proxy_nspi_resolve_names_response_for_principal<S>(
+    store: &S,
     call_id: u32,
     request: &[u8],
     principal: &AccountPrincipal,
-) -> Vec<u8> {
+) -> Vec<u8>
+where
+    S: ExchangeStore,
+{
     const MID_RESOLVED: u32 = 2;
     const PR_DISPLAY_NAME_A: u32 = 0x3001_001e;
     const PR_EMAIL_ADDRESS_A: u32 = 0x3003_001e;
 
-    let smtp_address = principal.email.to_ascii_lowercase();
-    let display_name = principal.display_name.clone();
+    let entries = rpc_proxy_address_book_entries(store, principal).await;
+    let lookup_values = rpc_proxy_nspi_lookup_values(request);
+    let matched = lookup_values
+        .first()
+        .and_then(|value| rpc_proxy_match_nspi_entry(&entries, value))
+        .or_else(|| {
+            lookup_values
+                .is_empty()
+                .then(|| {
+                    entries
+                        .iter()
+                        .find(|entry| rpc_proxy_nspi_entry_is_principal(entry, principal))
+                })
+                .flatten()
+        });
+    let Some(entry) = matched else {
+        let mut stub = Vec::with_capacity(64);
+        push_le_u32(&mut stub, 0x0002_0000);
+        rpc_proxy_push_property_tag_array(&mut stub, &[0]);
+        push_le_u32(&mut stub, 0);
+        push_le_u32(&mut stub, 0);
+        return rpc_proxy_dce_response(call_id, &stub);
+    };
+    let smtp_address = entry.email.to_ascii_lowercase();
+    let display_name = entry.display_name.clone();
     let property_tags = rpc_proxy_nspi_requested_resolve_property_tags(request);
     let row_values: Vec<(u32, String)> = property_tags
         .into_iter()
@@ -6768,7 +6833,6 @@ fn rpc_proxy_nspi_requested_resolve_property_tags(request: &[u8]) -> Vec<u32> {
     tags
 }
 
-#[cfg(test)]
 fn rpc_proxy_nspi_requested_smtp_address(request: &[u8]) -> Option<String> {
     const SMTP_PREFIX_UTF16LE: &[u8] = b"=\0S\0M\0T\0P\0:\0";
     const SMTP_PREFIX_ASCII: &[u8] = b"=SMTP:";
@@ -6829,12 +6893,6 @@ fn rpc_proxy_display_name_for_smtp_address(address: &str) -> String {
     display_name
 }
 
-fn principal_minimal_entry_id_for_rpc(principal: &AccountPrincipal) -> u32 {
-    let bytes = principal.account_id.as_bytes();
-    let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-    value.max(2)
-}
-
 fn rpc_proxy_push_property_tag_array(buffer: &mut Vec<u8>, values: &[u32]) {
     push_le_u32(buffer, values.len() as u32 + 1);
     push_le_u32(buffer, values.len() as u32);
@@ -6884,13 +6942,30 @@ fn rpc_proxy_nspi_row_values(request: &[u8], tags: &[u32]) -> Vec<(u32, RpcProxy
         .collect()
 }
 
-fn rpc_proxy_nspi_row_values_for_principal(
-    _request: &[u8],
-    tags: &[u32],
+async fn rpc_proxy_address_book_entries<S>(
+    store: &S,
     principal: &AccountPrincipal,
+) -> Vec<ExchangeAddressBookEntry>
+where
+    S: ExchangeStore,
+{
+    match store.fetch_address_book_entries(principal.account_id).await {
+        Ok(entries) if !entries.is_empty() => entries,
+        Ok(_) | Err(_) => vec![ExchangeAddressBookEntry {
+            id: principal.account_id,
+            display_name: principal.display_name.clone(),
+            email: principal.email.clone(),
+            entry_kind: ExchangeAddressBookEntryKind::Account,
+        }],
+    }
+}
+
+fn rpc_proxy_nspi_row_values_for_entry(
+    tags: &[u32],
+    entry: &ExchangeAddressBookEntry,
 ) -> Vec<(u32, RpcProxyNspiValue)> {
-    let smtp_address = principal.email.to_ascii_lowercase();
-    let display_name = principal.display_name.clone();
+    let smtp_address = entry.email.to_ascii_lowercase();
+    let display_name = entry.display_name.clone();
     tags.iter()
         .map(|tag| {
             let value = match *tag {
@@ -6901,18 +6976,215 @@ fn rpc_proxy_nspi_row_values_for_principal(
                 0x3002_001f => RpcProxyNspiValue::String("SMTP".to_string()),
                 0x3005_001f => RpcProxyNspiValue::String(format!(
                     "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={}",
-                    smtp_address.replace('@', "-").replace('.', "-")
+                    rpc_proxy_nspi_entry_legacy_name(entry)
                 )),
                 0x0ffe_0003 => RpcProxyNspiValue::U32(6),
-                0x3000_0003 => {
-                    RpcProxyNspiValue::U32(principal_minimal_entry_id_for_rpc(principal))
-                }
+                0x3000_0003 => RpcProxyNspiValue::U32(rpc_proxy_nspi_entry_id(entry)),
                 _ if *tag & 0xffff == 0x0003 => RpcProxyNspiValue::U32(0),
                 _ => RpcProxyNspiValue::String(String::new()),
             };
             (*tag, value)
         })
         .collect()
+}
+
+fn rpc_proxy_nspi_entry_id(entry: &ExchangeAddressBookEntry) -> u32 {
+    let bytes = entry.id.as_bytes();
+    let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    match entry.entry_kind {
+        ExchangeAddressBookEntryKind::Account => value | 0x8000_0000,
+        ExchangeAddressBookEntryKind::Contact => value | 0x4000_0000,
+    }
+    .max(2)
+}
+
+fn rpc_proxy_nspi_entry_legacy_name(entry: &ExchangeAddressBookEntry) -> String {
+    let prefix = match entry.entry_kind {
+        ExchangeAddressBookEntryKind::Account => "acct",
+        ExchangeAddressBookEntryKind::Contact => "contact",
+    };
+    let source = if entry.email.trim().is_empty() {
+        entry.id.to_string()
+    } else {
+        entry.email.clone()
+    };
+    let legacy_user = source
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    format!("{prefix}-{legacy_user}")
+}
+
+fn rpc_proxy_filter_nspi_entries<'a>(
+    entries: &'a [ExchangeAddressBookEntry],
+    request: &[u8],
+) -> Vec<&'a ExchangeAddressBookEntry> {
+    let values = rpc_proxy_nspi_lookup_values(request);
+    if values.is_empty() {
+        return entries.iter().collect();
+    }
+    entries
+        .iter()
+        .filter(|entry| {
+            values
+                .iter()
+                .any(|value| rpc_proxy_nspi_entry_matches(entry, value))
+        })
+        .collect()
+}
+
+fn rpc_proxy_requested_nspi_entry<'a>(
+    entries: &'a [ExchangeAddressBookEntry],
+    request: &[u8],
+) -> Option<&'a ExchangeAddressBookEntry> {
+    rpc_proxy_nspi_requested_mids(request)
+        .iter()
+        .find_map(|mid| {
+            entries
+                .iter()
+                .find(|entry| rpc_proxy_nspi_entry_id(entry) == *mid)
+        })
+        .or_else(|| {
+            rpc_proxy_nspi_lookup_values(request)
+                .iter()
+                .find_map(|value| rpc_proxy_match_nspi_entry(entries, value))
+        })
+}
+
+fn rpc_proxy_match_nspi_entry<'a>(
+    entries: &'a [ExchangeAddressBookEntry],
+    value: &str,
+) -> Option<&'a ExchangeAddressBookEntry> {
+    entries
+        .iter()
+        .find(|entry| {
+            rpc_proxy_nspi_entry_matches(entry, value)
+                && rpc_proxy_nspi_entry_exact_match(entry, value)
+        })
+        .or_else(|| {
+            entries
+                .iter()
+                .find(|entry| rpc_proxy_nspi_entry_matches(entry, value))
+        })
+}
+
+fn rpc_proxy_nspi_entry_is_principal(
+    entry: &ExchangeAddressBookEntry,
+    principal: &AccountPrincipal,
+) -> bool {
+    entry.entry_kind == ExchangeAddressBookEntryKind::Account && entry.id == principal.account_id
+}
+
+fn rpc_proxy_nspi_entry_exact_match(entry: &ExchangeAddressBookEntry, value: &str) -> bool {
+    let value = rpc_proxy_normalize_nspi_lookup_value(value);
+    let email = entry.email.to_ascii_lowercase();
+    value == email
+        || value == entry.display_name.to_ascii_lowercase()
+        || value
+            == format!(
+                "/o=lpe/ou=exchange administrative group/cn=recipients/cn={}",
+                rpc_proxy_nspi_entry_legacy_name(entry)
+            )
+}
+
+fn rpc_proxy_nspi_entry_matches(entry: &ExchangeAddressBookEntry, value: &str) -> bool {
+    let value = rpc_proxy_normalize_nspi_lookup_value(value);
+    if value.is_empty() {
+        return false;
+    }
+    rpc_proxy_nspi_entry_exact_match(entry, &value)
+        || entry.email.to_ascii_lowercase().contains(value.as_str())
+        || entry
+            .display_name
+            .to_ascii_lowercase()
+            .contains(value.as_str())
+}
+
+fn rpc_proxy_nspi_requested_mids(request: &[u8]) -> Vec<u32> {
+    let mut mids = Vec::new();
+    let mut offset = 0usize;
+    while offset + 4 <= request.len() {
+        if let Some(value) = read_le_u32(request, offset) {
+            if value >= 2 && !mids.contains(&value) {
+                mids.push(value);
+            }
+        }
+        offset += 4;
+    }
+    mids
+}
+
+fn rpc_proxy_nspi_lookup_values(request: &[u8]) -> Vec<String> {
+    let mut values = Vec::new();
+    if let Some(address) = rpc_proxy_nspi_requested_smtp_address(request) {
+        values.push(address);
+    }
+    values.extend(rpc_proxy_nspi_ascii_lookup_values(request));
+    values.extend(rpc_proxy_nspi_utf16_lookup_values(request));
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn rpc_proxy_nspi_ascii_lookup_values(request: &[u8]) -> Vec<String> {
+    request
+        .split(|byte| *byte == 0)
+        .filter_map(|bytes| {
+            if bytes.len() < 3 {
+                return None;
+            }
+            let value = String::from_utf8_lossy(bytes);
+            let value = rpc_proxy_normalize_nspi_lookup_value(&value);
+            (!value.is_empty() && (value.contains('@') || value.contains("/cn="))).then_some(value)
+        })
+        .collect()
+}
+
+fn rpc_proxy_nspi_utf16_lookup_values(request: &[u8]) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut start = 0usize;
+    while start + 3 < request.len() {
+        let mut units = Vec::new();
+        let mut offset = start;
+        while offset + 1 < request.len() {
+            let unit = u16::from_le_bytes([request[offset], request[offset + 1]]);
+            if unit == 0 {
+                break;
+            }
+            if unit < 0x20 && !matches!(unit, 0x09 | 0x0a | 0x0d) {
+                units.clear();
+                break;
+            }
+            units.push(unit);
+            offset += 2;
+        }
+        if units.len() >= 3 {
+            if let Ok(value) = String::from_utf16(&units) {
+                let value = rpc_proxy_normalize_nspi_lookup_value(&value);
+                if !value.is_empty() && (value.contains('@') || value.contains("/cn=")) {
+                    values.push(value);
+                }
+            }
+        }
+        start += 1;
+    }
+    values
+}
+
+fn rpc_proxy_normalize_nspi_lookup_value(value: &str) -> String {
+    let mut value = value.trim().trim_matches('\0').to_ascii_lowercase();
+    if let Some(rest) = value.strip_prefix("=smtp:") {
+        value = rest.to_string();
+    } else if let Some(rest) = value.strip_prefix("smtp:") {
+        value = rest.to_string();
+    }
+    value
 }
 
 fn rpc_proxy_push_rowset_pointer(buffer: &mut Vec<u8>, rows: &[Vec<(u32, RpcProxyNspiValue)>]) {

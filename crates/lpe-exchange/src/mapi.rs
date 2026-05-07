@@ -33,7 +33,7 @@ use crate::{
         MapiAttachment, MapiCollaborationFolder, MapiCollaborationFolderKind,
         MapiMailStoreSnapshot, MapiStore,
     },
-    store::ExchangeStore,
+    store::{ExchangeAddressBookEntry, ExchangeAddressBookEntryKind, ExchangeStore},
 };
 
 const MAPI_CONTENT_TYPE: &str = "application/mapi-http";
@@ -340,19 +340,17 @@ where
         (MapiEndpoint::Nspi, MapiRequestType::CompareMids) => {
             nspi_u32_result_response("CompareMIds", &request_id, 0)
         }
-        (MapiEndpoint::Nspi, MapiRequestType::DnToMid) => nspi_u32_result_response(
-            "DNToMId",
-            &request_id,
-            principal_minimal_entry_id(&principal),
-        ),
+        (MapiEndpoint::Nspi, MapiRequestType::DnToMid) => {
+            nspi_dn_to_mid_response(store, &principal, _body, &request_id).await
+        }
         (MapiEndpoint::Nspi, MapiRequestType::GetMatches) => {
-            nspi_matches_response(&principal, &request_id)
+            nspi_matches_response(store, &principal, _body, &request_id).await
         }
         (MapiEndpoint::Nspi, MapiRequestType::GetPropList) => {
             nspi_property_tags_response("GetPropList", &request_id)
         }
         (MapiEndpoint::Nspi, MapiRequestType::GetProps) => {
-            nspi_principal_props_response("GetProps", &principal, &request_id)
+            nspi_props_response(store, &principal, _body, "GetProps", &request_id).await
         }
         (MapiEndpoint::Nspi, MapiRequestType::GetSpecialTable) => {
             nspi_special_table_response(&request_id)
@@ -370,16 +368,16 @@ where
             nspi_property_tags_response("QueryColumns", &request_id)
         }
         (MapiEndpoint::Nspi, MapiRequestType::QueryRows) => {
-            nspi_principal_rowset_response("QueryRows", &principal, &request_id)
+            nspi_rowset_response(store, &principal, _body, "QueryRows", &request_id).await
         }
         (MapiEndpoint::Nspi, MapiRequestType::ResolveNames) => {
-            resolve_names_response(&principal, _body, &request_id)
+            resolve_names_response(store, &principal, _body, &request_id).await
         }
         (MapiEndpoint::Nspi, MapiRequestType::ResortRestriction) => {
             nspi_minimal_ids_response("ResortRestriction", &principal, &request_id)
         }
         (MapiEndpoint::Nspi, MapiRequestType::SeekEntries) => {
-            nspi_principal_rowset_response("SeekEntries", &principal, &request_id)
+            nspi_rowset_response(store, &principal, _body, "SeekEntries", &request_id).await
         }
         (MapiEndpoint::Nspi, MapiRequestType::UpdateStat) => nspi_update_stat_response(&request_id),
         (_, MapiRequestType::Ping) => mapi_response("PING", &request_id, 0, Vec::new(), None),
@@ -632,23 +630,64 @@ const NSPI_BOOTSTRAP_PROPERTY_TAGS: &[u32] = &[
     0x3002_001F, // PidTagAddressType / legacy bootstrap metadata
 ];
 
-fn resolve_names_response(
+async fn resolve_names_response<S>(
+    store: &S,
     principal: &AccountPrincipal,
     request: &[u8],
     request_id: &str,
-) -> Response {
+) -> Response
+where
+    S: ExchangeStore,
+{
     let columns = resolve_names_columns(request);
+    let requested_names = resolve_names_requested_values(request);
+    let entries = match store.fetch_address_book_entries(principal.account_id).await {
+        Ok(entries) => entries,
+        Err(error) => {
+            return mapi_diagnostic_response(
+                "ResolveNames",
+                request_id,
+                4,
+                &format!("failed to load address book entries: {error}"),
+            );
+        }
+    };
+    let matched = requested_names
+        .first()
+        .and_then(|name| nspi_match_entry(&entries, name))
+        .or_else(|| {
+            requested_names
+                .is_empty()
+                .then(|| {
+                    entries
+                        .iter()
+                        .find(|entry| nspi_entry_is_principal(entry, principal))
+                })
+                .flatten()
+        });
+
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
     write_u32(&mut body, NSPI_UNICODE_CODEPAGE);
     body.push(1);
     write_u32(&mut body, 1);
-    write_u32(&mut body, NSPI_MID_RESOLVED);
-    body.push(1);
-    write_large_property_tag_array(&mut body, &columns);
-    write_u32(&mut body, 1);
-    body.extend_from_slice(&nspi_resolved_principal_row(principal, &columns));
+    write_u32(
+        &mut body,
+        if matched.is_some() {
+            NSPI_MID_RESOLVED
+        } else {
+            0
+        },
+    );
+    if let Some(entry) = matched {
+        body.push(1);
+        write_large_property_tag_array(&mut body, &columns);
+        write_u32(&mut body, 1);
+        body.extend_from_slice(&nspi_resolved_entry_row(entry, &columns));
+    } else {
+        body.push(0);
+    }
     write_u32(&mut body, 0);
     mapi_response("ResolveNames", request_id, 0, body, None)
 }
@@ -681,6 +720,44 @@ fn parse_resolve_names_columns(request: &[u8]) -> Option<Vec<u32>> {
     Some(columns)
 }
 
+fn resolve_names_requested_values(request: &[u8]) -> Vec<String> {
+    parse_resolve_names_values(request).unwrap_or_else(|| scan_address_book_lookup_values(request))
+}
+
+fn parse_resolve_names_values(request: &[u8]) -> Option<Vec<String>> {
+    let mut cursor = Cursor::new(request);
+    let _reserved = cursor.read_u32().ok()?;
+    if cursor.read_u8().ok()? != 0 {
+        cursor.read_bytes(36).ok()?;
+    }
+    if cursor.read_u8().ok()? != 0 {
+        let count = cursor.read_u32().ok()? as usize;
+        if count > 128 {
+            return None;
+        }
+        cursor.read_bytes(count.checked_mul(4)?).ok()?;
+    }
+    if cursor.read_u8().ok()? == 0 {
+        return Some(Vec::new());
+    }
+    let count = cursor.read_u32().ok()? as usize;
+    if count > 128 {
+        return None;
+    }
+    let mut values = Vec::new();
+    for _ in 0..count {
+        let size = cursor.read_u16().ok()? as usize;
+        let bytes = cursor.read_bytes(size).ok()?;
+        if let Some(value) = decode_utf16le_string(bytes) {
+            let value = normalize_nspi_lookup_value(&value);
+            if !value.is_empty() {
+                values.push(value);
+            }
+        }
+    }
+    Some(values)
+}
+
 fn nspi_u32_result_response(request_type: &str, request_id: &str, value: u32) -> Response {
     let mut body = Vec::new();
     write_u32(&mut body, 0);
@@ -688,6 +765,43 @@ fn nspi_u32_result_response(request_type: &str, request_id: &str, value: u32) ->
     write_u32(&mut body, value);
     write_u32(&mut body, 0);
     mapi_response(request_type, request_id, 0, body, None)
+}
+
+async fn nspi_dn_to_mid_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    request: &[u8],
+    request_id: &str,
+) -> Response
+where
+    S: ExchangeStore,
+{
+    let entries = match store.fetch_address_book_entries(principal.account_id).await {
+        Ok(entries) => entries,
+        Err(error) => {
+            return mapi_diagnostic_response(
+                "DNToMId",
+                request_id,
+                4,
+                &format!("failed to load address book entries: {error}"),
+            );
+        }
+    };
+    let values = scan_address_book_lookup_values(request);
+    let entry = values
+        .first()
+        .and_then(|value| nspi_match_entry(&entries, value))
+        .or_else(|| {
+            values
+                .is_empty()
+                .then(|| {
+                    entries
+                        .iter()
+                        .find(|entry| nspi_entry_is_principal(entry, principal))
+                })
+                .flatten()
+        });
+    nspi_u32_result_response("DNToMId", request_id, entry.map(nspi_entry_id).unwrap_or(0))
 }
 
 fn nspi_property_tags_response(request_type: &str, request_id: &str) -> Response {
@@ -700,59 +814,129 @@ fn nspi_property_tags_response(request_type: &str, request_id: &str) -> Response
     mapi_response(request_type, request_id, 0, body, None)
 }
 
-fn nspi_principal_props_response(
-    request_type: &str,
+async fn nspi_props_response<S>(
+    store: &S,
     principal: &AccountPrincipal,
+    request: &[u8],
+    request_type: &str,
     request_id: &str,
-) -> Response {
+) -> Response
+where
+    S: ExchangeStore,
+{
+    let entries = match store.fetch_address_book_entries(principal.account_id).await {
+        Ok(entries) => entries,
+        Err(error) => {
+            return mapi_diagnostic_response(
+                request_type,
+                request_id,
+                4,
+                &format!("failed to load address book entries: {error}"),
+            );
+        }
+    };
+    let entry = nspi_requested_entry(request, &entries).or_else(|| {
+        entries
+            .iter()
+            .find(|entry| nspi_entry_is_principal(entry, principal))
+    });
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
     write_u32(&mut body, NSPI_UNICODE_CODEPAGE);
-    body.push(1);
-    body.extend_from_slice(&nspi_principal_property_value_list(
-        principal,
-        NSPI_BOOTSTRAP_PROPERTY_TAGS,
-    ));
+    if let Some(entry) = entry {
+        body.push(1);
+        body.extend_from_slice(&nspi_entry_property_value_list(
+            entry,
+            NSPI_BOOTSTRAP_PROPERTY_TAGS,
+        ));
+    } else {
+        body.push(0);
+    }
     write_u32(&mut body, 0);
     mapi_response(request_type, request_id, 0, body, None)
 }
 
-fn nspi_principal_rowset_response(
-    request_type: &str,
+async fn nspi_rowset_response<S>(
+    store: &S,
     principal: &AccountPrincipal,
+    request: &[u8],
+    request_type: &str,
     request_id: &str,
-) -> Response {
+) -> Response
+where
+    S: ExchangeStore,
+{
+    let entries = match store.fetch_address_book_entries(principal.account_id).await {
+        Ok(entries) => nspi_filter_entries_for_request(entries, request),
+        Err(error) => {
+            return mapi_diagnostic_response(
+                request_type,
+                request_id,
+                4,
+                &format!("failed to load address book entries: {error}"),
+            );
+        }
+    };
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
     body.push(0);
-    body.push(1);
-    write_large_property_tag_array(&mut body, NSPI_BOOTSTRAP_PROPERTY_TAGS);
-    write_u32(&mut body, 1);
-    body.extend_from_slice(&nspi_resolved_principal_row(
-        principal,
-        NSPI_BOOTSTRAP_PROPERTY_TAGS,
-    ));
+    body.push((!entries.is_empty()) as u8);
+    if !entries.is_empty() {
+        write_large_property_tag_array(&mut body, NSPI_BOOTSTRAP_PROPERTY_TAGS);
+        write_u32(&mut body, entries.len().min(u32::MAX as usize) as u32);
+        for entry in &entries {
+            body.extend_from_slice(&nspi_resolved_entry_row(
+                entry,
+                NSPI_BOOTSTRAP_PROPERTY_TAGS,
+            ));
+        }
+    }
     write_u32(&mut body, 0);
     mapi_response(request_type, request_id, 0, body, None)
 }
 
-fn nspi_matches_response(principal: &AccountPrincipal, request_id: &str) -> Response {
+async fn nspi_matches_response<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    request: &[u8],
+    request_id: &str,
+) -> Response
+where
+    S: ExchangeStore,
+{
+    let entries = match store.fetch_address_book_entries(principal.account_id).await {
+        Ok(entries) => nspi_filter_entries_for_request(entries, request),
+        Err(error) => {
+            return mapi_diagnostic_response(
+                "GetMatches",
+                request_id,
+                4,
+                &format!("failed to load address book entries: {error}"),
+            );
+        }
+    };
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
     body.push(0);
-    body.push(1);
-    write_u32(&mut body, 1);
-    write_u32(&mut body, principal_minimal_entry_id(principal));
-    body.push(1);
-    write_large_property_tag_array(&mut body, NSPI_BOOTSTRAP_PROPERTY_TAGS);
-    write_u32(&mut body, 1);
-    body.extend_from_slice(&nspi_resolved_principal_row(
-        principal,
-        NSPI_BOOTSTRAP_PROPERTY_TAGS,
-    ));
+    body.push((!entries.is_empty()) as u8);
+    write_u32(&mut body, entries.len().min(u32::MAX as usize) as u32);
+    for entry in &entries {
+        write_u32(&mut body, nspi_entry_id(entry));
+    }
+    body.push((!entries.is_empty()) as u8);
+    if !entries.is_empty() {
+        write_large_property_tag_array(&mut body, NSPI_BOOTSTRAP_PROPERTY_TAGS);
+        write_u32(&mut body, entries.len().min(u32::MAX as usize) as u32);
+        for entry in &entries {
+            body.extend_from_slice(&nspi_resolved_entry_row(
+                entry,
+                NSPI_BOOTSTRAP_PROPERTY_TAGS,
+            ));
+        }
+    }
     write_u32(&mut body, 0);
     mapi_response("GetMatches", request_id, 0, body, None)
 }
@@ -805,13 +989,14 @@ fn nspi_special_table_response(request_id: &str) -> Response {
 }
 
 fn nspi_template_info_response(principal: &AccountPrincipal, request_id: &str) -> Response {
+    let entry = principal_address_book_entry(principal);
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
     write_u32(&mut body, NSPI_UNICODE_CODEPAGE);
     body.push(1);
-    body.extend_from_slice(&nspi_principal_property_value_list(
-        principal,
+    body.extend_from_slice(&nspi_entry_property_value_list(
+        &entry,
         NSPI_BOOTSTRAP_PROPERTY_TAGS,
     ));
     write_u32(&mut body, 0);
@@ -828,32 +1013,27 @@ fn nspi_update_stat_response(request_id: &str) -> Response {
     mapi_response("UpdateStat", request_id, 0, body, None)
 }
 
-fn principal_minimal_entry_id(principal: &AccountPrincipal) -> u32 {
-    let bytes = principal.account_id.as_bytes();
-    u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) | 0x8000_0000
-}
-
-fn nspi_resolved_principal_row(principal: &AccountPrincipal, columns: &[u32]) -> Vec<u8> {
+fn nspi_resolved_entry_row(entry: &ExchangeAddressBookEntry, columns: &[u32]) -> Vec<u8> {
     let mut row = Vec::new();
     row.push(0);
     for property_tag in columns {
         write_address_book_property_value(
             &mut row,
             *property_tag,
-            &nspi_principal_value(principal, *property_tag),
+            &nspi_entry_value(entry, *property_tag),
         );
     }
     row
 }
 
-fn nspi_principal_property_value_list(principal: &AccountPrincipal, tags: &[u32]) -> Vec<u8> {
+fn nspi_entry_property_value_list(entry: &ExchangeAddressBookEntry, tags: &[u32]) -> Vec<u8> {
     let mut values = Vec::new();
     write_u32(&mut values, tags.len() as u32);
     for property_tag in tags {
         write_address_book_tagged_property_value(
             &mut values,
             *property_tag,
-            &nspi_principal_value(principal, *property_tag),
+            &nspi_entry_value(entry, *property_tag),
         );
     }
     values
@@ -865,22 +1045,45 @@ enum NspiValue<'a> {
     U32(u32),
 }
 
-fn nspi_principal_value(principal: &AccountPrincipal, property_tag: u32) -> NspiValue<'_> {
+fn nspi_entry_value(entry: &ExchangeAddressBookEntry, property_tag: u32) -> NspiValue<'_> {
     match property_tag {
-        0x3001_001F => NspiValue::String(&principal.display_name),
-        0x39FE_001F => NspiValue::String(&principal.email),
-        0x3003_001F => NspiValue::String(&principal.email),
-        0x3A00_001F => NspiValue::String(&principal.display_name),
+        0x3001_001F => NspiValue::String(&entry.display_name),
+        0x39FE_001F => NspiValue::String(&entry.email),
+        0x3003_001F => NspiValue::String(&entry.email),
+        0x3A00_001F => NspiValue::String(&entry.display_name),
         0x0FFE_0003 => NspiValue::U32(MAPI_MAILUSER_OBJECT_TYPE),
-        0x3000_0003 => NspiValue::U32(principal_minimal_entry_id(principal)),
-        0x3004_001F => NspiValue::String(&principal.email),
+        0x3000_0003 => NspiValue::U32(nspi_entry_id(entry)),
+        0x3004_001F => NspiValue::String(&entry.email),
         0x3002_001F => NspiValue::String("SMTP"),
-        0x3005_001F => NspiValue::OwnedString(principal_legacy_dn(principal)),
+        0x3005_001F => NspiValue::OwnedString(nspi_entry_legacy_dn(entry)),
         _ => match property_tag & 0xFFFF {
             0x001F => NspiValue::String(""),
             0x0003 => NspiValue::U32(0),
             _ => NspiValue::U32(0),
         },
+    }
+}
+
+fn nspi_entry_id(entry: &ExchangeAddressBookEntry) -> u32 {
+    let bytes = entry.id.as_bytes();
+    let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    match entry.entry_kind {
+        ExchangeAddressBookEntryKind::Account => value | 0x8000_0000,
+        ExchangeAddressBookEntryKind::Contact => value | 0x4000_0000,
+    }
+    .max(2)
+}
+
+fn principal_minimal_entry_id(principal: &AccountPrincipal) -> u32 {
+    nspi_entry_id(&principal_address_book_entry(principal))
+}
+
+fn principal_address_book_entry(principal: &AccountPrincipal) -> ExchangeAddressBookEntry {
+    ExchangeAddressBookEntry {
+        id: principal.account_id,
+        display_name: principal.display_name.clone(),
+        email: principal.email.clone(),
+        entry_kind: ExchangeAddressBookEntryKind::Account,
     }
 }
 
@@ -924,9 +1127,17 @@ fn write_address_book_property_value(body: &mut Vec<u8>, property_tag: u32, valu
     }
 }
 
-fn principal_legacy_dn(principal: &AccountPrincipal) -> String {
-    let legacy_user = principal
-        .email
+fn nspi_entry_legacy_dn(entry: &ExchangeAddressBookEntry) -> String {
+    let prefix = match entry.entry_kind {
+        ExchangeAddressBookEntryKind::Account => "acct",
+        ExchangeAddressBookEntryKind::Contact => "contact",
+    };
+    let source = if entry.email.trim().is_empty() {
+        entry.id.to_string()
+    } else {
+        entry.email.clone()
+    };
+    let legacy_user = source
         .chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() {
@@ -936,7 +1147,173 @@ fn principal_legacy_dn(principal: &AccountPrincipal) -> String {
             }
         })
         .collect::<String>();
-    format!("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={legacy_user}")
+    format!("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={prefix}-{legacy_user}")
+}
+
+fn nspi_entry_is_principal(entry: &ExchangeAddressBookEntry, principal: &AccountPrincipal) -> bool {
+    entry.entry_kind == ExchangeAddressBookEntryKind::Account && entry.id == principal.account_id
+}
+
+fn nspi_requested_entry<'a>(
+    request: &[u8],
+    entries: &'a [ExchangeAddressBookEntry],
+) -> Option<&'a ExchangeAddressBookEntry> {
+    let ids = nspi_requested_entry_ids(request);
+    ids.iter()
+        .find_map(|id| entries.iter().find(|entry| nspi_entry_id(entry) == *id))
+        .or_else(|| {
+            scan_address_book_lookup_values(request)
+                .iter()
+                .find_map(|value| nspi_match_entry(entries, value))
+        })
+}
+
+fn nspi_filter_entries_for_request(
+    entries: Vec<ExchangeAddressBookEntry>,
+    request: &[u8],
+) -> Vec<ExchangeAddressBookEntry> {
+    let values = scan_address_book_lookup_values(request);
+    if values.is_empty() {
+        return entries;
+    }
+    entries
+        .into_iter()
+        .filter(|entry| values.iter().any(|value| nspi_entry_matches(entry, value)))
+        .collect()
+}
+
+fn nspi_match_entry<'a>(
+    entries: &'a [ExchangeAddressBookEntry],
+    value: &str,
+) -> Option<&'a ExchangeAddressBookEntry> {
+    entries
+        .iter()
+        .find(|entry| nspi_entry_matches(entry, value) && nspi_entry_exact_match(entry, value))
+        .or_else(|| {
+            entries
+                .iter()
+                .find(|entry| nspi_entry_matches(entry, value))
+        })
+}
+
+fn nspi_entry_exact_match(entry: &ExchangeAddressBookEntry, value: &str) -> bool {
+    let value = normalize_nspi_lookup_value(value);
+    let legacy_dn = nspi_entry_legacy_dn(entry).to_ascii_lowercase();
+    value == entry.email.to_ascii_lowercase()
+        || value == entry.display_name.to_ascii_lowercase()
+        || value == legacy_dn
+        || value == format!("smtp:{}", entry.email.to_ascii_lowercase())
+        || value == format!("=smtp:{}", entry.email.to_ascii_lowercase())
+}
+
+fn nspi_entry_matches(entry: &ExchangeAddressBookEntry, value: &str) -> bool {
+    let value = normalize_nspi_lookup_value(value);
+    if value.is_empty() {
+        return false;
+    }
+    nspi_entry_exact_match(entry, &value)
+        || entry
+            .display_name
+            .to_ascii_lowercase()
+            .contains(value.as_str())
+        || entry.email.to_ascii_lowercase().contains(value.as_str())
+        || nspi_entry_legacy_dn(entry)
+            .to_ascii_lowercase()
+            .contains(value.as_str())
+}
+
+fn nspi_requested_entry_ids(request: &[u8]) -> Vec<u32> {
+    let mut ids = Vec::new();
+    let mut offset = 0usize;
+    while offset + 4 <= request.len() {
+        let value = u32::from_le_bytes([
+            request[offset],
+            request[offset + 1],
+            request[offset + 2],
+            request[offset + 3],
+        ]);
+        if value >= 2 && !ids.contains(&value) {
+            ids.push(value);
+        }
+        offset += 4;
+    }
+    ids
+}
+
+fn scan_address_book_lookup_values(request: &[u8]) -> Vec<String> {
+    let mut values = Vec::new();
+    values.extend(scan_ascii_lookup_values(request));
+    values.extend(scan_utf16_lookup_values(request));
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn scan_ascii_lookup_values(request: &[u8]) -> Vec<String> {
+    request
+        .split(|byte| *byte == 0)
+        .filter_map(|bytes| {
+            if bytes.len() < 3 {
+                return None;
+            }
+            let value = String::from_utf8_lossy(bytes);
+            let value = normalize_nspi_lookup_value(&value);
+            (!value.is_empty() && (value.contains('@') || value.contains("/cn="))).then_some(value)
+        })
+        .collect()
+}
+
+fn scan_utf16_lookup_values(request: &[u8]) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut start = 0usize;
+    while start + 3 < request.len() {
+        let mut units = Vec::new();
+        let mut offset = start;
+        while offset + 1 < request.len() {
+            let unit = u16::from_le_bytes([request[offset], request[offset + 1]]);
+            if unit == 0 {
+                break;
+            }
+            if unit < 0x20 && !matches!(unit, 0x09 | 0x0a | 0x0d) {
+                units.clear();
+                break;
+            }
+            units.push(unit);
+            offset += 2;
+        }
+        if units.len() >= 3 {
+            if let Ok(value) = String::from_utf16(&units) {
+                let value = normalize_nspi_lookup_value(&value);
+                if !value.is_empty() && (value.contains('@') || value.contains("/cn=")) {
+                    values.push(value);
+                }
+            }
+        }
+        start += 1;
+    }
+    values
+}
+
+fn decode_utf16le_string(bytes: &[u8]) -> Option<String> {
+    if bytes.len() % 2 != 0 {
+        return None;
+    }
+    let units = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .take_while(|unit| *unit != 0)
+        .collect::<Vec<_>>();
+    String::from_utf16(&units).ok()
+}
+
+fn normalize_nspi_lookup_value(value: &str) -> String {
+    let mut value = value.trim().trim_matches('\0').to_ascii_lowercase();
+    if let Some(rest) = value.strip_prefix("=smtp:") {
+        value = rest.to_string();
+    } else if let Some(rest) = value.strip_prefix("smtp:") {
+        value = rest.to_string();
+    }
+    value
 }
 
 fn public_endpoint_url(headers: &HeaderMap, path: &str) -> String {

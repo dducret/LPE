@@ -26,7 +26,7 @@ use crate::{
         rpc_proxy_in_channel_response_for_buffer, rpc_proxy_in_channel_response_for_endpoint_query,
         rpc_proxy_in_channel_response_for_endpoint_query_with_store, ExchangeService,
     },
-    store::ExchangeStore,
+    store::{ExchangeAddressBookEntry, ExchangeAddressBookEntryKind, ExchangeStore},
 };
 
 #[derive(Clone, Default)]
@@ -58,6 +58,7 @@ struct FakeStore {
     mailboxes: Arc<Mutex<Vec<JmapMailbox>>>,
     created_mailboxes: Arc<Mutex<Vec<JmapMailboxCreateInput>>>,
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
+    directory_accounts: Arc<Mutex<Vec<AuthenticatedAccount>>>,
 }
 
 #[derive(Clone)]
@@ -130,6 +131,24 @@ impl FakeStore {
             display_name: display_name.to_string(),
             is_owned: true,
             rights: Self::rights(),
+        }
+    }
+
+    fn contact(id: &str, name: &str, email: &str) -> AccessibleContact {
+        let account = Self::account();
+        AccessibleContact {
+            id: Uuid::parse_str(id).unwrap(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email,
+            owner_display_name: account.display_name,
+            rights: Self::rights(),
+            name: name.to_string(),
+            role: String::new(),
+            email: email.to_string(),
+            phone: String::new(),
+            team: String::new(),
+            notes: String::new(),
         }
     }
 
@@ -250,6 +269,69 @@ impl AccountAuthStore for FakeStore {
 }
 
 impl ExchangeStore for FakeStore {
+    fn fetch_address_book_entries<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ExchangeAddressBookEntry>> {
+        let principal = self
+            .session
+            .clone()
+            .filter(|account| account.account_id == principal_account_id);
+        let mut accounts = self.directory_accounts.lock().unwrap().clone();
+        if let Some(principal) = principal {
+            if !accounts
+                .iter()
+                .any(|account| account.account_id == principal.account_id)
+            {
+                accounts.push(principal.clone());
+            }
+            accounts.retain(|account| account.tenant_id == principal.tenant_id);
+        } else {
+            accounts.clear();
+        }
+        let mut entries = accounts
+            .into_iter()
+            .map(|account| ExchangeAddressBookEntry {
+                id: account.account_id,
+                display_name: account.display_name,
+                email: account.email,
+                entry_kind: ExchangeAddressBookEntryKind::Account,
+            })
+            .collect::<Vec<_>>();
+        let visible_collection_ids = self
+            .contact_collections
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|collection| {
+                collection.owner_account_id == principal_account_id || collection.rights.may_read
+            })
+            .map(|collection| collection.id.clone())
+            .collect::<Vec<_>>();
+        entries.extend(
+            self.contacts
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|contact| {
+                    contact.owner_account_id == principal_account_id
+                        || visible_collection_ids.contains(&contact.collection_id)
+                })
+                .map(|contact| ExchangeAddressBookEntry {
+                    id: contact.id,
+                    display_name: contact.name.clone(),
+                    email: contact.email.clone(),
+                    entry_kind: ExchangeAddressBookEntryKind::Contact,
+                }),
+        );
+        entries.sort_by(|left, right| {
+            left.display_name
+                .cmp(&right.display_name)
+                .then_with(|| left.email.cmp(&right.email))
+        });
+        Box::pin(async move { Ok(entries) })
+    }
+
     fn fetch_accessible_contact_collections<'a>(
         &'a self,
         _principal_account_id: Uuid,
@@ -7136,6 +7218,103 @@ async fn mapi_over_http_resolve_names_honors_requested_rca_columns() {
     assert!(contains_bytes(&body, &utf16z("Alice")));
     assert!(!contains_bytes(&body, &utf16z("SMTP")));
     assert!(body.ends_with(&[0, 0, 0, 0]));
+}
+
+#[tokio::test]
+async fn mapi_over_http_resolve_names_resolves_canonical_contact() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        contacts: Arc::new(Mutex::new(vec![FakeStore::contact(
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "Bob Contact",
+            "bob@example.test",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = resolve_names_request("bob@example.test", &[0x3003_001F, 0x3001_001F]);
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
+    assert!(contains_bytes(&body, &utf16z("bob@example.test")));
+    assert!(contains_bytes(&body, &utf16z("Bob Contact")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_query_rows_stays_in_authenticated_tenant() {
+    let mut same_tenant = FakeStore::account();
+    same_tenant.account_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    same_tenant.email = "bob@example.test".to_string();
+    same_tenant.display_name = "Bob".to_string();
+
+    let mut other_tenant = FakeStore::account();
+    other_tenant.tenant_id = "tenant-b".to_string();
+    other_tenant.account_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
+    other_tenant.email = "mallory@other.test".to_string();
+    other_tenant.display_name = "Mallory".to_string();
+
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![same_tenant, other_tenant])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("QueryRows"), &[0; 32])
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_bytes(response).await;
+    assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+    assert!(contains_bytes(&body, &utf16z("bob@example.test")));
+    assert!(!contains_bytes(&body, &utf16z("mallory@other.test")));
+
+    let request = resolve_names_request("mallory@other.test", &[0x3003_001F, 0x3001_001F]);
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 0);
+    assert_eq!(body[21], 0);
+    assert!(!contains_bytes(&body, &utf16z("mallory@other.test")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_resolve_names_returns_no_match_for_unknown_name() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = resolve_names_request("nobody@example.test", &[0x3003_001F, 0x3001_001F]);
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 0);
+    assert_eq!(body[21], 0);
+    assert!(!contains_bytes(&body, &utf16z("alice@example.test")));
+    assert!(!contains_bytes(&body, &utf16z("nobody@example.test")));
 }
 
 #[tokio::test]

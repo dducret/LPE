@@ -9,7 +9,26 @@ use lpe_storage::{
 use sqlx::Row;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExchangeAddressBookEntry {
+    pub(crate) id: Uuid,
+    pub(crate) display_name: String,
+    pub(crate) email: String,
+    pub(crate) entry_kind: ExchangeAddressBookEntryKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExchangeAddressBookEntryKind {
+    Account,
+    Contact,
+}
+
 pub trait ExchangeStore: AccountAuthStore {
+    fn fetch_address_book_entries<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ExchangeAddressBookEntry>>;
+
     fn fetch_accessible_contact_collections<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -268,6 +287,77 @@ pub trait ExchangeStore: AccountAuthStore {
 }
 
 impl ExchangeStore for Storage {
+    fn fetch_address_book_entries<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ExchangeAddressBookEntry>> {
+        Box::pin(async move {
+            let tenant_id = sqlx::query_scalar::<_, String>(
+                r#"
+                SELECT tenant_id
+                FROM accounts
+                WHERE id = $1
+                LIMIT 1
+                "#,
+            )
+            .bind(principal_account_id)
+            .fetch_optional(self.pool())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("account not found"))?;
+            let account_rows = sqlx::query(
+                r#"
+                SELECT id, primary_email, display_name
+                FROM accounts
+                WHERE tenant_id = $1
+                  AND status = 'active'
+                  AND (gal_visibility = 'tenant' OR id = $2)
+                ORDER BY lower(display_name) ASC, lower(primary_email) ASC, id ASC
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(principal_account_id)
+            .fetch_all(self.pool())
+            .await?;
+
+            let mut entries = account_rows
+                .into_iter()
+                .map(|row| ExchangeAddressBookEntry {
+                    id: row.get("id"),
+                    display_name: row.get("display_name"),
+                    email: row.get("primary_email"),
+                    entry_kind: ExchangeAddressBookEntryKind::Account,
+                })
+                .collect::<Vec<_>>();
+
+            entries.extend(
+                self.fetch_accessible_contacts(principal_account_id)
+                    .await?
+                    .into_iter()
+                    .filter(|contact| {
+                        !contact.email.trim().is_empty() || !contact.name.trim().is_empty()
+                    })
+                    .map(|contact| ExchangeAddressBookEntry {
+                        id: contact.id,
+                        display_name: contact.name,
+                        email: contact.email,
+                        entry_kind: ExchangeAddressBookEntryKind::Contact,
+                    }),
+            );
+            entries.sort_by(|left, right| {
+                left.display_name
+                    .to_ascii_lowercase()
+                    .cmp(&right.display_name.to_ascii_lowercase())
+                    .then_with(|| {
+                        left.email
+                            .to_ascii_lowercase()
+                            .cmp(&right.email.to_ascii_lowercase())
+                    })
+                    .then_with(|| address_book_entry_id(left).cmp(&address_book_entry_id(right)))
+            });
+            Ok(entries)
+        })
+    }
+
     fn fetch_accessible_contact_collections<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -746,4 +836,14 @@ impl ExchangeStore for Storage {
 
 fn task_matches_collection(task: &ClientTask, collection_id: &str) -> bool {
     matches!(collection_id, "tasks" | "default") || task.task_list_id.to_string() == collection_id
+}
+
+fn address_book_entry_id(entry: &ExchangeAddressBookEntry) -> u32 {
+    let bytes = entry.id.as_bytes();
+    let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    match entry.entry_kind {
+        ExchangeAddressBookEntryKind::Account => value | 0x8000_0000,
+        ExchangeAddressBookEntryKind::Contact => value | 0x4000_0000,
+    }
+    .max(2)
 }
