@@ -5738,8 +5738,7 @@ pub(crate) fn rpc_proxy_in_channel_response_for_buffer(buffer: &mut Vec<u8>) -> 
             return None;
         }
 
-        let response =
-            rpc_proxy_mailstore_endpoint_response_for_fragment(&buffer[offset..fragment_end]);
+        let response = rpc_proxy_endpoint_response_for_fragment(&buffer[offset..fragment_end]);
         if let Some(response) = response {
             buffer.drain(..fragment_end);
             return Some(response);
@@ -5753,7 +5752,7 @@ pub(crate) fn rpc_proxy_in_channel_response_for_buffer(buffer: &mut Vec<u8>) -> 
     None
 }
 
-fn rpc_proxy_mailstore_endpoint_response_for_fragment(bytes: &[u8]) -> Option<Vec<u8>> {
+fn rpc_proxy_endpoint_response_for_fragment(bytes: &[u8]) -> Option<Vec<u8>> {
     if bytes.get(0..4) != Some(&[0x05, 0x00, 0x00, 0x03]) {
         return None;
     }
@@ -5765,16 +5764,17 @@ fn rpc_proxy_mailstore_endpoint_response_for_fragment(bytes: &[u8]) -> Option<Ve
     let alloc_hint = read_le_u32(bytes, 16)?;
     let context_id = u16::from_le_bytes([*bytes.get(20)?, *bytes.get(21)?]);
     let opnum = u16::from_le_bytes([*bytes.get(22)?, *bytes.get(23)?]);
-    if alloc_hint != 4 || context_id != 0 || opnum != 1 {
-        return None;
+    match (context_id, opnum) {
+        (0, 1) if alloc_hint == 4 => {
+            let requested_stats = read_le_u32(bytes, 24)?;
+            Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats))
+        }
+        (2, 0) if alloc_hint >= 44 => Some(rpc_proxy_nspi_bind_response(call_id)),
+        _ => None,
     }
-    let requested_stats = read_le_u32(bytes, 24)?;
-    Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats))
 }
 
 fn rpc_proxy_mgmt_inq_stats_response(call_id: u32, requested_stats: u32) -> Vec<u8> {
-    const RESPONSE_BODY_HEADER_LENGTH: usize = 8;
-
     let stat_count = requested_stats.min(4);
     let stats = [1u32, 0u32, 1u32, 1u32];
     let mut stub = Vec::with_capacity(8 + (stat_count as usize * 4) + 4);
@@ -5785,8 +5785,25 @@ fn rpc_proxy_mgmt_inq_stats_response(call_id: u32, requested_stats: u32) -> Vec<
     }
     stub.extend_from_slice(&0u32.to_le_bytes());
 
-    let fragment_length = 16 + RESPONSE_BODY_HEADER_LENGTH + stub.len();
+    rpc_proxy_dce_response(call_id, &stub)
+}
 
+fn rpc_proxy_nspi_bind_response(call_id: u32) -> Vec<u8> {
+    let mut stub = Vec::with_capacity(28);
+    stub.extend_from_slice(&0u32.to_le_bytes());
+    stub.extend_from_slice(&0u32.to_le_bytes());
+    stub.extend_from_slice(&[
+        0x4c, 0x50, 0x45, 0x00, 0x4e, 0x53, 0x50, 0x49, 0x43, 0x54, 0x58, 0x00, 0x00, 0x00, 0x00,
+        0x01,
+    ]);
+    stub.extend_from_slice(&0u32.to_le_bytes());
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
+fn rpc_proxy_dce_response(call_id: u32, stub: &[u8]) -> Vec<u8> {
+    const RESPONSE_BODY_HEADER_LENGTH: usize = 8;
+    let fragment_length = 16 + RESPONSE_BODY_HEADER_LENGTH + stub.len();
     let mut packet = Vec::with_capacity(fragment_length);
     packet.extend_from_slice(&[0x05, 0x00, 0x02, 0x03, 0x10, 0x00, 0x00, 0x00]);
     packet.extend_from_slice(&(fragment_length as u16).to_le_bytes());
@@ -5796,7 +5813,7 @@ fn rpc_proxy_mgmt_inq_stats_response(call_id: u32, requested_stats: u32) -> Vec<
     packet.extend_from_slice(&0u16.to_le_bytes());
     packet.push(0);
     packet.push(0);
-    packet.extend_from_slice(&stub);
+    packet.extend_from_slice(stub);
     packet
 }
 
