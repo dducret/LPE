@@ -27,6 +27,7 @@ use lpe_storage::{
     UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tracing::{info, warn};
@@ -635,7 +636,7 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
         match authenticate_account(&self.store, None, headers, "mapi").await {
             Ok(_) => {
                 spawn_rpc_proxy_in_data_drain(method, uri, headers, body);
-                rpc_proxy_in_channel_response()
+                rpc_proxy_in_channel_response(uri)
             }
             Err(error) => rpc_proxy_auth_challenge_response(&error.to_string()),
         }
@@ -5380,7 +5381,17 @@ fn rpc_proxy_echo_response() -> Response {
     rpc_proxy_binary_response(RPC_PROXY_ECHO_BODY.to_vec(), RPC_PROXY_ECHO_STATUS)
 }
 
-fn rpc_proxy_in_channel_response() -> Response {
+fn rpc_proxy_in_channel_response(uri: &Uri) -> Response {
+    if should_hold_rpc_proxy_in_channel(uri) {
+        return rpc_proxy_held_open_binary_response(
+            Vec::new(),
+            RPC_PROXY_IN_CHANNEL_STATUS,
+            rpc_proxy_channel_hold_ms(),
+            false,
+            true,
+        );
+    }
+
     let mut response = StatusCode::OK.into_response();
     response
         .headers_mut()
@@ -5392,6 +5403,30 @@ fn rpc_proxy_in_channel_response() -> Response {
         RPC_PROXY_IN_CHANNEL_STATUS,
     );
     response
+}
+
+fn should_hold_rpc_proxy_in_channel(uri: &Uri) -> bool {
+    let Some(query) = uri.query().filter(|query| query.contains(":6001")) else {
+        return false;
+    };
+    let hold_open_ms = rpc_proxy_channel_hold_ms();
+    if hold_open_ms == 0 {
+        return false;
+    }
+
+    let now = Instant::now();
+    let mut channels = rpc_proxy_in_channel_openers()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    channels.retain(|_, first_seen| {
+        now.duration_since(*first_seen) <= Duration::from_millis(hold_open_ms)
+    });
+    channels.insert(query.to_string(), now).is_some()
+}
+
+fn rpc_proxy_in_channel_openers() -> &'static Mutex<HashMap<String, Instant>> {
+    static OPENERS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    OPENERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn rpc_proxy_binary_response(body: Vec<u8>, status: &'static str) -> Response {

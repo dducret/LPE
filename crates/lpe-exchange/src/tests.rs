@@ -6754,6 +6754,16 @@ async fn rpc_proxy_opens_authenticated_in_data_channel_without_waiting_for_body_
         response.headers().get("content-length"),
         Some(&HeaderValue::from_static("0"))
     );
+
+    let response = service
+        .handle_rpc_proxy_in_data_channel(&method, &uri, &headers, Body::from("bind-bytes"))
+        .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-length"),
+        Some(&HeaderValue::from_static("131072"))
+    );
 }
 
 #[tokio::test]
