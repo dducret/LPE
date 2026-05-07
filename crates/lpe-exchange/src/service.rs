@@ -5496,7 +5496,7 @@ fn should_hold_rpc_proxy_in_channel(uri: &Uri) -> bool {
     if hold_open_ms == 0 {
         return false;
     }
-    if query.contains(":6004") {
+    if query.contains(":6002") || query.contains(":6004") {
         return true;
     }
 

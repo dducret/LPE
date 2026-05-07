@@ -6871,7 +6871,7 @@ async fn rpc_proxy_opens_authenticated_referral_in_data_channel_without_bufferin
     );
     assert_eq!(
         response.headers().get("content-length"),
-        Some(&HeaderValue::from_static("0"))
+        Some(&HeaderValue::from_static("131072"))
     );
 }
 
