@@ -6917,6 +6917,41 @@ fn rpc_proxy_in_channel_nspi_bind_request_gets_context_handle_response() {
 }
 
 #[test]
+fn rpc_proxy_in_channel_nspi_update_stat_request_gets_success_response() {
+    let request = [
+        0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0x60, 0x00, 0x10, 0x00, 0x03, 0x00, 0x00,
+        0x00, 0x2c, 0x00, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00,
+    ];
+    let mut buffer = request.to_vec();
+    buffer.resize(96, 0);
+
+    let response =
+        rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("nspi update stat response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u16::from_le_bytes([response[8], response[9]]) as usize,
+        response.len()
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        3
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[16], response[17], response[18], response[19]]),
+        44
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[48], response[49], response[50], response[51]]),
+        0x04e4
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[56], response[57], response[58], response[59]]),
+        0x0409
+    );
+}
+
+#[test]
 fn rpc_proxy_in_channel_nspi_resolve_names_w_request_gets_response() {
     let request = [
         0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0xd0, 0x00, 0x10, 0x00, 0x04, 0x00, 0x00,
@@ -6964,6 +6999,33 @@ fn rpc_proxy_in_channel_nspi_resolve_names_w_request_gets_response() {
             response[return_offset + 2],
             response[return_offset + 3]
         ]),
+        0
+    );
+}
+
+#[test]
+fn rpc_proxy_in_channel_nspi_unbind_request_gets_success_response() {
+    let request = [
+        0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0x50, 0x00, 0x10, 0x00, 0x05, 0x00, 0x00,
+        0x00, 0x18, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0x00,
+    ];
+    let mut buffer = request.to_vec();
+    buffer.resize(80, 0);
+
+    let response =
+        rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("nspi unbind response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        5
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[16], response[17], response[18], response[19]]),
+        24
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[44], response[45], response[46], response[47]]),
         0
     );
 }

@@ -5454,7 +5454,7 @@ fn register_rpc_proxy_out_channel(query: &str, sender: tokio::sync::mpsc::Unboun
     channels.insert(query.to_string(), sender);
 }
 
-fn send_rpc_proxy_out_channel(query: &str, bytes: Vec<u8>) {
+fn send_rpc_proxy_out_channel(query: &str, bytes: Vec<u8>) -> bool {
     let sender = {
         let channels = rpc_proxy_out_channels()
             .lock()
@@ -5462,8 +5462,9 @@ fn send_rpc_proxy_out_channel(query: &str, bytes: Vec<u8>) {
         channels.get(query).cloned()
     };
     if let Some(sender) = sender {
-        let _ = sender.send(Bytes::from(bytes));
+        return sender.send(Bytes::from(bytes)).is_ok();
     }
+    false
 }
 
 fn remove_rpc_proxy_out_channel(query: &str) {
@@ -5653,7 +5654,31 @@ fn spawn_rpc_proxy_in_data_drain(method: &Method, uri: &Uri, headers: &HeaderMap
                     while let Some(response) =
                         rpc_proxy_in_channel_response_for_buffer(&mut pdu_buffer)
                     {
-                        send_rpc_proxy_out_channel(&query, response);
+                        let response_payload_bytes = response.len();
+                        let response_payload_preview_hex =
+                            mapi::debug_payload_preview_hex(&response);
+                        let forwarded = send_rpc_proxy_out_channel(&query, response);
+                        info!(
+                            rca_debug = true,
+                            adapter = "rpcproxy",
+                            method = %method,
+                            path = %path,
+                            query = %query,
+                            response_kind = if forwarded {
+                                "out-channel-forwarded"
+                            } else {
+                                "out-channel-missing"
+                            },
+                            trace_id = %trace_id,
+                            client_request_id = %client_request_id,
+                            x_request_id = %x_request_id,
+                            http_status = 200u16,
+                            response_payload_bytes = response_payload_bytes,
+                            response_payload_preview_hex = %response_payload_preview_hex,
+                            duration_ms = started_at.elapsed().as_secs_f64() * 1000.0,
+                            user_agent = %user_agent,
+                            message = "rca debug rpc proxy forwarded response from in data stream"
+                        );
                     }
                     info!(
                         rca_debug = true,
@@ -5770,6 +5795,8 @@ fn rpc_proxy_endpoint_response_for_fragment(bytes: &[u8]) -> Option<Vec<u8>> {
             Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats))
         }
         (2, 0) if alloc_hint >= 44 => Some(rpc_proxy_nspi_bind_response(call_id)),
+        (2, 1) if alloc_hint >= 20 => Some(rpc_proxy_nspi_unbind_response(call_id)),
+        (2, 2) if alloc_hint >= 20 => Some(rpc_proxy_nspi_update_stat_response(call_id)),
         (2, 20) if alloc_hint >= 24 => {
             Some(rpc_proxy_nspi_resolve_names_w_response(call_id, bytes))
         }
@@ -5800,6 +5827,33 @@ fn rpc_proxy_nspi_bind_response(call_id: u32) -> Vec<u8> {
         0x01,
     ]);
     stub.extend_from_slice(&0u32.to_le_bytes());
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
+fn rpc_proxy_nspi_unbind_response(call_id: u32) -> Vec<u8> {
+    let mut stub = Vec::with_capacity(24);
+    for _ in 0..5 {
+        push_le_u32(&mut stub, 0);
+    }
+    push_le_u32(&mut stub, 0);
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
+fn rpc_proxy_nspi_update_stat_response(call_id: u32) -> Vec<u8> {
+    let mut stub = Vec::with_capacity(44);
+    push_le_u32(&mut stub, 0);
+    push_le_u32(&mut stub, 0);
+    push_le_u32(&mut stub, 2);
+    push_le_u32(&mut stub, 0);
+    push_le_u32(&mut stub, 1);
+    push_le_u32(&mut stub, 1);
+    push_le_u32(&mut stub, 0x04e4);
+    push_le_u32(&mut stub, 0x0409);
+    push_le_u32(&mut stub, 0x0409);
+    push_le_u32(&mut stub, 0);
+    push_le_u32(&mut stub, 0);
 
     rpc_proxy_dce_response(call_id, &stub)
 }
