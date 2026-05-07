@@ -5428,7 +5428,9 @@ fn rpc_proxy_in_channel_response() -> Response {
 }
 
 fn rpc_proxy_binary_response(body: Vec<u8>, status: &'static str) -> Response {
-    if status == RPC_PROXY_RTS_CONNECT_STATUS && rpc_proxy_channel_hold_ms() > 0 {
+    if (status == RPC_PROXY_RTS_CONNECT_STATUS || status == RPC_PROXY_MAILSTORE_PING_STATUS)
+        && rpc_proxy_channel_hold_ms() > 0
+    {
         return rpc_proxy_held_open_binary_response(
             body,
             status,

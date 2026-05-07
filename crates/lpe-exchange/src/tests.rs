@@ -6695,6 +6695,10 @@ async fn rpc_proxy_mailstore_endpoint_ping_includes_bind_ack_after_rts_connect()
         response.headers().get("x-lpe-rpc-proxy-status"),
         Some(&HeaderValue::from_static("mailstore-ping"))
     );
+    assert_eq!(
+        response.headers().get("content-length"),
+        Some(&HeaderValue::from_static("131072"))
+    );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     assert_eq!(body.len(), 184);
     assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
