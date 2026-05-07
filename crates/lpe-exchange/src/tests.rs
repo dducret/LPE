@@ -6987,11 +6987,11 @@ fn rpc_proxy_in_channel_nspi_resolve_names_w_request_gets_response() {
     );
     assert_eq!(
         u32::from_le_bytes([response[28], response[29], response[30], response[31]]),
-        1
+        2
     );
     assert_eq!(
         u32::from_le_bytes([response[32], response[33], response[34], response[35]]),
-        2
+        1
     );
     assert!(response
         .windows(b"fabien@l-p-e.ch".len())
