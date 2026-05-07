@@ -22,7 +22,8 @@ use crate::{
     mapi_mailstore,
     service::{
         error_response, is_rpc_proxy_in_data_channel_request,
-        rpc_proxy_in_channel_response_for_buffer, ExchangeService,
+        rpc_proxy_in_channel_response_for_buffer, rpc_proxy_in_channel_response_for_endpoint_query,
+        ExchangeService,
     },
     store::ExchangeStore,
 };
@@ -7164,14 +7165,53 @@ fn rpc_proxy_in_channel_nspi_bootstrap_opnums_get_success_responses() {
     }
 }
 
+#[test]
+fn rpc_proxy_in_channel_referral_opnums_get_server_name_responses() {
+    for (opnum, call_id) in [(0u16, 31u32), (1, 32)] {
+        let mut buffer = rfri_rpc_request(call_id, opnum, 96);
+
+        let response =
+            rpc_proxy_in_channel_response_for_endpoint_query("mail.l-p-e.ch:6002", &mut buffer)
+                .unwrap_or_else(|| panic!("rfri opnum {opnum} response"));
+
+        assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03], "opnum {opnum}");
+        assert_eq!(
+            u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+            call_id,
+            "opnum {opnum}"
+        );
+        assert!(response
+            .windows(b"mail.l-p-e.ch".len())
+            .any(|window| window == b"mail.l-p-e.ch"));
+        assert_eq!(
+            u32::from_le_bytes([
+                response[response.len() - 4],
+                response[response.len() - 3],
+                response[response.len() - 2],
+                response[response.len() - 1]
+            ]),
+            0,
+            "opnum {opnum}"
+        );
+    }
+}
+
 fn nspi_rpc_request(call_id: u32, opnum: u16, fragment_length: usize) -> Vec<u8> {
+    rpc_request(call_id, 2, opnum, fragment_length)
+}
+
+fn rfri_rpc_request(call_id: u32, opnum: u16, fragment_length: usize) -> Vec<u8> {
+    rpc_request(call_id, 0, opnum, fragment_length)
+}
+
+fn rpc_request(call_id: u32, context_id: u16, opnum: u16, fragment_length: usize) -> Vec<u8> {
     let mut request = vec![0u8; fragment_length];
     request[0..8].copy_from_slice(&[0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00]);
     request[8..10].copy_from_slice(&(fragment_length as u16).to_le_bytes());
     request[10..12].copy_from_slice(&0x0010u16.to_le_bytes());
     request[12..16].copy_from_slice(&call_id.to_le_bytes());
     request[16..20].copy_from_slice(&(fragment_length as u32 - 24).to_le_bytes());
-    request[20..22].copy_from_slice(&2u16.to_le_bytes());
+    request[20..22].copy_from_slice(&context_id.to_le_bytes());
     request[22..24].copy_from_slice(&opnum.to_le_bytes());
     request
 }

@@ -5656,7 +5656,7 @@ fn spawn_rpc_proxy_in_data_drain(method: &Method, uri: &Uri, headers: &HeaderMap
                     let request_body_preview_hex = mapi::debug_payload_preview_hex(bytes.as_ref());
                     pdu_buffer.extend_from_slice(bytes.as_ref());
                     while let Some(response) =
-                        rpc_proxy_in_channel_response_for_buffer(&mut pdu_buffer)
+                        rpc_proxy_in_channel_response_for_endpoint_query(&query, &mut pdu_buffer)
                     {
                         let response_payload_bytes = response.len();
                         let response_payload_preview_hex =
@@ -5745,7 +5745,15 @@ fn spawn_rpc_proxy_in_data_drain(method: &Method, uri: &Uri, headers: &HeaderMap
     });
 }
 
+#[cfg(test)]
 pub(crate) fn rpc_proxy_in_channel_response_for_buffer(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
+    rpc_proxy_in_channel_response_for_endpoint_query("", buffer)
+}
+
+pub(crate) fn rpc_proxy_in_channel_response_for_endpoint_query(
+    endpoint_query: &str,
+    buffer: &mut Vec<u8>,
+) -> Option<Vec<u8>> {
     let mut offset = 0usize;
     while offset + 16 <= buffer.len() {
         if buffer.get(offset..offset + 2) != Some(&[0x05, 0x00]) {
@@ -5767,7 +5775,8 @@ pub(crate) fn rpc_proxy_in_channel_response_for_buffer(buffer: &mut Vec<u8>) -> 
             return None;
         }
 
-        let response = rpc_proxy_endpoint_response_for_fragment(&buffer[offset..fragment_end]);
+        let response =
+            rpc_proxy_endpoint_response_for_fragment(endpoint_query, &buffer[offset..fragment_end]);
         if let Some(response) = response {
             buffer.drain(..fragment_end);
             return Some(response);
@@ -5781,7 +5790,7 @@ pub(crate) fn rpc_proxy_in_channel_response_for_buffer(buffer: &mut Vec<u8>) -> 
     None
 }
 
-fn rpc_proxy_endpoint_response_for_fragment(bytes: &[u8]) -> Option<Vec<u8>> {
+fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) -> Option<Vec<u8>> {
     if bytes.get(0..4) != Some(&[0x05, 0x00, 0x00, 0x03]) {
         return None;
     }
@@ -5793,6 +5802,17 @@ fn rpc_proxy_endpoint_response_for_fragment(bytes: &[u8]) -> Option<Vec<u8>> {
     let alloc_hint = read_le_u32(bytes, 16)?;
     let context_id = u16::from_le_bytes([*bytes.get(20)?, *bytes.get(21)?]);
     let opnum = u16::from_le_bytes([*bytes.get(22)?, *bytes.get(23)?]);
+    if endpoint_query.contains(":6002") {
+        match opnum {
+            0 if alloc_hint >= 4 => {
+                return Some(rpc_proxy_rfri_get_new_dsa_response(call_id, endpoint_query));
+            }
+            1 if alloc_hint >= 8 => {
+                return Some(rpc_proxy_rfri_get_fqdn_response(call_id, endpoint_query));
+            }
+            _ => {}
+        }
+    }
     match (context_id, opnum) {
         (0, 1) if alloc_hint == 4 => {
             let requested_stats = read_le_u32(bytes, 24)?;
@@ -5832,6 +5852,34 @@ fn rpc_proxy_mgmt_inq_stats_response(call_id: u32, requested_stats: u32) -> Vec<
     stub.extend_from_slice(&0u32.to_le_bytes());
 
     rpc_proxy_dce_response(call_id, &stub)
+}
+
+fn rpc_proxy_rfri_get_new_dsa_response(call_id: u32, endpoint_query: &str) -> Vec<u8> {
+    let server = rpc_proxy_referral_server_name(endpoint_query);
+    let mut stub = Vec::with_capacity(32 + server.len());
+    push_le_u32(&mut stub, 0x0002_0000);
+    rpc_proxy_push_ndr_ascii_string(&mut stub, &server);
+    push_le_u32(&mut stub, 0);
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
+fn rpc_proxy_rfri_get_fqdn_response(call_id: u32, endpoint_query: &str) -> Vec<u8> {
+    let server = rpc_proxy_referral_server_name(endpoint_query);
+    let mut stub = Vec::with_capacity(28 + server.len());
+    rpc_proxy_push_ndr_ascii_string(&mut stub, &server);
+    push_le_u32(&mut stub, 0);
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
+fn rpc_proxy_referral_server_name(endpoint_query: &str) -> String {
+    endpoint_query
+        .split_once(':')
+        .map(|(host, _)| host)
+        .filter(|host| !host.is_empty())
+        .unwrap_or("mail.l-p-e.ch")
+        .to_ascii_lowercase()
 }
 
 fn rpc_proxy_nspi_bind_response(call_id: u32) -> Vec<u8> {
