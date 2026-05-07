@@ -532,7 +532,11 @@ fn query_parameter(query: &str, name: &str) -> Option<String> {
     })
 }
 
-impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
+impl<S, V> ExchangeService<S, V>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+    V: Detector + Clone + Send + Sync + 'static,
+{
     pub(crate) async fn handle(&self, headers: &HeaderMap, body: &[u8]) -> Result<Response> {
         let principal = authenticate_account(&self.store, None, headers, "ews").await?;
         let body = decode_ews_body(headers, body)?;
@@ -634,8 +638,16 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
         body: Body,
     ) -> Response {
         match authenticate_account(&self.store, None, headers, "mapi").await {
-            Ok(_) => {
-                spawn_rpc_proxy_in_data_drain(method, uri, headers, body);
+            Ok(principal) => {
+                spawn_rpc_proxy_in_data_drain(
+                    self.store.clone(),
+                    self.validator.clone(),
+                    principal,
+                    method,
+                    uri,
+                    headers,
+                    body,
+                );
                 rpc_proxy_in_channel_response(uri)
             }
             Err(error) => rpc_proxy_auth_challenge_response(&error.to_string()),
@@ -5657,7 +5669,18 @@ fn rpc_proxy_response_payload_preview_hex(response: &Response) -> Option<&str> {
         .map(|preview| preview.hex.as_str())
 }
 
-fn spawn_rpc_proxy_in_data_drain(method: &Method, uri: &Uri, headers: &HeaderMap, body: Body) {
+fn spawn_rpc_proxy_in_data_drain<S, V>(
+    store: S,
+    validator: Validator<V>,
+    principal: AccountPrincipal,
+    method: &Method,
+    uri: &Uri,
+    headers: &HeaderMap,
+    body: Body,
+) where
+    S: ExchangeStore + Send + Sync + 'static,
+    V: Detector + Send + Sync + 'static,
+{
     let method = method.to_string();
     let path = uri.path().to_string();
     let query = uri.query().unwrap_or_default().to_string();
@@ -5698,7 +5721,14 @@ fn spawn_rpc_proxy_in_data_drain(method: &Method, uri: &Uri, headers: &HeaderMap
                     let request_body_preview_hex = mapi::debug_payload_preview_hex(bytes.as_ref());
                     pdu_buffer.extend_from_slice(bytes.as_ref());
                     while let Some(response) =
-                        rpc_proxy_in_channel_response_for_endpoint_query(&query, &mut pdu_buffer)
+                        rpc_proxy_in_channel_response_for_endpoint_query_with_store(
+                            &store,
+                            &validator,
+                            &principal,
+                            &query,
+                            &mut pdu_buffer,
+                        )
+                        .await
                     {
                         let response_payload_bytes = response.len();
                         let response_payload_preview_hex =
@@ -5792,6 +5822,7 @@ pub(crate) fn rpc_proxy_in_channel_response_for_buffer(buffer: &mut Vec<u8>) -> 
     rpc_proxy_in_channel_response_for_endpoint_query("", buffer)
 }
 
+#[cfg(test)]
 pub(crate) fn rpc_proxy_in_channel_response_for_endpoint_query(
     endpoint_query: &str,
     buffer: &mut Vec<u8>,
@@ -5832,6 +5863,60 @@ pub(crate) fn rpc_proxy_in_channel_response_for_endpoint_query(
     None
 }
 
+pub(crate) async fn rpc_proxy_in_channel_response_for_endpoint_query_with_store<S, V>(
+    store: &S,
+    validator: &Validator<V>,
+    principal: &AccountPrincipal,
+    endpoint_query: &str,
+    buffer: &mut Vec<u8>,
+) -> Option<Vec<u8>>
+where
+    S: ExchangeStore,
+    V: Detector,
+{
+    let mut offset = 0usize;
+    while offset + 16 <= buffer.len() {
+        if buffer.get(offset..offset + 2) != Some(&[0x05, 0x00]) {
+            offset += 1;
+            continue;
+        }
+
+        let fragment_length = u16::from_le_bytes([buffer[offset + 8], buffer[offset + 9]]) as usize;
+        if fragment_length < 16 {
+            offset += 1;
+            continue;
+        }
+
+        let fragment_end = offset + fragment_length;
+        if fragment_end > buffer.len() {
+            if offset > 0 {
+                buffer.drain(..offset);
+            }
+            return None;
+        }
+
+        let response = rpc_proxy_endpoint_response_for_fragment_with_store(
+            store,
+            validator,
+            principal,
+            endpoint_query,
+            &buffer[offset..fragment_end],
+        )
+        .await;
+        if let Some(response) = response {
+            buffer.drain(..fragment_end);
+            return Some(response);
+        }
+
+        offset = fragment_end;
+    }
+    if offset > 0 {
+        buffer.drain(..offset);
+    }
+    None
+}
+
+#[cfg(test)]
 fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) -> Option<Vec<u8>> {
     if bytes.get(0..2) != Some(&[0x05, 0x00]) {
         return None;
@@ -5906,6 +5991,123 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
     }
 }
 
+async fn rpc_proxy_endpoint_response_for_fragment_with_store<S, V>(
+    store: &S,
+    validator: &Validator<V>,
+    principal: &AccountPrincipal,
+    endpoint_query: &str,
+    bytes: &[u8],
+) -> Option<Vec<u8>>
+where
+    S: ExchangeStore,
+    V: Detector,
+{
+    if bytes.get(0..2) != Some(&[0x05, 0x00]) {
+        return None;
+    }
+    let fragment_length = u16::from_le_bytes([*bytes.get(8)?, *bytes.get(9)?]) as usize;
+    if fragment_length > bytes.len() || fragment_length < 16 {
+        return None;
+    }
+    let call_id = read_le_u32(bytes, 12)?;
+    match bytes.get(2).copied()? {
+        0x0b => {
+            if consume_rpc_proxy_out_endpoint_bind_ack(endpoint_query) {
+                return None;
+            }
+            return Some(rpc_proxy_dce_bind_ack_body(call_id));
+        }
+        0x0e => return Some(rpc_proxy_dce_alter_context_response_body(call_id)),
+        0x00 => {}
+        _ => return None,
+    }
+    if fragment_length < 24 {
+        return None;
+    }
+    let alloc_hint = read_le_u32(bytes, 16)?;
+    let context_id = u16::from_le_bytes([*bytes.get(20)?, *bytes.get(21)?]);
+    let opnum = u16::from_le_bytes([*bytes.get(22)?, *bytes.get(23)?]);
+    if endpoint_query.contains(":6002") {
+        match opnum {
+            0 if alloc_hint >= 4 => {
+                return Some(rpc_proxy_rfri_get_new_dsa_response_for_principal(
+                    call_id,
+                    endpoint_query,
+                    principal,
+                ));
+            }
+            1 if alloc_hint >= 8 => {
+                return Some(rpc_proxy_rfri_get_fqdn_response_for_principal(
+                    call_id,
+                    endpoint_query,
+                    principal,
+                ));
+            }
+            _ => {}
+        }
+    }
+    if endpoint_query.contains(":6001") {
+        match opnum {
+            1 if alloc_hint >= 20 => return Some(rpc_proxy_emsmdb_disconnect_response(call_id)),
+            10 if alloc_hint >= 20 => {
+                return Some(rpc_proxy_emsmdb_connect_ex_response_for_principal(
+                    call_id, principal,
+                ));
+            }
+            11 if alloc_hint >= 20 => {
+                return Some(
+                    rpc_proxy_emsmdb_rpc_ext2_response_for_principal(
+                        store, validator, principal, call_id, bytes,
+                    )
+                    .await,
+                );
+            }
+            _ => {}
+        }
+    }
+    match (context_id, opnum) {
+        (0, 1) if alloc_hint == 4 => {
+            let requested_stats = read_le_u32(bytes, 24)?;
+            Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats))
+        }
+        (2, 0) if alloc_hint >= 44 => Some(rpc_proxy_nspi_bind_response(call_id)),
+        (2, 1) if alloc_hint >= 20 => Some(rpc_proxy_nspi_unbind_response(call_id)),
+        (2, 2) if alloc_hint >= 20 => Some(rpc_proxy_nspi_update_stat_response(call_id)),
+        (2, 3) if alloc_hint >= 20 => Some(rpc_proxy_nspi_query_rows_response_for_principal(
+            call_id, bytes, principal,
+        )),
+        (2, 4) if alloc_hint >= 20 => Some(rpc_proxy_nspi_query_rows_response_for_principal(
+            call_id, bytes, principal,
+        )),
+        (2, 5) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_matches_response_for_principal(
+            call_id, bytes, principal,
+        )),
+        (2, 6) if alloc_hint >= 20 => Some(rpc_proxy_nspi_resort_restriction_response(call_id)),
+        (2, 7) if alloc_hint >= 20 => Some(rpc_proxy_nspi_minimal_ids_response(call_id)),
+        (2, 8) if alloc_hint >= 16 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
+        (2, 9) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_props_response_for_principal(
+            call_id, bytes, principal,
+        )),
+        (2, 10) if alloc_hint >= 20 => Some(rpc_proxy_nspi_compare_mids_response(call_id)),
+        (2, 12) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_special_table_response(call_id)),
+        (2, 13) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_props_response_for_principal(
+            call_id, bytes, principal,
+        )),
+        (2, 16) if alloc_hint >= 12 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
+        (2, 17) if alloc_hint >= 12 => {
+            Some(rpc_proxy_nspi_get_names_from_ids_response(call_id, bytes))
+        }
+        (2, 18) if alloc_hint >= 20 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
+        (2, 19) if alloc_hint >= 24 => Some(rpc_proxy_nspi_resolve_names_response_for_principal(
+            call_id, bytes, principal,
+        )),
+        (2, 20) if alloc_hint >= 24 => Some(rpc_proxy_nspi_resolve_names_response_for_principal(
+            call_id, bytes, principal,
+        )),
+        _ => None,
+    }
+}
+
 fn rpc_proxy_mgmt_inq_stats_response(call_id: u32, requested_stats: u32) -> Vec<u8> {
     let stat_count = requested_stats.min(4);
     let stats = [1u32, 0u32, 1u32, 1u32];
@@ -5920,9 +6122,24 @@ fn rpc_proxy_mgmt_inq_stats_response(call_id: u32, requested_stats: u32) -> Vec<
     rpc_proxy_dce_response(call_id, &stub)
 }
 
+#[cfg(test)]
 fn rpc_proxy_emsmdb_connect_ex_response(call_id: u32) -> Vec<u8> {
+    let mut context = [0u8; 20];
+    context[4..20].copy_from_slice(Uuid::nil().as_bytes());
+    rpc_proxy_emsmdb_connect_ex_response_with_context(call_id, &context)
+}
+
+fn rpc_proxy_emsmdb_connect_ex_response_for_principal(
+    call_id: u32,
+    principal: &AccountPrincipal,
+) -> Vec<u8> {
+    let context = mapi::create_rpc_emsmdb_context(principal);
+    rpc_proxy_emsmdb_connect_ex_response_with_context(call_id, &context)
+}
+
+fn rpc_proxy_emsmdb_connect_ex_response_with_context(call_id: u32, context: &[u8; 20]) -> Vec<u8> {
     let mut stub = Vec::new();
-    rpc_proxy_push_emsmdb_context_handle(&mut stub);
+    rpc_proxy_push_emsmdb_context_handle(&mut stub, context);
     push_le_u32(&mut stub, 60_000);
     push_le_u32(&mut stub, 6);
     push_le_u32(&mut stub, 10_000);
@@ -5949,16 +6166,64 @@ fn rpc_proxy_emsmdb_connect_ex_response(call_id: u32) -> Vec<u8> {
     rpc_proxy_dce_response(call_id, &stub)
 }
 
+#[cfg(test)]
 fn rpc_proxy_emsmdb_rpc_ext2_response(call_id: u32) -> Vec<u8> {
-    let rop_response = rpc_proxy_emsmdb_logon_rop_response();
-    let mut rop_buffer = Vec::new();
-    rop_buffer.extend_from_slice(&(rop_response.len() as u16).to_le_bytes());
-    rop_buffer.extend_from_slice(&rop_response);
-    push_le_u32(&mut rop_buffer, 1);
+    let mut context = [0u8; 20];
+    context[4..20].copy_from_slice(Uuid::nil().as_bytes());
+    rpc_proxy_emsmdb_rpc_ext2_response_with_rop_buffer(call_id, &context, Vec::new())
+}
 
-    let rgb_out = rpc_proxy_rpc_header_ext_payload(&rop_buffer);
+async fn rpc_proxy_emsmdb_rpc_ext2_response_for_principal<S, V>(
+    store: &S,
+    validator: &Validator<V>,
+    principal: &AccountPrincipal,
+    call_id: u32,
+    request: &[u8],
+) -> Vec<u8>
+where
+    S: ExchangeStore,
+    V: Detector,
+{
+    let (context, rop_buffer) = if let Some(request) = rpc_proxy_emsmdb_rpc_ext2_request(request) {
+        request
+    } else {
+        let context = request
+            .get(24..44)
+            .and_then(|bytes| bytes.try_into().ok())
+            .unwrap_or_else(|| mapi::create_rpc_emsmdb_context(principal));
+        (context, rpc_proxy_bootstrap_logon_rop_buffer(principal))
+    };
+    let rop_buffer =
+        match mapi::execute_rpc_emsmdb_rops(store, validator, principal, &context, &rop_buffer)
+            .await
+        {
+            Ok(rop_buffer) => rop_buffer,
+            Err(error) => {
+                warn!(
+                    rca_debug = true,
+                    adapter = "rpcproxy",
+                    mailbox = %principal.email,
+                    error = %error,
+                    message = "rpc proxy emsmdb execution failed"
+                );
+                Vec::new()
+            }
+        };
+    rpc_proxy_emsmdb_rpc_ext2_response_with_rop_buffer(call_id, &context, rop_buffer)
+}
+
+fn rpc_proxy_emsmdb_rpc_ext2_response_with_rop_buffer(
+    call_id: u32,
+    context: &[u8; 20],
+    rop_buffer: Vec<u8>,
+) -> Vec<u8> {
+    let rgb_out = if rop_buffer.is_empty() {
+        rpc_proxy_rpc_header_ext_payload(&[])
+    } else {
+        rop_buffer
+    };
     let mut stub = Vec::new();
-    rpc_proxy_push_emsmdb_context_handle(&mut stub);
+    rpc_proxy_push_emsmdb_context_handle(&mut stub, context);
     push_le_u32(&mut stub, 0);
     rpc_proxy_push_ndr_byte_array(&mut stub, &rgb_out);
     push_le_u32(&mut stub, rgb_out.len() as u32);
@@ -5978,9 +6243,8 @@ fn rpc_proxy_emsmdb_disconnect_response(call_id: u32) -> Vec<u8> {
     rpc_proxy_dce_response(call_id, &stub)
 }
 
-fn rpc_proxy_push_emsmdb_context_handle(stub: &mut Vec<u8>) {
-    stub.extend_from_slice(&0u32.to_le_bytes());
-    stub.extend_from_slice(b"LPEEMSMDBCTX0001");
+fn rpc_proxy_push_emsmdb_context_handle(stub: &mut Vec<u8>, context: &[u8; 20]) {
+    stub.extend_from_slice(context);
 }
 
 fn rpc_proxy_push_ndr_byte_array(stub: &mut Vec<u8>, value: &[u8]) {
@@ -6004,42 +6268,59 @@ fn rpc_proxy_rpc_header_ext_payload(payload: &[u8]) -> Vec<u8> {
     buffer
 }
 
-fn rpc_proxy_emsmdb_logon_rop_response() -> Vec<u8> {
-    const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
-        0x0001_0000_0000_0001,
-        0x0002_0000_0000_0001,
-        0x0003_0000_0000_0001,
-        0x0004_0000_0000_0001,
-        0x0005_0000_0000_0001,
-        0x0006_0000_0000_0001,
-        0x0007_0000_0000_0001,
-        0x0008_0000_0000_0001,
-        0x0009_0000_0000_0001,
-        0x000a_0000_0000_0001,
-        0x000b_0000_0000_0001,
-        0x000c_0000_0000_0001,
-        0x000d_0000_0000_0001,
-    ];
-    let mut response = Vec::new();
-    response.push(0xfe);
-    response.push(0);
-    push_le_u32(&mut response, 0);
-    response.push(0x01);
-    for folder_id in PRIVATE_LOGON_SPECIAL_FOLDER_IDS {
-        response.extend_from_slice(&folder_id.to_le_bytes());
+fn rpc_proxy_emsmdb_rpc_ext2_request(request: &[u8]) -> Option<([u8; 20], Vec<u8>)> {
+    let fragment_length = u16::from_le_bytes([*request.get(8)?, *request.get(9)?]) as usize;
+    let stub = request.get(24..fragment_length)?;
+    let context: [u8; 20] = stub.get(0..20)?.try_into().ok()?;
+    for offset in 20..stub.len().saturating_sub(8) {
+        let candidate = &stub[offset..];
+        if candidate.get(0..2) != Some(&[0, 0]) {
+            continue;
+        }
+        let flags = u16::from_le_bytes([candidate[2], candidate[3]]);
+        let size = u16::from_le_bytes([candidate[4], candidate[5]]) as usize;
+        let size_actual = u16::from_le_bytes([candidate[6], candidate[7]]) as usize;
+        if flags & !0x0004 != 0 || size == 0 || size > size_actual {
+            continue;
+        }
+        let end = 8 + size;
+        let Some(payload) = candidate.get(8..end) else {
+            continue;
+        };
+        let Some(rop_size_bytes) = payload.get(0..2) else {
+            continue;
+        };
+        let rop_size = u16::from_le_bytes(rop_size_bytes.try_into().ok()?) as usize;
+        if rop_size >= 2 && payload.len() >= rop_size {
+            return Some((context, candidate[..end].to_vec()));
+        }
     }
-    response.push(0x03);
-    response.extend_from_slice(&[0x21, 0x93, 0x24, 0xa1, 0x3b, 0x82, 0x44, 0x10]);
-    response.extend_from_slice(&[0x92, 0x34, 0xab, 0xae, 0xda, 0x5d, 0x69, 0x22]);
-    response.extend_from_slice(&1u16.to_le_bytes());
-    response.extend_from_slice(&[0x21, 0x93, 0x24, 0xa1, 0x3b, 0x82, 0x44, 0x10]);
-    response.extend_from_slice(&[0x92, 0x34, 0xab, 0xae, 0xda, 0x5d, 0x69, 0x22]);
-    response.extend_from_slice(&[0; 8]);
-    response.extend_from_slice(&1u64.to_le_bytes());
-    push_le_u32(&mut response, 0);
-    response
+    None
 }
 
+fn rpc_proxy_bootstrap_logon_rop_buffer(principal: &AccountPrincipal) -> Vec<u8> {
+    let recipient = principal
+        .email
+        .split('@')
+        .next()
+        .filter(|value| !value.is_empty())
+        .unwrap_or("mailbox");
+    let legacy_dn =
+        format!("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={recipient}\0");
+    let mut rops = vec![0xFE, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&0x0100_0004u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
+    rops.extend_from_slice(legacy_dn.as_bytes());
+
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&((rops.len() + 2) as u16).to_le_bytes());
+    payload.extend_from_slice(&rops);
+    payload.extend_from_slice(&u32::MAX.to_le_bytes());
+    rpc_proxy_rpc_header_ext_payload(&payload)
+}
+
+#[cfg(test)]
 fn rpc_proxy_rfri_get_new_dsa_response(call_id: u32, endpoint_query: &str) -> Vec<u8> {
     let server = rpc_proxy_referral_server_name(endpoint_query);
     let mut stub = Vec::with_capacity(40 + server.len());
@@ -6052,6 +6333,23 @@ fn rpc_proxy_rfri_get_new_dsa_response(call_id: u32, endpoint_query: &str) -> Ve
     rpc_proxy_dce_response(call_id, &stub)
 }
 
+fn rpc_proxy_rfri_get_new_dsa_response_for_principal(
+    call_id: u32,
+    endpoint_query: &str,
+    principal: &AccountPrincipal,
+) -> Vec<u8> {
+    let server = rpc_proxy_referral_server_name_for_principal(endpoint_query, principal);
+    let mut stub = Vec::with_capacity(40 + server.len());
+    push_le_u32(&mut stub, 0);
+    push_le_u32(&mut stub, 0x0002_0000);
+    push_le_u32(&mut stub, 0x0002_0004);
+    rpc_proxy_push_ndr_ascii_string(&mut stub, &server);
+    push_le_u32(&mut stub, 0);
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
+#[cfg(test)]
 fn rpc_proxy_rfri_get_fqdn_response(call_id: u32, endpoint_query: &str) -> Vec<u8> {
     let server = rpc_proxy_referral_server_name(endpoint_query);
     let mut stub = Vec::with_capacity(32 + server.len());
@@ -6062,13 +6360,48 @@ fn rpc_proxy_rfri_get_fqdn_response(call_id: u32, endpoint_query: &str) -> Vec<u
     rpc_proxy_dce_response(call_id, &stub)
 }
 
+fn rpc_proxy_rfri_get_fqdn_response_for_principal(
+    call_id: u32,
+    endpoint_query: &str,
+    principal: &AccountPrincipal,
+) -> Vec<u8> {
+    let server = rpc_proxy_referral_server_name_for_principal(endpoint_query, principal);
+    let mut stub = Vec::with_capacity(32 + server.len());
+    push_le_u32(&mut stub, 0x0002_0000);
+    rpc_proxy_push_ndr_ascii_string(&mut stub, &server);
+    push_le_u32(&mut stub, 0);
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
+#[cfg(test)]
 fn rpc_proxy_referral_server_name(endpoint_query: &str) -> String {
     endpoint_query
         .split_once(':')
         .map(|(host, _)| host)
         .filter(|host| !host.is_empty())
-        .unwrap_or("mail.l-p-e.ch")
+        .unwrap_or("localhost")
         .to_ascii_lowercase()
+}
+
+fn rpc_proxy_referral_server_name_for_principal(
+    endpoint_query: &str,
+    principal: &AccountPrincipal,
+) -> String {
+    endpoint_query
+        .split_once(':')
+        .map(|(host, _)| host)
+        .filter(|host| !host.is_empty())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_else(|| {
+            let domain = principal
+                .email
+                .split_once('@')
+                .map(|(_, domain)| domain)
+                .filter(|domain| !domain.is_empty())
+                .unwrap_or("localhost");
+            format!("mail.{domain}").to_ascii_lowercase()
+        })
 }
 
 fn rpc_proxy_nspi_bind_response(call_id: u32) -> Vec<u8> {
@@ -6111,6 +6444,7 @@ fn rpc_proxy_nspi_update_stat_response(call_id: u32) -> Vec<u8> {
     rpc_proxy_dce_response(call_id, &stub)
 }
 
+#[cfg(test)]
 fn rpc_proxy_nspi_query_rows_response(call_id: u32, request: &[u8]) -> Vec<u8> {
     let tags = rpc_proxy_nspi_requested_property_tags(request);
     let row_values = rpc_proxy_nspi_row_values(request, &tags);
@@ -6122,6 +6456,22 @@ fn rpc_proxy_nspi_query_rows_response(call_id: u32, request: &[u8]) -> Vec<u8> {
     rpc_proxy_dce_response(call_id, &stub)
 }
 
+fn rpc_proxy_nspi_query_rows_response_for_principal(
+    call_id: u32,
+    request: &[u8],
+    principal: &AccountPrincipal,
+) -> Vec<u8> {
+    let tags = rpc_proxy_nspi_requested_property_tags(request);
+    let row_values = rpc_proxy_nspi_row_values_for_principal(request, &tags, principal);
+    let mut stub = Vec::with_capacity(256);
+    rpc_proxy_push_stat(&mut stub);
+    rpc_proxy_push_rowset_pointer(&mut stub, &[row_values]);
+    push_le_u32(&mut stub, 0);
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
+#[cfg(test)]
 fn rpc_proxy_nspi_get_matches_response(call_id: u32, request: &[u8]) -> Vec<u8> {
     let tags = rpc_proxy_nspi_requested_property_tags(request);
     let row_values = rpc_proxy_nspi_row_values(request, &tags);
@@ -6135,6 +6485,22 @@ fn rpc_proxy_nspi_get_matches_response(call_id: u32, request: &[u8]) -> Vec<u8> 
     rpc_proxy_dce_response(call_id, &stub)
 }
 
+fn rpc_proxy_nspi_get_matches_response_for_principal(
+    call_id: u32,
+    request: &[u8],
+    principal: &AccountPrincipal,
+) -> Vec<u8> {
+    let tags = rpc_proxy_nspi_requested_property_tags(request);
+    let row_values = rpc_proxy_nspi_row_values_for_principal(request, &tags, principal);
+    let mut stub = Vec::with_capacity(280);
+    rpc_proxy_push_stat(&mut stub);
+    push_le_u32(&mut stub, 0x0002_0000);
+    rpc_proxy_push_property_tag_array(&mut stub, &[principal_minimal_entry_id_for_rpc(principal)]);
+    rpc_proxy_push_rowset_pointer(&mut stub, &[row_values]);
+    push_le_u32(&mut stub, 0);
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
 fn rpc_proxy_nspi_resort_restriction_response(call_id: u32) -> Vec<u8> {
     let mut stub = Vec::with_capacity(68);
     rpc_proxy_push_stat(&mut stub);
@@ -6180,9 +6546,25 @@ fn rpc_proxy_nspi_get_names_from_ids_response(call_id: u32, request: &[u8]) -> V
     rpc_proxy_dce_response(call_id, &stub)
 }
 
+#[cfg(test)]
 fn rpc_proxy_nspi_get_props_response(call_id: u32, request: &[u8]) -> Vec<u8> {
     let tags = rpc_proxy_nspi_requested_property_tags(request);
     let row_values = rpc_proxy_nspi_row_values(request, &tags);
+    let mut stub = Vec::with_capacity(192);
+    push_le_u32(&mut stub, 0x0002_0000);
+    rpc_proxy_push_property_row(&mut stub, &row_values);
+    push_le_u32(&mut stub, 0);
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
+fn rpc_proxy_nspi_get_props_response_for_principal(
+    call_id: u32,
+    request: &[u8],
+    principal: &AccountPrincipal,
+) -> Vec<u8> {
+    let tags = rpc_proxy_nspi_requested_property_tags(request);
+    let row_values = rpc_proxy_nspi_row_values_for_principal(request, &tags, principal);
     let mut stub = Vec::with_capacity(192);
     push_le_u32(&mut stub, 0x0002_0000);
     rpc_proxy_push_property_row(&mut stub, &row_values);
@@ -6219,14 +6601,71 @@ fn rpc_proxy_nspi_get_special_table_response(call_id: u32) -> Vec<u8> {
     rpc_proxy_dce_response(call_id, &stub)
 }
 
+#[cfg(test)]
 fn rpc_proxy_nspi_resolve_names_response(call_id: u32, request: &[u8]) -> Vec<u8> {
     const MID_RESOLVED: u32 = 2;
     const PR_DISPLAY_NAME_A: u32 = 0x3001_001e;
     const PR_EMAIL_ADDRESS_A: u32 = 0x3003_001e;
 
     let smtp_address = rpc_proxy_nspi_requested_smtp_address(request)
-        .unwrap_or_else(|| "test@l-p-e.ch".to_string());
+        .unwrap_or_else(|| "unknown@localhost".to_string());
     let display_name = rpc_proxy_display_name_for_smtp_address(&smtp_address);
+    let property_tags = rpc_proxy_nspi_requested_resolve_property_tags(request);
+    let row_values: Vec<(u32, String)> = property_tags
+        .into_iter()
+        .filter_map(|tag| match tag {
+            PR_EMAIL_ADDRESS_A => Some((tag, smtp_address.clone())),
+            PR_DISPLAY_NAME_A => Some((tag, display_name.clone())),
+            _ => None,
+        })
+        .collect();
+    let row_values = if row_values.is_empty() {
+        vec![
+            (PR_EMAIL_ADDRESS_A, smtp_address),
+            (PR_DISPLAY_NAME_A, display_name),
+        ]
+    } else {
+        row_values
+    };
+
+    let mut stub = Vec::with_capacity(192);
+    let mut deferred_strings = Vec::new();
+
+    push_le_u32(&mut stub, 0x0002_0000);
+    rpc_proxy_push_property_tag_array(&mut stub, &[MID_RESOLVED]);
+
+    push_le_u32(&mut stub, 0x0002_0004);
+    push_le_u32(&mut stub, 1);
+    push_le_u32(&mut stub, 1);
+    push_le_u32(&mut stub, 0);
+    push_le_u32(&mut stub, row_values.len() as u32);
+    push_le_u32(&mut stub, 0x0002_0008);
+    push_le_u32(&mut stub, row_values.len() as u32);
+
+    for (index, (property_tag, value)) in row_values.iter().enumerate() {
+        push_le_u32(&mut stub, *property_tag);
+        push_le_u32(&mut stub, 0);
+        push_le_u32(&mut stub, property_tag & 0xffff);
+        push_le_u32(&mut stub, 0x0002_000c + (index as u32 * 4));
+        rpc_proxy_push_ndr_ascii_string(&mut deferred_strings, value);
+    }
+    stub.extend_from_slice(&deferred_strings);
+    push_le_u32(&mut stub, 0);
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
+fn rpc_proxy_nspi_resolve_names_response_for_principal(
+    call_id: u32,
+    request: &[u8],
+    principal: &AccountPrincipal,
+) -> Vec<u8> {
+    const MID_RESOLVED: u32 = 2;
+    const PR_DISPLAY_NAME_A: u32 = 0x3001_001e;
+    const PR_EMAIL_ADDRESS_A: u32 = 0x3003_001e;
+
+    let smtp_address = principal.email.to_ascii_lowercase();
+    let display_name = principal.display_name.clone();
     let property_tags = rpc_proxy_nspi_requested_resolve_property_tags(request);
     let row_values: Vec<(u32, String)> = property_tags
         .into_iter()
@@ -6327,6 +6766,7 @@ fn rpc_proxy_nspi_requested_resolve_property_tags(request: &[u8]) -> Vec<u32> {
     tags
 }
 
+#[cfg(test)]
 fn rpc_proxy_nspi_requested_smtp_address(request: &[u8]) -> Option<String> {
     const SMTP_PREFIX_UTF16LE: &[u8] = b"=\0S\0M\0T\0P\0:\0";
     const SMTP_PREFIX_ASCII: &[u8] = b"=SMTP:";
@@ -6375,6 +6815,7 @@ fn rpc_proxy_nspi_requested_smtp_address(request: &[u8]) -> Option<String> {
         .filter(|value| value.contains('@'))
 }
 
+#[cfg(test)]
 fn rpc_proxy_display_name_for_smtp_address(address: &str) -> String {
     let local_part = address.split('@').next().unwrap_or(address).trim();
     let mut chars = local_part.chars();
@@ -6384,6 +6825,12 @@ fn rpc_proxy_display_name_for_smtp_address(address: &str) -> String {
     let mut display_name = first.to_uppercase().collect::<String>();
     display_name.push_str(chars.as_str());
     display_name
+}
+
+fn principal_minimal_entry_id_for_rpc(principal: &AccountPrincipal) -> u32 {
+    let bytes = principal.account_id.as_bytes();
+    let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    value.max(2)
 }
 
 fn rpc_proxy_push_property_tag_array(buffer: &mut Vec<u8>, values: &[u32]) {
@@ -6408,9 +6855,10 @@ fn rpc_proxy_push_stat(buffer: &mut Vec<u8>) {
     push_le_u32(buffer, 0x0409);
 }
 
+#[cfg(test)]
 fn rpc_proxy_nspi_row_values(request: &[u8], tags: &[u32]) -> Vec<(u32, RpcProxyNspiValue)> {
     let smtp_address = rpc_proxy_nspi_requested_smtp_address(request)
-        .unwrap_or_else(|| "test@l-p-e.ch".to_string());
+        .unwrap_or_else(|| "unknown@localhost".to_string());
     let display_name = rpc_proxy_display_name_for_smtp_address(&smtp_address);
     tags.iter()
         .map(|tag| {
@@ -6426,6 +6874,37 @@ fn rpc_proxy_nspi_row_values(request: &[u8], tags: &[u32]) -> Vec<(u32, RpcProxy
                 )),
                 0x0ffe_0003 => RpcProxyNspiValue::U32(6),
                 0x3000_0003 => RpcProxyNspiValue::U32(2),
+                _ if *tag & 0xffff == 0x0003 => RpcProxyNspiValue::U32(0),
+                _ => RpcProxyNspiValue::String(String::new()),
+            };
+            (*tag, value)
+        })
+        .collect()
+}
+
+fn rpc_proxy_nspi_row_values_for_principal(
+    _request: &[u8],
+    tags: &[u32],
+    principal: &AccountPrincipal,
+) -> Vec<(u32, RpcProxyNspiValue)> {
+    let smtp_address = principal.email.to_ascii_lowercase();
+    let display_name = principal.display_name.clone();
+    tags.iter()
+        .map(|tag| {
+            let value = match *tag {
+                0x3001_001f | 0x3a00_001f => RpcProxyNspiValue::String(display_name.clone()),
+                0x39fe_001f | 0x3003_001f | 0x3004_001f => {
+                    RpcProxyNspiValue::String(smtp_address.clone())
+                }
+                0x3002_001f => RpcProxyNspiValue::String("SMTP".to_string()),
+                0x3005_001f => RpcProxyNspiValue::String(format!(
+                    "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={}",
+                    smtp_address.replace('@', "-").replace('.', "-")
+                )),
+                0x0ffe_0003 => RpcProxyNspiValue::U32(6),
+                0x3000_0003 => {
+                    RpcProxyNspiValue::U32(principal_minimal_entry_id_for_rpc(principal))
+                }
                 _ if *tag & 0xffff == 0x0003 => RpcProxyNspiValue::U32(0),
                 _ => RpcProxyNspiValue::String(String::new()),
             };

@@ -960,6 +960,68 @@ fn create_session(endpoint: MapiEndpoint, principal: &AccountPrincipal) -> Strin
     session_id
 }
 
+pub(crate) fn create_rpc_emsmdb_context(principal: &AccountPrincipal) -> [u8; 20] {
+    let session_id = create_session(MapiEndpoint::Emsmdb, principal);
+    let session_uuid = Uuid::parse_str(&session_id).unwrap_or_else(|_| Uuid::new_v4());
+    let mut context = [0u8; 20];
+    context[4..20].copy_from_slice(session_uuid.as_bytes());
+    context
+}
+
+pub(crate) async fn execute_rpc_emsmdb_rops<S, V>(
+    store: &S,
+    validator: &Validator<V>,
+    principal: &AccountPrincipal,
+    context_handle: &[u8],
+    rop_buffer: &[u8],
+) -> Result<Vec<u8>>
+where
+    S: ExchangeStore,
+    V: Detector,
+{
+    let session_id = rpc_context_session_id(context_handle)
+        .ok_or_else(|| anyhow!("invalid RPC/HTTP EMSMDB context handle"))?;
+    let Some(session) = get_session(&session_id) else {
+        return Err(anyhow!("RPC/HTTP EMSMDB session context not found"));
+    };
+    if !session_matches(&session, MapiEndpoint::Emsmdb, principal) {
+        return Err(anyhow!("RPC/HTTP EMSMDB authentication context changed"));
+    }
+
+    let snapshot = store
+        .load_mapi_mail_store(principal.account_id, 500)
+        .await?;
+    let mailboxes = snapshot.mailboxes();
+    let emails = snapshot.emails();
+    let Some(mut session) = remove_session(&session_id) else {
+        return Err(anyhow!("RPC/HTTP EMSMDB session context not found"));
+    };
+    if !session_matches(&session, MapiEndpoint::Emsmdb, principal) {
+        return Err(anyhow!("RPC/HTTP EMSMDB authentication context changed"));
+    }
+    let rop_buffer = execute_rops(
+        store,
+        principal,
+        &mut session,
+        &mailboxes,
+        &emails,
+        &snapshot,
+        validator,
+        rop_buffer,
+    )
+    .await;
+    store_session(session_id, session);
+    Ok(rop_buffer)
+}
+
+fn rpc_context_session_id(context_handle: &[u8]) -> Option<String> {
+    if context_handle.len() < 20 {
+        return None;
+    }
+    let uuid = Uuid::from_slice(&context_handle[4..20]).ok()?;
+    Some(uuid.to_string())
+}
+
 fn remove_session(session_id: &str) -> Option<MapiSession> {
     let now = SystemTime::now();
     let mut guard = sessions()

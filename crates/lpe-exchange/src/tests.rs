@@ -2,7 +2,7 @@ use axum::body::{to_bytes, Body};
 use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
-use lpe_mail_auth::{AccountAuthStore, StoreFuture};
+use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, ActiveSyncAttachment,
     ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount, ClientTask,
@@ -23,7 +23,7 @@ use crate::{
     service::{
         error_response, is_rpc_proxy_in_data_channel_request, mark_rpc_proxy_out_endpoint_bind_ack,
         rpc_proxy_in_channel_response_for_buffer, rpc_proxy_in_channel_response_for_endpoint_query,
-        ExchangeService,
+        rpc_proxy_in_channel_response_for_endpoint_query_with_store, ExchangeService,
     },
     store::ExchangeStore,
 };
@@ -1193,6 +1193,43 @@ fn rca_wrapped_private_logon_execute_body(mailbox: &str, client: &str) -> Vec<u8
     body
 }
 
+fn test_account_principal() -> AccountPrincipal {
+    let account = FakeStore::account();
+    AccountPrincipal {
+        tenant_id: account.tenant_id,
+        account_id: account.account_id,
+        email: account.email,
+        display_name: account.display_name,
+    }
+}
+
+fn rpc_proxy_bootstrap_logon_execute_rop(mailbox: &str) -> Vec<u8> {
+    let legacy_dn = format!("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={mailbox}\0");
+    let mut rops = vec![0xFE, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&0x0100_0004u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
+    rops.extend_from_slice(legacy_dn.as_bytes());
+    rpc_proxy_wrapped_rop_buffer(&rops, &[u32::MAX])
+}
+
+fn rpc_proxy_wrapped_rop_buffer(rops: &[u8], handles: &[u32]) -> Vec<u8> {
+    let mut payload = Vec::new();
+    payload.extend_from_slice(&((rops.len() + 2) as u16).to_le_bytes());
+    payload.extend_from_slice(rops);
+    for handle in handles {
+        payload.extend_from_slice(&handle.to_le_bytes());
+    }
+
+    let mut rpc_header_ext = Vec::new();
+    rpc_header_ext.extend_from_slice(&0u16.to_le_bytes());
+    rpc_header_ext.extend_from_slice(&0x0004u16.to_le_bytes());
+    rpc_header_ext.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+    rpc_header_ext.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+    rpc_header_ext.extend_from_slice(&payload);
+    rpc_header_ext
+}
+
 fn resolve_names_request(search_address: &str, columns: &[u32]) -> Vec<u8> {
     let mut request = Vec::new();
     request.extend_from_slice(&0u32.to_le_bytes());
@@ -1661,8 +1698,10 @@ async fn mapi_over_http_execute_accepts_rca_wrapped_private_mailbox_logon() {
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request =
-        rca_wrapped_private_logon_execute_body("test@l-p-e.ch", "Client=MS Connectivity Analyzer");
+    let request = rca_wrapped_private_logon_execute_body(
+        "alice@example.test",
+        "Client=MS Connectivity Analyzer",
+    );
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
         .await
@@ -6992,7 +7031,7 @@ fn rpc_proxy_in_channel_emsmdb_connect_ex_gets_session_context_response() {
     let mut buffer = emsmdb_rpc_request(51, 10, 160);
 
     let response =
-        rpc_proxy_in_channel_response_for_endpoint_query("mail.l-p-e.ch:6001", &mut buffer)
+        rpc_proxy_in_channel_response_for_endpoint_query("mail.example.test:6001", &mut buffer)
             .expect("emsmdb connect response");
 
     assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
@@ -7000,9 +7039,8 @@ fn rpc_proxy_in_channel_emsmdb_connect_ex_gets_session_context_response() {
         u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
         51
     );
-    assert!(response
-        .windows(b"LPEEMSMDBCTX0001".len())
-        .any(|window| { window == b"LPEEMSMDBCTX0001" }));
+    assert_eq!(&response[24..28], &[0; 4]);
+    assert_eq!(&response[28..44], Uuid::nil().as_bytes());
     assert_eq!(
         u32::from_le_bytes(response[44..48].try_into().unwrap()),
         60_000
@@ -7015,7 +7053,7 @@ fn rpc_proxy_in_channel_emsmdb_rpc_ext2_gets_logon_carrier_response() {
     let mut buffer = emsmdb_rpc_request(52, 11, 160);
 
     let response =
-        rpc_proxy_in_channel_response_for_endpoint_query("mail.l-p-e.ch:6001", &mut buffer)
+        rpc_proxy_in_channel_response_for_endpoint_query("mail.example.test:6001", &mut buffer)
             .expect("emsmdb rpc ext2 response");
 
     assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
@@ -7023,10 +7061,11 @@ fn rpc_proxy_in_channel_emsmdb_rpc_ext2_gets_logon_carrier_response() {
         u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
         52
     );
+    assert_eq!(&response[24..28], &[0; 4]);
+    assert_eq!(&response[28..44], Uuid::nil().as_bytes());
     assert!(response
-        .windows(b"LPEEMSMDBCTX0001".len())
-        .any(|window| { window == b"LPEEMSMDBCTX0001" }));
-    assert!(response.windows(2).any(|window| window == [0xfe, 0x00]));
+        .windows(8)
+        .any(|window| window == [0, 0, 4, 0, 0, 0, 0, 0]));
 }
 
 #[test]
@@ -7034,7 +7073,7 @@ fn rpc_proxy_in_channel_emsmdb_disconnect_clears_session_context() {
     let mut buffer = emsmdb_rpc_request(53, 1, 64);
 
     let response =
-        rpc_proxy_in_channel_response_for_endpoint_query("mail.l-p-e.ch:6001", &mut buffer)
+        rpc_proxy_in_channel_response_for_endpoint_query("mail.example.test:6001", &mut buffer)
             .expect("emsmdb disconnect response");
 
     assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
@@ -7046,9 +7085,118 @@ fn rpc_proxy_in_channel_emsmdb_disconnect_clears_session_context() {
     assert_eq!(u32::from_le_bytes(response[44..48].try_into().unwrap()), 0);
 }
 
+#[tokio::test]
+async fn rpc_proxy_emsmdb_logon_uses_authenticated_canonical_principal() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let validator = Validator::new(FakeDetector::pdf(), 0.8);
+    let principal = test_account_principal();
+    let mut connect = emsmdb_rpc_request(61, 10, 160);
+    let connect_response = rpc_proxy_in_channel_response_for_endpoint_query_with_store(
+        &store,
+        &validator,
+        &principal,
+        "mail.example.test:6001",
+        &mut connect,
+    )
+    .await
+    .expect("connect response");
+    let context = rpc_response_context(&connect_response);
+
+    let logon_request = rpc_proxy_bootstrap_logon_execute_rop(&principal.email);
+    let mut execute = emsmdb_rpc_ext2_request(62, &context, &logon_request);
+    let execute_response = rpc_proxy_in_channel_response_for_endpoint_query_with_store(
+        &store,
+        &validator,
+        &principal,
+        "mail.example.test:6001",
+        &mut execute,
+    )
+    .await
+    .expect("execute response");
+    let rop_response = rpc_response_rpc_header_ext(&execute_response);
+
+    let static_marker = [b"LPEEMSMDB".as_slice(), b"CTX0001".as_slice()].concat();
+    assert!(contains_bytes(
+        &rop_response,
+        FakeStore::account().account_id.as_bytes()
+    ));
+    assert!(!contains_bytes(&execute_response, &static_marker));
+}
+
+#[tokio::test]
+async fn rpc_proxy_emsmdb_query_rows_reads_canonical_mailboxes() {
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 7;
+    let archive = FakeStore::mailbox("66666666-6666-6666-6666-666666666666", "custom", "Archive");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox, archive])),
+        ..Default::default()
+    };
+    let validator = Validator::new(FakeDetector::pdf(), 0.8);
+    let principal = test_account_principal();
+    let mut connect = emsmdb_rpc_request(63, 10, 160);
+    let connect_response = rpc_proxy_in_channel_response_for_endpoint_query_with_store(
+        &store,
+        &validator,
+        &principal,
+        "mail.example.test:6001",
+        &mut connect,
+    )
+    .await
+    .expect("connect response");
+    let context = rpc_response_context(&connect_response);
+
+    let logon_request = rpc_proxy_bootstrap_logon_execute_rop(&principal.email);
+    let mut execute = emsmdb_rpc_ext2_request(64, &context, &logon_request);
+    rpc_proxy_in_channel_response_for_endpoint_query_with_store(
+        &store,
+        &validator,
+        &principal,
+        "mail.example.test:6001",
+        &mut execute,
+    )
+    .await
+    .expect("logon response");
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable
+        0x12, 0x00, 0x02, 0x00, // RopSetColumns
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
+    ]);
+    rops.extend_from_slice(&50u16.to_le_bytes());
+    let table_request = rpc_proxy_wrapped_rop_buffer(&rops, &[1, u32::MAX, u32::MAX]);
+    let mut execute = emsmdb_rpc_ext2_request(65, &context, &table_request);
+    let table_response = rpc_proxy_in_channel_response_for_endpoint_query_with_store(
+        &store,
+        &validator,
+        &principal,
+        "mail.example.test:6001",
+        &mut execute,
+    )
+    .await
+    .expect("table response");
+    let rop_response = rpc_response_rpc_header_ext(&table_response);
+
+    assert!(contains_bytes(&rop_response, &utf16z("Inbox")));
+    assert!(contains_bytes(&rop_response, &utf16z("Archive")));
+}
+
 #[test]
 fn rpc_proxy_mailstore_in_channel_skips_duplicate_bind_ack() {
-    let endpoint_query = "mail.l-p-e.ch:6001";
+    let endpoint_query = "mail.example.test:6001";
     mark_rpc_proxy_out_endpoint_bind_ack(endpoint_query);
     let bind = hex_bytes(
         "05000b1310000000a400280003000000\
@@ -7091,7 +7239,7 @@ fn rpc_proxy_mailstore_in_channel_skips_duplicate_bind_ack() {
 
 #[test]
 fn rpc_proxy_address_book_in_channel_skips_duplicate_endpoint_ping_bind_ack() {
-    let endpoint_query = "mail.l-p-e.ch:6004";
+    let endpoint_query = "mail.example.test:6004";
     mark_rpc_proxy_out_endpoint_bind_ack(endpoint_query);
     let bind = hex_bytes(
         "05000b0310000000d000280030000000\
@@ -7301,9 +7449,7 @@ fn rpc_proxy_in_channel_scans_nspi_resolve_after_rts_pdu() {
         u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
         9
     );
-    assert!(response
-        .windows(b"test@l-p-e.ch".len())
-        .any(|window| window == b"test@l-p-e.ch"));
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
 }
 
 #[test]
@@ -7453,7 +7599,7 @@ fn rpc_proxy_in_channel_referral_opnums_get_server_name_responses() {
         let mut buffer = rfri_rpc_request(call_id, opnum, 96);
 
         let response =
-            rpc_proxy_in_channel_response_for_endpoint_query("mail.l-p-e.ch:6002", &mut buffer)
+            rpc_proxy_in_channel_response_for_endpoint_query("mail.example.test:6002", &mut buffer)
                 .unwrap_or_else(|| panic!("rfri opnum {opnum} response"));
 
         assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03], "opnum {opnum}");
@@ -7486,8 +7632,8 @@ fn rpc_proxy_in_channel_referral_opnums_get_server_name_responses() {
             );
         }
         assert!(response
-            .windows(b"mail.l-p-e.ch".len())
-            .any(|window| window == b"mail.l-p-e.ch"));
+            .windows(b"mail.example.test".len())
+            .any(|window| window == b"mail.example.test"));
         assert_eq!(
             u32::from_le_bytes([
                 response[response.len() - 4],
@@ -7513,6 +7659,23 @@ fn emsmdb_rpc_request(call_id: u32, opnum: u16, fragment_length: usize) -> Vec<u
     rpc_request(call_id, 3, opnum, fragment_length)
 }
 
+fn emsmdb_rpc_ext2_request(call_id: u32, context: &[u8], rop_buffer: &[u8]) -> Vec<u8> {
+    let mut stub = Vec::new();
+    stub.extend_from_slice(context);
+    stub.extend_from_slice(&(rop_buffer.len() as u32).to_le_bytes());
+    stub.extend_from_slice(&0u32.to_le_bytes());
+    stub.extend_from_slice(&(rop_buffer.len() as u32).to_le_bytes());
+    stub.extend_from_slice(rop_buffer);
+    while stub.len() % 4 != 0 {
+        stub.push(0);
+    }
+    let fragment_length = 24 + stub.len();
+    let mut request = rpc_request(call_id, 3, 11, fragment_length);
+    request[16..20].copy_from_slice(&(stub.len() as u32).to_le_bytes());
+    request[24..].copy_from_slice(&stub);
+    request
+}
+
 fn rpc_request(call_id: u32, context_id: u16, opnum: u16, fragment_length: usize) -> Vec<u8> {
     let mut request = vec![0u8; fragment_length];
     request[0..8].copy_from_slice(&[0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00]);
@@ -7523,6 +7686,19 @@ fn rpc_request(call_id: u32, context_id: u16, opnum: u16, fragment_length: usize
     request[20..22].copy_from_slice(&context_id.to_le_bytes());
     request[22..24].copy_from_slice(&opnum.to_le_bytes());
     request
+}
+
+fn rpc_response_context(response: &[u8]) -> [u8; 20] {
+    response[24..44].try_into().unwrap()
+}
+
+fn rpc_response_rpc_header_ext(response: &[u8]) -> Vec<u8> {
+    let offset = response
+        .windows(4)
+        .position(|window| window == [0, 0, 4, 0])
+        .expect("RPC_HEADER_EXT response");
+    let size = u16::from_le_bytes(response[offset + 4..offset + 6].try_into().unwrap()) as usize;
+    response[offset..offset + 8 + size].to_vec()
 }
 
 fn hex_bytes(input: &str) -> Vec<u8> {
