@@ -5856,9 +5856,10 @@ fn rpc_proxy_mgmt_inq_stats_response(call_id: u32, requested_stats: u32) -> Vec<
 
 fn rpc_proxy_rfri_get_new_dsa_response(call_id: u32, endpoint_query: &str) -> Vec<u8> {
     let server = rpc_proxy_referral_server_name(endpoint_query);
-    let mut stub = Vec::with_capacity(36 + server.len());
+    let mut stub = Vec::with_capacity(40 + server.len());
     push_le_u32(&mut stub, 0);
     push_le_u32(&mut stub, 0x0002_0000);
+    push_le_u32(&mut stub, 0x0002_0004);
     rpc_proxy_push_ndr_ascii_string(&mut stub, &server);
     push_le_u32(&mut stub, 0);
 
@@ -5867,7 +5868,8 @@ fn rpc_proxy_rfri_get_new_dsa_response(call_id: u32, endpoint_query: &str) -> Ve
 
 fn rpc_proxy_rfri_get_fqdn_response(call_id: u32, endpoint_query: &str) -> Vec<u8> {
     let server = rpc_proxy_referral_server_name(endpoint_query);
-    let mut stub = Vec::with_capacity(28 + server.len());
+    let mut stub = Vec::with_capacity(32 + server.len());
+    push_le_u32(&mut stub, 0x0002_0000);
     rpc_proxy_push_ndr_ascii_string(&mut stub, &server);
     push_le_u32(&mut stub, 0);
 

@@ -7189,7 +7189,18 @@ fn rpc_proxy_in_channel_referral_opnums_get_server_name_responses() {
             assert_ne!(
                 u32::from_le_bytes([response[28], response[29], response[30], response[31]]),
                 0,
-                "RfrGetNewDSA ppszServer"
+                "RfrGetNewDSA ppszServer outer pointer"
+            );
+            assert_ne!(
+                u32::from_le_bytes([response[32], response[33], response[34], response[35]]),
+                0,
+                "RfrGetNewDSA ppszServer string pointer"
+            );
+        } else {
+            assert_ne!(
+                u32::from_le_bytes([response[24], response[25], response[26], response[27]]),
+                0,
+                "RfrGetFQDNFromServerDN ppszServerFQDN string pointer"
             );
         }
         assert!(response
