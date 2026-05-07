@@ -5180,7 +5180,11 @@ fn is_rpc_proxy_echo_request(method: &Method, headers: &HeaderMap) -> bool {
     is_rpc_proxy_msrpc_request(headers)
 }
 
-fn is_rpc_proxy_in_data_channel_request(method: &Method, uri: &Uri, headers: &HeaderMap) -> bool {
+pub(crate) fn is_rpc_proxy_in_data_channel_request(
+    method: &Method,
+    uri: &Uri,
+    headers: &HeaderMap,
+) -> bool {
     method.as_str() == "RPC_IN_DATA"
         && is_rpc_proxy_endpoint_ping(uri)
         && is_rpc_proxy_msrpc_request(headers)
@@ -5191,7 +5195,7 @@ fn is_rpc_proxy_endpoint_ping(uri: &Uri) -> bool {
 }
 
 fn is_rpc_proxy_endpoint_query(query: &str) -> bool {
-    query.contains(":6001") || query.contains(":6004")
+    query.contains(":6001") || query.contains(":6002") || query.contains(":6004")
 }
 
 fn is_rpc_proxy_msrpc_request(headers: &HeaderMap) -> bool {

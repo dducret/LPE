@@ -20,7 +20,10 @@ use uuid::Uuid;
 use crate::{
     mapi::MapiEndpoint,
     mapi_mailstore,
-    service::{error_response, rpc_proxy_in_channel_response_for_buffer, ExchangeService},
+    service::{
+        error_response, is_rpc_proxy_in_data_channel_request,
+        rpc_proxy_in_channel_response_for_buffer, ExchangeService,
+    },
     store::ExchangeStore,
 };
 
@@ -6622,7 +6625,7 @@ async fn rpc_proxy_answers_authenticated_msrpch_echo_ping() {
 }
 
 #[tokio::test]
-async fn rpc_proxy_answers_authenticated_msrpch_out_data_ping() {
+async fn rpc_proxy_referral_endpoint_ping_includes_bind_ack_after_rts_connect() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -6646,10 +6649,10 @@ async fn rpc_proxy_answers_authenticated_msrpch_out_data_ping() {
     );
     assert_eq!(
         response.headers().get("x-lpe-rpc-proxy-status"),
-        Some(&HeaderValue::from_static("rts-connect"))
+        Some(&HeaderValue::from_static("endpoint-ping"))
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 72);
+    assert_eq!(body.len(), 184);
     assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
     assert_eq!(u16::from_le_bytes([body[18], body[19]]), 1);
     assert_eq!(
@@ -6666,6 +6669,9 @@ async fn rpc_proxy_answers_authenticated_msrpch_out_data_ping() {
         u32::from_le_bytes([body[60], body[61], body[62], body[63]]),
         0x0000_8000
     );
+    assert_eq!(body[72], 0x05);
+    assert_eq!(body[74], 0x0c);
+    assert_eq!(body[75], 0x03);
 }
 
 #[tokio::test]
@@ -6835,6 +6841,51 @@ async fn rpc_proxy_opens_authenticated_address_book_in_data_channel_without_wait
         response.headers().get("content-length"),
         Some(&HeaderValue::from_static("131072"))
     );
+}
+
+#[tokio::test]
+async fn rpc_proxy_opens_authenticated_referral_in_data_channel_without_buffering_body() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let method = Method::from_bytes(b"RPC_IN_DATA").expect("valid RPC method");
+    let uri: Uri = "/rpc/rpcproxy.dll?mail.example.test:6002".parse().unwrap();
+    let mut headers = bearer_headers();
+    headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
+    headers.insert("accept", HeaderValue::from_static("application/rpc"));
+
+    let response = service
+        .handle_rpc_proxy_in_data_channel(&method, &uri, &headers, Body::from("bind-bytes"))
+        .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type"),
+        Some(&HeaderValue::from_static("application/rpc"))
+    );
+    assert_eq!(
+        response.headers().get("x-lpe-rpc-proxy-status"),
+        Some(&HeaderValue::from_static("in-channel-open"))
+    );
+    assert_eq!(
+        response.headers().get("content-length"),
+        Some(&HeaderValue::from_static("0"))
+    );
+}
+
+#[test]
+fn rpc_proxy_classifies_referral_endpoint_as_streaming_in_data_channel() {
+    let method = Method::from_bytes(b"RPC_IN_DATA").expect("valid RPC method");
+    let uri: Uri = "/rpc/rpcproxy.dll?mail.example.test:6002".parse().unwrap();
+    let mut headers = HeaderMap::new();
+    headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
+    headers.insert("accept", HeaderValue::from_static("application/rpc"));
+
+    assert!(is_rpc_proxy_in_data_channel_request(
+        &method, &uri, &headers
+    ));
 }
 
 #[test]
