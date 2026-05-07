@@ -5747,11 +5747,15 @@ fn rpc_proxy_mailstore_endpoint_response_for_fragment(bytes: &[u8]) -> Option<Ve
     if alloc_hint != 4 || context_id != 0 || opnum != 1 {
         return None;
     }
-    Some(rpc_proxy_mailstore_endpoint_ping_success_response(call_id))
+    let request_stub = read_le_u32(bytes, 24)?;
+    Some(rpc_proxy_mailstore_endpoint_ping_success_response(
+        call_id,
+        request_stub,
+    ))
 }
 
-fn rpc_proxy_mailstore_endpoint_ping_success_response(call_id: u32) -> Vec<u8> {
-    let stub = 0u32.to_le_bytes();
+fn rpc_proxy_mailstore_endpoint_ping_success_response(call_id: u32, request_stub: u32) -> Vec<u8> {
+    let stub = request_stub.to_le_bytes();
     let fragment_length = 16 + 8 + stub.len();
     let mut packet = Vec::with_capacity(fragment_length);
     packet.extend_from_slice(&[0x05, 0x00, 0x02, 0x03, 0x10, 0x00, 0x00, 0x00]);

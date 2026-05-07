@@ -6784,7 +6784,7 @@ fn rpc_proxy_in_channel_endpoint_ping_request_gets_success_response() {
     );
     assert_eq!(
         u32::from_le_bytes([response[24], response[25], response[26], response[27]]),
-        0
+        0x32
     );
 }
 
