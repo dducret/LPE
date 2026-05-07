@@ -7180,6 +7180,18 @@ fn rpc_proxy_in_channel_referral_opnums_get_server_name_responses() {
             call_id,
             "opnum {opnum}"
         );
+        if opnum == 0 {
+            assert_eq!(
+                u32::from_le_bytes([response[24], response[25], response[26], response[27]]),
+                0,
+                "RfrGetNewDSA ppszUnused"
+            );
+            assert_ne!(
+                u32::from_le_bytes([response[28], response[29], response[30], response[31]]),
+                0,
+                "RfrGetNewDSA ppszServer"
+            );
+        }
         assert!(response
             .windows(b"mail.l-p-e.ch".len())
             .any(|window| window == b"mail.l-p-e.ch"));
