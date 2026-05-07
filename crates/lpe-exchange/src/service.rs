@@ -5187,8 +5187,11 @@ fn is_rpc_proxy_in_data_channel_request(method: &Method, uri: &Uri, headers: &He
 }
 
 fn is_rpc_proxy_endpoint_ping(uri: &Uri) -> bool {
-    uri.query()
-        .is_some_and(|query| query.contains(":6001") || query.contains(":6004"))
+    uri.query().is_some_and(is_rpc_proxy_endpoint_query)
+}
+
+fn is_rpc_proxy_endpoint_query(query: &str) -> bool {
+    query.contains(":6001") || query.contains(":6004")
 }
 
 fn is_rpc_proxy_msrpc_request(headers: &HeaderMap) -> bool {
@@ -5480,13 +5483,16 @@ fn rpc_proxy_out_channels(
 fn should_hold_rpc_proxy_in_channel(uri: &Uri) -> bool {
     let Some(query) = uri
         .query()
-        .filter(|query| query.contains(":6001") || query.contains(":6004"))
+        .filter(|query| is_rpc_proxy_endpoint_query(query))
     else {
         return false;
     };
     let hold_open_ms = rpc_proxy_channel_hold_ms();
     if hold_open_ms == 0 {
         return false;
+    }
+    if query.contains(":6004") {
+        return true;
     }
 
     let now = Instant::now();
