@@ -5704,6 +5704,35 @@ fn spawn_rpc_proxy_in_data_drain(method: &Method, uri: &Uri, headers: &HeaderMap
 }
 
 pub(crate) fn rpc_proxy_in_channel_response_for_chunk(bytes: &[u8]) -> Option<Vec<u8>> {
+    let mut offset = 0usize;
+    while offset + 16 <= bytes.len() {
+        let Some(fragment) = rpc_proxy_next_dce_rpc_fragment(bytes, &mut offset) else {
+            continue;
+        };
+        if let Some(response) = rpc_proxy_mailstore_endpoint_response_for_fragment(fragment) {
+            return Some(response);
+        }
+    }
+    None
+}
+
+fn rpc_proxy_next_dce_rpc_fragment<'a>(bytes: &'a [u8], offset: &mut usize) -> Option<&'a [u8]> {
+    if bytes.get(*offset..*offset + 2) != Some(&[0x05, 0x00]) {
+        *offset += 1;
+        return None;
+    }
+    let fragment_length =
+        u16::from_le_bytes([*bytes.get(*offset + 8)?, *bytes.get(*offset + 9)?]) as usize;
+    if fragment_length < 16 || *offset + fragment_length > bytes.len() {
+        *offset += 1;
+        return None;
+    }
+    let fragment = &bytes[*offset..*offset + fragment_length];
+    *offset += fragment_length;
+    Some(fragment)
+}
+
+fn rpc_proxy_mailstore_endpoint_response_for_fragment(bytes: &[u8]) -> Option<Vec<u8>> {
     if bytes.get(0..4) != Some(&[0x05, 0x00, 0x00, 0x03]) {
         return None;
     }

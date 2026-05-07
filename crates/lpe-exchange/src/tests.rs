@@ -6788,6 +6788,31 @@ fn rpc_proxy_in_channel_endpoint_ping_request_gets_success_response() {
     );
 }
 
+#[test]
+fn rpc_proxy_in_channel_scans_endpoint_ping_after_auth_fragment() {
+    let auth = [
+        0x05, 0x00, 0x10, 0x03, 0x10, 0x00, 0x00, 0x00, 0xfa, 0x00, 0xde, 0x00, 0x02, 0x00, 0x00,
+        0x00,
+    ];
+    let request = [
+        0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00,
+        0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x32, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+    ];
+    let mut chunk = Vec::new();
+    chunk.extend_from_slice(&auth);
+    chunk.extend_from_slice(&[0u8; 234]);
+    chunk.extend_from_slice(&request);
+
+    let response = rpc_proxy_in_channel_response_for_chunk(&chunk).expect("endpoint response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        3
+    );
+}
+
 #[tokio::test]
 async fn rpc_proxy_accepts_authenticated_rca_probe_without_405() {
     let store = FakeStore {
