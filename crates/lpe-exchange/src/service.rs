@@ -5332,7 +5332,40 @@ fn rpc_proxy_rts_connect_response(client_receive_window_size: u32) -> Response {
 fn rpc_proxy_mailstore_ping_response(uri: &Uri, client_receive_window_size: u32) -> Response {
     let mut body = rpc_proxy_rts_connect_body(client_receive_window_size);
     body.extend_from_slice(&rpc_proxy_dce_bind_ack_body(1));
+    if let Some(query) = uri
+        .query()
+        .filter(|query| is_rpc_proxy_endpoint_query(query))
+    {
+        mark_rpc_proxy_out_endpoint_bind_ack(query);
+    }
     rpc_proxy_mailstore_held_open_response(uri, body)
+}
+
+pub(crate) fn mark_rpc_proxy_out_endpoint_bind_ack(query: &str) {
+    let mut pending = rpc_proxy_out_endpoint_bind_acks()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let count = pending.entry(query.to_string()).or_insert(0);
+    *count = count.saturating_add(1);
+}
+
+fn consume_rpc_proxy_out_endpoint_bind_ack(query: &str) -> bool {
+    let mut pending = rpc_proxy_out_endpoint_bind_acks()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(count) = pending.get_mut(query) else {
+        return false;
+    };
+    *count = count.saturating_sub(1);
+    if *count == 0 {
+        pending.remove(query);
+    }
+    true
+}
+
+fn rpc_proxy_out_endpoint_bind_acks() -> &'static Mutex<HashMap<String, usize>> {
+    static BIND_ACKS: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
+    BIND_ACKS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn rpc_proxy_dce_bind_ack_body(call_id: u32) -> Vec<u8> {
@@ -5800,10 +5833,12 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
     }
     let call_id = read_le_u32(bytes, 12)?;
     match bytes.get(2).copied()? {
-        0x0b if !endpoint_query.contains(":6001") => {
+        0x0b => {
+            if consume_rpc_proxy_out_endpoint_bind_ack(endpoint_query) {
+                return None;
+            }
             return Some(rpc_proxy_dce_bind_ack_body(call_id));
         }
-        0x0b => return None,
         0x00 => {}
         _ => return None,
     }
