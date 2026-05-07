@@ -5770,6 +5770,7 @@ fn rpc_proxy_endpoint_response_for_fragment(bytes: &[u8]) -> Option<Vec<u8>> {
             Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats))
         }
         (2, 0) if alloc_hint >= 44 => Some(rpc_proxy_nspi_bind_response(call_id)),
+        (2, 20) if alloc_hint >= 24 => Some(rpc_proxy_nspi_resolve_names_w_response(call_id)),
         _ => None,
     }
 }
@@ -5796,6 +5797,17 @@ fn rpc_proxy_nspi_bind_response(call_id: u32) -> Vec<u8> {
         0x4c, 0x50, 0x45, 0x00, 0x4e, 0x53, 0x50, 0x49, 0x43, 0x54, 0x58, 0x00, 0x00, 0x00, 0x00,
         0x01,
     ]);
+    stub.extend_from_slice(&0u32.to_le_bytes());
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
+fn rpc_proxy_nspi_resolve_names_w_response(call_id: u32) -> Vec<u8> {
+    let mut stub = Vec::with_capacity(20);
+    stub.extend_from_slice(&0u32.to_le_bytes());
+    stub.extend_from_slice(&0u32.to_le_bytes());
+    stub.extend_from_slice(&0u32.to_le_bytes());
+    stub.extend_from_slice(&0u32.to_le_bytes());
     stub.extend_from_slice(&0u32.to_le_bytes());
 
     rpc_proxy_dce_response(call_id, &stub)

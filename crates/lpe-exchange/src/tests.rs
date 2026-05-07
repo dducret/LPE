@@ -6917,6 +6917,36 @@ fn rpc_proxy_in_channel_nspi_bind_request_gets_context_handle_response() {
 }
 
 #[test]
+fn rpc_proxy_in_channel_nspi_resolve_names_w_request_gets_response() {
+    let request = [
+        0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0xd0, 0x00, 0x10, 0x00, 0x04, 0x00, 0x00,
+        0x00, 0x98, 0x00, 0x00, 0x00, 0x02, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4c, 0x50,
+        0x45, 0x00, 0x4e, 0x53, 0x50, 0x49, 0x43, 0x54, 0x58, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
+        0x00, 0x00, 0x00,
+    ];
+    let mut buffer = request.to_vec();
+    buffer.resize(208, 0);
+
+    let response =
+        rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("resolve names response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 44);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        4
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[16], response[17], response[18], response[19]]),
+        20
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[40], response[41], response[42], response[43]]),
+        0
+    );
+}
+
+#[test]
 fn rpc_proxy_in_channel_scans_endpoint_ping_after_auth_fragment() {
     let auth = [
         0x05, 0x00, 0x10, 0x03, 0x10, 0x00, 0x00, 0x00, 0xfa, 0x00, 0xde, 0x00, 0x02, 0x00, 0x00,
