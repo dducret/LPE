@@ -6926,22 +6926,44 @@ fn rpc_proxy_in_channel_nspi_resolve_names_w_request_gets_response() {
     ];
     let mut buffer = request.to_vec();
     buffer.resize(208, 0);
+    buffer[72..76].copy_from_slice(&0x3003_001eu32.to_le_bytes());
+    buffer[76..80].copy_from_slice(&0x3001_001eu32.to_le_bytes());
+    let requested_name: Vec<u8> = "=SMTP:fabien@l-p-e.ch\0"
+        .encode_utf16()
+        .flat_map(|unit| unit.to_le_bytes())
+        .collect();
+    buffer[112..112 + requested_name.len()].copy_from_slice(&requested_name);
 
     let response =
         rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("resolve names response");
 
     assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
-    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 44);
+    assert_eq!(
+        u16::from_le_bytes([response[8], response[9]]) as usize,
+        response.len()
+    );
     assert_eq!(
         u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
         4
     );
     assert_eq!(
         u32::from_le_bytes([response[16], response[17], response[18], response[19]]),
-        20
+        (response.len() - 24) as u32
     );
+    assert!(response
+        .windows(b"fabien@l-p-e.ch".len())
+        .any(|window| window == b"fabien@l-p-e.ch"));
+    assert!(response
+        .windows(b"Fabien".len())
+        .any(|window| window == b"Fabien"));
+    let return_offset = response.len() - 4;
     assert_eq!(
-        u32::from_le_bytes([response[40], response[41], response[42], response[43]]),
+        u32::from_le_bytes([
+            response[return_offset],
+            response[return_offset + 1],
+            response[return_offset + 2],
+            response[return_offset + 3]
+        ]),
         0
     );
 }

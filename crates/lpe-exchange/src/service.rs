@@ -5770,7 +5770,9 @@ fn rpc_proxy_endpoint_response_for_fragment(bytes: &[u8]) -> Option<Vec<u8>> {
             Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats))
         }
         (2, 0) if alloc_hint >= 44 => Some(rpc_proxy_nspi_bind_response(call_id)),
-        (2, 20) if alloc_hint >= 24 => Some(rpc_proxy_nspi_resolve_names_w_response(call_id)),
+        (2, 20) if alloc_hint >= 24 => {
+            Some(rpc_proxy_nspi_resolve_names_w_response(call_id, bytes))
+        }
         _ => None,
     }
 }
@@ -5802,15 +5804,138 @@ fn rpc_proxy_nspi_bind_response(call_id: u32) -> Vec<u8> {
     rpc_proxy_dce_response(call_id, &stub)
 }
 
-fn rpc_proxy_nspi_resolve_names_w_response(call_id: u32) -> Vec<u8> {
-    let mut stub = Vec::with_capacity(20);
-    stub.extend_from_slice(&0u32.to_le_bytes());
-    stub.extend_from_slice(&0u32.to_le_bytes());
-    stub.extend_from_slice(&0u32.to_le_bytes());
-    stub.extend_from_slice(&0u32.to_le_bytes());
-    stub.extend_from_slice(&0u32.to_le_bytes());
+fn rpc_proxy_nspi_resolve_names_w_response(call_id: u32, request: &[u8]) -> Vec<u8> {
+    const MID_RESOLVED: u32 = 2;
+    const PR_DISPLAY_NAME_A: u32 = 0x3001_001e;
+    const PR_EMAIL_ADDRESS_A: u32 = 0x3003_001e;
+
+    let smtp_address = rpc_proxy_nspi_requested_smtp_address(request)
+        .unwrap_or_else(|| "test@l-p-e.ch".to_string());
+    let display_name = rpc_proxy_display_name_for_smtp_address(&smtp_address);
+    let property_tags = rpc_proxy_nspi_requested_property_tags(request);
+    let row_values: Vec<(u32, String)> = property_tags
+        .into_iter()
+        .filter_map(|tag| match tag {
+            PR_EMAIL_ADDRESS_A => Some((tag, smtp_address.clone())),
+            PR_DISPLAY_NAME_A => Some((tag, display_name.clone())),
+            _ => None,
+        })
+        .collect();
+    let row_values = if row_values.is_empty() {
+        vec![
+            (PR_EMAIL_ADDRESS_A, smtp_address),
+            (PR_DISPLAY_NAME_A, display_name),
+        ]
+    } else {
+        row_values
+    };
+
+    let mut stub = Vec::with_capacity(192);
+    let mut deferred_strings = Vec::new();
+
+    push_le_u32(&mut stub, 0x0002_0000);
+    rpc_proxy_push_property_tag_array(&mut stub, &[MID_RESOLVED]);
+
+    push_le_u32(&mut stub, 0x0002_0004);
+    push_le_u32(&mut stub, 1);
+    push_le_u32(&mut stub, 1);
+    push_le_u32(&mut stub, 0);
+    push_le_u32(&mut stub, row_values.len() as u32);
+    push_le_u32(&mut stub, 0x0002_0008);
+    push_le_u32(&mut stub, row_values.len() as u32);
+
+    for (index, (property_tag, value)) in row_values.iter().enumerate() {
+        push_le_u32(&mut stub, *property_tag);
+        push_le_u32(&mut stub, 0);
+        push_le_u32(&mut stub, 0x0002_000c + (index as u32 * 4));
+        rpc_proxy_push_ndr_ascii_string(&mut deferred_strings, value);
+    }
+    stub.extend_from_slice(&deferred_strings);
+    push_le_u32(&mut stub, 0);
 
     rpc_proxy_dce_response(call_id, &stub)
+}
+
+fn rpc_proxy_nspi_requested_property_tags(request: &[u8]) -> Vec<u32> {
+    let mut tags = Vec::new();
+    let mut offset = 24usize;
+    while offset + 4 <= request.len() {
+        let Some(tag) = read_le_u32(request, offset) else {
+            break;
+        };
+        if matches!(tag, 0x3001_001e | 0x3003_001e) && !tags.contains(&tag) {
+            tags.push(tag);
+        }
+        offset += 4;
+    }
+    tags
+}
+
+fn rpc_proxy_nspi_requested_smtp_address(request: &[u8]) -> Option<String> {
+    const SMTP_PREFIX_UTF16LE: &[u8] = b"=\0S\0M\0T\0P\0:\0";
+
+    let start = request
+        .windows(SMTP_PREFIX_UTF16LE.len())
+        .position(|window| {
+            window
+                .chunks_exact(2)
+                .zip(SMTP_PREFIX_UTF16LE.chunks_exact(2))
+                .all(|(actual, expected)| {
+                    actual[0].eq_ignore_ascii_case(&expected[0]) && actual[1] == expected[1]
+                })
+        })?;
+    let mut units = Vec::new();
+    let mut offset = start + SMTP_PREFIX_UTF16LE.len();
+    while offset + 1 < request.len() {
+        let unit = u16::from_le_bytes([request[offset], request[offset + 1]]);
+        if unit == 0 {
+            break;
+        }
+        units.push(unit);
+        offset += 2;
+    }
+    String::from_utf16(&units)
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| value.contains('@'))
+}
+
+fn rpc_proxy_display_name_for_smtp_address(address: &str) -> String {
+    let local_part = address.split('@').next().unwrap_or(address).trim();
+    let mut chars = local_part.chars();
+    let Some(first) = chars.next() else {
+        return address.to_string();
+    };
+    let mut display_name = first.to_uppercase().collect::<String>();
+    display_name.push_str(chars.as_str());
+    display_name
+}
+
+fn rpc_proxy_push_property_tag_array(buffer: &mut Vec<u8>, values: &[u32]) {
+    push_le_u32(buffer, values.len() as u32);
+    push_le_u32(buffer, values.len() as u32);
+    push_le_u32(buffer, 0);
+    push_le_u32(buffer, values.len() as u32);
+    for value in values {
+        push_le_u32(buffer, *value);
+    }
+}
+
+fn rpc_proxy_push_ndr_ascii_string(buffer: &mut Vec<u8>, value: &str) {
+    let bytes = value.as_bytes();
+    let count = bytes.len() as u32 + 1;
+    push_le_u32(buffer, count);
+    push_le_u32(buffer, 0);
+    push_le_u32(buffer, count);
+    buffer.extend_from_slice(bytes);
+    buffer.push(0);
+    while buffer.len() % 4 != 0 {
+        buffer.push(0);
+    }
+}
+
+fn push_le_u32(buffer: &mut Vec<u8>, value: u32) {
+    buffer.extend_from_slice(&value.to_le_bytes());
 }
 
 fn rpc_proxy_dce_response(call_id: u32, stub: &[u8]) -> Vec<u8> {
