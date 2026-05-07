@@ -612,7 +612,7 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
                     parse_rpc_proxy_out_data_connect_request(method, headers, request_body)
                 {
                     if is_rpc_proxy_mailstore_endpoint_ping(uri) {
-                        rpc_proxy_mailstore_ping_response(connect.receive_window_size)
+                        rpc_proxy_mailstore_ping_response(uri, connect.receive_window_size)
                     } else {
                         rpc_proxy_rts_connect_response(connect.receive_window_size)
                     }
@@ -5321,10 +5321,10 @@ fn rpc_proxy_rts_connect_response(client_receive_window_size: u32) -> Response {
     )
 }
 
-fn rpc_proxy_mailstore_ping_response(client_receive_window_size: u32) -> Response {
+fn rpc_proxy_mailstore_ping_response(uri: &Uri, client_receive_window_size: u32) -> Response {
     let mut body = rpc_proxy_rts_connect_body(client_receive_window_size);
     body.extend_from_slice(&rpc_proxy_mailstore_bind_ack_body());
-    rpc_proxy_binary_response(body, RPC_PROXY_MAILSTORE_PING_STATUS)
+    rpc_proxy_mailstore_held_open_response(uri, body)
 }
 
 fn rpc_proxy_mailstore_bind_ack_body() -> Vec<u8> {
@@ -5403,6 +5403,77 @@ fn rpc_proxy_in_channel_response(uri: &Uri) -> Response {
         RPC_PROXY_IN_CHANNEL_STATUS,
     );
     response
+}
+
+fn rpc_proxy_mailstore_held_open_response(uri: &Uri, body: Vec<u8>) -> Response {
+    let Some(query) = uri.query() else {
+        return rpc_proxy_binary_response(body, RPC_PROXY_MAILSTORE_PING_STATUS);
+    };
+    let hold_open_ms = rpc_proxy_channel_hold_ms();
+    if hold_open_ms == 0 {
+        return rpc_proxy_binary_response(body, RPC_PROXY_MAILSTORE_PING_STATUS);
+    }
+
+    let payload_bytes = body.len();
+    let payload_preview_hex = mapi::debug_payload_preview_hex(&body);
+    let query = query.to_string();
+    let (sender, receiver) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
+    register_rpc_proxy_out_channel(&query, sender);
+
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(hold_open_ms)).await;
+        remove_rpc_proxy_out_channel(&query);
+    });
+
+    let initial = Some(Ok::<Bytes, std::io::Error>(Bytes::from(body)));
+    let followups = tokio_stream::wrappers::UnboundedReceiverStream::new(receiver).map(Ok);
+    let stream = tokio_stream::iter(initial).chain(followups);
+    let mut response = Response::new(Body::from_stream(stream));
+    decorate_rpc_proxy_binary_response(
+        &mut response,
+        payload_bytes,
+        payload_preview_hex,
+        RPC_PROXY_MAILSTORE_PING_STATUS,
+    );
+    response.headers_mut().insert(
+        CONTENT_LENGTH,
+        HeaderValue::from_str(&RPC_PROXY_OUT_CHANNEL_CONTENT_LENGTH.to_string())
+            .unwrap_or_else(|_| HeaderValue::from_static("131072")),
+    );
+    response
+}
+
+fn register_rpc_proxy_out_channel(query: &str, sender: tokio::sync::mpsc::UnboundedSender<Bytes>) {
+    let mut channels = rpc_proxy_out_channels()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    channels.insert(query.to_string(), sender);
+}
+
+fn send_rpc_proxy_out_channel(query: &str, bytes: Vec<u8>) {
+    let sender = {
+        let channels = rpc_proxy_out_channels()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        channels.get(query).cloned()
+    };
+    if let Some(sender) = sender {
+        let _ = sender.send(Bytes::from(bytes));
+    }
+}
+
+fn remove_rpc_proxy_out_channel(query: &str) {
+    let mut channels = rpc_proxy_out_channels()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    channels.remove(query);
+}
+
+fn rpc_proxy_out_channels(
+) -> &'static Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<Bytes>>> {
+    static CHANNELS: OnceLock<Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<Bytes>>>> =
+        OnceLock::new();
+    CHANNELS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn should_hold_rpc_proxy_in_channel(uri: &Uri) -> bool {
@@ -5567,6 +5638,10 @@ fn spawn_rpc_proxy_in_data_drain(method: &Method, uri: &Uri, headers: &HeaderMap
                 Ok(bytes) => {
                     total_body_bytes += bytes.len();
                     let request_body_preview_hex = mapi::debug_payload_preview_hex(bytes.as_ref());
+                    if let Some(response) = rpc_proxy_in_channel_response_for_chunk(bytes.as_ref())
+                    {
+                        send_rpc_proxy_out_channel(&query, response);
+                    }
                     info!(
                         rca_debug = true,
                         adapter = "rpcproxy",
@@ -5626,6 +5701,40 @@ fn spawn_rpc_proxy_in_data_drain(method: &Method, uri: &Uri, headers: &HeaderMap
             message = "rca debug rpc proxy in data stream finished"
         );
     });
+}
+
+pub(crate) fn rpc_proxy_in_channel_response_for_chunk(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.get(0..4) != Some(&[0x05, 0x00, 0x00, 0x03]) {
+        return None;
+    }
+    let fragment_length = u16::from_le_bytes([*bytes.get(8)?, *bytes.get(9)?]) as usize;
+    if fragment_length > bytes.len() || fragment_length < 24 {
+        return None;
+    }
+    let call_id = read_le_u32(bytes, 12)?;
+    let alloc_hint = read_le_u32(bytes, 16)?;
+    let context_id = u16::from_le_bytes([*bytes.get(20)?, *bytes.get(21)?]);
+    let opnum = u16::from_le_bytes([*bytes.get(22)?, *bytes.get(23)?]);
+    if alloc_hint != 4 || context_id != 0 || opnum != 1 {
+        return None;
+    }
+    Some(rpc_proxy_mailstore_endpoint_ping_success_response(call_id))
+}
+
+fn rpc_proxy_mailstore_endpoint_ping_success_response(call_id: u32) -> Vec<u8> {
+    let stub = 0u32.to_le_bytes();
+    let fragment_length = 16 + 8 + stub.len();
+    let mut packet = Vec::with_capacity(fragment_length);
+    packet.extend_from_slice(&[0x05, 0x00, 0x02, 0x03, 0x10, 0x00, 0x00, 0x00]);
+    packet.extend_from_slice(&(fragment_length as u16).to_le_bytes());
+    packet.extend_from_slice(&0u16.to_le_bytes());
+    packet.extend_from_slice(&call_id.to_le_bytes());
+    packet.extend_from_slice(&(stub.len() as u32).to_le_bytes());
+    packet.extend_from_slice(&0u16.to_le_bytes());
+    packet.push(0);
+    packet.push(0);
+    packet.extend_from_slice(&stub);
+    packet
 }
 
 #[cfg(not(test))]

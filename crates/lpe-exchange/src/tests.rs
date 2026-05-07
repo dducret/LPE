@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::{
     mapi::MapiEndpoint,
     mapi_mailstore,
-    service::{error_response, ExchangeService},
+    service::{error_response, rpc_proxy_in_channel_response_for_chunk, ExchangeService},
     store::ExchangeStore,
 };
 
@@ -6763,6 +6763,28 @@ async fn rpc_proxy_opens_authenticated_in_data_channel_without_waiting_for_body_
     assert_eq!(
         response.headers().get("content-length"),
         Some(&HeaderValue::from_static("131072"))
+    );
+}
+
+#[test]
+fn rpc_proxy_in_channel_endpoint_ping_request_gets_success_response() {
+    let request = [
+        0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00,
+        0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x32, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+    ];
+
+    let response = rpc_proxy_in_channel_response_for_chunk(&request).expect("endpoint response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 28);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        2
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[24], response[25], response[26], response[27]]),
+        0
     );
 }
 
