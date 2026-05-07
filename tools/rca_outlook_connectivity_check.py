@@ -11,6 +11,7 @@ import argparse
 import base64
 import json
 import os
+import ssl
 import struct
 import sys
 import textwrap
@@ -54,6 +55,19 @@ class HttpResponse:
         return self.body.decode("utf-8", errors="replace")
 
 
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> None:
+        return None
+
+
 def request(
     method: str,
     url: str,
@@ -61,10 +75,18 @@ def request(
     headers: dict[str, str] | None = None,
     timeout: int = 20,
     read_limit: int | None = None,
+    insecure_tls: bool = False,
+    follow_redirects: bool = True,
 ) -> HttpResponse:
     req = urllib.request.Request(url, data=body, method=method, headers=headers or {})
+    handlers: list[Any] = []
+    if insecure_tls and urllib.parse.urlparse(url).scheme == "https":
+        handlers.append(urllib.request.HTTPSHandler(context=ssl._create_unverified_context()))
+    if not follow_redirects:
+        handlers.append(NoRedirectHandler)
+    opener = urllib.request.build_opener(*handlers) if handlers else urllib.request
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with opener.open(req, timeout=timeout) as resp:
             response_body = resp.read(read_limit) if read_limit is not None else resp.read()
             return HttpResponse(resp.status, dict(resp.headers.items()), response_body)
     except urllib.error.HTTPError as error:
@@ -95,6 +117,11 @@ def header_value(headers: dict[str, str], name: str) -> str:
     return ""
 
 
+def url_host(value: str) -> str:
+    parsed = urllib.parse.urlparse(value)
+    return parsed.hostname or ""
+
+
 def mapi_request_id(sequence: str | int | None = None) -> str:
     value = str(uuid.uuid4())
     if sequence is not None:
@@ -123,6 +150,8 @@ def check_pox_autodiscover(
     expect_ews: bool,
     expect_exchange_providers: bool,
     expect_mapi: bool,
+    expected_service_host: str | None,
+    insecure_tls: bool,
     timeout: int,
 ) -> None:
     body = POX_BODY.format(email=xml_escape(email)).encode("utf-8")
@@ -141,6 +170,7 @@ def check_pox_autodiscover(
                 "User-Agent": "lpe-rca-connectivity-check/0.1",
             },
             timeout,
+            insecure_tls=insecure_tls,
         )
         text = response.text
         require(response.status == 200, f"{path} returned HTTP {response.status}: {text[:300]}")
@@ -149,9 +179,18 @@ def check_pox_autodiscover(
         require(f"<AutoDiscoverSMTPAddress>{email}</AutoDiscoverSMTPAddress>" in text, f"{path} returned wrong mailbox")
         require("<Type>IMAP</Type>" in text, f"{path} missing default IMAP protocol")
         require("<Type>MobileSync</Type>" not in text, f"{path} incorrectly advertises ActiveSync as desktop Exchange")
+        if expected_service_host:
+            require(
+                f"<Server>{expected_service_host}</Server>" in text,
+                f"{path} does not publish expected service host {expected_service_host}",
+            )
         if expect_ews:
             require("<Type>WEB</Type>" in text, f"{path} missing opt-in EWS WEB block")
             require("<ASUrl>" in text, f"{path} missing EWS ASUrl")
+            require(
+                not expected_service_host or f"https://{expected_service_host}/EWS/Exchange.asmx" in text,
+                f"{path} does not publish EWS on expected service host {expected_service_host}",
+            )
         if expect_exchange_providers:
             require(
                 "      <Protocol>\n        <Type>EXCH</Type>" in text,
@@ -176,6 +215,7 @@ def check_pox_autodiscover(
                 "X-MapiHttpCapability": "1",
             },
             timeout,
+            insecure_tls=insecure_tls,
         )
         text = response.text
         require(response.status == 200, f"POX MAPI probe returned HTTP {response.status}: {text[:300]}")
@@ -190,39 +230,90 @@ def check_json_autodiscover(
     email: str,
     expect_ews: bool,
     expect_mapi: bool,
+    expected_service_host: str | None,
+    insecure_tls: bool,
     timeout: int,
 ) -> None:
     encoded_email = urllib.parse.quote(email, safe="")
     url = join_url(base_url, f"/autodiscover/autodiscover.json/v1.0/{encoded_email}?Protocol=AutoDiscoverV1")
-    response = request("GET", url, timeout=timeout)
+    response = request("GET", url, timeout=timeout, insecure_tls=insecure_tls)
     require(response.status == 200, f"Autodiscover JSON v1 returned HTTP {response.status}: {response.text[:300]}")
     payload = json.loads(response.text)
     require(payload.get("Protocol") == "AutoDiscoverV1", "Autodiscover JSON did not identify AutoDiscoverV1")
     require(payload.get("Url", "").endswith("/autodiscover/autodiscover.xml"), "Autodiscover JSON returned unexpected POX URL")
 
     ews_url = join_url(base_url, f"/autodiscover/autodiscover.json/v1.0/{encoded_email}?Protocol=EWS")
-    ews_response = request("GET", ews_url, timeout=timeout)
+    ews_response = request("GET", ews_url, timeout=timeout, insecure_tls=insecure_tls)
     if expect_ews:
         require(ews_response.status == 200, f"Autodiscover JSON EWS returned HTTP {ews_response.status}: {ews_response.text[:300]}")
         ews_payload = json.loads(ews_response.text)
         require(ews_payload.get("Protocol") == "EWS", "Autodiscover JSON EWS returned wrong protocol")
         require(ews_payload.get("Url", "").endswith("/EWS/Exchange.asmx"), "Autodiscover JSON EWS returned unexpected URL")
+        if expected_service_host:
+            require(
+                url_host(ews_payload.get("Url", "")) == expected_service_host,
+                f"Autodiscover JSON EWS did not return expected service host {expected_service_host}",
+            )
     else:
         require(ews_response.status in {200, 404}, f"Autodiscover JSON EWS returned unexpected HTTP {ews_response.status}")
 
     mapi_url = join_url(base_url, f"/autodiscover/autodiscover.json/v1.0/{encoded_email}?Protocol=MapiHttp")
-    mapi_response = request("GET", mapi_url, timeout=timeout)
+    mapi_response = request("GET", mapi_url, timeout=timeout, insecure_tls=insecure_tls)
     if expect_mapi:
         require(mapi_response.status == 200, f"Autodiscover JSON MAPI returned HTTP {mapi_response.status}: {mapi_response.text[:300]}")
         mapi_payload = json.loads(mapi_response.text)
         require(mapi_payload.get("Protocol") == "MapiHttp", "Autodiscover JSON MAPI returned wrong protocol")
         require("/mapi/emsmdb/" in mapi_payload.get("Url", ""), "Autodiscover JSON MAPI returned unexpected URL")
+        if expected_service_host:
+            require(
+                url_host(mapi_payload.get("Url", "")) == expected_service_host,
+                f"Autodiscover JSON MAPI did not return expected service host {expected_service_host}",
+            )
     else:
         require(mapi_response.status in {200, 404}, f"Autodiscover JSON MAPI returned unexpected HTTP {mapi_response.status}")
     print("ok autodiscover_json")
 
 
-def check_jmap_session(base_url: str, email: str, password: str, timeout: int) -> None:
+def check_jmap_publication_headers(
+    base_url: str,
+    expected_service_host: str | None,
+    insecure_tls: bool,
+    timeout: int,
+) -> None:
+    well_known = request(
+        "GET",
+        join_url(base_url, "/.well-known/jmap"),
+        timeout=timeout,
+        insecure_tls=insecure_tls,
+        follow_redirects=False,
+    )
+    require(
+        well_known.status in {301, 302, 307, 308},
+        f"/.well-known/jmap returned HTTP {well_known.status}; expected redirect to JMAP session",
+    )
+    location = header_value(well_known.headers, "location")
+    require(location.endswith("/api/jmap/session"), f"/.well-known/jmap returned unexpected Location {location!r}")
+    if expected_service_host:
+        require(
+            url_host(location) == expected_service_host,
+            f"/.well-known/jmap did not redirect to expected service host {expected_service_host}",
+        )
+
+    anonymous = request(
+        "GET",
+        join_url(base_url, "/api/jmap/session"),
+        headers={"Accept": "application/json"},
+        timeout=timeout,
+        insecure_tls=insecure_tls,
+    )
+    require(
+        anonymous.status == 401,
+        f"anonymous JMAP session returned HTTP {anonymous.status}; expected authentication challenge",
+    )
+    print("ok jmap_publication_headers")
+
+
+def check_jmap_session(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
     login_body = json.dumps({"email": email, "password": password}).encode("utf-8")
     login = request(
         "POST",
@@ -230,6 +321,7 @@ def check_jmap_session(base_url: str, email: str, password: str, timeout: int) -
         login_body,
         {"Content-Type": "application/json", "Accept": "application/json"},
         timeout,
+        insecure_tls=insecure_tls,
     )
     require(login.status == 200, f"mail login returned HTTP {login.status}: {login.text[:300]}")
     token = json.loads(login.text).get("token")
@@ -240,6 +332,7 @@ def check_jmap_session(base_url: str, email: str, password: str, timeout: int) -
         join_url(base_url, "/api/jmap/session"),
         headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
         timeout=timeout,
+        insecure_tls=insecure_tls,
     )
     require(session.status == 200, f"JMAP session returned HTTP {session.status}: {session.text[:300]}")
     require("json" in content_type(session.headers), "JMAP session did not return JSON headers")
@@ -249,7 +342,7 @@ def check_jmap_session(base_url: str, email: str, password: str, timeout: int) -
     print("ok jmap_session")
 
 
-def check_ews_basic(base_url: str, email: str, password: str, timeout: int) -> None:
+def check_ews_basic(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
     token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
     response = request(
         "POST",
@@ -262,6 +355,7 @@ def check_ews_basic(base_url: str, email: str, password: str, timeout: int) -> N
             "User-Agent": "lpe-rca-connectivity-check/0.1",
         },
         timeout,
+        insecure_tls=insecure_tls,
     )
     require(response.status == 200, f"EWS Basic probe returned HTTP {response.status}: {response.text[:500]}")
     require("xml" in content_type(response.headers), "EWS Basic probe did not return XML headers")
@@ -270,7 +364,7 @@ def check_ews_basic(base_url: str, email: str, password: str, timeout: int) -> N
     print("ok ews_basic")
 
 
-def check_mapi_ping(base_url: str, email: str, password: str, timeout: int) -> None:
+def check_mapi_ping(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
     token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
     for path in ["/mapi/emsmdb", "/mapi/nspi"]:
         response = request(
@@ -285,6 +379,7 @@ def check_mapi_ping(base_url: str, email: str, password: str, timeout: int) -> N
                 "X-ClientInfo": "lpe-rca-connectivity-check",
             },
             timeout,
+            insecure_tls=insecure_tls,
         )
         require(response.status == 200, f"MAPI PING {path} returned HTTP {response.status}: {response.text[:300]}")
         require("application/mapi-http" in content_type(response.headers), f"MAPI PING {path} did not return MAPI content")
@@ -293,7 +388,7 @@ def check_mapi_ping(base_url: str, email: str, password: str, timeout: int) -> N
     print("ok mapi_ping")
 
 
-def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, timeout: int) -> None:
+def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
     token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
     response = request(
         "POST",
@@ -308,6 +403,7 @@ def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, 
             "User-Agent": "MapiHttpClient",
         },
         timeout,
+        insecure_tls=insecure_tls,
     )
     require(response.status == 200, f"MAPI NSPI Bind returned HTTP {response.status}: {response.text[:300]}")
     require("application/mapi-http" in content_type(response.headers), "MAPI NSPI Bind did not return MAPI content")
@@ -320,7 +416,7 @@ def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, 
     print("ok mapi_nspi_bind_octet_stream")
 
 
-def check_mapi_nspi_address_book(base_url: str, email: str, password: str, timeout: int) -> None:
+def check_mapi_nspi_address_book(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
     token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
     path = f"/mapi/nspi/?mailboxId={urllib.parse.quote(email, safe='@')}"
     probes = {
@@ -343,6 +439,7 @@ def check_mapi_nspi_address_book(base_url: str, email: str, password: str, timeo
                 "User-Agent": "MapiHttpClient",
             },
             timeout,
+            insecure_tls=insecure_tls,
         )
         require(response.status == 200, f"MAPI NSPI {request_type} returned HTTP {response.status}: {response.text[:300]}")
         require("application/mapi-http" in content_type(response.headers), f"MAPI NSPI {request_type} did not return MAPI content")
@@ -352,7 +449,7 @@ def check_mapi_nspi_address_book(base_url: str, email: str, password: str, timeo
     print("ok mapi_nspi_address_book")
 
 
-def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, timeout: int) -> None:
+def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, insecure_tls: bool, timeout: int) -> None:
     parsed = urllib.parse.urlparse(base_url)
     rpc_host = parsed.hostname or parsed.netloc
     require(bool(rpc_host), "base URL must include a host for RPC proxy checks")
@@ -362,7 +459,7 @@ def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, timeou
         "User-Agent": "MSRPC",
     }
 
-    anonymous = request("RPC_IN_DATA", rpc_url, b"", headers, timeout)
+    anonymous = request("RPC_IN_DATA", rpc_url, b"", headers, timeout, insecure_tls=insecure_tls)
     require(
         anonymous.status == 401,
         f"anonymous RPC proxy probe returned HTTP {anonymous.status}; RCA requires anonymous to fail",
@@ -387,6 +484,7 @@ def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, timeou
                 authenticated_headers,
                 timeout,
                 read_limit=expected_length,
+                insecure_tls=insecure_tls,
             )
             require(
                 authenticated.status == 200,
@@ -473,7 +571,7 @@ def main() -> int:
             """\
             Examples:
               LPE_RCA_PASSWORD='...' tools/rca_outlook_connectivity_check.py --expect-ews --expect-exchange-providers --check-ews-basic
-              tools/rca_outlook_connectivity_check.py --base-url http://127.0.0.1:8080 --email test@example.test
+              tools/rca_outlook_connectivity_check.py --base-url https://l-p-e.ch --email test@l-p-e.ch --expected-service-host mail.l-p-e.ch --expect-ews --expect-exchange-providers --insecure
             """
         ),
     )
@@ -482,6 +580,15 @@ def main() -> int:
     parser.add_argument("--password", default=os.getenv("LPE_RCA_PASSWORD"))
     parser.add_argument("--timeout", type=int, default=int(os.getenv("LPE_RCA_TIMEOUT", "20")))
     parser.add_argument("--expect-ews", action="store_true", help="Require EWS discovery to be published.")
+    parser.add_argument(
+        "--expected-service-host",
+        help="Require discovered service URLs and JMAP redirects to use this host, for example mail.l-p-e.ch.",
+    )
+    parser.add_argument(
+        "--insecure",
+        action="store_true",
+        help="Disable TLS certificate verification for local or pre-production smoke checks.",
+    )
     parser.add_argument(
         "--expect-exchange-providers",
         action="store_true",
@@ -516,20 +623,31 @@ def main() -> int:
         args.expect_ews,
         args.expect_exchange_providers,
         args.expect_mapi,
+        args.expected_service_host,
+        args.insecure,
         args.timeout,
     )
-    check_json_autodiscover(base_url, args.email, args.expect_ews, args.expect_mapi, args.timeout)
+    check_json_autodiscover(
+        base_url,
+        args.email,
+        args.expect_ews,
+        args.expect_mapi,
+        args.expected_service_host,
+        args.insecure,
+        args.timeout,
+    )
+    check_jmap_publication_headers(base_url, args.expected_service_host, args.insecure, args.timeout)
 
     if args.password:
-        check_jmap_session(base_url, args.email, args.password, args.timeout)
+        check_jmap_session(base_url, args.email, args.password, args.insecure, args.timeout)
         if args.check_ews_basic:
-            check_ews_basic(base_url, args.email, args.password, args.timeout)
+            check_ews_basic(base_url, args.email, args.password, args.insecure, args.timeout)
         if args.check_mapi_ping:
-            check_mapi_ping(base_url, args.email, args.password, args.timeout)
+            check_mapi_ping(base_url, args.email, args.password, args.insecure, args.timeout)
         if args.check_mapi_nspi_bind_octet_stream:
-            check_mapi_nspi_bind_octet_stream(base_url, args.email, args.password, args.timeout)
+            check_mapi_nspi_bind_octet_stream(base_url, args.email, args.password, args.insecure, args.timeout)
         if args.check_mapi_nspi_address_book:
-            check_mapi_nspi_address_book(base_url, args.email, args.password, args.timeout)
+            check_mapi_nspi_address_book(base_url, args.email, args.password, args.insecure, args.timeout)
     else:
         print("skip jmap_session password not provided")
         if (
@@ -540,7 +658,7 @@ def main() -> int:
         ):
             raise RuntimeError("requested authenticated checks require --password or LPE_RCA_PASSWORD")
     if args.check_rpc_proxy_auth:
-        check_rpc_proxy_auth(base_url, args.email, args.password, args.timeout)
+        check_rpc_proxy_auth(base_url, args.email, args.password, args.insecure, args.timeout)
 
     return 0
 
