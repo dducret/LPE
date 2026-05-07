@@ -6004,6 +6004,7 @@ fn rpc_proxy_nspi_resolve_names_w_response(call_id: u32, request: &[u8]) -> Vec<
     for (index, (property_tag, value)) in row_values.iter().enumerate() {
         push_le_u32(&mut stub, *property_tag);
         push_le_u32(&mut stub, 0);
+        push_le_u32(&mut stub, property_tag & 0xffff);
         push_le_u32(&mut stub, 0x0002_000c + (index as u32 * 4));
         rpc_proxy_push_ndr_ascii_string(&mut deferred_strings, value);
     }
@@ -6169,6 +6170,7 @@ fn rpc_proxy_push_property_row(buffer: &mut Vec<u8>, row_values: &[(u32, RpcProx
     for (index, (property_tag, value)) in row_values.iter().enumerate() {
         push_le_u32(buffer, *property_tag);
         push_le_u32(buffer, 0);
+        push_le_u32(buffer, property_tag & 0xffff);
         match value {
             RpcProxyNspiValue::U32(value) => push_le_u32(buffer, *value),
             RpcProxyNspiValue::String(value) if property_tag & 0xffff == 0x001f => {

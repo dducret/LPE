@@ -6999,6 +6999,16 @@ fn rpc_proxy_in_channel_nspi_resolve_names_w_request_gets_response() {
     assert!(response
         .windows(b"Fabien".len())
         .any(|window| window == b"Fabien"));
+    assert!(response.windows(12).any(|window| {
+        window[0..4] == 0x3003_001eu32.to_le_bytes()
+            && window[4..8] == 0u32.to_le_bytes()
+            && window[8..12] == 0x001eu32.to_le_bytes()
+    }));
+    assert!(response.windows(12).any(|window| {
+        window[0..4] == 0x3001_001eu32.to_le_bytes()
+            && window[4..8] == 0u32.to_le_bytes()
+            && window[8..12] == 0x001eu32.to_le_bytes()
+    }));
     let return_offset = response.len() - 4;
     assert_eq!(
         u32::from_le_bytes([
