@@ -11,9 +11,11 @@ use lpe_magika::{
 };
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
-    AttachmentUploadInput, AuditEntryInput, JmapEmail, JmapEmailAddress, JmapImportedEmailInput,
-    JmapMailbox, JmapMailboxCreateInput, SubmitMessageInput, SubmittedMessage,
-    SubmittedRecipientInput,
+    serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent,
+    AttachmentUploadInput, AuditEntryInput, CalendarParticipantsMetadata, CollaborationRights,
+    JmapEmail, JmapEmailAddress, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput,
+    UpsertClientEventInput,
 };
 use std::{
     cmp::Ordering,
@@ -27,7 +29,10 @@ use uuid::Uuid;
 
 use crate::{
     mapi_mailstore,
-    mapi_store::{MapiAttachment, MapiMailStoreSnapshot, MapiStore},
+    mapi_store::{
+        MapiAttachment, MapiCollaborationFolder, MapiCollaborationFolderKind,
+        MapiMailStoreSnapshot, MapiStore,
+    },
     store::ExchangeStore,
 };
 
@@ -176,10 +181,26 @@ enum MapiObject {
         folder_id: u64,
         message_id: u64,
     },
+    Contact {
+        folder_id: u64,
+        contact_id: u64,
+    },
+    Event {
+        folder_id: u64,
+        event_id: u64,
+    },
     PendingMessage {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
         recipients: Vec<PendingRecipient>,
+    },
+    PendingContact {
+        folder_id: u64,
+        properties: HashMap<u32, MapiValue>,
+    },
+    PendingEvent {
+        folder_id: u64,
+        properties: HashMap<u32, MapiValue>,
     },
     HierarchyTable {
         folder_id: u64,
@@ -1421,7 +1442,41 @@ where
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                    responses.extend_from_slice(&rop_open_message_response(&request, email));
+                    responses.extend_from_slice(&rop_open_message_response(
+                        &request,
+                        &email.subject,
+                        message_recipients(email).len(),
+                    ));
+                    output_handles.push(handle);
+                } else if let Some(contact) = snapshot.contact_for_id(folder_id, message_id) {
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::Contact {
+                            folder_id,
+                            contact_id: message_id,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_open_message_response(
+                        &request,
+                        &contact.contact.name,
+                        0,
+                    ));
+                    output_handles.push(handle);
+                } else if let Some(event) = snapshot.event_for_id(folder_id, message_id) {
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::Event {
+                            folder_id,
+                            event_id: message_id,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_open_message_response(
+                        &request,
+                        &event.event.title,
+                        0,
+                    ));
                     output_handles.push(handle);
                 } else {
                     responses.extend_from_slice(&rop_error_response(
@@ -1451,7 +1506,7 @@ where
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 responses.extend_from_slice(&rop_get_hierarchy_table_response(
                     &request,
-                    hierarchy_row_count(folder_id, mailboxes),
+                    hierarchy_row_count(folder_id, mailboxes, snapshot),
                 ));
                 output_handles.push(handle);
             }
@@ -1474,7 +1529,7 @@ where
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 responses.extend_from_slice(&rop_get_contents_table_response(
                     &request,
-                    folder_message_count(folder_id, mailboxes, emails),
+                    folder_message_count(folder_id, mailboxes, emails, snapshot),
                 ));
                 output_handles.push(handle);
             }
@@ -1484,7 +1539,8 @@ where
                         .and_then(MapiObject::folder_id)
                         .unwrap_or(INBOX_FOLDER_ID)
                 });
-                if folder_row_for_id(folder_id, mailboxes).is_none()
+                if snapshot.collaboration_folder_for_id(folder_id).is_none()
+                    && folder_row_for_id(folder_id, mailboxes).is_none()
                     && !matches!(
                         folder_id,
                         INBOX_FOLDER_ID
@@ -1502,14 +1558,26 @@ where
                     continue;
                 }
 
-                let handle = session.allocate_output_handle(
-                    request.output_handle_index,
-                    MapiObject::PendingMessage {
+                let pending_object = match snapshot
+                    .collaboration_folder_for_id(folder_id)
+                    .map(|folder| folder.kind)
+                {
+                    Some(MapiCollaborationFolderKind::Contacts) => MapiObject::PendingContact {
+                        folder_id,
+                        properties: HashMap::new(),
+                    },
+                    Some(MapiCollaborationFolderKind::Calendar) => MapiObject::PendingEvent {
+                        folder_id,
+                        properties: HashMap::new(),
+                    },
+                    _ => MapiObject::PendingMessage {
                         folder_id,
                         properties: HashMap::new(),
                         recipients: Vec::new(),
                     },
-                );
+                };
+                let handle =
+                    session.allocate_output_handle(request.output_handle_index, pending_object);
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 responses.extend_from_slice(&rop_create_message_response(&request));
                 output_handles.push(handle);
@@ -1543,6 +1611,24 @@ where
                         }) => {
                             apply_canonical_message_property_values(
                                 store, principal, folder_id, message_id, values, mailboxes, emails,
+                            )
+                            .await
+                        }
+                        Some(MapiObject::Contact {
+                            folder_id,
+                            contact_id,
+                        }) => {
+                            apply_canonical_contact_property_values(
+                                store, principal, folder_id, contact_id, values, snapshot,
+                            )
+                            .await
+                        }
+                        Some(MapiObject::Event {
+                            folder_id,
+                            event_id,
+                        }) => {
+                            apply_canonical_event_property_values(
+                                store, principal, folder_id, event_id, values, snapshot,
                             )
                             .await
                         }
@@ -1587,6 +1673,126 @@ where
                     ));
                     continue;
                 };
+                match session.handles.get(&handle).cloned() {
+                    Some(MapiObject::PendingContact {
+                        folder_id,
+                        properties,
+                    }) => {
+                        let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) else {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            ));
+                            continue;
+                        };
+                        let input = contact_input_from_mapi(
+                            principal.account_id,
+                            None,
+                            &default_contact_for_mapping(
+                                principal.account_id,
+                                &folder.collection.id,
+                            ),
+                            &properties,
+                        );
+                        match store
+                            .create_accessible_contact(
+                                principal.account_id,
+                                Some(&folder.collection.id),
+                                input,
+                            )
+                            .await
+                        {
+                            Ok(contact) => {
+                                let contact_id = mapi_item_id(&contact.id);
+                                session.handles.insert(
+                                    handle,
+                                    MapiObject::Contact {
+                                        folder_id,
+                                        contact_id,
+                                    },
+                                );
+                                responses.extend_from_slice(&rop_save_changes_message_response(
+                                    &request, contact_id,
+                                ));
+                            }
+                            Err(_) => responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            )),
+                        }
+                        continue;
+                    }
+                    Some(MapiObject::PendingEvent {
+                        folder_id,
+                        properties,
+                    }) => {
+                        let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) else {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            ));
+                            continue;
+                        };
+                        let input = match event_input_from_mapi(
+                            principal.account_id,
+                            None,
+                            &default_event_for_mapping(principal.account_id, &folder.collection.id),
+                            &properties,
+                        ) {
+                            Ok(input) => input,
+                            Err(_) => {
+                                responses.extend_from_slice(&rop_error_response(
+                                    0x0C,
+                                    request.response_handle_index(),
+                                    0x8004_0102,
+                                ));
+                                continue;
+                            }
+                        };
+                        match store
+                            .create_accessible_event(
+                                principal.account_id,
+                                Some(&folder.collection.id),
+                                input,
+                            )
+                            .await
+                        {
+                            Ok(event) => {
+                                let event_id = mapi_item_id(&event.id);
+                                session.handles.insert(
+                                    handle,
+                                    MapiObject::Event {
+                                        folder_id,
+                                        event_id,
+                                    },
+                                );
+                                responses.extend_from_slice(&rop_save_changes_message_response(
+                                    &request, event_id,
+                                ));
+                            }
+                            Err(_) => responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            )),
+                        }
+                        continue;
+                    }
+                    Some(MapiObject::Contact { contact_id, .. })
+                    | Some(MapiObject::Event {
+                        event_id: contact_id,
+                        ..
+                    }) => {
+                        responses.extend_from_slice(&rop_save_changes_message_response(
+                            &request, contact_id,
+                        ));
+                        continue;
+                    }
+                    _ => {}
+                }
                 let Some(MapiObject::PendingMessage {
                     folder_id,
                     properties,
@@ -2002,6 +2208,26 @@ where
                 };
                 let mut partial_completion = false;
                 for message_id in request.message_ids() {
+                    if let Some(contact) = snapshot.contact_for_id(folder_id, message_id) {
+                        if store
+                            .delete_accessible_contact(principal.account_id, contact.canonical_id)
+                            .await
+                            .is_err()
+                        {
+                            partial_completion = true;
+                        }
+                        continue;
+                    }
+                    if let Some(event) = snapshot.event_for_id(folder_id, message_id) {
+                        if store
+                            .delete_accessible_event(principal.account_id, event.canonical_id)
+                            .await
+                            .is_err()
+                        {
+                            partial_completion = true;
+                        }
+                        continue;
+                    }
                     let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
                     else {
                         partial_completion = true;
@@ -3256,6 +3482,8 @@ const SEARCH_FOLDER_ID: u64 = mapi_store_id(11);
 const VIEWS_FOLDER_ID: u64 = mapi_store_id(12);
 const SHORTCUTS_FOLDER_ID: u64 = mapi_store_id(13);
 const DRAFTS_FOLDER_ID: u64 = mapi_store_id(14);
+const CONTACTS_FOLDER_ID: u64 = mapi_store_id(15);
+const CALENDAR_FOLDER_ID: u64 = mapi_store_id(16);
 
 const fn mapi_store_id(global_counter: u64) -> u64 {
     ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | STORE_REPLICA_ID
@@ -3316,6 +3544,16 @@ const PID_TAG_RENDERING_POSITION: u32 = 0x370B_0003;
 const PID_TAG_ATTACH_MIME_TAG_W: u32 = 0x370E_001F;
 const PID_TAG_EMAIL_ADDRESS_W: u32 = 0x3003_001F;
 const PID_TAG_SMTP_ADDRESS_W: u32 = 0x39FE_001F;
+const PID_TAG_GIVEN_NAME_W: u32 = 0x3A06_001F;
+const PID_TAG_BUSINESS_TELEPHONE_NUMBER_W: u32 = 0x3A08_001F;
+const PID_TAG_HOME_TELEPHONE_NUMBER_W: u32 = 0x3A09_001F;
+const PID_TAG_SURNAME_W: u32 = 0x3A11_001F;
+const PID_TAG_COMPANY_NAME_W: u32 = 0x3A16_001F;
+const PID_TAG_TITLE_W: u32 = 0x3A17_001F;
+const PID_TAG_MOBILE_TELEPHONE_NUMBER_W: u32 = 0x3A1C_001F;
+const PID_TAG_START_DATE: u32 = 0x0060_0040;
+const PID_TAG_END_DATE: u32 = 0x0061_0040;
+const PID_TAG_LOCATION_W: u32 = 0x3FFB_001F;
 const FIRST_NAMED_PROPERTY_ID: u16 = 0x8001;
 const MAX_NAMED_PROPERTY_ID: u16 = 0xFFFE;
 const PS_MAPI_GUID: [u8; 16] = [
@@ -3407,7 +3645,11 @@ impl MapiObject {
             MapiObject::Logon => Some(ROOT_FOLDER_ID),
             MapiObject::Folder { folder_id }
             | MapiObject::Message { folder_id, .. }
+            | MapiObject::Contact { folder_id, .. }
+            | MapiObject::Event { folder_id, .. }
             | MapiObject::PendingMessage { folder_id, .. }
+            | MapiObject::PendingContact { folder_id, .. }
+            | MapiObject::PendingEvent { folder_id, .. }
             | MapiObject::HierarchyTable { folder_id, .. }
             | MapiObject::ContentsTable { folder_id, .. }
             | MapiObject::AttachmentTable { folder_id, .. }
@@ -3498,15 +3740,30 @@ fn read_handle_table(handle_table: &[u8]) -> Vec<u32> {
         .collect()
 }
 
-fn hierarchy_row_count(folder_id: u64, mailboxes: &[JmapMailbox]) -> u32 {
+fn hierarchy_row_count(
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+) -> u32 {
     if is_root_hierarchy_folder(folder_id) {
-        mailboxes.len() as u32
+        mailboxes
+            .len()
+            .saturating_add(snapshot.collaboration_folders().len())
+            .min(u32::MAX as usize) as u32
     } else {
         0
     }
 }
 
-fn folder_message_count(folder_id: u64, mailboxes: &[JmapMailbox], emails: &[JmapEmail]) -> u32 {
+fn folder_message_count(
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> u32 {
+    if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
+        return folder.item_count;
+    }
     emails_for_folder(folder_id, mailboxes, emails).len() as u32
 }
 
@@ -3589,6 +3846,54 @@ fn default_message_property_tags() -> Vec<u32> {
         PID_TAG_HAS_ATTACHMENTS,
         PID_TAG_BODY_W,
         PID_TAG_INTERNET_MESSAGE_ID_W,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ]
+}
+
+fn default_contact_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_GIVEN_NAME_W,
+        PID_TAG_SURNAME_W,
+        PID_TAG_EMAIL_ADDRESS_W,
+        PID_TAG_SMTP_ADDRESS_W,
+        PID_TAG_MOBILE_TELEPHONE_NUMBER_W,
+        PID_TAG_BUSINESS_TELEPHONE_NUMBER_W,
+        PID_TAG_COMPANY_NAME_W,
+        PID_TAG_TITLE_W,
+        PID_TAG_BODY_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ]
+}
+
+fn default_event_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_BODY_W,
+        PID_TAG_START_DATE,
+        PID_TAG_END_DATE,
+        PID_TAG_LOCATION_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
         PID_TAG_SOURCE_KEY,
         PID_TAG_PARENT_SOURCE_KEY,
         PID_TAG_CHANGE_KEY,
@@ -3738,13 +4043,17 @@ fn rop_open_folder_response(request: &RopRequest) -> Vec<u8> {
     response
 }
 
-fn rop_open_message_response(request: &RopRequest, email: &JmapEmail) -> Vec<u8> {
+fn rop_open_message_response(
+    request: &RopRequest,
+    subject: &str,
+    recipient_count: usize,
+) -> Vec<u8> {
     let mut response = vec![0x03, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
     response.push(0);
     write_typed_string(&mut response, "");
-    write_typed_string(&mut response, &email.subject);
-    response.extend_from_slice(&(message_recipients(email).len() as u16).to_le_bytes());
+    write_typed_string(&mut response, subject);
+    response.extend_from_slice(&(recipient_count as u16).to_le_bytes());
     response.extend_from_slice(&0u16.to_le_bytes());
     response.push(0);
     response
@@ -3776,6 +4085,28 @@ fn rop_reload_cached_information_response(
                 &[PID_TAG_SUBJECT_W, PID_TAG_NORMALIZED_SUBJECT_W],
             ),
             recipients.len(),
+        ),
+        Some(MapiObject::PendingContact { properties, .. }) => (
+            pending_text_property(
+                properties,
+                &[
+                    PID_TAG_DISPLAY_NAME_W,
+                    PID_TAG_SUBJECT_W,
+                    PID_TAG_NORMALIZED_SUBJECT_W,
+                ],
+            ),
+            0,
+        ),
+        Some(MapiObject::PendingEvent { properties, .. }) => (
+            pending_text_property(
+                properties,
+                &[
+                    PID_TAG_SUBJECT_W,
+                    PID_TAG_NORMALIZED_SUBJECT_W,
+                    PID_TAG_DISPLAY_NAME_W,
+                ],
+            ),
+            0,
         ),
         _ => return rop_error_response(0x10, request.response_handle_index(), 0x0000_04B9),
     };
@@ -4038,6 +4369,12 @@ fn rop_get_properties_list_response(request: &RopRequest, object: Option<&MapiOb
             | MapiObject::PendingAttachment { .. }
             | MapiObject::SavedAttachment { .. },
         ) => default_attachment_columns(),
+        Some(MapiObject::Contact { .. }) | Some(MapiObject::PendingContact { .. }) => {
+            default_contact_property_tags()
+        }
+        Some(MapiObject::Event { .. }) | Some(MapiObject::PendingEvent { .. }) => {
+            default_event_property_tags()
+        }
         Some(MapiObject::Message { .. }) | Some(MapiObject::PendingMessage { .. }) => {
             default_message_property_tags()
         }
@@ -4079,6 +4416,38 @@ fn rop_get_properties_specific_response(
         }
         Some(MapiObject::PendingMessage { properties, .. }) => {
             serialize_pending_message_row(principal, properties, &columns)
+        }
+        Some(MapiObject::Contact {
+            folder_id,
+            contact_id,
+        }) => {
+            let Some(contact) = snapshot.contact_for_id(*folder_id, *contact_id) else {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            };
+            serialize_contact_row(&contact.contact, contact.id, contact.folder_id, &columns)
+        }
+        Some(MapiObject::PendingContact { properties, .. }) => {
+            serialize_pending_contact_row(principal, properties, &columns)
+        }
+        Some(MapiObject::Event {
+            folder_id,
+            event_id,
+        }) => {
+            let Some(event) = snapshot.event_for_id(*folder_id, *event_id) else {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            };
+            serialize_event_row(&event.event, event.id, event.folder_id, &columns)
+        }
+        Some(MapiObject::PendingEvent { properties, .. }) => {
+            serialize_pending_event_row(principal, properties, &columns)
         }
         Some(MapiObject::Attachment {
             folder_id,
@@ -4123,6 +4492,11 @@ fn rop_get_properties_specific_response(
                 .unwrap_or(ROOT_FOLDER_ID);
             folder_row_for_id(folder_id, mailboxes)
                 .map(|mailbox| serialize_folder_row(mailbox, &columns))
+                .or_else(|| {
+                    snapshot
+                        .collaboration_folder_for_id(folder_id)
+                        .map(|folder| serialize_collaboration_folder_row(folder, &columns))
+                })
                 .unwrap_or_else(|| serialize_root_folder_row(mailboxes, &columns))
         }
     };
@@ -4244,6 +4618,36 @@ fn serialize_object_property(
         Some(MapiObject::PendingMessage { properties, .. }) => {
             serialize_pending_message_row(principal, properties, &[tag])
         }
+        Some(MapiObject::Contact {
+            folder_id,
+            contact_id,
+        }) => snapshot
+            .contact_for_id(*folder_id, *contact_id)
+            .map(|contact| {
+                serialize_contact_row(&contact.contact, contact.id, contact.folder_id, &[tag])
+            })
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
+        Some(MapiObject::PendingContact { properties, .. }) => {
+            serialize_pending_contact_row(principal, properties, &[tag])
+        }
+        Some(MapiObject::Event {
+            folder_id,
+            event_id,
+        }) => snapshot
+            .event_for_id(*folder_id, *event_id)
+            .map(|event| serialize_event_row(&event.event, event.id, event.folder_id, &[tag]))
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
+        Some(MapiObject::PendingEvent { properties, .. }) => {
+            serialize_pending_event_row(principal, properties, &[tag])
+        }
         Some(MapiObject::Attachment {
             folder_id,
             message_id,
@@ -4283,6 +4687,11 @@ fn serialize_object_property(
                 .unwrap_or(ROOT_FOLDER_ID);
             folder_row_for_id(folder_id, mailboxes)
                 .map(|mailbox| serialize_folder_row(mailbox, &[tag]))
+                .or_else(|| {
+                    snapshot
+                        .collaboration_folder_for_id(folder_id)
+                        .map(|folder| serialize_collaboration_folder_row(folder, &[tag]))
+                })
                 .unwrap_or_else(|| serialize_root_folder_row(mailboxes, &[tag]))
         }
     }
@@ -4377,9 +4786,24 @@ fn rop_query_rows_response(
             let mut rows = mailboxes.iter().collect::<Vec<_>>();
             rows.retain(|mailbox| restriction_matches_mailbox(restriction.as_ref(), mailbox));
             sort_mailboxes(&mut rows, sort_orders);
-            rows.into_iter()
+            let mut serialized = rows
+                .into_iter()
                 .map(|mailbox| serialize_folder_row(mailbox, &columns))
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            let mut collaboration_rows = snapshot
+                .collaboration_folders()
+                .iter()
+                .filter(|folder| {
+                    restriction_matches_collaboration_folder(restriction.as_ref(), folder)
+                })
+                .collect::<Vec<_>>();
+            sort_collaboration_folders(&mut collaboration_rows, sort_orders);
+            serialized.extend(
+                collaboration_rows
+                    .into_iter()
+                    .map(|folder| serialize_collaboration_folder_row(folder, &columns)),
+            );
+            serialized
         }
         Some(MapiObject::ContentsTable {
             folder_id,
@@ -4395,12 +4819,51 @@ fn rop_query_rows_response(
             } else {
                 columns.clone()
             };
-            let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
-            rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
-            sort_emails(&mut rows, sort_orders);
-            rows.into_iter()
-                .map(|email| serialize_message_row(email, &columns))
-                .collect::<Vec<_>>()
+            if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
+                match folder.kind {
+                    MapiCollaborationFolderKind::Contacts => {
+                        let mut rows = snapshot.contacts_for_folder(*folder_id);
+                        rows.retain(|contact| {
+                            restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                        });
+                        sort_contacts(&mut rows, sort_orders);
+                        rows.into_iter()
+                            .map(|contact| {
+                                serialize_contact_row(
+                                    &contact.contact,
+                                    contact.id,
+                                    contact.folder_id,
+                                    &columns,
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    }
+                    MapiCollaborationFolderKind::Calendar => {
+                        let mut rows = snapshot.events_for_folder(*folder_id);
+                        rows.retain(|event| {
+                            restriction_matches_event(restriction.as_ref(), &event.event)
+                        });
+                        sort_events(&mut rows, sort_orders);
+                        rows.into_iter()
+                            .map(|event| {
+                                serialize_event_row(
+                                    &event.event,
+                                    event.id,
+                                    event.folder_id,
+                                    &columns,
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    }
+                }
+            } else {
+                let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
+                rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
+                sort_emails(&mut rows, sort_orders);
+                rows.into_iter()
+                    .map(|email| serialize_message_row(email, &columns))
+                    .collect::<Vec<_>>()
+            }
         }
         Some(MapiObject::AttachmentTable {
             folder_id,
@@ -4555,6 +5018,91 @@ fn sort_attachments(rows: &mut [&MapiAttachment], sort_orders: &[MapiSortOrder])
     });
 }
 
+fn sort_collaboration_folders(
+    rows: &mut [&MapiCollaborationFolder],
+    sort_orders: &[MapiSortOrder],
+) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match sort_order.property_tag {
+                PID_TAG_DISPLAY_NAME_W => compare_case_insensitive(
+                    &left.collection.display_name,
+                    &right.collection.display_name,
+                ),
+                PID_TAG_CONTENT_COUNT => left.item_count.cmp(&right.item_count),
+                PID_TAG_FOLDER_ID => left.id.cmp(&right.id),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        Ordering::Equal
+    });
+}
+
+fn sort_contacts(rows: &mut [&crate::mapi_store::MapiContact], sort_orders: &[MapiSortOrder]) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match sort_order.property_tag {
+                PID_TAG_DISPLAY_NAME_W | PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+                    compare_case_insensitive(&left.contact.name, &right.contact.name)
+                }
+                PID_TAG_EMAIL_ADDRESS_W | PID_TAG_SMTP_ADDRESS_W => {
+                    compare_case_insensitive(&left.contact.email, &right.contact.email)
+                }
+                PID_TAG_COMPANY_NAME_W => {
+                    compare_case_insensitive(&left.contact.team, &right.contact.team)
+                }
+                PID_TAG_MID => left.id.cmp(&right.id),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        Ordering::Equal
+    });
+}
+
+fn sort_events(rows: &mut [&crate::mapi_store::MapiEvent], sort_orders: &[MapiSortOrder]) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match sort_order.property_tag {
+                PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+                    compare_case_insensitive(&left.event.title, &right.event.title)
+                }
+                PID_TAG_START_DATE
+                | PID_TAG_MESSAGE_DELIVERY_TIME
+                | PID_TAG_LAST_MODIFICATION_TIME => {
+                    event_start_sort_key(&left.event).cmp(&event_start_sort_key(&right.event))
+                }
+                PID_TAG_LOCATION_W => {
+                    compare_case_insensitive(&left.event.location, &right.event.location)
+                }
+                PID_TAG_MID => left.id.cmp(&right.id),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        Ordering::Equal
+    });
+}
+
 fn apply_sort_direction(ordering: Ordering, sort_order: u8) -> Ordering {
     if sort_order == 0x01 {
         ordering.reverse()
@@ -4576,9 +5124,46 @@ fn restriction_matches_mailbox(
     })
 }
 
+fn restriction_matches_collaboration_folder(
+    restriction: Option<&MapiRestriction>,
+    folder: &MapiCollaborationFolder,
+) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        collaboration_folder_property_value(folder, property_tag)
+    })
+}
+
 fn restriction_matches_email(restriction: Option<&MapiRestriction>, email: &JmapEmail) -> bool {
     restriction_matches(restriction, |property_tag| {
         email_property_value(email, property_tag)
+    })
+}
+
+fn restriction_matches_contact(
+    restriction: Option<&MapiRestriction>,
+    contact: &AccessibleContact,
+) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        contact_property_value(
+            contact,
+            mapi_item_id(&contact.id),
+            CONTACTS_FOLDER_ID,
+            property_tag,
+        )
+    })
+}
+
+fn restriction_matches_event(
+    restriction: Option<&MapiRestriction>,
+    event: &AccessibleEvent,
+) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        event_property_value(
+            event,
+            mapi_item_id(&event.id),
+            CALENDAR_FOLDER_ID,
+            property_tag,
+        )
     })
 }
 
@@ -4670,6 +5255,36 @@ fn mailbox_property_value(mailbox: &JmapMailbox, property_tag: u32) -> Option<Ma
     }
 }
 
+fn collaboration_folder_property_value(
+    folder: &MapiCollaborationFolder,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    match property_tag {
+        PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(folder.collection.display_name.clone())),
+        PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(folder.item_count)),
+        PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(0)),
+        PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(false)),
+        PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder.id)),
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
+            collaboration_folder_message_class(folder.kind).to_string(),
+        )),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            folder.id,
+        ))),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(IPM_SUBTREE_FOLDER_ID),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(folder.id),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(folder.id),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(folder.id)),
+        _ => None,
+    }
+}
+
 fn email_property_value(email: &JmapEmail, property_tag: u32) -> Option<MapiValue> {
     match property_tag {
         PID_TAG_MID => Some(MapiValue::U64(mapi_message_id(email))),
@@ -4716,6 +5331,102 @@ fn email_property_value(email: &JmapEmail, property_tag: u32) -> Option<MapiValu
             mapi_mailstore::canonical_message_change_number(email),
         )),
         PID_TAG_INTERNET_MESSAGE_ID_W => email.internet_message_id.clone().map(MapiValue::String),
+        _ => None,
+    }
+}
+
+fn contact_property_value(
+    contact: &AccessibleContact,
+    item_id: u64,
+    folder_id: u64,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    match property_tag {
+        PID_TAG_MID => Some(MapiValue::U64(item_id)),
+        PID_TAG_DISPLAY_NAME_W | PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+            Some(MapiValue::String(contact.name.clone()))
+        }
+        PID_TAG_GIVEN_NAME_W => contact
+            .name
+            .split_whitespace()
+            .next()
+            .map(|value| MapiValue::String(value.to_string())),
+        PID_TAG_SURNAME_W => contact
+            .name
+            .split_whitespace()
+            .last()
+            .filter(|value| *value != contact.name)
+            .map(|value| MapiValue::String(value.to_string())),
+        PID_TAG_EMAIL_ADDRESS_W | PID_TAG_SMTP_ADDRESS_W => {
+            Some(MapiValue::String(contact.email.clone()))
+        }
+        PID_TAG_MOBILE_TELEPHONE_NUMBER_W
+        | PID_TAG_BUSINESS_TELEPHONE_NUMBER_W
+        | PID_TAG_HOME_TELEPHONE_NUMBER_W => Some(MapiValue::String(contact.phone.clone())),
+        PID_TAG_COMPANY_NAME_W => Some(MapiValue::String(contact.team.clone())),
+        PID_TAG_TITLE_W => Some(MapiValue::String(contact.role.clone())),
+        PID_TAG_BODY_W => Some(MapiValue::String(contact.notes.clone())),
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Contact".to_string())),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0001)),
+        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(contact_size(contact))),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => {
+            Some(MapiValue::Binary(contact.id.as_bytes().to_vec()))
+        }
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
+            &contact.id,
+        ))),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(folder_id),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(item_id),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(item_id),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(item_id)),
+        _ => None,
+    }
+}
+
+fn event_property_value(
+    event: &AccessibleEvent,
+    item_id: u64,
+    folder_id: u64,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    match property_tag {
+        PID_TAG_MID => Some(MapiValue::U64(item_id)),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
+            Some(MapiValue::String(event.title.clone()))
+        }
+        PID_TAG_BODY_W => Some(MapiValue::String(event.notes.clone())),
+        PID_TAG_START_DATE | PID_TAG_MESSAGE_DELIVERY_TIME | PID_TAG_LAST_MODIFICATION_TIME => {
+            Some(MapiValue::I64(event_start_filetime(event) as i64))
+        }
+        PID_TAG_END_DATE => Some(MapiValue::I64(event_end_filetime(event) as i64)),
+        PID_TAG_LOCATION_W => Some(MapiValue::String(event.location.clone())),
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Appointment".to_string())),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0001)),
+        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(event_size(event))),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => {
+            Some(MapiValue::Binary(event.id.as_bytes().to_vec()))
+        }
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
+            &event.id,
+        ))),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(folder_id),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(item_id),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(item_id),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(item_id)),
         _ => None,
     }
 }
@@ -5505,6 +6216,32 @@ fn serialize_folder_row(mailbox: &JmapMailbox, columns: &[u32]) -> Vec<u8> {
     row
 }
 
+fn serialize_collaboration_folder_row(
+    folder: &MapiCollaborationFolder,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match *column {
+            PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, &folder.collection.display_name),
+            PID_TAG_FOLDER_ID => write_u64(&mut row, folder.id),
+            PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, ROOT_FOLDER_ID),
+            PID_TAG_CONTENT_COUNT => write_u32(&mut row, folder.item_count),
+            PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
+            PID_TAG_SUBFOLDERS => row.push(0),
+            PID_TAG_MESSAGE_CLASS_W => {
+                write_utf16z(&mut row, collaboration_folder_message_class(folder.kind))
+            }
+            PID_TAG_LAST_MODIFICATION_TIME => write_u64(&mut row, 0),
+            _ => match collaboration_folder_property_value(folder, *column) {
+                Some(value) => write_mapi_value(&mut row, *column, &value),
+                None => write_property_default(&mut row, *column),
+            },
+        }
+    }
+    row
+}
+
 fn serialize_message_row(email: &JmapEmail, columns: &[u32]) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
@@ -5539,6 +6276,38 @@ fn serialize_message_row(email: &JmapEmail, columns: &[u32]) -> Vec<u8> {
                 Some(value) => write_mapi_value(&mut row, *column, &value),
                 None => write_property_default(&mut row, *column),
             },
+        }
+    }
+    row
+}
+
+fn serialize_contact_row(
+    contact: &AccessibleContact,
+    item_id: u64,
+    folder_id: u64,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match contact_property_value(contact, item_id, folder_id, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+fn serialize_event_row(
+    event: &AccessibleEvent,
+    item_id: u64,
+    folder_id: u64,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match event_property_value(event, item_id, folder_id, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
         }
     }
     row
@@ -5581,6 +6350,67 @@ fn pending_message_property_value(
         })
 }
 
+fn serialize_pending_contact_row(
+    principal: &AccountPrincipal,
+    properties: &HashMap<u32, MapiValue>,
+    columns: &[u32],
+) -> Vec<u8> {
+    let contact = contact_input_from_mapi(
+        principal.account_id,
+        None,
+        &default_contact_for_mapping(principal.account_id, "default"),
+        properties,
+    );
+    let contact = AccessibleContact {
+        id: Uuid::nil(),
+        collection_id: "default".to_string(),
+        owner_account_id: principal.account_id,
+        owner_email: principal.email.clone(),
+        owner_display_name: principal.display_name.clone(),
+        rights: default_mapping_rights(),
+        name: contact.name,
+        role: contact.role,
+        email: contact.email,
+        phone: contact.phone,
+        team: contact.team,
+        notes: contact.notes,
+    };
+    serialize_contact_row(&contact, 0, CONTACTS_FOLDER_ID, columns)
+}
+
+fn serialize_pending_event_row(
+    principal: &AccountPrincipal,
+    properties: &HashMap<u32, MapiValue>,
+    columns: &[u32],
+) -> Vec<u8> {
+    let event = event_input_from_mapi(
+        principal.account_id,
+        None,
+        &default_event_for_mapping(principal.account_id, "default"),
+        properties,
+    )
+    .unwrap_or_else(|_| default_event_input(principal.account_id, None));
+    let event = AccessibleEvent {
+        id: Uuid::nil(),
+        collection_id: "default".to_string(),
+        owner_account_id: principal.account_id,
+        owner_email: principal.email.clone(),
+        owner_display_name: principal.display_name.clone(),
+        rights: default_mapping_rights(),
+        date: event.date,
+        time: event.time,
+        time_zone: event.time_zone,
+        duration_minutes: event.duration_minutes,
+        recurrence_rule: event.recurrence_rule,
+        title: event.title,
+        location: event.location,
+        attendees: event.attendees,
+        attendees_json: event.attendees_json,
+        notes: event.notes,
+    };
+    serialize_event_row(&event, 0, CALENDAR_FOLDER_ID, columns)
+}
+
 fn pending_message_size(properties: &HashMap<u32, MapiValue>) -> i64 {
     let subject = pending_text_property(
         properties,
@@ -5614,6 +6444,215 @@ fn optional_pending_text_property(
                 .and_then(|value| value.clone().into_text())
         })
         .filter(|value| !value.trim().is_empty())
+}
+
+fn default_mapping_rights() -> CollaborationRights {
+    CollaborationRights {
+        may_read: true,
+        may_write: true,
+        may_delete: true,
+        may_share: false,
+    }
+}
+
+fn default_contact_for_mapping(account_id: Uuid, collection_id: &str) -> AccessibleContact {
+    AccessibleContact {
+        id: Uuid::nil(),
+        collection_id: collection_id.to_string(),
+        owner_account_id: account_id,
+        owner_email: String::new(),
+        owner_display_name: String::new(),
+        rights: default_mapping_rights(),
+        name: String::new(),
+        role: String::new(),
+        email: String::new(),
+        phone: String::new(),
+        team: String::new(),
+        notes: String::new(),
+    }
+}
+
+fn default_event_for_mapping(account_id: Uuid, collection_id: &str) -> AccessibleEvent {
+    AccessibleEvent {
+        id: Uuid::nil(),
+        collection_id: collection_id.to_string(),
+        owner_account_id: account_id,
+        owner_email: String::new(),
+        owner_display_name: String::new(),
+        rights: default_mapping_rights(),
+        date: "1970-01-01".to_string(),
+        time: "00:00".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 0,
+        recurrence_rule: String::new(),
+        title: String::new(),
+        location: String::new(),
+        attendees: String::new(),
+        attendees_json: serialize_calendar_participants_metadata(
+            &CalendarParticipantsMetadata::default(),
+        ),
+        notes: String::new(),
+    }
+}
+
+fn default_event_input(account_id: Uuid, id: Option<Uuid>) -> UpsertClientEventInput {
+    UpsertClientEventInput {
+        id,
+        account_id,
+        date: "1970-01-01".to_string(),
+        time: "00:00".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 0,
+        recurrence_rule: String::new(),
+        title: String::new(),
+        location: String::new(),
+        attendees: String::new(),
+        attendees_json: serialize_calendar_participants_metadata(
+            &CalendarParticipantsMetadata::default(),
+        ),
+        notes: String::new(),
+    }
+}
+
+fn contact_input_from_mapi(
+    account_id: Uuid,
+    id: Option<Uuid>,
+    existing: &AccessibleContact,
+    properties: &HashMap<u32, MapiValue>,
+) -> UpsertClientContactInput {
+    let name = optional_pending_text_property(
+        properties,
+        &[
+            PID_TAG_DISPLAY_NAME_W,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_NORMALIZED_SUBJECT_W,
+        ],
+    )
+    .or_else(|| {
+        let given = optional_pending_text_property(properties, &[PID_TAG_GIVEN_NAME_W]);
+        let surname = optional_pending_text_property(properties, &[PID_TAG_SURNAME_W]);
+        match (given, surname) {
+            (Some(given), Some(surname)) => Some(format!("{given} {surname}")),
+            (Some(given), None) => Some(given),
+            (None, Some(surname)) => Some(surname),
+            (None, None) => None,
+        }
+    })
+    .unwrap_or_else(|| existing.name.clone());
+    UpsertClientContactInput {
+        id,
+        account_id,
+        name,
+        role: optional_pending_text_property(properties, &[PID_TAG_TITLE_W])
+            .unwrap_or_else(|| existing.role.clone()),
+        email: optional_pending_text_property(
+            properties,
+            &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W],
+        )
+        .unwrap_or_else(|| existing.email.clone()),
+        phone: optional_pending_text_property(
+            properties,
+            &[
+                PID_TAG_MOBILE_TELEPHONE_NUMBER_W,
+                PID_TAG_BUSINESS_TELEPHONE_NUMBER_W,
+                PID_TAG_HOME_TELEPHONE_NUMBER_W,
+            ],
+        )
+        .unwrap_or_else(|| existing.phone.clone()),
+        team: optional_pending_text_property(properties, &[PID_TAG_COMPANY_NAME_W])
+            .unwrap_or_else(|| existing.team.clone()),
+        notes: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
+            .unwrap_or_else(|| existing.notes.clone()),
+    }
+}
+
+fn event_input_from_mapi(
+    account_id: Uuid,
+    id: Option<Uuid>,
+    existing: &AccessibleEvent,
+    properties: &HashMap<u32, MapiValue>,
+) -> Result<UpsertClientEventInput> {
+    reject_unsupported_mapi_event_properties(properties)?;
+    let start = properties
+        .get(&PID_TAG_START_DATE)
+        .and_then(MapiValue::as_i64)
+        .and_then(filetime_to_date_time)
+        .unwrap_or_else(|| (existing.date.clone(), existing.time.clone()));
+    let end = properties
+        .get(&PID_TAG_END_DATE)
+        .and_then(MapiValue::as_i64)
+        .and_then(filetime_to_date_time);
+    let duration_minutes = match (
+        properties
+            .get(&PID_TAG_START_DATE)
+            .and_then(MapiValue::as_i64),
+        properties
+            .get(&PID_TAG_END_DATE)
+            .and_then(MapiValue::as_i64),
+    ) {
+        (Some(start), Some(end)) if end >= start => {
+            ((end - start) / 10_000_000 / 60).clamp(0, i64::from(i32::MAX)) as i32
+        }
+        _ => existing.duration_minutes,
+    };
+    let (date, time) = start;
+    Ok(UpsertClientEventInput {
+        id,
+        account_id,
+        date,
+        time,
+        time_zone: existing.time_zone.clone(),
+        duration_minutes: end
+            .map(|_| duration_minutes)
+            .unwrap_or(existing.duration_minutes),
+        recurrence_rule: existing.recurrence_rule.clone(),
+        title: optional_pending_text_property(
+            properties,
+            &[
+                PID_TAG_SUBJECT_W,
+                PID_TAG_NORMALIZED_SUBJECT_W,
+                PID_TAG_DISPLAY_NAME_W,
+            ],
+        )
+        .unwrap_or_else(|| existing.title.clone()),
+        location: optional_pending_text_property(properties, &[PID_TAG_LOCATION_W])
+            .unwrap_or_else(|| existing.location.clone()),
+        attendees: existing.attendees.clone(),
+        attendees_json: if existing.attendees_json.trim().is_empty() {
+            serialize_calendar_participants_metadata(&CalendarParticipantsMetadata::default())
+        } else {
+            existing.attendees_json.clone()
+        },
+        notes: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
+            .unwrap_or_else(|| existing.notes.clone()),
+    })
+}
+
+fn reject_unsupported_mapi_event_properties(properties: &HashMap<u32, MapiValue>) -> Result<()> {
+    for (tag, value) in properties {
+        let supported = matches!(
+            *tag,
+            PID_TAG_SUBJECT_W
+                | PID_TAG_NORMALIZED_SUBJECT_W
+                | PID_TAG_DISPLAY_NAME_W
+                | PID_TAG_BODY_W
+                | PID_TAG_START_DATE
+                | PID_TAG_END_DATE
+                | PID_TAG_LOCATION_W
+                | PID_TAG_MESSAGE_CLASS_W
+        );
+        if !supported {
+            return Err(anyhow!(
+                "MAPI calendar property {tag:#010X} is outside the canonical calendar subset"
+            ));
+        }
+        if matches!(value, MapiValue::Binary(_)) {
+            return Err(anyhow!(
+                "MAPI binary calendar recurrence or meeting payloads are not supported"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn pending_attachment_upload(
@@ -5954,12 +6993,71 @@ where
     Ok(())
 }
 
+async fn apply_canonical_contact_property_values<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    contact_id: u64,
+    values: Vec<(u32, MapiValue)>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let contact = snapshot
+        .contact_for_id(folder_id, contact_id)
+        .ok_or_else(|| anyhow!("canonical MAPI contact was not found"))?;
+    let properties = values.into_iter().collect::<HashMap<_, _>>();
+    let input = contact_input_from_mapi(
+        principal.account_id,
+        Some(contact.canonical_id),
+        &contact.contact,
+        &properties,
+    );
+    store
+        .update_accessible_contact(principal.account_id, contact.canonical_id, input)
+        .await?;
+    Ok(())
+}
+
+async fn apply_canonical_event_property_values<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    event_id: u64,
+    values: Vec<(u32, MapiValue)>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let event = snapshot
+        .event_for_id(folder_id, event_id)
+        .ok_or_else(|| anyhow!("canonical MAPI calendar event was not found"))?;
+    let properties = values.into_iter().collect::<HashMap<_, _>>();
+    let input = event_input_from_mapi(
+        principal.account_id,
+        Some(event.canonical_id),
+        &event.event,
+        &properties,
+    )?;
+    store
+        .update_accessible_event(principal.account_id, event.canonical_id, input)
+        .await?;
+    Ok(())
+}
+
 fn apply_mapi_property_values(
     object: Option<&mut MapiObject>,
     values: Vec<(u32, MapiValue)>,
 ) -> Result<()> {
     match object {
         Some(MapiObject::PendingMessage { properties, .. }) => {
+            properties.extend(values);
+            Ok(())
+        }
+        Some(MapiObject::PendingContact { properties, .. })
+        | Some(MapiObject::PendingEvent { properties, .. }) => {
             properties.extend(values);
             Ok(())
         }
@@ -5983,6 +7081,13 @@ fn apply_mapi_property_values(
 fn delete_mapi_properties(object: Option<&mut MapiObject>, property_tags: &[u32]) -> Result<()> {
     match object {
         Some(MapiObject::PendingMessage { properties, .. }) => {
+            for tag in property_tags {
+                properties.remove(tag);
+            }
+            Ok(())
+        }
+        Some(MapiObject::PendingContact { properties, .. })
+        | Some(MapiObject::PendingEvent { properties, .. }) => {
             for tag in property_tags {
                 properties.remove(tag);
             }
@@ -6121,6 +7226,106 @@ fn message_flags(email: &JmapEmail) -> u32 {
     flags
 }
 
+fn contact_size(contact: &AccessibleContact) -> i64 {
+    contact
+        .name
+        .len()
+        .saturating_add(contact.email.len())
+        .saturating_add(contact.phone.len())
+        .saturating_add(contact.team.len())
+        .saturating_add(contact.notes.len())
+        .min(i64::MAX as usize) as i64
+}
+
+fn event_size(event: &AccessibleEvent) -> i64 {
+    event
+        .title
+        .len()
+        .saturating_add(event.location.len())
+        .saturating_add(event.notes.len())
+        .min(i64::MAX as usize) as i64
+}
+
+fn event_start_sort_key(event: &AccessibleEvent) -> String {
+    format!("{}T{}", event.date, event.time)
+}
+
+fn event_start_filetime(event: &AccessibleEvent) -> u64 {
+    date_time_to_filetime(&event.date, &event.time)
+}
+
+fn event_end_filetime(event: &AccessibleEvent) -> u64 {
+    let start = event_start_filetime(event);
+    let duration = event.duration_minutes.max(0) as u64 * 60 * 10_000_000;
+    start.saturating_add(duration)
+}
+
+fn date_time_to_filetime(date: &str, time: &str) -> u64 {
+    let year = date
+        .get(0..4)
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(1970);
+    let month = date
+        .get(5..7)
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(1);
+    let day = date
+        .get(8..10)
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(1);
+    let hour = time
+        .get(0..2)
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(0);
+    let minute = time
+        .get(3..5)
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(0);
+    let days = days_from_civil(year, month, day).max(0) as u64;
+    let unix_seconds = days
+        .saturating_mul(86_400)
+        .saturating_add(u64::from(hour.min(23)) * 3_600)
+        .saturating_add(u64::from(minute.min(59)) * 60);
+    unix_seconds_to_filetime(unix_seconds)
+}
+
+fn filetime_to_date_time(filetime: i64) -> Option<(String, String)> {
+    let filetime = u64::try_from(filetime).ok()?;
+    let unix_seconds = filetime_to_unix_seconds(filetime)?;
+    let days = unix_seconds / 86_400;
+    let seconds = unix_seconds % 86_400;
+    let (year, month, day) = civil_from_unix_days(days as i64);
+    let hour = seconds / 3_600;
+    let minute = (seconds % 3_600) / 60;
+    Some((
+        format!("{year:04}-{month:02}-{day:02}"),
+        format!("{hour:02}:{minute:02}"),
+    ))
+}
+
+fn unix_seconds_to_filetime(unix_seconds: u64) -> u64 {
+    unix_seconds
+        .saturating_add(11_644_473_600)
+        .saturating_mul(10_000_000)
+}
+
+fn filetime_to_unix_seconds(filetime: u64) -> Option<u64> {
+    filetime
+        .checked_div(10_000_000)?
+        .checked_sub(11_644_473_600)
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+    let year = i64::from(year) - i64::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let yoe = year - era * 400;
+    let month = i64::from(month);
+    let day = i64::from(day);
+    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
 fn unread_from_read_flags(read_flags: Option<u8>) -> Option<bool> {
     match read_flags {
         Some(flags) if flags & 0x10 != 0 => None,
@@ -6135,6 +7340,13 @@ fn folder_message_class(mailbox: &JmapMailbox) -> &'static str {
         "contacts" => "IPF.Contact",
         "calendar" => "IPF.Appointment",
         _ => "IPF.Note",
+    }
+}
+
+fn collaboration_folder_message_class(kind: MapiCollaborationFolderKind) -> &'static str {
+    match kind {
+        MapiCollaborationFolderKind::Contacts => "IPF.Contact",
+        MapiCollaborationFolderKind::Calendar => "IPF.Appointment",
     }
 }
 
@@ -6158,12 +7370,18 @@ fn mapi_folder_id(mailbox: &JmapMailbox) -> u64 {
         "outbox" => OUTBOX_FOLDER_ID,
         "sent" => SENT_FOLDER_ID,
         "trash" => TRASH_FOLDER_ID,
+        "contacts" => CONTACTS_FOLDER_ID,
+        "calendar" => CALENDAR_FOLDER_ID,
         _ => mapi_store_id(uuid_global_counter(&mailbox.id)),
     }
 }
 
 fn mapi_message_id(email: &JmapEmail) -> u64 {
-    mapi_store_id(uuid_global_counter(&email.id))
+    mapi_item_id(&email.id)
+}
+
+fn mapi_item_id(id: &Uuid) -> u64 {
+    mapi_store_id(uuid_global_counter(id))
 }
 
 fn uuid_global_counter(id: &Uuid) -> u64 {

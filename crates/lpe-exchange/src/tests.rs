@@ -1554,6 +1554,56 @@ fn test_mapi_uuid_id(uuid: &Uuid) -> u64 {
     test_mapi_folder_id(value.max(0x100))
 }
 
+fn append_rop_get_properties_specific(rops: &mut Vec<u8>, input: u8, property_tags: &[u32]) {
+    rops.extend_from_slice(&[0x07, 0x00, input]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+    rops.extend_from_slice(&(property_tags.len() as u16).to_le_bytes());
+    for tag in property_tags {
+        rops.extend_from_slice(&tag.to_le_bytes());
+    }
+}
+
+fn append_rop_delete_messages(rops: &mut Vec<u8>, input: u8, message_ids: &[u64]) {
+    rops.extend_from_slice(&[0x1E, 0x00, input, 0x00, 0x00]);
+    rops.extend_from_slice(&(message_ids.len() as u16).to_le_bytes());
+    for message_id in message_ids {
+        rops.extend_from_slice(&message_id.to_le_bytes());
+    }
+}
+
+fn test_filetime(date: &str, time: &str) -> i64 {
+    let year = date
+        .get(0..4)
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap();
+    let month = date
+        .get(5..7)
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap();
+    let day = date
+        .get(8..10)
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap();
+    let hour = time
+        .get(0..2)
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap();
+    let minute = time
+        .get(3..5)
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap();
+    let year = i64::from(year) - i64::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let yoe = year - era * 400;
+    let month = i64::from(month);
+    let day = i64::from(day);
+    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    let unix_seconds = days * 86_400 + i64::from(hour) * 3_600 + i64::from(minute) * 60;
+    (unix_seconds + 11_644_473_600) * 10_000_000
+}
+
 fn utf16z_string_bytes(value: &[u8]) -> Vec<u8> {
     value
         .chunks_exact(2)
@@ -1564,6 +1614,295 @@ fn utf16z_string_bytes(value: &[u8]) -> Vec<u8> {
         .map(|unit| char::from_u32(*unit as u32).unwrap_or(char::REPLACEMENT_CHARACTER))
         .collect::<String>()
         .into_bytes()
+}
+
+#[tokio::test]
+async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        ..Default::default()
+    };
+    let contacts = store.contacts.clone();
+    let deleted_contacts = store.deleted_contacts.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = HeaderValue::from_str(
+        connect
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x3001_001F, "RCA Contact");
+    append_mapi_utf16_property(&mut property_values, 0x39FE_001F, "rca@example.test");
+    append_mapi_utf16_property(&mut property_values, 0x3A1C_001F, "+49 30 123456");
+    append_mapi_utf16_property(&mut property_values, 0x3A16_001F, "Interop Team");
+    append_mapi_utf16_property(&mut property_values, 0x3A17_001F, "Coordinator");
+    append_mapi_utf16_property(&mut property_values, 0x1000_001F, "Created through MAPI");
+    let mut rops = Vec::new();
+    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(15));
+    append_rop_set_properties(&mut rops, 1, 6, &property_values);
+    append_rop_save_changes_message(&mut rops, 1, 1);
+    append_rop_get_properties_specific(&mut rops, 1, &[0x3001_001F, 0x39FE_001F, 0x3A1C_001F]);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", cookie.clone());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let _response_rops = response_rops_from_execute_response(response).await;
+    {
+        let stored = contacts.lock().unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].name, "RCA Contact");
+        assert_eq!(stored[0].email, "rca@example.test");
+        assert_eq!(stored[0].phone, "+49 30 123456");
+        assert_eq!(stored[0].team, "Interop Team");
+        assert_eq!(stored[0].role, "Coordinator");
+        assert_eq!(stored[0].notes, "Created through MAPI");
+    }
+
+    let contact_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    let mut update_values = Vec::new();
+    append_mapi_utf16_property(&mut update_values, 0x3001_001F, "Updated RCA Contact");
+    append_mapi_utf16_property(&mut update_values, 0x39FE_001F, "updated@example.test");
+    let mut update_rops = Vec::new();
+    append_rop_open_folder(&mut update_rops, 0, 1, test_mapi_folder_id(15));
+    append_rop_open_message(
+        &mut update_rops,
+        1,
+        2,
+        test_mapi_folder_id(15),
+        test_mapi_uuid_id(&contact_id),
+    );
+    append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&update_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!response_rops
+        .windows(4)
+        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    {
+        let stored = contacts.lock().unwrap();
+        assert_eq!(stored[0].name, "Updated RCA Contact");
+        assert_eq!(stored[0].email, "updated@example.test");
+    }
+
+    let mut read_rops = Vec::new();
+    append_rop_open_folder(&mut read_rops, 0, 1, test_mapi_folder_id(15));
+    append_rop_open_message(
+        &mut read_rops,
+        1,
+        2,
+        test_mapi_folder_id(15),
+        test_mapi_uuid_id(&contact_id),
+    );
+    append_rop_get_properties_specific(&mut read_rops, 2, &[0x3001_001F, 0x39FE_001F]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&read_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Updated RCA Contact")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("updated@example.test")
+    ));
+
+    let mut delete_rops = Vec::new();
+    append_rop_open_folder(&mut delete_rops, 0, 1, test_mapi_folder_id(15));
+    append_rop_delete_messages(&mut delete_rops, 1, &[test_mapi_uuid_id(&contact_id)]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&delete_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!response_rops
+        .windows(4)
+        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    assert!(contacts.lock().unwrap().is_empty());
+    assert_eq!(deleted_contacts.lock().unwrap().as_slice(), &[contact_id]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_crud_uses_canonical_events() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let deleted_events = store.deleted_events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = HeaderValue::from_str(
+        connect
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "RCA Calendar");
+    append_mapi_i64_property(
+        &mut property_values,
+        0x0060_0040,
+        test_filetime("2026-05-04", "09:30"),
+    );
+    append_mapi_i64_property(
+        &mut property_values,
+        0x0061_0040,
+        test_filetime("2026-05-04", "10:15"),
+    );
+    append_mapi_utf16_property(&mut property_values, 0x3FFB_001F, "Room 1");
+    append_mapi_utf16_property(&mut property_values, 0x1000_001F, "Agenda");
+    let mut rops = Vec::new();
+    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_set_properties(&mut rops, 1, 5, &property_values);
+    append_rop_save_changes_message(&mut rops, 1, 1);
+    append_rop_get_properties_specific(&mut rops, 1, &[0x0037_001F, 0x0060_0040, 0x0061_0040]);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", cookie.clone());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let _response_rops = response_rops_from_execute_response(response).await;
+    {
+        let stored = events.lock().unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].title, "RCA Calendar");
+        assert_eq!(stored[0].date, "2026-05-04");
+        assert_eq!(stored[0].time, "09:30");
+        assert_eq!(stored[0].duration_minutes, 45);
+        assert_eq!(stored[0].location, "Room 1");
+        assert_eq!(stored[0].notes, "Agenda");
+        assert!(stored[0].recurrence_rule.is_empty());
+    }
+
+    let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
+    let mut update_values = Vec::new();
+    append_mapi_utf16_property(&mut update_values, 0x0037_001F, "Updated RCA Calendar");
+    append_mapi_utf16_property(&mut update_values, 0x3FFB_001F, "Room 2");
+    let mut update_rops = Vec::new();
+    append_rop_open_folder(&mut update_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut update_rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&update_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!response_rops
+        .windows(4)
+        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    {
+        let stored = events.lock().unwrap();
+        assert_eq!(stored[0].title, "Updated RCA Calendar");
+        assert_eq!(stored[0].location, "Room 2");
+    }
+
+    let mut read_rops = Vec::new();
+    append_rop_open_folder(&mut read_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut read_rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_get_properties_specific(&mut read_rops, 2, &[0x0037_001F, 0x3FFB_001F]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&read_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Updated RCA Calendar")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Room 2")));
+
+    let mut delete_rops = Vec::new();
+    append_rop_open_folder(&mut delete_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_delete_messages(&mut delete_rops, 1, &[test_mapi_uuid_id(&event_id)]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&delete_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!response_rops
+        .windows(4)
+        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    assert!(events.lock().unwrap().is_empty());
+    assert_eq!(deleted_events.lock().unwrap().as_slice(), &[event_id]);
 }
 
 #[tokio::test]

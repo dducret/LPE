@@ -1,5 +1,8 @@
 use lpe_mail_auth::StoreFuture;
-use lpe_storage::{ActiveSyncAttachment, JmapEmail, JmapMailbox};
+use lpe_storage::{
+    AccessibleContact, AccessibleEvent, ActiveSyncAttachment, CollaborationCollection, JmapEmail,
+    JmapMailbox,
+};
 use uuid::Uuid;
 
 use crate::store::ExchangeStore;
@@ -9,7 +12,10 @@ const STORE_REPLICA_ID: u64 = 1;
 #[derive(Debug, Clone)]
 pub(crate) struct MapiMailStoreSnapshot {
     folders: Vec<MapiFolder>,
+    collaboration_folders: Vec<MapiCollaborationFolder>,
     messages: Vec<MapiMessage>,
+    contacts: Vec<MapiContact>,
+    events: Vec<MapiEvent>,
 }
 
 #[derive(Debug, Clone)]
@@ -20,6 +26,20 @@ pub(crate) struct MapiFolder {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct MapiCollaborationFolder {
+    pub(crate) id: u64,
+    pub(crate) kind: MapiCollaborationFolderKind,
+    pub(crate) collection: CollaborationCollection,
+    pub(crate) item_count: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MapiCollaborationFolderKind {
+    Contacts,
+    Calendar,
+}
+
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub(crate) struct MapiMessage {
     pub(crate) id: u64,
@@ -27,6 +47,24 @@ pub(crate) struct MapiMessage {
     pub(crate) canonical_id: Uuid,
     pub(crate) email: JmapEmail,
     pub(crate) attachments: Vec<MapiAttachment>,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct MapiContact {
+    pub(crate) id: u64,
+    pub(crate) folder_id: u64,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) contact: AccessibleContact,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct MapiEvent {
+    pub(crate) id: u64,
+    pub(crate) folder_id: u64,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) event: AccessibleEvent,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +83,10 @@ impl MapiMailStoreSnapshot {
         mailboxes: Vec<JmapMailbox>,
         emails: Vec<JmapEmail>,
         attachments: Vec<(Uuid, Vec<ActiveSyncAttachment>)>,
+        contact_collections: Vec<CollaborationCollection>,
+        calendar_collections: Vec<CollaborationCollection>,
+        contacts: Vec<AccessibleContact>,
+        events: Vec<AccessibleEvent>,
     ) -> Self {
         let folders = mailboxes
             .into_iter()
@@ -83,7 +125,80 @@ impl MapiMailStoreSnapshot {
                 }
             })
             .collect();
-        Self { folders, messages }
+        let mut collaboration_folders = Vec::new();
+        collaboration_folders.extend(contact_collections.into_iter().map(|collection| {
+            let id =
+                mapi_collaboration_folder_id(MapiCollaborationFolderKind::Contacts, &collection);
+            let item_count = contacts
+                .iter()
+                .filter(|contact| contact.collection_id == collection.id)
+                .count()
+                .min(u32::MAX as usize) as u32;
+            MapiCollaborationFolder {
+                id,
+                kind: MapiCollaborationFolderKind::Contacts,
+                collection,
+                item_count,
+            }
+        }));
+        collaboration_folders.extend(calendar_collections.into_iter().map(|collection| {
+            let id =
+                mapi_collaboration_folder_id(MapiCollaborationFolderKind::Calendar, &collection);
+            let item_count = events
+                .iter()
+                .filter(|event| event.collection_id == collection.id)
+                .count()
+                .min(u32::MAX as usize) as u32;
+            MapiCollaborationFolder {
+                id,
+                kind: MapiCollaborationFolderKind::Calendar,
+                collection,
+                item_count,
+            }
+        }));
+        let contacts = contacts
+            .into_iter()
+            .filter_map(|contact| {
+                let folder_id = collaboration_folders
+                    .iter()
+                    .find(|folder| {
+                        folder.kind == MapiCollaborationFolderKind::Contacts
+                            && folder.collection.id == contact.collection_id
+                    })
+                    .map(|folder| folder.id)?;
+                Some(MapiContact {
+                    id: mapi_item_id(&contact.id),
+                    folder_id,
+                    canonical_id: contact.id,
+                    contact,
+                })
+            })
+            .collect();
+        let events = events
+            .into_iter()
+            .filter_map(|event| {
+                let folder_id = collaboration_folders
+                    .iter()
+                    .find(|folder| {
+                        folder.kind == MapiCollaborationFolderKind::Calendar
+                            && folder.collection.id == event.collection_id
+                    })
+                    .map(|folder| folder.id)?;
+                Some(MapiEvent {
+                    id: mapi_item_id(&event.id),
+                    folder_id,
+                    canonical_id: event.id,
+                    event,
+                })
+            })
+            .collect();
+        Self {
+            folders,
+            collaboration_folders,
+            messages,
+            contacts,
+            events,
+        }
     }
 
     pub(crate) fn mailboxes(&self) -> Vec<JmapMailbox> {
@@ -120,6 +235,45 @@ impl MapiMailStoreSnapshot {
         self.attachments_for_message(folder_id, message_id)?
             .iter()
             .find(|attachment| attachment.attach_num == attach_num)
+    }
+
+    pub(crate) fn collaboration_folders(&self) -> &[MapiCollaborationFolder] {
+        &self.collaboration_folders
+    }
+
+    pub(crate) fn collaboration_folder_for_id(
+        &self,
+        folder_id: u64,
+    ) -> Option<&MapiCollaborationFolder> {
+        self.collaboration_folders
+            .iter()
+            .find(|folder| folder.id == folder_id)
+    }
+
+    pub(crate) fn contacts_for_folder(&self, folder_id: u64) -> Vec<&MapiContact> {
+        self.contacts
+            .iter()
+            .filter(|contact| contact.folder_id == folder_id)
+            .collect()
+    }
+
+    pub(crate) fn contact_for_id(&self, folder_id: u64, item_id: u64) -> Option<&MapiContact> {
+        self.contacts
+            .iter()
+            .find(|contact| contact.folder_id == folder_id && contact.id == item_id)
+    }
+
+    pub(crate) fn events_for_folder(&self, folder_id: u64) -> Vec<&MapiEvent> {
+        self.events
+            .iter()
+            .filter(|event| event.folder_id == folder_id)
+            .collect()
+    }
+
+    pub(crate) fn event_for_id(&self, folder_id: u64, item_id: u64) -> Option<&MapiEvent> {
+        self.events
+            .iter()
+            .find(|event| event.folder_id == folder_id && event.id == item_id)
     }
 
     #[cfg(test)]
@@ -159,7 +313,35 @@ impl<T: ExchangeStore> MapiStore for T {
                     self.fetch_message_attachments(account_id, email.id).await?;
                 attachments.push((email.id, message_attachments));
             }
-            Ok(MapiMailStoreSnapshot::new(mailboxes, emails, attachments))
+            let contact_collections = self
+                .fetch_accessible_contact_collections(account_id)
+                .await?;
+            let calendar_collections = self
+                .fetch_accessible_calendar_collections(account_id)
+                .await?;
+            let mut contacts = Vec::new();
+            for collection in &contact_collections {
+                contacts.extend(
+                    self.fetch_accessible_contacts_in_collection(account_id, &collection.id)
+                        .await?,
+                );
+            }
+            let mut events = Vec::new();
+            for collection in &calendar_collections {
+                events.extend(
+                    self.fetch_accessible_events_in_collection(account_id, &collection.id)
+                        .await?,
+                );
+            }
+            Ok(MapiMailStoreSnapshot::new(
+                mailboxes,
+                emails,
+                attachments,
+                contact_collections,
+                calendar_collections,
+                contacts,
+                events,
+            ))
         })
     }
 }
@@ -195,7 +377,34 @@ fn mapi_folder_id_for_role(role: &str) -> u64 {
 }
 
 fn mapi_message_id(email: &JmapEmail) -> u64 {
-    mapi_store_id(uuid_global_counter(&email.id))
+    mapi_item_id(&email.id)
+}
+
+fn mapi_item_id(id: &Uuid) -> u64 {
+    mapi_store_id(uuid_global_counter(id))
+}
+
+fn mapi_collaboration_folder_id(
+    kind: MapiCollaborationFolderKind,
+    collection: &CollaborationCollection,
+) -> u64 {
+    match (kind, collection.id.as_str()) {
+        (MapiCollaborationFolderKind::Contacts, "default" | "contacts") => mapi_store_id(15),
+        (MapiCollaborationFolderKind::Calendar, "default" | "calendar") => mapi_store_id(16),
+        _ => collection
+            .id
+            .rsplit('-')
+            .next()
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .map(|id| mapi_store_id(uuid_global_counter(&id)))
+            .unwrap_or_else(|| {
+                let seed = match kind {
+                    MapiCollaborationFolderKind::Contacts => 17,
+                    MapiCollaborationFolderKind::Calendar => 18,
+                };
+                mapi_store_id(seed + stable_text_counter(&collection.id))
+            }),
+    }
 }
 
 const fn mapi_store_id(global_counter: u64) -> u64 {
@@ -208,6 +417,12 @@ fn uuid_global_counter(id: &Uuid) -> u64 {
         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
     ]) & 0x0000_FFFF_FFFF_FFFF;
     value.max(0x100)
+}
+
+fn stable_text_counter(value: &str) -> u64 {
+    value.bytes().fold(0u64, |acc, byte| {
+        acc.wrapping_mul(131).wrapping_add(u64::from(byte))
+    }) & 0x0000_FFFF_FFFF_FFFF
 }
 
 #[cfg(test)]
@@ -273,6 +488,10 @@ mod tests {
             vec![mailbox],
             vec![email],
             vec![(message_id, vec![attachment])],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
         );
 
         assert_eq!(snapshot.folders().len(), 1);
