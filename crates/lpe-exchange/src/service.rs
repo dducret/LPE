@@ -5869,6 +5869,14 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
             _ => {}
         }
     }
+    if endpoint_query.contains(":6001") {
+        match opnum {
+            1 if alloc_hint >= 20 => return Some(rpc_proxy_emsmdb_disconnect_response(call_id)),
+            10 if alloc_hint >= 20 => return Some(rpc_proxy_emsmdb_connect_ex_response(call_id)),
+            11 if alloc_hint >= 20 => return Some(rpc_proxy_emsmdb_rpc_ext2_response(call_id)),
+            _ => {}
+        }
+    }
     match (context_id, opnum) {
         (0, 1) if alloc_hint == 4 => {
             let requested_stats = read_le_u32(bytes, 24)?;
@@ -5910,6 +5918,126 @@ fn rpc_proxy_mgmt_inq_stats_response(call_id: u32, requested_stats: u32) -> Vec<
     stub.extend_from_slice(&0u32.to_le_bytes());
 
     rpc_proxy_dce_response(call_id, &stub)
+}
+
+fn rpc_proxy_emsmdb_connect_ex_response(call_id: u32) -> Vec<u8> {
+    let mut stub = Vec::new();
+    rpc_proxy_push_emsmdb_context_handle(&mut stub);
+    push_le_u32(&mut stub, 60_000);
+    push_le_u32(&mut stub, 6);
+    push_le_u32(&mut stub, 10_000);
+    stub.extend_from_slice(&0x0304u16.to_le_bytes());
+    while stub.len() % 4 != 0 {
+        stub.push(0);
+    }
+    push_le_u32(&mut stub, 0);
+    push_le_u32(&mut stub, 0);
+    for value in [15u16, 0x263c, 0] {
+        stub.extend_from_slice(&value.to_le_bytes());
+    }
+    for value in [12u16, 0x183e, 1000] {
+        stub.extend_from_slice(&value.to_le_bytes());
+    }
+    while stub.len() % 4 != 0 {
+        stub.push(0);
+    }
+    push_le_u32(&mut stub, 1);
+    rpc_proxy_push_ndr_byte_array(&mut stub, &[]);
+    push_le_u32(&mut stub, 0);
+    push_le_u32(&mut stub, 0);
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
+fn rpc_proxy_emsmdb_rpc_ext2_response(call_id: u32) -> Vec<u8> {
+    let rop_response = rpc_proxy_emsmdb_logon_rop_response();
+    let mut rop_buffer = Vec::new();
+    rop_buffer.extend_from_slice(&(rop_response.len() as u16).to_le_bytes());
+    rop_buffer.extend_from_slice(&rop_response);
+    push_le_u32(&mut rop_buffer, 1);
+
+    let rgb_out = rpc_proxy_rpc_header_ext_payload(&rop_buffer);
+    let mut stub = Vec::new();
+    rpc_proxy_push_emsmdb_context_handle(&mut stub);
+    push_le_u32(&mut stub, 0);
+    rpc_proxy_push_ndr_byte_array(&mut stub, &rgb_out);
+    push_le_u32(&mut stub, rgb_out.len() as u32);
+    rpc_proxy_push_ndr_byte_array(&mut stub, &[]);
+    push_le_u32(&mut stub, 0);
+    push_le_u32(&mut stub, 1);
+    push_le_u32(&mut stub, 0);
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
+fn rpc_proxy_emsmdb_disconnect_response(call_id: u32) -> Vec<u8> {
+    let mut stub = Vec::new();
+    stub.extend_from_slice(&[0; 20]);
+    push_le_u32(&mut stub, 0);
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
+fn rpc_proxy_push_emsmdb_context_handle(stub: &mut Vec<u8>) {
+    stub.extend_from_slice(&0u32.to_le_bytes());
+    stub.extend_from_slice(b"LPEEMSMDBCTX0001");
+}
+
+fn rpc_proxy_push_ndr_byte_array(stub: &mut Vec<u8>, value: &[u8]) {
+    push_le_u32(stub, value.len() as u32);
+    push_le_u32(stub, 0);
+    push_le_u32(stub, value.len() as u32);
+    stub.extend_from_slice(value);
+    while stub.len() % 4 != 0 {
+        stub.push(0);
+    }
+}
+
+fn rpc_proxy_rpc_header_ext_payload(payload: &[u8]) -> Vec<u8> {
+    let size = payload.len().min(u16::MAX as usize) as u16;
+    let mut buffer = Vec::with_capacity(8 + payload.len());
+    buffer.extend_from_slice(&0u16.to_le_bytes());
+    buffer.extend_from_slice(&0x0004u16.to_le_bytes());
+    buffer.extend_from_slice(&size.to_le_bytes());
+    buffer.extend_from_slice(&size.to_le_bytes());
+    buffer.extend_from_slice(payload);
+    buffer
+}
+
+fn rpc_proxy_emsmdb_logon_rop_response() -> Vec<u8> {
+    const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
+        0x0001_0000_0000_0001,
+        0x0002_0000_0000_0001,
+        0x0003_0000_0000_0001,
+        0x0004_0000_0000_0001,
+        0x0005_0000_0000_0001,
+        0x0006_0000_0000_0001,
+        0x0007_0000_0000_0001,
+        0x0008_0000_0000_0001,
+        0x0009_0000_0000_0001,
+        0x000a_0000_0000_0001,
+        0x000b_0000_0000_0001,
+        0x000c_0000_0000_0001,
+        0x000d_0000_0000_0001,
+    ];
+    let mut response = Vec::new();
+    response.push(0xfe);
+    response.push(0);
+    push_le_u32(&mut response, 0);
+    response.push(0x01);
+    for folder_id in PRIVATE_LOGON_SPECIAL_FOLDER_IDS {
+        response.extend_from_slice(&folder_id.to_le_bytes());
+    }
+    response.push(0x03);
+    response.extend_from_slice(&[0x21, 0x93, 0x24, 0xa1, 0x3b, 0x82, 0x44, 0x10]);
+    response.extend_from_slice(&[0x92, 0x34, 0xab, 0xae, 0xda, 0x5d, 0x69, 0x22]);
+    response.extend_from_slice(&1u16.to_le_bytes());
+    response.extend_from_slice(&[0x21, 0x93, 0x24, 0xa1, 0x3b, 0x82, 0x44, 0x10]);
+    response.extend_from_slice(&[0x92, 0x34, 0xab, 0xae, 0xda, 0x5d, 0x69, 0x22]);
+    response.extend_from_slice(&[0; 8]);
+    response.extend_from_slice(&1u64.to_le_bytes());
+    push_le_u32(&mut response, 0);
+    response
 }
 
 fn rpc_proxy_rfri_get_new_dsa_response(call_id: u32, endpoint_query: &str) -> Vec<u8> {

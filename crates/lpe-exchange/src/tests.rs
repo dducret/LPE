@@ -6988,6 +6988,65 @@ fn rpc_proxy_in_channel_alter_context_request_gets_alter_context_response() {
 }
 
 #[test]
+fn rpc_proxy_in_channel_emsmdb_connect_ex_gets_session_context_response() {
+    let mut buffer = emsmdb_rpc_request(51, 10, 160);
+
+    let response =
+        rpc_proxy_in_channel_response_for_endpoint_query("mail.l-p-e.ch:6001", &mut buffer)
+            .expect("emsmdb connect response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        51
+    );
+    assert!(response
+        .windows(b"LPEEMSMDBCTX0001".len())
+        .any(|window| { window == b"LPEEMSMDBCTX0001" }));
+    assert_eq!(
+        u32::from_le_bytes(response[44..48].try_into().unwrap()),
+        60_000
+    );
+    assert_eq!(*response.last().unwrap(), 0);
+}
+
+#[test]
+fn rpc_proxy_in_channel_emsmdb_rpc_ext2_gets_logon_carrier_response() {
+    let mut buffer = emsmdb_rpc_request(52, 11, 160);
+
+    let response =
+        rpc_proxy_in_channel_response_for_endpoint_query("mail.l-p-e.ch:6001", &mut buffer)
+            .expect("emsmdb rpc ext2 response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        52
+    );
+    assert!(response
+        .windows(b"LPEEMSMDBCTX0001".len())
+        .any(|window| { window == b"LPEEMSMDBCTX0001" }));
+    assert!(response.windows(2).any(|window| window == [0xfe, 0x00]));
+}
+
+#[test]
+fn rpc_proxy_in_channel_emsmdb_disconnect_clears_session_context() {
+    let mut buffer = emsmdb_rpc_request(53, 1, 64);
+
+    let response =
+        rpc_proxy_in_channel_response_for_endpoint_query("mail.l-p-e.ch:6001", &mut buffer)
+            .expect("emsmdb disconnect response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        53
+    );
+    assert_eq!(&response[24..44], &[0; 20]);
+    assert_eq!(u32::from_le_bytes(response[44..48].try_into().unwrap()), 0);
+}
+
+#[test]
 fn rpc_proxy_mailstore_in_channel_skips_duplicate_bind_ack() {
     let endpoint_query = "mail.l-p-e.ch:6001";
     mark_rpc_proxy_out_endpoint_bind_ack(endpoint_query);
@@ -7448,6 +7507,10 @@ fn nspi_rpc_request(call_id: u32, opnum: u16, fragment_length: usize) -> Vec<u8>
 
 fn rfri_rpc_request(call_id: u32, opnum: u16, fragment_length: usize) -> Vec<u8> {
     rpc_request(call_id, 0, opnum, fragment_length)
+}
+
+fn emsmdb_rpc_request(call_id: u32, opnum: u16, fragment_length: usize) -> Vec<u8> {
+    rpc_request(call_id, 3, opnum, fragment_length)
 }
 
 fn rpc_request(call_id: u32, context_id: u16, opnum: u16, fragment_length: usize) -> Vec<u8> {
