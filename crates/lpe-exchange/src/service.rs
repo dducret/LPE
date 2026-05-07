@@ -5706,11 +5706,6 @@ fn spawn_rpc_proxy_in_data_drain(method: &Method, uri: &Uri, headers: &HeaderMap
     });
 }
 
-pub(crate) fn rpc_proxy_in_channel_response_for_chunk(bytes: &[u8]) -> Option<Vec<u8>> {
-    let mut buffer = bytes.to_vec();
-    rpc_proxy_in_channel_response_for_buffer(&mut buffer)
-}
-
 pub(crate) fn rpc_proxy_in_channel_response_for_buffer(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
     let mut offset = 0usize;
     while offset + 16 <= buffer.len() {

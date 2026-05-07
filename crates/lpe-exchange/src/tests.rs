@@ -20,10 +20,7 @@ use uuid::Uuid;
 use crate::{
     mapi::MapiEndpoint,
     mapi_mailstore,
-    service::{
-        error_response, rpc_proxy_in_channel_response_for_buffer,
-        rpc_proxy_in_channel_response_for_chunk, ExchangeService,
-    },
+    service::{error_response, rpc_proxy_in_channel_response_for_buffer, ExchangeService},
     store::ExchangeStore,
 };
 
@@ -6777,7 +6774,9 @@ fn rpc_proxy_in_channel_endpoint_ping_request_gets_success_response() {
         0x00, 0x00,
     ];
 
-    let response = rpc_proxy_in_channel_response_for_chunk(&request).expect("endpoint response");
+    let mut buffer = request.to_vec();
+    let response =
+        rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("endpoint response");
 
     assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
     assert_eq!(u16::from_le_bytes([response[8], response[9]]), 88);
@@ -6823,7 +6822,9 @@ fn rpc_proxy_in_channel_scans_endpoint_ping_after_auth_fragment() {
     chunk.extend_from_slice(&[0u8; 234]);
     chunk.extend_from_slice(&request);
 
-    let response = rpc_proxy_in_channel_response_for_chunk(&chunk).expect("endpoint response");
+    let mut buffer = chunk;
+    let response =
+        rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("endpoint response");
 
     assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
     assert_eq!(
