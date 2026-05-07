@@ -5380,6 +5380,7 @@ fn rpc_proxy_in_channel_response() -> Response {
             RPC_PROXY_IN_CHANNEL_STATUS,
             hold_open_ms,
             false,
+            false,
         );
     }
 
@@ -5400,6 +5401,7 @@ fn rpc_proxy_binary_response(body: Vec<u8>, status: &'static str) -> Response {
             status,
             rpc_proxy_channel_hold_ms(),
             true,
+            true,
         );
     }
 
@@ -5415,6 +5417,7 @@ fn rpc_proxy_held_open_binary_response(
     status: &'static str,
     hold_open_ms: u64,
     send_initial_body: bool,
+    include_content_length: bool,
 ) -> Response {
     let payload_bytes = body.len();
     let payload_preview_hex = mapi::debug_payload_preview_hex(&body);
@@ -5428,11 +5431,13 @@ fn rpc_proxy_held_open_binary_response(
 
     let mut response = Response::new(Body::from_stream(ReceiverStream::new(receiver)));
     decorate_rpc_proxy_binary_response(&mut response, payload_bytes, payload_preview_hex, status);
-    response.headers_mut().insert(
-        CONTENT_LENGTH,
-        HeaderValue::from_str(&RPC_PROXY_OUT_CHANNEL_CONTENT_LENGTH.to_string())
-            .unwrap_or_else(|_| HeaderValue::from_static("131072")),
-    );
+    if include_content_length {
+        response.headers_mut().insert(
+            CONTENT_LENGTH,
+            HeaderValue::from_str(&RPC_PROXY_OUT_CHANNEL_CONTENT_LENGTH.to_string())
+                .unwrap_or_else(|_| HeaderValue::from_static("131072")),
+        );
+    }
     response
 }
 
