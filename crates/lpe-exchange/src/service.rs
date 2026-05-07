@@ -5763,12 +5763,7 @@ fn rpc_proxy_mailstore_endpoint_response_for_fragment(bytes: &[u8]) -> Option<Ve
 }
 
 fn rpc_proxy_mgmt_inq_stats_response(call_id: u32, requested_stats: u32) -> Vec<u8> {
-    const AUTH_LENGTH: usize = 16;
     const RESPONSE_BODY_HEADER_LENGTH: usize = 8;
-    const SEC_TRAILER_LENGTH: usize = 8;
-    const AUTH_TYPE_NTLM: u8 = 10;
-    const AUTH_LEVEL_CONNECT: u8 = 2;
-    const AUTH_CONTEXT_ID: u32 = 0;
 
     let stat_count = requested_stats.min(4);
     let stats = [1u32, 0u32, 1u32, 1u32];
@@ -5780,27 +5775,18 @@ fn rpc_proxy_mgmt_inq_stats_response(call_id: u32, requested_stats: u32) -> Vec<
     }
     stub.extend_from_slice(&0u32.to_le_bytes());
 
-    let pdu_body_len = RESPONSE_BODY_HEADER_LENGTH + stub.len();
-    let auth_pad_length = (16 - (pdu_body_len % 16)) % 16;
-    let fragment_length = 16 + pdu_body_len + auth_pad_length + SEC_TRAILER_LENGTH + AUTH_LENGTH;
+    let fragment_length = 16 + RESPONSE_BODY_HEADER_LENGTH + stub.len();
 
     let mut packet = Vec::with_capacity(fragment_length);
     packet.extend_from_slice(&[0x05, 0x00, 0x02, 0x03, 0x10, 0x00, 0x00, 0x00]);
     packet.extend_from_slice(&(fragment_length as u16).to_le_bytes());
-    packet.extend_from_slice(&(AUTH_LENGTH as u16).to_le_bytes());
+    packet.extend_from_slice(&0u16.to_le_bytes());
     packet.extend_from_slice(&call_id.to_le_bytes());
     packet.extend_from_slice(&(stub.len() as u32).to_le_bytes());
     packet.extend_from_slice(&0u16.to_le_bytes());
     packet.push(0);
     packet.push(0);
     packet.extend_from_slice(&stub);
-    packet.extend(std::iter::repeat_n(0, auth_pad_length));
-    packet.push(AUTH_TYPE_NTLM);
-    packet.push(AUTH_LEVEL_CONNECT);
-    packet.push(auth_pad_length as u8);
-    packet.push(0);
-    packet.extend_from_slice(&AUTH_CONTEXT_ID.to_le_bytes());
-    packet.extend_from_slice(&[0u8; AUTH_LENGTH]);
     packet
 }
 

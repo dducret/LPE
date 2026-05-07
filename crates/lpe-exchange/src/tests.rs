@@ -6779,8 +6779,8 @@ fn rpc_proxy_in_channel_endpoint_ping_request_gets_success_response() {
         rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("endpoint response");
 
     assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
-    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 88);
-    assert_eq!(u16::from_le_bytes([response[10], response[11]]), 16);
+    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 52);
+    assert_eq!(u16::from_le_bytes([response[10], response[11]]), 0);
     assert_eq!(
         u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
         2
@@ -6801,9 +6801,6 @@ fn rpc_proxy_in_channel_endpoint_ping_request_gets_success_response() {
         u32::from_le_bytes([response[48], response[49], response[50], response[51]]),
         0
     );
-    assert_eq!(response[64], 10);
-    assert_eq!(response[65], 2);
-    assert_eq!(response[66], 12);
 }
 
 #[test]
