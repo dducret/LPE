@@ -5800,7 +5800,10 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
     }
     let call_id = read_le_u32(bytes, 12)?;
     match bytes.get(2).copied()? {
-        0x0b => return Some(rpc_proxy_dce_bind_ack_body(call_id)),
+        0x0b if !endpoint_query.contains(":6001") => {
+            return Some(rpc_proxy_dce_bind_ack_body(call_id));
+        }
+        0x0b => return None,
         0x00 => {}
         _ => return None,
     }
