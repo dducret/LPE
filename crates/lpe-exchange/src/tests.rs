@@ -7012,6 +7012,31 @@ fn rpc_proxy_in_channel_nspi_resolve_names_w_request_gets_response() {
 }
 
 #[test]
+fn rpc_proxy_in_channel_scans_nspi_resolve_after_rts_pdu() {
+    let chunk = hex_bytes(
+        "05001403100000001c00000000000000020001000500000030750000\
+         0500000310000000d000100009000000980000000200140000000000\
+         4c5045004e535049435458000000000100000000000000000000000000000000000000000000000000000000\
+         e404000009040000090400000000020003000000020000000000000002000000\
+         1e0003301e000130010000000100000004000200140000000000000014000000\
+         3d0053004d00540050003a00740065007300740040006c002d0070002d0065002e00630068000000\
+         00000000000000000a0208000000000001000000000000000000000000000000",
+    );
+    let mut buffer = chunk;
+
+    let response =
+        rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("resolve names response");
+
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        9
+    );
+    assert!(response
+        .windows(b"test@l-p-e.ch".len())
+        .any(|window| window == b"test@l-p-e.ch"));
+}
+
+#[test]
 fn rpc_proxy_in_channel_nspi_unbind_request_gets_success_response() {
     let request = [
         0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0x50, 0x00, 0x10, 0x00, 0x05, 0x00, 0x00,
@@ -7036,6 +7061,81 @@ fn rpc_proxy_in_channel_nspi_unbind_request_gets_success_response() {
         u32::from_le_bytes([response[44], response[45], response[46], response[47]]),
         0
     );
+}
+
+#[test]
+fn rpc_proxy_in_channel_nspi_bootstrap_opnums_get_success_responses() {
+    for (opnum, call_id) in [
+        (3u16, 11u32),
+        (4, 12),
+        (5, 13),
+        (6, 14),
+        (7, 15),
+        (8, 16),
+        (9, 17),
+        (10, 18),
+        (12, 19),
+        (13, 20),
+        (16, 21),
+        (18, 22),
+    ] {
+        let mut buffer = nspi_rpc_request(call_id, opnum, 96);
+
+        let response = rpc_proxy_in_channel_response_for_buffer(&mut buffer)
+            .unwrap_or_else(|| panic!("nspi opnum {opnum} response"));
+
+        assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03], "opnum {opnum}");
+        assert_eq!(
+            u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+            call_id,
+            "opnum {opnum}"
+        );
+        assert_eq!(
+            u32::from_le_bytes([
+                response[response.len() - 4],
+                response[response.len() - 3],
+                response[response.len() - 2],
+                response[response.len() - 1]
+            ]),
+            0,
+            "opnum {opnum}"
+        );
+    }
+}
+
+fn nspi_rpc_request(call_id: u32, opnum: u16, fragment_length: usize) -> Vec<u8> {
+    let mut request = vec![0u8; fragment_length];
+    request[0..8].copy_from_slice(&[0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00]);
+    request[8..10].copy_from_slice(&(fragment_length as u16).to_le_bytes());
+    request[10..12].copy_from_slice(&0x0010u16.to_le_bytes());
+    request[12..16].copy_from_slice(&call_id.to_le_bytes());
+    request[16..20].copy_from_slice(&(fragment_length as u32 - 24).to_le_bytes());
+    request[20..22].copy_from_slice(&2u16.to_le_bytes());
+    request[22..24].copy_from_slice(&opnum.to_le_bytes());
+    request
+}
+
+fn hex_bytes(input: &str) -> Vec<u8> {
+    let compact: String = input.chars().filter(|ch| !ch.is_whitespace()).collect();
+    assert_eq!(compact.len() % 2, 0);
+    compact
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let high = hex_nibble(pair[0]);
+            let low = hex_nibble(pair[1]);
+            (high << 4) | low
+        })
+        .collect()
+}
+
+fn hex_nibble(byte: u8) -> u8 {
+    match byte {
+        b'0'..=b'9' => byte - b'0',
+        b'a'..=b'f' => byte - b'a' + 10,
+        b'A'..=b'F' => byte - b'A' + 10,
+        _ => panic!("invalid hex byte"),
+    }
 }
 
 #[test]
