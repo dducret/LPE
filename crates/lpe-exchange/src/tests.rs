@@ -6927,6 +6927,42 @@ fn rpc_proxy_in_channel_endpoint_ping_request_gets_success_response() {
 }
 
 #[test]
+fn rpc_proxy_in_channel_bind_request_gets_bind_ack_response() {
+    let bind = hex_bytes(
+        "05000b1310000000a400280003000000\
+         f80ff80f010000000200000002000100\
+         e0f544153c61d11193df00c04fd7bd0901000000\
+         045d888aeb1cc9119fe808002b10486002000000\
+         03000100e0f544153c61d11193df00c04fd7bd0901000000\
+         33057171babe37498319b5dbef9ccc3601000000\
+         0a020000000000004e544c4d5353500001000000078208a2\
+         000000000000000000000000000000000a007c4f0000000f",
+    );
+    let mut buffer = bind;
+
+    let response =
+        rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("bind ack response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x0c, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        3
+    );
+    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 112);
+    assert_eq!(u16::from_le_bytes([response[10], response[11]]), 48);
+    assert_eq!(
+        &response[36..56],
+        &[
+            0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11, 0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10,
+            0x48, 0x60, 0x02, 0x00, 0x00, 0x00
+        ]
+    );
+    assert_eq!(response[56], 10);
+    assert_eq!(response[57], 2);
+    assert_eq!(&response[64..72], b"NTLMSSP\0");
+}
+
+#[test]
 fn rpc_proxy_in_channel_nspi_bind_request_gets_context_handle_response() {
     let request = [
         0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0x60, 0x00, 0x10, 0x00, 0x03, 0x00, 0x00,

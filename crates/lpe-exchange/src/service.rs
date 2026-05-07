@@ -5331,11 +5331,11 @@ fn rpc_proxy_rts_connect_response(client_receive_window_size: u32) -> Response {
 
 fn rpc_proxy_mailstore_ping_response(uri: &Uri, client_receive_window_size: u32) -> Response {
     let mut body = rpc_proxy_rts_connect_body(client_receive_window_size);
-    body.extend_from_slice(&rpc_proxy_mailstore_bind_ack_body());
+    body.extend_from_slice(&rpc_proxy_dce_bind_ack_body(1));
     rpc_proxy_mailstore_held_open_response(uri, body)
 }
 
-fn rpc_proxy_mailstore_bind_ack_body() -> Vec<u8> {
+fn rpc_proxy_dce_bind_ack_body(call_id: u32) -> Vec<u8> {
     const DCE_RPC_BIND_ACK: u8 = 0x0c;
     const DCE_RPC_FIRST_FRAG: u8 = 0x01;
     const DCE_RPC_LAST_FRAG: u8 = 0x02;
@@ -5380,7 +5380,7 @@ fn rpc_proxy_mailstore_bind_ack_body() -> Vec<u8> {
     ]);
     packet.extend_from_slice(&fragment_length.to_le_bytes());
     packet.extend_from_slice(&(verifier.value.len() as u16).to_le_bytes());
-    packet.extend_from_slice(&1u32.to_le_bytes());
+    packet.extend_from_slice(&call_id.to_le_bytes());
     packet.extend_from_slice(&body);
     packet
 }
@@ -5791,14 +5791,22 @@ pub(crate) fn rpc_proxy_in_channel_response_for_endpoint_query(
 }
 
 fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) -> Option<Vec<u8>> {
-    if bytes.get(0..4) != Some(&[0x05, 0x00, 0x00, 0x03]) {
+    if bytes.get(0..2) != Some(&[0x05, 0x00]) {
         return None;
     }
     let fragment_length = u16::from_le_bytes([*bytes.get(8)?, *bytes.get(9)?]) as usize;
-    if fragment_length > bytes.len() || fragment_length < 24 {
+    if fragment_length > bytes.len() || fragment_length < 16 {
         return None;
     }
     let call_id = read_le_u32(bytes, 12)?;
+    match bytes.get(2).copied()? {
+        0x0b => return Some(rpc_proxy_dce_bind_ack_body(call_id)),
+        0x00 => {}
+        _ => return None,
+    }
+    if fragment_length < 24 {
+        return None;
+    }
     let alloc_hint = read_le_u32(bytes, 16)?;
     let context_id = u16::from_le_bytes([*bytes.get(20)?, *bytes.get(21)?]);
     let opnum = u16::from_le_bytes([*bytes.get(22)?, *bytes.get(23)?]);
