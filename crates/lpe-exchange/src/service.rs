@@ -5314,6 +5314,16 @@ fn rpc_proxy_echo_response() -> Response {
 }
 
 fn rpc_proxy_in_channel_response() -> Response {
+    let hold_open_ms = rpc_proxy_channel_hold_ms();
+    if hold_open_ms > 0 {
+        return rpc_proxy_held_open_binary_response(
+            Vec::new(),
+            RPC_PROXY_IN_CHANNEL_STATUS,
+            hold_open_ms,
+            false,
+        );
+    }
+
     let mut response = StatusCode::OK.into_response();
     decorate_rpc_proxy_binary_response(
         &mut response,
@@ -5325,11 +5335,11 @@ fn rpc_proxy_in_channel_response() -> Response {
 }
 
 fn rpc_proxy_binary_response(body: Vec<u8>, status: &'static str) -> Response {
-    if status == RPC_PROXY_RTS_CONNECT_STATUS && rpc_proxy_out_channel_hold_ms() > 0 {
+    if status == RPC_PROXY_RTS_CONNECT_STATUS && rpc_proxy_channel_hold_ms() > 0 {
         return rpc_proxy_held_open_binary_response(
             body,
             status,
-            rpc_proxy_out_channel_hold_ms(),
+            rpc_proxy_channel_hold_ms(),
             true,
         );
     }
@@ -5429,6 +5439,26 @@ fn spawn_rpc_proxy_in_data_drain(method: &Method, uri: &Uri, headers: &HeaderMap
 
     tokio::spawn(async move {
         let started_at = Instant::now();
+        info!(
+            rca_debug = true,
+            adapter = "rpcproxy",
+            method = %method,
+            path = %path,
+            query = %query,
+            response_kind = "in-channel-open",
+            trace_id = %trace_id,
+            client_request_id = %client_request_id,
+            x_request_id = %x_request_id,
+            http_status = 200u16,
+            request_body_bytes = 0usize,
+            response_payload_bytes = 0usize,
+            request_body_preview_hex = "",
+            response_payload_preview_hex = "",
+            duration_ms = 0.0f64,
+            user_agent = %user_agent,
+            message = "rca debug rpc proxy in data stream opened"
+        );
+
         let mut stream = body.into_data_stream();
         let mut total_body_bytes = 0usize;
         while let Some(chunk) = stream.next().await {
@@ -5498,7 +5528,7 @@ fn spawn_rpc_proxy_in_data_drain(method: &Method, uri: &Uri, headers: &HeaderMap
 }
 
 #[cfg(not(test))]
-fn rpc_proxy_out_channel_hold_ms() -> u64 {
+fn rpc_proxy_channel_hold_ms() -> u64 {
     std::env::var("LPE_RPC_PROXY_OUT_CHANNEL_HOLD_MS")
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
@@ -5507,7 +5537,7 @@ fn rpc_proxy_out_channel_hold_ms() -> u64 {
 }
 
 #[cfg(test)]
-fn rpc_proxy_out_channel_hold_ms() -> u64 {
+fn rpc_proxy_channel_hold_ms() -> u64 {
     0
 }
 

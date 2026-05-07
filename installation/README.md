@@ -646,9 +646,10 @@ instead of receiving a static web-server `405`. Anonymous `MSRPC` echo
 discovery probes sent with `RPC_IN_DATA` or `RPC_OUT_DATA` must also receive
 that `401` challenge; after mailbox authentication, `RPC_IN_DATA` probes
 receive a `200 application/rpc` 20-byte RTS echo response, while
-authenticated `RPC_IN_DATA` mail-store channels return headers immediately
-without advertising a response body length and drain the incoming stream
-asynchronously for RCA payload logging. Authenticated `RPC_OUT_DATA` mail-store
+authenticated `RPC_IN_DATA` mail-store channels return an open streaming
+response while the client-to-server upload stream is drained asynchronously for
+RCA payload logging.
+Authenticated `RPC_OUT_DATA` mail-store
 ping bodies are parsed as client `CONN/A1` RTS requests and receive the initial
 RTS connection-establishment response for the RCA OUT-channel ping. The
 `RPC_OUT_DATA` response advertises a long RPC/HTTP content length and stays
