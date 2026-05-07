@@ -5967,7 +5967,7 @@ fn rpc_proxy_display_name_for_smtp_address(address: &str) -> String {
 
 fn rpc_proxy_push_property_tag_array(buffer: &mut Vec<u8>, values: &[u32]) {
     push_le_u32(buffer, values.len() as u32);
-    push_le_u32(buffer, values.len() as u32);
+    push_le_u32(buffer, values.len() as u32 + 1);
     push_le_u32(buffer, 0);
     push_le_u32(buffer, values.len() as u32);
     for value in values {
