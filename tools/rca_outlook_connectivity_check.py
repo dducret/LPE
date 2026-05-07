@@ -505,6 +505,50 @@ def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, insecu
     print("ok rpc_proxy_auth")
 
 
+def check_rpc_proxy_mailstore_ping(
+    base_url: str,
+    email: str,
+    password: str,
+    insecure_tls: bool,
+    timeout: int,
+) -> None:
+    parsed = urllib.parse.urlparse(base_url)
+    rpc_host = parsed.hostname or parsed.netloc
+    require(bool(rpc_host), "base URL must include a host for RPC proxy checks")
+    token = base64.b64encode(f"{email}:{password}".encode("utf-8")).decode("ascii")
+    rpc_url = join_url(base_url, f"/rpc/rpcproxy.dll?{rpc_host}:6001")
+    headers = {
+        "Accept": "application/rpc",
+        "Authorization": f"Basic {token}",
+        "User-Agent": "MSRPC",
+    }
+
+    response = request(
+        "RPC_OUT_DATA",
+        rpc_url,
+        rpc_rts_conn_a1_body(),
+        headers,
+        timeout,
+        read_limit=128,
+        insecure_tls=insecure_tls,
+    )
+    require(
+        response.status == 200,
+        f"RPC proxy mailstore OUT ping returned HTTP {response.status}: {response.text[:300]}",
+    )
+    require(
+        "application/rpc" in content_type(response.headers),
+        "RPC proxy mailstore OUT ping did not return application/rpc",
+    )
+    require(
+        header_value(response.headers, "x-lpe-rpc-proxy-status") == "mailstore-ping",
+        "RPC proxy mailstore OUT ping did not return the RCA mailbox-store ping response",
+    )
+    require(len(response.body) >= 128, f"RPC proxy mailstore OUT ping returned only {len(response.body)} bytes")
+    require(response.body[72] == 0x05 and response.body[74] == 0x0C, "mailstore ping did not include a DCE/RPC bind ACK")
+    print("ok rpc_proxy_mailstore_ping")
+
+
 def mapi_http_binary_payload(body: bytes) -> bytes:
     _, separator, payload = body.partition(b"\r\n\r\n")
     require(separator == b"\r\n\r\n", "MAPI response body did not contain the header/body separator")
@@ -612,6 +656,11 @@ def main() -> int:
         action="store_true",
         help="Exercise RCA-style /rpc/rpcproxy.dll anonymous challenge and optional authenticated echo.",
     )
+    parser.add_argument(
+        "--check-rpc-proxy-mailstore-ping",
+        action="store_true",
+        help="Exercise RCA-style /rpc/rpcproxy.dll mailbox-store endpoint ping on :6001.",
+    )
     args = parser.parse_args()
 
     require(args.base_url, "provide --base-url or set LPE_RCA_BASE_URL")
@@ -655,10 +704,14 @@ def main() -> int:
             or args.check_mapi_ping
             or args.check_mapi_nspi_bind_octet_stream
             or args.check_mapi_nspi_address_book
+            or args.check_rpc_proxy_mailstore_ping
         ):
             raise RuntimeError("requested authenticated checks require --password or LPE_RCA_PASSWORD")
     if args.check_rpc_proxy_auth:
         check_rpc_proxy_auth(base_url, args.email, args.password, args.insecure, args.timeout)
+    if args.check_rpc_proxy_mailstore_ping:
+        require(args.password, "--check-rpc-proxy-mailstore-ping requires --password or LPE_RCA_PASSWORD")
+        check_rpc_proxy_mailstore_ping(base_url, args.email, args.password, args.insecure, args.timeout)
 
     return 0
 

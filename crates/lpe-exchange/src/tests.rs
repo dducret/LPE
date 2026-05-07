@@ -6551,9 +6551,10 @@ async fn mapi_over_http_rejects_missing_authentication() {
 async fn rpc_proxy_challenges_missing_authentication_with_basic() {
     let store = FakeStore::default();
     let service = ExchangeService::new(store);
+    let uri: Uri = "/rpc/rpcproxy.dll".parse().unwrap();
 
     let response = service
-        .handle_rpc_proxy(&Method::GET, &HeaderMap::new(), b"")
+        .handle_rpc_proxy(&Method::GET, &uri, &HeaderMap::new(), b"")
         .await;
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
@@ -6570,11 +6571,12 @@ async fn rpc_proxy_challenges_anonymous_msrpch_echo_ping() {
     let store = FakeStore::default();
     let service = ExchangeService::new(store);
     let method = Method::from_bytes(b"RPC_IN_DATA").expect("valid RPC method");
+    let uri: Uri = "/rpc/rpcproxy.dll".parse().unwrap();
     let mut headers = HeaderMap::new();
     headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
     headers.insert("accept", HeaderValue::from_static("application/rpc"));
 
-    let response = service.handle_rpc_proxy(&method, &headers, b"").await;
+    let response = service.handle_rpc_proxy(&method, &uri, &headers, b"").await;
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(
@@ -6593,11 +6595,12 @@ async fn rpc_proxy_answers_authenticated_msrpch_echo_ping() {
     };
     let service = ExchangeService::new(store);
     let method = Method::from_bytes(b"RPC_IN_DATA").expect("valid RPC method");
+    let uri: Uri = "/rpc/rpcproxy.dll".parse().unwrap();
     let mut headers = bearer_headers();
     headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
     headers.insert("accept", HeaderValue::from_static("application/rpc"));
 
-    let response = service.handle_rpc_proxy(&method, &headers, b"").await;
+    let response = service.handle_rpc_proxy(&method, &uri, &headers, b"").await;
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
@@ -6626,13 +6629,14 @@ async fn rpc_proxy_answers_authenticated_msrpch_out_data_ping() {
     };
     let service = ExchangeService::new(store);
     let method = Method::from_bytes(b"RPC_OUT_DATA").expect("valid RPC method");
+    let uri: Uri = "/rpc/rpcproxy.dll?mail.example.test:6002".parse().unwrap();
     let mut headers = bearer_headers();
     headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
     headers.insert("accept", HeaderValue::from_static("application/rpc"));
 
     let connect_body = rpc_proxy_conn_a1_request_body(0x0000_8000);
     let response = service
-        .handle_rpc_proxy(&method, &headers, &connect_body)
+        .handle_rpc_proxy(&method, &uri, &headers, &connect_body)
         .await;
 
     assert_eq!(response.status(), StatusCode::OK);
@@ -6661,6 +6665,50 @@ async fn rpc_proxy_answers_authenticated_msrpch_out_data_ping() {
     assert_eq!(
         u32::from_le_bytes([body[60], body[61], body[62], body[63]]),
         0x0000_8000
+    );
+}
+
+#[tokio::test]
+async fn rpc_proxy_mailstore_endpoint_ping_includes_bind_ack_after_rts_connect() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let method = Method::from_bytes(b"RPC_OUT_DATA").expect("valid RPC method");
+    let uri: Uri = "/rpc/rpcproxy.dll?mail.example.test:6001".parse().unwrap();
+    let mut headers = bearer_headers();
+    headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
+    headers.insert("accept", HeaderValue::from_static("application/rpc"));
+
+    let connect_body = rpc_proxy_conn_a1_request_body(0x0000_8000);
+    let response = service
+        .handle_rpc_proxy(&method, &uri, &headers, &connect_body)
+        .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type"),
+        Some(&HeaderValue::from_static("application/rpc"))
+    );
+    assert_eq!(
+        response.headers().get("x-lpe-rpc-proxy-status"),
+        Some(&HeaderValue::from_static("mailstore-ping"))
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(body.len(), 128);
+    assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
+    assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
+    assert_eq!(body[72], 0x05);
+    assert_eq!(body[74], 0x0c);
+    assert_eq!(body[75], 0x03);
+    assert_eq!(u16::from_le_bytes([body[80], body[81]]), 56);
+    assert_eq!(
+        &body[108..128],
+        &[
+            0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11, 0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10,
+            0x48, 0x60, 0x02, 0x00, 0x00, 0x00
+        ]
     );
 }
 
@@ -6700,9 +6748,10 @@ async fn rpc_proxy_accepts_authenticated_rca_probe_without_405() {
         ..Default::default()
     };
     let service = ExchangeService::new(store);
+    let uri: Uri = "/rpc/rpcproxy.dll".parse().unwrap();
 
     let response = service
-        .handle_rpc_proxy(&Method::GET, &bearer_headers(), b"")
+        .handle_rpc_proxy(&Method::GET, &uri, &bearer_headers(), b"")
         .await;
 
     assert_eq!(response.status(), StatusCode::OK);

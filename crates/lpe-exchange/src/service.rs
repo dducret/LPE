@@ -48,6 +48,7 @@ const RPC_PROXY_COMPAT_STATUS: &str = "x-lpe-rpc-proxy-status";
 const RPC_PROXY_ECHO_STATUS: &str = "echo";
 const RPC_PROXY_IN_CHANNEL_STATUS: &str = "in-channel-open";
 const RPC_PROXY_RTS_CONNECT_STATUS: &str = "rts-connect";
+const RPC_PROXY_MAILSTORE_PING_STATUS: &str = "mailstore-ping";
 const RPC_PROXY_MAX_FINITE_BODY_BYTES: usize = 1024 * 1024;
 const RPC_PROXY_RECEIVE_WINDOW_SIZE: u32 = 0x0001_0000;
 const RPC_PROXY_OUT_CHANNEL_CONTENT_LENGTH: u32 = 0x0002_0000;
@@ -272,7 +273,7 @@ async fn rpc_proxy_handler(
         }
     };
     let response = service
-        .handle_rpc_proxy(&method, &headers, body.as_ref())
+        .handle_rpc_proxy(&method, &uri, &headers, body.as_ref())
         .await;
     log_rpc_proxy_connection(
         &method,
@@ -599,6 +600,7 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
     pub(crate) async fn handle_rpc_proxy(
         &self,
         method: &Method,
+        uri: &Uri,
         headers: &HeaderMap,
         request_body: &[u8],
     ) -> Response {
@@ -607,7 +609,11 @@ impl<S: ExchangeStore, V: Detector> ExchangeService<S, V> {
                 if let Some(connect) =
                     parse_rpc_proxy_out_data_connect_request(method, headers, request_body)
                 {
-                    rpc_proxy_rts_connect_response(connect.receive_window_size)
+                    if is_rpc_proxy_mailstore_endpoint_ping(uri) {
+                        rpc_proxy_mailstore_ping_response(connect.receive_window_size)
+                    } else {
+                        rpc_proxy_rts_connect_response(connect.receive_window_size)
+                    }
                 } else if is_rpc_proxy_echo_request(method, headers) {
                     rpc_proxy_echo_response()
                 } else {
@@ -5178,6 +5184,10 @@ fn is_rpc_proxy_in_data_channel_request(method: &Method, uri: &Uri, headers: &He
         && is_rpc_proxy_msrpc_request(headers)
 }
 
+fn is_rpc_proxy_mailstore_endpoint_ping(uri: &Uri) -> bool {
+    uri.query().is_some_and(|query| query.contains(":6001"))
+}
+
 fn is_rpc_proxy_msrpc_request(headers: &HeaderMap) -> bool {
     let user_agent = mapi::safe_header(headers, "user-agent")
         .unwrap_or_default()
@@ -5307,6 +5317,55 @@ fn rpc_proxy_rts_connect_response(client_receive_window_size: u32) -> Response {
         rpc_proxy_rts_connect_body(client_receive_window_size),
         RPC_PROXY_RTS_CONNECT_STATUS,
     )
+}
+
+fn rpc_proxy_mailstore_ping_response(client_receive_window_size: u32) -> Response {
+    let mut body = rpc_proxy_rts_connect_body(client_receive_window_size);
+    body.extend_from_slice(&rpc_proxy_mailstore_bind_ack_body());
+    rpc_proxy_binary_response(body, RPC_PROXY_MAILSTORE_PING_STATUS)
+}
+
+fn rpc_proxy_mailstore_bind_ack_body() -> Vec<u8> {
+    const DCE_RPC_BIND_ACK: u8 = 0x0c;
+    const DCE_RPC_FIRST_FRAG: u8 = 0x01;
+    const DCE_RPC_LAST_FRAG: u8 = 0x02;
+    const DCE_RPC_MAX_FRAG: u16 = 5840;
+    const DCE_RPC_NDR_TRANSFER_SYNTAX: [u8; 20] = [
+        0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11, 0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10, 0x48,
+        0x60, 0x02, 0x00, 0x00, 0x00,
+    ];
+
+    let mut body = Vec::new();
+    body.extend_from_slice(&DCE_RPC_MAX_FRAG.to_le_bytes());
+    body.extend_from_slice(&DCE_RPC_MAX_FRAG.to_le_bytes());
+    body.extend_from_slice(&1u32.to_le_bytes());
+    body.extend_from_slice(&1u16.to_le_bytes());
+    body.push(0);
+    body.push(0);
+    body.push(1);
+    body.push(0);
+    body.extend_from_slice(&0u16.to_le_bytes());
+    body.extend_from_slice(&0u16.to_le_bytes());
+    body.extend_from_slice(&0u16.to_le_bytes());
+    body.extend_from_slice(&DCE_RPC_NDR_TRANSFER_SYNTAX);
+
+    let fragment_length = (16 + body.len()) as u16;
+    let mut packet = Vec::with_capacity(fragment_length as usize);
+    packet.extend_from_slice(&[
+        0x05,
+        0x00,
+        DCE_RPC_BIND_ACK,
+        DCE_RPC_FIRST_FRAG | DCE_RPC_LAST_FRAG,
+        0x10,
+        0x00,
+        0x00,
+        0x00,
+    ]);
+    packet.extend_from_slice(&fragment_length.to_le_bytes());
+    packet.extend_from_slice(&0u16.to_le_bytes());
+    packet.extend_from_slice(&1u32.to_le_bytes());
+    packet.extend_from_slice(&body);
+    packet
 }
 
 fn rpc_proxy_echo_response() -> Response {

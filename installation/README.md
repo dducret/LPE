@@ -651,9 +651,11 @@ response while the client-to-server upload stream is drained asynchronously for
 RCA payload logging.
 Authenticated `RPC_OUT_DATA` mail-store
 ping bodies are parsed as client `CONN/A1` RTS requests and receive the initial
-RTS connection-establishment response for the RCA OUT-channel ping. The
-`RPC_OUT_DATA` response advertises a long RPC/HTTP content length and stays
-open after the initial RTS response;
+RTS connection-establishment response for the RCA OUT-channel ping. For
+mail-store endpoint pings against `:6001`, the response also includes a minimal
+DCE/RPC bind acknowledgement so RCA can complete the mailbox endpoint ping
+instead of timing out after RTS setup. The `RPC_OUT_DATA` response advertises a
+long RPC/HTTP content length and stays open after the initial response;
 `LPE_RPC_PROXY_OUT_CHANNEL_HOLD_MS` can tune the hold-open duration and
 defaults to the RPC/HTTP connection timeout.
 
@@ -710,7 +712,8 @@ LPE_RCA_PASSWORD='mailbox-password' \
   --expect-exchange-providers \
   --check-ews-basic \
   --check-mapi-ping \
-  --check-rpc-proxy-auth
+  --check-rpc-proxy-auth \
+  --check-rpc-proxy-mailstore-ping
 ```
 
 Use `--insecure` only for local or pre-production checks where the local trust
@@ -718,7 +721,8 @@ store does not yet trust the published certificate chain. The script verifies
 the same RCA-facing shape that matters for this deployment: POX Autodiscover on
 the account domain, `EXCH` / `EXPR` legacy provider metadata, EWS URLs and JMAP
 redirects pointing at the public service host, authenticated `EWS`, authenticated
-`MAPI` transport pings, and the `/rpc/rpcproxy.dll` Basic authentication probe.
+`MAPI` transport pings, the `/rpc/rpcproxy.dll` Basic authentication probe, and
+the RCA mailbox-store RPC/HTTP endpoint ping against `:6001`.
 
 If `LPE_BIND_ADDRESS` or `LPE_SERVER_NAME` changes in `/etc/lpe/lpe.env`, run `update-lpe.sh` again to regenerate the `nginx` configuration. If `LPE_IMAP_BIND_ADDRESS` changes, restart `lpe.service` and rerun `test-lpe-imap-listener.sh` on the core server, then rerun `test-lpe-ct-edge-ports.sh` on the `LPE-CT` server.
 
