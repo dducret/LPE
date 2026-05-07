@@ -5832,10 +5832,12 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
         (2, 12) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_special_table_response(call_id)),
         (2, 13) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_props_response(call_id, bytes)),
         (2, 16) if alloc_hint >= 12 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
-        (2, 18) if alloc_hint >= 20 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
-        (2, 20) if alloc_hint >= 24 => {
-            Some(rpc_proxy_nspi_resolve_names_w_response(call_id, bytes))
+        (2, 17) if alloc_hint >= 12 => {
+            Some(rpc_proxy_nspi_get_names_from_ids_response(call_id, bytes))
         }
+        (2, 18) if alloc_hint >= 20 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
+        (2, 19) if alloc_hint >= 24 => Some(rpc_proxy_nspi_resolve_names_response(call_id, bytes)),
+        (2, 20) if alloc_hint >= 24 => Some(rpc_proxy_nspi_resolve_names_response(call_id, bytes)),
         _ => None,
     }
 }
@@ -5977,6 +5979,23 @@ fn rpc_proxy_nspi_property_tags_response(call_id: u32) -> Vec<u8> {
     rpc_proxy_dce_response(call_id, &stub)
 }
 
+fn rpc_proxy_nspi_get_names_from_ids_response(call_id: u32, request: &[u8]) -> Vec<u8> {
+    let tags = rpc_proxy_nspi_known_property_tags(request);
+    let mut stub = Vec::with_capacity(24 + tags.len() * 12);
+    push_le_u32(&mut stub, 0);
+    push_le_u32(&mut stub, 0x0002_0000);
+    push_le_u32(&mut stub, tags.len() as u32);
+    push_le_u32(&mut stub, tags.len() as u32);
+    for tag in tags {
+        push_le_u32(&mut stub, 0);
+        push_le_u32(&mut stub, 0);
+        push_le_u32(&mut stub, tag);
+    }
+    push_le_u32(&mut stub, 0);
+
+    rpc_proxy_dce_response(call_id, &stub)
+}
+
 fn rpc_proxy_nspi_get_props_response(call_id: u32, request: &[u8]) -> Vec<u8> {
     let tags = rpc_proxy_nspi_requested_property_tags(request);
     let row_values = rpc_proxy_nspi_row_values(request, &tags);
@@ -6016,7 +6035,7 @@ fn rpc_proxy_nspi_get_special_table_response(call_id: u32) -> Vec<u8> {
     rpc_proxy_dce_response(call_id, &stub)
 }
 
-fn rpc_proxy_nspi_resolve_names_w_response(call_id: u32, request: &[u8]) -> Vec<u8> {
+fn rpc_proxy_nspi_resolve_names_response(call_id: u32, request: &[u8]) -> Vec<u8> {
     const MID_RESOLVED: u32 = 2;
     const PR_DISPLAY_NAME_A: u32 = 0x3001_001e;
     const PR_EMAIL_ADDRESS_A: u32 = 0x3003_001e;
@@ -6087,6 +6106,14 @@ enum RpcProxyNspiValue {
 }
 
 fn rpc_proxy_nspi_requested_property_tags(request: &[u8]) -> Vec<u32> {
+    let mut tags = rpc_proxy_nspi_known_property_tags(request);
+    if tags.is_empty() {
+        tags.extend_from_slice(RPC_PROXY_NSPI_BOOTSTRAP_PROPERTY_TAGS);
+    }
+    tags
+}
+
+fn rpc_proxy_nspi_known_property_tags(request: &[u8]) -> Vec<u32> {
     let mut tags = Vec::new();
     let mut offset = 24usize;
     while offset + 4 <= request.len() {
@@ -6097,9 +6124,6 @@ fn rpc_proxy_nspi_requested_property_tags(request: &[u8]) -> Vec<u32> {
             tags.push(tag);
         }
         offset += 4;
-    }
-    if tags.is_empty() {
-        tags.extend_from_slice(RPC_PROXY_NSPI_BOOTSTRAP_PROPERTY_TAGS);
     }
     tags
 }
@@ -6121,6 +6145,25 @@ fn rpc_proxy_nspi_requested_resolve_property_tags(request: &[u8]) -> Vec<u32> {
 
 fn rpc_proxy_nspi_requested_smtp_address(request: &[u8]) -> Option<String> {
     const SMTP_PREFIX_UTF16LE: &[u8] = b"=\0S\0M\0T\0P\0:\0";
+    const SMTP_PREFIX_ASCII: &[u8] = b"=SMTP:";
+
+    if let Some(start) = request.windows(SMTP_PREFIX_ASCII.len()).position(|window| {
+        window
+            .iter()
+            .zip(SMTP_PREFIX_ASCII)
+            .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
+    }) {
+        let mut end = start + SMTP_PREFIX_ASCII.len();
+        while end < request.len() && request[end] != 0 {
+            end += 1;
+        }
+        if let Ok(value) = std::str::from_utf8(&request[start + SMTP_PREFIX_ASCII.len()..end]) {
+            let value = value.trim().to_ascii_lowercase();
+            if value.contains('@') {
+                return Some(value);
+            }
+        }
+    }
 
     let start = request
         .windows(SMTP_PREFIX_UTF16LE.len())

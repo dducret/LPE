@@ -7139,7 +7139,9 @@ fn rpc_proxy_in_channel_nspi_bootstrap_opnums_get_success_responses() {
         (12, 19),
         (13, 20),
         (16, 21),
-        (18, 22),
+        (17, 22),
+        (18, 23),
+        (19, 24),
     ] {
         let mut buffer = nspi_rpc_request(call_id, opnum, 96);
 
@@ -7163,6 +7165,78 @@ fn rpc_proxy_in_channel_nspi_bootstrap_opnums_get_success_responses() {
             "opnum {opnum}"
         );
     }
+}
+
+#[test]
+fn rpc_proxy_in_channel_nspi_get_names_from_ids_gets_name_set_response() {
+    let mut buffer = nspi_rpc_request(26, 17, 96);
+    buffer[52..56].copy_from_slice(&0x3001_001fu32.to_le_bytes());
+    buffer[56..60].copy_from_slice(&0x3003_001fu32.to_le_bytes());
+
+    let response =
+        rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("get names from ids response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        26
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[24], response[25], response[26], response[27]]),
+        0
+    );
+    assert_ne!(
+        u32::from_le_bytes([response[28], response[29], response[30], response[31]]),
+        0
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[32], response[33], response[34], response[35]]),
+        2
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[36], response[37], response[38], response[39]]),
+        2
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[48], response[49], response[50], response[51]]),
+        0x3001_001f
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[60], response[61], response[62], response[63]]),
+        0x3003_001f
+    );
+    assert_eq!(
+        u32::from_le_bytes([
+            response[response.len() - 4],
+            response[response.len() - 3],
+            response[response.len() - 2],
+            response[response.len() - 1]
+        ]),
+        0
+    );
+}
+
+#[test]
+fn rpc_proxy_in_channel_nspi_resolve_names_ascii_request_gets_response() {
+    let mut buffer = nspi_rpc_request(27, 19, 160);
+    buffer[72..76].copy_from_slice(&0x3003_001eu32.to_le_bytes());
+    buffer[76..80].copy_from_slice(&0x3001_001eu32.to_le_bytes());
+    buffer[96..117].copy_from_slice(b"=SMTP:alias@l-p-e.ch\0");
+
+    let response =
+        rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("resolve names response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        27
+    );
+    assert!(response
+        .windows(b"alias@l-p-e.ch".len())
+        .any(|window| window == b"alias@l-p-e.ch"));
+    assert!(response
+        .windows(b"Alias".len())
+        .any(|window| window == b"Alias"));
 }
 
 #[test]
