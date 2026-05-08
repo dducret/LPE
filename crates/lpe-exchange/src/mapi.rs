@@ -652,9 +652,16 @@ where
             );
         }
     };
+    let principal_entry = principal_address_book_entry(principal);
     let matched = requested_names
         .first()
         .and_then(|name| nspi_match_entry(&entries, name))
+        .or_else(|| {
+            requested_names
+                .iter()
+                .any(|name| nspi_lookup_matches_principal(name, principal))
+                .then_some(&principal_entry)
+        })
         .or_else(|| {
             requested_names
                 .is_empty()
@@ -1152,6 +1159,13 @@ fn nspi_entry_legacy_dn(entry: &ExchangeAddressBookEntry) -> String {
 
 fn nspi_entry_is_principal(entry: &ExchangeAddressBookEntry, principal: &AccountPrincipal) -> bool {
     entry.entry_kind == ExchangeAddressBookEntryKind::Account && entry.id == principal.account_id
+}
+
+fn nspi_lookup_matches_principal(value: &str, principal: &AccountPrincipal) -> bool {
+    let value = normalize_nspi_lookup_value(value);
+    let email = principal.email.to_ascii_lowercase();
+    let display_name = principal.display_name.to_ascii_lowercase();
+    value == email || value == display_name || email.contains(value.as_str())
 }
 
 fn nspi_requested_entry<'a>(

@@ -59,6 +59,7 @@ struct FakeStore {
     created_mailboxes: Arc<Mutex<Vec<JmapMailboxCreateInput>>>,
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
     directory_accounts: Arc<Mutex<Vec<AuthenticatedAccount>>>,
+    omit_principal_from_directory: bool,
 }
 
 #[derive(Clone)]
@@ -279,7 +280,8 @@ impl ExchangeStore for FakeStore {
             .filter(|account| account.account_id == principal_account_id);
         let mut accounts = self.directory_accounts.lock().unwrap().clone();
         if let Some(principal) = principal {
-            if !accounts
+            if !self.omit_principal_from_directory
+                && !accounts
                 .iter()
                 .any(|account| account.account_id == principal.account_id)
             {
@@ -7218,6 +7220,30 @@ async fn mapi_over_http_resolve_names_honors_requested_rca_columns() {
     assert!(contains_bytes(&body, &utf16z("Alice")));
     assert!(!contains_bytes(&body, &utf16z("SMTP")));
     assert!(body.ends_with(&[0, 0, 0, 0]));
+}
+
+#[tokio::test]
+async fn mapi_over_http_resolve_names_falls_back_to_authenticated_mailbox_for_rca() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        omit_principal_from_directory: true,
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = resolve_names_request("alice@example.test", &[0x3003_001F, 0x3001_001F]);
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
+    assert_eq!(body[21], 1);
+    assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+    assert!(contains_bytes(&body, &utf16z("Alice")));
 }
 
 #[tokio::test]
