@@ -102,6 +102,25 @@ LPE_AUTOCONFIG_RPC_PROXY_ENABLED=true
 
 Optionally set `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED=true` when SOAP `GetUserSettings` should also publish the same EWS endpoint. Do not set `LPE_AUTOCONFIG_MAPI_ENABLED=true` for normal EWS RCA validation unless the deployment is intentionally testing the MAPI/HTTP release path.
 
+Before enabling top-level `EXCH`, top-level `EXPR`, or `mapiHttp` publication for an operator-facing hostname, run the live canonical RCA probe against the public route with a disposable mailbox:
+
+```powershell
+$env:LPE_RCA_BASE_URL = "https://mail.example.test"
+$env:LPE_RCA_EMAIL = "outlook-rca@example.test"
+$env:LPE_RCA_PASSWORD = "<mailbox password>"
+python tools/rca_outlook_connectivity_check.py --outlook-rca-readiness --allow-mutating-fixtures
+```
+
+This check must pass before `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, or `LPE_AUTOCONFIG_MAPI_ENABLED` are treated as safe to publish. It verifies the autodiscover gates for `IMAP`, `EWS`, `EXCH`, `EXPR`, and `mapiHttp`, creates temporary canonical mailbox/contact/calendar fixtures through `EWS`, proves the submitted message is visible in canonical `Sent` through both `EWS` and `MAPI/EMSMDB`, proves the created contact is visible through `MAPI/NSPI`, and keeps the RPC proxy authentication and mailbox endpoint ping checks covered. Static success responses, empty payloads, or PING-only MAPI behavior are failures for this release gate.
+
+For the narrower EWS-only publication gate, run:
+
+```powershell
+python tools/rca_outlook_connectivity_check.py --ews-readiness --allow-mutating-fixtures
+```
+
+That mode proves EWS autodiscover, EWS authentication, canonical send-to-`Sent`, and EWS contact/calendar create-read-delete behavior without requiring `EXCH`, `EXPR`, or `mapiHttp` publication.
+
 When authenticated client submission is published, the Outlook POX `SMTP` protocol block includes `AuthRequired`, `UsePOPAuth`, and `SMTPLast` so Outlook is told to authenticate directly to the submission listener instead of trying POP-before-SMTP or SMTP-after-download behavior.
 
 Autodiscover accepts SOAP `GetUserSettings` requests only when the deployment has explicitly enabled an Exchange-style discovery surface through `LPE_AUTOCONFIG_EWS_ENABLED` or `LPE_AUTOCONFIG_MAPI_ENABLED` and separately set `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` to a true value. In the default Outlook desktop `IMAP` setup path, SOAP Autodiscover is not published, so Outlook can continue to the POX `IMAP` / `SMTP` settings instead of receiving a partial Exchange profile. When enabled, the SOAP response returns user identity, mailbox-server identity, mailbox DN, SSL and authentication metadata, `CasVersion`, `ExternalEwsUrl`, `InternalEwsUrl`, and `EwsSupportedSchemas`. The SOAP path publishes the same opt-in `EWS` endpoint and does not advertise `RPC`, client `SMTP` submission, or any unsupported Exchange surface. Unless `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled, SOAP Autodiscover returns `MapiHttpEnabled` as `False`.

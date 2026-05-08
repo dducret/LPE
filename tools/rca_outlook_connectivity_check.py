@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate LPE Outlook/RCA discovery and JMAP connectivity.
+"""Validate LPE Outlook/RCA discovery and canonical Exchange readiness.
 
 The script uses only Python's standard library. Passwords are read from
 environment variables or CLI arguments so they do not need to be committed.
@@ -206,6 +206,43 @@ def utf16z(value: str) -> bytes:
 
 def contains_bytes(haystack: bytes, needle: bytes) -> bool:
     return any(haystack[index : index + len(needle)] == needle for index in range(0, len(haystack) - len(needle) + 1))
+
+
+def mapi_folder_id(global_counter: int) -> int:
+    return ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | 1
+
+
+def mapi_execute_body(rop_buffer: bytes) -> bytes:
+    body = bytearray()
+    body.extend(struct.pack("<I", 0))
+    body.extend(struct.pack("<I", len(rop_buffer)))
+    body.extend(rop_buffer)
+    body.extend(struct.pack("<I", 4096))
+    body.extend(struct.pack("<I", 0))
+    return bytes(body)
+
+
+def mapi_rop_buffer(rops: bytes, handles: list[int]) -> bytes:
+    buffer = bytearray()
+    buffer.extend(struct.pack("<H", len(rops)))
+    buffer.extend(rops)
+    for handle in handles:
+        buffer.extend(struct.pack("<I", handle))
+    return bytes(buffer)
+
+
+def mapi_sent_subject_table_rops(row_count: int = 20) -> bytes:
+    rops = bytearray()
+    rops.extend([0x02, 0x00, 0x00, 0x01])  # RopOpenFolder
+    rops.extend(struct.pack("<Q", mapi_folder_id(7)))  # canonical Sent
+    rops.append(0)
+    rops.extend([0x05, 0x00, 0x01, 0x02, 0x00])  # RopGetContentsTable
+    rops.extend([0x12, 0x00, 0x02, 0x00])  # RopSetColumns
+    rops.extend(struct.pack("<H", 1))
+    rops.extend(struct.pack("<I", 0x0037_001F))  # PidTagSubject, Unicode
+    rops.extend([0x15, 0x00, 0x02, 0x00, 0x01])  # RopQueryRows
+    rops.extend(struct.pack("<H", row_count))
+    return bytes(rops)
 
 
 def resolve_names_request(search_address: str, columns: list[int]) -> bytes:
@@ -509,6 +546,7 @@ def check_ews_send_sent(
     recipient: str,
     insecure_tls: bool,
     timeout: int,
+    check_mapi: bool,
 ) -> None:
     marker = uuid.uuid4().hex[:12]
     subject = f"LPE RCA canonical send {marker}"
@@ -572,6 +610,15 @@ def check_ews_send_sent(
         )
         require_ews_no_error("EWS FindItem sentitems", sent)
         require(message_id in sent or subject in sent, "EWS Sent folder did not expose the submitted canonical message")
+        if check_mapi:
+            check_mapi_emsmdb_sent_message(
+                base_url,
+                email,
+                password,
+                subject,
+                insecure_tls,
+                timeout,
+            )
     finally:
         if message_id:
             delete_ews_item(base_url, email, password, message_id, insecure_tls, timeout, required=False)
@@ -861,6 +908,68 @@ def check_mapi_nspi_address_book(
         print("ok mapi_nspi_address_book")
 
 
+def check_mapi_emsmdb_sent_message(
+    base_url: str,
+    email: str,
+    password: str,
+    expected_subject: str,
+    insecure_tls: bool,
+    timeout: int,
+) -> None:
+    connect = request(
+        "POST",
+        join_url(base_url, f"/mapi/emsmdb/?mailboxId={urllib.parse.quote(email, safe='@')}"),
+        b"",
+        {
+            "Authorization": basic_auth_header(email, password),
+            "Content-Type": "application/mapi-http",
+            "X-RequestType": "Connect",
+            "X-RequestId": mapi_request_id("Connect"),
+            "X-ClientInfo": "lpe-rca-connectivity-check",
+            "User-Agent": "MapiHttpClient",
+        },
+        timeout,
+        insecure_tls=insecure_tls,
+    )
+    require(connect.status == 200, f"MAPI EMSMDB Connect returned HTTP {connect.status}: {connect.text[:300]}")
+    require("application/mapi-http" in content_type(connect.headers), "MAPI EMSMDB Connect did not return MAPI content")
+    require(header_value(connect.headers, "x-responsecode") == "0", "MAPI EMSMDB Connect did not return success")
+    cookie = header_value(connect.headers, "set-cookie").split(";", 1)[0]
+    require(cookie.startswith("lpe_mapi_emsmdb="), "MAPI EMSMDB Connect did not issue an EMSMDB session cookie")
+
+    rops = mapi_sent_subject_table_rops()
+    execute = request(
+        "POST",
+        join_url(base_url, f"/mapi/emsmdb/?mailboxId={urllib.parse.quote(email, safe='@')}"),
+        mapi_execute_body(mapi_rop_buffer(rops, [1, 0xFFFF_FFFF, 0xFFFF_FFFF])),
+        {
+            "Authorization": basic_auth_header(email, password),
+            "Content-Type": "application/mapi-http",
+            "Cookie": cookie,
+            "X-RequestType": "Execute",
+            "X-RequestId": mapi_request_id("Execute"),
+            "X-ClientInfo": "lpe-rca-connectivity-check",
+            "User-Agent": "MapiHttpClient",
+        },
+        timeout,
+        insecure_tls=insecure_tls,
+    )
+    require(execute.status == 200, f"MAPI EMSMDB Execute returned HTTP {execute.status}: {execute.text[:300]}")
+    require("application/mapi-http" in content_type(execute.headers), "MAPI EMSMDB Execute did not return MAPI content")
+    require(header_value(execute.headers, "x-responsecode") == "0", "MAPI EMSMDB Execute did not return success")
+    payload = mapi_http_binary_payload(execute.body)
+    response_rops = mapi_execute_response_rops(payload, "MAPI EMSMDB Execute")
+    require(len(response_rops) > 20, "MAPI EMSMDB Execute returned an empty or static-sized ROP payload")
+    require(response_rops[0] == 0x02, "MAPI EMSMDB Execute did not start with RopOpenFolder response")
+    require(contains_bytes(response_rops, bytes([0x05, 0x01])), "MAPI EMSMDB Execute did not include RopGetContentsTable response")
+    require(contains_bytes(response_rops, bytes([0x15, 0x02])), "MAPI EMSMDB Execute did not include RopQueryRows response")
+    require(
+        contains_bytes(response_rops, utf16z(expected_subject)),
+        "MAPI EMSMDB Sent table did not expose the EWS-created canonical Sent message",
+    )
+    print("ok mapi_emsmdb_canonical_sent_message")
+
+
 def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, insecure_tls: bool, timeout: int) -> None:
     parsed = urllib.parse.urlparse(base_url)
     rpc_host = parsed.hostname or parsed.netloc
@@ -965,6 +1074,20 @@ def mapi_http_binary_payload(body: bytes) -> bytes:
     return payload
 
 
+def mapi_execute_response_rops(payload: bytes, label: str) -> bytes:
+    require(len(payload) >= 16, f"{label} returned a truncated Execute response")
+    require(le_u32(payload, 0) == 0, f"{label} returned nonzero Execute StatusCode")
+    require(le_u32(payload, 4) == 0, f"{label} returned nonzero Execute ErrorCode")
+    rop_buffer_size = le_u32(payload, 12)
+    require(rop_buffer_size >= 2, f"{label} returned an empty ROP buffer")
+    require(len(payload) >= 16 + rop_buffer_size, f"{label} returned a truncated ROP buffer")
+    rop_buffer = payload[16 : 16 + rop_buffer_size]
+    response_rop_size = struct.unpack_from("<H", rop_buffer, 0)[0]
+    require(response_rop_size > 0, f"{label} returned no response ROPs")
+    require(len(rop_buffer) >= 2 + response_rop_size, f"{label} returned truncated response ROPs")
+    return rop_buffer[2 : 2 + response_rop_size]
+
+
 def le_u32(payload: bytes, offset: int) -> int:
     require(len(payload) >= offset + 4, f"MAPI payload is too short for u32 at offset {offset}")
     return struct.unpack_from("<I", payload, offset)[0]
@@ -1030,13 +1153,14 @@ def xml_escape(value: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Check RCA-facing Autodiscover, JMAP, and optional EWS Basic connectivity.",
+        description="Check LPE Autodiscover gates and canonical EWS/MAPI/RPC readiness.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent(
             """\
             Examples:
-              LPE_RCA_PASSWORD='...' tools/rca_outlook_connectivity_check.py --expect-ews --expect-exchange-providers --check-ews-basic
-              tools/rca_outlook_connectivity_check.py --base-url https://l-p-e.ch --email test@l-p-e.ch --expected-service-host mail.l-p-e.ch --expect-ews --expect-exchange-providers --check-live-fixtures --insecure
+              LPE_RCA_PASSWORD='...' tools/rca_outlook_connectivity_check.py --ews-readiness --allow-mutating-fixtures
+              LPE_RCA_PASSWORD='...' tools/rca_outlook_connectivity_check.py --outlook-rca-readiness --allow-mutating-fixtures
+              tools/rca_outlook_connectivity_check.py --base-url https://l-p-e.ch --email test@l-p-e.ch --expected-service-host mail.l-p-e.ch --outlook-rca-readiness --allow-mutating-fixtures --insecure
             """
         ),
     )
@@ -1044,6 +1168,21 @@ def main() -> int:
     parser.add_argument("--email", default=os.getenv("LPE_RCA_EMAIL"))
     parser.add_argument("--password", default=os.getenv("LPE_RCA_PASSWORD"))
     parser.add_argument("--timeout", type=int, default=int(os.getenv("LPE_RCA_TIMEOUT", "20")))
+    parser.add_argument(
+        "--ews-readiness",
+        action="store_true",
+        help="Require the narrower EWS publication gate: EWS autodiscover, EWS auth, and live canonical EWS mail/contact/calendar fixtures.",
+    )
+    parser.add_argument(
+        "--outlook-rca-readiness",
+        action="store_true",
+        help="Require the full Outlook RCA gate: EWS, EXCH, EXPR, mapiHttp, RPC proxy, NSPI fixture, and EMSMDB canonical Sent proof.",
+    )
+    parser.add_argument(
+        "--allow-mutating-fixtures",
+        action="store_true",
+        help="Permit creation and cleanup of temporary mail, contact, and calendar fixtures in the target mailbox.",
+    )
     parser.add_argument("--expect-ews", action="store_true", help="Require EWS discovery to be published.")
     parser.add_argument(
         "--expected-service-host",
@@ -1106,14 +1245,48 @@ def main() -> int:
 
     require(args.base_url, "provide --base-url or set LPE_RCA_BASE_URL")
     require(args.email, "provide --email or set LPE_RCA_EMAIL")
+    expect_ews = args.expect_ews or args.ews_readiness or args.outlook_rca_readiness
+    expect_exch_provider = (
+        args.expect_exchange_providers or args.expect_exch_provider or args.outlook_rca_readiness
+    )
+    expect_expr_provider = (
+        args.expect_exchange_providers or args.expect_expr_provider or args.outlook_rca_readiness
+    )
+    expect_mapi = args.expect_mapi or args.outlook_rca_readiness
+    run_ews_basic = args.check_ews_basic or args.ews_readiness or args.outlook_rca_readiness
+    run_live_fixtures = args.check_live_fixtures or args.ews_readiness or args.outlook_rca_readiness
+    run_live_mapi_proof = args.check_live_fixtures or args.outlook_rca_readiness
+    run_mapi_ping = args.check_mapi_ping or args.outlook_rca_readiness
+    run_mapi_nspi_bind = args.check_mapi_nspi_bind_octet_stream or args.outlook_rca_readiness
+    run_mapi_nspi_address_book = args.check_mapi_nspi_address_book
+    run_rpc_proxy_auth = args.check_rpc_proxy_auth or args.outlook_rca_readiness
+    run_rpc_proxy_mailstore_ping = args.check_rpc_proxy_mailstore_ping or args.outlook_rca_readiness
+
+    if args.outlook_rca_readiness:
+        require(args.password, "--outlook-rca-readiness requires --password or LPE_RCA_PASSWORD")
+    if (
+        run_ews_basic
+        or run_mapi_ping
+        or run_mapi_nspi_bind
+        or run_mapi_nspi_address_book
+        or run_live_fixtures
+        or run_rpc_proxy_mailstore_ping
+    ):
+        require(args.password, "requested authenticated checks require --password or LPE_RCA_PASSWORD")
+    if run_live_fixtures:
+        require(
+            args.allow_mutating_fixtures,
+            "live readiness checks create and delete fixtures; pass --allow-mutating-fixtures to permit this",
+        )
+
     base_url = args.base_url.rstrip("/")
     check_pox_autodiscover(
         base_url,
         args.email,
-        args.expect_ews,
-        args.expect_exchange_providers or args.expect_exch_provider,
-        args.expect_exchange_providers or args.expect_expr_provider,
-        args.expect_mapi,
+        expect_ews,
+        expect_exch_provider,
+        expect_expr_provider,
+        expect_mapi,
         args.expected_service_host,
         args.insecure,
         args.timeout,
@@ -1121,8 +1294,8 @@ def main() -> int:
     check_json_autodiscover(
         base_url,
         args.email,
-        args.expect_ews,
-        args.expect_mapi,
+        expect_ews,
+        expect_mapi,
         args.expected_service_host,
         args.insecure,
         args.timeout,
@@ -1131,9 +1304,9 @@ def main() -> int:
 
     if args.password:
         check_jmap_session(base_url, args.email, args.password, args.insecure, args.timeout)
-        if args.check_ews_basic:
+        if run_ews_basic:
             check_ews_basic(base_url, args.email, args.password, args.insecure, args.timeout)
-        if args.check_live_fixtures:
+        if run_live_fixtures:
             check_ews_mailbox_access(base_url, args.email, args.password, args.insecure, args.timeout)
             check_ews_send_sent(
                 base_url,
@@ -1142,6 +1315,7 @@ def main() -> int:
                 args.send_recipient or args.email,
                 args.insecure,
                 args.timeout,
+                check_mapi=run_live_mapi_proof,
             )
             check_ews_contact_calendar_and_mapi_fixture(
                 base_url,
@@ -1149,28 +1323,28 @@ def main() -> int:
                 args.password,
                 args.insecure,
                 args.timeout,
-                check_mapi=True,
+                check_mapi=run_live_mapi_proof,
             )
-        if args.check_mapi_ping:
+        if run_mapi_ping:
             check_mapi_ping(base_url, args.email, args.password, args.insecure, args.timeout)
-        if args.check_mapi_nspi_bind_octet_stream:
+        if run_mapi_nspi_bind:
             check_mapi_nspi_bind_octet_stream(base_url, args.email, args.password, args.insecure, args.timeout)
-        if args.check_mapi_nspi_address_book:
+        if run_mapi_nspi_address_book:
             check_mapi_nspi_address_book(base_url, args.email, args.password, args.insecure, args.timeout)
     else:
         print("skip jmap_session password not provided")
         if (
-            args.check_ews_basic
-            or args.check_mapi_ping
-            or args.check_mapi_nspi_bind_octet_stream
-            or args.check_mapi_nspi_address_book
-            or args.check_live_fixtures
-            or args.check_rpc_proxy_mailstore_ping
+            run_ews_basic
+            or run_mapi_ping
+            or run_mapi_nspi_bind
+            or run_mapi_nspi_address_book
+            or run_live_fixtures
+            or run_rpc_proxy_mailstore_ping
         ):
             raise RuntimeError("requested authenticated checks require --password or LPE_RCA_PASSWORD")
-    if args.check_rpc_proxy_auth:
+    if run_rpc_proxy_auth:
         check_rpc_proxy_auth(base_url, args.email, args.password, args.insecure, args.timeout)
-    if args.check_rpc_proxy_mailstore_ping:
+    if run_rpc_proxy_mailstore_ping:
         require(args.password, "--check-rpc-proxy-mailstore-ping requires --password or LPE_RCA_PASSWORD")
         check_rpc_proxy_mailstore_ping(base_url, args.email, args.password, args.insecure, args.timeout)
 
