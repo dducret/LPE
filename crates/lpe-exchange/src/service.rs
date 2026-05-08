@@ -5341,10 +5341,10 @@ fn get_user_availability_success_response(events: &[AccessibleEvent]) -> String 
             "<m:ResponseMessage ResponseClass=\"Success\">",
             "<m:ResponseCode>NoError</m:ResponseCode>",
             "</m:ResponseMessage>",
-            "<m:FreeBusyView>",
+            "<t:FreeBusyView>",
             "<t:FreeBusyViewType>Detailed</t:FreeBusyViewType>",
             "<t:CalendarEventArray>{events}</t:CalendarEventArray>",
-            "</m:FreeBusyView>",
+            "</t:FreeBusyView>",
             "</m:FreeBusyResponse>",
             "</m:FreeBusyResponseArray>",
             "</m:GetUserAvailabilityResponse>"

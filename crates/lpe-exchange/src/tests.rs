@@ -9389,7 +9389,11 @@ async fn get_user_availability_returns_canonical_busy_events() {
     let body = response_text(response).await;
     assert!(body.contains("<m:GetUserAvailabilityResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:FreeBusyView>"));
+    assert!(body.contains("</t:FreeBusyView>"));
+    assert!(!body.contains("<m:FreeBusyView>"));
     assert!(body.contains("<t:FreeBusyViewType>Detailed</t:FreeBusyViewType>"));
+    assert!(body.contains("<t:CalendarEventArray><t:CalendarEvent>"));
     assert!(body.contains("<t:StartTime>2026-05-04T09:30:00Z</t:StartTime>"));
     assert!(body.contains("<t:EndTime>2026-05-04T10:15:00Z</t:EndTime>"));
     assert!(!body.contains("2026-05-07T09:30:00Z"));
