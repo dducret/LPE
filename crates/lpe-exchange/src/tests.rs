@@ -9880,13 +9880,10 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
         "GetRoomLists",
         "FindPeople",
         "ExpandDL",
-        "Subscribe",
         "GetDelegate",
         "GetUserConfiguration",
         "GetSharingMetadata",
         "GetSharingFolder",
-        "Unsubscribe",
-        "GetEvents",
     ] {
         let request = format!("<s:Envelope><s:Body><m:{operation} /></s:Body></s:Envelope>");
         let response = service
@@ -9901,6 +9898,86 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
         assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
         assert!(body.contains("<t:ServerVersionInfo"));
     }
+}
+
+#[tokio::test]
+async fn pull_subscription_get_events_and_unsubscribe_return_status_flow() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "44444444-4444-4444-4444-444444444444",
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:Subscribe>
+                  <m:PullSubscriptionRequest>
+                    <t:FolderIds><t:DistinguishedFolderId Id="inbox"/></t:FolderIds>
+                    <t:EventTypes><t:EventType>NewMailEvent</t:EventType><t:EventType>DeletedEvent</t:EventType></t:EventTypes>
+                    <t:Timeout>10</t:Timeout>
+                  </m:PullSubscriptionRequest>
+                </m:Subscribe>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SubscribeResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    let subscription_id = body
+        .split("<m:SubscriptionId>")
+        .nth(1)
+        .and_then(|rest| rest.split("</m:SubscriptionId>").next())
+        .unwrap()
+        .to_string();
+    let watermark = body
+        .split("<m:Watermark>")
+        .nth(1)
+        .and_then(|rest| rest.split("</m:Watermark>").next())
+        .unwrap()
+        .to_string();
+
+    let request = format!(
+        r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>{watermark}</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
+    );
+    let response = service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetEventsResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<m:Notification>"));
+    assert!(body.contains(&format!(
+        "<t:SubscriptionId>{subscription_id}</t:SubscriptionId>"
+    )));
+    assert!(body.contains(&format!(
+        "<t:PreviousWatermark>{watermark}</t:PreviousWatermark>"
+    )));
+    assert!(body.contains("<t:MoreEvents>false</t:MoreEvents>"));
+    assert!(body.contains("<t:StatusEvent>"));
+
+    let request = format!(
+        r#"<s:Envelope><s:Body><m:Unsubscribe><m:SubscriptionId>{subscription_id}</m:SubscriptionId></m:Unsubscribe></s:Body></s:Envelope>"#
+    );
+    let response = service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UnsubscribeResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
 }
 
 #[tokio::test]

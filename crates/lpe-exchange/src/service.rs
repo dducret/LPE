@@ -619,16 +619,16 @@ where
             "DeleteAttachment" => self.delete_attachment(&principal, &body).await?,
             "GetUserOofSettings" => self.get_user_oof_settings(&principal).await?,
             "SetUserOofSettings" => self.set_user_oof_settings(&principal, &body).await?,
+            "Subscribe" => self.subscribe(&principal, &body).await?,
+            "GetEvents" => self.get_events(&principal, &body).await?,
+            "Unsubscribe" => self.unsubscribe(&body).await?,
             "GetRoomLists" => unsupported_operation_response("GetRoomLists"),
             "FindPeople" => unsupported_operation_response("FindPeople"),
             "ExpandDL" => unsupported_operation_response("ExpandDL"),
-            "Subscribe" => unsupported_operation_response("Subscribe"),
             "GetDelegate" => unsupported_operation_response("GetDelegate"),
             "GetUserConfiguration" => unsupported_operation_response("GetUserConfiguration"),
             "GetSharingMetadata" => unsupported_operation_response("GetSharingMetadata"),
             "GetSharingFolder" => unsupported_operation_response("GetSharingFolder"),
-            "Unsubscribe" => unsupported_operation_response("Unsubscribe"),
-            "GetEvents" => unsupported_operation_response("GetEvents"),
             _ => unsupported_operation_response(&operation),
         };
 
@@ -2308,6 +2308,45 @@ where
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
             operation_error_response("DeleteFolder", "ErrorFolderNotFound", &error.to_string())
         }))
+    }
+
+    async fn subscribe(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        if element_content(request, "PullSubscriptionRequest").is_none() {
+            return Ok(operation_error_response(
+                "Subscribe",
+                "ErrorInvalidOperation",
+                "Subscribe currently supports only EWS pull subscriptions.",
+            ));
+        }
+
+        Ok(subscribe_success_response(principal, request))
+    }
+
+    async fn get_events(&self, _principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let subscription_id = element_text(request, "SubscriptionId")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| notification_subscription_id(_principal.account_id, request));
+        let previous_watermark = element_text(request, "Watermark")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| notification_watermark(&subscription_id, 0));
+
+        Ok(get_events_status_response(
+            &subscription_id,
+            &previous_watermark,
+        ))
+    }
+
+    async fn unsubscribe(&self, request: &str) -> Result<String> {
+        let subscription_id = element_text(request, "SubscriptionId").unwrap_or_default();
+        if subscription_id.trim().is_empty() {
+            return Ok(operation_error_response(
+                "Unsubscribe",
+                "ErrorInvalidSubscription",
+                "Unsubscribe requires a SubscriptionId.",
+            ));
+        }
+
+        Ok(unsubscribe_success_response())
     }
 }
 
@@ -4424,6 +4463,92 @@ fn delete_folder_success_response() -> String {
         "</m:DeleteFolderResponse>"
     )
     .to_string()
+}
+
+fn subscribe_success_response(principal: &AccountPrincipal, request: &str) -> String {
+    let subscription_id = notification_subscription_id(principal.account_id, request);
+    let watermark = notification_watermark(&subscription_id, 0);
+    format!(
+        concat!(
+            "<m:SubscribeResponse>",
+            "<m:ResponseMessages>",
+            "<m:SubscribeResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:SubscriptionId>{subscription_id}</m:SubscriptionId>",
+            "<m:Watermark>{watermark}</m:Watermark>",
+            "</m:SubscribeResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:SubscribeResponse>"
+        ),
+        subscription_id = escape_xml(&subscription_id),
+        watermark = escape_xml(&watermark),
+    )
+}
+
+fn get_events_status_response(subscription_id: &str, previous_watermark: &str) -> String {
+    let next_watermark = notification_watermark(subscription_id, 1);
+    format!(
+        concat!(
+            "<m:GetEventsResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetEventsResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Notification>",
+            "<t:SubscriptionId>{subscription_id}</t:SubscriptionId>",
+            "<t:PreviousWatermark>{previous_watermark}</t:PreviousWatermark>",
+            "<t:MoreEvents>false</t:MoreEvents>",
+            "<t:StatusEvent>",
+            "<t:Watermark>{next_watermark}</t:Watermark>",
+            "<t:TimeStamp>1970-01-01T00:00:00Z</t:TimeStamp>",
+            "</t:StatusEvent>",
+            "</m:Notification>",
+            "</m:GetEventsResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetEventsResponse>"
+        ),
+        subscription_id = escape_xml(subscription_id),
+        previous_watermark = escape_xml(previous_watermark),
+        next_watermark = escape_xml(&next_watermark),
+    )
+}
+
+fn unsubscribe_success_response() -> String {
+    concat!(
+        "<m:UnsubscribeResponse>",
+        "<m:ResponseMessages>",
+        "<m:UnsubscribeResponseMessage ResponseClass=\"Success\">",
+        "<m:ResponseCode>NoError</m:ResponseCode>",
+        "</m:UnsubscribeResponseMessage>",
+        "</m:ResponseMessages>",
+        "</m:UnsubscribeResponse>"
+    )
+    .to_string()
+}
+
+fn notification_subscription_id(account_id: Uuid, request: &str) -> String {
+    let folder_ids = requested_folder_ids(request).join(",");
+    let distinguished_folder_id = requested_distinguished_folder_id(request).unwrap_or_default();
+    let account_id = account_id.to_string();
+    let mut hash = 0xcbf29ce484222325_u64;
+    for part in [
+        "ews-pull-subscription",
+        &account_id,
+        &folder_ids,
+        distinguished_folder_id,
+    ] {
+        for byte in part.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    format!(
+        "00000000-0000-4000-8000-{tail:012x}",
+        tail = hash & 0xffff_ffff_ffff
+    )
+}
+
+fn notification_watermark(subscription_id: &str, sequence: u64) -> String {
+    format!("lpe:{subscription_id}:{sequence}")
 }
 
 fn get_item_error_response(code: &str, message: &str) -> String {
