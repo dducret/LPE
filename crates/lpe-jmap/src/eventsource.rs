@@ -40,6 +40,7 @@ where
     ) -> Result<EventSourceStream> {
         let enabled_types =
             normalize_push_data_types(event_source_data_types(query.types.as_deref()));
+        let mut listener = self.store.create_push_listener(account.account_id).await?;
         let current_cursor = self
             .store
             .fetch_canonical_change_cursor(account.account_id)
@@ -86,11 +87,6 @@ where
             if close_after.is_some_and(|limit| sent_events >= limit) {
                 return;
             }
-
-            let Ok(mut listener) = service.store.create_push_listener(account.account_id).await
-            else {
-                return;
-            };
 
             loop {
                 let categories = service.push_categories(&subscription.enabled_types);
