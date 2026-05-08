@@ -984,20 +984,19 @@ pub(crate) async fn process_outbound_handoff(
 ) -> Result<OutboundMessageHandoffResponse> {
     let trace_id = format!("lpe-ct-out-{}", payload.queue_id);
     if let Some((queue, message)) = find_message(spool_dir, &trace_id)? {
-        if queue == "sent" {
-            return Ok(OutboundMessageHandoffResponse {
-                queue_id: payload.queue_id,
-                status: TransportDeliveryStatus::Relayed,
-                trace_id,
-                detail: message.relay_error,
-                remote_message_ref: message.remote_message_ref,
-                retry: None,
-                dsn: message.dsn,
-                technical: message.technical_status,
-                route: message.route,
-                throttle: message.throttle,
-            });
-        }
+        let mut audit_message = message.clone();
+        audit_message.decision_trace.push(DecisionTraceEntry {
+            stage: "custody-invariant".to_string(),
+            outcome: "handoff-replay-suppressed".to_string(),
+            detail: format!(
+                "duplicate outbound handoff for queue_id {} reused existing {queue} custody",
+                payload.queue_id
+            ),
+        });
+        let _ = append_transport_audit(spool_dir, config, &queue, &audit_message).await;
+        return Ok(outbound_handoff_response_from_spool(
+            &payload, &trace_id, &queue, message,
+        ));
     }
     let message_id = payload.message_id;
     let internet_message_id = payload.internet_message_id.clone();
@@ -1428,6 +1427,73 @@ pub(crate) async fn process_outbound_handoff(
         route: execution.route.or(Some(route)),
         throttle: execution.throttle,
     })
+}
+
+fn outbound_handoff_response_from_spool(
+    payload: &OutboundMessageHandoffRequest,
+    trace_id: &str,
+    queue: &str,
+    message: QueuedMessage,
+) -> OutboundMessageHandoffResponse {
+    let status = outbound_status_from_spool(queue, &message.status);
+    let retry = if status == TransportDeliveryStatus::Deferred {
+        Some(retry_advice_from_spooled_message(payload, &message))
+    } else {
+        None
+    };
+    OutboundMessageHandoffResponse {
+        queue_id: payload.queue_id,
+        status,
+        trace_id: trace_id.to_string(),
+        detail: message.relay_error,
+        remote_message_ref: message.remote_message_ref,
+        retry,
+        dsn: message.dsn,
+        technical: message.technical_status,
+        route: message.route,
+        throttle: message.throttle,
+    }
+}
+
+fn outbound_status_from_spool(queue: &str, message_status: &str) -> TransportDeliveryStatus {
+    match queue {
+        "sent" => TransportDeliveryStatus::Relayed,
+        "deferred" => TransportDeliveryStatus::Deferred,
+        "quarantine" => TransportDeliveryStatus::Quarantined,
+        "bounces" => TransportDeliveryStatus::Bounced,
+        "held" => TransportDeliveryStatus::Failed,
+        "outbound" => TransportDeliveryStatus::Queued,
+        _ => match message_status {
+            "sent" => TransportDeliveryStatus::Relayed,
+            "deferred" => TransportDeliveryStatus::Deferred,
+            "quarantined" => TransportDeliveryStatus::Quarantined,
+            "bounced" => TransportDeliveryStatus::Bounced,
+            "outbound" => TransportDeliveryStatus::Queued,
+            _ => TransportDeliveryStatus::Failed,
+        },
+    }
+}
+
+fn retry_advice_from_spooled_message(
+    payload: &OutboundMessageHandoffRequest,
+    message: &QueuedMessage,
+) -> TransportRetryAdvice {
+    if let Some(throttle) = &message.throttle {
+        return TransportRetryAdvice {
+            retry_after_seconds: throttle.retry_after_seconds.max(1),
+            policy: "throttle".to_string(),
+            reason: Some(format!("{} {}", throttle.scope, throttle.key)),
+        };
+    }
+
+    TransportRetryAdvice {
+        retry_after_seconds: retry_after_seconds(
+            DEFAULT_OUTBOUND_RETRY_AFTER_SECONDS,
+            payload.attempt_count,
+        ),
+        policy: "lpe-ct-custody-replay".to_string(),
+        reason: message.relay_error.clone(),
+    }
 }
 
 fn resolve_outbound_route(
@@ -6434,7 +6500,7 @@ mod tests {
         io::{BufReader as StdIoBufReader, Cursor},
         net::IpAddr,
         net::SocketAddr,
-        path::PathBuf,
+        path::{Path, PathBuf},
         pin::Pin,
         sync::{Arc, Mutex},
         task::{Context as TaskContext, Poll},
@@ -7322,6 +7388,49 @@ pzqAuzRp69VoxDpO6hdx/Qc=
     }
 
     #[tokio::test]
+    async fn inbound_delivery_keeps_durable_spool_custody_until_core_accepts() {
+        let _guard = env_test_lock();
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
+        let spool = temp_dir("inbound-custody-before-core-accept");
+        initialize_spool(&spool).unwrap();
+        let observed_spool_custody = Arc::new(Mutex::new(false));
+        let core_base_url =
+            spawn_custody_asserting_core(spool.clone(), observed_spool_custody.clone()).await;
+        let config = runtime_config("127.0.0.1:9".to_string(), core_base_url);
+
+        let message = receive_message(
+            &spool,
+            &config,
+            "203.0.113.10:25".to_string(),
+            "mx.example.test".to_string(),
+            "sender@example.test".to_string(),
+            vec!["dest@example.test".to_string()],
+            b"From: sender@example.test\r\nSubject: Custody\r\n\r\nBody\r\n".to_vec(),
+        )
+        .await
+        .unwrap();
+
+        assert!(*observed_spool_custody.lock().unwrap());
+        assert_eq!(message.status, "sent");
+        assert!(!spool
+            .join("incoming")
+            .join(format!("{}.json", message.id))
+            .exists());
+        assert!(spool
+            .join("sent")
+            .join(format!("{}.json", message.id))
+            .exists());
+        let audit =
+            std::fs::read_to_string(spool.join("policy").join("transport-audit.jsonl")).unwrap();
+        assert!(audit.contains("\"queue\":\"sent\""));
+        assert!(audit.contains("\"status\":\"sent\""));
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
+    }
+
+    #[tokio::test]
     async fn smtp_data_accepts_null_reverse_path_for_dsn_delivery() {
         let _guard = env_test_lock();
         std::env::set_var(
@@ -7458,6 +7567,47 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         assert!(transcript.contains(")\r\n"));
         assert!(spool.join("deferred").read_dir().unwrap().next().is_some());
         assert!(spool.join("bounces").read_dir().unwrap().next().is_none());
+        std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
+    }
+
+    #[tokio::test]
+    async fn inbound_bridge_failure_keeps_deferred_custody_with_audit() {
+        let _guard = env_test_lock();
+        std::env::set_var(
+            "LPE_INTEGRATION_SHARED_SECRET",
+            "0123456789abcdef0123456789abcdef",
+        );
+        let spool = temp_dir("inbound-bridge-failure-custody");
+        initialize_spool(&spool).unwrap();
+        let config = runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+
+        let message = receive_message(
+            &spool,
+            &config,
+            "203.0.113.10:25".to_string(),
+            "mx.example.test".to_string(),
+            "sender@example.test".to_string(),
+            vec!["dest@example.test".to_string()],
+            b"From: sender@example.test\r\nSubject: Deferred custody\r\n\r\nBody\r\n".to_vec(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(message.status, "deferred");
+        assert!(!spool
+            .join("incoming")
+            .join(format!("{}.json", message.id))
+            .exists());
+        assert!(spool
+            .join("deferred")
+            .join(format!("{}.json", message.id))
+            .exists());
+        assert!(spool.join("bounces").read_dir().unwrap().next().is_none());
+        let audit =
+            std::fs::read_to_string(spool.join("policy").join("transport-audit.jsonl")).unwrap();
+        assert!(audit.contains("\"queue\":\"deferred\""));
+        assert!(audit.contains("\"status\":\"deferred\""));
+        assert!(audit.contains("core-delivery"));
         std::env::remove_var("LPE_INTEGRATION_SHARED_SECRET");
     }
 
@@ -8110,6 +8260,44 @@ pzqAuzRp69VoxDpO6hdx/Qc=
     }
 
     #[tokio::test]
+    async fn outbound_handoff_replay_after_relay_reuses_sent_custody_without_second_relay() {
+        let spool = temp_dir("outbound-replay-sent-custody");
+        initialize_spool(&spool).unwrap();
+        let captured_commands = Arc::new(Mutex::new(Vec::<String>::new()));
+        let smtp_address = spawn_dummy_smtp_with_profile(DummySmtpProfile {
+            captured_commands: Some(captured_commands.clone()),
+            ..DummySmtpProfile::default()
+        })
+        .await;
+        let config = runtime_config(smtp_address, "http://127.0.0.1:9".to_string());
+        let request = outbound_request("Replay sent custody");
+
+        let first = process_outbound_handoff(&spool, &config, request.clone())
+            .await
+            .unwrap();
+        let second = process_outbound_handoff(&spool, &config, request)
+            .await
+            .unwrap();
+
+        assert_eq!(first.status, TransportDeliveryStatus::Relayed);
+        assert_eq!(second.status, TransportDeliveryStatus::Relayed);
+        assert_eq!(second.trace_id, first.trace_id);
+        assert_eq!(count_queue_json_files(&spool, "sent"), 1);
+        assert_eq!(
+            captured_commands
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|command| command.as_str() == "DATA")
+                .count(),
+            1
+        );
+        let audit =
+            std::fs::read_to_string(spool.join("policy").join("transport-audit.jsonl")).unwrap();
+        assert!(audit.contains("handoff-replay-suppressed"));
+    }
+
+    #[tokio::test]
     #[ignore = "env-sensitive"]
     async fn smtp_session_rejects_when_ha_role_is_standby() {
         let _guard = env_test_lock();
@@ -8259,6 +8447,37 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             second.retry.as_ref().map(|retry| retry.policy.as_str()),
             Some("throttle")
         );
+    }
+
+    #[tokio::test]
+    async fn outbound_handoff_replay_for_deferred_message_does_not_duplicate_custody() {
+        let spool = temp_dir("outbound-replay-deferred-custody");
+        initialize_spool(&spool).unwrap();
+        let smtp_address = spawn_dummy_smtp_with_profile(DummySmtpProfile {
+            final_reply: "451 4.4.1 try again later".to_string(),
+            ..DummySmtpProfile::default()
+        })
+        .await;
+        let config = runtime_config(smtp_address, "http://127.0.0.1:9".to_string());
+        let request = outbound_request("Replay deferred custody");
+
+        let first = process_outbound_handoff(&spool, &config, request.clone())
+            .await
+            .unwrap();
+        let second = process_outbound_handoff(&spool, &config, request)
+            .await
+            .unwrap();
+
+        assert_eq!(first.status, TransportDeliveryStatus::Deferred);
+        assert_eq!(second.status, TransportDeliveryStatus::Deferred);
+        assert_eq!(second.trace_id, first.trace_id);
+        assert!(second.retry.is_some());
+        assert_eq!(count_queue_json_files(&spool, "deferred"), 1);
+        assert_eq!(count_queue_json_files(&spool, "outbound"), 0);
+        assert_eq!(count_queue_json_files(&spool, "sent"), 0);
+        let audit =
+            std::fs::read_to_string(spool.join("policy").join("transport-audit.jsonl")).unwrap();
+        assert!(audit.contains("handoff-replay-suppressed"));
     }
 
     #[tokio::test]
@@ -8969,6 +9188,67 @@ pzqAuzRp69VoxDpO6hdx/Qc=
     }
 
     #[tokio::test]
+    async fn rejected_quarantine_trace_recovers_from_spool_until_operator_delete() {
+        let spool = temp_dir("trace-reject-delete-recovery");
+        initialize_spool(&spool).unwrap();
+        let config = runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+        let message = QueuedMessage {
+            id: "trace-reject-delete-1".to_string(),
+            direction: "inbound".to_string(),
+            received_at: "unix:1".to_string(),
+            peer: "203.0.113.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "sender@example.test".to_string(),
+            rcpt_to: vec!["dest@example.test".to_string()],
+            status: "rejected".to_string(),
+            relay_error: Some("perimeter policy reject".to_string()),
+            magika_summary: None,
+            magika_decision: None,
+            spam_score: 10.0,
+            security_score: 6.0,
+            reputation_score: -8,
+            dnsbl_hits: Vec::new(),
+            auth_summary: AuthSummary::default(),
+            decision_trace: vec![DecisionTraceEntry {
+                stage: "final-policy".to_string(),
+                outcome: "reject".to_string(),
+                detail: "perimeter policy reject".to_string(),
+            }],
+            remote_message_ref: None,
+            technical_status: None,
+            dsn: None,
+            route: None,
+            throttle: None,
+            data: b"Subject: Rejected\r\n\r\nbody".to_vec(),
+        };
+        persist_message(&spool, "quarantine", &message)
+            .await
+            .unwrap();
+
+        let recovered = load_trace_details(&spool, &message.id).unwrap().unwrap();
+        assert_eq!(recovered.queue, "quarantine");
+        assert_eq!(recovered.status, "rejected");
+        assert_eq!(recovered.reason.as_deref(), Some("perimeter policy reject"));
+
+        let result = delete_trace(&spool, &config, &message.id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(result.from_queue, "quarantine");
+        assert_eq!(result.status, "deleted");
+        assert!(!spool
+            .join("quarantine")
+            .join("trace-reject-delete-1.json")
+            .exists());
+        let audit =
+            std::fs::read_to_string(spool.join("policy").join("transport-audit.jsonl")).unwrap();
+        assert!(audit.contains("\"trace_id\":\"trace-reject-delete-1\""));
+        assert!(audit.contains("\"queue\":\"deleted\""));
+        assert!(audit.contains("\"status\":\"deleted\""));
+    }
+
+    #[tokio::test]
     async fn delete_trace_removes_held_queue_items() {
         let spool = temp_dir("trace-delete-held");
         initialize_spool(&spool).unwrap();
@@ -9497,6 +9777,49 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             axum::serve(listener, router).await.unwrap();
         });
         format!("http://{}", address)
+    }
+
+    async fn spawn_custody_asserting_core(
+        spool: PathBuf,
+        observed_spool_custody: Arc<Mutex<bool>>,
+    ) -> String {
+        async fn accept(
+            axum::extract::State((spool, observed_spool_custody)): axum::extract::State<(
+                PathBuf,
+                Arc<Mutex<bool>>,
+            )>,
+            Json(request): Json<InboundDeliveryRequest>,
+        ) -> Json<InboundDeliveryResponse> {
+            let incoming_path = spool
+                .join("incoming")
+                .join(format!("{}.json", request.trace_id));
+            *observed_spool_custody.lock().unwrap() = incoming_path.exists();
+            Json(InboundDeliveryResponse {
+                accepted: true,
+                delivered_mailboxes: request.rcpt_to.clone(),
+                detail: None,
+            })
+        }
+
+        let router = Router::new()
+            .route("/internal/lpe-ct/inbound-deliveries", post(accept))
+            .with_state((spool, observed_spool_custody));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address: SocketAddr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        format!("http://{}", address)
+    }
+
+    fn count_queue_json_files(spool: &Path, queue: &str) -> usize {
+        std::fs::read_dir(spool.join(queue))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry.path().extension().and_then(|value| value.to_str()) == Some("json")
+            })
+            .count()
     }
 
     #[tokio::test]

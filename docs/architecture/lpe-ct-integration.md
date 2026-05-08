@@ -13,6 +13,8 @@
   - `LPE` creates canonical `Sent` before handoff
   - `LPE` updates `outbound_message_queue`, `messages.delivery_status`, `remote_message_ref`, `attempts`, `last_error`, `next_attempt_at`, and latest transport result
   - repeated results for the same queue item and `trace_id` are idempotent
+  - repeated `LPE -> LPE-CT` handoffs for the same queue item reuse the existing `LPE-CT` spool custody record across `outbound`, `deferred`, `held`, `quarantine`, `bounces`, and `sent` instead of creating a second relay attempt
+  - duplicate handoff suppression is recorded in the transport audit stream
   - terminal states must not regress
 - Inbound flow `LPE-CT -> LPE`:
   - base URL: `${LPE_CT_CORE_DELIVERY_BASE_URL}`
@@ -22,6 +24,7 @@
   - accepted Internet mail is delivered to the core final-delivery API
   - core `LPE` verifies the integration signature before mutation
   - bridge failure keeps custody in `LPE-CT`
+  - `LPE-CT` keeps the accepted message durably in its local spool until core final delivery succeeds, quarantine/rejection applies, or an operator/policy terminal action deletes it
 - Authenticated client submission:
   - public submission listener terminates on `LPE-CT`
   - preferred external submission port: implicit TLS `465`
