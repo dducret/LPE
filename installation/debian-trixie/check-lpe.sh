@@ -13,7 +13,7 @@ ENV_FILE="${ENV_FILE:-/etc/lpe/lpe.env}"
 SERVICE_NAME="${SERVICE_NAME:-lpe.service}"
 NGINX_SERVICE_NAME="${NGINX_SERVICE_NAME:-nginx}"
 NGINX_SITE_PATH="${NGINX_SITE_PATH:-/etc/nginx/sites-available/lpe.conf}"
-EXPECTED_FORMATS="${EXPECTED_FORMATS:-pdf docx odt}"
+EXPECTED_FORMATS="${EXPECTED_FORMATS:-PDF DOCX ODT}"
 SCHEMA_FILE="${SCHEMA_FILE:-$SRC_DIR/crates/lpe-storage/sql/schema.sql}"
 
 fail() {
