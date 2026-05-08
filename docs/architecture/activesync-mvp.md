@@ -12,6 +12,9 @@
 - Authentication:
   - mailbox-account `Basic`
   - mailbox bearer tokens from `/api/mail/auth/oauth/access-token`
+- Unauthenticated `OPTIONS` requests return a `401` ActiveSync authentication
+  challenge with the same protocol capability headers used by successful
+  authenticated probes.
 - Protocol behavior:
   - parses only the `WBXML` code pages required by the supported command set
   - uses canonical mailbox, contact, and calendar data

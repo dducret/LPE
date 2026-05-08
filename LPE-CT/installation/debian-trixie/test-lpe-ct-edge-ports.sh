@@ -664,15 +664,19 @@ probe_client_publication() {
   fi
 
   headers_file="$(mktemp)"
-  curl --silent --show-error --fail --insecure --http1.1 \
+  local activesync_status
+  activesync_status="$(curl --silent --show-error --insecure --http1.1 \
     --request OPTIONS \
     --header "Host: ${host_header}" \
     --dump-header "${headers_file}" \
     --output /dev/null \
-    "${base_url}/Microsoft-Server-ActiveSync" \
+    --write-out "%{http_code}" \
+    "${base_url}/Microsoft-Server-ActiveSync" || true)"
+  [[ "${activesync_status}" == "200" || "${activesync_status}" == "401" ]] \
     || {
+      sed -n '1,40p' "${headers_file}" || true
       rm -f "${headers_file}"
-      fail "ActiveSync OPTIONS is not reachable through LPE-CT HTTPS publication"
+      fail "ActiveSync OPTIONS is not reachable through LPE-CT HTTPS publication; got HTTP ${activesync_status:-000}"
     }
   grep -qi '^ms-asprotocolversions:' "${headers_file}" \
     || {
@@ -686,6 +690,14 @@ probe_client_publication() {
       rm -f "${headers_file}"
       fail "ActiveSync OPTIONS response is missing ms-asprotocolcommands"
     }
+  if [[ "${activesync_status}" == "401" ]]; then
+    grep -qi '^www-authenticate: Basic realm="LPE ActiveSync"' "${headers_file}" \
+      || {
+        sed -n '1,40p' "${headers_file}" || true
+        rm -f "${headers_file}"
+        fail "ActiveSync OPTIONS auth challenge is missing Basic realm=\"LPE ActiveSync\""
+      }
+  fi
   rm -f "${headers_file}"
   pass "ActiveSync OPTIONS exposes ms-asprotocolversions and ms-asprotocolcommands through LPE-CT"
 

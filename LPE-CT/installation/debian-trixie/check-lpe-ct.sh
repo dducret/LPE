@@ -212,15 +212,18 @@ autodiscover_upper_body="$(curl --silent --show-error --fail --insecure \
 pass "Uppercase Outlook Autodiscover POST publishes IMAP through LPE-CT"
 
 activesync_headers="$(mktemp)"
-curl --silent --show-error --fail --insecure --http1.1 \
+activesync_status="$(curl --silent --show-error --insecure --http1.1 \
   --request OPTIONS \
   --header "Host: ${PUBLIC_HOST_HEADER}" \
   --dump-header "$activesync_headers" \
   --output /dev/null \
-  "${PUBLIC_HTTPS_BASE}/Microsoft-Server-ActiveSync" \
+  --write-out "%{http_code}" \
+  "${PUBLIC_HTTPS_BASE}/Microsoft-Server-ActiveSync" || true)"
+[[ "$activesync_status" == "200" || "$activesync_status" == "401" ]] \
   || {
+    sed -n '1,40p' "$activesync_headers" >&2 || true
     rm -f "$activesync_headers"
-    fail "ActiveSync OPTIONS failed through LPE-CT public HTTPS edge"
+    fail "ActiveSync OPTIONS failed through LPE-CT public HTTPS edge with HTTP ${activesync_status:-000}"
   }
 grep -qi '^ms-asprotocolversions:' "$activesync_headers" \
   || {
@@ -234,6 +237,14 @@ grep -qi '^ms-asprotocolcommands:' "$activesync_headers" \
     rm -f "$activesync_headers"
     fail "ActiveSync OPTIONS response is missing ms-asprotocolcommands"
   }
+if [[ "$activesync_status" == "401" ]]; then
+  grep -qi '^www-authenticate: Basic realm="LPE ActiveSync"' "$activesync_headers" \
+    || {
+      sed -n '1,40p' "$activesync_headers" >&2 || true
+      rm -f "$activesync_headers"
+      fail "ActiveSync OPTIONS auth challenge is missing Basic realm=\"LPE ActiveSync\""
+    }
+fi
 rm -f "$activesync_headers"
 pass "ActiveSync OPTIONS exposes ms-asprotocolversions and ms-asprotocolcommands through LPE-CT"
 

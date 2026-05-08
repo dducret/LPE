@@ -646,7 +646,9 @@ provider only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED` is also enabled
 with `LPE_AUTOCONFIG_RPC_PROXY_ENABLED` and a real `/rpc/rpcproxy.dll`
 Outlook Anywhere path. `OPTIONS
 /Microsoft-Server-ActiveSync` returns the `ms-asprotocolversions` and
-`ms-asprotocolcommands` headers. `OPTIONS /mapi/emsmdb` returns
+`ms-asprotocolcommands` headers; when sent without mailbox credentials it may
+return a `401` `Basic realm="LPE ActiveSync"` challenge with those headers.
+`OPTIONS /mapi/emsmdb` returns
 `x-lpe-mapi-status: transport-session-ready`. Unauthenticated
 `/rpc/rpcproxy.dll` HTTP authentication probes return a `401` `Basic
 realm="LPE RPC"` challenge so RCA can discover supported HTTP authentication
