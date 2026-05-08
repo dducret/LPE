@@ -712,6 +712,13 @@ where
 
     async fn find_folder(&self, principal: &AccountPrincipal) -> Result<String> {
         let mut folders = String::new();
+        for mailbox in self
+            .store
+            .fetch_jmap_mailboxes(principal.account_id)
+            .await?
+        {
+            folders.push_str(&mailbox_folder_xml(&mailbox));
+        }
         for collection in self
             .store
             .fetch_accessible_contact_collections(principal.account_id)
@@ -732,13 +739,6 @@ where
             .await?
         {
             folders.push_str(&folder_xml(&collection, TASKS_FOLDER_ID, "Task"));
-        }
-        for mailbox in self
-            .store
-            .fetch_jmap_mailboxes(principal.account_id)
-            .await?
-        {
-            folders.push_str(&mailbox_folder_xml(&mailbox));
         }
 
         Ok(format!(
@@ -762,6 +762,16 @@ where
     async fn sync_folder_hierarchy(&self, principal: &AccountPrincipal) -> Result<String> {
         let mut changes = String::new();
         let mut count = 0;
+        for mailbox in self
+            .store
+            .fetch_jmap_mailboxes(principal.account_id)
+            .await?
+        {
+            changes.push_str("<t:Create>");
+            changes.push_str(&mailbox_folder_xml(&mailbox));
+            changes.push_str("</t:Create>");
+            count += 1;
+        }
         for collection in self
             .store
             .fetch_accessible_contact_collections(principal.account_id)
@@ -789,16 +799,6 @@ where
         {
             changes.push_str("<t:Create>");
             changes.push_str(&folder_xml(&collection, TASKS_FOLDER_ID, "Task"));
-            changes.push_str("</t:Create>");
-            count += 1;
-        }
-        for mailbox in self
-            .store
-            .fetch_jmap_mailboxes(principal.account_id)
-            .await?
-        {
-            changes.push_str("<t:Create>");
-            changes.push_str(&mailbox_folder_xml(&mailbox));
             changes.push_str("</t:Create>");
             count += 1;
         }

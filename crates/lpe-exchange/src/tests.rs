@@ -8886,6 +8886,11 @@ async fn find_folder_lists_contact_and_calendar_folders() {
     assert!(body.contains("<t:ContactsFolder>"));
     assert!(body.contains("<t:CalendarFolder>"));
     assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-44444444-4444-4444-4444-444444444444\"/>"));
+    assert!(
+        body.find("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\"")
+            .unwrap()
+            < body.find("<t:ContactsFolder>").unwrap()
+    );
     assert!(body.contains("<t:ParentFolderId Id=\"msgfolderroot\" ChangeKey=\"root\"/>"));
     assert!(body.contains("<t:DisplayName>RCA Sync</t:DisplayName>"));
     assert!(body.contains("<t:TotalCount>0</t:TotalCount>"));
@@ -8931,6 +8936,10 @@ async fn sync_folder_hierarchy_lists_contact_and_calendar_folders() {
     assert!(body.contains("<t:FolderClass>IPF.Contacts</t:FolderClass>"));
     assert!(body.contains("<t:FolderClass>IPF.Calendar</t:FolderClass>"));
     assert!(body.contains("<t:FolderId Id=\"mailbox:44444444-4444-4444-4444-444444444444\" ChangeKey=\"ck-44444444-4444-4444-4444-444444444444\"/>"));
+    assert!(
+        body.find("<t:Create><t:Folder>").unwrap()
+            < body.find("<t:Create><t:ContactsFolder>").unwrap()
+    );
     assert!(body.contains("<t:ParentFolderId Id=\"msgfolderroot\" ChangeKey=\"root\"/>"));
     assert!(body.contains("<t:DisplayName>RCA Sync</t:DisplayName>"));
     assert!(body.contains("<t:UnreadCount>0</t:UnreadCount>"));
