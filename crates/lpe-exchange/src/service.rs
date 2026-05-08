@@ -6764,7 +6764,7 @@ fn rpc_proxy_out_channels(
 }
 
 fn should_hold_rpc_proxy_in_channel(uri: &Uri) -> bool {
-    let Some(query) = uri
+    let Some(_) = uri
         .query()
         .filter(|query| is_rpc_proxy_endpoint_query(query))
     else {
@@ -6774,23 +6774,7 @@ fn should_hold_rpc_proxy_in_channel(uri: &Uri) -> bool {
     if hold_open_ms == 0 {
         return false;
     }
-    if query.contains(":6002") || query.contains(":6004") {
-        return true;
-    }
-
-    let now = Instant::now();
-    let mut channels = rpc_proxy_in_channel_openers()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    channels.retain(|_, first_seen| {
-        now.duration_since(*first_seen) <= Duration::from_millis(hold_open_ms)
-    });
-    channels.insert(query.to_string(), now).is_some()
-}
-
-fn rpc_proxy_in_channel_openers() -> &'static Mutex<HashMap<String, Instant>> {
-    static OPENERS: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
-    OPENERS.get_or_init(|| Mutex::new(HashMap::new()))
+    true
 }
 
 fn rpc_proxy_binary_response(body: Vec<u8>, status: &'static str) -> Response {

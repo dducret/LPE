@@ -7879,7 +7879,7 @@ async fn rpc_proxy_mailstore_endpoint_ping_orders_pending_conn_b1_before_bind_ac
 }
 
 #[tokio::test]
-async fn rpc_proxy_opens_authenticated_in_data_channel_without_waiting_for_body_eof() {
+async fn rpc_proxy_opens_authenticated_mailstore_in_data_channel_without_waiting_for_body_eof() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -7904,16 +7904,6 @@ async fn rpc_proxy_opens_authenticated_in_data_channel_without_waiting_for_body_
         response.headers().get("x-lpe-rpc-proxy-status"),
         Some(&HeaderValue::from_static("in-channel-open"))
     );
-    assert_eq!(
-        response.headers().get("content-length"),
-        Some(&HeaderValue::from_static("0"))
-    );
-
-    let response = service
-        .handle_rpc_proxy_in_data_channel(&method, &uri, &headers, Body::from("bind-bytes"))
-        .await;
-
-    assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get("content-length"),
         Some(&HeaderValue::from_static("131072"))
