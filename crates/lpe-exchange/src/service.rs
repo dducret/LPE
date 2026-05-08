@@ -6411,11 +6411,8 @@ fn rpc_proxy_rts_connect_response(client_receive_window_size: u32) -> Response {
 
 fn rpc_proxy_mailstore_ping_response(uri: &Uri, client_receive_window_size: u32) -> Response {
     let mut body = rpc_proxy_rts_connect_body(client_receive_window_size);
-    if let Some(query) = uri
-        .query()
-        .filter(|query| is_rpc_proxy_endpoint_query(query))
-    {
-        body.extend_from_slice(&rpc_proxy_endpoint_ping_bind_ack_body(uri, 1));
+    if let Some(query) = uri.query().filter(|query| query.contains(":6001")) {
+        body.extend_from_slice(&rpc_proxy_dce_bind_ack_body_with_result_count(1, 1));
         mark_rpc_proxy_out_endpoint_bind_ack(query);
     }
     rpc_proxy_mailstore_held_open_response(uri, body)
@@ -6446,15 +6443,6 @@ fn consume_rpc_proxy_out_endpoint_bind_ack(query: &str) -> bool {
 fn rpc_proxy_out_endpoint_bind_acks() -> &'static Mutex<HashMap<String, usize>> {
     static BIND_ACKS: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
     BIND_ACKS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn rpc_proxy_endpoint_ping_bind_ack_body(uri: &Uri, call_id: u32) -> Vec<u8> {
-    let result_count = uri
-        .query()
-        .filter(|query| query.contains(":6004"))
-        .map(|_| 2)
-        .unwrap_or(1);
-    rpc_proxy_dce_bind_ack_body_with_result_count(call_id, result_count)
 }
 
 fn rpc_proxy_dce_bind_ack_body(call_id: u32, request: &[u8]) -> Vec<u8> {

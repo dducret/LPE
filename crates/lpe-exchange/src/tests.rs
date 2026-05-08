@@ -7624,7 +7624,7 @@ async fn rpc_proxy_answers_authenticated_msrpch_echo_ping() {
 }
 
 #[tokio::test]
-async fn rpc_proxy_referral_endpoint_ping_includes_bind_ack_after_rts_connect() {
+async fn rpc_proxy_referral_endpoint_ping_returns_rts_connect_without_synthetic_bind_ack() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -7651,7 +7651,7 @@ async fn rpc_proxy_referral_endpoint_ping_includes_bind_ack_after_rts_connect() 
         Some(&HeaderValue::from_static("endpoint-ping"))
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 184);
+    assert_eq!(body.len(), 72);
     assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
     assert_eq!(u16::from_le_bytes([body[18], body[19]]), 1);
     assert_eq!(
@@ -7668,9 +7668,6 @@ async fn rpc_proxy_referral_endpoint_ping_includes_bind_ack_after_rts_connect() 
         u32::from_le_bytes([body[60], body[61], body[62], body[63]]),
         0x0000_8000
     );
-    assert_eq!(body[72], 0x05);
-    assert_eq!(body[74], 0x0c);
-    assert_eq!(body[75], 0x03);
 }
 
 #[tokio::test]
@@ -7730,7 +7727,7 @@ async fn rpc_proxy_mailstore_endpoint_ping_includes_bind_ack_after_rts_connect()
 }
 
 #[tokio::test]
-async fn rpc_proxy_address_book_endpoint_ping_includes_bind_ack_after_rts_connect() {
+async fn rpc_proxy_address_book_endpoint_ping_returns_rts_connect_without_synthetic_bind_ack() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -7761,32 +7758,12 @@ async fn rpc_proxy_address_book_endpoint_ping_includes_bind_ack_after_rts_connec
         Some(&HeaderValue::from_static("131072"))
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 208);
+    assert_eq!(body.len(), 72);
     assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
     assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
     assert_eq!(
         u32::from_le_bytes([body[60], body[61], body[62], body[63]]),
         0x0000_8000
-    );
-    assert_eq!(body[72], 0x05);
-    assert_eq!(body[74], 0x0c);
-    assert_eq!(body[75], 0x03);
-    assert_eq!(u16::from_le_bytes([body[80], body[81]]), 136);
-    assert_eq!(u16::from_le_bytes([body[82], body[83]]), 48);
-    assert_eq!(body[100], 2);
-    assert_eq!(u16::from_le_bytes([body[104], body[105]]), 0);
-    assert_eq!(
-        &body[108..128],
-        &[
-            0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11, 0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10,
-            0x48, 0x60, 0x02, 0x00, 0x00, 0x00
-        ]
-    );
-    assert_eq!(u16::from_le_bytes([body[128], body[129]]), 2);
-    assert_eq!(&body[160..168], b"NTLMSSP\0");
-    assert_eq!(
-        u32::from_le_bytes([body[168], body[169], body[170], body[171]]),
-        2
     );
 }
 
@@ -8283,9 +8260,8 @@ fn rpc_proxy_mailstore_in_channel_skips_duplicate_bind_ack() {
 }
 
 #[test]
-fn rpc_proxy_address_book_in_channel_skips_duplicate_endpoint_ping_bind_ack() {
-    let endpoint_query = "mail.example.test:6004";
-    mark_rpc_proxy_out_endpoint_bind_ack(endpoint_query);
+fn rpc_proxy_address_book_in_channel_answers_actual_bind_before_management_probe() {
+    let endpoint_query = "mail.address-book-bind.example.test:6004";
     let bind = hex_bytes(
         "05000b0310000000d000280030000000\
          f80ff80f000000000300000000000100\
@@ -8312,6 +8288,21 @@ fn rpc_proxy_address_book_in_channel_skips_duplicate_endpoint_ping_bind_ack() {
     buffer.extend_from_slice(&bind);
     buffer.extend_from_slice(&auth3);
     buffer.extend_from_slice(&management);
+
+    let bind_response =
+        rpc_proxy_in_channel_response_for_endpoint_query(endpoint_query, &mut buffer)
+            .expect("bind response");
+
+    assert_eq!(bind_response[0..4], [0x05, 0x00, 0x0c, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([
+            bind_response[12],
+            bind_response[13],
+            bind_response[14],
+            bind_response[15]
+        ]),
+        48
+    );
 
     let response = rpc_proxy_in_channel_response_for_endpoint_query(endpoint_query, &mut buffer)
         .expect("management response");
