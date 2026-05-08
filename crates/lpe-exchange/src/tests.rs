@@ -9389,15 +9389,69 @@ async fn get_user_availability_returns_canonical_busy_events() {
     let body = response_text(response).await;
     assert!(body.contains("<m:GetUserAvailabilityResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("<t:FreeBusyView>"));
-    assert!(body.contains("</t:FreeBusyView>"));
-    assert!(!body.contains("<m:FreeBusyView>"));
+    assert!(body.contains("<m:FreeBusyView>"));
+    assert!(body.contains("</m:FreeBusyView>"));
+    assert!(!body.contains("<t:FreeBusyView>"));
     assert!(body.contains("<t:FreeBusyViewType>Detailed</t:FreeBusyViewType>"));
     assert!(body.contains("<t:CalendarEventArray><t:CalendarEvent>"));
     assert!(body.contains("<t:StartTime>2026-05-04T09:30:00Z</t:StartTime>"));
     assert!(body.contains("<t:EndTime>2026-05-04T10:15:00Z</t:EndTime>"));
     assert!(!body.contains("2026-05-07T09:30:00Z"));
     assert!(body.contains("<t:ServerVersionInfo"));
+}
+
+#[tokio::test]
+async fn get_user_availability_returns_suggestions_when_requested() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:GetUserAvailabilityRequest>
+                  <m:MailboxDataArray>
+                    <t:MailboxData>
+                      <t:Email><t:Address>alice@example.test</t:Address></t:Email>
+                    </t:MailboxData>
+                  </m:MailboxDataArray>
+                  <t:FreeBusyViewOptions>
+                    <t:TimeWindow>
+                      <t:StartTime>2026-05-15T00:00:00</t:StartTime>
+                      <t:EndTime>2026-05-17T00:00:00</t:EndTime>
+                    </t:TimeWindow>
+                    <t:RequestedView>Detailed</t:RequestedView>
+                  </t:FreeBusyViewOptions>
+                  <t:SuggestionsViewOptions>
+                    <t:MeetingDurationInMinutes>60</t:MeetingDurationInMinutes>
+                    <t:DetailedSuggestionsWindow>
+                      <t:StartTime>2026-05-15T00:00:00</t:StartTime>
+                      <t:EndTime>2026-05-17T00:00:00</t:EndTime>
+                    </t:DetailedSuggestionsWindow>
+                  </t:SuggestionsViewOptions>
+                </m:GetUserAvailabilityRequest>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetUserAvailabilityResponse>"));
+    assert!(body.contains("<m:FreeBusyResponseArray>"));
+    assert!(body.contains("<m:FreeBusyView>"));
+    assert!(body.contains("<m:SuggestionsResponse>"));
+    assert!(body.contains("<m:SuggestionDayResultArray>"));
+    assert!(body.contains("<t:SuggestionDayResult>"));
+    assert!(body.contains("<t:Date>2026-05-15T00:00:00Z</t:Date>"));
+    assert!(body.contains("<t:SuggestionArray></t:SuggestionArray>"));
 }
 
 #[tokio::test]
