@@ -36,7 +36,10 @@ use uuid::Uuid;
 use crate::{
     mapi::{self, MapiEndpoint},
     ntlm,
-    store::{ExchangeAddressBookEntry, ExchangeAddressBookEntryKind, ExchangeStore},
+    store::{
+        ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
+        ExchangeStore,
+    },
 };
 
 const EWS_PATH: &str = "/EWS/Exchange.asmx";
@@ -560,7 +563,7 @@ where
                     )
                 }),
             "GetServerTimeZones" => get_server_time_zones_response(),
-            "ResolveNames" => resolve_names_response(&principal, &body),
+            "ResolveNames" => self.resolve_names(&principal, &body).await?,
             "GetUserAvailability" => self.get_user_availability(&principal, &body).await?,
             "CreateItem" => self.create_item(&principal, &body).await?,
             "UpdateItem" => self.update_item(&principal, &body).await?,
@@ -593,6 +596,14 @@ where
             .extensions_mut()
             .insert(EwsResponseDebug { response_code });
         Ok(response)
+    }
+
+    async fn resolve_names(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let entries = self
+            .store
+            .fetch_address_book_entries(principal.account_id)
+            .await?;
+        Ok(resolve_names_response(principal, request, &entries))
     }
 
     pub(crate) async fn handle_mapi(
@@ -4411,16 +4422,28 @@ fn resolve_names_no_results_response() -> String {
     .to_string()
 }
 
-fn resolve_names_response(principal: &AccountPrincipal, request: &str) -> String {
+fn resolve_names_response(
+    principal: &AccountPrincipal,
+    request: &str,
+    entries: &[ExchangeAddressBookEntry],
+) -> String {
     let query = element_text(request, "UnresolvedEntry")
         .unwrap_or_default()
         .trim()
         .to_ascii_lowercase();
-    let email = principal.email.to_ascii_lowercase();
-    let display_name = principal.display_name.to_ascii_lowercase();
-    if query.is_empty() || (!email.contains(&query) && !display_name.contains(&query)) {
+    if query.is_empty() {
         return resolve_names_no_results_response();
     }
+    let principal_entry = principal_address_book_entry(principal);
+    let matched = entries
+        .iter()
+        .find(|entry| address_book_entry_matches(entry, &query, true))
+        .or_else(|| {
+            address_book_lookup_matches_principal(&query, principal).then_some(&principal_entry)
+        });
+    let Some(entry) = matched else {
+        return resolve_names_no_results_response();
+    };
 
     format!(
         concat!(
@@ -4434,7 +4457,7 @@ fn resolve_names_response(principal: &AccountPrincipal, request: &str) -> String
             "<t:Name>{}</t:Name>",
             "<t:EmailAddress>{}</t:EmailAddress>",
             "<t:RoutingType>SMTP</t:RoutingType>",
-            "<t:MailboxType>Mailbox</t:MailboxType>",
+            "<t:MailboxType>{}</t:MailboxType>",
             "</t:Mailbox>",
             "</t:Resolution>",
             "</m:ResolutionSet>",
@@ -4442,9 +4465,63 @@ fn resolve_names_response(principal: &AccountPrincipal, request: &str) -> String
             "</m:ResponseMessages>",
             "</m:ResolveNamesResponse>"
         ),
-        escape_xml(&principal.display_name),
-        escape_xml(&principal.email),
+        escape_xml(&entry.display_name),
+        escape_xml(&entry.email),
+        ews_mailbox_type(entry),
     )
+}
+
+fn principal_address_book_entry(principal: &AccountPrincipal) -> ExchangeAddressBookEntry {
+    ExchangeAddressBookEntry {
+        id: principal.account_id,
+        display_name: principal.display_name.clone(),
+        email: principal.email.clone(),
+        entry_kind: ExchangeAddressBookEntryKind::Account,
+        directory_kind: ExchangeAddressBookDirectoryKind::Person,
+    }
+}
+
+fn address_book_lookup_matches_principal(value: &str, principal: &AccountPrincipal) -> bool {
+    let value = normalize_address_book_lookup(value);
+    let email = principal.email.to_ascii_lowercase();
+    let display_name = principal.display_name.to_ascii_lowercase();
+    value == email || value == display_name || email.contains(value.as_str())
+}
+
+fn address_book_entry_matches(
+    entry: &ExchangeAddressBookEntry,
+    value: &str,
+    allow_partial: bool,
+) -> bool {
+    let value = normalize_address_book_lookup(value);
+    if value.is_empty() {
+        return false;
+    }
+    let email = entry.email.to_ascii_lowercase();
+    let display_name = entry.display_name.to_ascii_lowercase();
+    value == email
+        || value == display_name
+        || value == format!("smtp:{email}")
+        || value == format!("=smtp:{email}")
+        || (allow_partial
+            && (email.contains(value.as_str()) || display_name.contains(value.as_str())))
+}
+
+fn normalize_address_book_lookup(value: &str) -> String {
+    let mut value = value.trim().trim_matches('\0').to_ascii_lowercase();
+    if let Some(rest) = value.strip_prefix("=smtp:") {
+        value = rest.to_string();
+    } else if let Some(rest) = value.strip_prefix("smtp:") {
+        value = rest.to_string();
+    }
+    value
+}
+
+fn ews_mailbox_type(entry: &ExchangeAddressBookEntry) -> &'static str {
+    match entry.entry_kind {
+        ExchangeAddressBookEntryKind::Contact => "Contact",
+        ExchangeAddressBookEntryKind::Account => "Mailbox",
+    }
 }
 
 fn get_user_availability_success_response(events: &[AccessibleEvent]) -> String {
@@ -6736,19 +6813,16 @@ where
     const PR_EMAIL_ADDRESS_A: u32 = 0x3003_001e;
 
     let entries = rpc_proxy_address_book_entries(store, principal).await;
+    let principal_entry = rpc_proxy_principal_address_book_entry(principal);
     let lookup_values = rpc_proxy_nspi_lookup_values(request);
     let matched = lookup_values
         .first()
         .and_then(|value| rpc_proxy_match_nspi_entry(&entries, value))
         .or_else(|| {
             lookup_values
-                .is_empty()
-                .then(|| {
-                    entries
-                        .iter()
-                        .find(|entry| rpc_proxy_nspi_entry_is_principal(entry, principal))
-                })
-                .flatten()
+                .iter()
+                .any(|value| rpc_proxy_nspi_principal_matches(value, principal))
+                .then_some(&principal_entry)
         });
     let Some(entry) = matched else {
         let mut stub = Vec::with_capacity(64);
@@ -6977,13 +7051,20 @@ where
     S: ExchangeStore,
 {
     match store.fetch_address_book_entries(principal.account_id).await {
-        Ok(entries) if !entries.is_empty() => entries,
-        Ok(_) | Err(_) => vec![ExchangeAddressBookEntry {
-            id: principal.account_id,
-            display_name: principal.display_name.clone(),
-            email: principal.email.clone(),
-            entry_kind: ExchangeAddressBookEntryKind::Account,
-        }],
+        Ok(entries) => entries,
+        Err(_) => Vec::new(),
+    }
+}
+
+fn rpc_proxy_principal_address_book_entry(
+    principal: &AccountPrincipal,
+) -> ExchangeAddressBookEntry {
+    ExchangeAddressBookEntry {
+        id: principal.account_id,
+        display_name: principal.display_name.clone(),
+        email: principal.email.clone(),
+        entry_kind: ExchangeAddressBookEntryKind::Account,
+        directory_kind: ExchangeAddressBookDirectoryKind::Person,
     }
 }
 
@@ -7106,6 +7187,17 @@ fn rpc_proxy_nspi_entry_is_principal(
     principal: &AccountPrincipal,
 ) -> bool {
     entry.entry_kind == ExchangeAddressBookEntryKind::Account && entry.id == principal.account_id
+}
+
+fn rpc_proxy_nspi_principal_matches(value: &str, principal: &AccountPrincipal) -> bool {
+    let value = rpc_proxy_normalize_nspi_lookup_value(value);
+    let email = principal.email.to_ascii_lowercase();
+    let display_name = principal.display_name.to_ascii_lowercase();
+    value == email
+        || value == display_name
+        || value == format!("smtp:{email}")
+        || value == format!("=smtp:{email}")
+        || email.contains(value.as_str())
 }
 
 fn rpc_proxy_nspi_entry_exact_match(entry: &ExchangeAddressBookEntry, value: &str) -> bool {

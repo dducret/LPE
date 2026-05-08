@@ -33,7 +33,10 @@ use crate::{
         MapiAttachment, MapiCollaborationFolder, MapiCollaborationFolderKind,
         MapiMailStoreSnapshot, MapiStore,
     },
-    store::{ExchangeAddressBookEntry, ExchangeAddressBookEntryKind, ExchangeStore},
+    store::{
+        ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
+        ExchangeStore,
+    },
 };
 
 const MAPI_CONTENT_TYPE: &str = "application/mapi-http";
@@ -1059,6 +1062,7 @@ fn nspi_entry_value(entry: &ExchangeAddressBookEntry, property_tag: u32) -> Nspi
         0x3003_001F => NspiValue::String(&entry.email),
         0x3A00_001F => NspiValue::String(&entry.display_name),
         0x0FFE_0003 => NspiValue::U32(MAPI_MAILUSER_OBJECT_TYPE),
+        0x3900_0003 => NspiValue::U32(nspi_entry_display_type(entry)),
         0x3000_0003 => NspiValue::U32(nspi_entry_id(entry)),
         0x3004_001F => NspiValue::String(&entry.email),
         0x3002_001F => NspiValue::String("SMTP"),
@@ -1091,6 +1095,16 @@ fn principal_address_book_entry(principal: &AccountPrincipal) -> ExchangeAddress
         display_name: principal.display_name.clone(),
         email: principal.email.clone(),
         entry_kind: ExchangeAddressBookEntryKind::Account,
+        directory_kind: ExchangeAddressBookDirectoryKind::Person,
+    }
+}
+
+fn nspi_entry_display_type(entry: &ExchangeAddressBookEntry) -> u32 {
+    match (entry.entry_kind, entry.directory_kind) {
+        (ExchangeAddressBookEntryKind::Contact, _) => 6,
+        (ExchangeAddressBookEntryKind::Account, ExchangeAddressBookDirectoryKind::Room) => 7,
+        (ExchangeAddressBookEntryKind::Account, ExchangeAddressBookDirectoryKind::Equipment) => 8,
+        (ExchangeAddressBookEntryKind::Account, ExchangeAddressBookDirectoryKind::Person) => 0,
     }
 }
 

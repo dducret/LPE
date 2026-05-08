@@ -44,14 +44,14 @@ Run these checks before enabling `LPE_AUTOCONFIG_EWS_ENABLED` for a deployment:
 
 Run this stricter gate before enabling legacy `EXCH`, legacy `EXPR`, or `mapiHttp` autodiscover publication for Outlook RCA or classic Outlook profile testing:
 
-- `RCA-01`: `tools/rca_outlook_connectivity_check.py --outlook-rca-readiness --allow-mutating-fixtures` against the public HTTPS endpoint with a disposable mailbox. The probe must create temporary canonical fixtures, verify the EWS-created `Sent` message through `MAPI/EMSMDB`, verify the EWS-created contact through `MAPI/NSPI`, and cover RPC proxy authentication plus the mailbox endpoint ping. Static fallback payloads, empty success bodies, or PING-only MAPI behavior fail this gate.
+- `RCA-01`: `tools/rca_outlook_connectivity_check.py --outlook-rca-readiness --allow-mutating-fixtures` against the public HTTPS endpoint with a disposable mailbox. The probe must create temporary canonical fixtures, verify the EWS-created `Sent` message through `MAPI/EMSMDB`, verify the EWS-created contact and authenticated mailbox through `MAPI/NSPI`, and cover RPC proxy authentication plus the mailbox endpoint ping. Static fallback payloads, empty success bodies, PING-only MAPI behavior, cross-tenant address-book leakage, or hidden-account browsing through general `NSPI` table reads fail this gate.
 
 ## Deferred Checks
 
 The following require canonical model or policy work before they can be
 converted into passing interoperability checks:
 
-- cross-mailbox free/busy and tenant address-book policy
+- cross-mailbox free/busy and broader tenant address-book policy beyond active same-tenant accounts, authenticated self-resolution, and accessible canonical contacts
 - attendee response workflows and meeting update/cancel semantics
 - reminders and alarms
 - recurrence expansion, exceptions, and detached instances

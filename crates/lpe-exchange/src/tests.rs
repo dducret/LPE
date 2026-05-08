@@ -26,7 +26,10 @@ use crate::{
         rpc_proxy_in_channel_response_for_buffer, rpc_proxy_in_channel_response_for_endpoint_query,
         rpc_proxy_in_channel_response_for_endpoint_query_with_store, ExchangeService,
     },
-    store::{ExchangeAddressBookEntry, ExchangeAddressBookEntryKind, ExchangeStore},
+    store::{
+        ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
+        ExchangeStore,
+    },
 };
 
 #[derive(Clone, Default)]
@@ -282,8 +285,8 @@ impl ExchangeStore for FakeStore {
         if let Some(principal) = principal {
             if !self.omit_principal_from_directory
                 && !accounts
-                .iter()
-                .any(|account| account.account_id == principal.account_id)
+                    .iter()
+                    .any(|account| account.account_id == principal.account_id)
             {
                 accounts.push(principal.clone());
             }
@@ -298,6 +301,7 @@ impl ExchangeStore for FakeStore {
                 display_name: account.display_name,
                 email: account.email,
                 entry_kind: ExchangeAddressBookEntryKind::Account,
+                directory_kind: ExchangeAddressBookDirectoryKind::Person,
             })
             .collect::<Vec<_>>();
         let visible_collection_ids = self
@@ -324,6 +328,7 @@ impl ExchangeStore for FakeStore {
                     display_name: contact.name.clone(),
                     email: contact.email.clone(),
                     entry_kind: ExchangeAddressBookEntryKind::Contact,
+                    directory_kind: ExchangeAddressBookDirectoryKind::Person,
                 }),
         );
         entries.sort_by(|left, right| {
@@ -7277,6 +7282,39 @@ async fn mapi_over_http_resolve_names_resolves_canonical_contact() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves_self() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        omit_principal_from_directory: true,
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("QueryRows"), &[0; 32])
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert!(!contains_bytes(&body, &utf16z("alice@example.test")));
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("GetMatches"), &[0; 32])
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert!(!contains_bytes(&body, &utf16z("alice@example.test")));
+
+    let request = resolve_names_request("alice@example.test", &[0x3003_001F, 0x3001_001F]);
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
+    assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+}
+
+#[tokio::test]
 async fn mapi_over_http_query_rows_stays_in_authenticated_tenant() {
     let mut same_tenant = FakeStore::account();
     same_tenant.account_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
@@ -9136,6 +9174,87 @@ async fn resolve_names_returns_authenticated_mailbox_match() {
     assert!(body.contains("<t:EmailAddress>alice@example.test</t:EmailAddress>"));
     assert!(body.contains("<t:MailboxType>Mailbox</t:MailboxType>"));
     assert!(body.contains("<t:ServerVersionInfo"));
+}
+
+#[tokio::test]
+async fn resolve_names_returns_tenant_directory_account_match() {
+    let mut bob = FakeStore::account();
+    bob.account_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    bob.email = "bob@example.test".to_string();
+    bob.display_name = "Bob Tenant".to_string();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![bob])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ResolveNames><m:UnresolvedEntry>bob@example.test</m:UnresolvedEntry></m:ResolveNames></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResolveNamesResponseMessage ResponseClass=\"Success\">"));
+    assert!(body.contains("<t:Name>Bob Tenant</t:Name>"));
+    assert!(body.contains("<t:EmailAddress>bob@example.test</t:EmailAddress>"));
+    assert!(!body.contains("mallory@other.test"));
+}
+
+#[tokio::test]
+async fn resolve_names_returns_accessible_contact_match() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        contacts: Arc::new(Mutex::new(vec![FakeStore::contact(
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "Bob Contact",
+            "bob@example.test",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ResolveNames><m:UnresolvedEntry>Bob Contact</m:UnresolvedEntry></m:ResolveNames></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResolveNamesResponseMessage ResponseClass=\"Success\">"));
+    assert!(body.contains("<t:Name>Bob Contact</t:Name>"));
+    assert!(body.contains("<t:EmailAddress>bob@example.test</t:EmailAddress>"));
+    assert!(body.contains("<t:MailboxType>Contact</t:MailboxType>"));
+}
+
+#[tokio::test]
+async fn resolve_names_hidden_authenticated_account_can_resolve_self() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        omit_principal_from_directory: true,
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ResolveNames><m:UnresolvedEntry>alice@example.test</m:UnresolvedEntry></m:ResolveNames></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResolveNamesResponseMessage ResponseClass=\"Success\">"));
+    assert!(body.contains("<t:EmailAddress>alice@example.test</t:EmailAddress>"));
 }
 
 #[tokio::test]

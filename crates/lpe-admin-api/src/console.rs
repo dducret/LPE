@@ -200,10 +200,10 @@ pub(crate) async fn update_account(
                 status: request.status,
                 gal_visibility: request
                     .gal_visibility
-                    .unwrap_or_else(|| "tenant".to_string()),
+                    .unwrap_or_else(|| account.gal_visibility.clone()),
                 directory_kind: request
                     .directory_kind
-                    .unwrap_or_else(|| "person".to_string()),
+                    .unwrap_or_else(|| account.directory_kind.clone()),
                 password_hash,
             },
             AuditEntryInput {

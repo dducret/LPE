@@ -908,6 +908,39 @@ def check_mapi_nspi_address_book(
         print("ok mapi_nspi_address_book")
 
 
+def check_mapi_nspi_resolve_authenticated_mailbox(
+    base_url: str,
+    email: str,
+    password: str,
+    insecure_tls: bool,
+    timeout: int,
+) -> None:
+    path = f"/mapi/nspi/?mailboxId={urllib.parse.quote(email, safe='@')}"
+    response = request(
+        "POST",
+        join_url(base_url, path),
+        resolve_names_request(email, [0x3003_001F, 0x3001_001F]),
+        {
+            "Authorization": basic_auth_header(email, password),
+            "Content-Type": "application/octet-stream",
+            "X-RequestType": "ResolveNames",
+            "X-RequestId": mapi_request_id("ResolveNamesSelf"),
+            "X-ClientInfo": "lpe-rca-connectivity-check",
+            "User-Agent": "MapiHttpClient",
+        },
+        timeout,
+        insecure_tls=insecure_tls,
+    )
+    require(response.status == 200, f"MAPI NSPI ResolveNames self returned HTTP {response.status}: {response.text[:300]}")
+    require("application/mapi-http" in content_type(response.headers), "MAPI NSPI ResolveNames self did not return MAPI content")
+    response_code = header_value(response.headers, "x-responsecode")
+    require(response_code == "0", f"MAPI NSPI ResolveNames self returned X-ResponseCode {response_code!r}: {response.text[:300]}")
+    payload = mapi_payload(response.body)
+    assert_nspi_resolve_names_payload(payload, "ResolveNames")
+    require(email.lower().encode("utf-16le") in payload.lower(), "MAPI NSPI ResolveNames self did not include the authenticated mailbox SMTP address")
+    print("ok mapi_nspi_resolve_authenticated_mailbox")
+
+
 def check_mapi_emsmdb_sent_message(
     base_url: str,
     email: str,
@@ -1213,7 +1246,7 @@ def main() -> int:
     parser.add_argument(
         "--check-live-fixtures",
         action="store_true",
-        help="Create/read/delete live EWS message, Sent, contact, calendar fixtures and prove the contact through MAPI/NSPI.",
+        help="Create/read/delete live EWS message, Sent, contact, calendar fixtures and prove the authenticated mailbox plus contact through MAPI/NSPI.",
     )
     parser.add_argument(
         "--send-recipient",
@@ -1329,6 +1362,8 @@ def main() -> int:
             check_mapi_ping(base_url, args.email, args.password, args.insecure, args.timeout)
         if run_mapi_nspi_bind:
             check_mapi_nspi_bind_octet_stream(base_url, args.email, args.password, args.insecure, args.timeout)
+        if args.outlook_rca_readiness:
+            check_mapi_nspi_resolve_authenticated_mailbox(base_url, args.email, args.password, args.insecure, args.timeout)
         if run_mapi_nspi_address_book:
             check_mapi_nspi_address_book(base_url, args.email, args.password, args.insecure, args.timeout)
     else:

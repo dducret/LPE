@@ -15,12 +15,20 @@ pub(crate) struct ExchangeAddressBookEntry {
     pub(crate) display_name: String,
     pub(crate) email: String,
     pub(crate) entry_kind: ExchangeAddressBookEntryKind,
+    pub(crate) directory_kind: ExchangeAddressBookDirectoryKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ExchangeAddressBookEntryKind {
     Account,
     Contact,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExchangeAddressBookDirectoryKind {
+    Person,
+    Room,
+    Equipment,
 }
 
 pub trait ExchangeStore: AccountAuthStore {
@@ -306,16 +314,15 @@ impl ExchangeStore for Storage {
             .ok_or_else(|| anyhow::anyhow!("account not found"))?;
             let account_rows = sqlx::query(
                 r#"
-                SELECT id, primary_email, display_name
+                SELECT id, primary_email, display_name, directory_kind
                 FROM accounts
                 WHERE tenant_id = $1
                   AND status = 'active'
-                  AND (gal_visibility = 'tenant' OR id = $2)
+                  AND gal_visibility = 'tenant'
                 ORDER BY lower(display_name) ASC, lower(primary_email) ASC, id ASC
                 "#,
             )
             .bind(&tenant_id)
-            .bind(principal_account_id)
             .fetch_all(self.pool())
             .await?;
 
@@ -326,6 +333,7 @@ impl ExchangeStore for Storage {
                     display_name: row.get("display_name"),
                     email: row.get("primary_email"),
                     entry_kind: ExchangeAddressBookEntryKind::Account,
+                    directory_kind: directory_kind_from_storage(row.get("directory_kind")),
                 })
                 .collect::<Vec<_>>();
 
@@ -341,6 +349,7 @@ impl ExchangeStore for Storage {
                         display_name: contact.name,
                         email: contact.email,
                         entry_kind: ExchangeAddressBookEntryKind::Contact,
+                        directory_kind: ExchangeAddressBookDirectoryKind::Person,
                     }),
             );
             entries.sort_by(|left, right| {
@@ -836,6 +845,14 @@ impl ExchangeStore for Storage {
 
 fn task_matches_collection(task: &ClientTask, collection_id: &str) -> bool {
     matches!(collection_id, "tasks" | "default") || task.task_list_id.to_string() == collection_id
+}
+
+fn directory_kind_from_storage(value: String) -> ExchangeAddressBookDirectoryKind {
+    match value.as_str() {
+        "room" => ExchangeAddressBookDirectoryKind::Room,
+        "equipment" => ExchangeAddressBookDirectoryKind::Equipment,
+        _ => ExchangeAddressBookDirectoryKind::Person,
+    }
 }
 
 fn address_book_entry_id(entry: &ExchangeAddressBookEntry) -> u32 {
