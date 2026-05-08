@@ -5425,7 +5425,7 @@ fn rpc_proxy_mailstore_ping_response(uri: &Uri, client_receive_window_size: u32)
         .query()
         .filter(|query| is_rpc_proxy_endpoint_query(query))
     {
-        body.extend_from_slice(&rpc_proxy_dce_bind_ack_body(1));
+        body.extend_from_slice(&rpc_proxy_endpoint_ping_bind_ack_body(uri, 1));
         mark_rpc_proxy_out_endpoint_bind_ack(query);
     }
     rpc_proxy_mailstore_held_open_response(uri, body)
@@ -5458,14 +5458,34 @@ fn rpc_proxy_out_endpoint_bind_acks() -> &'static Mutex<HashMap<String, usize>> 
     BIND_ACKS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn rpc_proxy_dce_bind_ack_body(call_id: u32) -> Vec<u8> {
-    const DCE_RPC_BIND_ACK: u8 = 0x0c;
-    rpc_proxy_dce_context_ack_body(call_id, DCE_RPC_BIND_ACK)
+fn rpc_proxy_endpoint_ping_bind_ack_body(uri: &Uri, call_id: u32) -> Vec<u8> {
+    let result_count = uri
+        .query()
+        .filter(|query| query.contains(":6004"))
+        .map(|_| 2)
+        .unwrap_or(1);
+    rpc_proxy_dce_bind_ack_body_with_result_count(call_id, result_count)
 }
 
-fn rpc_proxy_dce_alter_context_response_body(call_id: u32) -> Vec<u8> {
+fn rpc_proxy_dce_bind_ack_body(call_id: u32, request: &[u8]) -> Vec<u8> {
+    let result_count = rpc_proxy_dce_bind_context_count(request).unwrap_or(1);
+    rpc_proxy_dce_bind_ack_body_with_result_count(call_id, result_count)
+}
+
+fn rpc_proxy_dce_bind_ack_body_with_result_count(call_id: u32, result_count: u8) -> Vec<u8> {
+    const DCE_RPC_BIND_ACK: u8 = 0x0c;
+    rpc_proxy_dce_context_ack_body(call_id, DCE_RPC_BIND_ACK, result_count)
+}
+
+fn rpc_proxy_dce_alter_context_response_body(call_id: u32, request: &[u8]) -> Vec<u8> {
     const DCE_RPC_ALTER_CONTEXT_RESPONSE: u8 = 0x0f;
-    rpc_proxy_dce_context_ack_body(call_id, DCE_RPC_ALTER_CONTEXT_RESPONSE)
+    let result_count = rpc_proxy_dce_bind_context_count(request).unwrap_or(1);
+    rpc_proxy_dce_context_ack_body(call_id, DCE_RPC_ALTER_CONTEXT_RESPONSE, result_count)
+}
+
+fn rpc_proxy_dce_bind_context_count(request: &[u8]) -> Option<u8> {
+    let count = *request.get(24)?;
+    (count > 0).then_some(count)
 }
 
 fn rpc_proxy_dce_fault_response(call_id: u32, status: u32) -> Vec<u8> {
@@ -5497,7 +5517,7 @@ fn rpc_proxy_dce_fault_response(call_id: u32, status: u32) -> Vec<u8> {
     packet
 }
 
-fn rpc_proxy_dce_context_ack_body(call_id: u32, packet_type: u8) -> Vec<u8> {
+fn rpc_proxy_dce_context_ack_body(call_id: u32, packet_type: u8, result_count: u8) -> Vec<u8> {
     const DCE_RPC_FIRST_FRAG: u8 = 0x01;
     const DCE_RPC_LAST_FRAG: u8 = 0x02;
     const DCE_RPC_MAX_FRAG: u16 = 5840;
@@ -5512,12 +5532,20 @@ fn rpc_proxy_dce_context_ack_body(call_id: u32, packet_type: u8) -> Vec<u8> {
     body.extend_from_slice(&1u16.to_le_bytes());
     body.push(0);
     body.push(0);
-    body.push(1);
+    body.push(result_count);
     body.push(0);
     body.extend_from_slice(&0u16.to_le_bytes());
-    body.extend_from_slice(&0u16.to_le_bytes());
-    body.extend_from_slice(&0u16.to_le_bytes());
-    body.extend_from_slice(&DCE_RPC_NDR_TRANSFER_SYNTAX);
+    for result_index in 0..result_count {
+        if result_index == 0 {
+            body.extend_from_slice(&0u16.to_le_bytes());
+            body.extend_from_slice(&0u16.to_le_bytes());
+            body.extend_from_slice(&DCE_RPC_NDR_TRANSFER_SYNTAX);
+        } else {
+            body.extend_from_slice(&2u16.to_le_bytes());
+            body.extend_from_slice(&2u16.to_le_bytes());
+            body.extend_from_slice(&[0u8; 20]);
+        }
+    }
 
     let verifier = ntlm::connect_level_challenge_verifier();
     body.push(verifier.auth_type);
@@ -6038,9 +6066,9 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
             if consume_rpc_proxy_out_endpoint_bind_ack(endpoint_query) {
                 return None;
             }
-            return Some(rpc_proxy_dce_bind_ack_body(call_id));
+            return Some(rpc_proxy_dce_bind_ack_body(call_id, bytes));
         }
-        0x0e => return Some(rpc_proxy_dce_alter_context_response_body(call_id)),
+        0x0e => return Some(rpc_proxy_dce_alter_context_response_body(call_id, bytes)),
         0x00 => {}
         _ => return None,
     }
@@ -6122,9 +6150,9 @@ where
             if consume_rpc_proxy_out_endpoint_bind_ack(endpoint_query) {
                 return None;
             }
-            return Some(rpc_proxy_dce_bind_ack_body(call_id));
+            return Some(rpc_proxy_dce_bind_ack_body(call_id, bytes));
         }
-        0x0e => return Some(rpc_proxy_dce_alter_context_response_body(call_id)),
+        0x0e => return Some(rpc_proxy_dce_alter_context_response_body(call_id, bytes)),
         0x00 => {}
         _ => return None,
     }

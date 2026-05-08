@@ -7761,7 +7761,7 @@ async fn rpc_proxy_address_book_endpoint_ping_includes_bind_ack_after_rts_connec
         Some(&HeaderValue::from_static("131072"))
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 184);
+    assert_eq!(body.len(), 208);
     assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
     assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
     assert_eq!(
@@ -7771,11 +7771,21 @@ async fn rpc_proxy_address_book_endpoint_ping_includes_bind_ack_after_rts_connec
     assert_eq!(body[72], 0x05);
     assert_eq!(body[74], 0x0c);
     assert_eq!(body[75], 0x03);
-    assert_eq!(u16::from_le_bytes([body[80], body[81]]), 112);
+    assert_eq!(u16::from_le_bytes([body[80], body[81]]), 136);
     assert_eq!(u16::from_le_bytes([body[82], body[83]]), 48);
-    assert_eq!(&body[136..144], b"NTLMSSP\0");
+    assert_eq!(body[100], 2);
+    assert_eq!(u16::from_le_bytes([body[104], body[105]]), 0);
     assert_eq!(
-        u32::from_le_bytes([body[144], body[145], body[146], body[147]]),
+        &body[108..128],
+        &[
+            0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11, 0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10,
+            0x48, 0x60, 0x02, 0x00, 0x00, 0x00
+        ]
+    );
+    assert_eq!(u16::from_le_bytes([body[128], body[129]]), 2);
+    assert_eq!(&body[160..168], b"NTLMSSP\0");
+    assert_eq!(
+        u32::from_le_bytes([body[168], body[169], body[170], body[171]]),
         2
     );
 }
@@ -7958,8 +7968,9 @@ fn rpc_proxy_in_channel_bind_request_gets_bind_ack_response() {
         u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
         3
     );
-    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 112);
+    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 136);
     assert_eq!(u16::from_le_bytes([response[10], response[11]]), 48);
+    assert_eq!(response[28], 2);
     assert_eq!(
         &response[36..56],
         &[
@@ -7967,9 +7978,10 @@ fn rpc_proxy_in_channel_bind_request_gets_bind_ack_response() {
             0x48, 0x60, 0x02, 0x00, 0x00, 0x00
         ]
     );
-    assert_eq!(response[56], 10);
-    assert_eq!(response[57], 2);
-    assert_eq!(&response[64..72], b"NTLMSSP\0");
+    assert_eq!(u16::from_le_bytes([response[56], response[57]]), 2);
+    assert_eq!(response[80], 10);
+    assert_eq!(response[81], 2);
+    assert_eq!(&response[88..96], b"NTLMSSP\0");
 }
 
 #[test]
@@ -7992,9 +8004,11 @@ fn rpc_proxy_in_channel_alter_context_request_gets_alter_context_response() {
         u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
         4
     );
-    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 112);
+    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 136);
     assert_eq!(u16::from_le_bytes([response[10], response[11]]), 48);
-    assert_eq!(&response[64..72], b"NTLMSSP\0");
+    assert_eq!(response[28], 2);
+    assert_eq!(u16::from_le_bytes([response[56], response[57]]), 2);
+    assert_eq!(&response[88..96], b"NTLMSSP\0");
 }
 
 #[test]
