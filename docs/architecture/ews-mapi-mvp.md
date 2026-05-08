@@ -52,7 +52,7 @@
 | Calendar | canonical event read/write operations |
 | Tasks | canonical task read/write operations where exposed |
 | Submission | canonical send flow with authoritative `Sent` |
-| Notifications | bounded pull-subscription compatibility through `Subscribe`, `GetEvents`, and `Unsubscribe`; push and streaming notifications remain out of scope |
+| Notifications | bounded pull-subscription compatibility through `Subscribe`, `GetEvents`, and `Unsubscribe`; `GetEvents` projects visible mailbox messages as `CreatedEvent` / `NewMailEvent` and push or streaming notifications remain out of scope |
 
 | MAPI component | Canonical mapping |
 | --- | --- |

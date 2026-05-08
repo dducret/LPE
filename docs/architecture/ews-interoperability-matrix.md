@@ -43,5 +43,5 @@ The EWS matrix defines the live checks required for the supported `lpe-exchange`
 | `GetUserAvailability` | supported for canonical calendar availability |
 | `GetServerTimeZones` | supported static compatibility response |
 | `GetUserOofSettings` / `SetUserOofSettings` | supported through canonical vacation/Sieve behavior |
-| `Subscribe` / `GetEvents` / `Unsubscribe` | supported for bounded pull-subscription compatibility; `Subscribe` accepts pull subscriptions, `GetEvents` returns status notifications when no durable event queue is available, and push/streaming notifications remain out of scope |
+| `Subscribe` / `GetEvents` / `Unsubscribe` | supported for bounded pull-subscription compatibility; `Subscribe` accepts pull subscriptions, `GetEvents` returns `CreatedEvent` / `NewMailEvent` projections for visible mailbox messages or status notifications when no durable event queue is available, and push/streaming notifications remain out of scope |
 | `GetRoomLists`, `FindPeople`, `ExpandDL`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, `GetSharingFolder` | intentionally unsupported in `0.2.0`; must return EWS error responses |

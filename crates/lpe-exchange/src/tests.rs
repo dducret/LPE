@@ -10043,6 +10043,7 @@ async fn pull_subscription_get_events_returns_new_mail_for_watermarked_mailbox()
     let body = response_text(response).await;
     assert!(body.contains("<m:GetEventsResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:CreatedEvent>"));
     assert!(body.contains("<t:NewMailEvent>"));
     assert!(body.contains(&format!("<t:ItemId Id=\"message:{message_id}\"")));
     assert!(body.contains(&format!("<t:ParentFolderId Id=\"mailbox:{mailbox_id}\"")));
