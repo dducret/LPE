@@ -10482,8 +10482,12 @@ async fn get_user_oof_settings_returns_disabled_without_active_vacation() {
     assert!(body.contains("<m:GetUserOofSettingsResponse>"));
     assert!(!body.contains("<m:GetUserOofSettingsRequestResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:OofSettings>"));
+    assert!(body.contains("</t:OofSettings>"));
+    assert!(!body.contains("<m:OofSettings>"));
     assert!(body.contains("<t:OofState>Disabled</t:OofState>"));
     assert!(body.contains("<t:ExternalAudience>None</t:ExternalAudience>"));
+    assert!(body.contains("<m:AllowExternalOof>None</m:AllowExternalOof>"));
     assert!(body.contains("<t:ServerVersionInfo"));
 }
 
