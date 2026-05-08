@@ -7768,6 +7768,66 @@ async fn rpc_proxy_address_book_endpoint_ping_returns_rts_connect_without_synthe
 }
 
 #[tokio::test]
+async fn rpc_proxy_address_book_endpoint_ping_includes_pending_conn_b1_when_in_arrives_first() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let endpoint_query = "mail.conn-b1-before-out.example.test:6004";
+    let in_method = Method::from_bytes(b"RPC_IN_DATA").expect("valid RPC method");
+    let in_uri: Uri = format!("/rpc/rpcproxy.dll?{endpoint_query}")
+        .parse()
+        .unwrap();
+    let mut headers = bearer_headers();
+    headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
+    headers.insert("accept", HeaderValue::from_static("application/rpc"));
+    let conn_b1 = hex_bytes(
+        "0500140310000000680000000000000000000600\
+         06000000010000000300000076ed340685c5dd390e9a6acbc8cb9951\
+         03000000a6c4ac6df261ef9fc3804d0c73a59fff\
+         040000000000004005000000e09304000c0000005475b4942dd08746bf4c3d2821816b2c",
+    );
+
+    let response = service
+        .handle_rpc_proxy_in_data_channel(&in_method, &in_uri, &headers, Body::from(conn_b1))
+        .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-lpe-rpc-proxy-status"),
+        Some(&HeaderValue::from_static("in-channel-open"))
+    );
+
+    tokio::task::yield_now().await;
+
+    let out_method = Method::from_bytes(b"RPC_OUT_DATA").expect("valid RPC method");
+    let out_uri: Uri = format!("/rpc/rpcproxy.dll?{endpoint_query}")
+        .parse()
+        .unwrap();
+    let connect_body = rpc_proxy_conn_a1_request_body(0x0000_8000);
+    let response = service
+        .handle_rpc_proxy(&out_method, &out_uri, &headers, &connect_body)
+        .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(body.len(), 116);
+    assert_eq!(body[72], 0x05);
+    assert_eq!(body[74], 0x14);
+    assert_eq!(u16::from_le_bytes([body[80], body[81]]), 44);
+    assert_eq!(u16::from_le_bytes([body[90], body[91]]), 3);
+    assert_eq!(
+        u32::from_le_bytes([body[92], body[93], body[94], body[95]]),
+        6
+    );
+    assert_eq!(
+        u32::from_le_bytes([body[104], body[105], body[106], body[107]]),
+        0x0001_0000
+    );
+}
+
+#[tokio::test]
 async fn rpc_proxy_opens_authenticated_in_data_channel_without_waiting_for_body_eof() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
