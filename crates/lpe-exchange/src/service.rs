@@ -55,6 +55,7 @@ const RPC_PROXY_MAX_FINITE_BODY_BYTES: usize = 1024 * 1024;
 const RPC_PROXY_RECEIVE_WINDOW_SIZE: u32 = 0x0001_0000;
 const RPC_PROXY_OUT_CHANNEL_CONTENT_LENGTH: u32 = 0x0002_0000;
 const RPC_PROXY_CONNECTION_TIMEOUT_MS: u32 = 120_000;
+const RPC_PROXY_DCE_FAULT_PROTOCOL_ERROR: u32 = 0x0000_0005;
 const RPC_PROXY_ECHO_BODY: [u8; 20] = [
     0x05, 0x00, 0x14, 0x03, 0x10, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x40, 0x00, 0x00, 0x00,
@@ -5392,6 +5393,35 @@ fn rpc_proxy_dce_alter_context_response_body(call_id: u32) -> Vec<u8> {
     rpc_proxy_dce_context_ack_body(call_id, DCE_RPC_ALTER_CONTEXT_RESPONSE)
 }
 
+fn rpc_proxy_dce_fault_response(call_id: u32, status: u32) -> Vec<u8> {
+    const DCE_RPC_FAULT: u8 = 0x03;
+    const DCE_RPC_FIRST_FRAG: u8 = 0x01;
+    const DCE_RPC_LAST_FRAG: u8 = 0x02;
+    const FRAGMENT_LENGTH: u16 = 32;
+
+    let mut packet = Vec::with_capacity(FRAGMENT_LENGTH as usize);
+    packet.extend_from_slice(&[
+        0x05,
+        0x00,
+        DCE_RPC_FAULT,
+        DCE_RPC_FIRST_FRAG | DCE_RPC_LAST_FRAG,
+        0x10,
+        0x00,
+        0x00,
+        0x00,
+    ]);
+    packet.extend_from_slice(&FRAGMENT_LENGTH.to_le_bytes());
+    packet.extend_from_slice(&0u16.to_le_bytes());
+    packet.extend_from_slice(&call_id.to_le_bytes());
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet.extend_from_slice(&0u16.to_le_bytes());
+    packet.push(0);
+    packet.push(0);
+    packet.extend_from_slice(&status.to_le_bytes());
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet
+}
+
 fn rpc_proxy_dce_context_ack_body(call_id: u32, packet_type: u8) -> Vec<u8> {
     const DCE_RPC_FIRST_FRAG: u8 = 0x01;
     const DCE_RPC_LAST_FRAG: u8 = 0x02;
@@ -6191,14 +6221,18 @@ where
     S: ExchangeStore,
     V: Detector,
 {
-    let (context, rop_buffer) = if let Some(request) = rpc_proxy_emsmdb_rpc_ext2_request(request) {
-        request
-    } else {
-        let context = request
-            .get(24..44)
-            .and_then(|bytes| bytes.try_into().ok())
-            .unwrap_or_else(|| mapi::create_rpc_emsmdb_context(principal));
-        (context, rpc_proxy_bootstrap_logon_rop_buffer(principal))
+    let (context, rop_buffer) = match rpc_proxy_emsmdb_rpc_ext2_request(request) {
+        Ok(request) => request,
+        Err(error) => {
+            warn!(
+                rca_debug = true,
+                adapter = "rpcproxy",
+                mailbox = %principal.email,
+                error = %error,
+                message = "rpc proxy emsmdb request parsing failed"
+            );
+            return rpc_proxy_dce_fault_response(call_id, RPC_PROXY_DCE_FAULT_PROTOCOL_ERROR);
+        }
     };
     let rop_buffer =
         match mapi::execute_rpc_emsmdb_rops(store, validator, principal, &context, &rop_buffer)
@@ -6213,7 +6247,7 @@ where
                     error = %error,
                     message = "rpc proxy emsmdb execution failed"
                 );
-                Vec::new()
+                return rpc_proxy_dce_fault_response(call_id, RPC_PROXY_DCE_FAULT_PROTOCOL_ERROR);
             }
         };
     rpc_proxy_emsmdb_rpc_ext2_response_with_rop_buffer(call_id, &context, rop_buffer)
@@ -6275,10 +6309,19 @@ fn rpc_proxy_rpc_header_ext_payload(payload: &[u8]) -> Vec<u8> {
     buffer
 }
 
-fn rpc_proxy_emsmdb_rpc_ext2_request(request: &[u8]) -> Option<([u8; 20], Vec<u8>)> {
-    let fragment_length = u16::from_le_bytes([*request.get(8)?, *request.get(9)?]) as usize;
-    let stub = request.get(24..fragment_length)?;
-    let context: [u8; 20] = stub.get(0..20)?.try_into().ok()?;
+fn rpc_proxy_emsmdb_rpc_ext2_request(request: &[u8]) -> Result<([u8; 20], Vec<u8>)> {
+    let fragment_length = request
+        .get(8..10)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]) as usize)
+        .ok_or_else(|| anyhow!("truncated DCE/RPC request header"))?;
+    let stub = request
+        .get(24..fragment_length)
+        .ok_or_else(|| anyhow!("truncated EcDoRpcExt2 request stub"))?;
+    let context: [u8; 20] = stub
+        .get(0..20)
+        .ok_or_else(|| anyhow!("missing EcDoRpcExt2 context handle"))?
+        .try_into()
+        .map_err(|_| anyhow!("invalid EcDoRpcExt2 context handle"))?;
     for offset in 20..stub.len().saturating_sub(8) {
         let candidate = &stub[offset..];
         if candidate.get(0..2) != Some(&[0, 0]) {
@@ -6297,34 +6340,18 @@ fn rpc_proxy_emsmdb_rpc_ext2_request(request: &[u8]) -> Option<([u8; 20], Vec<u8
         let Some(rop_size_bytes) = payload.get(0..2) else {
             continue;
         };
-        let rop_size = u16::from_le_bytes(rop_size_bytes.try_into().ok()?) as usize;
+        let rop_size = u16::from_le_bytes(
+            rop_size_bytes
+                .try_into()
+                .map_err(|_| anyhow!("invalid ROP buffer size"))?,
+        ) as usize;
         if rop_size >= 2 && payload.len() >= rop_size {
-            return Some((context, candidate[..end].to_vec()));
+            return Ok((context, candidate[..end].to_vec()));
         }
     }
-    None
-}
-
-fn rpc_proxy_bootstrap_logon_rop_buffer(principal: &AccountPrincipal) -> Vec<u8> {
-    let recipient = principal
-        .email
-        .split('@')
-        .next()
-        .filter(|value| !value.is_empty())
-        .unwrap_or("mailbox");
-    let legacy_dn =
-        format!("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={recipient}\0");
-    let mut rops = vec![0xFE, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&0x0100_0004u32.to_le_bytes());
-    rops.extend_from_slice(&0u32.to_le_bytes());
-    rops.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
-    rops.extend_from_slice(legacy_dn.as_bytes());
-
-    let mut payload = Vec::new();
-    payload.extend_from_slice(&((rops.len() + 2) as u16).to_le_bytes());
-    payload.extend_from_slice(&rops);
-    payload.extend_from_slice(&u32::MAX.to_le_bytes());
-    rpc_proxy_rpc_header_ext_payload(&payload)
+    Err(anyhow!(
+        "missing valid EcDoRpcExt2 RPC_HEADER_EXT ROP payload"
+    ))
 }
 
 #[cfg(test)]

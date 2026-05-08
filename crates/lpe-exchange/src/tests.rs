@@ -8091,6 +8091,66 @@ async fn rpc_proxy_emsmdb_query_rows_reads_canonical_mailboxes() {
     assert!(contains_bytes(&rop_response, &utf16z("Archive")));
 }
 
+#[tokio::test]
+async fn rpc_proxy_emsmdb_rpc_ext2_parse_failure_returns_protocol_fault() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let validator = Validator::new(FakeDetector::pdf(), 0.8);
+    let principal = test_account_principal();
+    let mut execute = emsmdb_rpc_request(66, 11, 160);
+
+    let execute_response = rpc_proxy_in_channel_response_for_endpoint_query_with_store(
+        &store,
+        &validator,
+        &principal,
+        "mail.example.test:6001",
+        &mut execute,
+    )
+    .await
+    .expect("execute fault");
+
+    assert_eq!(execute_response[0..4], [0x05, 0x00, 0x03, 0x03]);
+    assert_eq!(rpc_response_call_id(&execute_response), 66);
+    assert_eq!(rpc_response_fault_status(&execute_response), 5);
+    assert!(!contains_bytes(
+        &execute_response,
+        &[0, 0, 4, 0, 0, 0, 0, 0]
+    ));
+}
+
+#[tokio::test]
+async fn rpc_proxy_emsmdb_rpc_ext2_requires_authenticated_context() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let validator = Validator::new(FakeDetector::pdf(), 0.8);
+    let principal = test_account_principal();
+    let context = [0u8; 20];
+    let logon_request = rpc_proxy_bootstrap_logon_execute_rop(&principal.email);
+    let mut execute = emsmdb_rpc_ext2_request(67, &context, &logon_request);
+
+    let execute_response = rpc_proxy_in_channel_response_for_endpoint_query_with_store(
+        &store,
+        &validator,
+        &principal,
+        "mail.example.test:6001",
+        &mut execute,
+    )
+    .await
+    .expect("execute fault");
+
+    assert_eq!(execute_response[0..4], [0x05, 0x00, 0x03, 0x03]);
+    assert_eq!(rpc_response_call_id(&execute_response), 67);
+    assert_eq!(rpc_response_fault_status(&execute_response), 5);
+    assert!(!contains_bytes(
+        &execute_response,
+        FakeStore::account().account_id.as_bytes()
+    ));
+}
+
 #[test]
 fn rpc_proxy_mailstore_in_channel_skips_duplicate_bind_ack() {
     let endpoint_query = "mail.example.test:6001";
@@ -8587,6 +8647,14 @@ fn rpc_request(call_id: u32, context_id: u16, opnum: u16, fragment_length: usize
 
 fn rpc_response_context(response: &[u8]) -> [u8; 20] {
     response[24..44].try_into().unwrap()
+}
+
+fn rpc_response_call_id(response: &[u8]) -> u32 {
+    u32::from_le_bytes(response[12..16].try_into().unwrap())
+}
+
+fn rpc_response_fault_status(response: &[u8]) -> u32 {
+    u32::from_le_bytes(response[24..28].try_into().unwrap())
 }
 
 fn rpc_response_rpc_header_ext(response: &[u8]) -> Vec<u8> {

@@ -1385,6 +1385,9 @@ where
     if !session_matches(&session, MapiEndpoint::Emsmdb, principal) {
         return Err(anyhow!("RPC/HTTP EMSMDB authentication context changed"));
     }
+    if rop_buffer.is_empty() {
+        return Err(anyhow!("RPC/HTTP EMSMDB ROP payload is empty"));
+    }
 
     let snapshot = store
         .load_mapi_mail_store(principal.account_id, 500)
