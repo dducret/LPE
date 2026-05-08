@@ -8169,6 +8169,45 @@ fn rpc_proxy_classifies_referral_endpoint_as_streaming_in_data_channel() {
 }
 
 #[test]
+fn rpc_proxy_classifies_zero_length_endpoint_in_data_as_echo_probe() {
+    let method = Method::from_bytes(b"RPC_IN_DATA").expect("valid RPC method");
+    let uri: Uri = "/rpc/rpcproxy.dll?mail.example.test:6001".parse().unwrap();
+    let mut headers = HeaderMap::new();
+    headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
+    headers.insert("accept", HeaderValue::from_static("application/rpc"));
+    headers.insert("content-length", HeaderValue::from_static("0"));
+
+    assert!(!is_rpc_proxy_in_data_channel_request(
+        &method, &uri, &headers
+    ));
+}
+
+#[tokio::test]
+async fn rpc_proxy_answers_zero_length_endpoint_in_data_echo_probe() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let method = Method::from_bytes(b"RPC_IN_DATA").expect("valid RPC method");
+    let uri: Uri = "/rpc/rpcproxy.dll?mail.example.test:6001".parse().unwrap();
+    let mut headers = bearer_headers();
+    headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
+    headers.insert("accept", HeaderValue::from_static("application/rpc"));
+    headers.insert("content-length", HeaderValue::from_static("0"));
+
+    let response = service.handle_rpc_proxy(&method, &uri, &headers, b"").await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-lpe-rpc-proxy-status"),
+        Some(&HeaderValue::from_static("echo"))
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(body.len(), 20);
+}
+
+#[test]
 fn rpc_proxy_in_channel_endpoint_ping_request_gets_success_response() {
     let request = [
         0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00,

@@ -6268,6 +6268,15 @@ pub(crate) fn is_rpc_proxy_in_data_channel_request(
     method.as_str() == "RPC_IN_DATA"
         && is_rpc_proxy_endpoint_ping(uri)
         && is_rpc_proxy_msrpc_request(headers)
+        && !is_rpc_proxy_zero_length_request(headers)
+}
+
+fn is_rpc_proxy_zero_length_request(headers: &HeaderMap) -> bool {
+    headers
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .is_some_and(|length| length == 0)
 }
 
 fn is_rpc_proxy_endpoint_ping(uri: &Uri) -> bool {
