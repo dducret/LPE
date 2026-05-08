@@ -6390,6 +6390,10 @@ fn rpc_proxy_rts_connect_body(client_receive_window_size: u32) -> Vec<u8> {
     body
 }
 
+fn rpc_proxy_endpoint_connect_body() -> Vec<u8> {
+    rpc_proxy_connection_timeout_pdu()
+}
+
 fn rpc_proxy_connection_timeout_pdu() -> Vec<u8> {
     let mut body = rpc_proxy_rts_header(0, 1, 28);
     body.extend_from_slice(&2u32.to_le_bytes());
@@ -6469,16 +6473,23 @@ fn rpc_proxy_mailstore_ping_response_for_connect(
     uri: &Uri,
     connect: RpcProxyOutDataConnect,
 ) -> Response {
-    let mut body = rpc_proxy_rts_connect_body(connect.receive_window_size);
-    if let Some(query) = uri.query() {
-        body.extend(consume_pending_rpc_proxy_out_channel_responses(
+    let mut body = rpc_proxy_endpoint_connect_body();
+    let has_connection_established = if let Some(query) = uri.query() {
+        let pending = consume_pending_rpc_proxy_out_channel_responses(
             query,
             Some(connect.virtual_connection_cookie),
-        ));
-    }
-    if let Some(query) = uri.query().filter(|query| query.contains(":6001")) {
-        body.extend_from_slice(&rpc_proxy_dce_bind_ack_body_with_result_count(1, 1));
-        mark_rpc_proxy_out_endpoint_bind_ack(query);
+        );
+        let has_pending = !pending.is_empty();
+        body.extend(pending);
+        has_pending
+    } else {
+        false
+    };
+    if has_connection_established {
+        if let Some(query) = uri.query().filter(|query| query.contains(":6001")) {
+            body.extend_from_slice(&rpc_proxy_dce_bind_ack_body_with_result_count(1, 1));
+            mark_rpc_proxy_out_endpoint_bind_ack(query);
+        }
     }
     rpc_proxy_mailstore_held_open_response(uri, body)
 }

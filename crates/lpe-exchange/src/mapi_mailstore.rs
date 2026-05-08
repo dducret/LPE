@@ -189,6 +189,7 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         write_prefixed_bytes(&mut buffer, &source_key);
         buffer.extend_from_slice(&change_number.to_le_bytes());
         write_prefixed_bytes(&mut buffer, email.subject.as_bytes());
+        write_visible_recipient_facts(&mut buffer, email);
         buffer.extend_from_slice(&(attachments.len().min(u16::MAX as usize) as u16).to_le_bytes());
         let mut attachments = attachments.iter().collect::<Vec<_>>();
         attachments.sort_by(|left, right| {
@@ -205,6 +206,33 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         }
     }
     buffer
+}
+
+fn write_visible_recipient_facts(buffer: &mut Vec<u8>, email: &JmapEmail) {
+    let recipient_count = email
+        .to
+        .len()
+        .saturating_add(email.cc.len())
+        .min(u16::MAX as usize);
+    buffer.extend_from_slice(&(recipient_count as u16).to_le_bytes());
+
+    let visible_recipients = email
+        .to
+        .iter()
+        .map(|recipient| (1u8, recipient))
+        .chain(email.cc.iter().map(|recipient| (2u8, recipient)));
+    for (recipient_type, recipient) in visible_recipients.take(u16::MAX as usize) {
+        buffer.push(recipient_type);
+        write_prefixed_bytes(buffer, recipient.address.as_bytes());
+        write_prefixed_bytes(
+            buffer,
+            recipient
+                .display_name
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
+        );
+    }
 }
 
 fn attachments_for_message(

@@ -6597,6 +6597,75 @@ async fn mapi_over_http_sync_manifest_includes_attachment_change_facts_without_b
 }
 
 #[tokio::test]
+async fn mapi_over_http_sync_manifest_includes_visible_recipient_facts_without_bcc() {
+    let message_uuid = Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let mut email = FakeStore::email(
+        &message_uuid.to_string(),
+        mailbox_id,
+        "inbox",
+        "Recipient sync message",
+    );
+    email.to.push(JmapEmailAddress {
+        address: "to@example.test".to_string(),
+        display_name: Some("Visible To".to_string()),
+    });
+    email.cc.push(JmapEmailAddress {
+        address: "cc@example.test".to_string(),
+        display_name: Some("Visible Cc".to_string()),
+    });
+    email.bcc.push(JmapEmailAddress {
+        address: "hidden@example.test".to_string(),
+        display_name: Some("Hidden Bcc".to_string()),
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 1)));
+    assert!(contains_bytes(&response_rops, b"Recipient sync message"));
+    assert!(contains_bytes(&response_rops, b"to@example.test"));
+    assert!(contains_bytes(&response_rops, b"Visible To"));
+    assert!(contains_bytes(&response_rops, b"cc@example.test"));
+    assert!(contains_bytes(&response_rops, b"Visible Cc"));
+    assert!(!contains_bytes(&response_rops, b"hidden@example.test"));
+    assert!(!contains_bytes(&response_rops, b"Hidden Bcc"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_get_local_replica_ids_returns_replica_guid() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -7878,7 +7947,7 @@ async fn rpc_proxy_answers_authenticated_msrpch_echo_ping() {
 }
 
 #[tokio::test]
-async fn rpc_proxy_referral_endpoint_ping_returns_rts_connect_without_synthetic_bind_ack() {
+async fn rpc_proxy_referral_endpoint_ping_returns_a3_without_synthetic_bind_ack() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -7905,27 +7974,17 @@ async fn rpc_proxy_referral_endpoint_ping_returns_rts_connect_without_synthetic_
         Some(&HeaderValue::from_static("endpoint-ping"))
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 72);
+    assert_eq!(body.len(), 28);
     assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
     assert_eq!(u16::from_le_bytes([body[18], body[19]]), 1);
     assert_eq!(
         u32::from_le_bytes([body[20], body[21], body[22], body[23]]),
         2
     );
-    assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
-    assert_eq!(u16::from_le_bytes([body[46], body[47]]), 3);
-    assert_eq!(
-        u32::from_le_bytes([body[48], body[49], body[50], body[51]]),
-        6
-    );
-    assert_eq!(
-        u32::from_le_bytes([body[60], body[61], body[62], body[63]]),
-        0x0000_8000
-    );
 }
 
 #[tokio::test]
-async fn rpc_proxy_mailstore_endpoint_ping_includes_bind_ack_after_rts_connect() {
+async fn rpc_proxy_mailstore_endpoint_ping_waits_for_b1_before_bind_ack() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -7956,32 +8015,12 @@ async fn rpc_proxy_mailstore_endpoint_ping_includes_bind_ack_after_rts_connect()
         Some(&HeaderValue::from_static("131072"))
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 184);
+    assert_eq!(body.len(), 28);
     assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
-    assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
-    assert_eq!(body[72], 0x05);
-    assert_eq!(body[74], 0x0c);
-    assert_eq!(body[75], 0x03);
-    assert_eq!(u16::from_le_bytes([body[80], body[81]]), 112);
-    assert_eq!(u16::from_le_bytes([body[82], body[83]]), 48);
-    assert_eq!(
-        &body[108..128],
-        &[
-            0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11, 0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10,
-            0x48, 0x60, 0x02, 0x00, 0x00, 0x00
-        ]
-    );
-    assert_eq!(body[128], 10);
-    assert_eq!(body[129], 2);
-    assert_eq!(&body[136..144], b"NTLMSSP\0");
-    assert_eq!(
-        u32::from_le_bytes([body[144], body[145], body[146], body[147]]),
-        2
-    );
 }
 
 #[tokio::test]
-async fn rpc_proxy_address_book_endpoint_ping_returns_rts_connect_without_synthetic_bind_ack() {
+async fn rpc_proxy_address_book_endpoint_ping_returns_a3_without_synthetic_bind_ack() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -8012,13 +8051,8 @@ async fn rpc_proxy_address_book_endpoint_ping_returns_rts_connect_without_synthe
         Some(&HeaderValue::from_static("131072"))
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 72);
+    assert_eq!(body.len(), 28);
     assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
-    assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
-    assert_eq!(
-        u32::from_le_bytes([body[60], body[61], body[62], body[63]]),
-        0x0000_8000
-    );
 }
 
 #[tokio::test]
@@ -8067,17 +8101,17 @@ async fn rpc_proxy_address_book_endpoint_ping_includes_pending_conn_b1_when_in_a
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 116);
-    assert_eq!(body[72], 0x05);
-    assert_eq!(body[74], 0x14);
-    assert_eq!(u16::from_le_bytes([body[80], body[81]]), 44);
-    assert_eq!(u16::from_le_bytes([body[90], body[91]]), 3);
+    assert_eq!(body.len(), 72);
+    assert_eq!(body[28], 0x05);
+    assert_eq!(body[30], 0x14);
+    assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
+    assert_eq!(u16::from_le_bytes([body[46], body[47]]), 3);
     assert_eq!(
-        u32::from_le_bytes([body[92], body[93], body[94], body[95]]),
+        u32::from_le_bytes([body[48], body[49], body[50], body[51]]),
         6
     );
     assert_eq!(
-        u32::from_le_bytes([body[104], body[105], body[106], body[107]]),
+        u32::from_le_bytes([body[60], body[61], body[62], body[63]]),
         0x0001_0000
     );
 }
@@ -8123,13 +8157,13 @@ async fn rpc_proxy_mailstore_endpoint_ping_orders_pending_conn_b1_before_bind_ac
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 228);
+    assert_eq!(body.len(), 184);
+    assert_eq!(body[28], 0x05);
+    assert_eq!(body[30], 0x14);
+    assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
     assert_eq!(body[72], 0x05);
-    assert_eq!(body[74], 0x14);
-    assert_eq!(u16::from_le_bytes([body[80], body[81]]), 44);
-    assert_eq!(body[116], 0x05);
-    assert_eq!(body[118], 0x0c);
-    assert_eq!(u16::from_le_bytes([body[124], body[125]]), 112);
+    assert_eq!(body[74], 0x0c);
+    assert_eq!(u16::from_le_bytes([body[80], body[81]]), 112);
 }
 
 #[tokio::test]
