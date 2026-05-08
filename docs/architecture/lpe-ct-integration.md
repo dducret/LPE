@@ -23,6 +23,8 @@
   - recipient verification endpoint: `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/recipient-verification`
   - accepted Internet mail is delivered to the core final-delivery API
   - core `LPE` verifies the integration signature before mutation
+  - core final delivery treats committed `LPE-CT` `trace_id` values as idempotency keys; bridge retries after a timeout return the committed delivery receipt instead of creating duplicate mailbox messages
+  - same-trace inbound final delivery is serialized in PostgreSQL while the canonical commit is evaluated, so timeout races cannot produce parallel mailbox writes for one `LPE-CT` trace
   - bridge failure keeps custody in `LPE-CT`
   - `LPE-CT` keeps the accepted message durably in its local spool until core final delivery succeeds, quarantine/rejection applies, or an operator/policy terminal action deletes it
 - Authenticated client submission:

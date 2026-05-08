@@ -70,6 +70,7 @@ For outbound `LPE -> LPE-CT` handoff, the sorting center now also covers:
 - classification of `SMTP` replies into `relayed`, `deferred`, `bounced`, or `failed`
 - structured technical and `DSN` detail for the latest attempt
 - idempotent replay handling for repeated handoffs with the same `LPE` queue ID across all local custody queues, with duplicate suppression written to the transport audit stream
+- restart-safe custody for inbound accepted messages, terminal outbound traces, and quarantine release/reject/delete workflows through spool-backed trace recovery rather than process memory
 
 Inbound `SMTP` recipient verification remains an `LPE`-backed internal decision. `LPE-CT` may cache the result locally, but it must not replace that contract with public callback-verification tricks or invent canonical mailbox state in the `DMZ`. If recipient verification is disabled, `LPE-CT` intentionally uses deferred local-part validation for verified accepted domains: it accepts syntactically valid recipients at those domains as a catch-all edge policy and leaves final mailbox existence to the internal delivery bridge. If the bridge later rejects final delivery, `LPE-CT` keeps local deferred custody for operator-visible retry or intervention and does not synthesize an outbound bounce to the SMTP reverse path. An empty accepted-domain set rejects inbound `RCPT TO` instead of acting as an open relay.
 

@@ -6,7 +6,7 @@ use lpe_core::sieve::{
 use lpe_domain::{InboundDeliveryRequest, InboundDeliveryResponse};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 use crate::mail::{parse_header_recipients, parse_headers_map, parse_message_attachments};
@@ -52,8 +52,13 @@ impl Storage {
 
     pub async fn deliver_inbound_message(
         &self,
-        request: InboundDeliveryRequest,
+        mut request: InboundDeliveryRequest,
     ) -> Result<InboundDeliveryResponse> {
+        request.trace_id = request.trace_id.trim().to_string();
+        if request.trace_id.is_empty() {
+            bail!("trace_id is required");
+        }
+
         let mail_from = crate::normalize_email(&request.mail_from);
         let subject = crate::normalize_subject(&request.subject);
         let body_text = request.body_text.trim().to_string();
@@ -78,22 +83,30 @@ impl Storage {
         let preview = crate::preview_text(&body_text);
         let size_octets = request.raw_message.len() as i64;
 
+        let mut tx = self.pool.begin().await?;
+        lock_inbound_trace_delivery(&mut tx, &request.trace_id).await?;
+        if let Some(existing) =
+            existing_inbound_delivery_response_in_tx(&mut tx, &request.trace_id).await?
+        {
+            tx.commit().await?;
+            return Ok(existing);
+        }
+
         let account_rows = sqlx::query(
             r#"
             SELECT id, tenant_id, primary_email, display_name
             FROM accounts
             WHERE lower(primary_email) = ANY($1)
             ORDER BY primary_email ASC
-            "#,
+        "#,
         )
         .bind(&rcpt_to)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await?;
 
         let mut accepted = Vec::new();
         let mut rejected = Vec::new();
         let mut stored_message_ids = Vec::new();
-        let mut tx = self.pool.begin().await?;
         let thread_id = Uuid::new_v4();
         let attachments = parse_message_attachments(&request.raw_message)?;
         let mut followups = Vec::new();
@@ -571,6 +584,103 @@ impl Storage {
     }
 }
 
+async fn lock_inbound_trace_delivery(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    trace_id: &str,
+) -> Result<()> {
+    let (class_id, object_id) = inbound_trace_advisory_lock_keys(trace_id);
+    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+        .bind(class_id)
+        .bind(object_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+async fn existing_inbound_delivery_response_in_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    trace_id: &str,
+) -> Result<Option<InboundDeliveryResponse>> {
+    let prefix = inbound_mime_blob_ref_prefix(trace_id);
+    let rows = sqlx::query(
+        r#"
+        SELECT a.primary_email, m.id
+        FROM messages m
+        JOIN accounts a ON a.tenant_id = m.tenant_id AND a.id = m.account_id
+        WHERE m.submission_source = 'lpe-ct'
+          AND strpos(m.mime_blob_ref, $1) = 1
+        ORDER BY a.primary_email ASC, m.id ASC
+        "#,
+    )
+    .bind(&prefix)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    if !rows.is_empty() {
+        let mut mailbox_addresses = BTreeSet::new();
+        let mut message_ids = Vec::new();
+        for row in rows {
+            mailbox_addresses.insert(row.try_get::<String, _>("primary_email")?);
+            let message_id: Uuid = row.try_get("id")?;
+            message_ids.push(format!("message:{message_id}"));
+        }
+        let mut delivered_mailboxes = mailbox_addresses.into_iter().collect::<Vec<_>>();
+        delivered_mailboxes.extend(message_ids);
+        return Ok(Some(duplicate_inbound_delivery_response(
+            trace_id,
+            delivered_mailboxes,
+        )));
+    }
+
+    let committed = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM audit_events
+            WHERE tenant_id = $1
+              AND actor = 'lpe-ct'
+              AND action IN ('mail.inbound.delivered', 'mail.inbound.delivery-rejected')
+              AND subject = $2
+        )
+        "#,
+    )
+    .bind(crate::PLATFORM_TENANT_ID)
+    .bind(trace_id)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(committed
+        .then(|| duplicate_inbound_delivery_response(trace_id, vec![format!("trace:{trace_id}")])))
+}
+
+fn duplicate_inbound_delivery_response(
+    trace_id: &str,
+    delivered_mailboxes: Vec<String>,
+) -> InboundDeliveryResponse {
+    InboundDeliveryResponse {
+        accepted: true,
+        delivered_mailboxes,
+        detail: Some(format!(
+            "duplicate inbound delivery trace replay suppressed for {trace_id}"
+        )),
+    }
+}
+
+fn inbound_mime_blob_ref_prefix(trace_id: &str) -> String {
+    format!("lpe-ct-inbound:{}:", trace_id.trim())
+}
+
+fn inbound_trace_advisory_lock_keys(trace_id: &str) -> (i32, i32) {
+    let mut hasher = Sha256::new();
+    hasher.update(b"lpe-inbound-trace-v1\0");
+    hasher.update(trace_id.trim().as_bytes());
+    let digest = hasher.finalize();
+    (
+        i32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]),
+        i32::from_be_bytes([digest[4], digest[5], digest[6], digest[7]]),
+    )
+}
+
 fn estimate_generated_message_size(
     subject: &str,
     body_text: &str,
@@ -591,4 +701,44 @@ fn hash_sieve_vacation_key(vacation: &VacationAction) -> String {
     hasher.update(b"\n");
     hasher.update(vacation.days.to_string().as_bytes());
     format!("{:x}", hasher.finalize())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inbound_trace_id_helpers_normalize_whitespace() {
+        assert_eq!(
+            inbound_mime_blob_ref_prefix(" trace-1 "),
+            "lpe-ct-inbound:trace-1:"
+        );
+        assert_eq!(
+            inbound_trace_advisory_lock_keys("trace-1"),
+            inbound_trace_advisory_lock_keys(" trace-1 ")
+        );
+        assert_ne!(
+            inbound_trace_advisory_lock_keys("trace-1"),
+            inbound_trace_advisory_lock_keys("trace-2")
+        );
+    }
+
+    #[test]
+    fn duplicate_inbound_response_returns_committed_receipt() {
+        let response = duplicate_inbound_delivery_response(
+            "trace-1",
+            vec![
+                "user@example.test".to_string(),
+                "message:00000000-0000-0000-0000-000000000001".to_string(),
+            ],
+        );
+
+        assert!(response.accepted);
+        assert_eq!(response.delivered_mailboxes.len(), 2);
+        assert!(response
+            .detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("duplicate inbound delivery trace replay suppressed"));
+    }
 }

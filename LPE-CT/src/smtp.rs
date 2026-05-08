@@ -7612,6 +7612,31 @@ pzqAuzRp69VoxDpO6hdx/Qc=
     }
 
     #[tokio::test]
+    async fn accepted_inbound_spool_custody_survives_restart_before_core_delivery() {
+        let spool = temp_dir("inbound-restart-before-core-delivery");
+        initialize_spool(&spool).unwrap();
+        let message = inbound_test_message(
+            "trace-inbound-restart-1",
+            "incoming",
+            "Restart before core delivery",
+        );
+        persist_message(&spool, "incoming", &message).await.unwrap();
+
+        initialize_spool(&spool).unwrap();
+        let recovered = load_trace_details(&spool, &message.id).unwrap().unwrap();
+
+        assert_eq!(recovered.queue, "incoming");
+        assert_eq!(recovered.status, "incoming");
+        assert_eq!(recovered.direction, "inbound");
+        assert_eq!(recovered.mail_from, "sender@example.test");
+        assert_eq!(recovered.rcpt_to, vec!["dest@example.test".to_string()]);
+        assert!(spool
+            .join("incoming")
+            .join(format!("{}.json", message.id))
+            .exists());
+    }
+
+    #[tokio::test]
     async fn smtp_unknown_local_recipient_core_rejection_defers_without_backscatter_bounce() {
         let _guard = env_test_lock();
         std::env::set_var(
@@ -8295,6 +8320,97 @@ pzqAuzRp69VoxDpO6hdx/Qc=
         let audit =
             std::fs::read_to_string(spool.join("policy").join("transport-audit.jsonl")).unwrap();
         assert!(audit.contains("handoff-replay-suppressed"));
+    }
+
+    #[tokio::test]
+    async fn outbound_sent_replay_after_restart_preserves_remote_reference_without_second_relay() {
+        let spool = temp_dir("outbound-replay-sent-after-restart");
+        initialize_spool(&spool).unwrap();
+        let captured_commands = Arc::new(Mutex::new(Vec::<String>::new()));
+        let smtp_address = spawn_dummy_smtp_with_profile(DummySmtpProfile {
+            captured_commands: Some(captured_commands.clone()),
+            ..DummySmtpProfile::default()
+        })
+        .await;
+        let request = outbound_request("Replay sent after restart");
+        let first = process_outbound_handoff(
+            &spool,
+            &runtime_config(smtp_address, "http://127.0.0.1:9".to_string()),
+            request.clone(),
+        )
+        .await
+        .unwrap();
+        let first_remote_ref = first.remote_message_ref.clone();
+
+        initialize_spool(&spool).unwrap();
+        let second = process_outbound_handoff(
+            &spool,
+            &runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string()),
+            request,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(first.status, TransportDeliveryStatus::Relayed);
+        assert_eq!(second.status, TransportDeliveryStatus::Relayed);
+        assert_eq!(second.trace_id, first.trace_id);
+        assert_eq!(second.remote_message_ref, first_remote_ref);
+        assert_eq!(count_queue_json_files(&spool, "sent"), 1);
+        assert_eq!(count_queue_json_files(&spool, "outbound"), 0);
+        assert_eq!(count_queue_json_files(&spool, "deferred"), 0);
+        assert_eq!(
+            captured_commands
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|command| command.as_str() == "DATA")
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn terminal_outbound_custody_queues_do_not_regress_after_restart() {
+        let cases = [
+            (
+                "bounces",
+                "bounced",
+                TransportDeliveryStatus::Bounced,
+                Some("remote-bounce-ref"),
+            ),
+            ("held", "held", TransportDeliveryStatus::Failed, None),
+            (
+                "quarantine",
+                "quarantined",
+                TransportDeliveryStatus::Quarantined,
+                None,
+            ),
+        ];
+
+        for (queue, message_status, expected_status, remote_ref) in cases {
+            let spool = temp_dir(&format!("outbound-terminal-restart-{queue}"));
+            initialize_spool(&spool).unwrap();
+            let request = outbound_request(&format!("Terminal restart {queue}"));
+            let trace_id = format!("lpe-ct-out-{}", request.queue_id);
+            let message = outbound_terminal_test_message(&trace_id, message_status, remote_ref);
+            persist_message(&spool, queue, &message).await.unwrap();
+
+            initialize_spool(&spool).unwrap();
+            let response = process_outbound_handoff(
+                &spool,
+                &runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string()),
+                request,
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(response.status, expected_status);
+            assert_eq!(response.trace_id, trace_id);
+            assert_eq!(response.remote_message_ref, remote_ref.map(str::to_string));
+            assert!(spool.join(queue).join(format!("{trace_id}.json")).exists());
+            assert_eq!(count_queue_json_files(&spool, "outbound"), 0);
+            assert_eq!(count_queue_json_files(&spool, "deferred"), 0);
+        }
     }
 
     #[tokio::test]
@@ -9249,6 +9365,67 @@ pzqAuzRp69VoxDpO6hdx/Qc=
     }
 
     #[tokio::test]
+    async fn quarantine_release_reject_delete_recovers_across_node_replacement() {
+        let spool = temp_dir("quarantine-node-replacement");
+        initialize_spool(&spool).unwrap();
+        let replacement_config =
+            runtime_config("127.0.0.1:9".to_string(), "http://127.0.0.1:9".to_string());
+
+        let mut release = inbound_test_message(
+            "trace-quarantine-release-node-1",
+            "quarantined",
+            "Release after node replacement",
+        );
+        release.relay_error = Some("policy quarantine".to_string());
+        persist_message(&spool, "quarantine", &release)
+            .await
+            .unwrap();
+
+        initialize_spool(&spool).unwrap();
+        let release_result = release_trace(&spool, &replacement_config, &release.id)
+            .await
+            .unwrap()
+            .unwrap();
+        let released = load_trace_details(&spool, &release.id).unwrap().unwrap();
+        assert_eq!(release_result.from_queue, "quarantine");
+        assert_eq!(release_result.to_queue, "incoming");
+        assert_eq!(released.queue, "incoming");
+        assert_eq!(released.status, "incoming");
+
+        let mut rejected = inbound_test_message(
+            "trace-quarantine-reject-node-1",
+            "rejected",
+            "Reject after node replacement",
+        );
+        rejected.relay_error = Some("perimeter policy reject".to_string());
+        rejected.decision_trace.push(DecisionTraceEntry {
+            stage: "final-policy".to_string(),
+            outcome: "reject".to_string(),
+            detail: "perimeter policy reject".to_string(),
+        });
+        persist_message(&spool, "quarantine", &rejected)
+            .await
+            .unwrap();
+
+        initialize_spool(&spool).unwrap();
+        let recovered = load_trace_details(&spool, &rejected.id).unwrap().unwrap();
+        assert_eq!(recovered.queue, "quarantine");
+        assert_eq!(recovered.status, "rejected");
+        assert_eq!(recovered.reason.as_deref(), Some("perimeter policy reject"));
+
+        let delete_result = delete_trace(&spool, &replacement_config, &rejected.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(delete_result.from_queue, "quarantine");
+        assert_eq!(delete_result.status, "deleted");
+        assert!(!spool
+            .join("quarantine")
+            .join(format!("{}.json", rejected.id))
+            .exists());
+    }
+
+    #[tokio::test]
     async fn delete_trace_removes_held_queue_items() {
         let spool = temp_dir("trace-delete-held");
         initialize_spool(&spool).unwrap();
@@ -9750,6 +9927,80 @@ pzqAuzRp69VoxDpO6hdx/Qc=
             internet_message_id: Some(format!("<{}@test>", subject.to_ascii_lowercase())),
             attempt_count: 0,
             last_attempt_error: None,
+        }
+    }
+
+    fn inbound_test_message(id: &str, status: &str, subject: &str) -> QueuedMessage {
+        QueuedMessage {
+            id: id.to_string(),
+            direction: "inbound".to_string(),
+            received_at: "unix:1".to_string(),
+            peer: "203.0.113.10:25".to_string(),
+            helo: "mx.example.test".to_string(),
+            mail_from: "sender@example.test".to_string(),
+            rcpt_to: vec!["dest@example.test".to_string()],
+            status: status.to_string(),
+            relay_error: None,
+            magika_summary: None,
+            magika_decision: None,
+            spam_score: 0.0,
+            security_score: 0.0,
+            reputation_score: 0,
+            dnsbl_hits: Vec::new(),
+            auth_summary: AuthSummary::default(),
+            decision_trace: vec![DecisionTraceEntry {
+                stage: "ingress".to_string(),
+                outcome: "accepted".to_string(),
+                detail: "message accepted by SMTP edge and persisted to the incoming spool"
+                    .to_string(),
+            }],
+            remote_message_ref: None,
+            technical_status: None,
+            dsn: None,
+            route: None,
+            throttle: None,
+            data: format!("From: sender@example.test\r\nSubject: {subject}\r\n\r\nBody\r\n")
+                .into_bytes(),
+        }
+    }
+
+    fn outbound_terminal_test_message(
+        id: &str,
+        status: &str,
+        remote_message_ref: Option<&str>,
+    ) -> QueuedMessage {
+        QueuedMessage {
+            id: id.to_string(),
+            direction: "outbound".to_string(),
+            received_at: "unix:1".to_string(),
+            peer: "lpe-core".to_string(),
+            helo: "lpe-core".to_string(),
+            mail_from: "sender@example.test".to_string(),
+            rcpt_to: vec!["dest@example.test".to_string()],
+            status: status.to_string(),
+            relay_error: Some(format!("terminal {status} custody")),
+            magika_summary: None,
+            magika_decision: None,
+            spam_score: 0.0,
+            security_score: 0.0,
+            reputation_score: 0,
+            dnsbl_hits: Vec::new(),
+            auth_summary: AuthSummary::default(),
+            decision_trace: vec![DecisionTraceEntry {
+                stage: "outbound-relay".to_string(),
+                outcome: status.to_string(),
+                detail: format!("terminal {status} custody"),
+            }],
+            remote_message_ref: remote_message_ref.map(str::to_string),
+            technical_status: None,
+            dsn: None,
+            route: Some(TransportRouteDecision {
+                rule_id: None,
+                relay_target: Some("mx.example.test:25".to_string()),
+                queue: status.to_string(),
+            }),
+            throttle: None,
+            data: b"From: sender@example.test\r\nSubject: Terminal\r\n\r\nBody\r\n".to_vec(),
         }
     }
 
