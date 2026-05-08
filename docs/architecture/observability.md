@@ -65,3 +65,6 @@
 | `/api/v1/system-diagnostics/` | system diagnostics |
 | `/var/log/lpe-ct/mail.log` | `LPE-CT` mail log |
 | `/var/log/dmesg` | host diagnostics |
+
+`/api/v1/dashboard` is a management endpoint and requires a bearer token from
+`/api/v1/auth/login`; health and readiness probes remain unauthenticated.

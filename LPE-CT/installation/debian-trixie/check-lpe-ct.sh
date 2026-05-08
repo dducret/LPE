@@ -21,6 +21,38 @@ pass() {
   echo "[OK] $*"
 }
 
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
+management_login() {
+  local login_url="$1"
+  local email="${LPE_CT_MANAGEMENT_EMAIL:-${LPE_CT_BOOTSTRAP_ADMIN_EMAIL:-}}"
+  local password="${LPE_CT_MANAGEMENT_PASSWORD:-${LPE_CT_BOOTSTRAP_ADMIN_PASSWORD:-}}"
+  local payload
+  local login_body
+  local token
+
+  [[ -n "$email" ]] || fail "Set LPE_CT_MANAGEMENT_EMAIL or LPE_CT_BOOTSTRAP_ADMIN_EMAIL for dashboard authentication"
+  [[ -n "$password" ]] || fail "Set LPE_CT_MANAGEMENT_PASSWORD or LPE_CT_BOOTSTRAP_ADMIN_PASSWORD for dashboard authentication"
+
+  payload="$(printf '{"email":"%s","password":"%s"}' "$(json_escape "$email")" "$(json_escape "$password")")"
+  login_body="$(curl --silent --show-error --fail \
+    --header 'Content-Type: application/json' \
+    --data "$payload" \
+    "$login_url")" || fail "Management login failed: $login_url"
+
+  token="$(printf '%s' "$login_body" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  [[ -n "$token" ]] || fail "Management login response did not contain a bearer token"
+  printf '%s' "$token"
+}
+
 check_file() {
   local path="$1"
   [[ -e "$path" ]] || fail "Missing: $path"
@@ -88,6 +120,7 @@ if [[ "${LPE_CT_LOCAL_DB_ENABLED:-false}" == "true" ]]; then
 fi
 
 API_HEALTH_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/health"
+API_AUTH_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/api/v1/auth/login"
 API_DASHBOARD_URL="http://${LPE_CT_BIND_ADDRESS:-127.0.0.1:8380}/api/v1/dashboard"
 CONSOLE_URL="${LPE_CT_CONSOLE_TEST_URL:-https://127.0.0.1:${LPE_CT_NGINX_LISTEN_PORT:-443}/}"
 PUBLIC_HTTPS_BASE="${LPE_CT_PUBLICATION_TEST_URL:-https://127.0.0.1:${LPE_CT_NGINX_LISTEN_PORT:-443}}"
@@ -133,7 +166,12 @@ health_ready_body="$(curl --silent --show-error --fail "http://${LPE_CT_BIND_ADD
 [[ "$health_ready_body" == *"\"status\":\"ready\""* ]] || fail "Unexpected readiness response: $health_ready_body"
 pass "Management API readiness endpoint responded correctly"
 
-dashboard_body="$(curl --silent --show-error --fail "$API_DASHBOARD_URL")" || fail "Dashboard request failed: $API_DASHBOARD_URL"
+MANAGEMENT_TOKEN="$(management_login "$API_AUTH_URL")"
+pass "Management API authentication succeeded"
+
+dashboard_body="$(curl --silent --show-error --fail \
+  --header "Authorization: Bearer ${MANAGEMENT_TOKEN}" \
+  "$API_DASHBOARD_URL")" || fail "Dashboard request failed: $API_DASHBOARD_URL"
 [[ "$dashboard_body" == *"dmz-sorting-center"* ]] || fail "Unexpected dashboard response: $dashboard_body"
 pass "Dashboard endpoint responded correctly"
 
@@ -258,7 +296,9 @@ smtp_response="$({
   printf 'QUIT\r\n'
 } | timeout 10 bash -c "cat < /dev/stdin > /dev/tcp/${SMTP_HOST}/${SMTP_PORT}" 2>&1 || true)"
 sleep 1
-dashboard_after_smtp="$(curl --silent --show-error --fail "$API_DASHBOARD_URL")" || fail "Dashboard request failed after SMTP test"
+dashboard_after_smtp="$(curl --silent --show-error --fail \
+  --header "Authorization: Bearer ${MANAGEMENT_TOKEN}" \
+  "$API_DASHBOARD_URL")" || fail "Dashboard request failed after SMTP test"
 [[ "$dashboard_after_smtp" == *"deferred_messages"* ]] || fail "Dashboard missing queue metrics after SMTP test"
 pass "SMTP listener accepted an installation-check message"
 

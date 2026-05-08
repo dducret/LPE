@@ -2,6 +2,7 @@
 set -euo pipefail
 
 API_URL="${API_URL:-http://127.0.0.1/api}"
+ENV_FILE="${ENV_FILE:-/etc/lpe-ct/lpe-ct.env}"
 SMTP_HOST="${SMTP_HOST:-127.0.0.1}"
 SMTP_PORT="${SMTP_PORT:-25}"
 SENDER="${SENDER:?Set SENDER to the real local sender address}"
@@ -14,6 +15,38 @@ fail() {
 
 pass() {
   echo "[OK] $*"
+}
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
+management_login() {
+  local login_url="${API_URL}/auth/login"
+  local email="${LPE_CT_MANAGEMENT_EMAIL:-${LPE_CT_BOOTSTRAP_ADMIN_EMAIL:-}}"
+  local password="${LPE_CT_MANAGEMENT_PASSWORD:-${LPE_CT_BOOTSTRAP_ADMIN_PASSWORD:-}}"
+  local payload
+  local login_body
+  local token
+
+  [[ -n "$email" ]] || fail "Set LPE_CT_MANAGEMENT_EMAIL or LPE_CT_BOOTSTRAP_ADMIN_EMAIL for dashboard authentication"
+  [[ -n "$password" ]] || fail "Set LPE_CT_MANAGEMENT_PASSWORD or LPE_CT_BOOTSTRAP_ADMIN_PASSWORD for dashboard authentication"
+
+  payload="$(printf '{"email":"%s","password":"%s"}' "$(json_escape "$email")" "$(json_escape "$password")")"
+  login_body="$(curl --silent --show-error --fail \
+    --header 'Content-Type: application/json' \
+    --data "$payload" \
+    "$login_url")" || fail "Management login failed: $login_url"
+
+  token="$(printf '%s' "$login_body" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  [[ -n "$token" ]] || fail "Management login response did not contain a bearer token"
+  printf '%s' "$token"
 }
 
 smtp_expect() {
@@ -33,7 +66,17 @@ smtp_cmd() {
   smtp_expect "$2"
 }
 
-curl --silent --show-error --fail "${API_URL}/dashboard" >/dev/null \
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  source "$ENV_FILE"
+  set +a
+fi
+
+API_URL="${API_URL%/}"
+MANAGEMENT_TOKEN="$(management_login)"
+curl --silent --show-error --fail \
+  --header "Authorization: Bearer ${MANAGEMENT_TOKEN}" \
+  "${API_URL}/dashboard" >/dev/null \
   || fail "Management API is not reachable through ${API_URL}/dashboard"
 pass "Management API reachable"
 
@@ -53,7 +96,9 @@ exec 3<&-
 pass "SMTP listener accepted local message"
 
 sleep 1
-dashboard="$(curl --silent --show-error --fail "${API_URL}/dashboard")" \
+dashboard="$(curl --silent --show-error --fail \
+  --header "Authorization: Bearer ${MANAGEMENT_TOKEN}" \
+  "${API_URL}/dashboard")" \
   || fail "Unable to reload dashboard after SMTP test"
 [[ "$dashboard" == *"deferred_messages"* ]] || fail "Dashboard response does not include queue metrics"
 pass "Queue metrics available after local SMTP test"

@@ -89,6 +89,13 @@ Accepted inbound domains for the public `LPE-CT` SMTP listener are not environme
 - `check-lpe-ct-env.sh` from the `LPE-CT` server to list active variables that are present in `lpe-ct.env.example` but missing from `/etc/lpe-ct/lpe-ct.env`; `update-lpe-ct.sh` runs this check automatically in warning mode
 - `test-antivirus-lpe-ct.sh` from the `LPE-CT` server to validate quarantine on an `EICAR` attachment
 
+`check-lpe-ct.sh`, `test-local-lpe-ct.sh`, and the optional management API
+probe in `LPE-CT/installation/debian-trixie/test-from-lpe.sh` authenticate to
+the management dashboard before reading `/api/v1/dashboard`. They use
+`LPE_CT_MANAGEMENT_EMAIL` / `LPE_CT_MANAGEMENT_PASSWORD` when set, otherwise the
+bootstrap `LPE_CT_BOOTSTRAP_ADMIN_EMAIL` / `LPE_CT_BOOTSTRAP_ADMIN_PASSWORD`
+values from `/etc/lpe-ct/lpe-ct.env`.
+
 The `LPE-CT` test scripts that inject mail require real mailbox addresses through environment variables. For example, run the antivirus check as:
 
 ```bash

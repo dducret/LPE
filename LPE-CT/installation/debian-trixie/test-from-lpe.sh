@@ -16,6 +16,38 @@ pass() {
   echo "[OK] $*"
 }
 
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
+management_login() {
+  local login_url="${API_URL}/auth/login"
+  local email="${LPE_CT_MANAGEMENT_EMAIL:-${LPE_CT_BOOTSTRAP_ADMIN_EMAIL:-}}"
+  local password="${LPE_CT_MANAGEMENT_PASSWORD:-${LPE_CT_BOOTSTRAP_ADMIN_PASSWORD:-}}"
+  local payload
+  local login_body
+  local token
+
+  [[ -n "$email" ]] || fail "Set LPE_CT_MANAGEMENT_EMAIL or LPE_CT_BOOTSTRAP_ADMIN_EMAIL when API_URL is set"
+  [[ -n "$password" ]] || fail "Set LPE_CT_MANAGEMENT_PASSWORD or LPE_CT_BOOTSTRAP_ADMIN_PASSWORD when API_URL is set"
+
+  payload="$(printf '{"email":"%s","password":"%s"}' "$(json_escape "$email")" "$(json_escape "$password")")"
+  login_body="$(curl --silent --show-error --fail \
+    --header 'Content-Type: application/json' \
+    --data "$payload" \
+    "$login_url")" || fail "Management login failed: $login_url"
+
+  token="$(printf '%s' "$login_body" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  [[ -n "$token" ]] || fail "Management login response did not contain a bearer token"
+  printf '%s' "$token"
+}
+
 smtp_expect() {
   local expected="$1"
   local line
@@ -49,7 +81,11 @@ exec 3<&-
 pass "LPE-side host can reach the LPE-CT SMTP listener"
 
 if [[ -n "$API_URL" ]]; then
-  curl --silent --show-error --fail "${API_URL}/dashboard" >/dev/null \
+  API_URL="${API_URL%/}"
+  MANAGEMENT_TOKEN="$(management_login)"
+  curl --silent --show-error --fail \
+    --header "Authorization: Bearer ${MANAGEMENT_TOKEN}" \
+    "${API_URL}/dashboard" >/dev/null \
     || fail "LPE-side host cannot reach management API at ${API_URL}/dashboard"
   pass "LPE-side host can reach the LPE-CT management API"
 else
