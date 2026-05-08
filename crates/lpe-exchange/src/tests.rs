@@ -14,7 +14,10 @@ use lpe_storage::{
 };
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 use uuid::Uuid;
 
@@ -31,6 +34,8 @@ use crate::{
         ExchangeStore,
     },
 };
+
+static MAPI_TEST_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Default)]
 struct FakeStore {
@@ -1271,9 +1276,21 @@ fn mapi_headers(request_type: &str) -> HeaderMap {
         "x-requesttype",
         HeaderValue::from_str(request_type).unwrap(),
     );
-    headers.insert("x-requestid", HeaderValue::from_static("request-1"));
+    let request_id = format!(
+        "request-{}",
+        MAPI_TEST_REQUEST_ID.fetch_add(1, Ordering::Relaxed)
+    );
+    headers.insert("x-requestid", HeaderValue::from_str(&request_id).unwrap());
     headers.insert("x-clientinfo", HeaderValue::from_static("client-info-1"));
     headers
+}
+
+fn renew_mapi_request_id(headers: &mut HeaderMap) {
+    let request_id = format!(
+        "request-{}",
+        MAPI_TEST_REQUEST_ID.fetch_add(1, Ordering::Relaxed)
+    );
+    headers.insert("x-requestid", HeaderValue::from_str(&request_id).unwrap());
 }
 
 fn mapi_headers_without_content_type(request_type: &str) -> HeaderMap {
@@ -1782,6 +1799,7 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
         test_mapi_uuid_id(&contact_id),
     );
     append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
+    renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -1810,6 +1828,7 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
         test_mapi_uuid_id(&contact_id),
     );
     append_rop_get_properties_specific(&mut read_rops, 2, &[0x3001_001F, 0x39FE_001F]);
+    renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -1831,6 +1850,7 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
     let mut delete_rops = Vec::new();
     append_rop_open_folder(&mut delete_rops, 0, 1, test_mapi_folder_id(15));
     append_rop_delete_messages(&mut delete_rops, 1, &[test_mapi_uuid_id(&contact_id)]);
+    renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -1932,6 +1952,7 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
         test_mapi_uuid_id(&event_id),
     );
     append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
+    renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -1960,6 +1981,7 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
         test_mapi_uuid_id(&event_id),
     );
     append_rop_get_properties_specific(&mut read_rops, 2, &[0x0037_001F, 0x3FFB_001F]);
+    renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -1978,6 +2000,7 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
     let mut delete_rops = Vec::new();
     append_rop_open_folder(&mut delete_rops, 0, 1, test_mapi_folder_id(16));
     append_rop_delete_messages(&mut delete_rops, 1, &[test_mapi_uuid_id(&event_id)]);
+    renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -3606,6 +3629,7 @@ async fn mapi_over_http_table_bookmarks_restore_contents_cursor() {
     second_rops.extend_from_slice(&(bookmark.len() as u16).to_le_bytes());
     second_rops.extend_from_slice(&bookmark);
 
+    renew_mapi_request_id(&mut execute_headers);
     let second_request = execute_body(&rop_buffer(&second_rops, &[u32::MAX, u32::MAX, 3]));
     let second_response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &second_request)
@@ -4227,6 +4251,67 @@ async fn mapi_over_http_submit_pending_message_uses_canonical_submission() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_replayed_execute_request_id_does_not_resubmit_message() {
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let submitted_messages = store.submitted_messages.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Retry-safe submit");
+    append_mapi_utf16_property(&mut property_values, 0x1000_001F, "Retry body");
+    let to_row = mapi_recipient_row("Bob", "bob@example.test", 0x01);
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_create_message(&mut rops, 1, 2, test_mapi_folder_id(5));
+    append_rop_set_properties(&mut rops, 2, 2, &property_values);
+    append_rop_modify_recipients(&mut rops, 2, &[(1, 0x01, to_row.as_slice())]);
+    append_rop_submit_message(&mut rops, 2);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    execute_headers.insert("x-requestid", HeaderValue::from_static("retry-submit-1"));
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let first = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+    let first_body = response_bytes(first).await;
+    let second = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+    let second_body = response_bytes(second).await;
+
+    assert_eq!(first_body, second_body);
+    let recorded = submitted_messages.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].subject, "Retry-safe submit");
+}
+
+#[tokio::test]
 async fn mapi_over_http_submit_opened_draft_uses_source_draft_id() {
     let draft_id = Uuid::parse_str("20202020-2020-2020-2020-202020202020").unwrap();
     let draft_mailbox_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
@@ -4406,6 +4491,7 @@ async fn mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end() {
     let mut sync_rops = Vec::new();
     append_rop_open_folder(&mut sync_rops, 0, 1, test_mapi_folder_id(14));
     append_rop_sync_manifest_get_buffer(&mut sync_rops, 1, 2, 4096);
+    renew_mapi_request_id(&mut execute_headers);
     let sync_request = execute_body(&rop_buffer(&sync_rops, &[1, u32::MAX, u32::MAX]));
     let sync_response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &sync_request)
@@ -4424,6 +4510,7 @@ async fn mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end() {
     let mut flag_rops = Vec::new();
     append_rop_open_folder(&mut flag_rops, 0, 1, test_mapi_folder_id(14));
     append_rop_set_read_flags(&mut flag_rops, 1, 0x04, &[draft_mapi_message_id]);
+    renew_mapi_request_id(&mut execute_headers);
     let flag_request = execute_body(&rop_buffer(&flag_rops, &[1, u32::MAX]));
     let flag_response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &flag_request)
@@ -4456,6 +4543,7 @@ async fn mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end() {
         draft_mapi_message_id,
     );
     append_rop_submit_message(&mut submit_rops, 2);
+    renew_mapi_request_id(&mut execute_headers);
     let submit_request = execute_body(&rop_buffer(&submit_rops, &[1, u32::MAX, u32::MAX]));
     let submit_response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &submit_request)
@@ -4492,6 +4580,7 @@ async fn mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end() {
     let mut sent_table_rops = Vec::new();
     append_rop_open_folder(&mut sent_table_rops, 0, 1, test_mapi_folder_id(7));
     append_rop_query_subject_rows(&mut sent_table_rops, 1, 2, 10);
+    renew_mapi_request_id(&mut execute_headers);
     let sent_table_request = execute_body(&rop_buffer(&sent_table_rops, &[1, u32::MAX, u32::MAX]));
     let sent_table_response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &sent_table_request)

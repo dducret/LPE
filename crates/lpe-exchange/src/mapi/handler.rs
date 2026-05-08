@@ -50,6 +50,7 @@ const MAPI_SESSION_MAX_AGE_SECONDS: u32 = 1_800;
 const NSPI_UNICODE_CODEPAGE: u32 = 1200;
 const MAPI_MAILUSER_OBJECT_TYPE: u32 = 6;
 const NSPI_MID_RESOLVED: u32 = 0x0000_0002;
+const MAX_CACHED_EXECUTE_REQUESTS: usize = 64;
 const NSPI_SERVER_GUID: [u8; 16] = [
     0x4c, 0x50, 0x45, 0x00, 0x4d, 0x41, 0x50, 0x49, 0x4e, 0x53, 0x50, 0x49, 0x00, 0x00, 0x00, 0x01,
 ];
@@ -100,6 +101,13 @@ struct MapiSession {
     named_property_ids: HashMap<u16, MapiNamedProperty>,
     next_named_property_id: u16,
     next_local_replica_sequence: u64,
+    completed_execute_requests: HashMap<String, CachedExecuteResponse>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CachedExecuteResponse {
+    rop_fingerprint: u64,
+    response_body: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -508,19 +516,6 @@ where
             );
         }
     };
-    let snapshot = match store.load_mapi_mail_store(principal.account_id, 500).await {
-        Ok(snapshot) => snapshot,
-        Err(error) => {
-            return execute_failure_response(
-                request_id,
-                4,
-                &format!("failed to load MAPI mail store snapshot: {error}"),
-                Some(session_cookie(endpoint, &session_id, false)),
-            );
-        }
-    };
-    let mailboxes = snapshot.mailboxes();
-    let emails = snapshot.emails();
     let Some(mut session) = remove_session(&session_id) else {
         return execute_failure_response(
             request_id,
@@ -537,6 +532,41 @@ where
             Some(session_cookie(endpoint, &session_id, false)),
         );
     }
+    let rop_fingerprint = mapi_payload_fingerprint(&execute.rop_buffer);
+    if let Some(cached) = session.completed_execute_requests.get(request_id).cloned() {
+        if cached.rop_fingerprint == rop_fingerprint {
+            store_session(session_id.clone(), session);
+            return mapi_response(
+                "Execute",
+                request_id,
+                0,
+                cached.response_body,
+                Some(session_cookie(endpoint, &session_id, false)),
+            );
+        }
+        store_session(session_id.clone(), session);
+        return execute_failure_response(
+            request_id,
+            12,
+            "reused MAPI Execute request id with a different ROP payload",
+            Some(session_cookie(endpoint, &session_id, false)),
+        );
+    }
+
+    let snapshot = match store.load_mapi_mail_store(principal.account_id, 500).await {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            store_session(session_id.clone(), session);
+            return execute_failure_response(
+                request_id,
+                4,
+                &format!("failed to load MAPI mail store snapshot: {error}"),
+                Some(session_cookie(endpoint, &session_id, false)),
+            );
+        }
+    };
+    let mailboxes = snapshot.mailboxes();
+    let emails = snapshot.emails();
     let rop_buffer = execute_rops(
         store,
         principal,
@@ -548,8 +578,9 @@ where
         &execute.rop_buffer,
     )
     .await;
-    store_session(session_id.clone(), session);
     let response_body = execute_success_body(rop_buffer, Vec::new());
+    cache_execute_response(&mut session, request_id, rop_fingerprint, &response_body);
+    store_session(session_id.clone(), session);
     mapi_response(
         "Execute",
         request_id,
@@ -1377,6 +1408,7 @@ fn create_session(endpoint: MapiEndpoint, principal: &AccountPrincipal) -> Strin
         named_property_ids: HashMap::new(),
         next_named_property_id: FIRST_NAMED_PROPERTY_ID,
         next_local_replica_sequence: 1,
+        completed_execute_requests: HashMap::new(),
     };
     let mut guard = sessions()
         .lock()
@@ -1499,6 +1531,35 @@ fn session_matches(
         && session.tenant_id == principal.tenant_id
         && session.account_id == principal.account_id
         && session.email == principal.email
+}
+
+fn cache_execute_response(
+    session: &mut MapiSession,
+    request_id: &str,
+    rop_fingerprint: u64,
+    response_body: &[u8],
+) {
+    if session.completed_execute_requests.len() >= MAX_CACHED_EXECUTE_REQUESTS {
+        if let Some(oldest_key) = session.completed_execute_requests.keys().min().cloned() {
+            session.completed_execute_requests.remove(&oldest_key);
+        }
+    }
+    session.completed_execute_requests.insert(
+        request_id.to_string(),
+        CachedExecuteResponse {
+            rop_fingerprint,
+            response_body: response_body.to_vec(),
+        },
+    );
+}
+
+fn mapi_payload_fingerprint(bytes: &[u8]) -> u64 {
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    bytes.iter().fold(FNV_OFFSET, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(FNV_PRIME)
+    })
 }
 
 fn request_type(headers: &HeaderMap) -> Result<MapiRequestType> {
@@ -9557,6 +9618,7 @@ mod tests {
             named_property_ids: HashMap::new(),
             next_named_property_id: FIRST_NAMED_PROPERTY_ID,
             next_local_replica_sequence: 1,
+            completed_execute_requests: HashMap::new(),
         };
         let stale = MapiSession {
             last_seen_at: now - Duration::from_secs(u64::from(MAPI_SESSION_MAX_AGE_SECONDS) + 1),
