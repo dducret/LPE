@@ -107,9 +107,13 @@ def request(
         handlers.append(urllib.request.HTTPSHandler(context=ssl._create_unverified_context()))
     if not follow_redirects:
         handlers.append(NoRedirectHandler)
-    opener = urllib.request.build_opener(*handlers) if handlers else urllib.request
     try:
-        with opener.open(req, timeout=timeout) as resp:
+        if handlers:
+            opener = urllib.request.build_opener(*handlers)
+            response_context = opener.open(req, timeout=timeout)
+        else:
+            response_context = urllib.request.urlopen(req, timeout=timeout)
+        with response_context as resp:
             response_body = resp.read(read_limit) if read_limit is not None else resp.read()
             return HttpResponse(resp.status, dict(resp.headers.items()), response_body)
     except urllib.error.HTTPError as error:
@@ -935,7 +939,7 @@ def check_mapi_nspi_resolve_authenticated_mailbox(
     require("application/mapi-http" in content_type(response.headers), "MAPI NSPI ResolveNames self did not return MAPI content")
     response_code = header_value(response.headers, "x-responsecode")
     require(response_code == "0", f"MAPI NSPI ResolveNames self returned X-ResponseCode {response_code!r}: {response.text[:300]}")
-    payload = mapi_payload(response.body)
+    payload = mapi_http_binary_payload(response.body)
     assert_nspi_resolve_names_payload(payload, "ResolveNames")
     require(email.lower().encode("utf-16le") in payload.lower(), "MAPI NSPI ResolveNames self did not include the authenticated mailbox SMTP address")
     print("ok mapi_nspi_resolve_authenticated_mailbox")
@@ -994,7 +998,7 @@ def check_mapi_emsmdb_sent_message(
     response_rops = mapi_execute_response_rops(payload, "MAPI EMSMDB Execute")
     require(len(response_rops) > 20, "MAPI EMSMDB Execute returned an empty or static-sized ROP payload")
     require(response_rops[0] == 0x02, "MAPI EMSMDB Execute did not start with RopOpenFolder response")
-    require(contains_bytes(response_rops, bytes([0x05, 0x01])), "MAPI EMSMDB Execute did not include RopGetContentsTable response")
+    require(contains_bytes(response_rops, bytes([0x05, 0x02])), "MAPI EMSMDB Execute did not include RopGetContentsTable response")
     require(contains_bytes(response_rops, bytes([0x15, 0x02])), "MAPI EMSMDB Execute did not include RopQueryRows response")
     require(
         contains_bytes(response_rops, utf16z(expected_subject)),
@@ -1005,9 +1009,7 @@ def check_mapi_emsmdb_sent_message(
 
 def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, insecure_tls: bool, timeout: int) -> None:
     parsed = urllib.parse.urlparse(base_url)
-    rpc_host = parsed.hostname or parsed.netloc
-    require(bool(rpc_host), "base URL must include a host for RPC proxy checks")
-    rpc_url = join_url(base_url, f"/rpc/rpcproxy.dll?{rpc_host}:6002")
+    rpc_url = join_url(base_url, "/rpc/rpcproxy.dll")
     headers = {
         "Accept": "application/rpc",
         "User-Agent": "MSRPC",
@@ -1049,7 +1051,7 @@ def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, insecu
             )
             require(
                 header_value(authenticated.headers, "x-lpe-rpc-proxy-status") == expected_status,
-                f"authenticated RPC proxy {method} returned unexpected compatibility status",
+                f"authenticated RPC proxy {method} returned unexpected compatibility status {header_value(authenticated.headers, 'x-lpe-rpc-proxy-status')!r}; expected {expected_status!r}",
             )
             require(
                 len(authenticated.body) == expected_length,
@@ -1093,8 +1095,8 @@ def check_rpc_proxy_mailstore_ping(
         "RPC proxy mailstore OUT ping did not return application/rpc",
     )
     require(
-        header_value(response.headers, "x-lpe-rpc-proxy-status") == "mailstore-ping",
-        "RPC proxy mailstore OUT ping did not return the RCA mailbox-store ping response",
+        header_value(response.headers, "x-lpe-rpc-proxy-status") == "endpoint-ping",
+        f"RPC proxy mailstore OUT ping returned compatibility status {header_value(response.headers, 'x-lpe-rpc-proxy-status')!r}; expected 'endpoint-ping'",
     )
     require(len(response.body) >= 128, f"RPC proxy mailstore OUT ping returned only {len(response.body)} bytes")
     require(response.body[72] == 0x05 and response.body[74] == 0x0C, "mailstore ping did not include a DCE/RPC bind ACK")

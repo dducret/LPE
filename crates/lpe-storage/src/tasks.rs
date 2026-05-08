@@ -322,6 +322,7 @@ impl Storage {
               AND tasks.account_id = EXCLUDED.account_id
             RETURNING
                 tasks.id,
+                tasks.account_id AS owner_account_id,
                 tasks.task_list_id,
                 (
                     SELECT sort_order
