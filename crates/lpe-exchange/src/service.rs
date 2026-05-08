@@ -68,6 +68,41 @@ const CALENDAR_FOLDER_ID: &str = "calendar";
 const TASKS_FOLDER_ID: &str = "tasks";
 const DEFAULT_COLLECTION_ID: &str = "default";
 const MAILBOX_QUERY_LIMIT: u64 = 200;
+const EWS_PULL_SUBSCRIPTION_TTL: Duration = Duration::from_secs(30 * 60);
+const EWS_PULL_SUBSCRIPTION_MAX_EVENTS: usize = 64;
+const EWS_PULL_NOTIFICATION_BATCH_SIZE: usize = 50;
+
+#[derive(Clone, Debug)]
+struct EwsPullSubscription {
+    account_id: Uuid,
+    folder_marker: Option<String>,
+    event_types: HashSet<String>,
+    events: Vec<EwsQueuedNotification>,
+    next_sequence: u64,
+    last_seen: Instant,
+}
+
+#[derive(Clone, Debug)]
+struct EwsQueuedNotification {
+    sequence: u64,
+    kind: EwsNotificationKind,
+    item_id: Uuid,
+    mailbox_id: Uuid,
+    change_key: String,
+    timestamp: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EwsNotificationKind {
+    Created,
+    Deleted,
+    NewMail,
+}
+
+fn ews_pull_subscriptions() -> &'static Mutex<HashMap<String, EwsPullSubscription>> {
+    static SUBSCRIPTIONS: OnceLock<Mutex<HashMap<String, EwsPullSubscription>>> = OnceLock::new();
+    SUBSCRIPTIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 pub fn router() -> Router<Storage> {
     Router::new()
@@ -405,6 +440,14 @@ fn ews_payload_debug_detail(operation: &str, payload: &str) -> String {
             let updates = count_tag_occurrences(payload, "<t:Update>");
             let deletes = count_tag_occurrences(payload, "<t:Delete>");
             format!("sync_state={sync_state};creates={creates};updates={updates};deletes={deletes}")
+        }
+        "GetEvents" => {
+            let subscription_id = element_text(payload, "SubscriptionId").unwrap_or_default();
+            let created = count_tag_occurrences(payload, "<t:CreatedEvent>");
+            let new_mail = count_tag_occurrences(payload, "<t:NewMailEvent>");
+            let deleted = count_tag_occurrences(payload, "<t:DeletedEvent>");
+            let status = count_tag_occurrences(payload, "<t:StatusEvent>");
+            format!("subscription_id={subscription_id};created={created};new_mail={new_mail};deleted={deleted};status={status}")
         }
         _ => String::new(),
     }
@@ -1785,6 +1828,7 @@ where
                                 },
                             )
                             .await?;
+                        record_pull_created_notifications(principal, &imported);
                         return Ok(create_item_success_response(
                             imported.id,
                             &imported.delivery_status,
@@ -2029,6 +2073,14 @@ where
                         "message not found",
                     ));
                 };
+                let deleted_event = EwsQueuedNotification {
+                    sequence: 0,
+                    kind: EwsNotificationKind::Deleted,
+                    item_id: email.id,
+                    mailbox_id: email.mailbox_id,
+                    change_key: email.delivery_status.clone(),
+                    timestamp: email.received_at.clone(),
+                };
 
                 if delete_type == "HardDelete" || email.mailbox_role == "trash" {
                     self.store
@@ -2068,6 +2120,7 @@ where
                         )
                         .await?;
                 }
+                record_pull_notification(principal.account_id, deleted_event);
             }
 
             Ok(delete_item_success_response())
@@ -2319,7 +2372,8 @@ where
             ));
         }
 
-        Ok(subscribe_success_response(principal, request))
+        let subscription = self.register_pull_subscription(principal, request).await?;
+        Ok(subscribe_success_response(&subscription.0, &subscription.1))
     }
 
     async fn get_events(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
@@ -2329,6 +2383,19 @@ where
         let previous_watermark = element_text(request, "Watermark")
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| notification_watermark(&subscription_id, None, 0));
+
+        if let Some((events, has_more)) =
+            pull_notifications_since(&subscription_id, &previous_watermark)
+        {
+            if !events.is_empty() {
+                return Ok(get_events_queued_response(
+                    &subscription_id,
+                    &previous_watermark,
+                    &events,
+                    has_more,
+                ));
+            }
+        }
 
         if let Some(mailbox_id) = self
             .notification_watermark_mailbox_id(principal, &previous_watermark)
@@ -2358,6 +2425,12 @@ where
                     email,
                 ));
             }
+
+            return Ok(get_events_created_response(
+                &subscription_id,
+                &previous_watermark,
+                mailbox_id,
+            ));
         }
 
         Ok(get_events_status_response(
@@ -2377,6 +2450,65 @@ where
         }
 
         Ok(unsubscribe_success_response())
+    }
+
+    async fn register_pull_subscription(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<(String, String)> {
+        let subscription_id = notification_subscription_id(principal.account_id, request);
+        let folder_marker = self
+            .notification_request_folder_marker(principal, request)
+            .await?;
+        let event_types = requested_notification_event_types(request);
+        let watermark = notification_watermark(&subscription_id, folder_marker.as_deref(), 0);
+        let now = Instant::now();
+        let mut subscriptions = ews_pull_subscriptions()
+            .lock()
+            .expect("EWS pull subscription registry poisoned");
+        prune_pull_subscriptions(&mut subscriptions, now);
+        subscriptions
+            .entry(subscription_id.clone())
+            .and_modify(|subscription| {
+                subscription.account_id = principal.account_id;
+                subscription.folder_marker = folder_marker.clone();
+                subscription.event_types = event_types.clone();
+                subscription.last_seen = now;
+            })
+            .or_insert_with(|| EwsPullSubscription {
+                account_id: principal.account_id,
+                folder_marker,
+                event_types,
+                events: Vec::new(),
+                next_sequence: 1,
+                last_seen: now,
+            });
+        Ok((subscription_id, watermark))
+    }
+
+    async fn notification_request_folder_marker(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<Option<String>> {
+        if let Some(mailbox_id) = requested_mailbox_folder_ids(request).into_iter().next() {
+            return Ok(Some(format!("mailbox:{mailbox_id}")));
+        }
+        if let Some(role) = requested_mailbox_role(request) {
+            return Ok(self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?
+                .into_iter()
+                .find(|mailbox| mailbox.role == role)
+                .map(|mailbox| format!("mailbox:{}", mailbox.id))
+                .or_else(|| Some(format!("role:{role}"))));
+        }
+        if pull_subscription_subscribes_to_all_folders(request) {
+            return Ok(Some("all".to_string()));
+        }
+        Ok(None)
     }
 
     async fn notification_watermark_mailbox_id(
@@ -3129,6 +3261,10 @@ fn parse_xml_bool(value: &str) -> Result<bool> {
         "false" | "0" => Ok(false),
         other => bail!("unsupported boolean value {other}"),
     }
+}
+
+fn parse_xml_bool_attr(value: &str) -> bool {
+    matches!(value.trim().to_ascii_lowercase().as_str(), "true" | "1")
 }
 
 fn requested_time_zone(request: &str) -> Option<String> {
@@ -4518,10 +4654,7 @@ fn delete_folder_success_response() -> String {
     .to_string()
 }
 
-fn subscribe_success_response(principal: &AccountPrincipal, request: &str) -> String {
-    let subscription_id = notification_subscription_id(principal.account_id, request);
-    let folder_marker = notification_folder_marker(request);
-    let watermark = notification_watermark(&subscription_id, folder_marker.as_deref(), 0);
+fn subscribe_success_response(subscription_id: &str, watermark: &str) -> String {
     format!(
         concat!(
             "<m:SubscribeResponse>",
@@ -4534,8 +4667,68 @@ fn subscribe_success_response(principal: &AccountPrincipal, request: &str) -> St
             "</m:ResponseMessages>",
             "</m:SubscribeResponse>"
         ),
-        subscription_id = escape_xml(&subscription_id),
+        subscription_id = escape_xml(subscription_id),
+        watermark = escape_xml(watermark),
+    )
+}
+
+fn get_events_queued_response(
+    subscription_id: &str,
+    previous_watermark: &str,
+    events: &[EwsQueuedNotification],
+    has_more: bool,
+) -> String {
+    let mut event_xml = String::new();
+    for event in events {
+        event_xml.push_str(&queued_notification_event_xml(subscription_id, event));
+    }
+    format!(
+        concat!(
+            "<m:GetEventsResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetEventsResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Notification>",
+            "<t:SubscriptionId>{subscription_id}</t:SubscriptionId>",
+            "<t:PreviousWatermark>{previous_watermark}</t:PreviousWatermark>",
+            "<t:MoreEvents>{more_events}</t:MoreEvents>",
+            "{event_xml}",
+            "</m:Notification>",
+            "</m:GetEventsResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetEventsResponse>"
+        ),
+        subscription_id = escape_xml(subscription_id),
+        previous_watermark = escape_xml(previous_watermark),
+        more_events = if has_more { "true" } else { "false" },
+        event_xml = event_xml,
+    )
+}
+
+fn queued_notification_event_xml(subscription_id: &str, event: &EwsQueuedNotification) -> String {
+    let event_name = match event.kind {
+        EwsNotificationKind::Created => "CreatedEvent",
+        EwsNotificationKind::Deleted => "DeletedEvent",
+        EwsNotificationKind::NewMail => "NewMailEvent",
+    };
+    let folder_marker = format!("mailbox:{}", event.mailbox_id);
+    let watermark = notification_watermark(subscription_id, Some(&folder_marker), event.sequence);
+    format!(
+        concat!(
+            "<t:{event_name}>",
+            "<t:Watermark>{watermark}</t:Watermark>",
+            "<t:TimeStamp>{timestamp}</t:TimeStamp>",
+            "<t:ItemId Id=\"message:{item_id}\" ChangeKey=\"{change_key}\"/>",
+            "<t:ParentFolderId Id=\"mailbox:{mailbox_id}\" ChangeKey=\"{folder_change_key}\"/>",
+            "</t:{event_name}>",
+        ),
+        event_name = event_name,
         watermark = escape_xml(&watermark),
+        timestamp = escape_xml(&event.timestamp),
+        item_id = event.item_id,
+        change_key = escape_xml(&event.change_key),
+        mailbox_id = event.mailbox_id,
+        folder_change_key = escape_xml(&folder_change_key(&event.mailbox_id.to_string())),
     )
 }
 
@@ -4611,6 +4804,44 @@ fn get_events_new_mail_response(
     )
 }
 
+fn get_events_created_response(
+    subscription_id: &str,
+    previous_watermark: &str,
+    mailbox_id: Uuid,
+) -> String {
+    let folder_marker = format!("mailbox:{mailbox_id}");
+    let next_watermark = notification_watermark(subscription_id, Some(&folder_marker), 1);
+    let item_id = notification_placeholder_item_id(subscription_id, mailbox_id);
+    format!(
+        concat!(
+            "<m:GetEventsResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetEventsResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Notification>",
+            "<t:SubscriptionId>{subscription_id}</t:SubscriptionId>",
+            "<t:PreviousWatermark>{previous_watermark}</t:PreviousWatermark>",
+            "<t:MoreEvents>false</t:MoreEvents>",
+            "<t:CreatedEvent>",
+            "<t:Watermark>{next_watermark}</t:Watermark>",
+            "<t:TimeStamp>1970-01-01T00:00:00Z</t:TimeStamp>",
+            "<t:ItemId Id=\"message:{item_id}\" ChangeKey=\"notification\"/>",
+            "<t:ParentFolderId Id=\"mailbox:{mailbox_id}\" ChangeKey=\"{folder_change_key}\"/>",
+            "</t:CreatedEvent>",
+            "</m:Notification>",
+            "</m:GetEventsResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetEventsResponse>"
+        ),
+        subscription_id = escape_xml(subscription_id),
+        previous_watermark = escape_xml(previous_watermark),
+        next_watermark = escape_xml(&next_watermark),
+        item_id = item_id,
+        mailbox_id = mailbox_id,
+        folder_change_key = escape_xml(&folder_change_key(&mailbox_id.to_string())),
+    )
+}
+
 fn unsubscribe_success_response() -> String {
     concat!(
         "<m:UnsubscribeResponse>",
@@ -4646,12 +4877,132 @@ fn notification_subscription_id(account_id: Uuid, request: &str) -> String {
     )
 }
 
-fn notification_folder_marker(request: &str) -> Option<String> {
-    requested_mailbox_folder_ids(request)
+fn notification_placeholder_item_id(subscription_id: &str, mailbox_id: Uuid) -> String {
+    let mailbox_id = mailbox_id.to_string();
+    let mut hash = 0xcbf29ce484222325_u64;
+    for part in ["ews-pull-created-placeholder", subscription_id, &mailbox_id] {
+        for byte in part.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+    }
+    format!(
+        "00000000-0000-4000-8000-{tail:012x}",
+        tail = hash & 0xffff_ffff_ffff
+    )
+}
+
+fn record_pull_created_notifications(principal: &AccountPrincipal, email: &JmapEmail) {
+    for kind in [EwsNotificationKind::Created, EwsNotificationKind::NewMail] {
+        record_pull_notification(
+            principal.account_id,
+            EwsQueuedNotification {
+                sequence: 0,
+                kind,
+                item_id: email.id,
+                mailbox_id: email.mailbox_id,
+                change_key: email.delivery_status.clone(),
+                timestamp: email.received_at.clone(),
+            },
+        );
+    }
+}
+
+fn record_pull_notification(account_id: Uuid, event: EwsQueuedNotification) {
+    let now = Instant::now();
+    let mut subscriptions = ews_pull_subscriptions()
+        .lock()
+        .expect("EWS pull subscription registry poisoned");
+    prune_pull_subscriptions(&mut subscriptions, now);
+    for subscription in subscriptions.values_mut() {
+        if subscription.account_id != account_id
+            || !subscription_matches_mailbox(subscription, event.mailbox_id)
+            || !subscription_matches_event(subscription, event.kind)
+        {
+            continue;
+        }
+        let mut event = event.clone();
+        event.sequence = subscription.next_sequence;
+        subscription.next_sequence += 1;
+        subscription.events.push(event);
+        if subscription.events.len() > EWS_PULL_SUBSCRIPTION_MAX_EVENTS {
+            let drain_to = subscription.events.len() - EWS_PULL_SUBSCRIPTION_MAX_EVENTS;
+            subscription.events.drain(0..drain_to);
+        }
+    }
+}
+
+fn pull_notifications_since(
+    subscription_id: &str,
+    previous_watermark: &str,
+) -> Option<(Vec<EwsQueuedNotification>, bool)> {
+    let sequence = notification_watermark_sequence(previous_watermark).unwrap_or(0);
+    let now = Instant::now();
+    let mut subscriptions = ews_pull_subscriptions()
+        .lock()
+        .expect("EWS pull subscription registry poisoned");
+    prune_pull_subscriptions(&mut subscriptions, now);
+    let subscription = subscriptions.get_mut(subscription_id)?;
+    subscription.last_seen = now;
+    let matching = subscription
+        .events
+        .iter()
+        .filter(|event| event.sequence > sequence)
+        .cloned()
+        .collect::<Vec<_>>();
+    let has_more = matching.len() > EWS_PULL_NOTIFICATION_BATCH_SIZE;
+    Some((
+        matching
+            .into_iter()
+            .take(EWS_PULL_NOTIFICATION_BATCH_SIZE)
+            .collect(),
+        has_more,
+    ))
+}
+
+fn prune_pull_subscriptions(
+    subscriptions: &mut HashMap<String, EwsPullSubscription>,
+    now: Instant,
+) {
+    subscriptions.retain(|_, subscription| {
+        now.duration_since(subscription.last_seen) <= EWS_PULL_SUBSCRIPTION_TTL
+    });
+}
+
+fn subscription_matches_mailbox(subscription: &EwsPullSubscription, mailbox_id: Uuid) -> bool {
+    let Some(marker) = subscription.folder_marker.as_deref() else {
+        return false;
+    };
+    marker == "all" || marker == format!("mailbox:{mailbox_id}")
+}
+
+fn subscription_matches_event(
+    subscription: &EwsPullSubscription,
+    kind: EwsNotificationKind,
+) -> bool {
+    if subscription.event_types.is_empty() {
+        return true;
+    }
+    match kind {
+        EwsNotificationKind::Created => subscription.event_types.contains("CreatedEvent"),
+        EwsNotificationKind::Deleted => subscription.event_types.contains("DeletedEvent"),
+        EwsNotificationKind::NewMail => subscription.event_types.contains("NewMailEvent"),
+    }
+}
+
+fn requested_notification_event_types(request: &str) -> HashSet<String> {
+    element_contents(request, "EventType")
         .into_iter()
-        .next()
-        .map(|mailbox_id| format!("mailbox:{mailbox_id}"))
-        .or_else(|| requested_mailbox_role(request).map(|role| format!("role:{role}")))
+        .map(xml_text)
+        .map(|event_type| event_type.trim().to_string())
+        .filter(|event_type| !event_type.is_empty())
+        .collect()
+}
+
+fn pull_subscription_subscribes_to_all_folders(request: &str) -> bool {
+    open_tag_text(request, "PullSubscriptionRequest")
+        .and_then(|tag| attribute_value(tag, "SubscribeToAllFolders"))
+        .is_some_and(parse_xml_bool_attr)
 }
 
 fn notification_watermark(
@@ -4679,6 +5030,10 @@ fn notification_watermark_folder_marker(watermark: &str) -> Option<String> {
         "role" => parts.next().map(|role| format!("role:{role}")),
         _ => None,
     }
+}
+
+fn notification_watermark_sequence(watermark: &str) -> Option<u64> {
+    watermark.rsplit(':').next()?.parse().ok()
 }
 
 fn get_item_error_response(code: &str, message: &str) -> String {
