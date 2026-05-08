@@ -314,7 +314,8 @@ dashboard_after_smtp="$(curl --silent --show-error --fail \
 pass "SMTP listener accepted an installation-check message"
 
 console_body="$(curl --silent --show-error --fail --insecure "$CONSOLE_URL")" || fail "Console request failed: $CONSOLE_URL"
-[[ "$console_body" == *"Centre de Tri"* ]] || fail "Unexpected management index content"
+[[ "$console_body" == *"LPE-CT Management Console"* ]] || fail "Management index is missing the LPE-CT console title"
+[[ "$console_body" == *"id=\"login-shell\""* ]] || fail "Management index is missing the login shell"
 pass "Management console is served by nginx"
 
 echo
