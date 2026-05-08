@@ -6524,6 +6524,79 @@ async fn mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests
 }
 
 #[tokio::test]
+async fn mapi_over_http_sync_manifest_includes_attachment_change_facts_without_bcc() {
+    let message_uuid = Uuid::parse_str("43434343-4343-4343-4343-434343434343").unwrap();
+    let attachment_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let mut email = FakeStore::email(
+        &message_uuid.to_string(),
+        mailbox_id,
+        "inbox",
+        "Attachment sync message",
+    );
+    email.has_attachments = true;
+    email.bcc.push(JmapEmailAddress {
+        address: "hidden@example.test".to_string(),
+        display_name: None,
+    });
+    let file_reference = format!("attachment:{message_uuid}:{attachment_id}");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        attachments: Arc::new(Mutex::new(HashMap::from([(
+            message_uuid,
+            vec![ActiveSyncAttachment {
+                id: attachment_id,
+                message_id: message_uuid,
+                file_name: "brief.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                size_octets: 42,
+                file_reference: file_reference.clone(),
+            }],
+        )]))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 1)));
+    assert!(contains_bytes(&response_rops, b"Attachment sync message"));
+    assert!(contains_bytes(&response_rops, b"brief.pdf"));
+    assert!(contains_bytes(&response_rops, b"application/pdf"));
+    assert!(contains_bytes(&response_rops, file_reference.as_bytes()));
+    assert!(!contains_bytes(&response_rops, b"hidden@example.test"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_get_local_replica_ids_returns_replica_guid() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

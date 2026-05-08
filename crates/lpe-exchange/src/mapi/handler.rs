@@ -3370,9 +3370,19 @@ where
                 let sync_type = request.sync_type();
                 let sync_mailboxes = sync_mailboxes_for(folder_id, sync_type, mailboxes);
                 let sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
-                let state = mapi_mailstore::sync_state_token(&sync_mailboxes, &sync_emails);
-                let transfer_buffer =
-                    mapi_mailstore::sync_manifest_buffer(folder_id, &sync_mailboxes, &sync_emails);
+                let sync_attachment_facts =
+                    sync_attachment_facts_for(folder_id, &sync_emails, snapshot);
+                let state = mapi_mailstore::sync_state_token_with_attachments(
+                    &sync_mailboxes,
+                    &sync_emails,
+                    &sync_attachment_facts,
+                );
+                let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_attachments(
+                    folder_id,
+                    &sync_mailboxes,
+                    &sync_emails,
+                    &sync_attachment_facts,
+                );
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
                     MapiObject::SynchronizationSource {
@@ -3503,7 +3513,13 @@ where
                 let transfer_buffer = if state.is_empty() {
                     let sync_mailboxes = sync_mailboxes_for(folder_id, 0x01, mailboxes);
                     let sync_emails = sync_emails_for(folder_id, 0x01, mailboxes, emails);
-                    mapi_mailstore::sync_state_token(&sync_mailboxes, &sync_emails)
+                    let sync_attachment_facts =
+                        sync_attachment_facts_for(folder_id, &sync_emails, snapshot);
+                    mapi_mailstore::sync_state_token_with_attachments(
+                        &sync_mailboxes,
+                        &sync_emails,
+                        &sync_attachment_facts,
+                    )
                 } else {
                     state
                 };
@@ -6472,6 +6488,37 @@ fn sync_emails_for(
     emails_for_folder(folder_id, mailboxes, emails)
         .into_iter()
         .cloned()
+        .collect()
+}
+
+fn sync_attachment_facts_for(
+    folder_id: u64,
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<mapi_mailstore::MessageAttachmentSyncFacts> {
+    emails
+        .iter()
+        .filter_map(|email| {
+            let attachments = snapshot
+                .attachments_for_message(folder_id, mapi_message_id(email))
+                .unwrap_or_default();
+            if attachments.is_empty() {
+                return None;
+            }
+            Some(mapi_mailstore::MessageAttachmentSyncFacts {
+                message_id: email.id,
+                attachments: attachments
+                    .iter()
+                    .map(|attachment| mapi_mailstore::AttachmentSyncFact {
+                        id: attachment.canonical_id,
+                        file_reference: attachment.file_reference.clone(),
+                        file_name: attachment.file_name.clone(),
+                        media_type: attachment.media_type.clone(),
+                        size_octets: attachment.size_octets,
+                    })
+                    .collect(),
+            })
+        })
         .collect()
 }
 

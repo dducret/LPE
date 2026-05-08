@@ -8,6 +8,21 @@ pub(crate) const STORE_REPLICA_GUID: [u8; 16] = [
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AttachmentSyncFact {
+    pub(crate) id: Uuid,
+    pub(crate) file_reference: String,
+    pub(crate) file_name: String,
+    pub(crate) media_type: String,
+    pub(crate) size_octets: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MessageAttachmentSyncFacts {
+    pub(crate) message_id: Uuid,
+    pub(crate) attachments: Vec<AttachmentSyncFact>,
+}
+
 pub(crate) fn canonical_folder_change_number(mailbox: &JmapMailbox) -> u64 {
     stable_hash64([
         mailbox.id.as_bytes().as_slice(),
@@ -20,6 +35,13 @@ pub(crate) fn canonical_folder_change_number(mailbox: &JmapMailbox) -> u64 {
 }
 
 pub(crate) fn canonical_message_change_number(email: &JmapEmail) -> u64 {
+    canonical_message_change_number_with_attachments(email, &[])
+}
+
+pub(crate) fn canonical_message_change_number_with_attachments(
+    email: &JmapEmail,
+    attachments: &[AttachmentSyncFact],
+) -> u64 {
     let mut hash = FNV_OFFSET;
     hash = hash_bytes(hash, email.id.as_bytes());
     hash = hash_bytes(hash, email.thread_id.as_bytes());
@@ -67,6 +89,20 @@ pub(crate) fn canonical_message_change_number(email: &JmapEmail) -> u64 {
                 .as_bytes(),
         );
     }
+    let mut attachments = attachments.iter().collect::<Vec<_>>();
+    attachments.sort_by(|left, right| {
+        left.file_name
+            .cmp(&right.file_name)
+            .then(left.media_type.cmp(&right.media_type))
+            .then(left.id.cmp(&right.id))
+    });
+    for attachment in attachments {
+        hash = hash_bytes(hash, attachment.id.as_bytes());
+        hash = hash_bytes(hash, attachment.file_reference.as_bytes());
+        hash = hash_bytes(hash, attachment.file_name.as_bytes());
+        hash = hash_bytes(hash, attachment.media_type.as_bytes());
+        hash = hash_bytes(hash, &attachment.size_octets.to_le_bytes());
+    }
     hash.max(1)
 }
 
@@ -96,11 +132,20 @@ pub(crate) fn predecessor_change_list(change_number: u64) -> Vec<u8> {
     list
 }
 
-pub(crate) fn sync_state_token(mailboxes: &[JmapMailbox], emails: &[JmapEmail]) -> Vec<u8> {
+pub(crate) fn sync_state_token_with_attachments(
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    attachment_facts: &[MessageAttachmentSyncFacts],
+) -> Vec<u8> {
     let max_change = mailboxes
         .iter()
         .map(canonical_folder_change_number)
-        .chain(emails.iter().map(canonical_message_change_number))
+        .chain(emails.iter().map(|email| {
+            canonical_message_change_number_with_attachments(
+                email,
+                attachments_for_message(email.id, attachment_facts),
+            )
+        }))
         .max()
         .unwrap_or(1);
     let mut token = b"LPE-MAPI-SYNC-STATE\0".to_vec();
@@ -110,10 +155,11 @@ pub(crate) fn sync_state_token(mailboxes: &[JmapMailbox], emails: &[JmapEmail]) 
     token
 }
 
-pub(crate) fn sync_manifest_buffer(
+pub(crate) fn sync_manifest_buffer_with_attachments(
     folder_id: u64,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
+    attachment_facts: &[MessageAttachmentSyncFacts],
 ) -> Vec<u8> {
     let mut buffer = b"LPE-MAPI-SYNC\0".to_vec();
     buffer.extend_from_slice(&folder_id.to_le_bytes());
@@ -137,13 +183,39 @@ pub(crate) fn sync_manifest_buffer(
             .then(left.id.cmp(&right.id))
     });
     for email in messages {
-        let change_number = canonical_message_change_number(email);
+        let attachments = attachments_for_message(email.id, attachment_facts);
+        let change_number = canonical_message_change_number_with_attachments(email, attachments);
         let source_key = source_key_for_uuid(&email.id);
         write_prefixed_bytes(&mut buffer, &source_key);
         buffer.extend_from_slice(&change_number.to_le_bytes());
         write_prefixed_bytes(&mut buffer, email.subject.as_bytes());
+        buffer.extend_from_slice(&(attachments.len().min(u16::MAX as usize) as u16).to_le_bytes());
+        let mut attachments = attachments.iter().collect::<Vec<_>>();
+        attachments.sort_by(|left, right| {
+            left.file_name
+                .cmp(&right.file_name)
+                .then(left.media_type.cmp(&right.media_type))
+                .then(left.id.cmp(&right.id))
+        });
+        for attachment in attachments.into_iter().take(u16::MAX as usize) {
+            write_prefixed_bytes(&mut buffer, attachment.file_name.as_bytes());
+            write_prefixed_bytes(&mut buffer, attachment.media_type.as_bytes());
+            buffer.extend_from_slice(&attachment.size_octets.to_le_bytes());
+            write_prefixed_bytes(&mut buffer, attachment.file_reference.as_bytes());
+        }
     }
     buffer
+}
+
+fn attachments_for_message(
+    message_id: Uuid,
+    attachment_facts: &[MessageAttachmentSyncFacts],
+) -> &[AttachmentSyncFact] {
+    attachment_facts
+        .iter()
+        .find(|facts| facts.message_id == message_id)
+        .map(|facts| facts.attachments.as_slice())
+        .unwrap_or_default()
 }
 
 pub(crate) fn local_replica_id_range(
@@ -218,6 +290,54 @@ mod tests {
         assert!(source_key.starts_with(&STORE_REPLICA_GUID));
         assert!(change_key.starts_with(&STORE_REPLICA_GUID));
         assert_eq!(source_key, source_key_for_uuid(&id));
+    }
+
+    #[test]
+    fn attachment_facts_advance_message_change_without_bcc_leakage() {
+        let mut email = test_email();
+        email.has_attachments = true;
+        let baseline = canonical_message_change_number_with_attachments(
+            &email,
+            &[AttachmentSyncFact {
+                id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
+                file_reference: "attachment:one".to_string(),
+                file_name: "first.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                size_octets: 10,
+            }],
+        );
+
+        email.bcc.push(JmapEmailAddress {
+            address: "hidden@example.test".to_string(),
+            display_name: None,
+        });
+        assert_eq!(
+            canonical_message_change_number_with_attachments(
+                &email,
+                &[AttachmentSyncFact {
+                    id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
+                    file_reference: "attachment:one".to_string(),
+                    file_name: "first.pdf".to_string(),
+                    media_type: "application/pdf".to_string(),
+                    size_octets: 10,
+                }],
+            ),
+            baseline
+        );
+
+        assert_ne!(
+            canonical_message_change_number_with_attachments(
+                &email,
+                &[AttachmentSyncFact {
+                    id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
+                    file_reference: "attachment:one".to_string(),
+                    file_name: "renamed.pdf".to_string(),
+                    media_type: "application/pdf".to_string(),
+                    size_octets: 10,
+                }],
+            ),
+            baseline
+        );
     }
 
     fn test_email() -> JmapEmail {
