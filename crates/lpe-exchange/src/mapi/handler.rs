@@ -3367,18 +3367,17 @@ where
                     ));
                     continue;
                 };
-                let sync_emails = emails_for_folder(folder_id, mailboxes, emails)
-                    .into_iter()
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let state = mapi_mailstore::sync_state_token(mailboxes, &sync_emails);
+                let sync_type = request.sync_type();
+                let sync_mailboxes = sync_mailboxes_for(folder_id, sync_type, mailboxes);
+                let sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
+                let state = mapi_mailstore::sync_state_token(&sync_mailboxes, &sync_emails);
                 let transfer_buffer =
-                    mapi_mailstore::sync_manifest_buffer(folder_id, mailboxes, &sync_emails);
+                    mapi_mailstore::sync_manifest_buffer(folder_id, &sync_mailboxes, &sync_emails);
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
                     MapiObject::SynchronizationSource {
                         folder_id,
-                        sync_type: request.sync_type(),
+                        sync_type,
                         state,
                         state_upload_buffer: Vec::new(),
                         transfer_buffer,
@@ -3502,7 +3501,9 @@ where
                     continue;
                 };
                 let transfer_buffer = if state.is_empty() {
-                    mapi_mailstore::sync_state_token(mailboxes, emails)
+                    let sync_mailboxes = sync_mailboxes_for(folder_id, 0x01, mailboxes);
+                    let sync_emails = sync_emails_for(folder_id, 0x01, mailboxes, emails);
+                    mapi_mailstore::sync_state_token(&sync_mailboxes, &sync_emails)
                 } else {
                     state
                 };
@@ -6440,6 +6441,37 @@ fn emails_for_folder<'a>(
     emails
         .iter()
         .filter(|email| email_matches_folder(email, folder_id, mailboxes))
+        .collect()
+}
+
+fn sync_mailboxes_for(
+    folder_id: u64,
+    sync_type: u8,
+    mailboxes: &[JmapMailbox],
+) -> Vec<JmapMailbox> {
+    if sync_type == 0x02 && is_root_hierarchy_folder(folder_id) {
+        return mailboxes.to_vec();
+    }
+
+    folder_row_for_id(folder_id, mailboxes)
+        .cloned()
+        .into_iter()
+        .collect()
+}
+
+fn sync_emails_for(
+    folder_id: u64,
+    sync_type: u8,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+) -> Vec<JmapEmail> {
+    if sync_type == 0x02 {
+        return Vec::new();
+    }
+
+    emails_for_folder(folder_id, mailboxes, emails)
+        .into_iter()
+        .cloned()
         .collect()
 }
 

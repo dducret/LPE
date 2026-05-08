@@ -1495,6 +1495,18 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
+fn mapi_sync_manifest_counts(bytes: &[u8]) -> Option<(u32, u32)> {
+    let marker = b"LPE-MAPI-SYNC\0";
+    let start = bytes
+        .windows(marker.len())
+        .position(|window| window == marker)?;
+    let counts = bytes.get(start + marker.len() + 8..start + marker.len() + 16)?;
+    Some((
+        u32::from_le_bytes(counts[0..4].try_into().ok()?),
+        u32::from_le_bytes(counts[4..8].try_into().ok()?),
+    ))
+}
+
 fn utf16z(value: &str) -> Vec<u8> {
     let mut bytes = value
         .encode_utf16()
@@ -6429,6 +6441,86 @@ async fn mapi_over_http_sync_configure_returns_canonical_manifest_buffer() {
     assert!(contains_bytes(&response_rops, b"LPE-MAPI-SYNC\0"));
     assert!(contains_bytes(&response_rops, b"Sync manifest message"));
     assert!(!contains_bytes(&response_rops, b"hidden@example.test"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let sent_id = "22222222-2222-2222-2222-222222222222";
+    let mut inbox = FakeStore::mailbox(inbox_id, "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let mut sent = FakeStore::mailbox(sent_id, "sent", "Sent");
+    sent.total_emails = 1;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox, sent])),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(
+                "41414141-4141-4141-4141-414141414141",
+                inbox_id,
+                "inbox",
+                "Inbox scoped sync",
+            ),
+            FakeStore::email(
+                "42424242-4242-4242-4242-424242424242",
+                sent_id,
+                "sent",
+                "Sent scoped sync",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut content_rops = Vec::new();
+    append_rop_open_folder(&mut content_rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_sync_manifest_get_buffer(&mut content_rops, 1, 2, 4096);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let content_request = execute_body(&rop_buffer(&content_rops, &[1, u32::MAX, u32::MAX]));
+    let content_response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &content_request)
+        .await
+        .unwrap();
+    let content_rops = response_rops_from_execute_response(content_response).await;
+
+    assert_eq!(mapi_sync_manifest_counts(&content_rops), Some((1, 1)));
+    assert!(contains_bytes(&content_rops, b"Inbox scoped sync"));
+    assert!(!contains_bytes(&content_rops, b"Sent scoped sync"));
+
+    let mut hierarchy_rops = Vec::new();
+    append_rop_open_folder(&mut hierarchy_rops, 0, 1, test_mapi_folder_id(1));
+    hierarchy_rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x02, 0x00, 0x00, 0x00, // hierarchy sync
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
+    ]);
+    hierarchy_rops.extend_from_slice(&4096u16.to_le_bytes());
+    renew_mapi_request_id(&mut execute_headers);
+    let hierarchy_request = execute_body(&rop_buffer(&hierarchy_rops, &[1, u32::MAX, u32::MAX]));
+    let hierarchy_response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &hierarchy_request)
+        .await
+        .unwrap();
+    let hierarchy_rops = response_rops_from_execute_response(hierarchy_response).await;
+
+    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((2, 0)));
+    assert!(!contains_bytes(&hierarchy_rops, b"Inbox scoped sync"));
+    assert!(!contains_bytes(&hierarchy_rops, b"Sent scoped sync"));
 }
 
 #[tokio::test]
