@@ -1369,7 +1369,9 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
-            let settings = element_content(request, "OofSettings").unwrap_or(request);
+            let settings = element_content(request, "UserOofSettings")
+                .or_else(|| element_content(request, "OofSettings"))
+                .unwrap_or(request);
             let state =
                 element_text(settings, "OofState").unwrap_or_else(|| "Disabled".to_string());
             match state.trim().to_ascii_lowercase().as_str() {
@@ -1386,7 +1388,8 @@ where
                         )
                         .await?;
                 }
-                "enabled" => {
+                "enabled" | "scheduled" => {
+                    let state = parse_oof_state(&state)?;
                     let message = element_content(settings, "InternalReply")
                         .and_then(|reply| element_text(reply, "Message"))
                         .or_else(|| {
@@ -1397,11 +1400,25 @@ where
                     if message.trim().is_empty() {
                         bail!("OOF message is required when enabling OOF");
                     }
+                    let external_audience = normalize_oof_external_audience(
+                        &element_text(settings, "ExternalAudience")
+                            .unwrap_or_else(|| "All".to_string()),
+                    )?;
+                    let duration = match state {
+                        OofState::Scheduled => Some(parse_oof_duration(settings)?),
+                        OofState::Enabled => None,
+                        OofState::Disabled => unreachable!("disabled OOF is handled separately"),
+                    };
                     self.store
                         .put_sieve_script(
                             principal.account_id,
                             "ews-oof",
-                            &vacation_sieve_script(&message),
+                            &vacation_sieve_script(
+                                &message,
+                                state,
+                                external_audience,
+                                duration.as_ref(),
+                            ),
                             true,
                             AuditEntryInput {
                                 actor: principal.email.clone(),
@@ -1411,7 +1428,6 @@ where
                         )
                         .await?;
                 }
-                "scheduled" => bail!("scheduled OOF is not supported by the canonical Sieve MVP"),
                 other => bail!("unsupported OofState {other}"),
             }
             Ok(set_user_oof_settings_success_response())
@@ -1419,11 +1435,7 @@ where
         .await;
 
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
-            operation_error_response(
-                "SetUserOofSettings",
-                "ErrorInvalidOperation",
-                &error.to_string(),
-            )
+            set_user_oof_settings_error_response("ErrorInvalidOperation", &error.to_string())
         }))
     }
 
@@ -3007,17 +3019,44 @@ fn ews_task_status_to_canonical(value: &str) -> Result<&'static str> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OofState {
+    Disabled,
+    Enabled,
+    Scheduled,
+}
+
+impl OofState {
+    fn as_ews(self) -> &'static str {
+        match self {
+            OofState::Disabled => "Disabled",
+            OofState::Enabled => "Enabled",
+            OofState::Scheduled => "Scheduled",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct OofDuration {
+    start_time: String,
+    end_time: String,
+}
+
 #[derive(Debug, Clone)]
 struct OofProjection {
-    is_enabled: bool,
+    state: OofState,
+    external_audience: String,
     text_body: String,
+    duration: Option<OofDuration>,
 }
 
 impl OofProjection {
     fn disabled() -> Self {
         Self {
-            is_enabled: false,
+            state: OofState::Disabled,
+            external_audience: "None".to_string(),
             text_body: String::new(),
+            duration: None,
         }
     }
 }
@@ -3032,11 +3071,50 @@ fn oof_projection_from_script(content: Option<&str>) -> OofProjection {
     let Some(text_body) = find_vacation_reason(&script.statements) else {
         return OofProjection::disabled();
     };
+    let state = match oof_metadata_value(content, "State").as_deref() {
+        Some("Scheduled") => OofState::Scheduled,
+        Some("Enabled") | None => OofState::Enabled,
+        Some("Disabled") => return OofProjection::disabled(),
+        Some(_) => OofState::Enabled,
+    };
+    let external_audience = oof_metadata_value(content, "ExternalAudience")
+        .and_then(|value| {
+            normalize_oof_external_audience(&value)
+                .ok()
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "All".to_string());
+    let duration = if state == OofState::Scheduled {
+        match (
+            oof_metadata_value(content, "StartTime"),
+            oof_metadata_value(content, "EndTime"),
+        ) {
+            (Some(start_time), Some(end_time)) => Some(OofDuration {
+                start_time,
+                end_time,
+            }),
+            _ => None,
+        }
+    } else {
+        None
+    };
 
     OofProjection {
-        is_enabled: true,
+        state,
+        external_audience,
         text_body,
+        duration,
     }
+}
+
+fn oof_metadata_value(content: &str, name: &str) -> Option<String> {
+    let prefix = format!("# LPE-EWS-OOF-{name}:");
+    content.lines().find_map(|line| {
+        line.trim_start()
+            .strip_prefix(&prefix)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    })
 }
 
 fn find_vacation_reason(statements: &[Statement]) -> Option<String> {
@@ -3064,9 +3142,63 @@ fn find_vacation_reason(statements: &[Statement]) -> Option<String> {
     None
 }
 
-fn vacation_sieve_script(text_body: &str) -> String {
+fn parse_oof_state(value: &str) -> Result<OofState> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "disabled" => Ok(OofState::Disabled),
+        "enabled" => Ok(OofState::Enabled),
+        "scheduled" => Ok(OofState::Scheduled),
+        other => bail!("unsupported OofState {other}"),
+    }
+}
+
+fn parse_oof_duration(settings: &str) -> Result<OofDuration> {
+    let duration = element_content(settings, "Duration")
+        .ok_or_else(|| anyhow!("Duration is required when OofState is Scheduled"))?;
+    let start_time = element_text(duration, "StartTime")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("Duration StartTime is required when OofState is Scheduled"))?;
+    let end_time = element_text(duration, "EndTime")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("Duration EndTime is required when OofState is Scheduled"))?;
+    Ok(OofDuration {
+        start_time,
+        end_time,
+    })
+}
+
+fn normalize_oof_external_audience(value: &str) -> Result<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "" | "none" => Ok("None"),
+        "known" => Ok("Known"),
+        "all" => Ok("All"),
+        other => bail!("unsupported ExternalAudience {other}"),
+    }
+}
+
+fn vacation_sieve_script(
+    text_body: &str,
+    state: OofState,
+    external_audience: &str,
+    duration: Option<&OofDuration>,
+) -> String {
     let text_body = sieve_quote(text_body.trim());
-    format!("require [\"vacation\"];\r\nvacation :days 7 \"{text_body}\";\r\n")
+    let mut script = format!(
+        "# LPE-EWS-OOF-State: {}\r\n# LPE-EWS-OOF-ExternalAudience: {}\r\n",
+        state.as_ews(),
+        external_audience
+    );
+    if let Some(duration) = duration {
+        script.push_str(&format!(
+            "# LPE-EWS-OOF-StartTime: {}\r\n# LPE-EWS-OOF-EndTime: {}\r\n",
+            duration.start_time, duration.end_time
+        ));
+    }
+    script.push_str(&format!(
+        "require [\"vacation\"];\r\nvacation :days 7 \"{text_body}\";\r\n"
+    ));
+    script
 }
 
 fn sieve_quote(value: &str) -> String {
@@ -5411,12 +5543,22 @@ fn get_user_availability_error_response(message: &str) -> String {
 }
 
 fn get_user_oof_settings_response(projection: &OofProjection) -> String {
-    let state = if projection.is_enabled {
-        "Enabled"
+    let state = projection.state.as_ews();
+    let audience = &projection.external_audience;
+    let duration = if let Some(duration) = &projection.duration {
+        format!(
+            concat!(
+                "<t:Duration>",
+                "<t:StartTime>{start_time}</t:StartTime>",
+                "<t:EndTime>{end_time}</t:EndTime>",
+                "</t:Duration>"
+            ),
+            start_time = escape_xml(&duration.start_time),
+            end_time = escape_xml(&duration.end_time),
+        )
     } else {
-        "Disabled"
+        String::new()
     };
-    let audience = if projection.is_enabled { "All" } else { "None" };
     let message = escape_xml(&projection.text_body);
     format!(
         concat!(
@@ -5427,6 +5569,7 @@ fn get_user_oof_settings_response(projection: &OofProjection) -> String {
             "<t:OofSettings>",
             "<t:OofState>{state}</t:OofState>",
             "<t:ExternalAudience>{audience}</t:ExternalAudience>",
+            "{duration}",
             "<t:InternalReply><t:Message>{message}</t:Message></t:InternalReply>",
             "<t:ExternalReply><t:Message>{message}</t:Message></t:ExternalReply>",
             "</t:OofSettings>",
@@ -5435,6 +5578,7 @@ fn get_user_oof_settings_response(projection: &OofProjection) -> String {
         ),
         state = state,
         audience = audience,
+        duration = duration,
         message = message,
     )
 }
@@ -5448,6 +5592,22 @@ fn set_user_oof_settings_success_response() -> String {
         "</m:SetUserOofSettingsResponse>"
     )
     .to_string()
+}
+
+fn set_user_oof_settings_error_response(code: &str, message: &str) -> String {
+    format!(
+        concat!(
+            "<m:SetUserOofSettingsResponse>",
+            "<m:ResponseMessage ResponseClass=\"Error\">",
+            "<m:MessageText>{message}</m:MessageText>",
+            "<m:ResponseCode>{code}</m:ResponseCode>",
+            "<m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>",
+            "</m:ResponseMessage>",
+            "</m:SetUserOofSettingsResponse>"
+        ),
+        code = escape_xml(code),
+        message = escape_xml(message),
+    )
 }
 
 fn unsupported_operation_response(operation: &str) -> String {

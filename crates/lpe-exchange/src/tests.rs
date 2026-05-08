@@ -10554,9 +10554,76 @@ async fn set_user_oof_settings_writes_canonical_sieve_vacation() {
 
     let body = response_text(response).await;
     assert!(body.contains("<m:SetUserOofSettingsResponse>"));
+    assert!(body.contains("<m:ResponseMessage ResponseClass=\"Success\">"));
+    assert!(!body.contains("<m:ResponseMessages>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     let script = active_sieve_script.lock().unwrap().clone().unwrap();
     assert!(script.contains("vacation :days 7 \"Back next week\";"));
+}
+
+#[tokio::test]
+async fn set_user_oof_settings_scheduled_round_trips_canonical_sieve_metadata() {
+    let active_sieve_script = Arc::new(Mutex::new(None));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        active_sieve_script: active_sieve_script.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:SetUserOofSettingsRequest>
+                  <t:Mailbox><t:Address>alice@example.test</t:Address></t:Mailbox>
+                  <t:UserOofSettings>
+                    <t:OofState>Scheduled</t:OofState>
+                    <t:ExternalAudience>Known</t:ExternalAudience>
+                    <t:Duration>
+                      <t:StartTime>2026-05-15T00:00:00</t:StartTime>
+                      <t:EndTime>2026-05-17T00:00:00</t:EndTime>
+                    </t:Duration>
+                    <t:InternalReply><t:Message>Back Monday</t:Message></t:InternalReply>
+                    <t:ExternalReply><t:Message>Back Monday external</t:Message></t:ExternalReply>
+                  </t:UserOofSettings>
+                </m:SetUserOofSettingsRequest>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SetUserOofSettingsResponse>"));
+    assert!(body.contains("<m:ResponseMessage ResponseClass=\"Success\">"));
+    assert!(!body.contains("<m:ResponseMessages>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    let script = active_sieve_script.lock().unwrap().clone().unwrap();
+    assert!(script.contains("# LPE-EWS-OOF-State: Scheduled"));
+    assert!(script.contains("# LPE-EWS-OOF-ExternalAudience: Known"));
+    assert!(script.contains("# LPE-EWS-OOF-StartTime: 2026-05-15T00:00:00"));
+    assert!(script.contains("# LPE-EWS-OOF-EndTime: 2026-05-17T00:00:00"));
+    assert!(script.contains("vacation :days 7 \"Back Monday\";"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetUserOofSettingsRequest /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:OofState>Scheduled</t:OofState>"));
+    assert!(body.contains("<t:ExternalAudience>Known</t:ExternalAudience>"));
+    assert!(body.contains("<t:Duration>"));
+    assert!(body.contains("<t:StartTime>2026-05-15T00:00:00</t:StartTime>"));
+    assert!(body.contains("<t:EndTime>2026-05-17T00:00:00</t:EndTime>"));
+    assert!(body.contains("<t:InternalReply><t:Message>Back Monday</t:Message>"));
 }
 
 #[tokio::test]
@@ -10583,6 +10650,41 @@ async fn set_user_oof_settings_disables_active_sieve_script() {
     assert!(body.contains("<m:SetUserOofSettingsResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(active_sieve_script.lock().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn set_user_oof_settings_errors_use_single_response_message_shape() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:SetUserOofSettingsRequest>
+                  <t:UserOofSettings>
+                    <t:OofState>Scheduled</t:OofState>
+                    <t:InternalReply><t:Message>Back Monday</t:Message></t:InternalReply>
+                  </t:UserOofSettings>
+                </m:SetUserOofSettingsRequest>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SetUserOofSettingsResponse>"));
+    assert!(body.contains("<m:ResponseMessage ResponseClass=\"Error\">"));
+    assert!(!body.contains("<m:ResponseMessages>"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("Duration is required when OofState is Scheduled"));
 }
 
 #[tokio::test]
