@@ -726,7 +726,7 @@ where
                     parse_rpc_proxy_out_data_connect_request(method, headers, request_body)
                 {
                     if is_rpc_proxy_endpoint_ping(uri) {
-                        rpc_proxy_mailstore_ping_response(uri, connect.receive_window_size)
+                        rpc_proxy_mailstore_ping_response_for_connect(uri, connect)
                     } else {
                         rpc_proxy_rts_connect_response(connect.receive_window_size)
                     }
@@ -6291,6 +6291,13 @@ fn is_rpc_proxy_msrpc_request(headers: &HeaderMap) -> bool {
 #[derive(Debug, Clone, Copy)]
 struct RpcProxyOutDataConnect {
     receive_window_size: u32,
+    virtual_connection_cookie: [u8; 16],
+}
+
+#[derive(Debug)]
+struct RpcProxyInChannelResponse {
+    bytes: Vec<u8>,
+    virtual_connection_cookie: Option<[u8; 16]>,
 }
 
 fn parse_rpc_proxy_out_data_connect_request(
@@ -6323,11 +6330,12 @@ fn parse_rpc_proxy_conn_a1_rts_pdu(body: &[u8]) -> Option<RpcProxyOutDataConnect
     if version == 0 {
         return None;
     }
-    parse_rpc_rts_cookie_command(body, &mut offset, 3)?;
+    let virtual_connection_cookie = parse_rpc_rts_cookie_command(body, &mut offset, 3)?;
     parse_rpc_rts_cookie_command(body, &mut offset, 3)?;
     let receive_window_size = parse_rpc_rts_u32_command(body, &mut offset, 0)?;
     (offset == body.len()).then_some(RpcProxyOutDataConnect {
         receive_window_size,
+        virtual_connection_cookie,
     })
 }
 
@@ -6391,46 +6399,43 @@ fn rpc_proxy_connection_established_pdu(receive_window_size: u32) -> Vec<u8> {
     body
 }
 
-fn rpc_proxy_conn_b1_response_body(request: &[u8]) -> Option<Vec<u8>> {
-    if !is_rpc_proxy_conn_b1_rts_pdu(request) {
-        return None;
-    }
-    Some(rpc_proxy_connection_established_pdu(
-        RPC_PROXY_RECEIVE_WINDOW_SIZE,
-    ))
+fn rpc_proxy_conn_b1_response_body(request: &[u8]) -> Option<RpcProxyInChannelResponse> {
+    let virtual_connection_cookie = rpc_proxy_conn_b1_virtual_connection_cookie(request)?;
+    Some(RpcProxyInChannelResponse {
+        bytes: rpc_proxy_connection_established_pdu(RPC_PROXY_RECEIVE_WINDOW_SIZE),
+        virtual_connection_cookie: Some(virtual_connection_cookie),
+    })
 }
 
-fn is_rpc_proxy_conn_b1_rts_pdu(body: &[u8]) -> bool {
+fn rpc_proxy_conn_b1_virtual_connection_cookie(body: &[u8]) -> Option<[u8; 16]> {
     if body.len() < 104 || body.get(0..4) != Some(&[0x05, 0x00, 0x14, 0x03]) {
-        return false;
+        return None;
     }
     let fragment_length = u16::from_le_bytes([body[8], body[9]]) as usize;
     let flags = u16::from_le_bytes([body[16], body[17]]);
     let command_count = u16::from_le_bytes([body[18], body[19]]);
     if fragment_length != body.len() || flags != 0 || command_count != 6 {
-        return false;
+        return None;
     }
 
     let mut offset = 20;
     if parse_rpc_rts_u32_command(body, &mut offset, 6) != Some(1) {
-        return false;
+        return None;
     }
+    let virtual_connection_cookie = parse_rpc_rts_cookie_command(body, &mut offset, 3)?;
     if parse_rpc_rts_cookie_command(body, &mut offset, 3).is_none() {
-        return false;
-    }
-    if parse_rpc_rts_cookie_command(body, &mut offset, 3).is_none() {
-        return false;
+        return None;
     }
     if parse_rpc_rts_u32_command(body, &mut offset, 4).is_none() {
-        return false;
+        return None;
     }
     if parse_rpc_rts_u32_command(body, &mut offset, 5).is_none() {
-        return false;
+        return None;
     }
     if parse_rpc_rts_cookie_command(body, &mut offset, 12).is_none() {
-        return false;
+        return None;
     }
-    offset == body.len()
+    (offset == body.len()).then_some(virtual_connection_cookie)
 }
 
 fn rpc_proxy_rts_header(flags: u16, command_count: u16, fragment_length: u16) -> Vec<u8> {
@@ -6451,8 +6456,17 @@ fn rpc_proxy_rts_connect_response(client_receive_window_size: u32) -> Response {
     )
 }
 
-fn rpc_proxy_mailstore_ping_response(uri: &Uri, client_receive_window_size: u32) -> Response {
-    let mut body = rpc_proxy_rts_connect_body(client_receive_window_size);
+fn rpc_proxy_mailstore_ping_response_for_connect(
+    uri: &Uri,
+    connect: RpcProxyOutDataConnect,
+) -> Response {
+    let mut body = rpc_proxy_rts_connect_body(connect.receive_window_size);
+    if let Some(query) = uri.query() {
+        body.extend(consume_pending_rpc_proxy_out_channel_responses(
+            query,
+            Some(connect.virtual_connection_cookie),
+        ));
+    }
     if let Some(query) = uri.query().filter(|query| query.contains(":6001")) {
         body.extend_from_slice(&rpc_proxy_dce_bind_ack_body_with_result_count(1, 1));
         mark_rpc_proxy_out_endpoint_bind_ack(query);
@@ -6631,8 +6645,6 @@ fn rpc_proxy_mailstore_held_open_response(uri: &Uri, body: Vec<u8>) -> Response 
         return rpc_proxy_binary_response(body, RPC_PROXY_ENDPOINT_PING_STATUS);
     }
 
-    let mut body = body;
-    body.extend(consume_pending_rpc_proxy_out_channel_responses(query));
     let payload_bytes = body.len();
     let payload_preview_hex = mapi::debug_payload_preview_hex(&body);
     let query = query.to_string();
@@ -6682,41 +6694,58 @@ fn send_rpc_proxy_out_channel(query: &str, bytes: Vec<u8>) -> bool {
     false
 }
 
-fn queue_pending_rpc_proxy_out_channel_response(query: &str, bytes: Vec<u8>) {
+fn queue_pending_rpc_proxy_out_channel_response(
+    query: &str,
+    virtual_connection_cookie: [u8; 16],
+    bytes: Vec<u8>,
+) {
     let now = Instant::now();
     let ttl = Duration::from_millis(rpc_proxy_channel_hold_ms());
     let mut pending = pending_rpc_proxy_out_channel_responses()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     pending.retain(|_, entries| {
-        entries.retain(|(first_seen, _)| now.duration_since(*first_seen) <= ttl);
+        entries.retain(|(first_seen, _, _)| now.duration_since(*first_seen) <= ttl);
         !entries.is_empty()
     });
     let entries = pending.entry(query.to_string()).or_default();
     if entries.len() < 8 {
-        entries.push((now, bytes));
+        entries.push((now, virtual_connection_cookie, bytes));
     }
 }
 
-fn consume_pending_rpc_proxy_out_channel_responses(query: &str) -> Vec<u8> {
+fn consume_pending_rpc_proxy_out_channel_responses(
+    query: &str,
+    virtual_connection_cookie: Option<[u8; 16]>,
+) -> Vec<u8> {
     let now = Instant::now();
     let ttl = Duration::from_millis(rpc_proxy_channel_hold_ms());
     let mut pending = pending_rpc_proxy_out_channel_responses()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let Some(entries) = pending.remove(query) else {
+    let Some(entries) = pending.get_mut(query) else {
         return Vec::new();
     };
-    entries
-        .into_iter()
-        .filter(|(first_seen, _)| now.duration_since(*first_seen) <= ttl)
-        .flat_map(|(_, bytes)| bytes)
-        .collect()
+    let mut matched = Vec::new();
+    entries.retain(|(first_seen, cookie, bytes)| {
+        let fresh = now.duration_since(*first_seen) <= ttl;
+        if fresh && virtual_connection_cookie.is_some_and(|expected| expected == *cookie) {
+            matched.extend_from_slice(bytes);
+            false
+        } else {
+            fresh
+        }
+    });
+    if entries.is_empty() {
+        pending.remove(query);
+    }
+    matched
 }
 
 fn pending_rpc_proxy_out_channel_responses(
-) -> &'static Mutex<HashMap<String, Vec<(Instant, Vec<u8>)>>> {
-    static PENDING: OnceLock<Mutex<HashMap<String, Vec<(Instant, Vec<u8>)>>>> = OnceLock::new();
+) -> &'static Mutex<HashMap<String, Vec<(Instant, [u8; 16], Vec<u8>)>>> {
+    static PENDING: OnceLock<Mutex<HashMap<String, Vec<(Instant, [u8; 16], Vec<u8>)>>>> =
+        OnceLock::new();
     PENDING.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -6916,7 +6945,7 @@ fn spawn_rpc_proxy_in_data_drain<S, V>(
                     let request_body_preview_hex = mapi::debug_payload_preview_hex(bytes.as_ref());
                     pdu_buffer.extend_from_slice(bytes.as_ref());
                     while let Some(response) =
-                        rpc_proxy_in_channel_response_for_endpoint_query_with_store(
+                        rpc_proxy_in_channel_response_for_endpoint_query_with_store_response(
                             &store,
                             &validator,
                             &principal,
@@ -6925,12 +6954,20 @@ fn spawn_rpc_proxy_in_data_drain<S, V>(
                         )
                         .await
                     {
-                        let response_payload_bytes = response.len();
+                        let response_payload_bytes = response.bytes.len();
                         let response_payload_preview_hex =
-                            mapi::debug_payload_preview_hex(&response);
-                        let forwarded = send_rpc_proxy_out_channel(&query, response.clone());
+                            mapi::debug_payload_preview_hex(&response.bytes);
+                        let forwarded = send_rpc_proxy_out_channel(&query, response.bytes.clone());
                         if !forwarded {
-                            queue_pending_rpc_proxy_out_channel_response(&query, response);
+                            if let Some(virtual_connection_cookie) =
+                                response.virtual_connection_cookie
+                            {
+                                queue_pending_rpc_proxy_out_channel_response(
+                                    &query,
+                                    virtual_connection_cookie,
+                                    response.bytes,
+                                );
+                            }
                         }
                         info!(
                             rca_debug = true,
@@ -7047,8 +7084,11 @@ pub(crate) fn rpc_proxy_in_channel_response_for_endpoint_query(
         }
 
         let fragment = &buffer[offset..fragment_end];
-        let response = rpc_proxy_conn_b1_response_body(fragment)
-            .or_else(|| rpc_proxy_endpoint_response_for_fragment(endpoint_query, fragment));
+        if let Some(response) = rpc_proxy_conn_b1_response_body(fragment) {
+            buffer.drain(..fragment_end);
+            return Some(response.bytes);
+        }
+        let response = rpc_proxy_endpoint_response_for_fragment(endpoint_query, fragment);
         if let Some(response) = response {
             buffer.drain(..fragment_end);
             return Some(response);
@@ -7062,6 +7102,7 @@ pub(crate) fn rpc_proxy_in_channel_response_for_endpoint_query(
     None
 }
 
+#[cfg(test)]
 pub(crate) async fn rpc_proxy_in_channel_response_for_endpoint_query_with_store<S, V>(
     store: &S,
     validator: &Validator<V>,
@@ -7069,6 +7110,28 @@ pub(crate) async fn rpc_proxy_in_channel_response_for_endpoint_query_with_store<
     endpoint_query: &str,
     buffer: &mut Vec<u8>,
 ) -> Option<Vec<u8>>
+where
+    S: ExchangeStore,
+    V: Detector,
+{
+    rpc_proxy_in_channel_response_for_endpoint_query_with_store_response(
+        store,
+        validator,
+        principal,
+        endpoint_query,
+        buffer,
+    )
+    .await
+    .map(|response| response.bytes)
+}
+
+async fn rpc_proxy_in_channel_response_for_endpoint_query_with_store_response<S, V>(
+    store: &S,
+    validator: &Validator<V>,
+    principal: &AccountPrincipal,
+    endpoint_query: &str,
+    buffer: &mut Vec<u8>,
+) -> Option<RpcProxyInChannelResponse>
 where
     S: ExchangeStore,
     V: Detector,
@@ -7106,6 +7169,10 @@ where
                 fragment,
             )
             .await
+            .map(|bytes| RpcProxyInChannelResponse {
+                bytes,
+                virtual_connection_cookie: None,
+            })
         };
         if let Some(response) = response {
             buffer.drain(..fragment_end);
