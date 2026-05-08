@@ -150,6 +150,7 @@ async fn post_handler(
                 &response,
                 started_at.elapsed().as_secs_f64() * 1000.0,
                 Some(error.to_string().as_str()),
+                ews_response_debug_detail(&response),
             );
             return response;
         }
@@ -163,6 +164,7 @@ async fn post_handler(
         &response,
         started_at.elapsed().as_secs_f64() * 1000.0,
         None,
+        ews_response_debug_detail(&response),
     );
     response
 }
@@ -307,6 +309,7 @@ fn log_ews_connection(
     response: &Response,
     duration_ms: f64,
     error: Option<&str>,
+    debug_detail: Option<&str>,
 ) {
     let status = response.status().as_u16();
     let trace_id = mapi::safe_header(headers, "x-trace-id").unwrap_or_default();
@@ -330,6 +333,7 @@ fn log_ews_connection(
             client_application = %client_application,
             http_status = status,
             request_body_bytes,
+            ews_debug_detail = %debug_detail.unwrap_or_default(),
             duration_ms,
             user_agent = %user_agent,
             "{message}"
@@ -348,6 +352,7 @@ fn log_ews_connection(
             client_application = %client_application,
             http_status = status,
             request_body_bytes,
+            ews_debug_detail = %debug_detail.unwrap_or_default(),
             duration_ms,
             user_agent = %user_agent,
             error = %error.unwrap_or_default(),
@@ -359,6 +364,7 @@ fn log_ews_connection(
 #[derive(Clone, Debug)]
 struct EwsResponseDebug {
     response_code: String,
+    detail: String,
 }
 
 fn ews_response_code(response: &Response) -> Option<&str> {
@@ -366,6 +372,42 @@ fn ews_response_code(response: &Response) -> Option<&str> {
         .extensions()
         .get::<EwsResponseDebug>()
         .map(|debug| debug.response_code.as_str())
+}
+
+fn ews_response_debug_detail(response: &Response) -> Option<&str> {
+    response
+        .extensions()
+        .get::<EwsResponseDebug>()
+        .map(|debug| debug.detail.as_str())
+        .filter(|detail| !detail.is_empty())
+}
+
+fn ews_payload_debug_detail(operation: &str, payload: &str) -> String {
+    match operation {
+        "CreateItem" => {
+            let item_id = attribute_values_for_tag(payload, "ItemId", "Id")
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+            let parent_folder_id = attribute_values_for_tag(payload, "ParentFolderId", "Id")
+                .into_iter()
+                .next()
+                .unwrap_or_default();
+            if item_id.is_empty() && parent_folder_id.is_empty() {
+                String::new()
+            } else {
+                format!("created_item_id={item_id};parent_folder_id={parent_folder_id}")
+            }
+        }
+        "SyncFolderItems" => {
+            let sync_state = element_text(payload, "SyncState").unwrap_or_default();
+            let creates = count_tag_occurrences(payload, "<t:Create>");
+            let updates = count_tag_occurrences(payload, "<t:Update>");
+            let deletes = count_tag_occurrences(payload, "<t:Delete>");
+            format!("sync_state={sync_state};creates={creates};updates={updates};deletes={deletes}")
+        }
+        _ => String::new(),
+    }
 }
 
 fn log_mapi_transport_connection(
@@ -591,10 +633,12 @@ where
         };
 
         let response_code = element_text(&payload, "ResponseCode").unwrap_or_default();
+        let detail = ews_payload_debug_detail(&operation, &payload);
         let mut response = soap_response(payload);
-        response
-            .extensions_mut()
-            .insert(EwsResponseDebug { response_code });
+        response.extensions_mut().insert(EwsResponseDebug {
+            response_code,
+            detail,
+        });
         Ok(response)
     }
 
