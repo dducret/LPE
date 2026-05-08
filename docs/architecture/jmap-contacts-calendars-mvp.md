@@ -1,150 +1,50 @@
-# JMAP Contacts and Calendars MVP
+# JMAP Contacts and Calendars
 
-### Objective
+## Current State/Functionality Overview
 
-This document describes the `JMAP Contacts` and `JMAP Calendars` scope currently supported by `LPE` for the MVP.
+`lpe-jmap` exposes contacts and calendars over canonical `contacts` and `calendar_events`. It uses mailbox authentication and does not introduce JMAP-specific collaboration storage.
 
-The `crates/lpe-jmap` crate acts as a `JMAP` adapter on top of the canonical models already exposed through `lpe-storage`, `CardDAV`, `CalDAV`, and `ActiveSync`. It does not introduce any parallel storage, rights, or business logic for contacts and calendars.
+## Implementation/Usage
 
-### Architectural principles
+- Endpoints:
+  - `GET /api/jmap/session`
+  - `POST /api/jmap/api`
+- Authentication:
+  - mailbox login through `/api/mail/auth/login`
+  - JMAP requests scoped to the authenticated account
+- Session capabilities:
+  - contacts capability
+  - calendars capability
+  - core JMAP capability
+- Supported methods:
+  - `AddressBook/get`
+  - `ContactCard/get`
+  - `ContactCard/set`
+  - `ContactCard/changes`
+  - `ContactCard/query`
+  - `ContactCard/queryChanges`
+  - `Calendar/get`
+  - `CalendarEvent/get`
+  - `CalendarEvent/set`
+  - `CalendarEvent/changes`
+  - `CalendarEvent/query`
+  - `CalendarEvent/queryChanges`
+- Mapping:
+  - one canonical `default` address book per account
+  - one canonical `default` calendar per account
+  - contacts map to canonical `contacts`
+  - events map to canonical `calendar_events`
+- Rules:
+  - rights are bounded by authenticated account and canonical grants
+  - no JMAP-only collection store
+  - no protocol-local sharing model
+  - query/change behavior uses canonical timestamps and state
 
-- `JMAP` remains the primary modern axis for collaboration data
-- `contacts` remains the source of truth for contact cards
-- `calendar_events` remains the source of truth for calendar events
-- `CardDAV`, `CalDAV`, `ActiveSync`, and `JMAP` converge on the same canonical objects
-- rights are derived from the canonical same-tenant grant model; there is no `JMAP`-specific sharing or delegation model
-- no `Stalwart` code is reused
+## Reference Table/List
 
-### Authentication
-
-- the `JMAP` client reuses the existing mailbox-account authentication
-- login remains `/api/mail/auth/login`
-- the existing account bearer token must then be sent to `/api/jmap/session` and `/api/jmap/api`
-- without the Debian reverse proxy, the same routes are exposed directly as `/jmap/session` and `/jmap/api`
-- the Debian reverse proxy sets `X-Forwarded-Prefix: /api/jmap` so the shared `Session` document advertises public `/api/jmap/*` URLs
-
-### Supported session capabilities
-
-- `urn:ietf:params:jmap:core`
-- `urn:ietf:params:jmap:contacts`
-- `urn:ietf:params:jmap:calendars`
-
-The `JMAP` session exposes the authenticated mailbox account as the primary account and may expose additional accessible shared mailbox accounts in the session account map. Address books and calendars are exposed as stable canonical collections inside the same tenant, with owned and shared access resolved from the same underlying collection rights.
-
-For the current `JMAP` finalization milestone, Contacts and simple Calendar events are in the primary interoperability scope alongside Mail. Complex scheduling, cross-account data movement, and durable search/query-history behavior remain next-release work.
-
-### Supported methods
-
-Contacts:
-
-- `AddressBook/get`
-- `AddressBook/query`
-- `AddressBook/queryChanges`
-- `AddressBook/changes`
-- `ContactCard/get`
-- `ContactCard/query`
-- `ContactCard/queryChanges`
-- `ContactCard/changes`
-- `ContactCard/set`
-
-Calendars:
-
-- `Calendar/get`
-- `Calendar/query`
-- `Calendar/queryChanges`
-- `Calendar/changes`
-- `CalendarEvent/get`
-- `CalendarEvent/query`
-- `CalendarEvent/queryChanges`
-- `CalendarEvent/changes`
-- `CalendarEvent/set`
-
-### MVP mapping
-
-#### Address book
-
-- the owner sees its canonical `default` address book
-- extra shared address books may be exposed for same-tenant grants
-- `myRights` advertises read, write, delete, and share access according to the resolved canonical grant
-- `mayCreateTopLevel` remains `false`
-
-#### ContactCard
-
-The `JMAP` to `contacts` mapping is:
-
-- `id` and `uid` -> `contacts.id`
-- `name.full` -> `contacts.name`
-- `titles.*.name` -> `contacts.role`
-- `emails.*.address` -> `contacts.email`
-- `phones.*.number` -> `contacts.phone`
-- `organizations.*.name` -> `contacts.team`
-- `notes.*.note` -> `contacts.notes`
-- `addressBookIds.{collectionId}` -> an owned or shared canonical collection resolved through the canonical ACL model
-
-#### Calendar
-
-- the owner sees its canonical `default` calendar
-- extra shared calendars may be exposed for same-tenant grants
-- `myRights` advertises read, write, delete, and share access according to the resolved canonical grant
-- `mayCreateTopLevel` remains `false`
-
-#### CalendarEvent
-
-The `JMAP` to `calendar_events` mapping is:
-
-- `id` and `uid` -> `calendar_events.id`
-- `title` -> `calendar_events.title`
-- `start` (`YYYY-MM-DDTHH:MM:SS`) -> `calendar_events.date` + `calendar_events.time`
-- `locations.*.name` -> `calendar_events.location`
-- `participants` -> canonical structured participant metadata stored in `calendar_events.attendees_json`, with attendee labels mirrored into `calendar_events.attendees`
-- `description` -> `calendar_events.notes`
-- `calendarIds.{collectionId}` -> an owned or shared canonical collection resolved through the canonical ACL model
-
-Organizer and participant status are exposed through `participants`:
-
-- one participant with `roles.owner=true` is treated as the canonical organizer for the event
-- attendee participants keep their `participationStatus` and `expectReply` flags in the canonical event metadata
-- attendee labels remain mirrored into `calendar_events.attendees` so older filters and compatibility fallbacks keep working
-
-### Important MVP rules
-
-- `ContactCard/set` directly creates, replaces, or deletes canonical `contacts` rows
-- `CalendarEvent/set` directly creates, replaces, or deletes canonical `calendar_events` rows
-- `JMAP` reads use the same canonical objects as `CardDAV`, `CalDAV`, and `ActiveSync`
-- organizer and attendee status updates are stored only in canonical `calendar_events` metadata; there is no `JMAP`-only scheduling state
-- the owner keeps full rights on its `default` canonical collection
-- an account in the same tenant may read or mutate a shared collection only through a canonical grant
-- cross-tenant access is not supported
-- rights changes are minimally audited through `audit_events`
-- `changes` uses the shared opaque canonical projection state-token path; `AddressBook/queryChanges`, `Calendar/queryChanges`, `ContactCard/queryChanges`, and `CalendarEvent/queryChanges` use stateless ordered-result snapshots so clients can reconcile creates, deletes, and supported-order reorders without a protocol-local sync store
-- address book, contact, calendar, and event query snapshots use deterministic canonical-id tie-breakers for equal visible sort keys so backend row-order changes do not create false `queryChanges` reorders
-- `AddressBook/get`, `ContactCard/get`, `Calendar/get`, and `CalendarEvent/get` distinguish omitted or `null` `ids` from an explicit empty `ids: []`; explicit empty selections return empty `list` and `notFound` arrays
-
-### Accepted MVP limitations
-
-- an owning account always has a durable `default` canonical collection; extra shared collections may also be exposed
-- ACLs remain at the implicit collection level; there is no per-contact or per-event ACL yet
-- sharing and delegation remain limited to the same tenant
-- `ContactCard/query` and `ContactCard/queryChanges` support only ascending `name` sort and simple text filtering, with `inAddressBook` limited to one target collection
-- supported contact and calendar `query` methods honor RFC `position`, negative `position`, `anchor`, and `anchorOffset` windowing; missing anchors return method-level `anchorNotFound` errors
-- JMAP request result references are resolved for top-level argument properties, including `#ids` links from `ContactCard/query` or `CalendarEvent/query` responses to following `get` calls, without creating adapter-local state
-- `CalendarEvent/query` and `CalendarEvent/queryChanges` support only ascending `start` sort and the `inCalendar`, `text`, `after`, and `before` filters
-- `ContactCard/set` supports only `kind=individual`
-- `CalendarEvent/set` supports only `@type=Event`
-- `CalendarEvent/set` accepts only `duration=PT0S`
-- `timeZone` must be `null` or absent
-- `ContactCard/set` and `CalendarEvent/set` support bounded JMAP property patches for the implemented simple contact and event fields by merging patches onto the current canonical projection before writing through canonical storage
-- calendar participants are still mirrored as text for legacy fallback, but the canonical event metadata now stores one organizer plus attendee status and RSVP intent for interoperable adapters
-- no recurrence, alarms, free/busy, calendar attachments, or extended `VCARD` or `VCALENDAR` semantics
-- `AddressBook` and `Calendar` objects represent durable canonical collections and cannot be modified through `set` in the MVP
-- no user-specific renaming of shared collections
-- no fine-grained ACL history; rights-change notifications are bounded to principal-scoped `JMAP` push recomputation from the canonical collaboration change channel rather than a separate contacts/calendar event store
-
-### Consistency with other adapters
-
-- `CardDAV` and `CalDAV` remain DAV compatibility layers over the same canonical tables
-- `ActiveSync` remains the native Outlook/mobile layer over the same canonical tables
-- `JMAP Contacts` and `JMAP Calendars` become the primary modern access path over those same models
-- mailbox delegation and sender authorization for `JMAP Mail` also reuse the same canonical mailbox-access and canonical submission model; there is no `JMAP`-specific shared-mailbox or sender-right state
-
-
+| JMAP object | Canonical source |
+| --- | --- |
+| `AddressBook` | canonical default address book |
+| `ContactCard` | `contacts` |
+| `Calendar` | canonical default calendar |
+| `CalendarEvent` | `calendar_events` |

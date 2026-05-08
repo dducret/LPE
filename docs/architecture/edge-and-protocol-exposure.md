@@ -1,179 +1,58 @@
 # Edge and Protocol Exposure
 
-### Goal
+## Current State/Functionality Overview
 
-This document describes the boundary between `LPE` and `LPE-CT` for network exposure, protocol publication, and internal transport.
+`LPE-CT` is the public edge and DMZ sorting center; the core `LPE` service is not directly Internet-facing. Client-facing protocols must route through exposed edge paths and converge on canonical `LPE` state.
 
-### Core rule
+## Implementation/Usage
 
-`LPE-CT` is the unique external exposure point.
+- Public edge responsibilities:
+  - Internet `SMTP` ingress
+  - outbound relay
+  - authenticated client submission where deployed
+  - quarantine
+  - perimeter filtering
+  - public HTTPS/WSS proxying
+  - traceability
+- Core `LPE` responsibilities:
+  - mailboxes
+  - contacts
+  - calendars
+  - tasks
+  - rights
+  - canonical `Sent`
+  - user-visible state
+- `LPE` must not expose Internet-facing `SMTP`.
+- `LPE-CT` must not store canonical mailbox, collaboration, rights, or user-visible state.
+- Public HTTPS routes may include:
+  - `/api/mail/auth/login`
+  - `/api/jmap/session`
+  - `/api/jmap/api`
+  - `/api/jmap/upload/{accountId}`
+  - `/api/jmap/download/{accountId}/{blobId}/{name}`
+  - `/api/jmap/ws`
+  - `/api/jmap/events`
+  - `/Microsoft-Server-ActiveSync`
+  - `/EWS/Exchange.asmx`
+  - `/mapi/`
+  - `/rpc/rpcproxy.dll`
+- Internal routes:
+  - `/api/v1/integration/outbound-messages`
+  - `/internal/lpe-ct/inbound-deliveries`
+  - `/internal/lpe-ct/recipient-verification`
+  - `/internal/lpe-ct/submission-auth`
+  - `/internal/lpe-ct/submissions`
+- Edge publication is separate from protocol implementation.
+- Autodiscovery must publish only implemented and exposed endpoints.
 
-The core `LPE` server must not be directly reachable from the public Internet and does not need to be exposed for the target architecture to work.
+## Reference Table/List
 
-### Baseline external exposure
-
-`LPE-CT` publishes:
-
-- inbound `SMTP` on port `25`, with `STARTTLS` advertised only when an active
-  public certificate and private-key profile is configured in the `LPE-CT`
-  management console under `System Setup -> Mail relay -> SMTP Settings`
-- authenticated client `SMTP` submission on implicit `TLS` port `465` when configured
-- the `LPE` web client and `LPE-CT` management publication over `HTTPS` on `443`
-- plain `HTTP` on port `80` only as a redirect to the `HTTPS` edge; port `80`
-  must not be configured as the `HTTPS` listener
-- `ActiveSync` over `HTTPS` under `/Microsoft-Server-ActiveSync`
-- `EWS` over `HTTPS` under `/EWS/Exchange.asmx` and `/ews/exchange.asmx`
-- guarded `MAPI over HTTP` over `HTTPS` under `/mapi/`
-- the bounded RPC proxy authentication shim under `/rpc/rpcproxy.dll` for
-  legacy `EXCH` / `EXPR` RCA probes when that compatibility mode is enabled
-- exposed `JMAP` endpoints over `TLS` toward `LPE` under `/api/jmap/*`
-- secure `JMAP` WebSockets over `TLS` under the same published `JMAP` origin when the `JMAP` WebSocket endpoint is enabled
-- `IMAPS` on port `993`, with `LPE-CT` terminating client `TLS` and proxying the internal clear IMAP stream to the core `LPE` IMAP adapter
-- `ManageSieve` over `TLS` on `4190` when enabled
-- `SMTPS`
-
-Operational validation for public `IMAPS` must cover more than a certificate
-handshake. The Debian edge-port test can also use mailbox test credentials to
-verify the full client path: public `993` `TLS`, `LPE-CT` proxying, core IMAP
-`LOGIN`, and `SELECT INBOX`. It also supports a scoped `outlook` run that uses
-`LPE_CT_OUTLOOK_TEST_EMAIL` and `LPE_CT_OUTLOOK_TEST_PASSWORD` as shared
-credentials for autodiscover, IMAPS, and submission unless protocol-specific
-overrides are set. That run skips public `25` and validates trusted TLS,
-autodiscover IMAP/SMTP publication, the absence of Exchange-style POX and SOAP
-autodiscover blocks in the default IMAP path, public `993`, authenticated
-submission on `465`, and the IMAP login path needed by Outlook desktop. The
-submission probe authenticates with `AUTH LOGIN` and
-verifies `MAIL FROM` / `RCPT TO` acceptance without sending a message. It does
-not require `ActiveSync` or `MAPI` publication checks because those are not part
-of Outlook desktop `IMAP` account setup. If Outlook fails while `lpe.service`
-receives no new log entries, the first logs to inspect are `journalctl -u
-lpe-ct.service` because the client has not reached the core protocol adapter.
-
-For secure client submission, the baseline target prefers implicit TLS on port `465`, aligned with `RFC 8314`.
-
-The same public certificate chain may be reused for `HTTPS` `443`, implicit
-`TLS` submission `465`, and `IMAPS` `993` on the same public hostname. `LPE-CT`
-stores selectable public `SMTP` `STARTTLS` certificate profiles in its private
-management state; operators upload a PEM certificate chain and matching PEM
-private key, then select the active profile in the management console. Debian
-installations may still bootstrap the initial public profile through:
-
-- `LPE_CT_PUBLIC_TLS_CERT_PATH` / `LPE_CT_PUBLIC_TLS_KEY_PATH` to bootstrap the
-  active inbound `SMTP` `STARTTLS` profile on `25`
-- `LPE_CT_PUBLIC_TLS_CERT_PATH` / `LPE_CT_PUBLIC_TLS_KEY_PATH` for `nginx` `443`
-- `LPE_CT_SUBMISSION_TLS_CERT_PATH` / `LPE_CT_SUBMISSION_TLS_KEY_PATH` for `465`
-- `LPE_CT_IMAPS_TLS_CERT_PATH` / `LPE_CT_IMAPS_TLS_KEY_PATH` for `993`
-
-Port `25` is a plaintext `SMTP` listener that upgrades with `STARTTLS`; it is
-not implicit `TLS`. External validation must use `openssl s_client -starttls
-smtp -connect <mx-host>:25 -servername <mx-host>`. After the server replies
-`220 ready to start TLS` and the TLS handshake succeeds, clients must send a
-fresh `EHLO` before `MAIL FROM`, `RCPT TO`, or `DATA`.
-
-The `HTTPS` publication must redirect accidental plain `HTTP` traffic to the
-configured TLS origin, including nginx's plain-HTTP-on-HTTPS-port case. This
-avoids presenting the default nginx `400 Bad Request` page when an administrator
-types `http://host:443` instead of `https://host`. Debian deployments render the
-redirect with `LPE_CT_NGINX_LISTEN_PORT` so a non-standard HTTPS port is explicit
-instead of silently redirecting to a closed `443`.
-
-The public `HTTPS` edge must also emit baseline browser security headers without
-changing protocol payloads for `ActiveSync`, `EWS`, `MAPI`, autodiscover, or
-`JMAP`. The Debian `LPE-CT` nginx template sets `Strict-Transport-Security:
-max-age=31536000` without `includeSubDomains` by default, because the installer
-cannot prove that every delegated subdomain is served only over `HTTPS`.
-Deployments that control and harden every subdomain may extend the HSTS policy
-manually. The default framing policy is both `X-Frame-Options: DENY` and
-`Content-Security-Policy: frame-ancestors 'none'`. A broader CSP for scripts,
-styles, images, and API connections is intentionally deferred until it can be
-validated against the webmail, administration UI, and native-client protocol
-flows.
-
-When client submission is enabled, `LPE-CT` terminates the external `TLS` session, performs `AUTH`, and forwards the raw RFC 822 message plus envelope to the internal canonical `LPE` submission workflow. `LPE-CT` does not create the authoritative `Sent` copy itself, and the internal `LPE -> LPE-CT` outbound relay remains a backend-only transport.
-
-When published, the `JMAP` WebSocket endpoint remains a reverse-proxied `LPE` protocol adapter behind `LPE-CT`; it does not change the rule that `LPE-CT` is the only external exposure point.
-
-`JMAP` uses the mailbox-account authentication surface owned by the core
-`LPE` service, so `LPE-CT` must also publish:
-
-- `/api/mail/auth/login`
-
-The public `JMAP` paths published by `LPE-CT` are:
-
-- `/api/jmap/session`
-- `/api/jmap/api`
-- `/api/jmap/upload/{accountId}`
-- `/api/jmap/download/{accountId}/{blobId}/{name}`
-- `/api/jmap/ws`
-- `/api/jmap/events`
-
-`/api/jmap/ws` must support `HTTP` upgrade and long-lived `WSS` sessions. `EmailSubmission/set` remains a `JMAP` adapter over the canonical `LPE` submission model and must never hand mail directly to `SMTP`.
-`/api/jmap/events` publishes the same canonical push-state stream over EventSource / Server-Sent Events for clients that cannot use WebSocket.
-
-### Separation between publication and protocol logic
-
-- `LPE` owns mailbox and collaboration protocol logic
-- `LPE` also owns mailbox `Sieve` execution and the related `ManageSieve` service
-- `LPE-CT` owns external exposure, reverse proxying, TCP/TLS proxying, and edge security posture
-
-`LPE-CT` edge policies remain distinct from end-user mailbox `Sieve` rules. `Sieve` must not become a vehicle for perimeter filtering, anti-spam decisions, quarantine handling, relay routing, or throttling policies, which stay under sorting-center control.
-
-### ActiveSync
-
-`ActiveSync` is chatty and commonly relies on long-polling behavior.
-
-The `LPE-CT` front layer must therefore support:
-
-- long timeouts
-- protocol-aware connection handling
-- no premature disconnects for Outlook and iOS during long-held sync waits
-
-`JMAP` WebSockets require similar edge treatment:
-
-- support for `HTTP` upgrade handling and persistent `TLS` sessions
-- no premature idle timeout while a mailbox session is waiting for state changes
-- publication only on the externally documented `LPE-CT` hostname, never by exposing the core `LPE` bind address directly
-
-### LPE-CT as stateless as possible
-
-`LPE-CT` should remain as stateless as possible in order to simplify:
-
-- `DNS` load balancing
-- `VRRP`
-- horizontal node replacement
-
-Necessary edge state such as spool or quarantine must remain bounded, explicit, and operationally replaceable.
-
-`LPE-CT` may still use dedicated local technical databases when bounded file-based state is no longer sufficient, for example for Bayesian filtering, reputation, or cluster coordination. Those databases remain sorting-center-local stores and must not become a second canonical product database.
-
-When such a database is used, private `5432` remains acceptable only on loopback, a private backend segment, or a dedicated `LPE-CT` cluster network. It must never be published on the public `DMZ` edge.
-
-### Internal transport `LPE-CT <-> LPE`
-
-The target protocol for internal `LPE-CT` to `LPE` exchanges is `gRPC`.
-
-This choice is strictly limited to the internal backbone and does not change the externally exposed client protocols.
-
-The preferred Rust implementation for that internal layer is `tonic`.
-
-The current functional v1 contract remains documented separately in `docs/architecture/lpe-ct-integration.md`.
-
-The implemented v1 HTTP topology is:
-
-- Internet `SMTP` port `25` -> `LPE-CT` -> `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/inbound-deliveries` on `LPE`, default `LPE` port `8080`
-- inbound `RCPT TO` verification -> `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/recipient-verification` on `LPE`
-- client `SMTP` submission port `465` -> `LPE-CT` -> `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/submission-auth` and `POST ${LPE_CT_CORE_DELIVERY_BASE_URL}/internal/lpe-ct/submissions` on `LPE`
-- core outbound queue -> `LPE` worker -> `POST ${LPE_CT_API_BASE_URL}/api/v1/integration/outbound-messages` on `LPE-CT`, default `LPE-CT` API port `8380`
-
-For split `DMZ` / `LAN` deployments, `${LPE_CT_CORE_DELIVERY_BASE_URL}` must
-point at the core `LPE` private LAN HTTP listener. A loopback URL such as
-`http://127.0.0.1:8080` is valid only when `LPE` and `LPE-CT` run on the same
-host. If they run on separate hosts, the core `LPE_BIND_ADDRESS` must also use
-the private LAN address instead of loopback, and the LAN firewall must allow
-the `LPE-CT` host to reach that port.
-
-Port `2525` is not part of this canonical `LPE <-> LPE-CT` bridge. If used, it is only a configured technical `SMTP` upstream relay target owned by `LPE-CT`.
-
-The dedicated local-store boundary for `LPE-CT`, including private `5432` use, is documented in `docs/architecture/lpe-ct-local-data-stores.md`.
-
-
+| Surface | Public component | Core component |
+| --- | --- | --- |
+| inbound `SMTP` | `LPE-CT` | none |
+| outbound relay | `LPE-CT` | outbound queue worker |
+| authenticated client submission | `LPE-CT` | canonical submission API |
+| `JMAP` | `LPE-CT` HTTPS/WSS proxy | `lpe-jmap` |
+| `IMAP` | `LPE-CT` TLS proxy when exposed | `lpe-imap` |
+| `ActiveSync` | `LPE-CT` HTTPS proxy | `lpe-activesync` |
+| `EWS` / `MAPI` | `LPE-CT` HTTPS proxy | `lpe-exchange` |

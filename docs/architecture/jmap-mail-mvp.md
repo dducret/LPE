@@ -1,159 +1,68 @@
-# JMAP Mail MVP
+# JMAP Mail
 
-### Objective
+## Current State/Functionality Overview
 
-This document describes the `JMAP Mail` scope currently supported by `LPE` for the MVP.
+`lpe-jmap` exposes JMAP Mail over canonical `LPE` mailbox state. It uses canonical draft, message, blob, submission, and push state and never bypasses `LPE-CT` for transport.
 
-`crates/lpe-jmap` acts as a `JMAP` adapter on top of the existing canonical `LPE` model implemented in `lpe-storage`. It does not create any parallel `Sent`, `Drafts`, `Outbox`, or transport-side `SMTP` logic.
+## Implementation/Usage
 
-### Authentication
+- Endpoints:
+  - `GET /api/jmap/session`
+  - `POST /api/jmap/api`
+  - `POST /api/jmap/upload/{accountId}`
+  - `GET /api/jmap/download/{accountId}/{blobId}/{name}`
+  - `GET /api/jmap/ws`
+  - `GET /api/jmap/events`
+  - `GET /.well-known/jmap`
+- Authentication:
+  - mailbox login through `/api/mail/auth/login`
+  - account-scoped JMAP session
+- Supported methods:
+  - `Mailbox/get`
+  - `Mailbox/changes`
+  - `Mailbox/query`
+  - `Email/get`
+  - `Email/query`
+  - `Email/changes`
+  - `Email/queryChanges`
+  - `Email/set`
+  - `Email/copy`
+  - `Email/import`
+  - `EmailSubmission/set`
+  - `Blob/copy`
+- Push:
+  - WebSocket at `/api/jmap/ws`
+  - event stream at `/api/jmap/events?types={types}&closeafter={closeafter}`
+  - PostgreSQL `LISTEN` / `NOTIFY` wakes the adapter after canonical commits
+  - owned and delegated mailboxes participate in canonical push state
+- Submission:
+  - `EmailSubmission/set` loads a persisted draft
+  - canonical submission creates authoritative `Sent`
+  - outbound relay stays in `LPE-CT`
+- Upload/import:
+  - uploaded files use canonical blob handling
+  - external or client-provided files require validation
+- Safety:
+  - `Bcc` must not appear in standard search or user-facing projections
+  - no JMAP-specific mailbox state engine
+  - no direct `SMTP`
 
-- the `JMAP` client reuses the existing mailbox-account authentication
-- login remains `/api/mail/auth/login`
-- the existing account bearer token must then be sent to `/api/jmap/session`, `/api/jmap/api`, `/api/jmap/ws`, and `/api/jmap/events`
-- without the Debian reverse proxy, the same routes are exposed directly as `/jmap/session`, `/jmap/api`, `/jmap/ws`, and `/jmap/events`
-- the Debian reverse proxy sets `X-Forwarded-Prefix: /api/jmap` so the `Session` document advertises public `/api/jmap/*` URLs instead of direct internal `/jmap/*` URLs
+## Reference Table/List
 
-### Supported session capabilities
+| Surface | Path |
+| --- | --- |
+| session | `GET /api/jmap/session` |
+| API | `POST /api/jmap/api` |
+| upload | `POST /api/jmap/upload/{accountId}` |
+| download | `GET /api/jmap/download/{accountId}/{blobId}/{name}` |
+| WebSocket | `GET /api/jmap/ws` |
+| event stream | `GET /api/jmap/events` |
+| discovery | `GET /.well-known/jmap` |
 
-- `urn:ietf:params:jmap:core`
-- `urn:ietf:params:jmap:mail`
-- `urn:ietf:params:jmap:submission`
-- `urn:ietf:params:jmap:blob`
-- `urn:ietf:params:jmap:vacationresponse`
-- `urn:ietf:params:jmap:websocket`
-
-The `JMAP` session is real: it is built from the authenticated mailbox account and exposes that current `LPE` account as the active `accountId`.
-Its session `state` is derived from the current accessible mailbox-account projection, so mailbox delegation or sender-right changes that alter advertised accounts or account capabilities change the session document state.
-The WebSocket capability is advertised only when the `/jmap/ws` endpoint is actually present in the running adapter.
-
-The current finalization target is the `JMAP` Big Three: Mail, Contacts, and simple Calendar events. `JMAP Tasks` remains implemented as a canonical adapter, but it is not the primary interoperability hardening target for this release. Cross-account data movement, durable search/query-history storage, and broader protocol-family expansion are deferred to a later release. The interoperability matrix is tracked in `docs/architecture/jmap-interoperability-matrix.md`.
-
-### Supported methods
-
-- `Mailbox/get`
-- `Mailbox/query`
-- `Mailbox/queryChanges`
-- `Mailbox/changes`
-- `Mailbox/set`
-- `Email/query`
-- `Email/queryChanges`
-- `Email/get`
-- `Email/changes`
-- `Email/set` for draft creation, update, and deletion
-- `Email/copy`
-- `Email/import`
-- `EmailSubmission/get`
-- `EmailSubmission/changes`
-- `EmailSubmission/query`
-- `EmailSubmission/queryChanges`
-- `EmailSubmission/set` for draft submission through the canonical `LPE` submission model
-- `Identity/get`
-- `Identity/changes`
-- `Thread/query`
-- `Thread/queryChanges`
-- `Thread/get`
-- `Thread/changes`
-- `Quota/get`
-- `SearchSnippet/get`
-- `Blob/copy`
-- `Blob/upload`
-- `Blob/get`
-- `Blob/lookup`
-- `VacationResponse/get`
-- `VacationResponse/set`
-
-Additional supported `JMAP` routes:
-
-- `GET /.well-known/jmap` for RFC 8620 service autodiscovery; it redirects to the configured public `JMAP` session URL and follows `LPE_AUTOCONFIG_JMAP_SESSION_URL` when that override is set
-- `POST /api/jmap/api` enforces the `Session` core `maxSizeRequest`, `maxCallsInRequest`, `maxObjectsInGet`, `maxObjectsInSet`, and `maxConcurrentRequests` limits
-- request-level HTTP failures that `lpe-jmap` handles directly return RFC 7807-style JMAP problem details; limit failures include the required `limit` field
-- `POST /api/jmap/upload/{accountId}` for temporary `JMAP` blob upload; the `Session` core capability advertises the enforced `maxSizeUpload` and concurrent upload limit for real-client interoperability
-- `GET /api/jmap/download/{accountId}/{blobId}/{name}` for temporary blob download
-- `GET /api/jmap/ws` for `JMAP` over WebSocket with the `jmap` subprotocol
-- `GET /api/jmap/events` for JMAP push over EventSource / Server-Sent Events using the same canonical push-state computation as WebSocket push
-
-### Important MVP rules
-
-- `Email/set` persists only in the `Drafts` mailbox
-- method dispatch requires the defining capability to be present in the request `using` list; methods with missing capabilities return `unknownMethod` rather than executing under an undeclared protocol surface
-- request-level `using` capability names must be capabilities advertised by the current `Session`; unsupported capability names are rejected before method execution
-- `Email/set` accepts draft `keywords` for `$draft`, `$seen`, and `$flagged`; `$seen` and `$flagged` are mapped onto the canonical draft unread-flagged state without creating any parallel priority model
-- `EmailSubmission/set` does not submit raw MIME or direct `SMTP`
-- `EmailSubmission/set` takes an existing draft `emailId` and calls the canonical `LPE` submission workflow
-- for delegated mailbox accounts, `EmailSubmission/set` is available only when canonical mailbox write access and sender delegation grants allow draft-backed submission
-- canonical submission creates the authoritative copy in `Sent`, marks the message as `queued`, inserts an `outbound_message_queue` row, then removes the source draft
-- `JMAP` object `state` values and WebSocket `StateChange` payloads are derived from the same canonical mailbox, message, contact, and calendar projections already stored in `PostgreSQL`
-- `JMAP` object `state` tokens use opaque fingerprints of canonical projection data; protected or message-visible fields such as `Bcc`, subject, and body content must not be serialized directly into client-visible state tokens
-- delegated/shared mailbox `Email` and `Thread` state fingerprints exclude `Bcc`, so Bcc-only changes do not create observable state or push changes for delegated readers; owned sender-side state may still track Bcc for the authenticated owner's own draft and sent-message sync
-- the WebSocket transport is notification and request transport only; it does not introduce a second mailbox cache, event journal, or submission model
-- canonical change signaling stays inside `PostgreSQL`: `lpe-storage` emits account-scoped `LISTEN` / `NOTIFY` payloads after canonical commits, and `lpe-jmap` recomputes only the affected `JMAP` state scopes from canonical tables
-- mail push wakeups are expanded through canonical mailbox delegation so a change in a shared mailbox wakes both the owner session and delegated reader sessions without a protocol-local sharing cache
-- shared mailbox `Session` account flags, `Mailbox/get` `myRights`, and delegated `Identity/get` values are projected from the canonical mailbox delegation plus sender delegation grants rather than adapter-local ACL state
-- shared mailbox `Session` `accountCapabilities` advertise mail access, and advertise submission only when canonical mailbox write access and sender delegation grants both allow draft-backed submission; collaboration and task capabilities remain on the authenticated principal account rather than being copied onto delegated mailbox accounts
-- `Mailbox/set`, `Email/set`, `Email/copy`, `Email/import`, and draft-backed `EmailSubmission/set` reject writes when the selected shared mailbox account is not writable according to canonical mailbox delegation `may_write`; `EmailSubmission/set` also passes the authenticated submitter into the canonical sender-delegation check instead of trusting draft-local metadata
-- shared `Drafts` writes are advertised and accepted only when mailbox write access and canonical sender delegation are both present, so draft creation, copy, and import cannot drift from the later canonical submission authorization check
-- `Bcc` remains stored separately in `message_bcc_recipients`
-- `Bcc` is not reinjected into search, `participants_normalized`, or `Email/query`
-- `Email/get` may return `bcc` only when the `bcc` property is explicitly requested for the authenticated account's own sender-side draft or sent message
-- `Email/get` honors standard `bodyProperties`, `fetchTextBodyValues`, `fetchHTMLBodyValues`, `fetchAllBodyValues`, and `maxBodyValueBytes` arguments for canonical text and sanitized HTML body projections
-
-### Accepted MVP limitations
-
-- `Email/query` and `Thread/query` support only descending `receivedAt` sort
-- `Email/query` supports only the `inMailbox` filter
-- supported `query` methods honor RFC `position`, negative `position`, `anchor`, and `anchorOffset` windowing; missing anchors return method-level `anchorNotFound` errors instead of silently returning an unrelated page
-- JMAP request result references are resolved for top-level argument properties, including `#ids` links from `query` responses to following `get` calls, without creating adapter-local state
-- `Email/queryChanges`, `Thread/queryChanges`, and `Mailbox/queryChanges` use a stateless snapshot `queryState` token derived from the ordered result set instead of a durable per-query history table
-- `queryChanges` compares the full ordered result set for the logical query even when the original `query` response was paginated, and is intended for incremental client refresh, not for long-lived durable sync cursors
-- mailbox and Big Three collaboration query snapshots use deterministic canonical-id tie-breakers for equal visible sort keys so backend row-order changes do not create false `queryChanges` reorders
-- `changes` accepts `sinceState: "0"` as the explicit initial-sync state and otherwise requires an opaque state token bound to the requested account and method; malformed, cross-account, or cross-method tokens are rejected instead of being treated as a fresh initial sync
-- `Email/get` exposes a practical subset of `JMAP Mail` properties
-- `Mailbox/get`, `Identity/get`, and other `get` methods distinguish omitted or `null` `ids` from an explicit empty `ids: []`; explicit empty selections return empty `list` and `notFound` arrays
-- one `LPE` email currently belongs to one `LPE` mailbox, so `mailboxIds` contains one entry
-- `EmailSubmission/set` currently supports only `create`
-- `EmailSubmission/set` expects an existing draft through `emailId` or a resolved creation reference in the same request
-- `EmailSubmission/get`, `EmailSubmission/changes`, `EmailSubmission/query`, `EmailSubmission/queryChanges`, and `EmailSubmission/set` return state tokens derived from canonical outbound submission rows, not from general `Email` state, so delivery-status and queue-row changes are visible to incremental clients; shared accounts without canonical submission rights return an empty submission projection
-- `EmailSubmission/query` and `EmailSubmission/queryChanges` support the RFC `identityIds`, `emailIds`, `threadIds`, `undoStatus`, `before`, and `after` filters, with sorting by `emailId`, `threadId`, and `sentAt`
-- `Identity/get` exposes the standard MVP fields plus `LPE`-specific delegated-sender metadata for clients that request it, and `Identity/changes` returns state changes derived from the canonical sender-identity projection for the authenticated principal and requested mailbox account
-- `Mailbox/set` cannot modify or delete system mailboxes (`Inbox`, `Sent`, `Drafts`, etc.)
-- `Email/copy` currently supports only same-account copy
-- `Email/import` consumes a validated `message/rfc822` blob, extracts visible multipart text with plaintext preference, preserves a first HTML body when available, validates each imported attachment with `Magika`, trims structural multipart boundary line endings from imported attachment bytes, and imports multipart attachments into the canonical attachment pipeline
-- `Blob/upload` is supported both through the core HTTP upload endpoint and through the `urn:ietf:params:jmap:blob` inline method; both paths validate the resulting bytes with `Magika`, store temporary upload blobs in `PostgreSQL`, and return a set-compatible response with null state/update/destroy slots
-- message `blobId` values now expose the canonical `mime_blob_ref` shape when one already exists, including `upload:{uuid}` for imported MIME uploads, and fall back to stable `message:{emailId}` identifiers for canonical message downloads
-- `Session.downloadUrl` includes the standard `{type}` media-type placeholder as an `accept` query parameter while the current download route keeps serving the readable canonical blob bytes directly
-- `GET /api/jmap/download/{accountId}/{blobId}/{name}` can return temporary upload blobs and reconstructed `message/rfc822` downloads for canonical message blob IDs; delegated/shared mailbox downloads never include protected `Bcc` metadata
-- `Blob/copy` copies readable upload or canonical message blobs into the destination account's temporary upload blob store; it does not introduce a separate durable blob store, and reconstructed message copies include `Bcc` only when both the source and destination are the authenticated account's own mailbox account
-- temporary blob creation through HTTP upload, `Blob/upload`, and `Blob/copy` destinations requires canonical write access to the target account; read-only shared accounts can still read accessible blobs, but advertise `maxSizeBlobSet: 0`
-- `Blob/get` returns requested byte ranges from readable temporary upload blobs or reconstructed canonical message blobs, including `digest:sha` and `digest:sha-256` over the returned octet range; non-owner delegated/shared mailbox reads use the same Bcc-safe reconstruction path as HTTP download
-- `Blob/lookup` is limited to canonical mail references for `Mailbox`, `Thread`, and `Email`, and requires both `urn:ietf:params:jmap:blob` and `urn:ietf:params:jmap:mail` in the request `using` list; it never exposes inaccessible blobs and does not inspect unrelated collaboration stores or introduce a separate blob-reference index
-- method-level failures use the standard JMAP `["error", {"type": ...}, callId]` response tuple shape; successful method responses keep their method name
-- the session advertises `eventSourceUrl` as `/events?types={types}&closeafter={closeafter}` under the public JMAP base URL; EventSource emits `StateChange` events with the same changed-state payload and push-state cursor semantics as WebSocket push
-- `WebSocketPushEnable` follows `RFC 8887` `dataTypes` semantics: `null` or omitted `dataTypes` subscribes to all supported push data types, while unsupported data-type names are filtered out
-- malformed known WebSocket message objects return `RequestError` frames instead of silently dropping an otherwise healthy connection
-- WebSocket push uses canonical `PostgreSQL` signaling end to end: `lpe-storage` writes a canonical change-journal row and emits principal-filtered `LISTEN` / `NOTIFY` wakeups after canonical commits, while `lpe-jmap` replays bounded missed reconnect work from that journal and recomputes only the affected canonical object states without introducing a second mailbox state engine
-- when reconnect recovery or a live push wakeup sees the canonical journal cursor advance without a subscribed object-state fingerprint change, `lpe-jmap` may emit a `StateChange` with an empty `changed` map so clients receive a fresher `pushState` cursor and avoid unnecessary future full-snapshot fallbacks
-- canonical change-journal retention defaults to 30 days and is managed per domain through `domains.jmap_push_journal_retention_days`; the `lpe-cli` maintenance worker purges older rows periodically, with `LPE_JMAP_JOURNAL_PURGE_INTERVAL_SECS` controlling the purge interval and a one-hour default; purge deletes older rows from the tenant-scoped journal using the longest configured retention for that tenant so shared-tenant deployments do not over-purge one domain's reconnect window because of another domain's shorter setting
-- reconnect replay treats a client cursor older than the retained journal floor as truncated, forcing a full state snapshot instead of returning an incomplete incremental `StateChange`
-- mail push state spans every mailbox account visible through canonical mailbox delegation so one authenticated session can receive `StateChange` payloads for owned and delegated mailboxes without a protocol-local sharing cache
-- collaboration and task push stay principal-scoped: shared contacts, calendars, and task lists notify every affected principal account, while mailbox push still spans the canonical owner plus delegated mailbox readers
-- supported push data types are limited to `Mailbox`, `Email`, `Thread`, `EmailDelivery`, `Identity`, `EmailSubmission`, `AddressBook`, `ContactCard`, `Calendar`, `CalendarEvent`, `TaskList`, and `Task`
-- `EmailDelivery` is a push-only state type derived from canonical message delivery presence; it changes for newly visible messages without exposing another method or local delivery cache
-- `VacationResponse/get` and `VacationResponse/set` project the authenticated account's canonical active `Sieve` script; `set` patch updates preserve omitted singleton fields from that projection, writes a bounded `jmap-vacation` Sieve script or disables the active script, and does not introduce a separate `JMAP` vacation store
-
-### Deferred next-release work
-
-- durable per-query history for long-lived `queryChanges` cursors
-- complex cross-account data movement beyond the current same-account mail operations and temporary blob-copy interoperability path
-- broader `JMAP` protocol-family expansion beyond Mail, Contacts, and simple Calendar interoperability hardening
-
-### Current completion priorities
-
-Before broadening `JMAP` method surface further, the current priority is to finish protocol depth and interoperability:
-
-- complete canonical `state`, `changes`, and `queryChanges` behavior so refresh and resync semantics stay coherent under concurrent mailbox operations
-- harden WebSocket reliability, including wakeup delivery, reconnect behavior, principal filtering, and delegated-mailbox push consistency
-- validate mailbox delegation and shared collection behavior so `Session`, `Mailbox`, `Identity`, and push views stay aligned
-- add interoperability tests against `JMAP::Tester` and Fastmail-style client behavior, keeping those tests focused on canonical-state correctness rather than synthetic method-count growth
-
-
+| Capability | Canonical source |
+| --- | --- |
+| mailboxes | mailbox tables |
+| messages | `messages`, `message_bodies`, recipients, blobs |
+| drafts | `Drafts` mailbox messages |
+| submission | `/api/mail/messages/submit` workflow |
+| push state | canonical push journal |

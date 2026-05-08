@@ -1,53 +1,31 @@
 # Data Lifecycle and Compliance
 
-### Goal
+## Current State/Functionality Overview
 
-This document covers mailbox storage, archiving, retention, deduplication, privacy, and asynchronous processing.
+`LPE` keeps canonical mailbox and collaboration state in PostgreSQL and protects metadata that must not appear in user search or AI pipelines. Retention, deletion, and legal hold rules must preserve auditability and exportability.
 
-### Mailbox size tiers
+## Implementation/Usage
 
-- below `10 GB`: shared database
-- above `10 GB`: dedicated database
-- above `50 GB`: user-invisible technical partitioning
-- above `100 GB`: online archive with degraded performance
+- Mailbox size tiers are quota policy inputs.
+- `PST` import and export must preserve canonical messages and attachments.
+- Attachment blobs are deduplicated per domain.
+- Export must reconstruct every message with its blobs.
+- Retention and legal hold must apply before destructive deletion.
+- `Bcc`:
+  - is protected metadata
+  - must not be indexed in user search
+  - must not be exposed to user-facing AI pipelines
+  - must not be reinjected into visible projections
+- Deletion must preserve required audit events.
+- Attachment text extraction runs asynchronously.
+- Indexed attachment formats are limited to `PDF`, `DOCX`, and `ODT`.
 
-### `PST` import and export
+## Reference Table/List
 
-`LPE` supports full or partial `PST` import and export.
-
-### Deduplication
-
-Identical blobs are deduplicated at domain scope.
-
-Export paths must reconstruct attachments correctly.
-
-### Retention and legal hold
-
-Retention may be defined at:
-
-- tenant
-- domain
-- mailbox
-- folder
-
-Legal hold is governed at tenant level.
-
-### `Bcc`
-
-`Bcc` is protected metadata.
-
-It:
-
-- is not indexed in standard search
-- is excluded from user-facing AI pipelines
-- remains available for audit and compliance through privileged workflows
-
-### Deletion and audit
-
-Deleted messages must be reconstructed and moved into a separated `Audit Store` so they do not pollute production indexes.
-
-### Asynchronous text extraction
-
-Attachment text extraction must not happen in the synchronous `SMTP` receive path.
-
-
+| Data | Rule |
+| --- | --- |
+| primary store | `PostgreSQL` |
+| search default | `PostgreSQL` |
+| attachment dedupe | per domain |
+| protected recipient metadata | `Bcc` |
+| attachment text index formats | `PDF`, `DOCX`, `ODT` |

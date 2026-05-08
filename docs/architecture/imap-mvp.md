@@ -1,178 +1,60 @@
-# IMAP MVP
+# IMAP Adapter
 
-## Purpose
+## Current State/Functionality Overview
 
-The first `IMAP` server in `LPE` is a permanently supported mailbox-access communication protocol and compatibility adapter. Its first major development push carried `LPE` through `0.1.2`, and it sits over the canonical mailbox model already used by `JMAP`, `ActiveSync`, `EWS`, and the web client.
+`lpe-imap` exposes IMAP as a mailbox compatibility layer over canonical `LPE` mailbox state. It supports mailbox access and mutation without adding IMAP-specific mailbox, `Sent`, `Drafts`, or `Outbox` state.
 
-It does not introduce a parallel mailbox store, a parallel sent-message workflow, or a protocol-specific draft model.
+## Implementation/Usage
 
-## Implemented scope
+- Authentication:
+  - mailbox account credentials
+  - supported mailbox auth tokens where configured
+- Supported commands:
+  - `LOGIN`
+  - `CAPABILITY`
+  - `NOOP`
+  - `LOGOUT`
+  - `LIST`
+  - `XLIST`
+  - `STATUS`
+  - `CREATE`
+  - `DELETE`
+  - `RENAME`
+  - `SELECT`
+  - `EXAMINE`
+  - `CHECK`
+  - `CLOSE`
+  - `UNSELECT`
+  - `EXPUNGE`
+  - `FETCH`
+  - `UID FETCH`
+  - `STORE`
+  - `UID STORE`
+  - `SEARCH`
+  - `UID SEARCH`
+  - `COPY`
+  - `UID COPY`
+  - `APPEND`
+- Canonical behavior:
+  - folder aliases such as `Deleted Items` and `Trash` converge on canonical trash
+  - `APPEND` uses canonical draft or import persistence
+  - flags update canonical message state
+  - search uses canonical indexed fields and must not expose `Bcc`
+  - UID behavior is scoped to mailbox state
+- File validation:
+  - any imported client-provided file must pass the canonical validation path
+- Diagnostics:
+  - expose enough session, command, and mailbox identifiers for traceability
+  - avoid logging protected metadata or secrets
 
-- account authentication through `LOGIN`, `AUTHENTICATE PLAIN`, or
-  Outlook-compatible `AUTHENTICATE LOGIN` with the
-  existing mailbox account credentials, supporting Outlook-style SASL initial
-  response and challenge/response flows
-- `AUTHENTICATE XOAUTH2` with the mailbox `OAuth2` bearer access token
-- `CAPABILITY`, `NOOP`, `LOGOUT`
-- `ENABLE CONDSTORE` for clients that explicitly enable conditional-store
-  synchronization before fetching mailbox state
-- tolerant `ID`
-- tolerant legacy `AUTH LOGIN` as an alias for `AUTHENTICATE LOGIN`
-- command literals for authentication and setup commands, including Outlook
-  login flows that send usernames or passwords as `{N}` literals
-- `NAMESPACE` for the flat personal namespace
-- `LIST` for the canonical system mailboxes, rendering the inbox as the single
-  canonical `INBOX` name and honoring mailbox patterns such as `INBOX`, `%`, and `*`
-- system mailbox discovery canonicalizes legacy aliases such as `INBOX`,
-  `Draft`, `Drafts`, `Sent Items`, `Sent Messages`, `Deleted`,
-  `Deleted Items`, and `Trash` before Outlook selects those folders, including
-  rows with extra whitespace or non-normalized role text
-- tolerant legacy `XLIST` for Outlook desktop compatibility
-- `SPECIAL-USE` folder flags on listed system mailboxes where the flag is standard;
-  regular `LIST` identifies the inbox by the special `INBOX` name rather than a
-  non-standard `\Inbox` flag
-- tolerant `LSUB`, `SUBSCRIBE`, and `UNSUBSCRIBE` for Outlook compatibility; subscription state is not persisted yet
-- tolerant `GETQUOTAROOT` and `GETQUOTA` probes for clients that check storage
-  limits even though the adapter does not advertise `QUOTA`
-- `STATUS` for mailbox counters and stable UID metadata
-- mailbox management through `CREATE`, `RENAME`, and `DELETE` for custom user mailboxes
-- `CREATE` for trash aliases such as `Deleted Items` and `Trash` is accepted
-  as an idempotent request for the canonical `Deleted` mailbox with role `trash`
-- custom `CREATE` folders such as `Junk Email` are stored with the neutral
-  canonical role `custom`
-- Outlook-style slash-delimited custom folder names such as `Projects/2026`
-  are accepted and stored as canonical custom mailbox display names
-- `SELECT` on `Inbox`, `Sent`, `Drafts`, and the canonical `Deleted` trash mailbox
-- `EXAMINE`, `CHECK`, `CLOSE`, `UNSELECT`, and `EXPUNGE` for Outlook desktop synchronization flows, with `CLOSE` silently expunging `\Deleted` messages from read-write selected mailboxes as required by `IMAP`
-- `FETCH` over canonical message state, including `ENVELOPE`, `BODYSTRUCTURE`,
-  `BODY`, `BODY.PEEK[HEADER.FIELDS (...)]`, `BODY.PEEK[HEADER.FIELDS.NOT (...)]`,
-  part-scoped header fields, body sections, MIME part headers, and partial literals
-- `SEARCH` and `FETCH` refresh the selected mailbox from canonical storage before
-  evaluating message sets so Outlook-style `UID SEARCH SINCE ...` and follow-up
-  fetches do not use a stale selected-folder snapshot
-- RFC 3501 `FETCH` macros `FAST`, `ALL`, and `FULL`, with `ALL` and `FULL`
-  including `ENVELOPE` as required for clients that use macro fetches during
-  initial folder population
-- minimal `STORE` for `\Seen`, `\Flagged`, and `\Deleted`
-- `IDLE` on a selected mailbox, with periodic refresh against canonical mailbox
-  state; Outlook-style `IDLE` before mailbox selection is accepted as a no-op
-  idle window until `DONE`
-- `CONDSTORE` mailbox sync primitives: `HIGHESTMODSEQ`, per-message `MODSEQ`,
-  `FETCH ... (CHANGEDSINCE n)`, and conditional `STORE` with `UNCHANGEDSINCE`
-- `COPY` and `UID COPY` into `Inbox`, trash, or custom mailboxes, with
-  `Drafts` allowed as a source only when the target is trash for client delete
-  workflows
-- `MOVE` and `UID MOVE` between `Inbox`, trash, and custom user mailboxes, with
-  `Drafts` to trash supported for Thunderbird-style draft deletion
-- richer `SEARCH`
-- `UID FETCH`, `UID STORE`, and `UID SEARCH`
-- `UID EXPUNGE` for messages already marked `\Deleted`
-- `APPEND` to `Drafts`, persisted through the canonical draft workflow
-- Outlook-style `APPEND` to `Sent` is accepted as a compatibility acknowledgement
-  after client `SMTP` submission. When the canonical `Sent` copy is already
-  visible, the acknowledgement includes a `UIDPLUS` `APPENDUID` for that
-  canonical message so Outlook can complete its send validation, but it does not
-  persist another message or create an alternate sent-message path
-- `APPEND` to `Inbox` and custom folders such as `Junk Email`, persisted through
-  the canonical message import workflow for Outlook local-folder change sync
-- `UIDPLUS` response codes where the current canonical workflow can supply them directly
-- `ACL` admin commands `GETACL`, `MYRIGHTS`, `LISTRIGHTS`, `SETACL`, and `DELETEACL` projected from canonical mailbox and sender delegation grants
+## Reference Table/List
 
-## Canonical model alignment
-
-- mailbox reads are served from the canonical `messages`, `message_bodies`, `message_recipients`, and protected `message_bcc_recipients` data already used by `JMAP` and `ActiveSync`
-- `\Seen` maps to the canonical `unread` flag
-- `\Flagged` maps to the canonical `flagged` flag
-- `\Deleted` maps to a canonical pending-IMAP-deletion flag and `EXPUNGE`
-  permanently removes only those marked messages
-- `SELECT` / `EXAMINE` publishes `PERMANENTFLAGS` for the writable canonical
-  flag subset so Outlook can identify the flags it may persist
-- `APPEND` to `Drafts` reuses `save_draft_message`
-- `APPEND` returns `APPENDUID` using the canonical row written into `messages`;
-  the special `Sent` acknowledgement maps to an existing canonical `Sent` row
-  when one can be identified by `Message-ID` or by current `Sent` order
-- `APPEND` to `Inbox` and custom folders reuses canonical message import and
-  never performs outbound delivery
-- custom IMAP mailbox creation and rename reuse the canonical mailbox records already exposed through `JMAP`
-- trash aliases are canonicalized to one `trash` mailbox displayed as `Deleted`;
-  `Deleted Items` and `Trash` are accepted as compatibility names and do not
-  create additional user-visible folders
-- slash-delimited IMAP folder names are a compatibility projection over the
-  current canonical mailbox record; they do not add a separate IMAP hierarchy store
-- `COPY` reuses canonical message-copy persistence and creates a new canonical message row in the target mailbox instead of introducing mailbox replication state
-- `MOVE` reuses a canonical mailbox move on the existing message row, updates the target mailbox projection, and allocates a fresh destination `UID` so the destination mailbox still receives the moved message at the tail of its IMAP order
-- `CONDSTORE` reuses a canonical account-level mail change watermark plus canonical per-message `imap_modseq` values stored on `messages`; the adapter does not maintain an `IMAP`-only sync journal
-- `ACL` reuses canonical `mailbox_delegation_grants` and `sender_delegation_grants`; the adapter does not maintain a separate IMAP ACL store
-- no `IMAP` path creates a parallel `Sent`, `Drafts`, or `Outbox`
-- `Bcc` stays out of `SEARCH`; it is only rendered back in `Drafts` and `Sent` header reconstruction for the authenticated owner view
-
-## File validation
-
-`APPEND` validates MIME attachments with Google `Magika` before the draft is persisted or a `Sent` compatibility append is acknowledged, following the same architecture rule already applied to `JMAP` uploads and `ActiveSync` MIME submission.
-
-## Current limitations
-
-- no outbound message submission through `IMAP APPEND`; outbound submission remains canonical through `JMAP`, `ActiveSync`, `SMTP` submission, and the web/API submission workflow
-- `APPEND` to `Sent` is an Outlook interoperability acknowledgement only; it intentionally does not create a second `Sent` copy because the authenticated `SMTP` submission path writes the authoritative copy
-- no durable subscribe state, parent/child hierarchy metadata, `QRESYNC`, or SASL mechanisms other than `LOGIN` and `XOAUTH2`
-- mailbox management accepts slash-delimited Outlook folder names, but true parent/child hierarchy metadata is not implemented yet
-- `FETCH BODYSTRUCTURE` and MIME section rendering are compatibility projections over the canonical message text and sanitized HTML fields; attachment MIME reserialization remains deferred
-- `RFC822.SIZE` reports the byte length of the RFC822 projection returned by `BODY[]`, not the original raw ingest size, so size metadata stays consistent with what IMAP clients fetch
-- `COPY` intentionally rejects `Sent` as a source or target and `Drafts` as a
-  target so the adapter cannot become an alternate sent-message or draft
-  workflow; `Drafts` to trash is allowed only for client delete workflows
-- `MOVE` uses the same guardrail, with the same `Drafts` to trash exception for
-  client delete workflows
-- `SEARCH` now supports optional `RETURN (...)`, optional `CHARSET`, `ALL`,
-  `SEEN`, `UNSEEN`, `FLAGGED`, `UNFLAGGED`, `DELETED`, `UNDELETED`,
-  `ANSWERED`, `UNANSWERED`, `DRAFT`, `UNDRAFT`, `RECENT`, `OLD`, `NEW`,
-  `KEYWORD`, `UNKEYWORD`, `TEXT`, `SUBJECT`, `FROM`, `TO`, `CC`, `BODY`,
-  `HEADER`, `BEFORE`, `ON`, `SINCE`, `SENTBEFORE`, `SENTON`, `SENTSINCE`,
-  `LARGER`, `SMALLER`, `NOT`, `OR`, sequence-set criteria, and `UID`
-- `EXPUNGE` and read-write `CLOSE` permanently remove messages that were already marked `\Deleted`, which supports Thunderbird and Outlook copy-to-trash deletion workflows without leaving the source message behind
-- `IDLE` currently refreshes by polling canonical mailbox state for the selected mailbox; it now coexists with a reusable canonical mail change watermark, but still does not publish `QRESYNC`-grade vanished history
-- the current `ACL` slice is administrative only for the authenticated owner mailbox namespace; delegated mailbox projection through IMAP remains deferred even though the grants are canonical today
-
-## UID and sync tradeoffs
-
-- `UIDVALIDITY` remains fixed at `1` for now because the adapter still sits on one canonical mailbox store rather than a dedicated per-mailbox synchronization engine
-- message `UID`s come from the stable `messages.imap_uid` projection column and are globally monotonic for the account data set, not reallocated from a mailbox-local replication log
-- `UIDNEXT` is derived from the highest currently visible message `UID` in the mailbox projection plus one; gaps are expected after copies or future deletions
-- each canonical message now carries a stored `imap_modseq`, and each account carries a canonical mail `HIGHESTMODSEQ` watermark that advances on draft persistence, inbound delivery, copy, move, flag updates, and canonical draft deletion
-- `HIGHESTMODSEQ` is account-scoped canonical mail state rather than an `IMAP`-local shadow counter, so it stays monotonic across mailbox-local deletions and moves; clients may therefore observe a mailbox `HIGHESTMODSEQ` advance because of other mail changes in the same account
-- `COPY` returns a new canonical row with a new `UID` in the target mailbox; it does not create a shared multi-mailbox identity or hidden replication record
-- `MOVE` updates the canonical message row in place but still assigns a new destination `UID`, preserving `UIDPLUS` mapping and keeping the destination mailbox append-like from an IMAP client perspective
-- `FETCH MODSEQ` and `STORE ... (UNCHANGEDSINCE n)` operate directly on those canonical values; mixed conditional `STORE` batches may partially apply and return `MODIFIED` for the stale subset
-- `IDLE` only reports selected-mailbox changes that can be observed from canonical mailbox refreshes, such as flag changes, additions, and removals
-- because there is still no canonical vanished-history journal, `QRESYNC` stays deferred even though `CONDSTORE` now uses canonical first-class change anchors
-- `ACL` rights are a truthful projection over canonical delegation: mailbox access rights map to mailbox visibility and mutation, `p` maps to canonical `send-as`, and `b` is an `LPE`-specific right for canonical `send-on-behalf`
-- `Bcc` remains protected in those tradeoffs as well: it is preserved in protected storage for owner reconstruction in `Drafts` and `Sent`, but never added to IMAP search matching
-
-## Operational diagnostics
-
-- successful `LIST` / `LSUB`, `STATUS`, `SELECT` / `EXAMINE`, `FETCH`, and
-  `SEARCH` operations emit `info` logs with mailbox names, counts, UID ranges,
-  response counts, and response byte totals, but not message bodies, passwords,
-  or search text
-- these logs are intended for Outlook empty-folder investigations where the
-  client receives tagged `OK` responses and `journalctl -u lpe.service` has no
-  command-failure warnings
-
-## Runtime
-
-- the listener is started by `lpe-cli`
-- the bind address is configured through `LPE_IMAP_BIND_ADDRESS`
-- the default bind is `127.0.0.1:1143`
-- public `IMAPS` on `993` is terminated by `LPE-CT`; in a split `DMZ` / `LAN`
-  deployment, the core `LPE` listener must bind to a private LAN address such
-  as `192.168.1.25:1143`, and firewall policy must allow only `LPE-CT` to
-  reach that clear internal `IMAP` upstream
-
-## Current completion priorities
-
-`IMAP` remains supported as the `0.1.2` compatibility foundation and as an ongoing mailbox-access communication protocol while `0.1.3` focuses on the `EWS` implementation. Before expanding `IMAP` breadth, the priority remains improving correctness and interoperability of the implemented slice:
-
-- tighten sync correctness across `SELECT`, `FETCH`, `STORE`, `COPY`, `MOVE`, `IDLE`, and `CONDSTORE`
-- validate that `UID`, `UIDNEXT`, `UIDVALIDITY`, and `MODSEQ` behavior remain coherent under realistic mailbox operations
-- ensure flag handling stays consistent with the canonical message model across concurrent protocol activity
-- add compatibility testing against common real-world `IMAP` clients and mailbox workflows instead of broadening protocol surface prematurely
+| Area | Rule |
+| --- | --- |
+| Role | compatibility mailbox access |
+| Storage | canonical `LPE` mailbox tables |
+| `Sent` | canonical only |
+| `Drafts` | canonical only |
+| `Outbox` | no protocol-local implementation |
+| Search | no `Bcc` exposure |
+| External `SMTP` | `LPE-CT`, not IMAP adapter |
