@@ -12,6 +12,7 @@ The EWS matrix defines the live checks required for the supported `lpe-exchange`
 - Require contact and calendar create-read-delete checks.
 - Require task checks where EWS task operations are published.
 - Keep `MAPI/EMSMDB`, `MAPI/NSPI`, and `/rpc/rpcproxy.dll` checks in the Outlook/MAPI readiness path.
+- Unsupported Exchange operations must return parseable EWS errors, not generic transport failures.
 
 ## Reference Table/List
 
@@ -25,3 +26,21 @@ The EWS matrix defines the live checks required for the supported `lpe-exchange`
 | Calendar | create, read, update, delete, busy status |
 | Tasks | create, read, update, delete where supported |
 | Submission | canonical `Sent` copy visible after send |
+
+| Operation | 0.1.3 status |
+| --- | --- |
+| `SyncFolderHierarchy` | supported for canonical folder hierarchy |
+| `FindFolder` / `GetFolder` | supported for canonical folder discovery |
+| `FindItem` / `GetItem` | supported for canonical mail, contacts, calendar, and tasks where exposed |
+| `SyncFolderItems` | supported for canonical mail, contacts, calendar, and tasks |
+| `CreateItem` | supported for mail drafts/send, contacts, calendar events, and tasks within bounded mappings |
+| `UpdateItem` | supported for canonical message read/flag state and collaboration item updates within bounded mappings |
+| `DeleteItem` | supported for bounded canonical mail/contact/calendar/task deletion |
+| `MoveItem` / `CopyItem` | supported for bounded canonical mail movement/copy behavior |
+| `CreateFolder` / `DeleteFolder` | supported for custom canonical mail folders; protected folders are guarded |
+| `GetAttachment` / `CreateAttachment` / `DeleteAttachment` | supported for bounded canonical attachment flows |
+| `ResolveNames` | supported against canonical account/contact visibility |
+| `GetUserAvailability` | supported for canonical calendar availability |
+| `GetServerTimeZones` | supported static compatibility response |
+| `GetUserOofSettings` / `SetUserOofSettings` | supported through canonical vacation/Sieve behavior |
+| `GetRoomLists`, `FindPeople`, `ExpandDL`, `Subscribe`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, `GetSharingFolder`, `Unsubscribe`, `GetEvents` | intentionally unsupported in `0.1.3`; must return EWS error responses |

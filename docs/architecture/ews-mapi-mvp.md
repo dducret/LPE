@@ -32,6 +32,8 @@
   - `NSPI` maps address-book behavior to canonical account/contact visibility
   - session context must remain authenticated and bounded to the mailbox principal
   - send and draft flows must use canonical submission and draft persistence
+  - profile creation must complete authenticated `Connect`, private mailbox `Logon`, hierarchy/content table probes, and NSPI address-book binding without publishing MAPI autodiscover until the gate passes
+  - mailbox synchronization must use canonical message, folder, flag, attachment, and sync-state mappings; import/read/delete/move operations must mutate canonical state only
 - Autodiscover:
   - `EWS` publication requires `LPE_AUTOCONFIG_EWS_ENABLED`
   - `mapiHttp` publication requires `LPE_AUTOCONFIG_MAPI_ENABLED`
@@ -56,6 +58,16 @@
 | `EMSMDB` | mailbox tables, message content, flags, folders, sync state |
 | `NSPI` | account/contact address-book visibility |
 | `/rpc/rpcproxy.dll` | authenticated RPC/HTTP mailbox transport path |
+
+| MAPI gate | Required behavior |
+| --- | --- |
+| profile creation | `OPTIONS`, `Connect`, private mailbox `Logon`, hierarchy table, receive-folder table, and store-state probes succeed after authentication |
+| address book | `NSPI Bind`, row lookup, seek/query rows, resolve names, mailbox URL, and address-book URL behavior use canonical account/contact visibility |
+| mailbox sync | `RopSynchronizationConfigure`, fast-transfer buffer, upload transfer state, import message/read/delete/move/hierarchy changes, and local replica IDs remain bounded to canonical mailbox state |
+| folder and message tables | open folder, hierarchy table, contents table, set columns, sort/restrict/seek/query rows, and query position return canonical folder/message data |
+| draft/send | create/open message, set properties, recipients, save changes, submit, and canonical `Sent` visibility use core submission |
+| reconnect | session cookies and request IDs maintain bounded authenticated state; reconnect can reissue `Connect`, `Logon`, and sync probes |
+| RPC proxy | `/rpc/rpcproxy.dll` authenticates and maps Outlook Anywhere mailbox transport probes to the same canonical MAPI path |
 
 | Unsupported | Rule |
 | --- | --- |

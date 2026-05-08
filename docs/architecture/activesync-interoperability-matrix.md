@@ -12,6 +12,7 @@ The matrix defines the ActiveSync client scenarios required for the supported ad
 - Treat sync-key stability, retry behavior, and paged continuation as mandatory.
 - Treat attachment fetch consistency across send, sync, and fetch as mandatory.
 - Keep Outlook desktop ActiveSync testing separate from classic Outlook Exchange-account testing.
+- Do not use ActiveSync as the Outlook for Windows desktop Exchange-account gate; that belongs to the EWS/MAPI readiness path.
 
 ## Reference Table/List
 
@@ -35,4 +36,17 @@ The matrix defines the ActiveSync client scenarios required for the supported ad
 | Outlook mobile for iOS | bearer, `Basic` fallback | ActiveSync `16.1` | `S1` `S2` `S3` `S5` `S6` `S7` `S8` |
 | Outlook mobile for Android | bearer, `Basic` fallback | ActiveSync `16.1` | `S1` `S2` `S3` `S5` `S6` `S7` `S8` |
 | iOS Mail | `Basic`, bearer where available | ActiveSync `16.1` | `S1` `S2` `S3` `S5` `S7` `S8` `S9` `S10` |
-| Classic Outlook desktop as direct ActiveSync client | `Basic`, bearer where available | ActiveSync `16.1` | `S1` `S2` `S3` `S4` `S5` `S6` `S7` `S8` `S11` `S12` |
+| Apple Mail on macOS when configured as Exchange ActiveSync | `Basic`, bearer where available | ActiveSync `16.1` | `S1` `S2` `S3` `S5` `S7` `S8` `S9` `S10` `S12` |
+
+| Lab checkpoint | Local coverage |
+| --- | --- |
+| enrollment and folder discovery | `folder_sync_returns_mail_and_collaboration_collections` |
+| initial and paged sync | `sync_key_zero_primes_then_returns_paged_more_available_changes` |
+| stable repeated sync | `stable_sync_does_not_reload_full_email_payloads_without_changes` |
+| sync-key recovery | `stale_sync_key_is_rejected_after_a_completed_round` |
+| mobile send | `send_mail_uses_canonical_submission_model` |
+| smart forward | `smart_forward_reuses_source_message_and_attachments` |
+| attachment fetch | `item_operations_fetch_returns_attachment_bytes` |
+| search | `search_queries_canonical_mail_projection` |
+| long poll | `ping_reports_changed_collections_after_sync_state_exists` |
+| contact/calendar mutations | `sync_contact_and_calendar_mutations_update_canonical_models` |
