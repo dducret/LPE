@@ -105,12 +105,16 @@ pass "Schema version is $expected_schema_version"
 check_http_json_field "$HTTP_BASE/health" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/live" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/ready" '"status":"ready"'
-check_http_json_field "$HTTP_BASE/bootstrap/admin" "\"email\":\"${BOOTSTRAP_EMAIL}\""
 check_http_json_field "$HTTP_BASE/health/local-ai" '"provider":"stub-local"'
 check_http_json_field "http://127.0.0.1/api/health" '"status":"ok"'
 check_http_json_field "http://127.0.0.1/api/health/live" '"status":"ok"'
 check_http_json_field "http://127.0.0.1/api/health/ready" '"status":"ready"'
-check_http_json_field "http://127.0.0.1/api/bootstrap/admin" "\"email\":\"${BOOTSTRAP_EMAIL}\""
+
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v email="$BOOTSTRAP_EMAIL" -tAc \
+  "SELECT 1 FROM public.admin_credentials WHERE lower(email) = lower(:'email') LIMIT 1;" \
+  | grep -qx '1' \
+  || fail "Bootstrap administrator ${BOOTSTRAP_EMAIL} is missing from public.admin_credentials"
+pass "Bootstrap administrator exists: ${BOOTSTRAP_EMAIL}"
 
 autoconfig_body="$(curl --silent --show-error --fail "http://127.0.0.1/autoconfig/mail/config-v1.1.xml")" \
   || fail "HTTP request failed: http://127.0.0.1/autoconfig/mail/config-v1.1.xml"
