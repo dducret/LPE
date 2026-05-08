@@ -260,7 +260,7 @@ Additional command-style providers can be chained after `takeri` with:
 
 `LPE_CT_SPOOL_DIR` now contains these durable operational artifacts:
 
-- `greylist/`: legacy first-seen triplets that can still be migrated into the private PostgreSQL store
+- `greylist/`: file-backed first-seen triplets used when the private PostgreSQL store is disabled
 - `policy/transport-audit.jsonl`: retained perimeter audit stream used for reporting and rebuild
 - `policy/digest-reports/`: generated digest artifacts
 - queue files under `incoming/`, `outbound/`, `deferred/`, `held/`, `quarantine/`, `bounces/`, and `sent/`
@@ -329,7 +329,7 @@ Use a controlled external sender domain with valid aligned `SPF` or `DKIM`, or
 a neutral sender domain that does not publish a rejecting `DMARC` policy, when
 the goal is to validate successful inbound delivery.
 
-The current default profile stores `bayespam` in the private PostgreSQL `bayespam_corpora` table. Legacy `policy/bayespam.json` content is still migrated when present so older technical state can be carried forward during rollout.
+The current default profile stores `bayespam` in the private PostgreSQL `bayespam_corpora` table. `policy/bayespam.json` is used only as the file-backed fallback when the private PostgreSQL store is disabled.
 
 Outbound trace files now also persist:
 

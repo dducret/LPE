@@ -20,7 +20,7 @@ The perimeter pipeline now also executes:
 - greylisting
 - `DNSBL/RBL` lookups
 - `SPF`, `DKIM`, and `DMARC` verification
-- local `bayespam` scoring with the dedicated private PostgreSQL store as the default indexed backend, plus migration from legacy spool artifacts when present
+- local `bayespam` scoring with the dedicated private PostgreSQL store as the default indexed backend and a file-backed fallback when that store is disabled
 - a configurable antivirus provider chain, with `takeri` as the default Git-synchronized Debian profile
 - anti-spam scoring and simple local reputation
 - detailed decision tracing persisted in the spool
@@ -57,7 +57,7 @@ In the current repository state, the runtime now uses:
 - the local spool for inbound and outbound queue ownership, quarantine payload custody, retained transport audit artifacts, and generated digest reports
 - the private dedicated PostgreSQL store as the default backend for indexed technical state such as greylisting, reputation, `bayespam`, throttling, quarantine metadata, retained history indexes, recipient-verification cache rows, and DKIM-domain references
 
-Legacy flat-file policy artifacts in the spool are still migrated forward when present so older state can be retained during rollout, but the default indexed backend is no longer spool-only for greylisting, reputation, throttling, or `bayespam`.
+Flat-file policy artifacts remain available only as the fallback backend when the private PostgreSQL store is disabled; the default indexed backend is no longer spool-only for greylisting, reputation, throttling, or `bayespam`.
 
 For outbound `LPE -> LPE-CT` handoff, the sorting center now also covers:
 

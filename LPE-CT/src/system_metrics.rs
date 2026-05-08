@@ -279,7 +279,12 @@ fn read_dns_servers_from_resolvectl() -> Vec<String> {
         return Vec::new();
     };
     raw.lines()
-        .flat_map(|line| line.split_once(':').map(|(_, value)| value).unwrap_or(line).split_whitespace())
+        .flat_map(|line| {
+            line.split_once(':')
+                .map(|(_, value)| value)
+                .unwrap_or(line)
+                .split_whitespace()
+        })
         .filter(|value| value.chars().any(|ch| ch == '.' || ch == ':'))
         .map(ToString::to_string)
         .collect()
@@ -340,7 +345,10 @@ fn ntp_metric() -> NtpMetric {
     let mut synchronized = None;
     let mut service = None;
 
-    if let Some(raw) = command_stdout("timedatectl", &["show", "-p", "NTP", "-p", "NTPSynchronized"]) {
+    if let Some(raw) = command_stdout(
+        "timedatectl",
+        &["show", "-p", "NTP", "-p", "NTPSynchronized"],
+    ) {
         for line in raw.lines() {
             if let Some(value) = line.strip_prefix("NTP=") {
                 enabled = value.trim() == "yes";
@@ -402,7 +410,10 @@ fn configured_ntp_servers() -> Vec<String> {
 
 #[cfg(unix)]
 fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
-    let output = std::process::Command::new(program).args(args).output().ok()?;
+    let output = std::process::Command::new(program)
+        .args(args)
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }

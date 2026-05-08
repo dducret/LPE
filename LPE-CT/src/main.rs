@@ -765,7 +765,10 @@ fn router(state: AppState) -> Router {
             "/api/v1/system-updates/apt-upgrade",
             post(run_apt_update_upgrade),
         )
-        .route("/api/v1/system-power/{action}", post(run_system_power_action))
+        .route(
+            "/api/v1/system-power/{action}",
+            post(run_system_power_action),
+        )
         .route("/api/v1/policies", put(update_policies))
         .route("/api/v1/updates", put(update_updates))
         .route(

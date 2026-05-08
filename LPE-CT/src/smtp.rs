@@ -612,10 +612,9 @@ pub(crate) fn initialize_spool(spool_dir: &Path) -> Result<()> {
 }
 
 pub(crate) async fn prepare_local_store(spool_dir: &Path, config: &RuntimeConfig) -> Result<()> {
-    let Some(pool) = ensure_local_db_schema(config).await? else {
+    let Some(_pool) = ensure_local_db_schema(config).await? else {
         return Ok(());
     };
-    migrate_legacy_policy_artifacts(spool_dir, pool).await?;
     reindex_quarantine_spool(spool_dir, config).await?;
     Ok(())
 }
@@ -624,14 +623,6 @@ pub(crate) async fn ensure_local_db_schema(
     config: &RuntimeConfig,
 ) -> Result<Option<&'static PgPool>> {
     storage::ensure_local_db_schema(&config.local_db).await
-}
-
-async fn migrate_legacy_policy_artifacts(spool_dir: &Path, pool: &PgPool) -> Result<()> {
-    migrate_legacy_reputation_store(spool_dir, pool).await?;
-    migrate_legacy_bayespam_corpus(spool_dir, pool).await?;
-    migrate_legacy_greylist_entries(spool_dir, pool).await?;
-    migrate_legacy_transport_audit_history(spool_dir, pool).await?;
-    Ok(())
 }
 
 async fn reindex_quarantine_spool(spool_dir: &Path, config: &RuntimeConfig) -> Result<()> {
@@ -648,134 +639,6 @@ async fn reindex_quarantine_spool(spool_dir: &Path, config: &RuntimeConfig) -> R
         let message = load_message_from_path(&path)?;
         persist_quarantine_metadata(spool_dir, config, &message).await?;
     }
-    Ok(())
-}
-
-async fn migrate_legacy_transport_audit_history(spool_dir: &Path, pool: &PgPool) -> Result<()> {
-    let legacy_path = spool_dir.join("policy").join("transport-audit.jsonl");
-    if !legacy_path.exists() {
-        return Ok(());
-    }
-    let existing_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM mail_flow_history")
-        .fetch_one(pool)
-        .await?;
-    if existing_count > 0 {
-        return Ok(());
-    }
-
-    for line in fs::read_to_string(legacy_path)?.lines() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let event: TransportAuditEvent = serde_json::from_str(line)?;
-        persist_transport_audit_db_event(pool, &event).await?;
-    }
-    Ok(())
-}
-
-async fn migrate_legacy_reputation_store(spool_dir: &Path, pool: &PgPool) -> Result<()> {
-    let legacy_path = spool_dir.join("policy").join("reputation.json");
-    if !legacy_path.exists() {
-        return Ok(());
-    }
-
-    let existing_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM reputation_entries")
-        .fetch_one(pool)
-        .await?;
-    if existing_count > 0 {
-        return Ok(());
-    }
-
-    let store: ReputationStore = serde_json::from_str(&fs::read_to_string(&legacy_path)?)?;
-    for (entry_key, state) in store.entries {
-        sqlx::query(
-            r#"
-            INSERT INTO reputation_entries (entry_key, state, updated_at)
-            VALUES ($1, $2, NOW())
-            ON CONFLICT (entry_key) DO UPDATE SET
-                state = EXCLUDED.state,
-                updated_at = NOW()
-            "#,
-        )
-        .bind(entry_key)
-        .bind(Json(state))
-        .execute(pool)
-        .await?;
-    }
-
-    Ok(())
-}
-
-async fn migrate_legacy_bayespam_corpus(spool_dir: &Path, pool: &PgPool) -> Result<()> {
-    let legacy_path = spool_dir.join("policy").join("bayespam.json");
-    if !legacy_path.exists() {
-        return Ok(());
-    }
-
-    let existing = sqlx::query("SELECT corpus FROM bayespam_corpora WHERE corpus_key = $1")
-        .bind("default")
-        .fetch_optional(pool)
-        .await?;
-    if existing.is_some() {
-        return Ok(());
-    }
-
-    let corpus: BayesCorpus = serde_json::from_str(&fs::read_to_string(&legacy_path)?)?;
-    sqlx::query(
-        r#"
-        INSERT INTO bayespam_corpora (corpus_key, corpus, updated_at)
-        VALUES ($1, $2, NOW())
-        ON CONFLICT (corpus_key) DO UPDATE SET
-            corpus = EXCLUDED.corpus,
-            updated_at = NOW()
-        "#,
-    )
-    .bind("default")
-    .bind(Json(corpus))
-    .execute(pool)
-    .await?;
-
-    Ok(())
-}
-
-async fn migrate_legacy_greylist_entries(spool_dir: &Path, pool: &PgPool) -> Result<()> {
-    let legacy_dir = spool_dir.join("greylist");
-    if !legacy_dir.is_dir() {
-        return Ok(());
-    }
-
-    let existing_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM greylist_entries")
-        .fetch_one(pool)
-        .await?;
-    if existing_count > 0 {
-        return Ok(());
-    }
-
-    for entry in fs::read_dir(&legacy_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("json") {
-            continue;
-        }
-        let Some(key) = path.file_stem().and_then(|value| value.to_str()) else {
-            continue;
-        };
-        let state: GreylistEntry = serde_json::from_str(&fs::read_to_string(&path)?)?;
-        sqlx::query(
-            r#"
-            INSERT INTO greylist_entries (entry_key, state, updated_at)
-            VALUES ($1, $2, NOW())
-            ON CONFLICT (entry_key) DO UPDATE SET
-                state = EXCLUDED.state,
-                updated_at = NOW()
-            "#,
-        )
-        .bind(key)
-        .bind(Json(state))
-        .execute(pool)
-        .await?;
-    }
-
     Ok(())
 }
 
