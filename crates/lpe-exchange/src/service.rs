@@ -1391,14 +1391,15 @@ where
         let sync_state = match requested_folder_kind(request).unwrap_or(FolderKind::Contacts) {
             FolderKind::Root => "root:0".to_string(),
             FolderKind::Contacts => {
-                let collection_id = requested_collection_id(request).unwrap_or(CONTACTS_FOLDER_ID);
+                let collection_id =
+                    requested_sync_collection_id(request, "contacts", CONTACTS_FOLDER_ID);
                 let contacts = self
                     .store
-                    .fetch_accessible_contacts_in_collection(principal.account_id, collection_id)
+                    .fetch_accessible_contacts_in_collection(principal.account_id, &collection_id)
                     .await?;
                 let sync_versions = sync_version_by_id(
                     self.store
-                        .fetch_contact_sync_versions(principal.account_id, collection_id)
+                        .fetch_contact_sync_versions(principal.account_id, &collection_id)
                         .await?,
                 );
                 let current_items = contacts
@@ -1418,7 +1419,7 @@ where
                     .map(|(id, _)| *id)
                     .collect::<HashSet<_>>();
                 let previous_state = requested_sync_state(request)
-                    .map(|state| collaboration_sync_state_items(&state, "contacts", collection_id))
+                    .map(|state| collaboration_sync_state_items(&state, "contacts", &collection_id))
                     .unwrap_or_default();
                 let previous_by_id = sync_state_items_by_id(&previous_state.items);
                 for contact in &contacts {
@@ -1467,17 +1468,18 @@ where
                         changes.push_str("</t:Delete>");
                     }
                 }
-                collaboration_sync_state("contacts", collection_id, &current_items)
+                collaboration_sync_state("contacts", &collection_id, &current_items)
             }
             FolderKind::Calendar => {
-                let collection_id = requested_collection_id(request).unwrap_or(CALENDAR_FOLDER_ID);
+                let collection_id =
+                    requested_sync_collection_id(request, "calendar", CALENDAR_FOLDER_ID);
                 let events = self
                     .store
-                    .fetch_accessible_events_in_collection(principal.account_id, collection_id)
+                    .fetch_accessible_events_in_collection(principal.account_id, &collection_id)
                     .await?;
                 let sync_versions = sync_version_by_id(
                     self.store
-                        .fetch_event_sync_versions(principal.account_id, collection_id)
+                        .fetch_event_sync_versions(principal.account_id, &collection_id)
                         .await?,
                 );
                 let current_items = events
@@ -1497,7 +1499,7 @@ where
                     .map(|(id, _)| *id)
                     .collect::<HashSet<_>>();
                 let previous_state = requested_sync_state(request)
-                    .map(|state| collaboration_sync_state_items(&state, "calendar", collection_id))
+                    .map(|state| collaboration_sync_state_items(&state, "calendar", &collection_id))
                     .unwrap_or_default();
                 let previous_by_id = sync_state_items_by_id(&previous_state.items);
                 for event in &events {
@@ -1546,17 +1548,17 @@ where
                         changes.push_str("</t:Delete>");
                     }
                 }
-                collaboration_sync_state("calendar", collection_id, &current_items)
+                collaboration_sync_state("calendar", &collection_id, &current_items)
             }
             FolderKind::Tasks => {
-                let collection_id = requested_collection_id(request).unwrap_or(TASKS_FOLDER_ID);
+                let collection_id = requested_sync_collection_id(request, "tasks", TASKS_FOLDER_ID);
                 let tasks = self
                     .store
-                    .fetch_accessible_tasks_in_collection(principal.account_id, collection_id)
+                    .fetch_accessible_tasks_in_collection(principal.account_id, &collection_id)
                     .await?;
                 let sync_versions = sync_version_by_id(
                     self.store
-                        .fetch_task_sync_versions(principal.account_id, collection_id)
+                        .fetch_task_sync_versions(principal.account_id, &collection_id)
                         .await?,
                 );
                 let current_items = tasks
@@ -1573,7 +1575,7 @@ where
                     .map(|(id, _)| *id)
                     .collect::<HashSet<_>>();
                 let previous_state = requested_sync_state(request)
-                    .map(|state| collaboration_sync_state_items(&state, "tasks", collection_id))
+                    .map(|state| collaboration_sync_state_items(&state, "tasks", &collection_id))
                     .unwrap_or_default();
                 let previous_by_id = sync_state_items_by_id(&previous_state.items);
                 for task in &tasks {
@@ -1620,7 +1622,7 @@ where
                         changes.push_str("</t:Delete>");
                     }
                 }
-                collaboration_sync_state("tasks", collection_id, &current_items)
+                collaboration_sync_state("tasks", &collection_id, &current_items)
             }
             FolderKind::Mailbox => {
                 let Some(mailbox_id) = self
@@ -1681,7 +1683,7 @@ where
     async fn create_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let result = async {
             if element_content(request, "Contact").is_some() {
-                let collection_id = requested_collection_id(request);
+                let collection_id = requested_collection_id_in(request, "SavedItemFolderId");
                 let contact = self
                     .store
                     .create_accessible_contact(
@@ -1693,7 +1695,7 @@ where
                 return Ok(create_contact_success_response(&contact));
             }
             if element_content(request, "CalendarItem").is_some() {
-                let collection_id = requested_collection_id(request);
+                let collection_id = requested_collection_id_in(request, "SavedItemFolderId");
                 let event = self
                     .store
                     .create_accessible_event(
@@ -3397,11 +3399,20 @@ fn request_contains_folder_reference(request: &str) -> bool {
 }
 
 fn requested_collection_id(request: &str) -> Option<&str> {
-    attribute_values_for_tag(request, "FolderId", "Id")
+    requested_collection_id_in(request, "")
+}
+
+fn requested_collection_id_in<'a>(request: &'a str, wrapper: &str) -> Option<&'a str> {
+    let xml = if wrapper.is_empty() {
+        request
+    } else {
+        element_content(request, wrapper)?
+    };
+    attribute_values_for_tag(xml, "FolderId", "Id")
         .into_iter()
         .next()
         .or_else(|| {
-            attribute_values_for_tag(request, "DistinguishedFolderId", "Id")
+            attribute_values_for_tag(xml, "DistinguishedFolderId", "Id")
                 .into_iter()
                 .next()
         })
@@ -3409,6 +3420,18 @@ fn requested_collection_id(request: &str) -> Option<&str> {
             "contacts" | "calendar" | "tasks" => DEFAULT_COLLECTION_ID,
             other => other,
         })
+}
+
+fn requested_sync_collection_id(request: &str, kind: &str, default_id: &str) -> String {
+    if let Some(collection_id) = requested_collection_id_in(request, "SyncFolderId") {
+        return collection_id.to_string();
+    }
+    if let Some(sync_state) = requested_sync_state(request) {
+        if let Some(collection_id) = collaboration_sync_state_collection_id(&sync_state, kind) {
+            return collection_id.to_string();
+        }
+    }
+    default_id.to_string()
 }
 
 fn requested_mailbox_role(request: &str) -> Option<&'static str> {
@@ -3523,6 +3546,13 @@ fn collaboration_sync_state_items(
         is_current_version,
         items,
     }
+}
+
+fn collaboration_sync_state_collection_id<'a>(sync_state: &'a str, kind: &str) -> Option<&'a str> {
+    sync_state
+        .strip_prefix(&format!("{kind}:"))?
+        .split(':')
+        .next()
 }
 
 fn sync_state_items_by_id(items: &[SyncStateItem]) -> HashMap<Uuid, Option<String>> {

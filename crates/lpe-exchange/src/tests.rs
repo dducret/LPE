@@ -10203,6 +10203,106 @@ async fn create_delete_contact_round_trips_through_sync_folder_items() {
 }
 
 #[tokio::test]
+async fn create_contact_syncs_from_current_empty_rca_sync_state() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:CreateItem>
+                  <m:SavedItemFolderId><t:FolderId Id="default" ChangeKey="ck-default"/></m:SavedItemFolderId>
+                  <m:Items>
+                    <t:Contact>
+                      <t:DisplayName>RCA Contact</t:DisplayName>
+                      <t:EmailAddresses>
+                        <t:Entry Key="EmailAddress1">rca@example.test</t:Entry>
+                      </t:EmailAddresses>
+                    </t:Contact>
+                  </m:Items>
+                </m:CreateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:ItemShape><t:BaseShape>AllProperties</t:BaseShape></m:ItemShape><m:SyncFolderId><t:FolderId Id="default" ChangeKey="ck-default"/></m:SyncFolderId><m:SyncState>contacts:default:v2:0</m:SyncState><m:MaxChangesReturned>10</m:MaxChangesReturned></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Create><t:Contact>"));
+    assert!(body.contains("contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"));
+    assert!(body.contains("<t:DisplayName>RCA Contact</t:DisplayName>"));
+    assert!(!body.contains("<m:SyncState>contacts:default:v2:0</m:SyncState>"));
+}
+
+#[tokio::test]
+async fn create_contact_without_saved_folder_ignores_unrelated_folder_ids() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:CreateItem>
+                  <m:Items>
+                    <t:Contact>
+                      <t:FolderId Id="shared-contacts-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"/>
+                      <t:DisplayName>Unscoped RCA Contact</t:DisplayName>
+                      <t:EmailAddresses>
+                        <t:Entry Key="EmailAddress1">unscoped@example.test</t:Entry>
+                      </t:EmailAddresses>
+                    </t:Contact>
+                  </m:Items>
+                </m:CreateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="default" ChangeKey="ck-default"/></m:SyncFolderId><m:SyncState>contacts:default:v2:0</m:SyncState></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Create><t:Contact>"));
+    assert!(body.contains("<t:DisplayName>Unscoped RCA Contact</t:DisplayName>"));
+}
+
+#[tokio::test]
 async fn sync_folder_items_returns_contact_update_for_legacy_id_only_sync_state() {
     let contact_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
     let collection = FakeStore::collection("default", "contacts", "Contacts");
