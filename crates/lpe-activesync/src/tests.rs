@@ -2206,6 +2206,87 @@ async fn ping_reports_changed_collections_after_sync_state_exists() {
 }
 
 #[tokio::test]
+async fn ping_reconnects_after_service_restart_using_persisted_sync_state() {
+    let inbox = FakeStore::inbox_mailbox();
+    let emails = Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+        "11111111-1111-1111-1111-111111111111",
+        inbox.id,
+        "inbox",
+        "One",
+    )]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: emails.clone(),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+
+    let sync_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", "0"));
+        collection.push(WbxmlNode::with_text(
+            0,
+            "CollectionId",
+            inbox.id.to_string(),
+        ));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+    service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &sync_request,
+        )
+        .await
+        .unwrap();
+
+    let restarted_service = ActiveSyncService::new(store);
+    emails.lock().unwrap().push(FakeStore::inbox_email(
+        "22222222-2222-2222-2222-222222222222",
+        inbox.id,
+        "inbox",
+        "Two",
+    ));
+
+    let ping_request = encode_wbxml(&{
+        let mut ping = WbxmlNode::new(13, "Ping");
+        ping.push(WbxmlNode::with_text(13, "HeartbeatInterval", "60"));
+        let mut folders = WbxmlNode::new(13, "Folders");
+        let mut folder = WbxmlNode::new(13, "Folder");
+        folder.push(WbxmlNode::with_text(13, "Id", inbox.id.to_string()));
+        folder.push(WbxmlNode::with_text(13, "Class", "Email"));
+        folders.push(folder);
+        ping.push(folders);
+        ping
+    });
+    let response = restarted_service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Ping".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &ping_request,
+        )
+        .await
+        .unwrap();
+    let body = decode_response_body(response).await;
+    assert_eq!(body.child("Status").unwrap().text_value(), "2");
+}
+
+#[tokio::test]
 async fn ping_rejects_unsynchronized_folders() {
     let inbox = FakeStore::inbox_mailbox();
     let store = FakeStore {
@@ -2248,6 +2329,67 @@ async fn ping_rejects_unsynchronized_folders() {
     let body = decode_response_body(response).await;
     assert_eq!(body.child("Status").unwrap().text_value(), "3");
     assert!(body.child("Folders").is_none());
+}
+
+#[tokio::test]
+async fn smart_reply_uses_source_recipients_and_canonical_submission() {
+    let inbox = FakeStore::inbox_mailbox();
+    let source_message_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            inbox.id,
+            "inbox",
+            "Source subject",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+    let request = encode_wbxml(&{
+        let mut root = WbxmlNode::new(21, "SmartReply");
+        let mut source = WbxmlNode::new(21, "Source");
+        source.push(WbxmlNode::with_text(
+            21,
+            "ItemId",
+            source_message_id.to_string(),
+        ));
+        root.push(source);
+        root.push(WbxmlNode::with_text(
+            21,
+            "Mime",
+            concat!(
+                "From: Alice <alice@example.test>\r\n",
+                "Subject: \r\n",
+                "\r\n",
+                "Thanks for the update."
+            ),
+        ));
+        root
+    });
+
+    let response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("SmartReply".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &request,
+        )
+        .await
+        .unwrap();
+
+    let body = decode_response_body(response).await;
+    assert_eq!(body.child("Status").unwrap().text_value(), "1");
+    let submitted = store.submitted_messages.lock().unwrap();
+    assert_eq!(submitted[0].source, "activesync-smartreply");
+    assert_eq!(submitted[0].to[0].address, "bob@example.test");
+    assert_eq!(submitted[0].subject, "Re: Source subject");
+    assert!(submitted[0].body_text.contains("Original message"));
 }
 
 #[tokio::test]

@@ -67,6 +67,7 @@
 | --- | --- |
 | Outlook first login/list/select/sync | `crates/lpe-imap::tests::outlook_first_login_list_select_sync_transcript` |
 | Outlook UID refresh | `crates/lpe-imap::tests::outlook_uid_search_refreshes_selected_mailbox_before_fetch` |
+| Outlook large mailbox refresh | `crates/lpe-imap::tests::outlook_large_mailbox_refresh_keeps_uid_fetch_and_search_stable` |
 | Outlook setup probes | `crates/lpe-imap::tests::quota_probe_commands_are_tolerated_for_outlook_setup` |
 | Thunderbird copy to trash and expunge | `crates/lpe-imap::tests::thunderbird_copy_to_trash_then_expunge_removes_source_only` |
 | Thunderbird draft delete by move | `crates/lpe-imap::tests::thunderbird_delete_draft_by_move_to_trash_removes_drafts_copy` |

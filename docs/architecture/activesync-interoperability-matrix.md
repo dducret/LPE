@@ -45,8 +45,10 @@ The matrix defines the ActiveSync client scenarios required for the supported ad
 | stable repeated sync | `stable_sync_does_not_reload_full_email_payloads_without_changes` |
 | sync-key recovery | `stale_sync_key_is_rejected_after_a_completed_round` |
 | mobile send | `send_mail_uses_canonical_submission_model` |
+| smart reply | `smart_reply_uses_source_recipients_and_canonical_submission` |
 | smart forward | `smart_forward_reuses_source_message_and_attachments` |
 | attachment fetch | `item_operations_fetch_returns_attachment_bytes` |
 | search | `search_queries_canonical_mail_projection` |
 | long poll | `ping_reports_changed_collections_after_sync_state_exists` |
+| long-poll reconnect | `ping_reconnects_after_service_restart_using_persisted_sync_state` |
 | contact/calendar mutations | `sync_contact_and_calendar_mutations_update_canonical_models` |

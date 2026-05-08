@@ -1441,6 +1441,90 @@ async fn outlook_uid_search_refreshes_selected_mailbox_before_fetch() {
 }
 
 #[tokio::test]
+async fn outlook_large_mailbox_refresh_keeps_uid_fetch_and_search_stable() {
+    let store = FakeStore::new();
+    let inbox_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    *store.emails.lock().unwrap() = (1..=384)
+        .map(|uid| {
+            email(
+                &format!("00000000-0000-0000-0000-{uid:012x}"),
+                uid,
+                uid as u64 + 1,
+                inbox_id,
+                "inbox",
+                "Inbox",
+                &format!("Message-{uid:04}"),
+                uid % 3 == 0,
+                uid % 5 == 0,
+            )
+        })
+        .collect();
+    *store.highest_modseq.lock().unwrap() = 385;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(
+        &mut stream,
+        "OL1 LOGIN alice@example.test secret\r\n",
+        "OL1",
+    )
+    .await;
+
+    let select = send_command(&mut stream, "OL2 SELECT Inbox\r\n", "OL2").await;
+    assert!(select.contains("* 384 EXISTS"));
+    assert!(select.contains("* OK [UIDNEXT 385]"));
+    assert!(select.contains("* OK [HIGHESTMODSEQ 385]"));
+
+    let fetch = send_command(
+        &mut stream,
+        "OL3 UID FETCH 1:* (UID FLAGS RFC822.SIZE)\r\n",
+        "OL3",
+    )
+    .await;
+    assert!(fetch.contains("* 1 FETCH (UID 1 FLAGS ("));
+    assert!(fetch.contains("* 384 FETCH (UID 384 FLAGS ("));
+    assert!(fetch.contains("OL3 OK FETCH completed"));
+
+    let search_last = send_command(
+        &mut stream,
+        "OL4 UID SEARCH SUBJECT Message-0384\r\n",
+        "OL4",
+    )
+    .await;
+    assert!(search_last.contains("* SEARCH 384"));
+
+    store.emails.lock().unwrap().push(email(
+        "00000000-0000-0000-0000-000000000181",
+        385,
+        386,
+        inbox_id,
+        "inbox",
+        "Inbox",
+        "Message-0385",
+        true,
+        false,
+    ));
+    *store.highest_modseq.lock().unwrap() = 386;
+
+    let refresh_search = send_command(
+        &mut stream,
+        "OL5 UID SEARCH SUBJECT Message-0385\r\n",
+        "OL5",
+    )
+    .await;
+    assert!(refresh_search.contains("* SEARCH 385"));
+    let refresh_fetch = send_command(&mut stream, "OL6 UID FETCH 385 (FLAGS)\r\n", "OL6").await;
+    assert!(refresh_fetch.contains("* 385 FETCH (UID 385 FLAGS ("));
+
+    task.abort();
+}
+
+#[tokio::test]
 async fn condstore_store_reports_modified_and_keeps_fresh_messages() {
     let store = FakeStore::new();
     let archive_id = Uuid::new_v4();
