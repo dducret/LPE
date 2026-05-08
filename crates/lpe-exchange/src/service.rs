@@ -2322,13 +2322,43 @@ where
         Ok(subscribe_success_response(principal, request))
     }
 
-    async fn get_events(&self, _principal: &AccountPrincipal, request: &str) -> Result<String> {
+    async fn get_events(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let subscription_id = element_text(request, "SubscriptionId")
             .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| notification_subscription_id(_principal.account_id, request));
+            .unwrap_or_else(|| notification_subscription_id(principal.account_id, request));
         let previous_watermark = element_text(request, "Watermark")
             .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| notification_watermark(&subscription_id, 0));
+            .unwrap_or_else(|| notification_watermark(&subscription_id, None, 0));
+
+        if let Some(mailbox_id) = self
+            .notification_watermark_mailbox_id(principal, &previous_watermark)
+            .await?
+        {
+            let query = self
+                .store
+                .query_jmap_email_ids(
+                    principal.account_id,
+                    Some(mailbox_id),
+                    None,
+                    0,
+                    MAILBOX_QUERY_LIMIT,
+                )
+                .await?;
+            let emails = self
+                .store
+                .fetch_jmap_emails(principal.account_id, &query.ids)
+                .await?
+                .into_iter()
+                .filter(|email| email.mailbox_id == mailbox_id)
+                .collect::<Vec<_>>();
+            if let Some(email) = emails.first() {
+                return Ok(get_events_new_mail_response(
+                    &subscription_id,
+                    &previous_watermark,
+                    email,
+                ));
+            }
+        }
 
         Ok(get_events_status_response(
             &subscription_id,
@@ -2347,6 +2377,29 @@ where
         }
 
         Ok(unsubscribe_success_response())
+    }
+
+    async fn notification_watermark_mailbox_id(
+        &self,
+        principal: &AccountPrincipal,
+        watermark: &str,
+    ) -> Result<Option<Uuid>> {
+        let Some(folder_marker) = notification_watermark_folder_marker(watermark) else {
+            return Ok(None);
+        };
+        if let Some(mailbox_id) = folder_marker.strip_prefix("mailbox:") {
+            return Ok(Uuid::parse_str(mailbox_id).ok());
+        }
+        let Some(role) = folder_marker.strip_prefix("role:") else {
+            return Ok(None);
+        };
+        Ok(self
+            .store
+            .fetch_jmap_mailboxes(principal.account_id)
+            .await?
+            .into_iter()
+            .find(|mailbox| mailbox.role == role)
+            .map(|mailbox| mailbox.id))
     }
 }
 
@@ -4467,7 +4520,8 @@ fn delete_folder_success_response() -> String {
 
 fn subscribe_success_response(principal: &AccountPrincipal, request: &str) -> String {
     let subscription_id = notification_subscription_id(principal.account_id, request);
-    let watermark = notification_watermark(&subscription_id, 0);
+    let folder_marker = notification_folder_marker(request);
+    let watermark = notification_watermark(&subscription_id, folder_marker.as_deref(), 0);
     format!(
         concat!(
             "<m:SubscribeResponse>",
@@ -4486,7 +4540,8 @@ fn subscribe_success_response(principal: &AccountPrincipal, request: &str) -> St
 }
 
 fn get_events_status_response(subscription_id: &str, previous_watermark: &str) -> String {
-    let next_watermark = notification_watermark(subscription_id, 1);
+    let folder_marker = notification_watermark_folder_marker(previous_watermark);
+    let next_watermark = notification_watermark(subscription_id, folder_marker.as_deref(), 1);
     format!(
         concat!(
             "<m:GetEventsResponse>",
@@ -4499,7 +4554,6 @@ fn get_events_status_response(subscription_id: &str, previous_watermark: &str) -
             "<t:MoreEvents>false</t:MoreEvents>",
             "<t:StatusEvent>",
             "<t:Watermark>{next_watermark}</t:Watermark>",
-            "<t:TimeStamp>1970-01-01T00:00:00Z</t:TimeStamp>",
             "</t:StatusEvent>",
             "</m:Notification>",
             "</m:GetEventsResponseMessage>",
@@ -4509,6 +4563,45 @@ fn get_events_status_response(subscription_id: &str, previous_watermark: &str) -
         subscription_id = escape_xml(subscription_id),
         previous_watermark = escape_xml(previous_watermark),
         next_watermark = escape_xml(&next_watermark),
+    )
+}
+
+fn get_events_new_mail_response(
+    subscription_id: &str,
+    previous_watermark: &str,
+    email: &JmapEmail,
+) -> String {
+    let folder_marker = format!("mailbox:{}", email.mailbox_id);
+    let next_watermark = notification_watermark(subscription_id, Some(&folder_marker), 1);
+    format!(
+        concat!(
+            "<m:GetEventsResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetEventsResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Notification>",
+            "<t:SubscriptionId>{subscription_id}</t:SubscriptionId>",
+            "<t:PreviousWatermark>{previous_watermark}</t:PreviousWatermark>",
+            "<t:MoreEvents>false</t:MoreEvents>",
+            "<t:NewMailEvent>",
+            "<t:Watermark>{next_watermark}</t:Watermark>",
+            "<t:TimeStamp>{received_at}</t:TimeStamp>",
+            "<t:ItemId Id=\"message:{message_id}\" ChangeKey=\"{change_key}\"/>",
+            "<t:ParentFolderId Id=\"mailbox:{mailbox_id}\" ChangeKey=\"{folder_change_key}\"/>",
+            "</t:NewMailEvent>",
+            "</m:Notification>",
+            "</m:GetEventsResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetEventsResponse>"
+        ),
+        subscription_id = escape_xml(subscription_id),
+        previous_watermark = escape_xml(previous_watermark),
+        next_watermark = escape_xml(&next_watermark),
+        received_at = escape_xml(&email.received_at),
+        message_id = email.id,
+        change_key = escape_xml(&email.delivery_status),
+        mailbox_id = email.mailbox_id,
+        folder_change_key = escape_xml(&folder_change_key(&email.mailbox_id.to_string())),
     )
 }
 
@@ -4547,8 +4640,39 @@ fn notification_subscription_id(account_id: Uuid, request: &str) -> String {
     )
 }
 
-fn notification_watermark(subscription_id: &str, sequence: u64) -> String {
-    format!("lpe:{subscription_id}:{sequence}")
+fn notification_folder_marker(request: &str) -> Option<String> {
+    requested_mailbox_folder_ids(request)
+        .into_iter()
+        .next()
+        .map(|mailbox_id| format!("mailbox:{mailbox_id}"))
+        .or_else(|| requested_mailbox_role(request).map(|role| format!("role:{role}")))
+}
+
+fn notification_watermark(
+    subscription_id: &str,
+    folder_marker: Option<&str>,
+    sequence: u64,
+) -> String {
+    match folder_marker {
+        Some(folder_marker) => format!("lpe:{subscription_id}:{folder_marker}:{sequence}"),
+        None => format!("lpe:{subscription_id}:all:{sequence}"),
+    }
+}
+
+fn notification_watermark_folder_marker(watermark: &str) -> Option<String> {
+    let mut parts = watermark.split(':');
+    if parts.next()? != "lpe" {
+        return None;
+    }
+    parts.next()?;
+    let kind = parts.next()?;
+    match kind {
+        "mailbox" => Uuid::parse_str(parts.next()?)
+            .ok()
+            .map(|mailbox_id| format!("mailbox:{mailbox_id}")),
+        "role" => parts.next().map(|role| format!("role:{role}")),
+        _ => None,
+    }
 }
 
 fn get_item_error_response(code: &str, message: &str) -> String {
