@@ -78,6 +78,12 @@ struct EwsPullSubscription {
     folder_marker: Option<String>,
     event_types: HashSet<String>,
     events: Vec<EwsQueuedNotification>,
+    last_seen: Instant,
+}
+
+#[derive(Clone, Debug)]
+struct EwsPullEventJournal {
+    events: Vec<EwsQueuedNotification>,
     next_sequence: u64,
     last_seen: Instant,
 }
@@ -102,6 +108,11 @@ enum EwsNotificationKind {
 fn ews_pull_subscriptions() -> &'static Mutex<HashMap<String, EwsPullSubscription>> {
     static SUBSCRIPTIONS: OnceLock<Mutex<HashMap<String, EwsPullSubscription>>> = OnceLock::new();
     SUBSCRIPTIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn ews_pull_event_journal() -> &'static Mutex<HashMap<String, EwsPullEventJournal>> {
+    static JOURNAL: OnceLock<Mutex<HashMap<String, EwsPullEventJournal>>> = OnceLock::new();
+    JOURNAL.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 pub fn router() -> Router<Storage> {
@@ -2462,7 +2473,21 @@ where
             .notification_request_folder_marker(principal, request)
             .await?;
         let event_types = requested_notification_event_types(request);
-        let watermark = notification_watermark(&subscription_id, folder_marker.as_deref(), 0);
+        let requested_watermark =
+            element_text(request, "Watermark").filter(|value| !value.trim().is_empty());
+        let watermark = requested_watermark.clone().unwrap_or_else(|| {
+            notification_watermark(&subscription_id, folder_marker.as_deref(), 0)
+        });
+        let seed_after_sequence = requested_watermark
+            .as_deref()
+            .and_then(notification_watermark_sequence)
+            .unwrap_or(0);
+        let seed_events = pull_journal_events_since(
+            principal.account_id,
+            folder_marker.as_deref(),
+            seed_after_sequence,
+            &event_types,
+        );
         let now = Instant::now();
         let mut subscriptions = ews_pull_subscriptions()
             .lock()
@@ -2474,14 +2499,14 @@ where
                 subscription.account_id = principal.account_id;
                 subscription.folder_marker = folder_marker.clone();
                 subscription.event_types = event_types.clone();
+                subscription.events = seed_events.clone();
                 subscription.last_seen = now;
             })
             .or_insert_with(|| EwsPullSubscription {
                 account_id: principal.account_id,
                 folder_marker,
                 event_types,
-                events: Vec::new(),
-                next_sequence: 1,
+                events: seed_events,
                 last_seen: now,
             });
         Ok((subscription_id, watermark))
@@ -4910,6 +4935,7 @@ fn record_pull_created_notifications(principal: &AccountPrincipal, email: &JmapE
 
 fn record_pull_notification(account_id: Uuid, event: EwsQueuedNotification) {
     let now = Instant::now();
+    let event = append_pull_journal_event(account_id, event, now);
     let mut subscriptions = ews_pull_subscriptions()
         .lock()
         .expect("EWS pull subscription registry poisoned");
@@ -4921,15 +4947,40 @@ fn record_pull_notification(account_id: Uuid, event: EwsQueuedNotification) {
         {
             continue;
         }
-        let mut event = event.clone();
-        event.sequence = subscription.next_sequence;
-        subscription.next_sequence += 1;
-        subscription.events.push(event);
+        subscription.events.push(event.clone());
         if subscription.events.len() > EWS_PULL_SUBSCRIPTION_MAX_EVENTS {
             let drain_to = subscription.events.len() - EWS_PULL_SUBSCRIPTION_MAX_EVENTS;
             subscription.events.drain(0..drain_to);
         }
     }
+}
+
+fn append_pull_journal_event(
+    account_id: Uuid,
+    event: EwsQueuedNotification,
+    now: Instant,
+) -> EwsQueuedNotification {
+    let mut journal = ews_pull_event_journal()
+        .lock()
+        .expect("EWS pull event journal poisoned");
+    prune_pull_event_journal(&mut journal, now);
+    let entry = journal
+        .entry(pull_event_journal_key(account_id, event.mailbox_id))
+        .or_insert_with(|| EwsPullEventJournal {
+            events: Vec::new(),
+            next_sequence: 1,
+            last_seen: now,
+        });
+    entry.last_seen = now;
+    let mut event = event;
+    event.sequence = entry.next_sequence;
+    entry.next_sequence += 1;
+    entry.events.push(event.clone());
+    if entry.events.len() > EWS_PULL_SUBSCRIPTION_MAX_EVENTS {
+        let drain_to = entry.events.len() - EWS_PULL_SUBSCRIPTION_MAX_EVENTS;
+        entry.events.drain(0..drain_to);
+    }
+    event
 }
 
 fn pull_notifications_since(
@@ -4960,6 +5011,39 @@ fn pull_notifications_since(
     ))
 }
 
+fn pull_journal_events_since(
+    account_id: Uuid,
+    folder_marker: Option<&str>,
+    sequence: u64,
+    event_types: &HashSet<String>,
+) -> Vec<EwsQueuedNotification> {
+    let now = Instant::now();
+    let mut journal = ews_pull_event_journal()
+        .lock()
+        .expect("EWS pull event journal poisoned");
+    prune_pull_event_journal(&mut journal, now);
+    let mut events = journal
+        .iter()
+        .filter_map(|(key, entry)| {
+            let (journal_account_id, mailbox_id) = pull_event_journal_key_parts(key)?;
+            if journal_account_id != account_id {
+                return None;
+            }
+            if !folder_marker_matches_mailbox(folder_marker, mailbox_id) {
+                return None;
+            }
+            Some(entry.events.iter().filter(move |event| {
+                event.sequence > sequence && event_type_matches(event_types, event.kind)
+            }))
+        })
+        .flatten()
+        .cloned()
+        .collect::<Vec<_>>();
+    events.sort_by_key(|event| event.sequence);
+    events.truncate(EWS_PULL_NOTIFICATION_BATCH_SIZE);
+    events
+}
+
 fn prune_pull_subscriptions(
     subscriptions: &mut HashMap<String, EwsPullSubscription>,
     now: Instant,
@@ -4969,25 +5053,49 @@ fn prune_pull_subscriptions(
     });
 }
 
+fn prune_pull_event_journal(journal: &mut HashMap<String, EwsPullEventJournal>, now: Instant) {
+    journal.retain(|_, entry| now.duration_since(entry.last_seen) <= EWS_PULL_SUBSCRIPTION_TTL);
+}
+
 fn subscription_matches_mailbox(subscription: &EwsPullSubscription, mailbox_id: Uuid) -> bool {
-    let Some(marker) = subscription.folder_marker.as_deref() else {
-        return false;
-    };
-    marker == "all" || marker == format!("mailbox:{mailbox_id}")
+    folder_marker_matches_mailbox(subscription.folder_marker.as_deref(), mailbox_id)
 }
 
 fn subscription_matches_event(
     subscription: &EwsPullSubscription,
     kind: EwsNotificationKind,
 ) -> bool {
-    if subscription.event_types.is_empty() {
+    event_type_matches(&subscription.event_types, kind)
+}
+
+fn event_type_matches(event_types: &HashSet<String>, kind: EwsNotificationKind) -> bool {
+    if event_types.is_empty() {
         return true;
     }
     match kind {
-        EwsNotificationKind::Created => subscription.event_types.contains("CreatedEvent"),
-        EwsNotificationKind::Deleted => subscription.event_types.contains("DeletedEvent"),
-        EwsNotificationKind::NewMail => subscription.event_types.contains("NewMailEvent"),
+        EwsNotificationKind::Created => event_types.contains("CreatedEvent"),
+        EwsNotificationKind::Deleted => event_types.contains("DeletedEvent"),
+        EwsNotificationKind::NewMail => event_types.contains("NewMailEvent"),
     }
+}
+
+fn folder_marker_matches_mailbox(folder_marker: Option<&str>, mailbox_id: Uuid) -> bool {
+    let Some(marker) = folder_marker else {
+        return false;
+    };
+    marker == "all" || marker == format!("mailbox:{mailbox_id}")
+}
+
+fn pull_event_journal_key(account_id: Uuid, mailbox_id: Uuid) -> String {
+    format!("{account_id}:{mailbox_id}")
+}
+
+fn pull_event_journal_key_parts(key: &str) -> Option<(Uuid, Uuid)> {
+    let (account_id, mailbox_id) = key.split_once(':')?;
+    Some((
+        Uuid::parse_str(account_id).ok()?,
+        Uuid::parse_str(mailbox_id).ok()?,
+    ))
 }
 
 fn requested_notification_event_types(request: &str) -> HashSet<String> {

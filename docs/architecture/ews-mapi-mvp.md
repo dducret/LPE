@@ -52,7 +52,7 @@
 | Calendar | canonical event read/write operations |
 | Tasks | canonical task read/write operations where exposed |
 | Submission | canonical send flow with authoritative `Sent` |
-| Notifications | bounded pull-subscription compatibility through `Subscribe`, `GetEvents`, and `Unsubscribe`; mailbox `CreateItem` and `DeleteItem` calls are recorded in a short-lived in-process pull queue, `GetEvents` returns queued `CreatedEvent`, `NewMailEvent`, and `DeletedEvent` notifications before falling back to visible-message projections, emits mailbox-scoped compatibility `CreatedEvent` probes when no durable event queue is available, and push or streaming notifications remain out of scope |
+| Notifications | bounded pull-subscription compatibility through `Subscribe`, `GetEvents`, and `Unsubscribe`; `Subscribe` honors request watermarks against a short-lived in-process mailbox event journal, mailbox `CreateItem` and `DeleteItem` calls are recorded as `CreatedEvent`, `NewMailEvent`, and `DeletedEvent` candidates, `GetEvents` returns queued notifications before falling back to visible-message projections, emits mailbox-scoped compatibility `CreatedEvent` probes when no durable event queue is available, and push or streaming notifications remain out of scope |
 
 | MAPI component | Canonical mapping |
 | --- | --- |
