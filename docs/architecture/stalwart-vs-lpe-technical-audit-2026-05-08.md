@@ -6,7 +6,7 @@
 - Preserve the `LPE` architecture: core `LPE` owns canonical mailbox and collaboration state; `LPE-CT` owns SMTP edge, relay, quarantine, and perimeter security.
 - Treat Stalwart as a benchmark only. Do not copy Stalwart source code or adopt license-incompatible implementation details.
 - Verify current `LPE` build and tests before making conclusions about implementation state.
-- Produce actionable gaps that can guide `0.1.3` and post-`0.1.3` work.
+- Produce actionable gaps that can guide `0.2.0` and post-`0.2.0` work.
 
 ## Scope
 
@@ -42,7 +42,7 @@ Implementation density snapshot:
 | `lpe-activesync` | 12 | 6,434 |
 | `lpe-dav` | 10 | 3,254 |
 
-Test distribution is strongest around `lpe-exchange`, `lpe-jmap`, `LPE-CT`, and `lpe-admin-api`, which matches the current `0.1.3` focus. Some env-sensitive and benchmark tests are intentionally ignored in normal `cargo test`.
+Test distribution is strongest around `lpe-exchange`, `lpe-jmap`, `LPE-CT`, and `lpe-admin-api`, which matches the current `0.2.0` focus. Some env-sensitive and benchmark tests are intentionally ignored in normal `cargo test`.
 
 ## Stalwart Benchmark Baseline
 
@@ -83,7 +83,7 @@ The main implementation caution is that `LPE` is already broad. The current risk
 | IMAP | IMAP4rev2/rev1 plus extensive extensions | compatibility layer with common commands, UID, flags, search, append, idle | sufficient MVP; gap remains extension breadth and formal interoperability matrix |
 | POP3 | supported | not planned in current protocol order | acceptable gap; do not add before current protocol depth |
 | ActiveSync | not a Stalwart differentiator | first-class mobile/native compatibility adapter | `LPE` differentiator; needs real Outlook mobile/iOS lab evidence |
-| EWS/MAPI | not Stalwart's main target | major `0.1.3` focus for Outlook/Exchange compatibility | strategic differentiator; still bounded by unsupported EWS operations and MAPI ROP gaps |
+| EWS/MAPI | not Stalwart's main target | major `0.2.0` focus for Outlook/Exchange compatibility | strategic differentiator; still bounded by unsupported EWS operations and MAPI ROP gaps |
 | DAV/WebDAV | CalDAV, CardDAV, WebDAV, file storage | CalDAV/CardDAV/tasks over canonical models; no WebDAV file storage | acceptable for current scope; file storage should wait for documented need |
 | Sieve | broad Sieve and ManageSieve extensions | basic ManageSieve plus fileinto/discard/redirect/vacation | adequate MVP; far behind Stalwart extension surface |
 | Storage | pluggable data/blob/search/memory stores | PostgreSQL primary, attachment blobs in DB, local `LPE-CT` technical state | simpler and maintainable; scalability bottleneck is blob/search/ephemeral separation |
@@ -139,7 +139,7 @@ Action: do not add pluggable backends prematurely. Instead define one concrete n
 
 Stalwart v0.16 moved management to unified JMAP objects and an idempotent CLI apply flow. `LPE` should not copy that surface, but should absorb the operational lesson: administrators need repeatable reconciliation, not only hand-driven API/UI mutations.
 
-Action: add an `LPE` declarative admin plan model after `0.1.3` Outlook gates. Start with domains, accounts, aliases, accepted domains, DKIM/publication policy, and `LPE-CT` routing policy.
+Action: add an `LPE` declarative admin plan model after `0.2.0` Outlook gates. Start with domains, accounts, aliases, accepted domains, DKIM/publication policy, and `LPE-CT` routing policy.
 
 ### P2: Security Filtering Is Behind Stalwart's Breadth
 
@@ -188,7 +188,7 @@ The highest-risk gaps are operational, not code volume:
 
 ## Recommended Roadmap
 
-1. Finish `0.1.3` protocol depth gates:
+1. Finish `0.2.0` protocol depth gates:
    - JMAP state/change/push consistency
    - IMAP Outlook/Thunderbird compatibility transcripts
    - ActiveSync mobile/iOS compatibility lab

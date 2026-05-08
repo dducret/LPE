@@ -14,29 +14,29 @@ Its stable architectural base is:
 - project source code under `Apache-2.0`
 - `PostgreSQL` as the main persistent store
 - `JMAP` as the primary modern protocol axis
-- `IMAP` as a permanently supported mailbox-access communication protocol and compatibility layer, with the first major development push completed through `0.1.2`
+- `IMAP` as a permanently supported mailbox-access communication protocol and compatibility layer
 - `ActiveSync` as the first mobile/native compatibility target for clients that support `Exchange ActiveSync`
-- `EWS` as the active `0.1.3` Exchange compatibility implementation, without moving `SMTP` or canonical mailbox state out of `LPE`
-- `MAPI over HTTP` and Outlook Anywhere / RPC over HTTP as mandatory `0.1.3` implementation tracks for full classic Outlook for Windows Exchange-account support, with public edge routing present and autodiscover publication gated until the Outlook interoperability matrix passes
-- full Outlook support as an explicit `0.1.3` release goal: Outlook mobile through `ActiveSync`, Exchange-style mail, contacts, calendar, and task compatibility through `EWS`, and classic Outlook for Windows Exchange-account support through `MAPI over HTTP`
+- `EWS` as the active `0.2.0` Exchange compatibility implementation, without moving `SMTP` or canonical mailbox state out of `LPE`
+- `MAPI over HTTP` and Outlook Anywhere / RPC over HTTP as mandatory `0.2.0` implementation tracks for full classic Outlook for Windows Exchange-account support, with public edge routing present and autodiscover publication gated until the Outlook interoperability matrix passes
+- full Outlook support as an explicit `0.2.0` release goal: Outlook mobile through `ActiveSync`, Exchange-style mail, contacts, calendar, and task compatibility through `EWS`, and classic Outlook for Windows Exchange-account support through `MAPI over HTTP`
 - `LPE-CT` as the distinct DMZ sorting center for external exposure, inbound `SMTP`, outbound relay, quarantine, and perimeter enforcement
 - `LPE` as the system of record for mailboxes, contacts, calendars, tasks, rights, and user-visible state
 - future local AI supported without requiring data to leave the server
 
 ## Current Delivery Priority
 
-`IMAP` was the development-start compatibility layer through `0.1.2` and remains a supported communication protocol for mailbox access.
-The current `0.1.3` product priority is implementing the selected `EWS` adapter
+`IMAP` remains a supported communication protocol for mailbox access.
+The current `0.2.0` product priority is implementing the selected `EWS` adapter
 and full classic Outlook `MAPI over HTTP` support while preserving the canonical
 mailbox, contacts, calendar, and task model.
 
 That means:
 
 - `JMAP` first: complete state or change semantics, WebSocket reliability, and shared-mailbox behavior
-- `IMAP` remains a supported client communication protocol and should receive correctness fixes for sync, `UID` behavior, flags, and real-client compatibility, but it is no longer the main `0.1.3` release driver
+- `IMAP` remains a supported client communication protocol and should receive correctness fixes for sync, `UID` behavior, flags, and real-client compatibility, but it is no longer the main `0.2.0` release driver
 - `ActiveSync` as the flagship mobile/native-client story for clients that support `Exchange ActiveSync`: prioritize Outlook mobile and iOS compatibility labs, long-poll stability, send-flow correctness, and folder-sync edge cases
-- `EWS` is the `0.1.3` Exchange compatibility focus for Exchange-style folder, mail, contacts, calendar, and task synchronization; it must not imply `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox` model
-- `MAPI over HTTP` must be completed in `0.1.3` for classic Outlook for Windows desktop: profile creation, EMSMDB mailbox synchronization, NSPI address book behavior, send and draft flows through canonical submission, reconnect behavior, and authoritative `Sent` visibility
+- `EWS` is the `0.2.0` Exchange compatibility focus for Exchange-style folder, mail, contacts, calendar, and task synchronization; it must not imply `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox` model
+- `MAPI over HTTP` must be completed in `0.2.0` for classic Outlook for Windows desktop: profile creation, EMSMDB mailbox synchronization, NSPI address book behavior, send and draft flows through canonical submission, reconnect behavior, and authoritative `Sent` visibility
 - full Outlook Anywhere / RPC over HTTP is mandatory when administrators publish legacy `EXCH` / `EXPR` autodiscover metadata for RCA Outlook Connectivity validation; `/rpc/rpcproxy.dll` must implement authenticated RPC/HTTP mailbox transport, not only HTTP authentication
 - Outlook for Windows desktop can continue to use the supported `IMAP` communication path when configured that way; administrators can explicitly publish `EWS` plus legacy `EXCH` / `EXPR` autodiscover metadata for RCA Outlook Connectivity validation, and supported Exchange-account publication requires the completed `MAPI over HTTP` plus RPC/HTTP release gates
 - `DAV` and `ManageSieve` after that: focus on correctness, canonical execution, and client-matrix interoperability rather than feature sprawl
@@ -81,6 +81,7 @@ The important non-negotiable rules are:
 
 ### Protocols
 
+- `docs/architecture/0.2.0-protocol-depth-gates.md`
 - `docs/architecture/jmap-mail-mvp.md`
 - `docs/architecture/jmap-contacts-calendars-mvp.md`
 - `docs/architecture/activesync-mvp.md`

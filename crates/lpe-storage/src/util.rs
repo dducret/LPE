@@ -11,7 +11,6 @@ pub(crate) fn normalize_admin_session_auth_method(value: &str) -> &'static str {
     match value.trim().to_ascii_lowercase().as_str() {
         "oidc" => "oidc",
         // The persisted admin session tracks the broad login family so
-        // password+totp continues to work against the 0.1.3 schema.
         _ => "password",
     }
 }

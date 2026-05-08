@@ -40,7 +40,7 @@ impl Storage {
 
         if schema_version != EXPECTED_SCHEMA_VERSION {
             bail!(
-                "unsupported database schema version {schema_version}; expected {EXPECTED_SCHEMA_VERSION}. Apply the bundled migrations or initialize a fresh database from crates/lpe-storage/sql/schema.sql"
+                "unsupported database schema version {schema_version}; expected {EXPECTED_SCHEMA_VERSION}. Initialize a fresh database from crates/lpe-storage/sql/schema.sql"
             );
         }
 

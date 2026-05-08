@@ -85,7 +85,7 @@ Native Outlook and mobile support is a first-class requirement.
 - `ActiveSync` targets mobile and native clients that actually support `Exchange ActiveSync`; do not try to force Outlook for Windows desktop to use `ActiveSync` as an Exchange account
 - Outlook for Windows desktop currently uses `IMAP` unless an administrator explicitly enables the bounded `EWS` or guarded `MAPI over HTTP` interoperability surfaces documented for the deployment
 - protocol planning must treat both Outlook desktop `IMAP` interoperability and `ActiveSync` mobile compatibility labs as flagship requirements before introducing new client protocols
-- `EWS` is the active `0.1.3` Exchange compatibility adapter; it must stay bounded to documented canonical mailbox, contacts, calendar, and submission behavior until its limits are explicitly widened
+- `EWS` is the active `0.2.0` Exchange compatibility adapter; it must stay bounded to documented canonical mailbox, contacts, calendar, and submission behavior until its limits are explicitly widened
 - `MAPI over HTTP` is the future Outlook desktop Exchange route; it must stay behind authenticated endpoints and opt-in autodiscover publication until Outlook desktop profile creation, EMSMDB, NSPI, session context, and canonical mailbox synchronization are proven in interoperability testing
 - `IMAP` + `SMTP` + autodiscover is the current Outlook desktop path, but must not be treated as the final Outlook adoption story
 - every client layer must use the canonical `LPE` submission and synchronization model

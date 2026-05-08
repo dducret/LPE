@@ -49,12 +49,12 @@ LPE_PUBLIC_SCHEME_DEFAULT="${LPE_PUBLIC_SCHEME:-https}"
 LPE_OUTBOUND_WORKER_INTERVAL_MS_DEFAULT="${LPE_OUTBOUND_WORKER_INTERVAL_MS:-1000}"
 LPE_OUTBOUND_WORKER_BATCH_SIZE_DEFAULT="${LPE_OUTBOUND_WORKER_BATCH_SIZE:-50}"
 LPE_ENABLE_SERVICES_DEFAULT="${LPE_ENABLE_SERVICES:-yes}"
-if [[ -n "${LPE_RUN_MIGRATIONS:-}" ]]; then
-  LPE_RUN_MIGRATIONS_DEFAULT="${LPE_RUN_MIGRATIONS}"
+if [[ -n "${LPE_INIT_SCHEMA:-}" ]]; then
+  LPE_INIT_SCHEMA_DEFAULT="${LPE_INIT_SCHEMA}"
 elif [[ "${FIRST_INSTALL}" == "1" ]]; then
-  LPE_RUN_MIGRATIONS_DEFAULT="yes"
+  LPE_INIT_SCHEMA_DEFAULT="yes"
 else
-  LPE_RUN_MIGRATIONS_DEFAULT="no"
+  LPE_INIT_SCHEMA_DEFAULT="no"
 fi
 
 usage() {
@@ -129,7 +129,7 @@ collect_runtime_values() {
   local db_password_default="${LPE_DB_PASSWORD:-}"
   local shared_secret_default="${LPE_INTEGRATION_SHARED_SECRET:-}"
   local service_choice_default="${LPE_ENABLE_SERVICES_DEFAULT}"
-  local migrations_choice_default="${LPE_RUN_MIGRATIONS_DEFAULT}"
+  local schema_init_choice_default="${LPE_INIT_SCHEMA_DEFAULT}"
 
   print_section "Installation"
   INSTALL_ROOT="$(ask_with_default "Installation directory" "/opt/lpe" "validate_exact_path /opt/lpe" "Use /opt/lpe.")"
@@ -170,7 +170,7 @@ collect_runtime_values() {
 
   print_section "Services"
   LPE_ENABLE_SERVICES="$(ask_yes_no "Enable and start systemd services now" "${service_choice_default}")"
-  LPE_RUN_MIGRATIONS="$(ask_yes_no "Run migrations now" "${migrations_choice_default}")"
+  LPE_INIT_SCHEMA="$(ask_yes_no "Initialize fresh schema now" "${schema_init_choice_default}")"
 
   LPE_PUBLIC_SCHEME="${LPE_PUBLIC_SCHEME_DEFAULT}"
   LPE_PST_IMPORT_DIR="${LPE_PST_IMPORT_DIR_DEFAULT}"
@@ -389,12 +389,8 @@ activate_services() {
 }
 
 run_schema_init_if_requested() {
-  if [[ "${LPE_RUN_MIGRATIONS}" == "yes" ]]; then
-    if [[ "${FIRST_INSTALL}" == "1" ]]; then
-      bash "${SCRIPT_DIR}/init-schema.sh"
-    else
-      bash "${SCRIPT_DIR}/migrate-schema.sh"
-    fi
+  if [[ "${LPE_INIT_SCHEMA}" == "yes" ]]; then
+    bash "${SCRIPT_DIR}/init-schema.sh"
   fi
 }
 

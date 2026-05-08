@@ -27,7 +27,7 @@ The EWS matrix defines the live checks required for the supported `lpe-exchange`
 | Tasks | create, read, update, delete where supported |
 | Submission | canonical `Sent` copy visible after send |
 
-| Operation | 0.1.3 status |
+| Operation | 0.2.0 status |
 | --- | --- |
 | `SyncFolderHierarchy` | supported for canonical folder hierarchy |
 | `FindFolder` / `GetFolder` | supported for canonical folder discovery |
@@ -43,4 +43,4 @@ The EWS matrix defines the live checks required for the supported `lpe-exchange`
 | `GetUserAvailability` | supported for canonical calendar availability |
 | `GetServerTimeZones` | supported static compatibility response |
 | `GetUserOofSettings` / `SetUserOofSettings` | supported through canonical vacation/Sieve behavior |
-| `GetRoomLists`, `FindPeople`, `ExpandDL`, `Subscribe`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, `GetSharingFolder`, `Unsubscribe`, `GetEvents` | intentionally unsupported in `0.1.3`; must return EWS error responses |
+| `GetRoomLists`, `FindPeople`, `ExpandDL`, `Subscribe`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, `GetSharingFolder`, `Unsubscribe`, `GetEvents` | intentionally unsupported in `0.2.0`; must return EWS error responses |

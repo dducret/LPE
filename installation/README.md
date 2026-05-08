@@ -1,8 +1,8 @@
 # Installation
 
-These installation instructions are aligned with the current repository schema `0.1.8`.
+These installation instructions are aligned with the current repository schema `0.2.0`.
 
-Legacy updates from schemas that predate the current schema metadata are not supported. Fresh installs still initialize the database from the canonical schema, but routine updates must preserve existing data and apply only explicit migrations.
+Fresh installs initialize the database from the canonical schema. In-place schema migrations are not supported for this release; rebuild the database from `crates/lpe-storage/sql/schema.sql` for a new deployment.
 
 ### Debian Trixie
 
@@ -316,17 +316,15 @@ Files:
 - `install-lpe.sh` now verifies that `LPE_DB_PASSWORD`, `DATABASE_URL`, `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD`, and `LPE_INTEGRATION_SHARED_SECRET` were actually persisted to `/etc/lpe/lpe.env` before it continues
 - `install-lpe.sh` writes `DATABASE_URL` to `/etc/lpe/lpe.env`; when an older env file still lacks it, maintenance scripts derive it from `LPE_DB_HOST`, `LPE_DB_PORT`, `LPE_DB_NAME`, `LPE_DB_USER`, and `LPE_DB_PASSWORD`
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
-- `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, applies non-destructive schema migrations from `crates/lpe-storage/sql/migrations`, rebuilds `lpe-cli`, and restarts the service
+- `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, rebuilds `lpe-cli`, and restarts the service when the installed database already matches the current schema
 - `update-lpe.sh` also re-provisions the same pinned `Magika` version so content validation stays deterministic
 - `update-lpe.sh` also rebuilds `web/admin` and `web/client`, redeploys static assets, and reloads `nginx`
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
 - `create-lpe-database.sql` provides a SQL-native bootstrap alternative for creating the PostgreSQL role and database
 - `crates/lpe-storage/sql/schema.sql` provides the canonical full schema for fresh databases
-- `crates/lpe-storage/sql/migrations` contains non-destructive update migrations for already-initialized databases
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
 - `init-schema.sh` drops and recreates the PostgreSQL `public` schema, then applies the canonical schema; use it only for fresh installs or intentional resets
-- `migrate-schema.sh` checks the installed schema version, applies pending non-destructive migrations, and refuses to reset or silently create a missing schema
 - `check-lpe.sh` verifies the installation, PostgreSQL, the service, and the HTTP endpoints
 - `check-lpe-ready.sh` returns success only when the local `LPE` node is ready for traffic
 - `lpe-ha-set-role.sh` writes the local HA role (`active`, `standby`, `drain`, `maintenance`)
@@ -347,7 +345,7 @@ Recommended order:
 
 The web client requires user authentication. First create an account and its password from the administration domain page, then sign in to `/mail/` with the full email address and that password.
 
-The administration console stores its accounts, account passwords, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Initialize a fresh database with `init-schema.sh`. Routine updates use `migrate-schema.sh` through `update-lpe.sh` and preserve existing data.
+The administration console stores its accounts, account passwords, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Initialize a fresh database with `init-schema.sh`.
 
 `PST` imports can be uploaded from the browser. The service validates each incoming file with Google `Magika` before storing it in `LPE_PST_IMPORT_DIR`, defaulting to `/var/lib/lpe/imports`, and then creates the `PST` import request with the resulting server path. The maximum accepted API upload size is configured through `LPE_PST_UPLOAD_MAX_BYTES`, defaulting to `21474836480` bytes. The `nginx` reverse proxy is aligned through `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, defaulting to `20g`. The binary path is configured through `LPE_MAGIKA_BIN`, defaulting to `/opt/lpe/bin/magika`, and the minimum confidence threshold through `LPE_MAGIKA_MIN_SCORE`.
 
@@ -413,7 +411,7 @@ The `LPE` installer prompts for:
 - bootstrap administrator display name, default `Bootstrap Administrator`
 - bootstrap administrator password, no default and at least `12` characters
 - whether to enable and start services now, default `yes`
-- whether to run schema setup or migrations now, default `yes` on first install and `no` on later reruns
+- whether to initialize the fresh schema now, default `yes` on first install and `no` on later reruns
 
 The `LPE-CT` installer prompts for:
 
@@ -478,7 +476,7 @@ Typical unattended `LPE` environment variables:
 - `LPE_BOOTSTRAP_ADMIN_DISPLAY_NAME`
 - `LPE_BOOTSTRAP_ADMIN_PASSWORD`
 - `LPE_ENABLE_SERVICES`
-- `LPE_RUN_MIGRATIONS`
+- `LPE_INIT_SCHEMA`
 
 The effective default PostgreSQL connection string shape is:
 
@@ -542,7 +540,7 @@ LPE_INTEGRATION_SHARED_SECRET='replace-with-a-secret-of-at-least-32-characters' 
 LPE_BOOTSTRAP_ADMIN_EMAIL=admin@example.com \
 LPE_BOOTSTRAP_ADMIN_PASSWORD='replace-with-strong-password' \
 LPE_ENABLE_SERVICES=yes \
-LPE_RUN_MIGRATIONS=yes \
+LPE_INIT_SCHEMA=yes \
 ./install-lpe.sh --non-interactive
 ```
 
@@ -665,10 +663,10 @@ defaults to the RPC/HTTP connection timeout.
 For public client auto-configuration, the exposed front end must remain `LPE-CT` or an equivalent HTTPS publication layer. In v1:
 
 - `Thunderbird` receives an `IMAP` profile
-- Outlook support is a `0.1.3` goal: Outlook mobile uses `ActiveSync`, Outlook for Windows desktop receives an `IMAP` profile by default when configured that way, `0.1.3` deployments may explicitly enable EWS autodiscovery for Exchange-style mail, contacts, calendar, and task compatibility, and full classic Outlook desktop Exchange-account support is the `MAPI over HTTP` plus Outlook Anywhere / RPC over HTTP release path
+- Outlook support is a `0.2.0` goal: Outlook mobile uses `ActiveSync`, Outlook for Windows desktop receives an `IMAP` profile by default when configured that way, `0.2.0` deployments may explicitly enable EWS autodiscovery for Exchange-style mail, contacts, calendar, and task compatibility, and full classic Outlook desktop Exchange-account support is the `MAPI over HTTP` plus Outlook Anywhere / RPC over HTTP release path
 - `ActiveSync` remains exposed for mobile/native clients that actually support `Exchange ActiveSync`
 - `EWS` remains opt-in through `LPE_AUTOCONFIG_EWS_ENABLED` and must not be treated as `MAPI`, `RPC`, or client `SMTP`
-- `MAPI over HTTP` routes are the `0.1.3` classic Outlook desktop Exchange-account path; the public edge publishes `/mapi/` so Outlook can reach the authenticated endpoints, but autodiscover publishes `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled, SOAP Exchange `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled, legacy `EXCH` provider metadata only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is also enabled with an explicitly published EWS or MAPI surface, and legacy `EXPR` provider metadata only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED` and `LPE_AUTOCONFIG_RPC_PROXY_ENABLED` are also enabled with a real `/rpc/rpcproxy.dll` Outlook Anywhere path
+- `MAPI over HTTP` routes are the `0.2.0` classic Outlook desktop Exchange-account path; the public edge publishes `/mapi/` so Outlook can reach the authenticated endpoints, but autodiscover publishes `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled, SOAP Exchange `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled, legacy `EXCH` provider metadata only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is also enabled with an explicitly published EWS or MAPI surface, and legacy `EXPR` provider metadata only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED` and `LPE_AUTOCONFIG_RPC_PROXY_ENABLED` are also enabled with a real `/rpc/rpcproxy.dll` Outlook Anywhere path
 - Outlook Anywhere / RPC over HTTP is required when legacy `EXPR` is published; `/rpc/rpcproxy.dll` must be routed by `LPE-CT` to the core exchange adapter and must not be replaced by a static web-server response.
 - The public `/rpc/rpcproxy.dll` route must use streaming proxy settings equivalent to `/mapi/`: long read/send timeouts, `proxy_buffering off`, `proxy_request_buffering off`, and `client_max_body_size 0`. RCA `RPC_IN_DATA` opens a long upload channel with a very large advertised request body; without the explicit body-size override, nginx can reject the mailbox-store channel with `413` before the core service can drain it.
 - Microsoft Remote Connectivity Analyzer Outlook Connectivity expects top-level `EXCH` and `EXPR` provider sections; the errors "The EXCH provider section is missing from the Autodiscover response" or "The EXPR Provider section is missing in the Autodiscover response" mean that provider metadata is not published. For the EWS compatibility path, set `LPE_AUTOCONFIG_EWS_ENABLED=true`, `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED=true`, `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED=true`, and `LPE_AUTOCONFIG_RPC_PROXY_ENABLED=true`
@@ -737,7 +735,7 @@ For later updates:
 1. push the desired commit to `https://github.com/dducret/LPE`
 2. run `update-lpe.sh`
 
-`update-lpe.sh` is no longer destructive by default. It applies pending SQL migrations and exits with an error if the database is uninitialized or if the checked-out code expects a schema version for which no migration has been provided. For an intentional destructive reset, run `init-schema.sh` explicitly.
+`update-lpe.sh` rebuilds and redeploys code and web assets. It does not apply schema migrations; for an intentional fresh schema reset, run `init-schema.sh` explicitly.
 
 `LPE-CT/installation/debian-trixie/update-lpe-ct.sh` is not destructive by default. It rebuilds and redeploys the service while preserving the full spool, retained history, the private local PostgreSQL state, and the legacy `state.json` bootstrap/export file unless `LPE_CT_RESET_STATE_ON_UPDATE=true` is set explicitly for a disposable environment.
 
