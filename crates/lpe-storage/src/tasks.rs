@@ -323,6 +323,13 @@ impl Storage {
             RETURNING
                 tasks.id,
                 tasks.account_id AS owner_account_id,
+                $11::text AS owner_email,
+                $12::text AS owner_display_name,
+                $13::boolean AS is_owned,
+                $14::boolean AS may_read,
+                $15::boolean AS may_write,
+                $16::boolean AS may_delete,
+                $17::boolean AS may_share,
                 tasks.task_list_id,
                 (
                     SELECT sort_order
@@ -356,6 +363,13 @@ impl Storage {
         .bind(input.due_at.as_deref().unwrap_or_default().trim())
         .bind(input.completed_at.as_deref().unwrap_or_default().trim())
         .bind(input.sort_order)
+        .bind(target_task_list.owner_email.clone())
+        .bind(target_task_list.owner_display_name.clone())
+        .bind(owner_account_id == input.account_id)
+        .bind(target_task_list.rights.may_read)
+        .bind(target_task_list.rights.may_write)
+        .bind(target_task_list.rights.may_delete)
+        .bind(target_task_list.rights.may_share)
         .fetch_one(&mut *tx)
         .await?;
 
