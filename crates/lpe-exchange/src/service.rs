@@ -5425,10 +5425,8 @@ fn rpc_proxy_mailstore_ping_response(uri: &Uri, client_receive_window_size: u32)
         .query()
         .filter(|query| is_rpc_proxy_endpoint_query(query))
     {
-        if !query.contains(":6004") {
-            body.extend_from_slice(&rpc_proxy_dce_bind_ack_body(1));
-            mark_rpc_proxy_out_endpoint_bind_ack(query);
-        }
+        body.extend_from_slice(&rpc_proxy_dce_bind_ack_body(1));
+        mark_rpc_proxy_out_endpoint_bind_ack(query);
     }
     rpc_proxy_mailstore_held_open_response(uri, body)
 }

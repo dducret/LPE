@@ -7730,7 +7730,7 @@ async fn rpc_proxy_mailstore_endpoint_ping_includes_bind_ack_after_rts_connect()
 }
 
 #[tokio::test]
-async fn rpc_proxy_address_book_endpoint_ping_waits_for_real_in_channel_bind() {
+async fn rpc_proxy_address_book_endpoint_ping_includes_bind_ack_after_rts_connect() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -7761,12 +7761,22 @@ async fn rpc_proxy_address_book_endpoint_ping_waits_for_real_in_channel_bind() {
         Some(&HeaderValue::from_static("131072"))
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 72);
+    assert_eq!(body.len(), 184);
     assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
     assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
     assert_eq!(
         u32::from_le_bytes([body[60], body[61], body[62], body[63]]),
         0x0000_8000
+    );
+    assert_eq!(body[72], 0x05);
+    assert_eq!(body[74], 0x0c);
+    assert_eq!(body[75], 0x03);
+    assert_eq!(u16::from_le_bytes([body[80], body[81]]), 112);
+    assert_eq!(u16::from_le_bytes([body[82], body[83]]), 48);
+    assert_eq!(&body[136..144], b"NTLMSSP\0");
+    assert_eq!(
+        u32::from_le_bytes([body[144], body[145], body[146], body[147]]),
+        2
     );
 }
 
