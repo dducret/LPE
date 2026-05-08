@@ -110,9 +110,15 @@ check_http_json_field "http://127.0.0.1/api/health" '"status":"ok"'
 check_http_json_field "http://127.0.0.1/api/health/live" '"status":"ok"'
 check_http_json_field "http://127.0.0.1/api/health/ready" '"status":"ready"'
 
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v email="$BOOTSTRAP_EMAIL" -tAc \
-  "SELECT 1 FROM public.admin_credentials WHERE lower(email) = lower(:'email') LIMIT 1;" \
-  | grep -qx '1' \
+bootstrap_admin_exists="$(
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v email="$BOOTSTRAP_EMAIL" -At <<'SQL'
+SELECT 1
+FROM public.admin_credentials
+WHERE lower(email) = lower(:'email')
+LIMIT 1;
+SQL
+)" || fail "Unable to query bootstrap administrator from public.admin_credentials"
+[[ "$bootstrap_admin_exists" == "1" ]] \
   || fail "Bootstrap administrator ${BOOTSTRAP_EMAIL} is missing from public.admin_credentials"
 pass "Bootstrap administrator exists: ${BOOTSTRAP_EMAIL}"
 
