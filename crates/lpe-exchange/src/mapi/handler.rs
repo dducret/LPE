@@ -41,7 +41,7 @@ use crate::{
 
 const MAPI_CONTENT_TYPE: &str = "application/mapi-http";
 const MAPI_OCTET_STREAM_CONTENT_TYPE: &str = "application/octet-stream";
-const MAPI_SERVER_APPLICATION: &str = "LPE/0.2.0";
+const MAPI_SERVER_APPLICATION: &str = "Exchange/15.20.0485.000";
 const EMSMDB_COOKIE: &str = "MapiContext";
 const NSPI_COOKIE: &str = "MapiContext";
 const EMSMDB_SEQUENCE_COOKIE: &str = "MapiSequence";

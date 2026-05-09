@@ -2116,6 +2116,10 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
     assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     assert_eq!(
+        response.headers().get("x-serverapplication").unwrap(),
+        "Exchange/15.20.0485.000"
+    );
+    assert_eq!(
         response.headers().get("x-clientinfo").unwrap(),
         "client-info-1"
     );
