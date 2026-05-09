@@ -44,6 +44,8 @@ const MAPI_OCTET_STREAM_CONTENT_TYPE: &str = "application/octet-stream";
 const MAPI_SERVER_APPLICATION: &str = "LPE/0.2.0";
 const EMSMDB_COOKIE: &str = "lpe_mapi_emsmdb";
 const NSPI_COOKIE: &str = "lpe_mapi_nspi";
+const EMSMDB_SEQUENCE_COOKIE: &str = "lpe_mapi_emsmdb_seq";
+const NSPI_SEQUENCE_COOKIE: &str = "lpe_mapi_nspi_seq";
 const EMSMDB_COOKIE_PATH: &str = "/mapi/emsmdb";
 const NSPI_COOKIE_PATH: &str = "/mapi/nspi";
 const MAPI_SESSION_MAX_AGE_SECONDS: u32 = 1_800;
@@ -447,7 +449,7 @@ fn connect_response(
 ) -> Response {
     let session_id = reconnect_session(endpoint, principal, headers)
         .unwrap_or_else(|| create_session(endpoint, principal));
-    let cookie = session_cookie(endpoint, &session_id, false);
+    let cookies = session_context_cookies(endpoint, &session_id, false);
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
@@ -457,7 +459,7 @@ fn connect_response(
     body.extend_from_slice(b"/o=LPE/ou=Exchange Administrative Group/cn=Recipients\0");
     write_utf16z(&mut body, &principal.display_name);
     write_u32(&mut body, 0);
-    mapi_response("Connect", request_id, 0, body, Some(cookie))
+    mapi_response_with_cookies("Connect", request_id, 0, body, cookies)
 }
 
 fn reconnect_session(
@@ -485,13 +487,13 @@ fn bind_response(
     request_id: &str,
 ) -> Response {
     let session_id = create_session(endpoint, principal);
-    let cookie = session_cookie(endpoint, &session_id, false);
+    let cookies = session_context_cookies(endpoint, &session_id, false);
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
     body.extend_from_slice(&NSPI_SERVER_GUID);
     write_u32(&mut body, 0);
-    mapi_response("Bind", request_id, 0, body, Some(cookie))
+    mapi_response_with_cookies("Bind", request_id, 0, body, cookies)
 }
 
 async fn execute_response<S, V>(
@@ -651,12 +653,12 @@ fn disconnect_response(
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
-    mapi_response(
+    mapi_response_with_cookies(
         response_request_type,
         request_id,
         0,
         body,
-        Some(session_cookie(endpoint, "", true)),
+        session_context_cookies(endpoint, "", true),
     )
 }
 
@@ -1693,6 +1695,17 @@ fn mapi_response(
     body: Vec<u8>,
     cookie: Option<String>,
 ) -> Response {
+    let cookies = cookie.into_iter().collect();
+    mapi_response_with_cookies(request_type, request_id, response_code, body, cookies)
+}
+
+fn mapi_response_with_cookies(
+    request_type: &str,
+    request_id: &str,
+    response_code: u16,
+    body: Vec<u8>,
+    cookies: Vec<String>,
+) -> Response {
     let mut framed_body = Vec::new();
     framed_body.extend_from_slice(b"PROCESSING\r\n");
     framed_body.extend_from_slice(b"DONE\r\n");
@@ -1725,9 +1738,9 @@ fn mapi_response(
         "x-serverapplication",
         MAPI_SERVER_APPLICATION,
     );
-    if let Some(cookie) = cookie {
+    for cookie in cookies {
         if let Ok(value) = HeaderValue::from_str(&cookie) {
-            response.headers_mut().insert(SET_COOKIE, value);
+            response.headers_mut().append(SET_COOKIE, value);
         }
     }
     response
@@ -8063,7 +8076,26 @@ fn request_cookie(endpoint: MapiEndpoint, headers: &HeaderMap) -> Option<String>
 }
 
 fn session_cookie(endpoint: MapiEndpoint, session_id: &str, expired: bool) -> String {
-    let name = cookie_name(endpoint);
+    context_cookie(endpoint, cookie_name(endpoint), session_id, expired)
+}
+
+fn sequence_cookie(endpoint: MapiEndpoint, session_id: &str, expired: bool) -> String {
+    context_cookie(
+        endpoint,
+        sequence_cookie_name(endpoint),
+        session_id,
+        expired,
+    )
+}
+
+fn session_context_cookies(endpoint: MapiEndpoint, session_id: &str, expired: bool) -> Vec<String> {
+    vec![
+        session_cookie(endpoint, session_id, expired),
+        sequence_cookie(endpoint, session_id, expired),
+    ]
+}
+
+fn context_cookie(endpoint: MapiEndpoint, name: &str, session_id: &str, expired: bool) -> String {
     let path = cookie_path(endpoint);
     if expired {
         format!("{name}=; Path={path}; Max-Age=0; HttpOnly; SameSite=Lax; Secure")
@@ -8078,6 +8110,13 @@ fn cookie_name(endpoint: MapiEndpoint) -> &'static str {
     match endpoint {
         MapiEndpoint::Emsmdb => EMSMDB_COOKIE,
         MapiEndpoint::Nspi => NSPI_COOKIE,
+    }
+}
+
+fn sequence_cookie_name(endpoint: MapiEndpoint) -> &'static str {
+    match endpoint {
+        MapiEndpoint::Emsmdb => EMSMDB_SEQUENCE_COOKIE,
+        MapiEndpoint::Nspi => NSPI_SEQUENCE_COOKIE,
     }
 }
 

@@ -2134,6 +2134,19 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
     assert!(set_cookie.contains("Max-Age=1800"));
     assert!(set_cookie.contains("HttpOnly"));
     assert!(set_cookie.contains("Secure"));
+    let set_cookies = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(set_cookies.len(), 2);
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("lpe_mapi_emsmdb=")));
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("lpe_mapi_emsmdb_seq=")));
 
     let raw_body = to_bytes(response.into_body(), usize::MAX)
         .await
@@ -2335,6 +2348,19 @@ async fn mapi_over_http_accepts_outlook_octet_stream_bind_probe() {
         .to_str()
         .unwrap();
     assert!(set_cookie.starts_with("lpe_mapi_nspi="));
+    let set_cookies = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(set_cookies.len(), 2);
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("lpe_mapi_nspi=")));
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("lpe_mapi_nspi_seq=")));
 }
 
 #[tokio::test]
