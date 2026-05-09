@@ -7269,7 +7269,7 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
             0 if alloc_hint >= 4 => {
                 return Some(rpc_proxy_rfri_get_new_dsa_response(call_id, endpoint_query));
             }
-            1 if alloc_hint >= 8 => {
+            1 if alloc_hint >= 4 => {
                 return Some(rpc_proxy_rfri_get_fqdn_response(call_id, endpoint_query));
             }
             _ => {}
@@ -7341,7 +7341,7 @@ where
                     principal,
                 ));
             }
-            1 if alloc_hint >= 8 => {
+            1 if alloc_hint >= 4 => {
                 return Some(rpc_proxy_rfri_get_fqdn_response_for_principal(
                     call_id,
                     endpoint_query,

@@ -9217,6 +9217,44 @@ fn rpc_proxy_in_channel_referral_opnums_get_server_name_responses() {
     }
 }
 
+#[tokio::test]
+async fn rpc_proxy_referral_get_fqdn_accepts_rca_short_stub() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let validator = Validator::new(FakeDetector::pdf(), 0.8);
+    let principal = test_account_principal();
+    let mut buffer = vec![0u8; 626];
+    buffer[0..64].copy_from_slice(&[
+        0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0x40, 0x00, 0x10, 0x00, 0x7f, 0x00, 0x00,
+        0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x32, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x02, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    ]);
+
+    let response = rpc_proxy_in_channel_response_for_endpoint_query_with_store(
+        &store,
+        &validator,
+        &principal,
+        "mail.example.test:6002",
+        &mut buffer,
+    )
+    .await
+    .expect("referral response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        127
+    );
+    assert!(response
+        .windows(b"mail.example.test".len())
+        .any(|window| window == b"mail.example.test"));
+    assert_eq!(buffer.len(), 562);
+}
+
 fn nspi_rpc_request(call_id: u32, opnum: u16, fragment_length: usize) -> Vec<u8> {
     rpc_request(call_id, 2, opnum, fragment_length)
 }
