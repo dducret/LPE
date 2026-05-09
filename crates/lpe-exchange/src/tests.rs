@@ -8563,6 +8563,72 @@ fn rpc_proxy_in_channel_bind_ack_negotiates_bind_time_features() {
 }
 
 #[test]
+fn rpc_proxy_referral_endpoint_management_ping_uses_bound_context_before_rfri_heuristic() {
+    let endpoint_query = "mail.management.example.test:6002";
+    let bind = hex_bytes(
+        "05000b0310000000d000280002000000\
+         f80ff80f000000000300000000000100\
+         80bda8af8a7dc911bef408002b10298901000000\
+         045d888aeb1cc9119fe808002b10486002000000\
+         0100010080bda8af8a7dc911bef408002b10298901000000\
+         33057171babe37498319b5dbef9ccc3601000000\
+         0200010080bda8af8a7dc911bef408002b10298901000000\
+         2c1cb76c12984045030000000000000001000000\
+         0a020000000000004e544c4d5353500001000000078208a2\
+         000000000000000000000000000000000a007c4f0000000f",
+    );
+    let mut buffer = bind;
+
+    let bind_response =
+        rpc_proxy_in_channel_response_for_endpoint_query(endpoint_query, &mut buffer)
+            .expect("management bind response");
+
+    assert_eq!(bind_response[0..4], [0x05, 0x00, 0x0c, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([
+            bind_response[12],
+            bind_response[13],
+            bind_response[14],
+            bind_response[15]
+        ]),
+        2
+    );
+
+    let mut auth3 = vec![0u8; 250];
+    auth3[0..8].copy_from_slice(&[0x05, 0x00, 0x10, 0x03, 0x10, 0x00, 0x00, 0x00]);
+    auth3[8..10].copy_from_slice(&250u16.to_le_bytes());
+    auth3[10..12].copy_from_slice(&0x00deu16.to_le_bytes());
+    auth3[12..16].copy_from_slice(&2u32.to_le_bytes());
+    let management = [
+        0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0x40, 0x00, 0x10, 0x00, 0x02, 0x00, 0x00,
+        0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x32, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x02, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    ];
+    let mut request = auth3;
+    request.extend_from_slice(&management);
+
+    let response = rpc_proxy_in_channel_response_for_endpoint_query(endpoint_query, &mut request)
+        .expect("management ping response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        2
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[24], response[25], response[26], response[27]]),
+        4
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[28], response[29], response[30], response[31]]),
+        4
+    );
+    assert!(!contains_bytes(&response, b"mail.management.example.test"));
+}
+
+#[test]
 fn rpc_proxy_in_channel_alter_context_request_gets_alter_context_response() {
     let alter_context = hex_bytes(
         "05000e03100000007400000004000000\

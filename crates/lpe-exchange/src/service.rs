@@ -63,6 +63,14 @@ const RPC_PROXY_DCE_NDR_TRANSFER_SYNTAX: [u8; 20] = [
     0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11, 0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10, 0x48, 0x60,
     0x02, 0x00, 0x00, 0x00,
 ];
+const RPC_PROXY_DCE_MGMT_INTERFACE_SYNTAX: [u8; 20] = [
+    0x80, 0xbd, 0xa8, 0xaf, 0x8a, 0x7d, 0xc9, 0x11, 0xbe, 0xf4, 0x08, 0x00, 0x2b, 0x10, 0x29, 0x89,
+    0x01, 0x00, 0x00, 0x00,
+];
+const RPC_PROXY_RFRI_INTERFACE_SYNTAX: [u8; 20] = [
+    0xe0, 0xf5, 0x44, 0x15, 0x3c, 0x61, 0xd1, 0x11, 0x93, 0xdf, 0x00, 0xc0, 0x4f, 0xd7, 0xbd, 0x09,
+    0x01, 0x00, 0x00, 0x00,
+];
 const RPC_PROXY_ECHO_BODY: [u8; 20] = [
     0x05, 0x00, 0x14, 0x03, 0x10, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x40, 0x00, 0x00, 0x00,
@@ -6555,6 +6563,87 @@ struct RpcProxyDceContextResult {
     transfer_syntax: [u8; 20],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RpcProxyDceBoundInterface {
+    Management,
+    Rfri,
+}
+
+fn rpc_proxy_bound_dce_contexts(
+) -> &'static Mutex<HashMap<String, HashMap<u16, RpcProxyDceBoundInterface>>> {
+    static CONTEXTS: OnceLock<Mutex<HashMap<String, HashMap<u16, RpcProxyDceBoundInterface>>>> =
+        OnceLock::new();
+    CONTEXTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn rpc_proxy_bound_dce_context_interface(
+    endpoint_query: &str,
+    context_id: u16,
+) -> Option<RpcProxyDceBoundInterface> {
+    let contexts = rpc_proxy_bound_dce_contexts()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    contexts
+        .get(endpoint_query)
+        .and_then(|endpoint_contexts| endpoint_contexts.get(&context_id).copied())
+}
+
+fn rpc_proxy_dce_interface_for_abstract_syntax(
+    abstract_syntax: &[u8],
+) -> Option<RpcProxyDceBoundInterface> {
+    if abstract_syntax == RPC_PROXY_DCE_MGMT_INTERFACE_SYNTAX {
+        return Some(RpcProxyDceBoundInterface::Management);
+    }
+    if abstract_syntax == RPC_PROXY_RFRI_INTERFACE_SYNTAX {
+        return Some(RpcProxyDceBoundInterface::Rfri);
+    }
+    None
+}
+
+fn rpc_proxy_remember_dce_bind_contexts(endpoint_query: &str, request: &[u8]) {
+    let Some(count) = rpc_proxy_dce_bind_context_count(request) else {
+        return;
+    };
+    let mut offset = 28usize;
+    let mut endpoint_contexts = HashMap::new();
+    for _ in 0..count {
+        let Some(context_id) = request
+            .get(offset..offset + 2)
+            .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        else {
+            return;
+        };
+        let Some(transfer_count) = request.get(offset + 2).copied().map(usize::from) else {
+            return;
+        };
+        let Some(abstract_syntax) = request.get(offset + 4..offset + 24) else {
+            return;
+        };
+        offset += 24;
+        let mut has_ndr_transfer_syntax = false;
+        for _ in 0..transfer_count {
+            let Some(transfer_syntax) = request.get(offset..offset + 20) else {
+                return;
+            };
+            has_ndr_transfer_syntax |= transfer_syntax == RPC_PROXY_DCE_NDR_TRANSFER_SYNTAX;
+            offset += 20;
+        }
+        if !has_ndr_transfer_syntax {
+            continue;
+        }
+        if let Some(interface) = rpc_proxy_dce_interface_for_abstract_syntax(abstract_syntax) {
+            endpoint_contexts.insert(context_id, interface);
+        }
+    }
+    if endpoint_contexts.is_empty() {
+        return;
+    }
+    let mut contexts = rpc_proxy_bound_dce_contexts()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    contexts.insert(endpoint_query.to_string(), endpoint_contexts);
+}
+
 fn rpc_proxy_dce_default_context_results(result_count: u8) -> Vec<RpcProxyDceContextResult> {
     (0..result_count)
         .map(|result_index| {
@@ -7563,6 +7652,7 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
     let call_id = read_le_u32(bytes, 12)?;
     match bytes.get(2).copied()? {
         0x0b => {
+            rpc_proxy_remember_dce_bind_contexts(endpoint_query, bytes);
             if consume_rpc_proxy_out_endpoint_bind_ack(endpoint_query) {
                 return None;
             }
@@ -7578,6 +7668,19 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
     let alloc_hint = read_le_u32(bytes, 16)?;
     let context_id = u16::from_le_bytes([*bytes.get(20)?, *bytes.get(21)?]);
     let opnum = u16::from_le_bytes([*bytes.get(22)?, *bytes.get(23)?]);
+    let bound_interface = rpc_proxy_bound_dce_context_interface(endpoint_query, context_id);
+    if matches!(bound_interface, Some(RpcProxyDceBoundInterface::Management)) {
+        match opnum {
+            1 if alloc_hint == 4 => {
+                let requested_stats = read_le_u32(bytes, 24)?;
+                return Some(rpc_proxy_dce_response_with_request_auth(
+                    rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats),
+                    bytes,
+                ));
+            }
+            _ => {}
+        }
+    }
     if endpoint_query.contains(":6002") {
         match opnum {
             0 if alloc_hint >= 4 => {
@@ -7619,7 +7722,7 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
         }
     }
     match (context_id, opnum) {
-        (0, 1) if alloc_hint == 4 => {
+        (0, 1) if alloc_hint == 4 && !endpoint_query.contains(":6002") => {
             let requested_stats = read_le_u32(bytes, 24)?;
             return Some(rpc_proxy_dce_response_with_request_auth(
                 rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats),
@@ -7656,6 +7759,7 @@ where
     let call_id = read_le_u32(bytes, 12)?;
     match bytes.get(2).copied()? {
         0x0b => {
+            rpc_proxy_remember_dce_bind_contexts(endpoint_query, bytes);
             if consume_rpc_proxy_out_endpoint_bind_ack(endpoint_query) {
                 return None;
             }
@@ -7671,6 +7775,19 @@ where
     let alloc_hint = read_le_u32(bytes, 16)?;
     let context_id = u16::from_le_bytes([*bytes.get(20)?, *bytes.get(21)?]);
     let opnum = u16::from_le_bytes([*bytes.get(22)?, *bytes.get(23)?]);
+    let bound_interface = rpc_proxy_bound_dce_context_interface(endpoint_query, context_id);
+    if matches!(bound_interface, Some(RpcProxyDceBoundInterface::Management)) {
+        match opnum {
+            1 if alloc_hint == 4 => {
+                let requested_stats = read_le_u32(bytes, 24)?;
+                return Some(rpc_proxy_dce_response_with_request_auth(
+                    rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats),
+                    bytes,
+                ));
+            }
+            _ => {}
+        }
+    }
     if endpoint_query.contains(":6002") {
         match opnum {
             0 if alloc_hint >= 4 => {
@@ -7723,7 +7840,7 @@ where
         }
     }
     match (context_id, opnum) {
-        (0, 1) if alloc_hint == 4 => {
+        (0, 1) if alloc_hint == 4 && !endpoint_query.contains(":6002") => {
             let requested_stats = read_le_u32(bytes, 24)?;
             return Some(rpc_proxy_dce_response_with_request_auth(
                 rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats),

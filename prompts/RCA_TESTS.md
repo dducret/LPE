@@ -12,6 +12,7 @@ Do not guess. Do not apply a fix until you have checked current Microsoft online
 
 Before modifying code, read:
 
+- `AGENTS.md`
 - `ARCHITECTURE.md`
 - `docs/architecture/initial-architecture.md`
 - `LICENSE.md`
