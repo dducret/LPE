@@ -6942,6 +6942,7 @@ fn spawn_rpc_proxy_in_data_drain<S, V>(
         let mut stream = body.into_data_stream();
         let mut pdu_buffer = Vec::new();
         let mut total_body_bytes = 0usize;
+        let mut virtual_connection_cookie = None;
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
@@ -6958,41 +6959,17 @@ fn spawn_rpc_proxy_in_data_drain<S, V>(
                         )
                         .await
                     {
-                        let response_payload_bytes = response.bytes.len();
-                        let response_payload_preview_hex =
-                            mapi::debug_payload_preview_hex(&response.bytes);
-                        let forwarded = send_rpc_proxy_out_channel(&query, response.bytes.clone());
-                        if !forwarded {
-                            if let Some(virtual_connection_cookie) =
-                                response.virtual_connection_cookie
-                            {
-                                queue_pending_rpc_proxy_out_channel_response(
-                                    &query,
-                                    virtual_connection_cookie,
-                                    response.bytes,
-                                );
-                            }
-                        }
-                        info!(
-                            rca_debug = true,
-                            adapter = "rpcproxy",
-                            method = %method,
-                            path = %path,
-                            query = %query,
-                            response_kind = if forwarded {
-                                "out-channel-forwarded"
-                            } else {
-                                "out-channel-missing"
-                            },
-                            trace_id = %trace_id,
-                            client_request_id = %client_request_id,
-                            x_request_id = %x_request_id,
-                            http_status = 200u16,
-                            response_payload_bytes = response_payload_bytes,
-                            response_payload_preview_hex = %response_payload_preview_hex,
-                            duration_ms = started_at.elapsed().as_secs_f64() * 1000.0,
-                            user_agent = %user_agent,
-                            message = "rca debug rpc proxy forwarded response from in data stream"
+                        log_and_forward_rpc_proxy_in_channel_response(
+                            &method,
+                            &path,
+                            &query,
+                            &trace_id,
+                            &client_request_id,
+                            &x_request_id,
+                            &user_agent,
+                            started_at,
+                            &mut virtual_connection_cookie,
+                            response,
                         );
                     }
                     info!(
@@ -7015,6 +6992,32 @@ fn spawn_rpc_proxy_in_data_drain<S, V>(
                     );
                 }
                 Err(error) => {
+                    while let Some(response) =
+                        rpc_proxy_in_channel_response_for_endpoint_query_with_store_response(
+                            &store,
+                            &validator,
+                            &principal,
+                            &query,
+                            &mut pdu_buffer,
+                        )
+                        .await
+                    {
+                        log_and_forward_rpc_proxy_in_channel_response(
+                            &method,
+                            &path,
+                            &query,
+                            &trace_id,
+                            &client_request_id,
+                            &x_request_id,
+                            &user_agent,
+                            started_at,
+                            &mut virtual_connection_cookie,
+                            response,
+                        );
+                    }
+                    let pending_request_body_bytes = pdu_buffer.len();
+                    let pending_request_body_preview_hex =
+                        mapi::debug_payload_preview_hex(&pdu_buffer);
                     warn!(
                         rca_debug = true,
                         adapter = "rpcproxy",
@@ -7027,6 +7030,8 @@ fn spawn_rpc_proxy_in_data_drain<S, V>(
                         x_request_id = %x_request_id,
                         http_status = 200u16,
                         total_request_body_bytes = total_body_bytes,
+                        pending_request_body_bytes = pending_request_body_bytes,
+                        pending_request_body_preview_hex = %pending_request_body_preview_hex,
                         duration_ms = started_at.elapsed().as_secs_f64() * 1000.0,
                         user_agent = %user_agent,
                         error = %error,
@@ -7054,6 +7059,56 @@ fn spawn_rpc_proxy_in_data_drain<S, V>(
             message = "rca debug rpc proxy in data stream finished"
         );
     });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn log_and_forward_rpc_proxy_in_channel_response(
+    method: &str,
+    path: &str,
+    query: &str,
+    trace_id: &str,
+    client_request_id: &str,
+    x_request_id: &str,
+    user_agent: &str,
+    started_at: Instant,
+    virtual_connection_cookie: &mut Option<[u8; 16]>,
+    response: RpcProxyInChannelResponse,
+) {
+    let response_payload_bytes = response.bytes.len();
+    let response_payload_preview_hex = mapi::debug_payload_preview_hex(&response.bytes);
+    if response.virtual_connection_cookie.is_some() {
+        *virtual_connection_cookie = response.virtual_connection_cookie;
+    }
+    let forwarded = send_rpc_proxy_out_channel(query, response.bytes.clone());
+    if !forwarded {
+        if let Some(cookie) = response
+            .virtual_connection_cookie
+            .or(*virtual_connection_cookie)
+        {
+            queue_pending_rpc_proxy_out_channel_response(query, cookie, response.bytes);
+        }
+    }
+    info!(
+        rca_debug = true,
+        adapter = "rpcproxy",
+        method = %method,
+        path = %path,
+        query = %query,
+        response_kind = if forwarded {
+            "out-channel-forwarded"
+        } else {
+            "out-channel-missing"
+        },
+        trace_id = %trace_id,
+        client_request_id = %client_request_id,
+        x_request_id = %x_request_id,
+        http_status = 200u16,
+        response_payload_bytes = response_payload_bytes,
+        response_payload_preview_hex = %response_payload_preview_hex,
+        duration_ms = started_at.elapsed().as_secs_f64() * 1000.0,
+        user_agent = %user_agent,
+        message = "rca debug rpc proxy forwarded response from in data stream"
+    );
 }
 
 #[cfg(test)]
