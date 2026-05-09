@@ -188,6 +188,8 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         let source_key = source_key_for_uuid(&email.id);
         write_prefixed_bytes(&mut buffer, &source_key);
         buffer.extend_from_slice(&change_number.to_le_bytes());
+        buffer.extend_from_slice(&canonical_message_flags(email).to_le_bytes());
+        buffer.extend_from_slice(&canonical_flag_status(email).to_le_bytes());
         write_prefixed_bytes(&mut buffer, email.subject.as_bytes());
         write_visible_recipient_facts(&mut buffer, email);
         buffer.extend_from_slice(&(attachments.len().min(u16::MAX as usize) as u16).to_le_bytes());
@@ -206,6 +208,25 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         }
     }
     buffer
+}
+
+pub(crate) fn canonical_message_flags(email: &JmapEmail) -> u32 {
+    let mut flags = 0u32;
+    if !email.unread {
+        flags |= 0x0000_0001;
+    }
+    if email.has_attachments {
+        flags |= 0x0000_0010;
+    }
+    flags
+}
+
+pub(crate) fn canonical_flag_status(email: &JmapEmail) -> u32 {
+    if email.flagged {
+        2
+    } else {
+        0
+    }
 }
 
 fn write_visible_recipient_facts(buffer: &mut Vec<u8>, email: &JmapEmail) {

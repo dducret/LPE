@@ -5782,7 +5782,7 @@ fn email_property_value(email: &JmapEmail, property_tag: u32) -> Option<MapiValu
             Some(MapiValue::String(email.received_at.clone()))
         }
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
-        PID_TAG_FLAG_STATUS => Some(MapiValue::U32(if email.flagged { 2 } else { 0 })),
+        PID_TAG_FLAG_STATUS => Some(MapiValue::U32(mapi_mailstore::canonical_flag_status(email))),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(email.size_octets)),
         PID_TAG_SENDER_NAME_W => Some(MapiValue::String(
             email
@@ -7764,14 +7764,7 @@ fn serialize_pending_recipient_row(recipient: &PendingRecipient) -> Vec<u8> {
 }
 
 fn message_flags(email: &JmapEmail) -> u32 {
-    let mut flags = 0u32;
-    if !email.unread {
-        flags |= 0x0000_0001;
-    }
-    if email.has_attachments {
-        flags |= 0x0000_0010;
-    }
-    flags
+    mapi_mailstore::canonical_message_flags(email)
 }
 
 fn contact_size(contact: &AccessibleContact) -> i64 {

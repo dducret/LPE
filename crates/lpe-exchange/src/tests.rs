@@ -1507,6 +1507,39 @@ fn mapi_sync_manifest_counts(bytes: &[u8]) -> Option<(u32, u32)> {
     ))
 }
 
+fn mapi_sync_manifest_message_state(bytes: &[u8], subject: &str) -> Option<(u32, u32)> {
+    let subject = subject.as_bytes();
+    let subject_start = bytes
+        .windows(subject.len())
+        .position(|window| window == subject)?;
+    if subject_start < 10 {
+        return None;
+    }
+    let subject_len = u16::from_le_bytes(
+        bytes
+            .get(subject_start - 2..subject_start)?
+            .try_into()
+            .ok()?,
+    ) as usize;
+    if subject_len != subject.len() {
+        return None;
+    }
+    Some((
+        u32::from_le_bytes(
+            bytes
+                .get(subject_start - 10..subject_start - 6)?
+                .try_into()
+                .ok()?,
+        ),
+        u32::from_le_bytes(
+            bytes
+                .get(subject_start - 6..subject_start - 2)?
+                .try_into()
+                .ok()?,
+        ),
+    ))
+}
+
 fn utf16z(value: &str) -> Vec<u8> {
     let mut bytes = value
         .encode_utf16()
@@ -6663,6 +6696,64 @@ async fn mapi_over_http_sync_manifest_includes_visible_recipient_facts_without_b
     assert!(contains_bytes(&response_rops, b"Visible Cc"));
     assert!(!contains_bytes(&response_rops, b"hidden@example.test"));
     assert!(!contains_bytes(&response_rops, b"Hidden Bcc"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_sync_manifest_includes_canonical_read_flag_state() {
+    let message_uuid = Uuid::parse_str("45454545-4545-4545-4545-454545454545").unwrap();
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");
+    inbox.total_emails = 1;
+    inbox.unread_emails = 1;
+    let mut email = FakeStore::email(
+        &message_uuid.to_string(),
+        mailbox_id,
+        "inbox",
+        "Read flag sync message",
+    );
+    email.unread = false;
+    email.flagged = true;
+    email.has_attachments = true;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 1)));
+    assert_eq!(
+        mapi_sync_manifest_message_state(&response_rops, "Read flag sync message"),
+        Some((0x0000_0011, 2))
+    );
 }
 
 #[tokio::test]
