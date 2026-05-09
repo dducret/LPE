@@ -59,6 +59,10 @@ const RPC_PROXY_RECEIVE_WINDOW_SIZE: u32 = 0x0001_0000;
 const RPC_PROXY_OUT_CHANNEL_CONTENT_LENGTH: u32 = 0x0002_0000;
 const RPC_PROXY_CONNECTION_TIMEOUT_MS: u32 = 120_000;
 const RPC_PROXY_DCE_FAULT_PROTOCOL_ERROR: u32 = 0x0000_0005;
+const RPC_PROXY_DCE_NDR_TRANSFER_SYNTAX: [u8; 20] = [
+    0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11, 0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10, 0x48, 0x60,
+    0x02, 0x00, 0x00, 0x00,
+];
 const RPC_PROXY_ECHO_BODY: [u8; 20] = [
     0x05, 0x00, 0x14, 0x03, 0x10, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x40, 0x00, 0x00, 0x00,
@@ -6522,24 +6526,111 @@ fn rpc_proxy_out_endpoint_bind_acks() -> &'static Mutex<HashMap<String, usize>> 
 }
 
 fn rpc_proxy_dce_bind_ack_body(call_id: u32, request: &[u8]) -> Vec<u8> {
-    let result_count = rpc_proxy_dce_bind_context_count(request).unwrap_or(1);
-    rpc_proxy_dce_bind_ack_body_with_result_count(call_id, result_count)
+    let results = rpc_proxy_dce_bind_context_results(request).unwrap_or_else(|| {
+        rpc_proxy_dce_default_context_results(
+            rpc_proxy_dce_bind_context_count(request).unwrap_or(1),
+        )
+    });
+    rpc_proxy_dce_bind_ack_body_with_results(call_id, &results)
 }
 
 fn rpc_proxy_dce_bind_ack_body_with_result_count(call_id: u32, result_count: u8) -> Vec<u8> {
+    let results = rpc_proxy_dce_default_context_results(result_count);
+    rpc_proxy_dce_bind_ack_body_with_results(call_id, &results)
+}
+
+fn rpc_proxy_dce_bind_ack_body_with_results(
+    call_id: u32,
+    results: &[RpcProxyDceContextResult],
+) -> Vec<u8> {
     const DCE_RPC_BIND_ACK: u8 = 0x0c;
-    rpc_proxy_dce_context_ack_body(call_id, DCE_RPC_BIND_ACK, result_count)
+    rpc_proxy_dce_context_ack_body(call_id, DCE_RPC_BIND_ACK, results)
 }
 
 fn rpc_proxy_dce_alter_context_response_body(call_id: u32, request: &[u8]) -> Vec<u8> {
     const DCE_RPC_ALTER_CONTEXT_RESPONSE: u8 = 0x0f;
-    let result_count = rpc_proxy_dce_bind_context_count(request).unwrap_or(1);
-    rpc_proxy_dce_context_ack_body(call_id, DCE_RPC_ALTER_CONTEXT_RESPONSE, result_count)
+    let results = rpc_proxy_dce_bind_context_results(request).unwrap_or_else(|| {
+        rpc_proxy_dce_default_context_results(
+            rpc_proxy_dce_bind_context_count(request).unwrap_or(1),
+        )
+    });
+    rpc_proxy_dce_context_ack_body(call_id, DCE_RPC_ALTER_CONTEXT_RESPONSE, &results)
 }
 
 fn rpc_proxy_dce_bind_context_count(request: &[u8]) -> Option<u8> {
     let count = *request.get(24)?;
     (count > 0).then_some(count)
+}
+
+#[derive(Clone, Copy)]
+struct RpcProxyDceContextResult {
+    result: u16,
+    reason: u16,
+    transfer_syntax: [u8; 20],
+}
+
+fn rpc_proxy_dce_default_context_results(result_count: u8) -> Vec<RpcProxyDceContextResult> {
+    (0..result_count)
+        .map(|result_index| {
+            if result_index == 0 {
+                rpc_proxy_dce_context_accept_result(RPC_PROXY_DCE_NDR_TRANSFER_SYNTAX)
+            } else {
+                rpc_proxy_dce_context_provider_rejection_result()
+            }
+        })
+        .collect()
+}
+
+fn rpc_proxy_dce_bind_context_results(request: &[u8]) -> Option<Vec<RpcProxyDceContextResult>> {
+    let count = rpc_proxy_dce_bind_context_count(request)? as usize;
+    let mut offset = 28usize;
+    let mut results = Vec::with_capacity(count);
+    for _ in 0..count {
+        let transfer_count = *request.get(offset + 2)? as usize;
+        offset += 24;
+        let mut result = rpc_proxy_dce_context_provider_rejection_result();
+        for _ in 0..transfer_count {
+            let transfer_syntax = request.get(offset..offset + 20)?;
+            if transfer_syntax == RPC_PROXY_DCE_NDR_TRANSFER_SYNTAX {
+                result = rpc_proxy_dce_context_accept_result(RPC_PROXY_DCE_NDR_TRANSFER_SYNTAX);
+            } else if rpc_proxy_is_bind_time_feature_negotiation_syntax(transfer_syntax) {
+                result = rpc_proxy_dce_bind_time_feature_negotiation_result();
+            }
+            offset += 20;
+        }
+        results.push(result);
+    }
+    Some(results)
+}
+
+fn rpc_proxy_dce_context_accept_result(transfer_syntax: [u8; 20]) -> RpcProxyDceContextResult {
+    RpcProxyDceContextResult {
+        result: 0,
+        reason: 0,
+        transfer_syntax,
+    }
+}
+
+fn rpc_proxy_dce_context_provider_rejection_result() -> RpcProxyDceContextResult {
+    RpcProxyDceContextResult {
+        result: 2,
+        reason: 2,
+        transfer_syntax: [0u8; 20],
+    }
+}
+
+fn rpc_proxy_dce_bind_time_feature_negotiation_result() -> RpcProxyDceContextResult {
+    RpcProxyDceContextResult {
+        result: 3,
+        reason: 0,
+        transfer_syntax: [0u8; 20],
+    }
+}
+
+fn rpc_proxy_is_bind_time_feature_negotiation_syntax(transfer_syntax: &[u8]) -> bool {
+    transfer_syntax.len() == 20
+        && transfer_syntax[0..8] == [0x2c, 0x1c, 0xb7, 0x6c, 0x12, 0x98, 0x40, 0x45]
+        && transfer_syntax[16..20] == [0x01, 0x00, 0x00, 0x00]
 }
 
 fn rpc_proxy_dce_fault_response(call_id: u32, status: u32) -> Vec<u8> {
@@ -6571,14 +6662,14 @@ fn rpc_proxy_dce_fault_response(call_id: u32, status: u32) -> Vec<u8> {
     packet
 }
 
-fn rpc_proxy_dce_context_ack_body(call_id: u32, packet_type: u8, result_count: u8) -> Vec<u8> {
+fn rpc_proxy_dce_context_ack_body(
+    call_id: u32,
+    packet_type: u8,
+    results: &[RpcProxyDceContextResult],
+) -> Vec<u8> {
     const DCE_RPC_FIRST_FRAG: u8 = 0x01;
     const DCE_RPC_LAST_FRAG: u8 = 0x02;
     const DCE_RPC_MAX_FRAG: u16 = 5840;
-    const DCE_RPC_NDR_TRANSFER_SYNTAX: [u8; 20] = [
-        0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11, 0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10, 0x48,
-        0x60, 0x02, 0x00, 0x00, 0x00,
-    ];
     let mut body = Vec::new();
     body.extend_from_slice(&DCE_RPC_MAX_FRAG.to_le_bytes());
     body.extend_from_slice(&DCE_RPC_MAX_FRAG.to_le_bytes());
@@ -6586,19 +6677,13 @@ fn rpc_proxy_dce_context_ack_body(call_id: u32, packet_type: u8, result_count: u
     body.extend_from_slice(&1u16.to_le_bytes());
     body.push(0);
     body.push(0);
-    body.push(result_count);
+    body.push(results.len() as u8);
     body.push(0);
     body.extend_from_slice(&0u16.to_le_bytes());
-    for result_index in 0..result_count {
-        if result_index == 0 {
-            body.extend_from_slice(&0u16.to_le_bytes());
-            body.extend_from_slice(&0u16.to_le_bytes());
-            body.extend_from_slice(&DCE_RPC_NDR_TRANSFER_SYNTAX);
-        } else {
-            body.extend_from_slice(&2u16.to_le_bytes());
-            body.extend_from_slice(&2u16.to_le_bytes());
-            body.extend_from_slice(&[0u8; 20]);
-        }
+    for result in results {
+        body.extend_from_slice(&result.result.to_le_bytes());
+        body.extend_from_slice(&result.reason.to_le_bytes());
+        body.extend_from_slice(&result.transfer_syntax);
     }
 
     let verifier = ntlm::connect_level_challenge_verifier();

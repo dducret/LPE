@@ -8390,6 +8390,38 @@ fn rpc_proxy_in_channel_bind_request_gets_bind_ack_response() {
 }
 
 #[test]
+fn rpc_proxy_in_channel_bind_ack_negotiates_bind_time_features() {
+    let bind = hex_bytes(
+        "05000b0310000000d000280096000000\
+         f80ff80f000000000300000000000100\
+         80bda8af8a7dc911bef408002b10298901000000\
+         045d888aeb1cc9119fe808002b10486002000000\
+         0100010080bda8af8a7dc911bef408002b10298901000000\
+         33057171babe37498319b5dbef9ccc3601000000\
+         0200010080bda8af8a7dc911bef408002b10298901000000\
+         2c1cb76c12984045030000000000000001000000\
+         0a020000000000004e544c4d5353500001000000078208a2\
+         000000000000000000000000000000000a007c4f0000000f",
+    );
+    let mut buffer = bind;
+
+    let response =
+        rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("bind ack response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x0c, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        150
+    );
+    assert_eq!(response[28], 3);
+    assert_eq!(u16::from_le_bytes(response[32..34].try_into().unwrap()), 0);
+    assert_eq!(u16::from_le_bytes(response[56..58].try_into().unwrap()), 2);
+    assert_eq!(u16::from_le_bytes(response[80..82].try_into().unwrap()), 3);
+    assert_eq!(u16::from_le_bytes(response[82..84].try_into().unwrap()), 0);
+    assert_eq!(&response[84..104], &[0; 20]);
+}
+
+#[test]
 fn rpc_proxy_in_channel_alter_context_request_gets_alter_context_response() {
     let alter_context = hex_bytes(
         "05000e03100000007400000004000000\
