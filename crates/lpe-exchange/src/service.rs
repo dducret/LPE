@@ -7118,7 +7118,7 @@ where
     if !endpoint_query.contains(":6004") || rpc_proxy_nspi_lookup_values(buffer).is_empty() {
         return None;
     }
-    let call_id = rpc_proxy_last_dce_request_call_id(buffer).unwrap_or(1);
+    let call_id = rpc_proxy_last_dce_request_call_id(buffer)?;
     let bytes =
         rpc_proxy_nspi_resolve_names_response_for_principal(store, call_id, buffer, principal)
             .await;

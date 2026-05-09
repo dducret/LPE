@@ -8966,6 +8966,39 @@ async fn rpc_proxy_address_book_check_name_fallback_answers_framing_mismatch() {
     assert!(buffer.is_empty());
 }
 
+#[tokio::test]
+async fn rpc_proxy_address_book_auth3_does_not_trigger_check_name_fallback() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let validator = Validator::new(FakeDetector::pdf(), 0.8);
+    let principal = test_account_principal();
+    let mut buffer = vec![0u8; 250];
+    buffer[0..16].copy_from_slice(&[
+        0x05, 0x00, 0x10, 0x03, 0x10, 0x00, 0x00, 0x00, 0xfa, 0x00, 0xde, 0x00, 0x7f, 0x00, 0x00,
+        0x00,
+    ]);
+    buffer[16..24].copy_from_slice(&[0xf8, 0x0f, 0xf8, 0x0f, 0x0a, 0x02, 0x00, 0x00]);
+    let authenticated_name: Vec<u8> = "test@l-p-e.ch\0"
+        .encode_utf16()
+        .flat_map(|unit| unit.to_le_bytes())
+        .collect();
+    buffer[80..80 + authenticated_name.len()].copy_from_slice(&authenticated_name);
+
+    let response = rpc_proxy_in_channel_response_for_endpoint_query_with_store(
+        &store,
+        &validator,
+        &principal,
+        "mail.example.test:6004",
+        &mut buffer,
+    )
+    .await;
+
+    assert!(response.is_none());
+    assert!(buffer.is_empty());
+}
+
 #[test]
 fn rpc_proxy_in_channel_scans_nspi_resolve_after_rts_pdu() {
     let chunk = hex_bytes(
