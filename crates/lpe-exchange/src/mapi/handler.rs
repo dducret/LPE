@@ -5101,7 +5101,7 @@ fn rop_get_properties_specific_response(
                 .unwrap_or_else(|| serialize_root_folder_row(mailboxes, &columns))
         }
     };
-    response.extend_from_slice(&row);
+    write_standard_property_row(&mut response, &row);
     response
 }
 
@@ -5536,7 +5536,7 @@ fn rop_query_rows_response(
     }
     response.extend_from_slice(&(selected.len() as u16).to_le_bytes());
     for row in selected {
-        response.extend_from_slice(&row);
+        write_standard_property_row(&mut response, &row);
     }
     response
 }
@@ -6353,7 +6353,10 @@ fn rop_find_row_response(
             {
                 *position = index;
                 response.push(1);
-                response.extend_from_slice(&serialize_folder_row(mailbox, &columns));
+                write_standard_property_row(
+                    &mut response,
+                    &serialize_folder_row(mailbox, &columns),
+                );
             } else {
                 response.push(0);
             }
@@ -6379,7 +6382,10 @@ fn rop_find_row_response(
             }) {
                 *position = index;
                 response.push(1);
-                response.extend_from_slice(&serialize_message_row(email, &columns));
+                write_standard_property_row(
+                    &mut response,
+                    &serialize_message_row(email, &columns),
+                );
             } else {
                 response.push(0);
             }
@@ -6414,7 +6420,10 @@ fn rop_find_row_response(
             {
                 *position = index;
                 response.push(1);
-                response.extend_from_slice(&serialize_attachment_row(attachment, &columns));
+                write_standard_property_row(
+                    &mut response,
+                    &serialize_attachment_row(attachment, &columns),
+                );
             } else {
                 response.push(0);
             }
@@ -6805,6 +6814,11 @@ fn serialize_root_folder_row(mailboxes: &[JmapMailbox], columns: &[u32]) -> Vec<
         }
     }
     row
+}
+
+fn write_standard_property_row(response: &mut Vec<u8>, values: &[u8]) {
+    response.push(0);
+    response.extend_from_slice(values);
 }
 
 fn serialize_logon_row(columns: &[u32]) -> Vec<u8> {
