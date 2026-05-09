@@ -2155,6 +2155,10 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
     assert!(raw_body.starts_with(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 0\r\n"));
     let body = strip_mapi_http_envelope(raw_body);
     assert_eq!(&body[0..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(&body[8..12], &60_000u32.to_le_bytes());
+    assert_eq!(&body[12..16], &6u32.to_le_bytes());
+    assert_eq!(&body[16..20], &10_000u32.to_le_bytes());
+    assert!(body[20..].starts_with(b"/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=\0"));
     assert_eq!(
         &body[body.len() - 20..body.len() - 16],
         &16u32.to_le_bytes()

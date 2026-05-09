@@ -453,10 +453,10 @@ fn connect_response(
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
-    write_u32(&mut body, 30_000);
-    write_u32(&mut body, 3);
-    write_u32(&mut body, 1_000);
-    body.extend_from_slice(b"/o=LPE/ou=Exchange Administrative Group/cn=Recipients\0");
+    write_u32(&mut body, 60_000);
+    write_u32(&mut body, 6);
+    write_u32(&mut body, 10_000);
+    body.extend_from_slice(b"/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=\0");
     write_utf16z(&mut body, &principal.display_name);
     let auxiliary_buffer = connect_auxiliary_buffer();
     write_u32(&mut body, auxiliary_buffer.len() as u32);
