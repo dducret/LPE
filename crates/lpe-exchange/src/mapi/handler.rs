@@ -4119,6 +4119,7 @@ const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
 const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
 const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
 const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
+const PID_TAG_SERIALIZED_REPLID_GUID_MAP: u32 = 0x6638_0102;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
 const PID_TAG_ATTACH_DATA_BINARY: u32 = 0x3701_0102;
@@ -4988,6 +4989,7 @@ fn rop_get_properties_specific_response(
     write_u32(&mut response, 0);
     let columns = request.property_tags();
     let row = match object {
+        Some(MapiObject::Logon) => serialize_logon_row(&columns),
         Some(MapiObject::Message {
             folder_id,
             message_id,
@@ -5192,6 +5194,7 @@ fn serialize_object_property(
     tag: u32,
 ) -> Vec<u8> {
     match object {
+        Some(MapiObject::Logon) => serialize_logon_row(&[tag]),
         Some(MapiObject::Message {
             folder_id,
             message_id,
@@ -5281,6 +5284,13 @@ fn serialize_object_property(
                 })
                 .unwrap_or_else(|| serialize_root_folder_row(mailboxes, &[tag]))
         }
+    }
+}
+
+fn logon_property_value(property_tag: u32) -> Option<MapiValue> {
+    match property_tag {
+        PID_TAG_SERIALIZED_REPLID_GUID_MAP => Some(MapiValue::Binary(serialized_replid_guid_map())),
+        _ => None,
     }
 }
 
@@ -6783,6 +6793,24 @@ fn serialize_root_folder_row(mailboxes: &[JmapMailbox], columns: &[u32]) -> Vec<
         }
     }
     row
+}
+
+fn serialize_logon_row(columns: &[u32]) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match logon_property_value(*column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+fn serialized_replid_guid_map() -> Vec<u8> {
+    let mut value = Vec::with_capacity(18);
+    value.extend_from_slice(&(STORE_REPLICA_ID as u16).to_le_bytes());
+    value.extend_from_slice(&mapi_mailstore::STORE_REPLICA_GUID);
+    value
 }
 
 fn serialize_pending_attachment_row(
@@ -9613,7 +9641,20 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
-            let property_tag_count = cursor.read_u16()? as usize;
+            let first_count_or_want_unicode = cursor.read_u16()?;
+            let property_tag_count = if first_count_or_want_unicode <= 1 && cursor.remaining() >= 2
+            {
+                let checkpoint = cursor.position;
+                let count = cursor.read_u16()? as usize;
+                if cursor.remaining() >= count.saturating_mul(4) {
+                    count
+                } else {
+                    cursor.position = checkpoint;
+                    first_count_or_want_unicode as usize
+                }
+            } else {
+                first_count_or_want_unicode as usize
+            };
             payload.extend_from_slice(&(property_tag_count as u16).to_le_bytes());
             payload.extend_from_slice(cursor.read_bytes(property_tag_count * 4)?);
             Ok(RopRequest {

@@ -2606,6 +2606,77 @@ async fn mapi_over_http_execute_accepts_rca_wrapped_private_mailbox_logon() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootstrap() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let logon_request = hex_bytes(
+        "0200000063000000000004005b005b005700fe0000010c0400210000000047002f6f3d4c50452f6f753d45786368616e67652041646d696e6973747261746976652047726f75702f636e3d526563697069656e74732f636e3d746573742d6c2d702d652d636800ffffffff0780000000000000",
+    );
+    let logon_response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &logon_request)
+        .await
+        .unwrap();
+    assert_eq!(logon_response.status(), StatusCode::OK);
+    assert_eq!(logon_response.headers().get("x-responsecode").unwrap(), "0");
+
+    renew_mapi_request_id(&mut execute_headers);
+    let replid_request = hex_bytes(
+        "020000001b00000000000400130013000f0007000000000000010002013866010000000780000000000000",
+    );
+    let replid_response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &replid_request)
+        .await
+        .unwrap();
+
+    assert_eq!(replid_response.status(), StatusCode::OK);
+    assert_eq!(
+        replid_response.headers().get("x-responsecode").unwrap(),
+        "0"
+    );
+    let body = response_bytes(replid_response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    assert_eq!(&rop_buffer[0..4], &[0, 0, 4, 0]);
+    let payload_size = u16::from_le_bytes(rop_buffer[4..6].try_into().unwrap()) as usize;
+    let payload = &rop_buffer[8..8 + payload_size];
+    let response_rop_size = u16::from_le_bytes(payload[0..2].try_into().unwrap()) as usize;
+    let response_rop = &payload[2..response_rop_size];
+
+    assert_eq!(response_rop[0], 0x07);
+    assert_eq!(response_rop[1], 0x00);
+    assert_eq!(
+        u32::from_le_bytes(response_rop[2..6].try_into().unwrap()),
+        0
+    );
+    assert_eq!(
+        u16::from_le_bytes(response_rop[6..8].try_into().unwrap()),
+        18
+    );
+    assert_eq!(&response_rop[8..10], &1u16.to_le_bytes());
+    assert_eq!(&response_rop[10..26], &mapi_mailstore::STORE_REPLICA_GUID);
+}
+
+#[tokio::test]
 async fn mapi_over_http_execute_opens_folder_and_gets_empty_hierarchy_table() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
