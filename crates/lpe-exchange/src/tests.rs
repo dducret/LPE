@@ -7974,13 +7974,16 @@ async fn rpc_proxy_referral_endpoint_ping_returns_a3_without_synthetic_bind_ack(
         Some(&HeaderValue::from_static("endpoint-ping"))
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 28);
+    assert_eq!(body.len(), 72);
     assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
     assert_eq!(u16::from_le_bytes([body[18], body[19]]), 1);
     assert_eq!(
         u32::from_le_bytes([body[20], body[21], body[22], body[23]]),
         2
     );
+    assert_eq!(body[28], 0x05);
+    assert_eq!(body[30], 0x14);
+    assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
 }
 
 #[tokio::test]
@@ -8051,8 +8054,11 @@ async fn rpc_proxy_address_book_endpoint_ping_returns_a3_without_synthetic_bind_
         Some(&HeaderValue::from_static("131072"))
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 28);
+    assert_eq!(body.len(), 72);
     assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
+    assert_eq!(body[28], 0x05);
+    assert_eq!(body[30], 0x14);
+    assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
 }
 
 #[tokio::test]
@@ -8114,6 +8120,53 @@ async fn rpc_proxy_address_book_endpoint_ping_includes_pending_conn_b1_when_in_a
         u32::from_le_bytes([body[60], body[61], body[62], body[63]]),
         0x0001_0000
     );
+}
+
+#[tokio::test]
+async fn rpc_proxy_address_book_endpoint_ping_suppresses_duplicate_conn_b1_when_out_arrives_first()
+{
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let endpoint_query = "mail.conn-b1-after-out.example.test:6004";
+    let mut headers = bearer_headers();
+    headers.insert("user-agent", HeaderValue::from_static("MSRPC"));
+    headers.insert("accept", HeaderValue::from_static("application/rpc"));
+
+    let out_method = Method::from_bytes(b"RPC_OUT_DATA").expect("valid RPC method");
+    let out_uri: Uri = format!("/rpc/rpcproxy.dll?{endpoint_query}")
+        .parse()
+        .unwrap();
+    let connect_body = rpc_proxy_conn_a1_request_body(0x0000_8000);
+    let response = service
+        .handle_rpc_proxy(&out_method, &out_uri, &headers, &connect_body)
+        .await;
+
+    let in_method = Method::from_bytes(b"RPC_IN_DATA").expect("valid RPC method");
+    let in_uri: Uri = format!("/rpc/rpcproxy.dll?{endpoint_query}")
+        .parse()
+        .unwrap();
+    let mut conn_b1 = hex_bytes(
+        "0500140310000000680000000000000000000600\
+         06000000010000000300000076ed340685c5dd390e9a6acbc8cb9951\
+         03000000a6c4ac6df261ef9fc3804d0c73a59fff\
+         040000000000004005000000e09304000c0000005475b4942dd08746bf4c3d2821816b2c",
+    );
+    conn_b1[32..48].copy_from_slice(&connect_body[32..48]);
+
+    let in_response = service
+        .handle_rpc_proxy_in_data_channel(&in_method, &in_uri, &headers, Body::from(conn_b1))
+        .await;
+
+    assert_eq!(in_response.status(), StatusCode::OK);
+    tokio::task::yield_now().await;
+
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(body.len(), 72);
+    assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
+    assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
 }
 
 #[tokio::test]

@@ -6833,6 +6833,12 @@ fn rpc_proxy_mailstore_held_open_response(
         consume_pending_rpc_proxy_out_channel_responses(&query, virtual_connection_cookie);
     let has_pending = !pending.is_empty();
     body.extend(pending);
+    if !has_pending && rpc_proxy_should_send_synthetic_rts_connect(&query) {
+        body.extend_from_slice(&rpc_proxy_connection_established_pdu(
+            RPC_PROXY_RECEIVE_WINDOW_SIZE,
+        ));
+        mark_rpc_proxy_out_endpoint_rts_connect(&query);
+    }
     if has_pending && query.contains(":6001") {
         body.extend_from_slice(&rpc_proxy_dce_bind_ack_body_with_result_count(1, 1));
         mark_rpc_proxy_out_endpoint_bind_ack(&query);
@@ -6862,6 +6868,10 @@ fn rpc_proxy_mailstore_held_open_response(
             .unwrap_or_else(|_| HeaderValue::from_static("131072")),
     );
     response
+}
+
+fn rpc_proxy_should_send_synthetic_rts_connect(query: &str) -> bool {
+    query.contains(":6002") || query.contains(":6004")
 }
 
 fn register_rpc_proxy_out_channel(
@@ -6945,6 +6955,33 @@ fn consume_pending_rpc_proxy_out_channel_responses(
         pending.remove(query);
     }
     matched
+}
+
+fn mark_rpc_proxy_out_endpoint_rts_connect(query: &str) {
+    let mut pending = rpc_proxy_out_endpoint_rts_connects()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let count = pending.entry(query.to_string()).or_insert(0);
+    *count = count.saturating_add(1);
+}
+
+fn consume_rpc_proxy_out_endpoint_rts_connect(query: &str) -> bool {
+    let mut pending = rpc_proxy_out_endpoint_rts_connects()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(count) = pending.get_mut(query) else {
+        return false;
+    };
+    *count = count.saturating_sub(1);
+    if *count == 0 {
+        pending.remove(query);
+    }
+    true
+}
+
+fn rpc_proxy_out_endpoint_rts_connects() -> &'static Mutex<HashMap<String, usize>> {
+    static PENDING: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
+    PENDING.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn pending_rpc_proxy_out_channel_responses(
@@ -7476,7 +7513,11 @@ where
 
         let fragment = &buffer[offset..fragment_end];
         let response = if let Some(response) = rpc_proxy_conn_b1_response_body(fragment) {
-            Some(response)
+            if consume_rpc_proxy_out_endpoint_rts_connect(endpoint_query) {
+                None
+            } else {
+                Some(response)
+            }
         } else {
             rpc_proxy_endpoint_response_for_fragment_with_store(
                 store,
