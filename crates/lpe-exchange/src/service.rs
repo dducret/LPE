@@ -6648,6 +6648,90 @@ fn rpc_proxy_dce_fault_response(call_id: u32, status: u32) -> Vec<u8> {
     packet
 }
 
+#[derive(Clone, Copy)]
+struct RpcProxyDceRequestAuth {
+    auth_type: u8,
+    auth_level: u8,
+    context_id: u32,
+}
+
+fn rpc_proxy_dce_request_auth_trailer_offset(
+    request: &[u8],
+    fragment_length: usize,
+    auth_length: usize,
+) -> Option<usize> {
+    let token_base = fragment_length.checked_sub(auth_length + 8)?;
+    if rpc_proxy_dce_auth_trailer_candidate(request, token_base, 0) {
+        return Some(token_base);
+    }
+    for auth_pad_length in 1..=15usize {
+        let Some(offset) = token_base.checked_sub(auth_pad_length) else {
+            break;
+        };
+        if rpc_proxy_dce_auth_trailer_candidate(request, offset, auth_pad_length) {
+            return Some(offset);
+        }
+    }
+    None
+}
+
+fn rpc_proxy_dce_auth_trailer_candidate(
+    request: &[u8],
+    offset: usize,
+    auth_pad_length: usize,
+) -> bool {
+    let Some(auth_type) = request.get(offset) else {
+        return false;
+    };
+    let Some(auth_level) = request.get(offset + 1) else {
+        return false;
+    };
+    let Some(candidate_pad_length) = request.get(offset + 2) else {
+        return false;
+    };
+    if usize::from(*candidate_pad_length) != auth_pad_length {
+        return false;
+    }
+    // NTLM over RPC/HTTP is the Outlook Anywhere path RCA uses for these probes.
+    if *auth_type != 0x0a {
+        return false;
+    }
+    matches!(*auth_level, 1..=6)
+}
+
+fn rpc_proxy_dce_request_auth(request: &[u8]) -> Option<RpcProxyDceRequestAuth> {
+    let fragment_length = u16::from_le_bytes([*request.get(8)?, *request.get(9)?]) as usize;
+    let auth_length = u16::from_le_bytes([*request.get(10)?, *request.get(11)?]) as usize;
+    if auth_length == 0 || fragment_length > request.len() || fragment_length < auth_length + 8 {
+        return None;
+    }
+    let trailer_offset =
+        rpc_proxy_dce_request_auth_trailer_offset(request, fragment_length, auth_length)?;
+    Some(RpcProxyDceRequestAuth {
+        auth_type: *request.get(trailer_offset)?,
+        auth_level: *request.get(trailer_offset + 1)?,
+        context_id: read_le_u32(request, trailer_offset + 4)?,
+    })
+}
+
+fn rpc_proxy_dce_response_with_request_auth(mut response: Vec<u8>, request: &[u8]) -> Vec<u8> {
+    let Some(auth) = rpc_proxy_dce_request_auth(request) else {
+        return response;
+    };
+    let auth_pad_length = (4 - (response.len() % 4)) % 4;
+    response.extend(std::iter::repeat_n(0, auth_pad_length));
+    response.push(auth.auth_type);
+    response.push(auth.auth_level);
+    response.push(auth_pad_length as u8);
+    response.push(0);
+    response.extend_from_slice(&auth.context_id.to_le_bytes());
+    response.extend_from_slice(&[0u8; 16]);
+    let fragment_length = response.len() as u16;
+    response[8..10].copy_from_slice(&fragment_length.to_le_bytes());
+    response[10..12].copy_from_slice(&16u16.to_le_bytes());
+    response
+}
+
 fn rpc_proxy_dce_context_ack_body(
     call_id: u32,
     packet_type: u8,
@@ -7456,10 +7540,16 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
     if endpoint_query.contains(":6002") {
         match opnum {
             0 if alloc_hint >= 4 => {
-                return Some(rpc_proxy_rfri_get_new_dsa_response(call_id, endpoint_query));
+                return Some(rpc_proxy_dce_response_with_request_auth(
+                    rpc_proxy_rfri_get_new_dsa_response(call_id, endpoint_query),
+                    bytes,
+                ));
             }
             1 if alloc_hint >= 4 => {
-                return Some(rpc_proxy_rfri_get_fqdn_response(call_id, endpoint_query));
+                return Some(rpc_proxy_dce_response_with_request_auth(
+                    rpc_proxy_rfri_get_fqdn_response(call_id, endpoint_query),
+                    bytes,
+                ));
             }
             _ => {}
         }
@@ -7467,22 +7557,39 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
     if endpoint_query.contains(":6001") {
         match opnum {
             1 if alloc_hint >= 20 => {
-                return Some(rpc_proxy_emsmdb_disconnect_response(call_id));
+                return Some(rpc_proxy_dce_response_with_request_auth(
+                    rpc_proxy_emsmdb_disconnect_response(call_id),
+                    bytes,
+                ));
             }
-            10 if alloc_hint >= 20 => return Some(rpc_proxy_emsmdb_connect_ex_response(call_id)),
-            11 if alloc_hint >= 20 => return Some(rpc_proxy_emsmdb_rpc_ext2_response(call_id)),
+            10 if alloc_hint >= 20 => {
+                return Some(rpc_proxy_dce_response_with_request_auth(
+                    rpc_proxy_emsmdb_connect_ex_response(call_id),
+                    bytes,
+                ));
+            }
+            11 if alloc_hint >= 20 => {
+                return Some(rpc_proxy_dce_response_with_request_auth(
+                    rpc_proxy_emsmdb_rpc_ext2_response(call_id),
+                    bytes,
+                ));
+            }
             _ => {}
         }
     }
     match (context_id, opnum) {
         (0, 1) if alloc_hint == 4 => {
             let requested_stats = read_le_u32(bytes, 24)?;
-            return Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats));
+            return Some(rpc_proxy_dce_response_with_request_auth(
+                rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats),
+                bytes,
+            ));
         }
         _ => {}
     }
     if endpoint_query.contains(":6004") || context_id == 2 {
-        return rpc_proxy_nspi_response_for_opnum(call_id, opnum, alloc_hint, bytes);
+        return rpc_proxy_nspi_response_for_opnum(call_id, opnum, alloc_hint, bytes)
+            .map(|response| rpc_proxy_dce_response_with_request_auth(response, bytes));
     }
     None
 }
@@ -7526,17 +7633,23 @@ where
     if endpoint_query.contains(":6002") {
         match opnum {
             0 if alloc_hint >= 4 => {
-                return Some(rpc_proxy_rfri_get_new_dsa_response_for_principal(
-                    call_id,
-                    endpoint_query,
-                    principal,
+                return Some(rpc_proxy_dce_response_with_request_auth(
+                    rpc_proxy_rfri_get_new_dsa_response_for_principal(
+                        call_id,
+                        endpoint_query,
+                        principal,
+                    ),
+                    bytes,
                 ));
             }
             1 if alloc_hint >= 4 => {
-                return Some(rpc_proxy_rfri_get_fqdn_response_for_principal(
-                    call_id,
-                    endpoint_query,
-                    principal,
+                return Some(rpc_proxy_dce_response_with_request_auth(
+                    rpc_proxy_rfri_get_fqdn_response_for_principal(
+                        call_id,
+                        endpoint_query,
+                        principal,
+                    ),
+                    bytes,
                 ));
             }
             _ => {}
@@ -7545,20 +7658,25 @@ where
     if endpoint_query.contains(":6001") {
         match opnum {
             1 if alloc_hint >= 20 => {
-                return Some(rpc_proxy_emsmdb_disconnect_response(call_id));
+                return Some(rpc_proxy_dce_response_with_request_auth(
+                    rpc_proxy_emsmdb_disconnect_response(call_id),
+                    bytes,
+                ));
             }
             10 if alloc_hint >= 20 => {
-                return Some(rpc_proxy_emsmdb_connect_ex_response_for_principal(
-                    call_id, principal,
+                return Some(rpc_proxy_dce_response_with_request_auth(
+                    rpc_proxy_emsmdb_connect_ex_response_for_principal(call_id, principal),
+                    bytes,
                 ));
             }
             11 if alloc_hint >= 20 => {
-                return Some(
+                return Some(rpc_proxy_dce_response_with_request_auth(
                     rpc_proxy_emsmdb_rpc_ext2_response_for_principal(
                         store, validator, principal, call_id, bytes,
                     )
                     .await,
-                );
+                    bytes,
+                ));
             }
             _ => {}
         }
@@ -7566,7 +7684,10 @@ where
     match (context_id, opnum) {
         (0, 1) if alloc_hint == 4 => {
             let requested_stats = read_le_u32(bytes, 24)?;
-            return Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats));
+            return Some(rpc_proxy_dce_response_with_request_auth(
+                rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats),
+                bytes,
+            ));
         }
         _ => {}
     }
@@ -7574,7 +7695,8 @@ where
         return rpc_proxy_nspi_response_for_opnum_with_store(
             store, call_id, opnum, alloc_hint, bytes, principal,
         )
-        .await;
+        .await
+        .map(|response| rpc_proxy_dce_response_with_request_auth(response, bytes));
     }
     None
 }

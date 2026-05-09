@@ -8821,8 +8821,8 @@ fn rpc_proxy_in_channel_nspi_bind_request_gets_context_handle_response() {
         rpc_proxy_in_channel_response_for_buffer(&mut buffer).expect("nspi bind response");
 
     assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
-    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 52);
-    assert_eq!(u16::from_le_bytes([response[10], response[11]]), 0);
+    assert_eq!(u16::from_le_bytes([response[8], response[9]]), 76);
+    assert_eq!(u16::from_le_bytes([response[10], response[11]]), 16);
     assert_eq!(
         u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
         3
@@ -8844,6 +8844,7 @@ fn rpc_proxy_in_channel_nspi_bind_request_gets_context_handle_response() {
         u32::from_le_bytes([response[48], response[49], response[50], response[51]]),
         0
     );
+    assert_eq!(&response[52..60], &[0x0a, 0x02, 0x00, 0x00, 0, 0, 0, 0]);
 }
 
 #[test]
