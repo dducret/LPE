@@ -6477,25 +6477,11 @@ fn rpc_proxy_mailstore_ping_response_for_connect(
     uri: &Uri,
     connect: RpcProxyOutDataConnect,
 ) -> Response {
-    let mut body = rpc_proxy_endpoint_connect_body();
-    let has_connection_established = if let Some(query) = uri.query() {
-        let pending = consume_pending_rpc_proxy_out_channel_responses(
-            query,
-            Some(connect.virtual_connection_cookie),
-        );
-        let has_pending = !pending.is_empty();
-        body.extend(pending);
-        has_pending
-    } else {
-        false
-    };
-    if has_connection_established {
-        if let Some(query) = uri.query().filter(|query| query.contains(":6001")) {
-            body.extend_from_slice(&rpc_proxy_dce_bind_ack_body_with_result_count(1, 1));
-            mark_rpc_proxy_out_endpoint_bind_ack(query);
-        }
-    }
-    rpc_proxy_mailstore_held_open_response(uri, body, Some(connect.virtual_connection_cookie))
+    rpc_proxy_mailstore_held_open_response(
+        uri,
+        rpc_proxy_endpoint_connect_body(),
+        Some(connect.virtual_connection_cookie),
+    )
 }
 
 pub(crate) fn mark_rpc_proxy_out_endpoint_bind_ack(query: &str) {
@@ -6754,11 +6740,22 @@ fn rpc_proxy_mailstore_held_open_response(
         return rpc_proxy_binary_response(body, RPC_PROXY_ENDPOINT_PING_STATUS);
     }
 
-    let payload_bytes = body.len();
-    let payload_preview_hex = mapi::debug_payload_preview_hex(&body);
+    let mut body = body;
     let query = query.to_string();
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
     register_rpc_proxy_out_channel(&query, virtual_connection_cookie, sender);
+
+    let pending =
+        consume_pending_rpc_proxy_out_channel_responses(&query, virtual_connection_cookie);
+    let has_pending = !pending.is_empty();
+    body.extend(pending);
+    if has_pending && query.contains(":6001") {
+        body.extend_from_slice(&rpc_proxy_dce_bind_ack_body_with_result_count(1, 1));
+        mark_rpc_proxy_out_endpoint_bind_ack(&query);
+    }
+
+    let payload_bytes = body.len();
+    let payload_preview_hex = mapi::debug_payload_preview_hex(&body);
 
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(hold_open_ms)).await;
