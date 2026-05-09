@@ -4569,7 +4569,7 @@ fn rop_logon_response_body(principal: &AccountPrincipal, request: &RopRequest) -
     response.push(0x03);
     response.extend_from_slice(principal.account_id.as_bytes());
     response.extend_from_slice(&1u16.to_le_bytes());
-    response.extend_from_slice(principal.account_id.as_bytes());
+    response.extend_from_slice(&mapi_mailstore::STORE_REPLICA_GUID);
     let now = SystemTime::now();
     response.extend_from_slice(&logon_time_bytes(now));
     write_u64(&mut response, gwart_time_marker(now));
