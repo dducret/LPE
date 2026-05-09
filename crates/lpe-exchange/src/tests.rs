@@ -6757,6 +6757,68 @@ async fn mapi_over_http_sync_manifest_includes_canonical_read_flag_state() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_sync_manifest_includes_stable_change_key_facts_without_bcc() {
+    let message_uuid = Uuid::parse_str("46464646-4646-4646-4646-464646464646").unwrap();
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let mut email = FakeStore::email(
+        &message_uuid.to_string(),
+        mailbox_id,
+        "inbox",
+        "Change key sync message",
+    );
+    email.bcc.push(JmapEmailAddress {
+        address: "hidden@example.test".to_string(),
+        display_name: Some("Hidden Bcc".to_string()),
+    });
+    let change_number = mapi_mailstore::canonical_message_change_number(&email);
+    let change_key = mapi_mailstore::change_key_for_change_number(change_number);
+    let predecessor_change_list = mapi_mailstore::predecessor_change_list(change_number);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 1)));
+    assert!(contains_bytes(&response_rops, b"Change key sync message"));
+    assert!(contains_bytes(&response_rops, &change_key));
+    assert!(contains_bytes(&response_rops, &predecessor_change_list));
+    assert!(!contains_bytes(&response_rops, b"hidden@example.test"));
+    assert!(!contains_bytes(&response_rops, b"Hidden Bcc"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_get_local_replica_ids_returns_replica_guid() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

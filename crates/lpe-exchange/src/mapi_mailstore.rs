@@ -191,6 +191,8 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         buffer.extend_from_slice(&canonical_message_flags(email).to_le_bytes());
         buffer.extend_from_slice(&canonical_flag_status(email).to_le_bytes());
         write_prefixed_bytes(&mut buffer, email.subject.as_bytes());
+        write_prefixed_bytes(&mut buffer, &change_key_for_change_number(change_number));
+        write_prefixed_bytes(&mut buffer, &predecessor_change_list(change_number));
         write_visible_recipient_facts(&mut buffer, email);
         buffer.extend_from_slice(&(attachments.len().min(u16::MAX as usize) as u16).to_le_bytes());
         let mut attachments = attachments.iter().collect::<Vec<_>>();
