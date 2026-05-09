@@ -42,10 +42,10 @@ use crate::{
 const MAPI_CONTENT_TYPE: &str = "application/mapi-http";
 const MAPI_OCTET_STREAM_CONTENT_TYPE: &str = "application/octet-stream";
 const MAPI_SERVER_APPLICATION: &str = "LPE/0.2.0";
-const EMSMDB_COOKIE: &str = "lpe_mapi_emsmdb";
-const NSPI_COOKIE: &str = "lpe_mapi_nspi";
-const EMSMDB_SEQUENCE_COOKIE: &str = "lpe_mapi_emsmdb_seq";
-const NSPI_SEQUENCE_COOKIE: &str = "lpe_mapi_nspi_seq";
+const EMSMDB_COOKIE: &str = "MapiContext";
+const NSPI_COOKIE: &str = "MapiContext";
+const EMSMDB_SEQUENCE_COOKIE: &str = "MapiSequence";
+const NSPI_SEQUENCE_COOKIE: &str = "MapiSequence";
 const EMSMDB_COOKIE_PATH: &str = "/mapi/emsmdb";
 const NSPI_COOKIE_PATH: &str = "/mapi/nspi";
 const MAPI_SESSION_MAX_AGE_SECONDS: u32 = 1_800;
@@ -1811,6 +1811,7 @@ fn log_mapi_connection(
     let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
     let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
     let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
+    let set_cookie_names = response_set_cookie_names(response);
     let message = "rca debug mapi connection";
 
     if response_code == "0" {
@@ -1833,6 +1834,7 @@ fn log_mapi_connection(
             response_payload_bytes = payload_bytes,
             request_body_preview_hex = %request_body_preview_hex,
             response_payload_preview_hex = %response_payload_preview_hex,
+            set_cookie_names = %set_cookie_names,
             content_type = %content_type,
             user_agent = %user_agent,
             "{message}"
@@ -1857,11 +1859,28 @@ fn log_mapi_connection(
             response_payload_bytes = payload_bytes,
             request_body_preview_hex = %request_body_preview_hex,
             response_payload_preview_hex = %response_payload_preview_hex,
+            set_cookie_names = %set_cookie_names,
             content_type = %content_type,
             user_agent = %user_agent,
             "{message}"
         );
     }
+}
+
+fn response_set_cookie_names(response: &Response) -> String {
+    response
+        .headers()
+        .get_all(SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter_map(|value| {
+            value
+                .split_once('=')
+                .map(|(name, _)| name.trim().to_string())
+        })
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn response_header(response: &Response, name: &str) -> Option<String> {

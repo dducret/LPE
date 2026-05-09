@@ -2130,7 +2130,7 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
         .unwrap()
         .to_str()
         .unwrap();
-    assert!(set_cookie.starts_with("lpe_mapi_emsmdb="));
+    assert!(set_cookie.starts_with("MapiContext="));
     assert!(set_cookie.contains("Max-Age=1800"));
     assert!(set_cookie.contains("HttpOnly"));
     assert!(set_cookie.contains("Secure"));
@@ -2143,10 +2143,10 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
     assert_eq!(set_cookies.len(), 2);
     assert!(set_cookies
         .iter()
-        .any(|cookie| cookie.starts_with("lpe_mapi_emsmdb=")));
+        .any(|cookie| cookie.starts_with("MapiContext=")));
     assert!(set_cookies
         .iter()
-        .any(|cookie| cookie.starts_with("lpe_mapi_emsmdb_seq=")));
+        .any(|cookie| cookie.starts_with("MapiSequence=")));
 
     let raw_body = to_bytes(response.into_body(), usize::MAX)
         .await
@@ -2347,7 +2347,7 @@ async fn mapi_over_http_accepts_outlook_octet_stream_bind_probe() {
         .unwrap()
         .to_str()
         .unwrap();
-    assert!(set_cookie.starts_with("lpe_mapi_nspi="));
+    assert!(set_cookie.starts_with("MapiContext="));
     let set_cookies = response
         .headers()
         .get_all("set-cookie")
@@ -2357,10 +2357,10 @@ async fn mapi_over_http_accepts_outlook_octet_stream_bind_probe() {
     assert_eq!(set_cookies.len(), 2);
     assert!(set_cookies
         .iter()
-        .any(|cookie| cookie.starts_with("lpe_mapi_nspi=")));
+        .any(|cookie| cookie.starts_with("MapiContext=")));
     assert!(set_cookies
         .iter()
-        .any(|cookie| cookie.starts_with("lpe_mapi_nspi_seq=")));
+        .any(|cookie| cookie.starts_with("MapiSequence=")));
 }
 
 #[tokio::test]
@@ -7807,7 +7807,7 @@ async fn mapi_over_http_bind_creates_nspi_session() {
         .unwrap()
         .to_str()
         .unwrap()
-        .starts_with("lpe_mapi_nspi="));
+        .starts_with("MapiContext="));
 
     let body = response_bytes(response).await;
     assert_eq!(body.len(), 28);
