@@ -1397,6 +1397,10 @@ fn scan_utf16_lookup_values(request: &[u8]) -> Vec<String> {
     let mut values = Vec::new();
     let mut start = 0usize;
     while start + 3 < request.len() {
+        if !is_utf16_lookup_start(request, start) {
+            start += 1;
+            continue;
+        }
         let mut units = Vec::new();
         let mut offset = start;
         while offset + 1 < request.len() {
@@ -1422,6 +1426,14 @@ fn scan_utf16_lookup_values(request: &[u8]) -> Vec<String> {
         start += 1;
     }
     values
+}
+
+fn is_utf16_lookup_start(request: &[u8], start: usize) -> bool {
+    if start < 2 {
+        return true;
+    }
+    let previous = u16::from_le_bytes([request[start - 2], request[start - 1]]);
+    previous == 0 || previous < 0x20 || previous > 0x7e
 }
 
 fn decode_utf16le_string(bytes: &[u8]) -> Option<String> {

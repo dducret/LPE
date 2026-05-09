@@ -8170,6 +8170,53 @@ async fn mapi_over_http_query_rows_stays_in_authenticated_tenant() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_get_matches_uses_complete_utf16_lookup_value() {
+    let mut principal = FakeStore::account();
+    principal.account_id = Uuid::parse_str("f732c3ed-7780-4011-8c67-36b9215bd913").unwrap();
+    principal.email = "test@l-p-e.ch".to_string();
+    principal.display_name = "test".to_string();
+
+    let mut same_domain = FakeStore::account();
+    same_domain.account_id = Uuid::parse_str("315383c4-0000-0000-0000-000000000000").unwrap();
+    same_domain.email = "fabien@l-p-e.ch".to_string();
+    same_domain.display_name = "Fabien".to_string();
+
+    let store = FakeStore {
+        session: Some(principal.clone()),
+        directory_accounts: Arc::new(Mutex::new(vec![same_domain, principal])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = hex_bytes(
+        "00000000ff000000000000000000000000000000000000000088130000e40400000904000009080000\
+         0000000000ff04041f000c36ff1f000c36ff740065007300740040006c002d0070002d0065002e\
+         006300680000000088130000ff0f0000001e0001301e00173a1e00083a1e00193a1e00183a\
+         1e00fe391e00163a1e00003a1e0002300201ff0f0300fe0f03000039030005390201f60f\
+         1e00033000000000",
+    );
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("GetMatches"), &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(body[8], 0);
+    assert_eq!(body[9], 1);
+    assert_eq!(u32::from_le_bytes(body[10..14].try_into().unwrap()), 1);
+    assert_eq!(
+        u32::from_le_bytes(body[14..18].try_into().unwrap()),
+        0xedc3_32f7
+    );
+    assert_eq!(body[18], 1);
+    assert!(contains_bytes(&body, &utf16z("test@l-p-e.ch")));
+    assert!(!contains_bytes(&body, &utf16z("fabien@l-p-e.ch")));
+    assert!(!contains_bytes(&body, &utf16z("Fabien")));
+}
+
+#[tokio::test]
 async fn mapi_over_http_resolve_names_returns_no_match_for_unknown_name() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
