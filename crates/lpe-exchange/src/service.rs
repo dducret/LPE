@@ -7384,7 +7384,7 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
     }
     if endpoint_query.contains(":6001") {
         match opnum {
-            1 if alloc_hint >= 20 || (alloc_hint >= 4 && fragment_length > 32) => {
+            1 if alloc_hint >= 20 => {
                 return Some(rpc_proxy_emsmdb_disconnect_response(call_id));
             }
             10 if alloc_hint >= 20 => return Some(rpc_proxy_emsmdb_connect_ex_response(call_id)),
@@ -7393,7 +7393,7 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
         }
     }
     match (context_id, opnum) {
-        (0, 1) if alloc_hint == 4 && fragment_length <= 32 => {
+        (0, 1) if alloc_hint == 4 => {
             let requested_stats = read_le_u32(bytes, 24)?;
             return Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats));
         }
@@ -7462,7 +7462,7 @@ where
     }
     if endpoint_query.contains(":6001") {
         match opnum {
-            1 if alloc_hint >= 20 || (alloc_hint >= 4 && fragment_length > 32) => {
+            1 if alloc_hint >= 20 => {
                 return Some(rpc_proxy_emsmdb_disconnect_response(call_id));
             }
             10 if alloc_hint >= 20 => {
@@ -7482,7 +7482,7 @@ where
         }
     }
     match (context_id, opnum) {
-        (0, 1) if alloc_hint == 4 && fragment_length <= 32 => {
+        (0, 1) if alloc_hint == 4 => {
             let requested_stats = read_le_u32(bytes, 24)?;
             return Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats));
         }

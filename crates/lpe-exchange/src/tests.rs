@@ -8476,7 +8476,7 @@ fn rpc_proxy_in_channel_emsmdb_disconnect_clears_session_context() {
 }
 
 #[test]
-fn rpc_proxy_mailstore_disconnect_accepts_rca_short_stub() {
+fn rpc_proxy_mailstore_management_stats_accepts_rca_short_stub() {
     let mut buffer = vec![0u8; 626];
     buffer[0..64].copy_from_slice(&[
         0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0x40, 0x00, 0x10, 0x00, 0x02, 0x00, 0x00,
@@ -8488,15 +8488,16 @@ fn rpc_proxy_mailstore_disconnect_accepts_rca_short_stub() {
 
     let response =
         rpc_proxy_in_channel_response_for_endpoint_query("mail.example.test:6001", &mut buffer)
-            .expect("emsmdb short disconnect response");
+            .expect("management stats response");
 
     assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
     assert_eq!(
         u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
         2
     );
-    assert_eq!(&response[24..44], &[0; 20]);
-    assert_eq!(u32::from_le_bytes(response[44..48].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(response[24..28].try_into().unwrap()), 4);
+    assert_eq!(u32::from_le_bytes(response[28..32].try_into().unwrap()), 4);
+    assert_eq!(u32::from_le_bytes(response[48..52].try_into().unwrap()), 0);
     assert_eq!(buffer.len(), 562);
 }
 
@@ -9075,7 +9076,7 @@ fn rpc_proxy_in_channel_nspi_unbind_request_gets_success_response() {
 }
 
 #[tokio::test]
-async fn rpc_proxy_address_book_unbind_accepts_rca_short_stub() {
+async fn rpc_proxy_address_book_management_stats_accepts_rca_short_stub() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -9099,21 +9100,16 @@ async fn rpc_proxy_address_book_unbind_accepts_rca_short_stub() {
         &mut buffer,
     )
     .await
-    .expect("address book unbind response");
+    .expect("address book management stats response");
 
     assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
     assert_eq!(
         u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
         127
     );
-    assert_eq!(
-        u32::from_le_bytes([response[16], response[17], response[18], response[19]]),
-        24
-    );
-    assert_eq!(
-        u32::from_le_bytes([response[44], response[45], response[46], response[47]]),
-        0
-    );
+    assert_eq!(u32::from_le_bytes(response[24..28].try_into().unwrap()), 4);
+    assert_eq!(u32::from_le_bytes(response[28..32].try_into().unwrap()), 4);
+    assert_eq!(u32::from_le_bytes(response[48..52].try_into().unwrap()), 0);
     assert_eq!(buffer.len(), 562);
 }
 
