@@ -2145,6 +2145,105 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_connect_reestablishes_session_context_with_open_sync_handle() {
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let email = FakeStore::email(
+        "48484848-4848-4848-4848-484848484848",
+        mailbox_id,
+        "inbox",
+        "Reconnect sync context message",
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let first_cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut configure_rops = Vec::new();
+    append_rop_open_folder(&mut configure_rops, 0, 1, test_mapi_folder_id(5));
+    configure_rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, 0x00, 0x00, // content sync
+    ]);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&first_cookie).unwrap());
+    let configure_request = execute_body(&rop_buffer(&configure_rops, &[1, u32::MAX, u32::MAX]));
+    let configure_response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &configure_request)
+        .await
+        .unwrap();
+    assert_eq!(configure_response.status(), StatusCode::OK);
+    assert_eq!(
+        configure_response.headers().get("x-responsecode").unwrap(),
+        "0"
+    );
+
+    let mut reconnect_headers = mapi_headers("Connect");
+    reconnect_headers.insert("cookie", HeaderValue::from_str(&first_cookie).unwrap());
+    let reconnect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &reconnect_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(reconnect.status(), StatusCode::OK);
+    assert_eq!(reconnect.headers().get("x-responsecode").unwrap(), "0");
+    let reconnected_cookie = reconnect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    assert_ne!(reconnected_cookie, first_cookie);
+
+    let mut get_buffer_rops = Vec::new();
+    get_buffer_rops.extend_from_slice(&[0x4E, 0x00, 0x00]);
+    get_buffer_rops.extend_from_slice(&4096u16.to_le_bytes());
+    let mut reconnected_execute_headers = mapi_headers("Execute");
+    reconnected_execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&reconnected_cookie).unwrap(),
+    );
+    let get_buffer_request = execute_body(&rop_buffer(&get_buffer_rops, &[3]));
+    let get_buffer_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &reconnected_execute_headers,
+            &get_buffer_request,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(get_buffer_response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(get_buffer_response).await;
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 1)));
+    assert!(contains_bytes(
+        &response_rops,
+        b"Reconnect sync context message"
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_generates_request_id_when_client_omits_one() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -8080,6 +8179,31 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
             _ => {}
         }
     }
+}
+
+#[tokio::test]
+async fn mapi_over_http_dn_to_mid_resolves_outlook_unprefixed_legacy_dn_to_principal() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = b"\0\0\0\0\xff\x01\0\0\0/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice-example-test\0\0\0\0\0";
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("DNToMId"), request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(
+        u32::from_le_bytes(body[8..12].try_into().unwrap()),
+        0xaaaa_aaaa
+    );
 }
 
 #[tokio::test]

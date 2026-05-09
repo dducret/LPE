@@ -325,7 +325,7 @@ where
 
     let response = match (endpoint, request_type) {
         (MapiEndpoint::Emsmdb, MapiRequestType::Connect) => {
-            connect_response(endpoint, &principal, &request_id)
+            connect_response(endpoint, &principal, headers, &request_id)
         }
         (MapiEndpoint::Emsmdb, MapiRequestType::Disconnect) => {
             disconnect_response(endpoint, &principal, headers, &request_id, "Disconnect")
@@ -442,9 +442,11 @@ pub(crate) fn mapi_error_response(error: &anyhow::Error) -> Response {
 fn connect_response(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
+    headers: &HeaderMap,
     request_id: &str,
 ) -> Response {
-    let session_id = create_session(endpoint, principal);
+    let session_id = reconnect_session(endpoint, principal, headers)
+        .unwrap_or_else(|| create_session(endpoint, principal));
     let cookie = session_cookie(endpoint, &session_id, false);
     let mut body = Vec::new();
     write_u32(&mut body, 0);
@@ -456,6 +458,25 @@ fn connect_response(
     write_utf16z(&mut body, &principal.display_name);
     write_u32(&mut body, 0);
     mapi_response("Connect", request_id, 0, body, Some(cookie))
+}
+
+fn reconnect_session(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    headers: &HeaderMap,
+) -> Option<String> {
+    let previous_session_id = request_cookie(endpoint, headers)?;
+    let Some(session) = remove_session(&previous_session_id) else {
+        return None;
+    };
+    if !session_matches(&session, endpoint, principal) {
+        store_session(previous_session_id, session);
+        return None;
+    }
+
+    let session_id = Uuid::new_v4().to_string();
+    store_session(session_id.clone(), session);
+    Some(session_id)
 }
 
 fn bind_response(
@@ -829,9 +850,16 @@ where
         }
     };
     let values = scan_address_book_lookup_values(request);
-    let entry = values
+    let matched_mid = values
         .first()
         .and_then(|value| nspi_match_entry(&entries, value))
+        .map(nspi_entry_id)
+        .or_else(|| {
+            values
+                .iter()
+                .any(|value| nspi_lookup_matches_principal(value, principal))
+                .then(|| principal_minimal_entry_id(principal))
+        })
         .or_else(|| {
             values
                 .is_empty()
@@ -841,8 +869,9 @@ where
                         .find(|entry| nspi_entry_is_principal(entry, principal))
                 })
                 .flatten()
+                .map(nspi_entry_id)
         });
-    nspi_u32_result_response("DNToMId", request_id, entry.map(nspi_entry_id).unwrap_or(0))
+    nspi_u32_result_response("DNToMId", request_id, matched_mid.unwrap_or(0))
 }
 
 fn nspi_property_tags_response(request_type: &str, request_id: &str) -> Response {
@@ -1180,6 +1209,17 @@ fn write_address_book_property_value(body: &mut Vec<u8>, property_tag: u32, valu
 }
 
 fn nspi_entry_legacy_dn(entry: &ExchangeAddressBookEntry) -> String {
+    nspi_entry_legacy_dn_with_prefix(entry, true)
+}
+
+fn nspi_entry_unprefixed_legacy_dn(entry: &ExchangeAddressBookEntry) -> String {
+    nspi_entry_legacy_dn_with_prefix(entry, false)
+}
+
+fn nspi_entry_legacy_dn_with_prefix(
+    entry: &ExchangeAddressBookEntry,
+    include_kind_prefix: bool,
+) -> String {
     let prefix = match entry.entry_kind {
         ExchangeAddressBookEntryKind::Account => "acct",
         ExchangeAddressBookEntryKind::Contact => "contact",
@@ -1199,7 +1239,12 @@ fn nspi_entry_legacy_dn(entry: &ExchangeAddressBookEntry) -> String {
             }
         })
         .collect::<String>();
-    format!("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={prefix}-{legacy_user}")
+    let legacy_cn = if include_kind_prefix {
+        format!("{prefix}-{legacy_user}")
+    } else {
+        legacy_user
+    };
+    format!("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={legacy_cn}")
 }
 
 fn nspi_entry_is_principal(entry: &ExchangeAddressBookEntry, principal: &AccountPrincipal) -> bool {
@@ -1210,7 +1255,11 @@ fn nspi_lookup_matches_principal(value: &str, principal: &AccountPrincipal) -> b
     let value = normalize_nspi_lookup_value(value);
     let email = principal.email.to_ascii_lowercase();
     let display_name = principal.display_name.to_ascii_lowercase();
-    value == email || value == display_name || email.contains(value.as_str())
+    let principal_entry = principal_address_book_entry(principal);
+    value == email
+        || value == display_name
+        || email.contains(value.as_str())
+        || nspi_entry_matches(&principal_entry, &value)
 }
 
 fn nspi_requested_entry<'a>(
@@ -1258,9 +1307,11 @@ fn nspi_match_entry<'a>(
 fn nspi_entry_exact_match(entry: &ExchangeAddressBookEntry, value: &str) -> bool {
     let value = normalize_nspi_lookup_value(value);
     let legacy_dn = nspi_entry_legacy_dn(entry).to_ascii_lowercase();
+    let unprefixed_legacy_dn = nspi_entry_unprefixed_legacy_dn(entry).to_ascii_lowercase();
     value == entry.email.to_ascii_lowercase()
         || value == entry.display_name.to_ascii_lowercase()
         || value == legacy_dn
+        || value == unprefixed_legacy_dn
         || value == format!("smtp:{}", entry.email.to_ascii_lowercase())
         || value == format!("=smtp:{}", entry.email.to_ascii_lowercase())
 }
@@ -1277,6 +1328,9 @@ fn nspi_entry_matches(entry: &ExchangeAddressBookEntry, value: &str) -> bool {
             .contains(value.as_str())
         || entry.email.to_ascii_lowercase().contains(value.as_str())
         || nspi_entry_legacy_dn(entry)
+            .to_ascii_lowercase()
+            .contains(value.as_str())
+        || nspi_entry_unprefixed_legacy_dn(entry)
             .to_ascii_lowercase()
             .contains(value.as_str())
 }
