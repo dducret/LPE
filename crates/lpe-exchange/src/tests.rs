@@ -2524,6 +2524,7 @@ async fn mapi_over_http_execute_returns_private_mailbox_logon() {
         0
     );
     assert_eq!(response_rop[6], 0x01);
+    assert_eq!(response_rop[111], 0x07);
     assert_eq!(response_rop_size, 166);
     assert_eq!(
         u32::from_le_bytes(
@@ -2594,6 +2595,7 @@ async fn mapi_over_http_execute_accepts_rca_wrapped_private_mailbox_logon() {
         0
     );
     assert_eq!(response_rop[6] & 0x01, 0x01);
+    assert_eq!(response_rop[111], 0x07);
     assert_eq!(
         &response_rop[112..128],
         &FakeStore::account().account_id.to_bytes_le()

@@ -4578,7 +4578,7 @@ fn rop_logon_response_body(principal: &AccountPrincipal, request: &RopRequest) -
     for folder_id in PRIVATE_LOGON_SPECIAL_FOLDER_IDS {
         write_u64(&mut response, folder_id);
     }
-    response.push(0x03);
+    response.push(0x07);
     response.extend_from_slice(&principal.account_id.to_bytes_le());
     response.extend_from_slice(&1u16.to_le_bytes());
     response.extend_from_slice(&mapi_mailstore::STORE_REPLICA_GUID);
