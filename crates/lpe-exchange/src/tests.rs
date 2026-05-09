@@ -8475,6 +8475,31 @@ fn rpc_proxy_in_channel_emsmdb_disconnect_clears_session_context() {
     assert_eq!(u32::from_le_bytes(response[44..48].try_into().unwrap()), 0);
 }
 
+#[test]
+fn rpc_proxy_mailstore_disconnect_accepts_rca_short_stub() {
+    let mut buffer = vec![0u8; 626];
+    buffer[0..64].copy_from_slice(&[
+        0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0x40, 0x00, 0x10, 0x00, 0x02, 0x00, 0x00,
+        0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x32, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x02, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    ]);
+
+    let response =
+        rpc_proxy_in_channel_response_for_endpoint_query("mail.example.test:6001", &mut buffer)
+            .expect("emsmdb short disconnect response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        2
+    );
+    assert_eq!(&response[24..44], &[0; 20]);
+    assert_eq!(u32::from_le_bytes(response[44..48].try_into().unwrap()), 0);
+    assert_eq!(buffer.len(), 562);
+}
+
 #[tokio::test]
 async fn rpc_proxy_emsmdb_logon_uses_authenticated_canonical_principal() {
     let store = FakeStore {
