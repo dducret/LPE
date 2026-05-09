@@ -7106,6 +7106,46 @@ pub(crate) fn rpc_proxy_in_channel_response_for_endpoint_query(
     None
 }
 
+async fn rpc_proxy_address_book_check_name_fallback<S>(
+    store: &S,
+    endpoint_query: &str,
+    buffer: &[u8],
+    principal: &AccountPrincipal,
+) -> Option<RpcProxyInChannelResponse>
+where
+    S: ExchangeStore,
+{
+    if !endpoint_query.contains(":6004") || rpc_proxy_nspi_lookup_values(buffer).is_empty() {
+        return None;
+    }
+    let call_id = rpc_proxy_last_dce_request_call_id(buffer).unwrap_or(1);
+    let bytes =
+        rpc_proxy_nspi_resolve_names_response_for_principal(store, call_id, buffer, principal)
+            .await;
+    Some(RpcProxyInChannelResponse {
+        bytes,
+        virtual_connection_cookie: None,
+    })
+}
+
+fn rpc_proxy_last_dce_request_call_id(buffer: &[u8]) -> Option<u32> {
+    let mut offset = 0usize;
+    let mut call_id = None;
+    while offset + 16 <= buffer.len() {
+        if buffer.get(offset..offset + 3) == Some(&[0x05, 0x00, 0x00]) {
+            let fragment_length =
+                u16::from_le_bytes([buffer[offset + 8], buffer[offset + 9]]) as usize;
+            if fragment_length >= 24 && offset + fragment_length <= buffer.len() {
+                call_id = read_le_u32(buffer, offset + 12);
+                offset += fragment_length;
+                continue;
+            }
+        }
+        offset += 1;
+    }
+    call_id
+}
+
 #[cfg(test)]
 pub(crate) async fn rpc_proxy_in_channel_response_for_endpoint_query_with_store<S, V>(
     store: &S,
@@ -7184,6 +7224,12 @@ where
         }
 
         offset = fragment_end;
+    }
+    if let Some(response) =
+        rpc_proxy_address_book_check_name_fallback(store, endpoint_query, buffer, principal).await
+    {
+        buffer.clear();
+        return Some(response);
     }
     if offset > 0 {
         buffer.drain(..offset);

@@ -8925,6 +8925,47 @@ fn rpc_proxy_address_book_endpoint_resolves_names_on_alternate_context_id() {
         .any(|window| window == b"fabien@l-p-e.ch"));
 }
 
+#[tokio::test]
+async fn rpc_proxy_address_book_check_name_fallback_answers_framing_mismatch() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let validator = Validator::new(FakeDetector::pdf(), 0.8);
+    let principal = test_account_principal();
+    let mut buffer = vec![0u8; 626];
+    buffer[0..16].copy_from_slice(&[
+        0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0x40, 0x00, 0x10, 0x00, 0x4d, 0x00, 0x00,
+        0x00,
+    ]);
+    buffer[16..24].copy_from_slice(&[0x10, 0x00, 0x00, 0x00, 0x07, 0x00, 0x63, 0x00]);
+    let requested_name: Vec<u8> = "=SMTP:alice@example.test\0"
+        .encode_utf16()
+        .flat_map(|unit| unit.to_le_bytes())
+        .collect();
+    buffer[320..320 + requested_name.len()].copy_from_slice(&requested_name);
+
+    let response = rpc_proxy_in_channel_response_for_endpoint_query_with_store(
+        &store,
+        &validator,
+        &principal,
+        "mail.example.test:6004",
+        &mut buffer,
+    )
+    .await
+    .expect("fallback resolve names response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        77
+    );
+    assert!(response
+        .windows(b"alice@example.test".len())
+        .any(|window| window == b"alice@example.test"));
+    assert!(buffer.is_empty());
+}
+
 #[test]
 fn rpc_proxy_in_channel_scans_nspi_resolve_after_rts_pdu() {
     let chunk = hex_bytes(
