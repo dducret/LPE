@@ -1540,6 +1540,39 @@ fn mapi_sync_manifest_message_state(bytes: &[u8], subject: &str) -> Option<(u32,
     ))
 }
 
+fn mapi_fast_transfer_chunks(bytes: &[u8]) -> Vec<(u16, Vec<u8>)> {
+    let mut chunks = Vec::new();
+    let mut offset = 0;
+    while offset + 15 <= bytes.len() {
+        if bytes[offset] != 0x4E {
+            offset += 1;
+            continue;
+        }
+        let return_value = u32::from_le_bytes([
+            bytes[offset + 2],
+            bytes[offset + 3],
+            bytes[offset + 4],
+            bytes[offset + 5],
+        ]);
+        if return_value != 0 {
+            offset += 1;
+            continue;
+        }
+        let status = u16::from_le_bytes([bytes[offset + 6], bytes[offset + 7]]);
+        let transfer_buffer_size =
+            u16::from_le_bytes([bytes[offset + 13], bytes[offset + 14]]) as usize;
+        let transfer_buffer_start = offset + 15;
+        let transfer_buffer_end = transfer_buffer_start.saturating_add(transfer_buffer_size);
+        let Some(chunk) = bytes.get(transfer_buffer_start..transfer_buffer_end) else {
+            offset += 1;
+            continue;
+        };
+        chunks.push((status, chunk.to_vec()));
+        offset = transfer_buffer_end;
+    }
+    chunks
+}
+
 fn utf16z(value: &str) -> Vec<u8> {
     let mut bytes = value
         .encode_utf16()
@@ -6816,6 +6849,83 @@ async fn mapi_over_http_sync_manifest_includes_stable_change_key_facts_without_b
     assert!(contains_bytes(&response_rops, &predecessor_change_list));
     assert!(!contains_bytes(&response_rops, b"hidden@example.test"));
     assert!(!contains_bytes(&response_rops, b"Hidden Bcc"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests() {
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let email = FakeStore::email(
+        "47474747-4747-4747-4747-474747474747",
+        mailbox_id,
+        "inbox",
+        "Chunked FastTransfer sync message",
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut first_rops = Vec::new();
+    append_rop_open_folder(&mut first_rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_sync_manifest_get_buffer(&mut first_rops, 1, 2, 32);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let first_request = execute_body(&rop_buffer(&first_rops, &[1, u32::MAX, u32::MAX]));
+    let first_response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &first_request)
+        .await
+        .unwrap();
+
+    assert_eq!(first_response.status(), StatusCode::OK);
+    let first_response_rops = response_rops_from_execute_response(first_response).await;
+    let first_chunks = mapi_fast_transfer_chunks(&first_response_rops);
+    assert_eq!(first_chunks.len(), 1);
+    assert_eq!(first_chunks[0].0, 0x0001);
+    assert_eq!(first_chunks[0].1.len(), 32);
+
+    let mut second_rops = Vec::new();
+    second_rops.extend_from_slice(&[0x4E, 0x00, 0x00]);
+    second_rops.extend_from_slice(&4096u16.to_le_bytes());
+    renew_mapi_request_id(&mut execute_headers);
+    let second_request = execute_body(&rop_buffer(&second_rops, &[3]));
+    let second_response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &second_request)
+        .await
+        .unwrap();
+
+    assert_eq!(second_response.status(), StatusCode::OK);
+    let second_response_rops = response_rops_from_execute_response(second_response).await;
+    let second_chunks = mapi_fast_transfer_chunks(&second_response_rops);
+    assert_eq!(second_chunks.len(), 1);
+    assert_eq!(second_chunks[0].0, 0x0003);
+
+    let mut transfer = Vec::new();
+    transfer.extend_from_slice(&first_chunks[0].1);
+    transfer.extend_from_slice(&second_chunks[0].1);
+    assert_eq!(mapi_sync_manifest_counts(&transfer), Some((1, 1)));
+    assert!(contains_bytes(
+        &transfer,
+        b"Chunked FastTransfer sync message"
+    ));
 }
 
 #[tokio::test]
