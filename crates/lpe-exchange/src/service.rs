@@ -6987,10 +6987,13 @@ fn send_rpc_proxy_out_channel(
         let channels = rpc_proxy_out_channels()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        channels
-            .get(&(query.to_string(), virtual_connection_cookie))
-            .or_else(|| channels.get(&(query.to_string(), None)))
-            .cloned()
+        if virtual_connection_cookie.is_some() {
+            channels
+                .get(&(query.to_string(), virtual_connection_cookie))
+                .cloned()
+        } else {
+            channels.get(&(query.to_string(), None)).cloned()
+        }
     };
     if let Some(sender) = sender {
         return sender.send(Bytes::from(bytes)).is_ok();
@@ -7120,6 +7123,28 @@ mod rpc_proxy_out_channel_tests {
 
         remove_rpc_proxy_out_channel(query, Some(cookie_a));
         remove_rpc_proxy_out_channel(query, Some(cookie_b));
+    }
+
+    #[test]
+    fn rpc_proxy_cookie_scoped_response_does_not_fall_back_to_unscoped_out_channel() {
+        let query = "mail.stale-unscoped.example.test:6002";
+        let stale_cookie = [0x0a; 16];
+        let current_cookie = [0x0b; 16];
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        register_rpc_proxy_out_channel(query, Some(stale_cookie), sender);
+
+        assert!(!send_rpc_proxy_out_channel(
+            query,
+            Some(current_cookie),
+            vec![1]
+        ));
+        assert!(receiver.try_recv().is_err());
+
+        assert!(send_rpc_proxy_out_channel(query, None, vec![2]));
+        assert_eq!(receiver.try_recv().unwrap(), Bytes::from_static(&[2]));
+
+        remove_rpc_proxy_out_channel(query, Some(stale_cookie));
     }
 }
 
