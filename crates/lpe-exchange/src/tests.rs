@@ -7974,16 +7974,13 @@ async fn rpc_proxy_referral_endpoint_ping_returns_a3_without_synthetic_bind_ack(
         Some(&HeaderValue::from_static("endpoint-ping"))
     );
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    assert_eq!(body.len(), 72);
+    assert_eq!(body.len(), 28);
     assert_eq!(u16::from_le_bytes([body[8], body[9]]), 28);
     assert_eq!(u16::from_le_bytes([body[18], body[19]]), 1);
     assert_eq!(
         u32::from_le_bytes([body[20], body[21], body[22], body[23]]),
         2
     );
-    assert_eq!(body[28], 0x05);
-    assert_eq!(body[30], 0x14);
-    assert_eq!(u16::from_le_bytes([body[36], body[37]]), 44);
 }
 
 #[tokio::test]

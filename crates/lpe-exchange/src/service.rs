@@ -6871,7 +6871,7 @@ fn rpc_proxy_mailstore_held_open_response(
 }
 
 fn rpc_proxy_should_send_synthetic_rts_connect(query: &str) -> bool {
-    query.contains(":6002") || query.contains(":6004")
+    query.contains(":6004")
 }
 
 fn register_rpc_proxy_out_channel(
