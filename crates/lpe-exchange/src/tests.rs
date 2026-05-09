@@ -9049,6 +9049,49 @@ fn rpc_proxy_in_channel_nspi_unbind_request_gets_success_response() {
     );
 }
 
+#[tokio::test]
+async fn rpc_proxy_address_book_unbind_accepts_rca_short_stub() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let validator = Validator::new(FakeDetector::pdf(), 0.8);
+    let principal = test_account_principal();
+    let mut buffer = vec![0u8; 626];
+    buffer[0..64].copy_from_slice(&[
+        0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0x40, 0x00, 0x10, 0x00, 0x7f, 0x00, 0x00,
+        0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x32, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, 0x02, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    ]);
+
+    let response = rpc_proxy_in_channel_response_for_endpoint_query_with_store(
+        &store,
+        &validator,
+        &principal,
+        "mail.example.test:6004",
+        &mut buffer,
+    )
+    .await
+    .expect("address book unbind response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        127
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[16], response[17], response[18], response[19]]),
+        24
+    );
+    assert_eq!(
+        u32::from_le_bytes([response[44], response[45], response[46], response[47]]),
+        0
+    );
+    assert_eq!(buffer.len(), 562);
+}
+
 #[test]
 fn rpc_proxy_in_channel_nspi_bootstrap_opnums_get_success_responses() {
     for (opnum, call_id) in [

@@ -7284,7 +7284,7 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
         }
     }
     match (context_id, opnum) {
-        (0, 1) if alloc_hint == 4 => {
+        (0, 1) if alloc_hint == 4 && fragment_length <= 32 => {
             let requested_stats = read_le_u32(bytes, 24)?;
             return Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats));
         }
@@ -7371,7 +7371,7 @@ where
         }
     }
     match (context_id, opnum) {
-        (0, 1) if alloc_hint == 4 => {
+        (0, 1) if alloc_hint == 4 && fragment_length <= 32 => {
             let requested_stats = read_le_u32(bytes, 24)?;
             return Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats));
         }
@@ -7395,7 +7395,7 @@ fn rpc_proxy_nspi_response_for_opnum(
 ) -> Option<Vec<u8>> {
     match opnum {
         0 if alloc_hint >= 44 => Some(rpc_proxy_nspi_bind_response(call_id)),
-        1 if alloc_hint >= 20 => Some(rpc_proxy_nspi_unbind_response(call_id)),
+        1 if alloc_hint >= 4 => Some(rpc_proxy_nspi_unbind_response(call_id)),
         2 if alloc_hint >= 20 => Some(rpc_proxy_nspi_update_stat_response(call_id)),
         3 if alloc_hint >= 20 => Some(rpc_proxy_nspi_query_rows_response(call_id, bytes)),
         4 if alloc_hint >= 20 => Some(rpc_proxy_nspi_query_rows_response(call_id, bytes)),
@@ -7429,7 +7429,7 @@ where
 {
     match opnum {
         0 if alloc_hint >= 44 => Some(rpc_proxy_nspi_bind_response(call_id)),
-        1 if alloc_hint >= 20 => Some(rpc_proxy_nspi_unbind_response(call_id)),
+        1 if alloc_hint >= 4 => Some(rpc_proxy_nspi_unbind_response(call_id)),
         2 if alloc_hint >= 20 => Some(rpc_proxy_nspi_update_stat_response(call_id)),
         3 if alloc_hint >= 20 => Some(
             rpc_proxy_nspi_query_rows_response_for_principal(store, call_id, bytes, principal)
