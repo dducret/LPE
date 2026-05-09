@@ -2596,7 +2596,7 @@ async fn mapi_over_http_execute_accepts_rca_wrapped_private_mailbox_logon() {
     assert_eq!(response_rop[6] & 0x01, 0x01);
     assert_eq!(
         &response_rop[112..128],
-        FakeStore::account().account_id.as_bytes()
+        &FakeStore::account().account_id.to_bytes_le()
     );
     assert_eq!(&response_rop[128..130], &1u16.to_le_bytes());
     assert_eq!(&response_rop[130..146], &mapi_mailstore::STORE_REPLICA_GUID);
@@ -9247,7 +9247,7 @@ async fn rpc_proxy_emsmdb_logon_uses_authenticated_canonical_principal() {
     let static_marker = [b"LPEEMSMDB".as_slice(), b"CTX0001".as_slice()].concat();
     assert!(contains_bytes(
         &rop_response,
-        FakeStore::account().account_id.as_bytes()
+        &FakeStore::account().account_id.to_bytes_le()
     ));
     assert!(!contains_bytes(&execute_response, &static_marker));
 }
