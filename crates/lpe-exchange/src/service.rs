@@ -6491,7 +6491,7 @@ fn rpc_proxy_mailstore_ping_response_for_connect(
             mark_rpc_proxy_out_endpoint_bind_ack(query);
         }
     }
-    rpc_proxy_mailstore_held_open_response(uri, body)
+    rpc_proxy_mailstore_held_open_response(uri, body, Some(connect.virtual_connection_cookie))
 }
 
 pub(crate) fn mark_rpc_proxy_out_endpoint_bind_ack(query: &str) {
@@ -6656,7 +6656,11 @@ fn rpc_proxy_in_channel_response(uri: &Uri) -> Response {
     response
 }
 
-fn rpc_proxy_mailstore_held_open_response(uri: &Uri, body: Vec<u8>) -> Response {
+fn rpc_proxy_mailstore_held_open_response(
+    uri: &Uri,
+    body: Vec<u8>,
+    virtual_connection_cookie: Option<[u8; 16]>,
+) -> Response {
     let Some(query) = uri.query() else {
         return rpc_proxy_binary_response(body, RPC_PROXY_ENDPOINT_PING_STATUS);
     };
@@ -6669,11 +6673,11 @@ fn rpc_proxy_mailstore_held_open_response(uri: &Uri, body: Vec<u8>) -> Response 
     let payload_preview_hex = mapi::debug_payload_preview_hex(&body);
     let query = query.to_string();
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
-    register_rpc_proxy_out_channel(&query, sender);
+    register_rpc_proxy_out_channel(&query, virtual_connection_cookie, sender);
 
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(hold_open_ms)).await;
-        remove_rpc_proxy_out_channel(&query);
+        remove_rpc_proxy_out_channel(&query, virtual_connection_cookie);
     });
 
     let initial = Some(Ok::<Bytes, std::io::Error>(Bytes::from(body)));
@@ -6694,19 +6698,34 @@ fn rpc_proxy_mailstore_held_open_response(uri: &Uri, body: Vec<u8>) -> Response 
     response
 }
 
-fn register_rpc_proxy_out_channel(query: &str, sender: tokio::sync::mpsc::UnboundedSender<Bytes>) {
+fn register_rpc_proxy_out_channel(
+    query: &str,
+    virtual_connection_cookie: Option<[u8; 16]>,
+    sender: tokio::sync::mpsc::UnboundedSender<Bytes>,
+) {
     let mut channels = rpc_proxy_out_channels()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    channels.insert(query.to_string(), sender);
+    channels.insert(
+        (query.to_string(), virtual_connection_cookie),
+        sender.clone(),
+    );
+    channels.insert((query.to_string(), None), sender);
 }
 
-fn send_rpc_proxy_out_channel(query: &str, bytes: Vec<u8>) -> bool {
+fn send_rpc_proxy_out_channel(
+    query: &str,
+    virtual_connection_cookie: Option<[u8; 16]>,
+    bytes: Vec<u8>,
+) -> bool {
     let sender = {
         let channels = rpc_proxy_out_channels()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        channels.get(query).cloned()
+        channels
+            .get(&(query.to_string(), virtual_connection_cookie))
+            .or_else(|| channels.get(&(query.to_string(), None)))
+            .cloned()
     };
     if let Some(sender) = sender {
         return sender.send(Bytes::from(bytes)).is_ok();
@@ -6769,18 +6788,47 @@ fn pending_rpc_proxy_out_channel_responses(
     PENDING.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn remove_rpc_proxy_out_channel(query: &str) {
+fn remove_rpc_proxy_out_channel(query: &str, virtual_connection_cookie: Option<[u8; 16]>) {
     let mut channels = rpc_proxy_out_channels()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    channels.remove(query);
+    channels.remove(&(query.to_string(), virtual_connection_cookie));
+    channels.remove(&(query.to_string(), None));
 }
 
 fn rpc_proxy_out_channels(
-) -> &'static Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<Bytes>>> {
-    static CHANNELS: OnceLock<Mutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<Bytes>>>> =
-        OnceLock::new();
+) -> &'static Mutex<HashMap<(String, Option<[u8; 16]>), tokio::sync::mpsc::UnboundedSender<Bytes>>>
+{
+    static CHANNELS: OnceLock<
+        Mutex<HashMap<(String, Option<[u8; 16]>), tokio::sync::mpsc::UnboundedSender<Bytes>>>,
+    > = OnceLock::new();
     CHANNELS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(test)]
+mod rpc_proxy_out_channel_tests {
+    use super::*;
+
+    #[test]
+    fn rpc_proxy_out_channels_are_scoped_by_virtual_connection_cookie() {
+        let query = "mail.cookie-scope.example.test:6004";
+        let cookie_a = [0x0a; 16];
+        let cookie_b = [0x0b; 16];
+        let (sender_a, mut receiver_a) = tokio::sync::mpsc::unbounded_channel();
+        let (sender_b, mut receiver_b) = tokio::sync::mpsc::unbounded_channel();
+
+        register_rpc_proxy_out_channel(query, Some(cookie_a), sender_a);
+        register_rpc_proxy_out_channel(query, Some(cookie_b), sender_b);
+
+        assert!(send_rpc_proxy_out_channel(query, Some(cookie_a), vec![1]));
+        assert!(send_rpc_proxy_out_channel(query, Some(cookie_b), vec![2]));
+
+        assert_eq!(receiver_a.try_recv().unwrap(), Bytes::from_static(&[1]));
+        assert_eq!(receiver_b.try_recv().unwrap(), Bytes::from_static(&[2]));
+
+        remove_rpc_proxy_out_channel(query, Some(cookie_a));
+        remove_rpc_proxy_out_channel(query, Some(cookie_b));
+    }
 }
 
 fn should_hold_rpc_proxy_in_channel(uri: &Uri) -> bool {
@@ -7079,12 +7127,16 @@ fn log_and_forward_rpc_proxy_in_channel_response(
     if response.virtual_connection_cookie.is_some() {
         *virtual_connection_cookie = response.virtual_connection_cookie;
     }
-    let forwarded = send_rpc_proxy_out_channel(query, response.bytes.clone());
+    let target_virtual_connection_cookie = response
+        .virtual_connection_cookie
+        .or(*virtual_connection_cookie);
+    let forwarded = send_rpc_proxy_out_channel(
+        query,
+        target_virtual_connection_cookie,
+        response.bytes.clone(),
+    );
     if !forwarded {
-        if let Some(cookie) = response
-            .virtual_connection_cookie
-            .or(*virtual_connection_cookie)
-        {
+        if let Some(cookie) = target_virtual_connection_cookie {
             queue_pending_rpc_proxy_out_channel_response(query, cookie, response.bytes);
         }
     }
