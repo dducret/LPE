@@ -2155,6 +2155,23 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
     assert!(raw_body.starts_with(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 0\r\n"));
     let body = strip_mapi_http_envelope(raw_body);
     assert_eq!(&body[0..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(
+        &body[body.len() - 20..body.len() - 16],
+        &16u32.to_le_bytes()
+    );
+    assert_eq!(
+        &body[body.len() - 16..],
+        &[
+            0x00, 0x00, // RPC_HEADER_EXT Version
+            0x04, 0x00, // Last flag
+            0x08, 0x00, // Payload size
+            0x08, 0x00, // Uncompressed payload size
+            0x08, 0x00, // AUX_HEADER Size
+            0x01, // AUX_HEADER Version
+            0x17, // AUX_EXORGINFO
+            0x00, 0x00, 0x00, 0x00, // OrgFlags
+        ]
+    );
 }
 
 #[tokio::test]

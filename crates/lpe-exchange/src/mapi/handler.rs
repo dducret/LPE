@@ -458,8 +458,23 @@ fn connect_response(
     write_u32(&mut body, 1_000);
     body.extend_from_slice(b"/o=LPE/ou=Exchange Administrative Group/cn=Recipients\0");
     write_utf16z(&mut body, &principal.display_name);
-    write_u32(&mut body, 0);
+    let auxiliary_buffer = connect_auxiliary_buffer();
+    write_u32(&mut body, auxiliary_buffer.len() as u32);
+    body.extend_from_slice(&auxiliary_buffer);
     mapi_response_with_cookies("Connect", request_id, 0, body, cookies)
+}
+
+fn connect_auxiliary_buffer() -> Vec<u8> {
+    let mut buffer = Vec::new();
+    write_u16(&mut buffer, 0); // RPC_HEADER_EXT Version
+    write_u16(&mut buffer, 0x0004); // Last flag, uncompressed and unobfuscated.
+    write_u16(&mut buffer, 0x0008); // Payload size.
+    write_u16(&mut buffer, 0x0008); // Uncompressed payload size.
+    write_u16(&mut buffer, 0x0008); // AUX_HEADER Size.
+    buffer.push(0x01); // AUX_HEADER Version.
+    buffer.push(0x17); // AUX_EXORGINFO.
+    write_u32(&mut buffer, 0); // OrgFlags: no public folders are published by LPE.
+    buffer
 }
 
 fn reconnect_session(
@@ -8147,6 +8162,10 @@ fn cookie_path(endpoint: MapiEndpoint) -> &'static str {
 }
 
 fn write_u32(body: &mut Vec<u8>, value: u32) {
+    body.extend_from_slice(&value.to_le_bytes());
+}
+
+fn write_u16(body: &mut Vec<u8>, value: u16) {
     body.extend_from_slice(&value.to_le_bytes());
 }
 
