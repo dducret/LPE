@@ -8894,6 +8894,38 @@ fn rpc_proxy_in_channel_nspi_resolve_names_w_request_gets_response() {
 }
 
 #[test]
+fn rpc_proxy_address_book_endpoint_resolves_names_on_alternate_context_id() {
+    let request = [
+        0x05, 0x00, 0x00, 0x03, 0x10, 0x00, 0x00, 0x00, 0xd0, 0x00, 0x10, 0x00, 0x04, 0x00, 0x00,
+        0x00, 0x98, 0x00, 0x00, 0x00, 0x01, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4c, 0x50,
+        0x45, 0x00, 0x4e, 0x53, 0x50, 0x49, 0x43, 0x54, 0x58, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
+        0x00, 0x00, 0x00,
+    ];
+    let mut buffer = request.to_vec();
+    buffer.resize(208, 0);
+    buffer[72..76].copy_from_slice(&0x3003_001eu32.to_le_bytes());
+    buffer[76..80].copy_from_slice(&0x3001_001eu32.to_le_bytes());
+    let requested_name: Vec<u8> = "=SMTP:fabien@l-p-e.ch\0"
+        .encode_utf16()
+        .flat_map(|unit| unit.to_le_bytes())
+        .collect();
+    buffer[112..112 + requested_name.len()].copy_from_slice(&requested_name);
+
+    let response =
+        rpc_proxy_in_channel_response_for_endpoint_query("mail.example.test:6004", &mut buffer)
+            .expect("resolve names response");
+
+    assert_eq!(response[0..4], [0x05, 0x00, 0x02, 0x03]);
+    assert_eq!(
+        u32::from_le_bytes([response[12], response[13], response[14], response[15]]),
+        4
+    );
+    assert!(response
+        .windows(b"fabien@l-p-e.ch".len())
+        .any(|window| window == b"fabien@l-p-e.ch"));
+}
+
+#[test]
 fn rpc_proxy_in_channel_scans_nspi_resolve_after_rts_pdu() {
     let chunk = hex_bytes(
         "05001403100000001c00000000000000020001000500000030750000\

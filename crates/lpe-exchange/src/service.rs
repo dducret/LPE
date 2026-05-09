@@ -7240,30 +7240,14 @@ fn rpc_proxy_endpoint_response_for_fragment(endpoint_query: &str, bytes: &[u8]) 
     match (context_id, opnum) {
         (0, 1) if alloc_hint == 4 => {
             let requested_stats = read_le_u32(bytes, 24)?;
-            Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats))
+            return Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats));
         }
-        (2, 0) if alloc_hint >= 44 => Some(rpc_proxy_nspi_bind_response(call_id)),
-        (2, 1) if alloc_hint >= 20 => Some(rpc_proxy_nspi_unbind_response(call_id)),
-        (2, 2) if alloc_hint >= 20 => Some(rpc_proxy_nspi_update_stat_response(call_id)),
-        (2, 3) if alloc_hint >= 20 => Some(rpc_proxy_nspi_query_rows_response(call_id, bytes)),
-        (2, 4) if alloc_hint >= 20 => Some(rpc_proxy_nspi_query_rows_response(call_id, bytes)),
-        (2, 5) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_matches_response(call_id, bytes)),
-        (2, 6) if alloc_hint >= 20 => Some(rpc_proxy_nspi_resort_restriction_response(call_id)),
-        (2, 7) if alloc_hint >= 20 => Some(rpc_proxy_nspi_minimal_ids_response(call_id)),
-        (2, 8) if alloc_hint >= 16 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
-        (2, 9) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_props_response(call_id, bytes)),
-        (2, 10) if alloc_hint >= 20 => Some(rpc_proxy_nspi_compare_mids_response(call_id)),
-        (2, 12) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_special_table_response(call_id)),
-        (2, 13) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_props_response(call_id, bytes)),
-        (2, 16) if alloc_hint >= 12 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
-        (2, 17) if alloc_hint >= 12 => {
-            Some(rpc_proxy_nspi_get_names_from_ids_response(call_id, bytes))
-        }
-        (2, 18) if alloc_hint >= 20 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
-        (2, 19) if alloc_hint >= 24 => Some(rpc_proxy_nspi_resolve_names_response(call_id, bytes)),
-        (2, 20) if alloc_hint >= 24 => Some(rpc_proxy_nspi_resolve_names_response(call_id, bytes)),
-        _ => None,
+        _ => {}
     }
+    if endpoint_query.contains(":6004") || context_id == 2 {
+        return rpc_proxy_nspi_response_for_opnum(call_id, opnum, alloc_hint, bytes);
+    }
+    None
 }
 
 async fn rpc_proxy_endpoint_response_for_fragment_with_store<S, V>(
@@ -7343,44 +7327,95 @@ where
     match (context_id, opnum) {
         (0, 1) if alloc_hint == 4 => {
             let requested_stats = read_le_u32(bytes, 24)?;
-            Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats))
+            return Some(rpc_proxy_mgmt_inq_stats_response(call_id, requested_stats));
         }
-        (2, 0) if alloc_hint >= 44 => Some(rpc_proxy_nspi_bind_response(call_id)),
-        (2, 1) if alloc_hint >= 20 => Some(rpc_proxy_nspi_unbind_response(call_id)),
-        (2, 2) if alloc_hint >= 20 => Some(rpc_proxy_nspi_update_stat_response(call_id)),
-        (2, 3) if alloc_hint >= 20 => Some(
+        _ => {}
+    }
+    if endpoint_query.contains(":6004") || context_id == 2 {
+        return rpc_proxy_nspi_response_for_opnum_with_store(
+            store, call_id, opnum, alloc_hint, bytes, principal,
+        )
+        .await;
+    }
+    None
+}
+
+#[cfg(test)]
+fn rpc_proxy_nspi_response_for_opnum(
+    call_id: u32,
+    opnum: u16,
+    alloc_hint: u32,
+    bytes: &[u8],
+) -> Option<Vec<u8>> {
+    match opnum {
+        0 if alloc_hint >= 44 => Some(rpc_proxy_nspi_bind_response(call_id)),
+        1 if alloc_hint >= 20 => Some(rpc_proxy_nspi_unbind_response(call_id)),
+        2 if alloc_hint >= 20 => Some(rpc_proxy_nspi_update_stat_response(call_id)),
+        3 if alloc_hint >= 20 => Some(rpc_proxy_nspi_query_rows_response(call_id, bytes)),
+        4 if alloc_hint >= 20 => Some(rpc_proxy_nspi_query_rows_response(call_id, bytes)),
+        5 if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_matches_response(call_id, bytes)),
+        6 if alloc_hint >= 20 => Some(rpc_proxy_nspi_resort_restriction_response(call_id)),
+        7 if alloc_hint >= 20 => Some(rpc_proxy_nspi_minimal_ids_response(call_id)),
+        8 if alloc_hint >= 16 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
+        9 if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_props_response(call_id, bytes)),
+        10 if alloc_hint >= 20 => Some(rpc_proxy_nspi_compare_mids_response(call_id)),
+        12 if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_special_table_response(call_id)),
+        13 if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_props_response(call_id, bytes)),
+        16 if alloc_hint >= 12 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
+        17 if alloc_hint >= 12 => Some(rpc_proxy_nspi_get_names_from_ids_response(call_id, bytes)),
+        18 if alloc_hint >= 20 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
+        19 if alloc_hint >= 24 => Some(rpc_proxy_nspi_resolve_names_response(call_id, bytes)),
+        20 if alloc_hint >= 24 => Some(rpc_proxy_nspi_resolve_names_response(call_id, bytes)),
+        _ => None,
+    }
+}
+
+async fn rpc_proxy_nspi_response_for_opnum_with_store<S>(
+    store: &S,
+    call_id: u32,
+    opnum: u16,
+    alloc_hint: u32,
+    bytes: &[u8],
+    principal: &AccountPrincipal,
+) -> Option<Vec<u8>>
+where
+    S: ExchangeStore,
+{
+    match opnum {
+        0 if alloc_hint >= 44 => Some(rpc_proxy_nspi_bind_response(call_id)),
+        1 if alloc_hint >= 20 => Some(rpc_proxy_nspi_unbind_response(call_id)),
+        2 if alloc_hint >= 20 => Some(rpc_proxy_nspi_update_stat_response(call_id)),
+        3 if alloc_hint >= 20 => Some(
             rpc_proxy_nspi_query_rows_response_for_principal(store, call_id, bytes, principal)
                 .await,
         ),
-        (2, 4) if alloc_hint >= 20 => Some(
+        4 if alloc_hint >= 20 => Some(
             rpc_proxy_nspi_query_rows_response_for_principal(store, call_id, bytes, principal)
                 .await,
         ),
-        (2, 5) if alloc_hint >= 20 => Some(
+        5 if alloc_hint >= 20 => Some(
             rpc_proxy_nspi_get_matches_response_for_principal(store, call_id, bytes, principal)
                 .await,
         ),
-        (2, 6) if alloc_hint >= 20 => Some(rpc_proxy_nspi_resort_restriction_response(call_id)),
-        (2, 7) if alloc_hint >= 20 => Some(rpc_proxy_nspi_minimal_ids_response(call_id)),
-        (2, 8) if alloc_hint >= 16 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
-        (2, 9) if alloc_hint >= 20 => Some(
+        6 if alloc_hint >= 20 => Some(rpc_proxy_nspi_resort_restriction_response(call_id)),
+        7 if alloc_hint >= 20 => Some(rpc_proxy_nspi_minimal_ids_response(call_id)),
+        8 if alloc_hint >= 16 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
+        9 if alloc_hint >= 20 => Some(
             rpc_proxy_nspi_get_props_response_for_principal(store, call_id, bytes, principal).await,
         ),
-        (2, 10) if alloc_hint >= 20 => Some(rpc_proxy_nspi_compare_mids_response(call_id)),
-        (2, 12) if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_special_table_response(call_id)),
-        (2, 13) if alloc_hint >= 20 => Some(
+        10 if alloc_hint >= 20 => Some(rpc_proxy_nspi_compare_mids_response(call_id)),
+        12 if alloc_hint >= 20 => Some(rpc_proxy_nspi_get_special_table_response(call_id)),
+        13 if alloc_hint >= 20 => Some(
             rpc_proxy_nspi_get_props_response_for_principal(store, call_id, bytes, principal).await,
         ),
-        (2, 16) if alloc_hint >= 12 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
-        (2, 17) if alloc_hint >= 12 => {
-            Some(rpc_proxy_nspi_get_names_from_ids_response(call_id, bytes))
-        }
-        (2, 18) if alloc_hint >= 20 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
-        (2, 19) if alloc_hint >= 24 => Some(
+        16 if alloc_hint >= 12 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
+        17 if alloc_hint >= 12 => Some(rpc_proxy_nspi_get_names_from_ids_response(call_id, bytes)),
+        18 if alloc_hint >= 20 => Some(rpc_proxy_nspi_property_tags_response(call_id)),
+        19 if alloc_hint >= 24 => Some(
             rpc_proxy_nspi_resolve_names_response_for_principal(store, call_id, bytes, principal)
                 .await,
         ),
-        (2, 20) if alloc_hint >= 24 => Some(
+        20 if alloc_hint >= 24 => Some(
             rpc_proxy_nspi_resolve_names_response_for_principal(store, call_id, bytes, principal)
                 .await,
         ),
