@@ -2190,6 +2190,7 @@ where
                 input_object(session, &handle_slots, &request),
             )),
             0x0A | 0x79 => {
+                echo_input_handle_table = true;
                 let set_result = match request.property_values() {
                     Ok(values) => match input_object(session, &handle_slots, &request).cloned() {
                         Some(MapiObject::Message {
@@ -7805,6 +7806,7 @@ fn apply_mapi_property_values(
             }
             Ok(())
         }
+        Some(MapiObject::Folder { .. }) | Some(MapiObject::Logon) => Ok(()),
         _ => Err(anyhow!("MAPI object does not support property mutation")),
     }
 }
