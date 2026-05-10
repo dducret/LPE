@@ -54,8 +54,7 @@ const MAPI_MAILUSER_OBJECT_TYPE: u32 = 6;
 const NSPI_MID_RESOLVED: u32 = 0x0000_0002;
 const MAX_CACHED_EXECUTE_REQUESTS: usize = 64;
 const NSPI_SERVER_GUID: [u8; 16] = [
-    0x2b, 0xe6, 0x0b, 0x5d, 0x9f, 0x35, 0x3f, 0x45, 0x9a, 0x68, 0x4c, 0x4b, 0xc5, 0x8f, 0x3f,
-    0x30,
+    0x2b, 0xe6, 0x0b, 0x5d, 0x9f, 0x35, 0x3f, 0x45, 0x9a, 0x68, 0x4c, 0x4b, 0xc5, 0x8f, 0x3f, 0x30,
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4322,11 +4321,7 @@ fn set_handle_slot(handle_slots: &mut Vec<u32>, output_handle_index: Option<u8>,
     handle_slots[index] = handle;
 }
 
-fn release_handle_slot(
-    session: &mut MapiSession,
-    handle_slots: &mut [u32],
-    request: &RopRequest,
-) {
+fn release_handle_slot(session: &mut MapiSession, handle_slots: &mut [u32], request: &RopRequest) {
     let Some(index) = request.input_handle_index().map(usize::from) else {
         return;
     };
@@ -5148,7 +5143,7 @@ fn rop_get_properties_specific_response(
                         .collaboration_folder_for_id(folder_id)
                         .map(|folder| serialize_collaboration_folder_row(folder, &columns))
                 })
-                .unwrap_or_else(|| serialize_root_folder_row(mailboxes, &columns))
+                .unwrap_or_else(|| serialize_special_folder_row(folder_id, mailboxes, &columns))
         }
     };
     write_standard_property_row(&mut response, &row);
@@ -5344,7 +5339,7 @@ fn serialize_object_property(
                         .collaboration_folder_for_id(folder_id)
                         .map(|folder| serialize_collaboration_folder_row(folder, &[tag]))
                 })
-                .unwrap_or_else(|| serialize_root_folder_row(mailboxes, &[tag]))
+                .unwrap_or_else(|| serialize_special_folder_row(folder_id, mailboxes, &[tag]))
         }
     }
 }
@@ -6432,10 +6427,7 @@ fn rop_find_row_response(
             }) {
                 *position = index;
                 response.push(1);
-                write_standard_property_row(
-                    &mut response,
-                    &serialize_message_row(email, &columns),
-                );
+                write_standard_property_row(&mut response, &serialize_message_row(email, &columns));
             } else {
                 response.push(0);
             }
@@ -6849,6 +6841,17 @@ fn role_for_folder_id(folder_id: u64) -> Option<&'static str> {
     }
 }
 
+fn serialize_special_folder_row(
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    columns: &[u32],
+) -> Vec<u8> {
+    match folder_id {
+        IPM_SUBTREE_FOLDER_ID => serialize_ipm_subtree_folder_row(mailboxes, columns),
+        _ => serialize_root_folder_row(mailboxes, columns),
+    }
+}
+
 fn serialize_root_folder_row(mailboxes: &[JmapMailbox], columns: &[u32]) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
@@ -6860,6 +6863,54 @@ fn serialize_root_folder_row(mailboxes: &[JmapMailbox], columns: &[u32]) -> Vec<
             PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPF.Root"),
             PID_TAG_LAST_MODIFICATION_TIME => write_u64(&mut row, 0),
+            PID_TAG_SOURCE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::source_key_for_store_id(ROOT_FOLDER_ID),
+            ),
+            PID_TAG_PARENT_SOURCE_KEY => write_u16_prefixed_bytes(&mut row, &[]),
+            PID_TAG_CHANGE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::change_key_for_change_number(ROOT_FOLDER_ID),
+            ),
+            PID_TAG_PREDECESSOR_CHANGE_LIST => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::predecessor_change_list(ROOT_FOLDER_ID),
+            ),
+            PID_TAG_CHANGE_NUMBER => write_u64(&mut row, ROOT_FOLDER_ID),
+            _ => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+fn serialize_ipm_subtree_folder_row(mailboxes: &[JmapMailbox], columns: &[u32]) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match *column {
+            PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, "Top of Information Store"),
+            PID_TAG_FOLDER_ID => write_u64(&mut row, IPM_SUBTREE_FOLDER_ID),
+            PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, ROOT_FOLDER_ID),
+            PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
+            PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
+            PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPF.Note"),
+            PID_TAG_LAST_MODIFICATION_TIME => write_u64(&mut row, 0),
+            PID_TAG_SOURCE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::source_key_for_store_id(IPM_SUBTREE_FOLDER_ID),
+            ),
+            PID_TAG_PARENT_SOURCE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::source_key_for_store_id(ROOT_FOLDER_ID),
+            ),
+            PID_TAG_CHANGE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::change_key_for_change_number(IPM_SUBTREE_FOLDER_ID),
+            ),
+            PID_TAG_PREDECESSOR_CHANGE_LIST => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::predecessor_change_list(IPM_SUBTREE_FOLDER_ID),
+            ),
+            PID_TAG_CHANGE_NUMBER => write_u64(&mut row, IPM_SUBTREE_FOLDER_ID),
             _ => write_property_default(&mut row, *column),
         }
     }
@@ -6954,7 +7005,7 @@ fn serialize_folder_row(mailbox: &JmapMailbox, columns: &[u32]) -> Vec<u8> {
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, &mailbox.name),
             PID_TAG_FOLDER_ID => write_u64(&mut row, mapi_folder_id(mailbox)),
-            PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, ROOT_FOLDER_ID),
+            PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, IPM_SUBTREE_FOLDER_ID),
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, mailbox.total_emails),
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, mailbox.unread_emails),
             PID_TAG_SUBFOLDERS => row.push(0),
@@ -6978,7 +7029,7 @@ fn serialize_collaboration_folder_row(
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, &folder.collection.display_name),
             PID_TAG_FOLDER_ID => write_u64(&mut row, folder.id),
-            PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, ROOT_FOLDER_ID),
+            PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, IPM_SUBTREE_FOLDER_ID),
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, folder.item_count),
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
             PID_TAG_SUBFOLDERS => row.push(0),
