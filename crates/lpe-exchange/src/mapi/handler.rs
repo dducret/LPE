@@ -9382,6 +9382,7 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),

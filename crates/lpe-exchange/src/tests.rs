@@ -2911,6 +2911,20 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         hierarchy_sync_rops.extend_from_slice(&tag.to_le_bytes());
     }
     hierarchy_sync_rops.extend_from_slice(&[
+        0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
+    ]);
+    hierarchy_sync_rops.extend_from_slice(&0x4017_0003u32.to_le_bytes());
+    hierarchy_sync_rops.extend_from_slice(&0u32.to_le_bytes());
+    hierarchy_sync_rops.extend_from_slice(&[
+        0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
+        0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
+    ]);
+    hierarchy_sync_rops.extend_from_slice(&0x6796_0102u32.to_le_bytes());
+    hierarchy_sync_rops.extend_from_slice(&0u32.to_le_bytes());
+    hierarchy_sync_rops.extend_from_slice(&[
+        0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
+    ]);
+    hierarchy_sync_rops.extend_from_slice(&[
         0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
     ]);
     hierarchy_sync_rops.extend_from_slice(&0xBABEu16.to_le_bytes());
@@ -2937,8 +2951,17 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
     ));
     assert!(contains_bytes(
         &response_rops,
+        &[0x75, 0x02, 0x00, 0x00, 0x00, 0x00]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x77, 0x02, 0x00, 0x00, 0x00, 0x00]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
         &[0x4E, 0x02, 0x00, 0x00, 0x00, 0x00]
     ));
+    assert!(!contains_bytes(&response_rops, &[0x02, 0x01, 0x04, 0x80]));
 
     renew_mapi_request_id(&mut execute_headers);
     let address_types_request = hex_bytes(
@@ -7629,6 +7652,7 @@ async fn mapi_over_http_sync_upload_state_round_trips_as_transfer_state() {
         0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
     ]);
     rops.extend_from_slice(&0x65E2_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
     rops.extend_from_slice(&[
         0x76, 0x00, 0x02, // RopSynchronizationUploadStateStreamContinue
     ]);
