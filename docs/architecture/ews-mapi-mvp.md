@@ -86,3 +86,7 @@
 | unauthenticated MAPI endpoints | forbidden |
 | `NSPI ModLinkAtt` / `ModProps` over MAPI HTTP | recognized request types but disabled with parseable MAPI response code `16`; address-book mutation must go through canonical account/contact APIs, not NSPI-local state |
 | FastTransfer upload streams | parsed but unsupported with ROP-specific protocol errors until upload-side streams are mapped to canonical import paths |
+| public-folder per-user read/unread sync ROPs | `RopGetPerUserLongTermIds`, `RopGetPerUserGuid`, `RopReadPerUserInformation`, and `RopWritePerUserInformation` are parsed but unsupported with ROP-specific protocol errors until public-folder/per-user read state is mapped to canonical `LPE` state |
+| folder rule ROPs | `RopGetRulesTable` and zero-rule `RopModifyRules` requests are parsed but unsupported with ROP-specific protocol errors until MAPI rules are mapped to canonical `LPE` filtering/rule state |
+| folder permission ROPs | `RopGetPermissionsTable` and zero-permission `RopModifyPermissions` requests are parsed but unsupported with ROP-specific protocol errors until MAPI permissions are mapped to canonical `LPE` rights state |
+| search-folder criteria ROPs | `RopSetSearchCriteria` and `RopGetSearchCriteria` requests are parsed but unsupported with ROP-specific protocol errors until search folders are mapped to canonical `LPE` search state |

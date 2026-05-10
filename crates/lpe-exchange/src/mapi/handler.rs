@@ -9235,7 +9235,19 @@ impl RopRequest {
     fn response_handle_index(&self) -> u8 {
         if matches!(
             self.rop_id,
-            0x0C | 0x11 | 0x25 | 0x4B | 0x4C | 0x4D | 0x53 | 0x69 | 0x70 | 0x72 | 0x7E | 0x82
+            0x0C | 0x11
+                | 0x25
+                | 0x3E
+                | 0x3F
+                | 0x4B
+                | 0x4C
+                | 0x4D
+                | 0x53
+                | 0x69
+                | 0x70
+                | 0x72
+                | 0x7E
+                | 0x82
         ) {
             return self.output_handle_index.unwrap_or(0);
         }
@@ -10071,6 +10083,74 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
+        0x30 => {
+            let input_handle_index = cursor.read_u8()?;
+            let restriction_size = cursor.read_u16()? as usize;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&(restriction_size as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(restriction_size)?);
+            let folder_id_count = cursor.read_u16()? as usize;
+            payload.extend_from_slice(&(folder_id_count as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(folder_id_count * 8)?);
+            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x31 => {
+            let input_handle_index = cursor.read_u8()?;
+            let payload = vec![cursor.read_u8()?, cursor.read_u8()?, cursor.read_u8()?];
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x3E | 0x3F => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            let payload = vec![cursor.read_u8()?];
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
+        0x40 => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = vec![cursor.read_u8()?];
+            let permissions_count = cursor.read_u16()? as usize;
+            payload.extend_from_slice(&(permissions_count as u16).to_le_bytes());
+            if permissions_count != 0 {
+                return Err(anyhow!("unsupported non-empty ModifyPermissions request"));
+            }
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x41 => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = vec![cursor.read_u8()?];
+            let rules_count = cursor.read_u16()? as usize;
+            payload.extend_from_slice(&(rules_count as u16).to_le_bytes());
+            if rules_count != 0 {
+                return Err(anyhow!("unsupported non-empty ModifyRules request"));
+            }
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
         0x5D => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
@@ -10078,6 +10158,58 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: None,
                 payload: Vec::new(),
+            })
+        }
+        0x60 => {
+            let input_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload: cursor.read_bytes(16)?.to_vec(),
+            })
+        }
+        0x61 => {
+            let input_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload: cursor.read_bytes(24)?.to_vec(),
+            })
+        }
+        0x63 => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(cursor.read_bytes(24)?);
+            payload.push(cursor.read_u8()?);
+            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+            payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x64 => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(cursor.read_bytes(24)?);
+            payload.push(cursor.read_u8()?);
+            let data_offset = cursor.read_u32()?;
+            payload.extend_from_slice(&data_offset.to_le_bytes());
+            let data_size = cursor.read_u16()? as usize;
+            payload.extend_from_slice(&(data_size as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(data_size)?);
+            if data_offset == 0 && cursor.remaining() == 16 {
+                payload.extend_from_slice(cursor.read_bytes(16)?);
+            }
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
             })
         }
         0x66 => {
