@@ -1856,6 +1856,10 @@ fn append_rop_submit_message(rops: &mut Vec<u8>, input: u8) {
     rops.extend_from_slice(&[0x32, 0x00, input, 0x00]);
 }
 
+fn append_rop_transport_send(rops: &mut Vec<u8>, input: u8) {
+    rops.extend_from_slice(&[0x4A, 0x00, input]);
+}
+
 fn append_rop_query_subject_rows(rops: &mut Vec<u8>, input: u8, output: u8, row_count: u16) {
     rops.extend_from_slice(&[
         0x05, 0x00, input, output, 0x00, // RopGetContentsTable
@@ -5653,6 +5657,73 @@ async fn mapi_over_http_submit_pending_message_uses_canonical_submission() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_transport_send_uses_canonical_submission() {
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let submitted_messages = store.submitted_messages.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x0037_001F,
+        "Transport send from MAPI",
+    );
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x1000_001F,
+        "Canonical transport body",
+    );
+    let to_row = mapi_recipient_row("Bob", "bob@example.test", 0x01);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_create_message(&mut rops, 1, 2, test_mapi_folder_id(5));
+    append_rop_set_properties(&mut rops, 2, 2, &property_values);
+    append_rop_modify_recipients(&mut rops, 2, &[(1, 0x01, to_row.as_slice())]);
+    append_rop_transport_send(&mut rops, 2);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x4A, 0x02, 0, 0, 0, 0, 0, 0]
+    ));
+
+    let recorded = submitted_messages.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].source, "mapi-submit-message");
+    assert_eq!(recorded[0].draft_message_id, None);
+    assert_eq!(recorded[0].subject, "Transport send from MAPI");
+    assert_eq!(recorded[0].body_text, "Canonical transport body");
+    assert_eq!(recorded[0].from_address, "alice@example.test");
+    assert_eq!(recorded[0].to.len(), 1);
+    assert_eq!(recorded[0].to[0].address, "bob@example.test");
+}
+
+#[tokio::test]
 async fn mapi_over_http_replayed_execute_request_id_does_not_resubmit_message() {
     let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let store = FakeStore {
@@ -8992,6 +9063,105 @@ async fn mapi_over_http_execute_returns_receive_folder_and_store_state() {
                 .unwrap()
         ),
         0
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_execute_returns_transport_folder_without_protocol_outbox_state() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let legacy_dn = b"/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice\0";
+    let mut rops = vec![0xFE, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&0x0100_0004u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
+    rops.extend_from_slice(legacy_dn);
+    rops.extend_from_slice(&[
+        0x6D, 0x00, 0x01, // RopGetTransportFolder against the logon handle.
+    ]);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    let transport_offset = response_rops.len() - 14;
+    assert_eq!(response_rops[transport_offset], 0x6D);
+    assert_eq!(response_rops[transport_offset + 1], 0x01);
+    assert_eq!(
+        u32::from_le_bytes(
+            response_rops[transport_offset + 2..transport_offset + 6]
+                .try_into()
+                .unwrap()
+        ),
+        0
+    );
+    assert_eq!(
+        u64::from_le_bytes(
+            response_rops[transport_offset + 6..transport_offset + 14]
+                .try_into()
+                .unwrap()
+        ),
+        test_mapi_folder_id(6)
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_execute_returns_empty_transport_options_data() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let legacy_dn = b"/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice\0";
+    let mut rops = vec![0xFE, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&0x0100_0004u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
+    rops.extend_from_slice(legacy_dn);
+    rops.extend_from_slice(&[
+        0x49, 0x00, 0x01, // RopGetAddressTypes
+        0x6F, 0x00, 0x01, // RopOptionsData
+    ]);
+    rops.extend_from_slice(b"SMTP\0");
+    rops.push(0);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, b"EX\0SMTP\0"));
+    assert_eq!(
+        &response_rops[response_rops.len() - 11..],
+        &[0x6F, 0x01, 0, 0, 0, 0, 1, 0, 0, 0, 0]
     );
 }
 

@@ -165,6 +165,22 @@ def cookie_header(response: HttpResponse) -> str:
     return "; ".join(cookie.split(";", 1)[0] for cookie in cookies if cookie)
 
 
+def update_cookie_header(current: str, response: HttpResponse) -> str:
+    replacement = cookie_header(response)
+    if not replacement:
+        return current
+    cookies: dict[str, str] = {}
+    for value in current.split(";"):
+        name, separator, cookie_value = value.strip().partition("=")
+        if separator:
+            cookies[name] = cookie_value
+    for value in replacement.split(";"):
+        name, separator, cookie_value = value.strip().partition("=")
+        if separator:
+            cookies[name] = cookie_value
+    return "; ".join(f"{name}={value}" for name, value in cookies.items())
+
+
 def require_guid_counter_header(value: str, label: str) -> None:
     require(
         re.fullmatch(r"\{[0-9A-Fa-f-]{36}\}:[0-9]+", value) is not None,
@@ -283,6 +299,22 @@ def mapi_sent_subject_table_rops(row_count: int = 20) -> bytes:
     rops.extend(struct.pack("<I", 0x0037_001F))  # PidTagSubject, Unicode
     rops.extend([0x15, 0x00, 0x02, 0x00, 0x01])  # RopQueryRows
     rops.extend(struct.pack("<H", row_count))
+    return bytes(rops)
+
+
+def mapi_sent_content_sync_rops(buffer_size: int = 4096) -> bytes:
+    rops = bytearray()
+    rops.extend([0x02, 0x00, 0x00, 0x01])  # RopOpenFolder
+    rops.extend(struct.pack("<Q", mapi_folder_id(7)))  # canonical Sent
+    rops.append(0)
+    rops.extend([0x70, 0x00, 0x01, 0x02])  # RopSynchronizationConfigure
+    rops.extend([0x01, 0x00])  # content sync, Unicode send option
+    rops.extend(struct.pack("<H", 0))  # SynchronizationFlags
+    rops.extend(struct.pack("<H", 0))  # RestrictionDataSize
+    rops.extend(struct.pack("<I", 0))  # SynchronizationExtraFlags
+    rops.extend(struct.pack("<H", 0))  # PropertyTagCount
+    rops.extend([0x4E, 0x00, 0x02])  # RopFastTransferSourceGetBuffer
+    rops.extend(struct.pack("<H", buffer_size))
     return bytes(rops)
 
 
@@ -671,6 +703,14 @@ def check_ews_send_sent(
                 insecure_tls,
                 timeout,
             )
+            check_mapi_emsmdb_sent_sync_manifest(
+                base_url,
+                email,
+                password,
+                subject,
+                insecure_tls,
+                timeout,
+            )
     finally:
         if message_id:
             delete_ews_item(base_url, email, password, message_id, insecure_tls, timeout, required=False)
@@ -927,7 +967,7 @@ def check_mapi_ping(base_url: str, email: str, password: str, insecure_tls: bool
     print("ok mapi_ping")
 
 
-def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
+def mapi_nspi_bind_cookie(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> str:
     response = request(
         "POST",
         join_url(base_url, f"/mapi/nspi/?mailboxId={urllib.parse.quote(email, safe='@')}"),
@@ -951,6 +991,14 @@ def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, 
     require(expiration.isdigit() and int(expiration) > 0, f"MAPI NSPI Bind returned invalid X-ExpirationInfo {expiration!r}")
     client_info = header_value(response.headers, "x-clientinfo")
     require_guid_counter_header(client_info, "MAPI NSPI Bind X-ClientInfo")
+    cookie = cookie_header(response)
+    require("MapiContext=" in cookie, "MAPI NSPI Bind did not issue a MapiContext cookie")
+    require("MapiSequence=" in cookie, "MAPI NSPI Bind did not issue a MapiSequence cookie")
+    return cookie
+
+
+def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
+    mapi_nspi_bind_cookie(base_url, email, password, insecure_tls, timeout)
     print("ok mapi_nspi_bind_octet_stream")
 
 
@@ -964,6 +1012,7 @@ def check_mapi_nspi_address_book(
     expected_email: str | None = None,
 ) -> None:
     path = f"/mapi/nspi/?mailboxId={urllib.parse.quote(email, safe='@')}"
+    cookie = mapi_nspi_bind_cookie(base_url, email, password, insecure_tls, timeout)
     probe_bodies: dict[str, bytes] = {
         "ResolveNames": resolve_names_request(
             expected_email or email,
@@ -987,6 +1036,7 @@ def check_mapi_nspi_address_book(
             {
                 "Authorization": basic_auth_header(email, password),
                 "Content-Type": "application/octet-stream",
+                "Cookie": cookie,
                 "X-RequestType": request_type,
                 "X-RequestId": mapi_request_id(request_type),
                 "X-ClientInfo": mapi_client_info(),
@@ -1003,6 +1053,7 @@ def check_mapi_nspi_address_book(
         probe_assertions[request_type](payload, request_type)
         if expected_name and expected_email:
             assert_nspi_fixture_payload(payload, request_type, expected_name, expected_email)
+        cookie = update_cookie_header(cookie, response)
     if expected_name and expected_email:
         print("ok mapi_nspi_address_book_fixture")
     else:
@@ -1017,6 +1068,7 @@ def check_mapi_nspi_resolve_authenticated_mailbox(
     timeout: int,
 ) -> None:
     path = f"/mapi/nspi/?mailboxId={urllib.parse.quote(email, safe='@')}"
+    cookie = mapi_nspi_bind_cookie(base_url, email, password, insecure_tls, timeout)
     response = request(
         "POST",
         join_url(base_url, path),
@@ -1024,6 +1076,7 @@ def check_mapi_nspi_resolve_authenticated_mailbox(
         {
             "Authorization": basic_auth_header(email, password),
             "Content-Type": "application/octet-stream",
+            "Cookie": cookie,
             "X-RequestType": "ResolveNames",
             "X-RequestId": mapi_request_id("ResolveNamesSelf"),
             "X-ClientInfo": mapi_client_info(),
@@ -1103,6 +1156,66 @@ def check_mapi_emsmdb_sent_message(
         "MAPI EMSMDB Sent table did not expose the EWS-created canonical Sent message",
     )
     print("ok mapi_emsmdb_canonical_sent_message")
+
+
+def check_mapi_emsmdb_sent_sync_manifest(
+    base_url: str,
+    email: str,
+    password: str,
+    expected_subject: str,
+    insecure_tls: bool,
+    timeout: int,
+) -> None:
+    connect = request(
+        "POST",
+        join_url(base_url, f"/mapi/emsmdb/?mailboxId={urllib.parse.quote(email, safe='@')}"),
+        b"",
+        {
+            "Authorization": basic_auth_header(email, password),
+            "Content-Type": "application/mapi-http",
+            "X-RequestType": "Connect",
+            "X-RequestId": mapi_request_id("ConnectSync"),
+            "X-ClientInfo": mapi_client_info(),
+            "User-Agent": "MapiHttpClient",
+        },
+        timeout,
+        insecure_tls=insecure_tls,
+    )
+    require(connect.status == 200, f"MAPI EMSMDB sync Connect returned HTTP {connect.status}: {connect.text[:300]}")
+    require("application/mapi-http" in content_type(connect.headers), "MAPI EMSMDB sync Connect did not return MAPI content")
+    require(header_value(connect.headers, "x-responsecode") == "0", "MAPI EMSMDB sync Connect did not return success")
+    cookie = cookie_header(connect)
+    require("MapiContext=" in cookie, "MAPI EMSMDB sync Connect did not issue an EMSMDB session cookie")
+    require("MapiSequence=" in cookie, "MAPI EMSMDB sync Connect did not issue an EMSMDB sequence cookie")
+
+    execute = request(
+        "POST",
+        join_url(base_url, f"/mapi/emsmdb/?mailboxId={urllib.parse.quote(email, safe='@')}"),
+        mapi_execute_body(mapi_rop_buffer(mapi_sent_content_sync_rops(), [1, 0xFFFF_FFFF, 0xFFFF_FFFF])),
+        {
+            "Authorization": basic_auth_header(email, password),
+            "Content-Type": "application/mapi-http",
+            "Cookie": cookie,
+            "X-RequestType": "Execute",
+            "X-RequestId": mapi_request_id("ExecuteSync"),
+            "X-ClientInfo": mapi_client_info(),
+            "User-Agent": "MapiHttpClient",
+        },
+        timeout,
+        insecure_tls=insecure_tls,
+    )
+    require(execute.status == 200, f"MAPI EMSMDB sync Execute returned HTTP {execute.status}: {execute.text[:300]}")
+    require("application/mapi-http" in content_type(execute.headers), "MAPI EMSMDB sync Execute did not return MAPI content")
+    require(header_value(execute.headers, "x-responsecode") == "0", "MAPI EMSMDB sync Execute did not return success")
+    response_rops = mapi_execute_response_rops(mapi_http_binary_payload(execute.body), "MAPI EMSMDB sync Execute")
+    require(contains_bytes(response_rops, bytes([0x70, 0x02, 0, 0, 0, 0])), "MAPI EMSMDB sync did not configure a synchronization source")
+    require(contains_bytes(response_rops, bytes([0x4E, 0x02, 0, 0, 0, 0])), "MAPI EMSMDB sync did not return a FastTransfer buffer")
+    require(contains_bytes(response_rops, b"LPE-MAPI-SYNC\0"), "MAPI EMSMDB sync did not return an LPE sync manifest")
+    require(
+        contains_bytes(response_rops, expected_subject.encode("utf-8")),
+        "MAPI EMSMDB sync manifest did not expose the EWS-created canonical Sent message",
+    )
+    print("ok mapi_emsmdb_sent_sync_manifest")
 
 
 def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, insecure_tls: bool, timeout: int) -> None:

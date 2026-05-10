@@ -3752,10 +3752,10 @@ where
                     0x8004_010F,
                 )),
             },
-            0x32 => {
+            0x32 | 0x4A => {
                 let Some(handle) = input_handle(&handle_slots, &request) else {
                     responses.extend_from_slice(&rop_error_response(
-                        0x32,
+                        request.rop_id,
                         request.response_handle_index(),
                         0x8004_010F,
                     ));
@@ -3763,7 +3763,7 @@ where
                 };
                 let Some(object) = session.handles.get(&handle).cloned() else {
                     responses.extend_from_slice(&rop_error_response(
-                        0x32,
+                        request.rop_id,
                         request.response_handle_index(),
                         0x0000_04B9,
                     ));
@@ -3782,7 +3782,7 @@ where
                         let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
                         else {
                             responses.extend_from_slice(&rop_error_response(
-                                0x32,
+                                request.rop_id,
                                 request.response_handle_index(),
                                 0x8004_010F,
                             ));
@@ -3790,7 +3790,7 @@ where
                         };
                         if email.mailbox_role != "drafts" {
                             responses.extend_from_slice(&rop_error_response(
-                                0x32,
+                                request.rop_id,
                                 request.response_handle_index(),
                                 0x8004_0102,
                             ));
@@ -3800,7 +3800,7 @@ where
                     }
                     _ => {
                         responses.extend_from_slice(&rop_error_response(
-                            0x32,
+                            request.rop_id,
                             request.response_handle_index(),
                             0x0000_04B9,
                         ));
@@ -3828,10 +3828,15 @@ where
                                 )),
                             },
                         );
-                        responses.extend_from_slice(&rop_simple_success_response(&request));
+                        if request.rop_id == 0x4A {
+                            responses
+                                .extend_from_slice(&rop_transport_send_success_response(&request));
+                        } else {
+                            responses.extend_from_slice(&rop_simple_success_response(&request));
+                        }
                     }
                     Err(_) => responses.extend_from_slice(&rop_error_response(
-                        0x32,
+                        request.rop_id,
                         request.response_handle_index(),
                         0x8004_010F,
                     )),
@@ -4481,6 +4486,8 @@ where
                     count,
                 ));
             }
+            0x6D => responses.extend_from_slice(&rop_get_transport_folder_response(&request)),
+            0x6F => responses.extend_from_slice(&rop_options_data_response(&request)),
             0x68 => responses.extend_from_slice(&rop_get_receive_folder_table_response(&request)),
             0x49 => responses.extend_from_slice(&rop_get_address_types_response(&request)),
             0x55 => responses
@@ -5476,6 +5483,22 @@ fn rop_get_address_types_response(request: &RopRequest) -> Vec<u8> {
     response.extend_from_slice(&2u16.to_le_bytes());
     response.extend_from_slice(&(address_types.len() as u16).to_le_bytes());
     response.extend_from_slice(address_types);
+    response
+}
+
+fn rop_transport_send_success_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![0x4A, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    write_u16(&mut response, 0);
+    response
+}
+
+fn rop_options_data_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![0x6F, request.input_handle_index().unwrap_or(0)];
+    write_u32(&mut response, 0);
+    response.push(1);
+    write_u16(&mut response, 0);
+    write_u16(&mut response, 0);
     response
 }
 
@@ -7139,6 +7162,13 @@ fn rop_get_receive_folder_table_response(request: &RopRequest) -> Vec<u8> {
     write_u64(&mut response, INBOX_FOLDER_ID);
     write_utf16z(&mut response, "IPM.Note");
     write_u64(&mut response, 0);
+    response
+}
+
+fn rop_get_transport_folder_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![0x6D, request.input_handle_index().unwrap_or(0)];
+    write_u32(&mut response, 0);
+    write_u64(&mut response, OUTBOX_FOLDER_ID);
     response
 }
 
@@ -10096,13 +10126,27 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
-        0x09 | 0x16 | 0x17 | 0x52 | 0x68 | 0x7B | 0x81 => {
+        0x09 | 0x16 | 0x17 | 0x4A | 0x52 | 0x68 | 0x6D | 0x7B | 0x81 => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: None,
                 payload: Vec::new(),
+            })
+        }
+        0x6F => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            let address_type = cursor.read_ascii_z()?;
+            payload.extend_from_slice(address_type.as_bytes());
+            payload.push(0);
+            payload.push(cursor.read_u8()?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
             })
         }
         0x10 => {
