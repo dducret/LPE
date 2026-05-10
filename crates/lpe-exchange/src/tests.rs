@@ -9017,6 +9017,60 @@ async fn mapi_over_http_public_folder_replica_rops_return_rop_specific_protocol_
 }
 
 #[tokio::test]
+async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let object_id = test_mapi_folder_id(5);
+    let mut long_term_id = [0; 24];
+    long_term_id[..16].copy_from_slice(&mapi_mailstore::STORE_REPLICA_GUID);
+    long_term_id[16..22].copy_from_slice(&5u64.to_le_bytes()[..6]);
+    let mut invalid_long_term_id = long_term_id;
+    invalid_long_term_id[0] ^= 0xFF;
+
+    let mut rops = vec![0x43, 0x00, 0x00];
+    rops.extend_from_slice(&object_id.to_le_bytes());
+    rops.extend_from_slice(&[0x44, 0x00, 0x00]);
+    rops.extend_from_slice(&long_term_id);
+    rops.extend_from_slice(&[0x44, 0x00, 0x00]);
+    rops.extend_from_slice(&invalid_long_term_id);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let mut long_term_response = vec![0x43, 0x00, 0, 0, 0, 0];
+    long_term_response.extend_from_slice(&long_term_id);
+    assert!(contains_bytes(&response_rops, &long_term_response));
+    let mut object_id_response = vec![0x44, 0x00, 0, 0, 0, 0];
+    object_id_response.extend_from_slice(&object_id.to_le_bytes());
+    assert!(contains_bytes(&response_rops, &object_id_response));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x44, 0x00, 0x0F, 0x01, 0x04, 0x80]
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests() {
     let mailbox_id = "55555555-5555-5555-5555-555555555555";
     let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");

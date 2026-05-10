@@ -4565,6 +4565,8 @@ where
             0x6D => responses.extend_from_slice(&rop_get_transport_folder_response(&request)),
             0x6F => responses.extend_from_slice(&rop_options_data_response(&request)),
             0x68 => responses.extend_from_slice(&rop_get_receive_folder_table_response(&request)),
+            0x43 => responses.extend_from_slice(&rop_long_term_id_from_id_response(&request)),
+            0x44 => responses.extend_from_slice(&rop_id_from_long_term_id_response(&request)),
             0x49 => responses.extend_from_slice(&rop_get_address_types_response(&request)),
             0x55 => responses
                 .extend_from_slice(&rop_get_names_from_property_ids_response(&request, session)),
@@ -4684,6 +4686,36 @@ const CALENDAR_FOLDER_ID: u64 = mapi_store_id(16);
 
 const fn mapi_store_id(global_counter: u64) -> u64 {
     ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | STORE_REPLICA_ID
+}
+
+fn long_term_id_from_object_id(object_id: u64) -> Option<[u8; 24]> {
+    if object_id & 0xFFFF != STORE_REPLICA_ID {
+        return None;
+    }
+    let global_counter = object_id >> 16;
+    if global_counter == 0 {
+        return None;
+    }
+    let mut long_term_id = [0; 24];
+    long_term_id[..16].copy_from_slice(&mapi_mailstore::STORE_REPLICA_GUID);
+    long_term_id[16..22].copy_from_slice(&global_counter.to_le_bytes()[..6]);
+    Some(long_term_id)
+}
+
+fn object_id_from_long_term_id(long_term_id: &[u8]) -> Option<u64> {
+    if long_term_id.len() != 24
+        || long_term_id[..16] != mapi_mailstore::STORE_REPLICA_GUID
+        || long_term_id[22..24] != [0, 0]
+    {
+        return None;
+    }
+    let mut counter_bytes = [0; 8];
+    counter_bytes[..6].copy_from_slice(&long_term_id[16..22]);
+    let global_counter = u64::from_le_bytes(counter_bytes);
+    if global_counter == 0 {
+        return None;
+    }
+    Some(mapi_store_id(global_counter))
 }
 
 const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
@@ -5555,6 +5587,32 @@ fn rop_get_local_replica_ids_response(
     response.extend_from_slice(&mapi_mailstore::STORE_REPLICA_GUID);
     write_u64(&mut response, mapi_store_id(first_global_counter));
     write_u32(&mut response, count);
+    response
+}
+
+fn rop_long_term_id_from_id_response(request: &RopRequest) -> Vec<u8> {
+    let Some(object_id) = request.object_id() else {
+        return rop_error_response(0x43, request.response_handle_index(), 0x8004_0102);
+    };
+    let Some(long_term_id) = long_term_id_from_object_id(object_id) else {
+        return rop_error_response(0x43, request.response_handle_index(), 0x8004_010F);
+    };
+    let mut response = vec![0x43, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&long_term_id);
+    response
+}
+
+fn rop_id_from_long_term_id_response(request: &RopRequest) -> Vec<u8> {
+    let Some(long_term_id) = request.long_term_id() else {
+        return rop_error_response(0x44, request.response_handle_index(), 0x8004_0102);
+    };
+    let Some(object_id) = object_id_from_long_term_id(long_term_id) else {
+        return rop_error_response(0x44, request.response_handle_index(), 0x8004_010F);
+    };
+    let mut response = vec![0x44, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    write_u64(&mut response, object_id);
     response
 }
 
@@ -9446,6 +9504,15 @@ impl RopRequest {
             .unwrap_or(1)
     }
 
+    fn object_id(&self) -> Option<u64> {
+        let bytes = self.payload.get(..8)?;
+        Some(u64::from_le_bytes(bytes.try_into().ok()?))
+    }
+
+    fn long_term_id(&self) -> Option<&[u8]> {
+        self.payload.get(..24)
+    }
+
     fn message_ids(&self) -> Vec<u64> {
         let Some(count_bytes) = self.payload.get(2..4) else {
             return Vec::new();
@@ -10182,13 +10249,22 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
-        0x42 | 0x45 => {
+        0x42 | 0x43 | 0x45 => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: None,
                 payload: cursor.read_bytes(8)?.to_vec(),
+            })
+        }
+        0x44 => {
+            let input_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload: cursor.read_bytes(24)?.to_vec(),
             })
         }
         0x50 => {
