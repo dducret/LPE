@@ -7918,6 +7918,8 @@ async fn mapi_over_http_bind_creates_nspi_session() {
     assert_eq!(body.len(), 28);
     assert_eq!(&body[0..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
     assert_ne!(&body[8..24], &[0; 16]);
+    assert_eq!(body[15] & 0xf0, 0x40);
+    assert_eq!(body[16] & 0xc0, 0x80);
 }
 
 #[tokio::test]
