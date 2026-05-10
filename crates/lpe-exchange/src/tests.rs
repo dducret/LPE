@@ -8857,7 +8857,22 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
                 assert!(contains_bytes(&body, &utf16z("Global Address List")));
             }
             "DNToMId" => {
-                assert_ne!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 0);
+                assert_eq!(body[8], 1, "{request_type}");
+                assert_eq!(
+                    u32::from_le_bytes(body[9..13].try_into().unwrap()),
+                    1,
+                    "{request_type}"
+                );
+                assert_ne!(
+                    u32::from_le_bytes(body[13..17].try_into().unwrap()),
+                    0,
+                    "{request_type}"
+                );
+                assert_eq!(
+                    u32::from_le_bytes(body[17..21].try_into().unwrap()),
+                    0,
+                    "{request_type}"
+                );
             }
             _ => {}
         }
@@ -8883,10 +8898,13 @@ async fn mapi_over_http_dn_to_mid_resolves_outlook_unprefixed_legacy_dn_to_princ
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
     assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(body[8], 1);
+    assert_eq!(u32::from_le_bytes(body[9..13].try_into().unwrap()), 1);
     assert_eq!(
-        u32::from_le_bytes(body[8..12].try_into().unwrap()),
+        u32::from_le_bytes(body[13..17].try_into().unwrap()),
         0xaaaa_aaaa
     );
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 0);
 }
 
 #[tokio::test]

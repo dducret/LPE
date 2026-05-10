@@ -9,4 +9,5 @@
 **/*.pyc
 /takeri-inspect/
 /.codex-takeri-inspect/
+/.codex-tmp/
 

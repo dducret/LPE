@@ -890,7 +890,14 @@ where
                 .flatten()
                 .map(nspi_entry_id)
         });
-    nspi_u32_result_response("DNToMId", request_id, matched_mid.unwrap_or(0))
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    body.push(1);
+    write_u32(&mut body, 1);
+    write_u32(&mut body, matched_mid.unwrap_or(0));
+    write_u32(&mut body, 0);
+    mapi_response("DNToMId", request_id, 0, body, None)
 }
 
 fn nspi_property_tags_response(request_type: &str, request_id: &str) -> Response {
