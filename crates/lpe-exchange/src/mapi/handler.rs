@@ -345,7 +345,7 @@ where
             .await
         }
         (MapiEndpoint::Nspi, MapiRequestType::Bind) => {
-            bind_response(endpoint, &principal, &request_id)
+            bind_response(endpoint, &principal, headers, &request_id)
         }
         (MapiEndpoint::Nspi, MapiRequestType::Unbind) => {
             disconnect_response(endpoint, &principal, headers, &request_id, "Unbind")
@@ -499,9 +499,11 @@ fn reconnect_session(
 fn bind_response(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
+    headers: &HeaderMap,
     request_id: &str,
 ) -> Response {
-    let session_id = create_session(endpoint, principal);
+    let session_id = reconnect_session(endpoint, principal, headers)
+        .unwrap_or_else(|| create_session(endpoint, principal));
     let cookies = session_context_cookies(endpoint, &session_id, false);
     let mut body = Vec::new();
     write_u32(&mut body, 0);

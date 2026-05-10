@@ -196,6 +196,14 @@ LPE_CT_IMAPS_TLS_KEY_PATH=/etc/lpe-ct/tls/privkey.pem
 `nginx` uses the public pair for `443`. The Rust `LPE-CT` service uses the
 submission pair for `465` and the IMAPS pair for `993`.
 
+The public HTTPS edge on `443` must not request TLS client certificates.
+Outlook for Windows uses Schannel for `Autodiscover`, `EWS`, `MAPI over HTTP`,
+and Outlook Anywhere probes; inherited `ssl_verify_client on` or
+`ssl_verify_client optional` settings can trigger TLS renegotiation or
+post-handshake client-certificate requests and cause Outlook to fail before the
+HTTP protocol layer is reached. Keep client-certificate authentication on a
+separate hostname or listener, not on the public client endpoint.
+
 For `993`, `LPE-CT` terminates client `TLS` and then proxies the clear internal
 IMAP stream to `LPE_CT_IMAPS_UPSTREAM_ADDRESS`. The default
 `127.0.0.1:1143` is valid only when the core `LPE` IMAP listener is co-located

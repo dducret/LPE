@@ -2943,7 +2943,8 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         .unwrap();
 
     assert_eq!(hierarchy_sync_configure_response.status(), StatusCode::OK);
-    let response_rops = response_rops_from_execute_response(hierarchy_sync_configure_response).await;
+    let response_rops =
+        response_rops_from_execute_response(hierarchy_sync_configure_response).await;
 
     assert!(contains_bytes(
         &response_rops,
@@ -2985,9 +2986,8 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
     assert!(!contains_bytes(&response_rops, b"LPE-MAPI-SYNC\0"));
 
     renew_mapi_request_id(&mut execute_headers);
-    let address_types_request = hex_bytes(
-        "020000001100000000000400090009000500490000010000000780000000000000",
-    );
+    let address_types_request =
+        hex_bytes("020000001100000000000400090009000500490000010000000780000000000000");
     let address_types_response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -8352,6 +8352,77 @@ async fn mapi_over_http_bind_creates_nspi_session() {
     assert_ne!(&body[8..24], &[0; 16]);
     assert_eq!(body[15] & 0xf0, 0x40);
     assert_eq!(body[16] & 0xc0, 0x80);
+}
+
+#[tokio::test]
+async fn mapi_over_http_bind_reestablishes_nspi_session_cookie() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let bind = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("Bind"), b"")
+        .await
+        .unwrap();
+    let first_cookie = bind
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rebind_headers = mapi_headers("Bind");
+    rebind_headers.insert("cookie", HeaderValue::from_str(&first_cookie).unwrap());
+    let rebind = service
+        .handle_mapi(MapiEndpoint::Nspi, &rebind_headers, b"")
+        .await
+        .unwrap();
+
+    assert_eq!(rebind.status(), StatusCode::OK);
+    assert_eq!(rebind.headers().get("x-requesttype").unwrap(), "Bind");
+    assert_eq!(rebind.headers().get("x-responsecode").unwrap(), "0");
+    let reconnected_cookie = rebind
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    assert_ne!(reconnected_cookie, first_cookie);
+
+    let mut old_unbind_headers = mapi_headers("Unbind");
+    old_unbind_headers.insert("cookie", HeaderValue::from_str(&first_cookie).unwrap());
+    let old_unbind = service
+        .handle_mapi(MapiEndpoint::Nspi, &old_unbind_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(old_unbind.headers().get("x-responsecode").unwrap(), "10");
+
+    let mut new_unbind_headers = mapi_headers("Unbind");
+    new_unbind_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&reconnected_cookie).unwrap(),
+    );
+    let new_unbind = service
+        .handle_mapi(MapiEndpoint::Nspi, &new_unbind_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(new_unbind.headers().get("x-responsecode").unwrap(), "0");
+    assert!(new_unbind
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("Max-Age=0"));
 }
 
 #[tokio::test]
