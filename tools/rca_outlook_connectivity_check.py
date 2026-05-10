@@ -16,12 +16,14 @@ import ssl
 import struct
 import sys
 import textwrap
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from itertools import count
 from typing import Any
 
 
@@ -72,6 +74,7 @@ class HttpResponse:
     status: int
     headers: dict[str, str]
     body: bytes
+    set_cookies: list[str]
 
     @property
     def text(self) -> str:
@@ -115,10 +118,20 @@ def request(
             response_context = urllib.request.urlopen(req, timeout=timeout)
         with response_context as resp:
             response_body = resp.read(read_limit) if read_limit is not None else resp.read()
-            return HttpResponse(resp.status, dict(resp.headers.items()), response_body)
+            return HttpResponse(
+                resp.status,
+                dict(resp.headers.items()),
+                response_body,
+                resp.headers.get_all("Set-Cookie") or [],
+            )
     except urllib.error.HTTPError as error:
         response_body = error.read(read_limit) if read_limit is not None else error.read()
-        return HttpResponse(error.code, dict(error.headers.items()), response_body)
+        return HttpResponse(
+            error.code,
+            dict(error.headers.items()),
+            response_body,
+            error.headers.get_all("Set-Cookie") or [],
+        )
 
 
 def join_url(base_url: str, path: str) -> str:
@@ -144,16 +157,40 @@ def header_value(headers: dict[str, str], name: str) -> str:
     return ""
 
 
+def cookie_header(response: HttpResponse) -> str:
+    cookies = response.set_cookies
+    if not cookies:
+        value = header_value(response.headers, "set-cookie")
+        cookies = [value] if value else []
+    return "; ".join(cookie.split(";", 1)[0] for cookie in cookies if cookie)
+
+
+def require_guid_counter_header(value: str, label: str) -> None:
+    require(
+        re.fullmatch(r"\{[0-9A-Fa-f-]{36}\}:[0-9]+", value) is not None,
+        f"{label} was not a {{GUID}}:counter value: {value!r}",
+    )
+
+
 def url_host(value: str) -> str:
     parsed = urllib.parse.urlparse(value)
     return parsed.hostname or ""
 
 
+MAPI_RCA_REQUEST_GUID = uuid.uuid4()
+MAPI_RCA_CLIENT_GUID = uuid.uuid4()
+MAPI_RCA_COUNTER = count(1)
+
+
 def mapi_request_id(sequence: str | int | None = None) -> str:
-    value = str(uuid.uuid4())
-    if sequence is not None:
-        value = f"{value}:{sequence}"
-    return value
+    value = next(MAPI_RCA_COUNTER) if sequence is None else sequence
+    if isinstance(value, str) and not value.isdecimal():
+        value = next(MAPI_RCA_COUNTER)
+    return f"{{{str(MAPI_RCA_REQUEST_GUID).upper()}}}:{value}"
+
+
+def mapi_client_info() -> str:
+    return f"{{{str(MAPI_RCA_CLIENT_GUID).upper()}}}:{next(MAPI_RCA_COUNTER)}"
 
 
 def basic_auth_header(email: str, password: str) -> str:
@@ -282,6 +319,17 @@ def rpc_rts_conn_a1_body(receive_window_size: int = 0x00010000) -> bytes:
     body.extend(struct.pack("<I", 3))
     body.extend(out_channel_cookie)
     body.extend(struct.pack("<II", 0, receive_window_size))
+    return bytes(body)
+
+
+def rpc_rts_conn_b1_body(virtual_connection_cookie: bytes) -> bytes:
+    body = bytearray(bytes.fromhex(
+        "0500140310000000680000000000000000000600"
+        "06000000010000000300000076ed340685c5dd390e9a6acbc8cb9951"
+        "03000000a6c4ac6df261ef9fc3804d0c73a59fff"
+        "040000000000004005000000e09304000c0000005475b4942dd08746bf4c3d2821816b2c"
+    ))
+    body[32:48] = virtual_connection_cookie
     return bytes(body)
 
 
@@ -808,7 +856,55 @@ def require_deleted_ews_item(
 
 
 def check_mapi_ping(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
-    for path in ["/mapi/emsmdb", "/mapi/nspi"]:
+    sessions = [
+        (
+            "/mapi/emsmdb",
+            request(
+                "POST",
+                join_url(base_url, f"/mapi/emsmdb/?mailboxId={urllib.parse.quote(email, safe='@')}"),
+                b"",
+                {
+                    "Authorization": basic_auth_header(email, password),
+                    "Content-Type": "application/mapi-http",
+                    "X-RequestType": "Connect",
+                    "X-RequestId": mapi_request_id(),
+                    "X-ClientInfo": mapi_client_info(),
+                    "User-Agent": "MapiHttpClient",
+                },
+                timeout,
+                insecure_tls=insecure_tls,
+            ),
+        ),
+        (
+            "/mapi/nspi",
+            request(
+                "POST",
+                join_url(base_url, f"/mapi/nspi/?mailboxId={urllib.parse.quote(email, safe='@')}"),
+                bytes(45),
+                {
+                    "Authorization": basic_auth_header(email, password),
+                    "Content-Type": "application/octet-stream",
+                    "X-RequestType": "Bind",
+                    "X-RequestId": mapi_request_id(),
+                    "X-ClientInfo": mapi_client_info(),
+                    "User-Agent": "MapiHttpClient",
+                },
+                timeout,
+                insecure_tls=insecure_tls,
+            ),
+        ),
+    ]
+    for path, session in sessions:
+        require(session.status == 200, f"MAPI session setup {path} returned HTTP {session.status}: {session.text[:300]}")
+        require("application/mapi-http" in content_type(session.headers), f"MAPI session setup {path} did not return MAPI content")
+        session_response_code = header_value(session.headers, "x-responsecode")
+        require(
+            session_response_code == "0",
+            f"MAPI session setup {path} returned X-ResponseCode {session_response_code!r}: {session.text[:300]}",
+        )
+        cookie = cookie_header(session)
+        require("MapiContext=" in cookie, f"MAPI session setup {path} did not issue a MapiContext cookie")
+        require("MapiSequence=" in cookie, f"MAPI session setup {path} did not issue a MapiSequence cookie")
         response = request(
             "POST",
             join_url(base_url, path),
@@ -816,9 +912,10 @@ def check_mapi_ping(base_url: str, email: str, password: str, insecure_tls: bool
             {
                 "Authorization": basic_auth_header(email, password),
                 "Content-Type": "application/mapi-http",
+                "Cookie": cookie,
                 "X-RequestType": "PING",
                 "X-RequestId": mapi_request_id(),
-                "X-ClientInfo": "lpe-rca-connectivity-check",
+                "X-ClientInfo": mapi_client_info(),
             },
             timeout,
             insecure_tls=insecure_tls,
@@ -840,7 +937,7 @@ def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, 
             "Content-Type": "application/octet-stream",
             "X-RequestType": "Bind",
             "X-RequestId": mapi_request_id(1),
-            "X-ClientInfo": "lpe-rca-connectivity-check",
+            "X-ClientInfo": mapi_client_info(),
             "User-Agent": "MapiHttpClient",
         },
         timeout,
@@ -853,7 +950,7 @@ def check_mapi_nspi_bind_octet_stream(base_url: str, email: str, password: str, 
     expiration = header_value(response.headers, "x-expirationinfo")
     require(expiration.isdigit() and int(expiration) > 0, f"MAPI NSPI Bind returned invalid X-ExpirationInfo {expiration!r}")
     client_info = header_value(response.headers, "x-clientinfo")
-    require(client_info == "lpe-rca-connectivity-check", f"MAPI NSPI Bind did not echo X-ClientInfo")
+    require_guid_counter_header(client_info, "MAPI NSPI Bind X-ClientInfo")
     print("ok mapi_nspi_bind_octet_stream")
 
 
@@ -892,7 +989,7 @@ def check_mapi_nspi_address_book(
                 "Content-Type": "application/octet-stream",
                 "X-RequestType": request_type,
                 "X-RequestId": mapi_request_id(request_type),
-                "X-ClientInfo": "lpe-rca-connectivity-check",
+                "X-ClientInfo": mapi_client_info(),
                 "User-Agent": "MapiHttpClient",
             },
             timeout,
@@ -929,7 +1026,7 @@ def check_mapi_nspi_resolve_authenticated_mailbox(
             "Content-Type": "application/octet-stream",
             "X-RequestType": "ResolveNames",
             "X-RequestId": mapi_request_id("ResolveNamesSelf"),
-            "X-ClientInfo": "lpe-rca-connectivity-check",
+            "X-ClientInfo": mapi_client_info(),
             "User-Agent": "MapiHttpClient",
         },
         timeout,
@@ -962,7 +1059,7 @@ def check_mapi_emsmdb_sent_message(
             "Content-Type": "application/mapi-http",
             "X-RequestType": "Connect",
             "X-RequestId": mapi_request_id("Connect"),
-            "X-ClientInfo": "lpe-rca-connectivity-check",
+            "X-ClientInfo": mapi_client_info(),
             "User-Agent": "MapiHttpClient",
         },
         timeout,
@@ -971,8 +1068,9 @@ def check_mapi_emsmdb_sent_message(
     require(connect.status == 200, f"MAPI EMSMDB Connect returned HTTP {connect.status}: {connect.text[:300]}")
     require("application/mapi-http" in content_type(connect.headers), "MAPI EMSMDB Connect did not return MAPI content")
     require(header_value(connect.headers, "x-responsecode") == "0", "MAPI EMSMDB Connect did not return success")
-    cookie = header_value(connect.headers, "set-cookie").split(";", 1)[0]
-    require(cookie.startswith("lpe_mapi_emsmdb="), "MAPI EMSMDB Connect did not issue an EMSMDB session cookie")
+    cookie = cookie_header(connect)
+    require("MapiContext=" in cookie, "MAPI EMSMDB Connect did not issue an EMSMDB session cookie")
+    require("MapiSequence=" in cookie, "MAPI EMSMDB Connect did not issue an EMSMDB sequence cookie")
 
     rops = mapi_sent_subject_table_rops()
     execute = request(
@@ -985,7 +1083,7 @@ def check_mapi_emsmdb_sent_message(
             "Cookie": cookie,
             "X-RequestType": "Execute",
             "X-RequestId": mapi_request_id("Execute"),
-            "X-ClientInfo": "lpe-rca-connectivity-check",
+            "X-ClientInfo": mapi_client_info(),
             "User-Agent": "MapiHttpClient",
         },
         timeout,
@@ -1076,14 +1174,33 @@ def check_rpc_proxy_mailstore_ping(
         "Authorization": basic_auth_header(email, password),
         "User-Agent": "MSRPC",
     }
+    out_body = rpc_rts_conn_a1_body()
+    in_response = request(
+        "RPC_IN_DATA",
+        rpc_url,
+        rpc_rts_conn_b1_body(out_body[32:48]),
+        headers,
+        timeout,
+        read_limit=0,
+        insecure_tls=insecure_tls,
+    )
+    require(
+        in_response.status == 200,
+        f"RPC proxy mailstore IN ping returned HTTP {in_response.status}: {in_response.text[:300]}",
+    )
+    require(
+        header_value(in_response.headers, "x-lpe-rpc-proxy-status") == "in-channel-open",
+        f"RPC proxy mailstore IN ping returned compatibility status {header_value(in_response.headers, 'x-lpe-rpc-proxy-status')!r}; expected 'in-channel-open'",
+    )
+    time.sleep(0.2)
 
     response = request(
         "RPC_OUT_DATA",
         rpc_url,
-        rpc_rts_conn_a1_body(),
+        out_body,
         headers,
         timeout,
-        read_limit=128,
+        read_limit=184,
         insecure_tls=insecure_tls,
     )
     require(
@@ -1098,7 +1215,7 @@ def check_rpc_proxy_mailstore_ping(
         header_value(response.headers, "x-lpe-rpc-proxy-status") == "endpoint-ping",
         f"RPC proxy mailstore OUT ping returned compatibility status {header_value(response.headers, 'x-lpe-rpc-proxy-status')!r}; expected 'endpoint-ping'",
     )
-    require(len(response.body) >= 128, f"RPC proxy mailstore OUT ping returned only {len(response.body)} bytes")
+    require(len(response.body) >= 184, f"RPC proxy mailstore OUT ping returned only {len(response.body)} bytes")
     require(response.body[72] == 0x05 and response.body[74] == 0x0C, "mailstore ping did not include a DCE/RPC bind ACK")
     print("ok rpc_proxy_mailstore_ping")
 
