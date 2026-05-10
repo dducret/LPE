@@ -2,7 +2,8 @@ use lpe_storage::{JmapEmail, JmapMailbox};
 use uuid::Uuid;
 
 pub(crate) const STORE_REPLICA_GUID: [u8; 16] = [
-    0x4c, 0x50, 0x45, 0x00, 0x45, 0x4d, 0x53, 0x4d, 0x44, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+    0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f,
+    0x10,
 ];
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
@@ -338,6 +339,8 @@ mod tests {
         let source_key = source_key_for_uuid(&id);
         let change_key = change_key_for_change_number(42);
 
+        assert_eq!(STORE_REPLICA_GUID[7] & 0xf0, 0x40);
+        assert_eq!(STORE_REPLICA_GUID[8] & 0xc0, 0x80);
         assert!(source_key.starts_with(&STORE_REPLICA_GUID));
         assert!(change_key.starts_with(&STORE_REPLICA_GUID));
         assert_eq!(source_key, source_key_for_uuid(&id));
