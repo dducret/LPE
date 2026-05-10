@@ -1276,21 +1276,26 @@ fn mapi_headers(request_type: &str) -> HeaderMap {
         "x-requesttype",
         HeaderValue::from_str(request_type).unwrap(),
     );
-    let request_id = format!(
-        "request-{}",
-        MAPI_TEST_REQUEST_ID.fetch_add(1, Ordering::Relaxed)
+    headers.insert(
+        "x-requestid",
+        HeaderValue::from_str(&mapi_request_id()).unwrap(),
     );
-    headers.insert("x-requestid", HeaderValue::from_str(&request_id).unwrap());
     headers.insert("x-clientinfo", HeaderValue::from_static("client-info-1"));
     headers
 }
 
 fn renew_mapi_request_id(headers: &mut HeaderMap) {
-    let request_id = format!(
-        "request-{}",
-        MAPI_TEST_REQUEST_ID.fetch_add(1, Ordering::Relaxed)
+    headers.insert(
+        "x-requestid",
+        HeaderValue::from_str(&mapi_request_id()).unwrap(),
     );
-    headers.insert("x-requestid", HeaderValue::from_str(&request_id).unwrap());
+}
+
+fn mapi_request_id() -> String {
+    format!(
+        "{{11111111-2222-3333-4444-555555555555}}:{}",
+        MAPI_TEST_REQUEST_ID.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 fn mapi_headers_without_content_type(request_type: &str) -> HeaderMap {
@@ -1299,7 +1304,10 @@ fn mapi_headers_without_content_type(request_type: &str) -> HeaderMap {
         "x-requesttype",
         HeaderValue::from_str(request_type).unwrap(),
     );
-    headers.insert("x-requestid", HeaderValue::from_static("request-1"));
+    headers.insert(
+        "x-requestid",
+        HeaderValue::from_str(&mapi_request_id()).unwrap(),
+    );
     headers.insert("x-clientinfo", HeaderValue::from_static("client-info-1"));
     headers
 }
@@ -1314,7 +1322,10 @@ fn mapi_headers_with_content_type(request_type: &str, content_type: &'static str
         "x-requesttype",
         HeaderValue::from_str(request_type).unwrap(),
     );
-    headers.insert("x-requestid", HeaderValue::from_static("request-1"));
+    headers.insert(
+        "x-requestid",
+        HeaderValue::from_str(&mapi_request_id()).unwrap(),
+    );
     headers.insert("x-clientinfo", HeaderValue::from_static("client-info-1"));
     headers
 }
@@ -1338,7 +1349,10 @@ fn mapi_headers_without_request_type() -> HeaderMap {
         axum::http::header::CONTENT_TYPE,
         HeaderValue::from_static("application/mapi-http"),
     );
-    headers.insert("x-requestid", HeaderValue::from_static("request-1"));
+    headers.insert(
+        "x-requestid",
+        HeaderValue::from_str(&mapi_request_id()).unwrap(),
+    );
     headers.insert("x-clientinfo", HeaderValue::from_static("client-info-1"));
     headers
 }
@@ -1353,7 +1367,16 @@ fn mapi_headers_without_client_info(request_type: &str) -> HeaderMap {
         "x-requesttype",
         HeaderValue::from_str(request_type).unwrap(),
     );
-    headers.insert("x-requestid", HeaderValue::from_static("request-1"));
+    headers.insert(
+        "x-requestid",
+        HeaderValue::from_str(&mapi_request_id()).unwrap(),
+    );
+    headers
+}
+
+fn mapi_headers_with_request_id(request_type: &str, request_id: &'static str) -> HeaderMap {
+    let mut headers = mapi_headers(request_type);
+    headers.insert("x-requestid", HeaderValue::from_static(request_id));
     headers
 }
 
@@ -2367,7 +2390,13 @@ async fn mapi_over_http_rejects_missing_request_type_with_parseable_error() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-requesttype").unwrap(), "Unknown");
-    assert_eq!(response.headers().get("x-requestid").unwrap(), "request-1");
+    assert!(response
+        .headers()
+        .get("x-requestid")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("{11111111-2222-3333-4444-555555555555}:"));
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "7");
     let body = String::from_utf8(response_bytes(response).await).unwrap();
     assert!(body.contains("missing MAPI X-RequestType header"));
@@ -2392,11 +2421,45 @@ async fn mapi_over_http_rejects_missing_client_info_with_parseable_error() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
-    assert_eq!(response.headers().get("x-requestid").unwrap(), "request-1");
+    assert!(response
+        .headers()
+        .get("x-requestid")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("{11111111-2222-3333-4444-555555555555}:"));
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "7");
     assert!(response.headers().get("x-clientinfo").is_none());
     let body = String::from_utf8(response_bytes(response).await).unwrap();
     assert!(body.contains("missing MAPI X-ClientInfo header"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_rejects_invalid_request_id_with_parseable_error() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_headers_with_request_id("Connect", "not-a-guid-counter"),
+            b"",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
+    assert_eq!(
+        response.headers().get("x-requestid").unwrap(),
+        "not-a-guid-counter"
+    );
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "4");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("invalid MAPI X-RequestId header"));
 }
 
 #[tokio::test]
@@ -5243,7 +5306,10 @@ async fn mapi_over_http_replayed_execute_request_id_does_not_resubmit_message() 
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    execute_headers.insert("x-requestid", HeaderValue::from_static("retry-submit-1"));
+    execute_headers.insert(
+        "x-requestid",
+        HeaderValue::from_static("{11111111-2222-3333-4444-555555555555}:999999"),
+    );
     let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
     let first = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)

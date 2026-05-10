@@ -343,6 +343,25 @@ where
         );
         return Ok(response);
     };
+    if !is_valid_request_id(&request_id) {
+        let response = mapi_diagnostic_response(
+            &request_type_label,
+            &request_id,
+            4,
+            "invalid MAPI X-RequestId header; expected {GUID}:counter",
+        );
+        let response = finalize_mapi_response(response, headers);
+        log_mapi_connection(
+            endpoint,
+            &principal,
+            headers,
+            _body,
+            &request_type_label,
+            &request_id,
+            &response,
+        );
+        return Ok(response);
+    }
     if client_info(headers).is_none() {
         let response = mapi_diagnostic_response(
             &request_type_label,
@@ -1852,6 +1871,18 @@ fn request_id(headers: &HeaderMap) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn is_valid_request_id(value: &str) -> bool {
+    let Some(rest) = value.strip_prefix('{') else {
+        return false;
+    };
+    let Some((guid, counter)) = rest.split_once("}:") else {
+        return false;
+    };
+    !counter.is_empty()
+        && counter.bytes().all(|byte| byte.is_ascii_digit())
+        && Uuid::parse_str(guid).is_ok()
 }
 
 fn client_info(headers: &HeaderMap) -> Option<&HeaderValue> {
