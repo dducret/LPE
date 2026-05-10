@@ -1469,6 +1469,17 @@ async fn response_bytes(response: axum::response::Response) -> Vec<u8> {
     strip_mapi_http_envelope(bytes)
 }
 
+fn mapi_cookie_header(response: &axum::response::Response) -> String {
+    response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter_map(|value| value.split(';').next())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 fn parse_attachment_reference(value: &str) -> Option<(Uuid, Uuid)> {
     let value = value.trim();
     let rest = value.strip_prefix("attachment:")?;
@@ -2437,6 +2448,142 @@ async fn mapi_over_http_disconnect_consumes_emsmdb_session() {
         .to_str()
         .unwrap()
         .contains("Max-Age=0"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_notification_wait_refreshes_emsmdb_session_cookie() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut wait_headers = mapi_headers("NotificationWait");
+    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-requesttype").unwrap(),
+        "NotificationWait"
+    );
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let set_cookies = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(set_cookies.len(), 2);
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiContext=") && cookie.contains("Max-Age=1800")));
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiSequence=") && cookie.contains("Max-Age=1800")));
+    let body = response_bytes(response).await;
+    assert_eq!(body.len(), 16);
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 0);
+}
+
+#[tokio::test]
+async fn mapi_over_http_ping_requires_and_refreshes_session_cookie() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut ping_headers = mapi_headers("PING");
+    ping_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &ping_headers, b"")
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "PING");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(
+        response.headers().get("x-expirationinfo").unwrap(),
+        "1800000"
+    );
+    assert!(response_bytes(response).await.is_empty());
+
+    let missing_cookie = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("PING"), b"")
+        .await
+        .unwrap();
+    assert_eq!(
+        missing_cookie.headers().get("x-responsecode").unwrap(),
+        "13"
+    );
+    assert!(String::from_utf8(response_bytes(missing_cookie).await)
+        .unwrap()
+        .contains("missing MAPI session cookie"));
+
+    let mut invalid_body_headers = mapi_headers("PING");
+    invalid_body_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let invalid_body = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &invalid_body_headers, b"not-empty")
+        .await
+        .unwrap();
+    assert_eq!(invalid_body.headers().get("x-responsecode").unwrap(), "12");
+}
+
+#[tokio::test]
+async fn mapi_over_http_ping_refreshes_nspi_session_cookie() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let bind = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("Bind"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&bind);
+
+    let mut ping_headers = mapi_headers("PING");
+    ping_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &ping_headers, b"")
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "PING");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(
+        response.headers().get("x-expirationinfo").unwrap(),
+        "1800000"
+    );
+    assert!(response_bytes(response).await.is_empty());
 }
 
 #[tokio::test]

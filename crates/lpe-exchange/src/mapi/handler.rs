@@ -68,6 +68,7 @@ enum MapiRequestType {
     Connect,
     Disconnect,
     Execute,
+    NotificationWait,
     Bind,
     Unbind,
     CompareMids,
@@ -344,6 +345,9 @@ where
             )
             .await
         }
+        (MapiEndpoint::Emsmdb, MapiRequestType::NotificationWait) => {
+            notification_wait_response(endpoint, &principal, headers, &request_id)
+        }
         (MapiEndpoint::Nspi, MapiRequestType::Bind) => {
             bind_response(endpoint, &principal, headers, &request_id)
         }
@@ -393,7 +397,9 @@ where
             nspi_rowset_response(store, &principal, _body, "SeekEntries", &request_id).await
         }
         (MapiEndpoint::Nspi, MapiRequestType::UpdateStat) => nspi_update_stat_response(&request_id),
-        (_, MapiRequestType::Ping) => mapi_response("PING", &request_id, 0, Vec::new(), None),
+        (_, MapiRequestType::Ping) => {
+            ping_response(endpoint, &principal, headers, _body, &request_id)
+        }
         (_, MapiRequestType::Unsupported(value)) => mapi_diagnostic_response(
             &value,
             &request_id,
@@ -677,6 +683,81 @@ fn disconnect_response(
         body,
         session_context_cookies(endpoint, "", true),
     )
+}
+
+fn notification_wait_response(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    headers: &HeaderMap,
+    request_id: &str,
+) -> Response {
+    let Some(session_id) = request_cookie(endpoint, headers) else {
+        return mapi_diagnostic_response(
+            "NotificationWait",
+            request_id,
+            13,
+            "missing MAPI session cookie",
+        );
+    };
+    let Some(session) = remove_session(&session_id) else {
+        return mapi_diagnostic_response(
+            "NotificationWait",
+            request_id,
+            10,
+            "MAPI session context not found",
+        );
+    };
+    if !session_matches(&session, endpoint, principal) {
+        return mapi_diagnostic_response(
+            "NotificationWait",
+            request_id,
+            10,
+            "MAPI authentication context changed",
+        );
+    }
+
+    store_session(session_id.clone(), session);
+    let mut body = Vec::new();
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    write_u32(&mut body, 0);
+    mapi_response_with_cookies(
+        "NotificationWait",
+        request_id,
+        0,
+        body,
+        session_context_cookies(endpoint, &session_id, false),
+    )
+}
+
+fn ping_response(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    headers: &HeaderMap,
+    body: &[u8],
+    request_id: &str,
+) -> Response {
+    if !body.is_empty() {
+        return mapi_diagnostic_response("PING", request_id, 12, "PING request body must be empty");
+    }
+    let Some(session_id) = request_cookie(endpoint, headers) else {
+        return mapi_diagnostic_response("PING", request_id, 13, "missing MAPI session cookie");
+    };
+    let Some(session) = remove_session(&session_id) else {
+        return mapi_diagnostic_response("PING", request_id, 10, "MAPI session context not found");
+    };
+    if !session_matches(&session, endpoint, principal) {
+        return mapi_diagnostic_response(
+            "PING",
+            request_id,
+            10,
+            "MAPI authentication context changed",
+        );
+    }
+
+    store_session(session_id, session);
+    mapi_response("PING", request_id, 0, Vec::new(), None)
 }
 
 fn endpoint_url_response(
@@ -1665,6 +1746,7 @@ fn request_type(headers: &HeaderMap) -> Result<MapiRequestType> {
         "connect" => MapiRequestType::Connect,
         "disconnect" => MapiRequestType::Disconnect,
         "execute" => MapiRequestType::Execute,
+        "notificationwait" => MapiRequestType::NotificationWait,
         "bind" => MapiRequestType::Bind,
         "unbind" => MapiRequestType::Unbind,
         "comparemids" => MapiRequestType::CompareMids,
@@ -8426,6 +8508,7 @@ impl MapiRequestType {
             MapiRequestType::Connect => "Connect",
             MapiRequestType::Disconnect => "Disconnect",
             MapiRequestType::Execute => "Execute",
+            MapiRequestType::NotificationWait => "NotificationWait",
             MapiRequestType::Bind => "Bind",
             MapiRequestType::Unbind => "Unbind",
             MapiRequestType::CompareMids => "CompareMIds",
