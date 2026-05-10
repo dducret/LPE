@@ -1332,6 +1332,17 @@ fn mapi_headers_without_request_id(request_type: &str) -> HeaderMap {
     headers
 }
 
+fn mapi_headers_without_request_type() -> HeaderMap {
+    let mut headers = bearer_headers();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/mapi-http"),
+    );
+    headers.insert("x-requestid", HeaderValue::from_static("request-1"));
+    headers.insert("x-clientinfo", HeaderValue::from_static("client-info-1"));
+    headers
+}
+
 fn execute_body(rop_buffer: &[u8]) -> Vec<u8> {
     let mut body = Vec::new();
     body.extend_from_slice(&0u32.to_le_bytes());
@@ -2321,6 +2332,31 @@ async fn mapi_over_http_rejects_missing_request_id_with_parseable_error() {
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "7");
     let body = String::from_utf8(response_bytes(response).await).unwrap();
     assert!(body.contains("missing MAPI X-RequestId header"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_rejects_missing_request_type_with_parseable_error() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_headers_without_request_type(),
+            b"",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Unknown");
+    assert_eq!(response.headers().get("x-requestid").unwrap(), "request-1");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "7");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("missing MAPI X-RequestType header"));
 }
 
 #[tokio::test]

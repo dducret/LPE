@@ -305,7 +305,24 @@ where
     V: Detector,
 {
     let principal = authenticate_account(store, None, headers, "mapi").await?;
-    let request_type = request_type(headers)?;
+    let request_type = match request_type(headers) {
+        Ok(request_type) => request_type,
+        Err(error) => {
+            let request_id = request_id(headers).unwrap_or_default();
+            let response = mapi_diagnostic_response("Unknown", &request_id, 7, &error.to_string());
+            let response = finalize_mapi_response(response, headers);
+            log_mapi_connection(
+                endpoint,
+                &principal,
+                headers,
+                _body,
+                "Unknown",
+                &request_id,
+                &response,
+            );
+            return Ok(response);
+        }
+    };
     let request_type_label = request_type.header_value().to_string();
     let Some(request_id) = request_id(headers) else {
         let response = mapi_diagnostic_response(
