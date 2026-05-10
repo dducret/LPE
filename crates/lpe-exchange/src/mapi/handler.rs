@@ -8562,12 +8562,22 @@ impl RopRequest {
     }
 
     fn fast_transfer_buffer_size(&self) -> usize {
-        self.payload
+        let requested = self
+            .payload
             .get(..2)
             .and_then(|bytes| bytes.try_into().ok())
             .map(u16::from_le_bytes)
-            .map(usize::from)
-            .unwrap_or(u16::MAX as usize)
+            .unwrap_or(u16::MAX);
+        if requested == 0xBABE {
+            return self
+                .payload
+                .get(2..4)
+                .and_then(|bytes| bytes.try_into().ok())
+                .map(u16::from_le_bytes)
+                .map(usize::from)
+                .unwrap_or(u16::MAX as usize);
+        }
+        usize::from(requested)
     }
 
     fn stream_data(&self) -> &[u8] {
@@ -9337,6 +9347,15 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
             let sync_flags = cursor.read_u16()?;
             let mut payload = vec![sync_type, send_options];
             payload.extend_from_slice(&sync_flags.to_le_bytes());
+            if cursor.remaining() > 0 {
+                let restriction_size = cursor.read_u16()? as usize;
+                payload.extend_from_slice(&(restriction_size as u16).to_le_bytes());
+                payload.extend_from_slice(cursor.read_bytes(restriction_size)?);
+                payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+                let property_tag_count = cursor.read_u16()? as usize;
+                payload.extend_from_slice(&(property_tag_count as u16).to_le_bytes());
+                payload.extend_from_slice(cursor.read_bytes(property_tag_count * 4)?);
+            }
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
@@ -9346,8 +9365,12 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
         }
         0x4E => {
             let input_handle_index = cursor.read_u8()?;
+            let buffer_size = cursor.read_u16()?;
             let mut payload = Vec::new();
-            payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
+            payload.extend_from_slice(&buffer_size.to_le_bytes());
+            if buffer_size == 0xBABE {
+                payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
+            }
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),

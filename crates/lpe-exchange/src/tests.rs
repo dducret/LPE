@@ -1654,7 +1654,11 @@ fn append_rop_sync_manifest_get_buffer(
     buffer_size: u16,
 ) {
     rops.extend_from_slice(&[
-        0x70, 0x00, input, output, 0x01, 0x00, 0x00, 0x00, 0x4E, 0x00, output,
+        0x70, 0x00, input, output, 0x01, 0x00, 0x00, 0x00, // RopSynchronizationConfigure
+        0x00, 0x00, // RestrictionDataSize
+        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x00, 0x00, // PropertyTagCount
+        0x4E, 0x00, output, // RopFastTransferSourceGetBuffer
     ]);
     rops.extend_from_slice(&buffer_size.to_le_bytes());
 }
@@ -2220,6 +2224,9 @@ async fn mapi_over_http_connect_reestablishes_session_context_with_open_sync_han
     configure_rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
         0x01, 0x00, 0x00, 0x00, // content sync
+        0x00, 0x00, // RestrictionDataSize
+        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x00, 0x00, // PropertyTagCount
     ]);
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&first_cookie).unwrap());
@@ -2879,6 +2886,59 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         &payload[response_rop_size..response_rop_size + 8],
         &[0xff, 0xff, 0xff, 0xff, 1, 0, 0, 0]
     );
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut hierarchy_sync_rops = Vec::new();
+    append_rop_open_folder(&mut hierarchy_sync_rops, 0, 1, test_mapi_folder_id(1));
+    hierarchy_sync_rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x02, 0x09, 0x01, 0x01, // hierarchy sync, Unicode send/options
+        0x00, 0x00, // RestrictionDataSize
+        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+    ]);
+    let sync_property_tags = [
+        0x3601_0003u32,
+        0x3602_0003,
+        0x3603_0003,
+        0x0E08_0003,
+        0x0FF4_0102,
+        0x3FE0_0102,
+        0x3FE1_0102,
+        0x0E27_0002,
+    ];
+    hierarchy_sync_rops.extend_from_slice(&(sync_property_tags.len() as u16).to_le_bytes());
+    for tag in sync_property_tags {
+        hierarchy_sync_rops.extend_from_slice(&tag.to_le_bytes());
+    }
+    hierarchy_sync_rops.extend_from_slice(&[
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
+    ]);
+    hierarchy_sync_rops.extend_from_slice(&0xBABEu16.to_le_bytes());
+    hierarchy_sync_rops.extend_from_slice(&0x7BC0u16.to_le_bytes());
+    let hierarchy_sync_configure_request = execute_body(&crate::tests::rop_buffer(
+        &hierarchy_sync_rops,
+        &[1, u32::MAX, u32::MAX],
+    ));
+    let hierarchy_sync_configure_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &hierarchy_sync_configure_request,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(hierarchy_sync_configure_response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(hierarchy_sync_configure_response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x70, 0x02, 0x00, 0x00, 0x00, 0x00]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x4E, 0x02, 0x00, 0x00, 0x00, 0x00]
+    ));
 
     renew_mapi_request_id(&mut execute_headers);
     let address_types_request = hex_bytes(
@@ -7040,7 +7100,11 @@ async fn mapi_over_http_sync_configure_returns_canonical_manifest_buffer() {
     rops.push(0);
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
-        0x01, 0x00, 0x00, 0x00, 0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
+        0x01, 0x00, 0x00, 0x00, // content sync
+        0x00, 0x00, // RestrictionDataSize
+        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x00, 0x00, // PropertyTagCount
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
     ]);
     rops.extend_from_slice(&4096u16.to_le_bytes());
 
@@ -7123,6 +7187,9 @@ async fn mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests
     hierarchy_rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
         0x02, 0x00, 0x00, 0x00, // hierarchy sync
+        0x00, 0x00, // RestrictionDataSize
+        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x00, 0x00, // PropertyTagCount
         0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
     ]);
     hierarchy_rops.extend_from_slice(&4096u16.to_le_bytes());
