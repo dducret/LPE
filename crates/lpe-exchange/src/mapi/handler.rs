@@ -3136,6 +3136,11 @@ where
                 &request,
                 input_object_mut(session, &handle_slots, &request),
             )),
+            0x37 => responses.extend_from_slice(&rop_query_columns_all_response(
+                &request,
+                input_object(session, &handle_slots, &request),
+                snapshot,
+            )),
             0x1C => {
                 let parent_folder_id = match input_object(session, &handle_slots, &request)
                     .and_then(MapiObject::folder_id)
@@ -3934,6 +3939,11 @@ where
                     partial_completion,
                 ));
             }
+            0x26 => responses.extend_from_slice(&rop_error_response(
+                0x26,
+                request.response_handle_index(),
+                0x8004_0102,
+            )),
             0x27 => {
                 echo_input_handle_table = true;
                 responses.extend_from_slice(&rop_get_receive_folder_response(&request));
@@ -6291,6 +6301,34 @@ fn rop_query_rows_response(
     response.extend_from_slice(&(selected.len() as u16).to_le_bytes());
     for row in selected {
         write_standard_property_row(&mut response, &row);
+    }
+    response
+}
+
+fn rop_query_columns_all_response(
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    let columns = match object {
+        Some(MapiObject::HierarchyTable { .. }) => default_folder_property_tags(),
+        Some(MapiObject::ContentsTable { folder_id, .. }) => match snapshot
+            .collaboration_folder_for_id(*folder_id)
+            .map(|folder| folder.kind)
+        {
+            Some(MapiCollaborationFolderKind::Contacts) => default_contact_property_tags(),
+            Some(MapiCollaborationFolderKind::Calendar) => default_event_property_tags(),
+            None => default_message_property_tags(),
+        },
+        Some(MapiObject::AttachmentTable { .. }) => default_attachment_columns(),
+        _ => return rop_error_response(0x37, request.response_handle_index(), 0x8004_0102),
+    };
+
+    let mut response = vec![0x37, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&(columns.len() as u16).to_le_bytes());
+    for column in columns {
+        response.extend_from_slice(&column.to_le_bytes());
     }
     response
 }
@@ -10341,6 +10379,20 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload: Vec::new(),
             })
         }
+        0x26 => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(cursor.read_bytes(8)?);
+            let message_class = cursor.read_ascii_z()?;
+            payload.extend_from_slice(message_class.as_bytes());
+            payload.push(0);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
         0x60 => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
@@ -10701,7 +10753,7 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
-        0x09 | 0x16 | 0x17 | 0x4A | 0x52 | 0x68 | 0x6D | 0x7B | 0x81 => {
+        0x09 | 0x16 | 0x17 | 0x37 | 0x4A | 0x52 | 0x68 | 0x6D | 0x7B | 0x81 => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,

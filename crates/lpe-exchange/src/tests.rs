@@ -3780,6 +3780,76 @@ async fn mapi_over_http_execute_opens_folder_and_gets_empty_hierarchy_table() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_query_columns_all_reports_canonical_table_columns() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
+        0x37, 0x00, 0x02, // RopQueryColumnsAll
+    ]);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &rop_buffer[2..2 + response_rop_size];
+
+    let query_columns_offset = 18;
+    assert_eq!(response_rops[query_columns_offset], 0x37);
+    assert_eq!(response_rops[query_columns_offset + 1], 0x02);
+    assert_eq!(
+        u32::from_le_bytes(
+            response_rops[query_columns_offset + 2..query_columns_offset + 6]
+                .try_into()
+                .unwrap()
+        ),
+        0
+    );
+    let column_count = u16::from_le_bytes(
+        response_rops[query_columns_offset + 6..query_columns_offset + 8]
+            .try_into()
+            .unwrap(),
+    );
+    assert!(column_count >= 10);
+    assert!(contains_bytes(response_rops, &0x0037_001Fu32.to_le_bytes()));
+    assert!(contains_bytes(response_rops, &0x65E0_0102u32.to_le_bytes()));
+    assert!(contains_bytes(response_rops, &0x65E2_0102u32.to_le_bytes()));
+}
+
+#[tokio::test]
 async fn mapi_over_http_ipm_subtree_reports_distinct_folder_identity() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -10079,6 +10149,56 @@ async fn mapi_over_http_execute_returns_transport_folder_without_protocol_outbox
                 .unwrap()
         ),
         test_mapi_folder_id(6)
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_set_receive_folder_returns_rop_specific_protocol_error() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![0x26, 0x00, 0x00];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.extend_from_slice(b"IPM.Note\0");
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &rop_buffer[2..2 + response_rop_size];
+
+    assert_eq!(response_rops[0], 0x26);
+    assert_eq!(response_rops[1], 0x00);
+    assert_eq!(
+        u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
+        0x8004_0102
     );
 }
 

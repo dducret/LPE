@@ -82,6 +82,7 @@ The important non-negotiable rules are:
 ### Protocols
 
 - `docs/architecture/0.2.0-protocol-depth-gates.md`
+- `docs/architecture/imap-jmap-implementation-matrix.md`
 - `docs/architecture/jmap-mail-mvp.md`
 - `docs/architecture/jmap-contacts-calendars-mvp.md`
 - `docs/architecture/activesync-mvp.md`
