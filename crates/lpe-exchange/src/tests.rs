@@ -8257,6 +8257,319 @@ async fn mapi_over_http_sync_manifest_includes_stable_change_key_facts_without_b
 }
 
 #[tokio::test]
+async fn mapi_over_http_fast_transfer_copy_to_message_returns_canonical_manifest_without_bcc() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let message_id = "43434343-4343-4343-4343-434343434343";
+    let mut email = FakeStore::email(message_id, inbox_id, "inbox", "CopyTo message");
+    email.body_text = "CopyTo body from canonical mail".to_string();
+    email.bcc.push(JmapEmailAddress {
+        address: "hidden-copyto@example.test".to_string(),
+        display_name: None,
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            inbox_id, "inbox", "Inbox",
+        )])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let folder_id = test_mapi_folder_id(5);
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&folder_id.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[0x03, 0x00, 0x01, 0x02]);
+    rops.extend_from_slice(&1200u16.to_le_bytes());
+    rops.extend_from_slice(&folder_id.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    rops.extend_from_slice(&[0x4D, 0x00, 0x02, 0x03]);
+    rops.push(0);
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.push(0x01);
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&[0x4E, 0x00, 0x03]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x4D, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, b"LPE-MAPI-FASTTRANSFER\0"));
+    assert!(contains_bytes(&response_rops, b"CopyTo message"));
+    assert!(contains_bytes(
+        &response_rops,
+        b"CopyTo body from canonical mail"
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        b"hidden-copyto@example.test"
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_fast_transfer_copy_messages_filters_to_requested_canonical_messages() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let selected_id = "44444444-4444-4444-4444-444444444444";
+    let other_id = "45454545-4545-4545-4545-454545454545";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            inbox_id, "inbox", "Inbox",
+        )])),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(selected_id, inbox_id, "inbox", "Selected FastTransfer"),
+            FakeStore::email(other_id, inbox_id, "inbox", "Unrequested FastTransfer"),
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let folder_id = test_mapi_folder_id(5);
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&folder_id.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[0x4B, 0x00, 0x01, 0x02]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_message_id(selected_id).to_le_bytes());
+    rops.push(0);
+    rops.push(0x01);
+    rops.extend_from_slice(&[0x4E, 0x00, 0x02]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x4B, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, b"LPE-MAPI-FASTTRANSFER\0"));
+    assert!(contains_bytes(&response_rops, b"Selected FastTransfer"));
+    assert!(!contains_bytes(&response_rops, b"Unrequested FastTransfer"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_fast_transfer_copy_folder_returns_canonical_folder_manifest() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            inbox_id, "inbox", "Inbox",
+        )])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "46464646-4646-4646-4646-464646464646",
+            inbox_id,
+            "inbox",
+            "Folder FastTransfer",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let folder_id = test_mapi_folder_id(5);
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&folder_id.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[0x4C, 0x00, 0x01, 0x02]);
+    rops.push(0);
+    rops.push(0x01);
+    rops.extend_from_slice(&[0x4E, 0x00, 0x02]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x4C, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, b"LPE-MAPI-FASTTRANSFER\0"));
+    assert!(contains_bytes(&response_rops, b"inbox"));
+    assert!(contains_bytes(&response_rops, b"Inbox"));
+    assert!(contains_bytes(&response_rops, b"Folder FastTransfer"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_fast_transfer_copy_properties_message_returns_canonical_manifest_without_bcc(
+) {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let message_id = "47474747-4747-4747-4747-474747474747";
+    let mut email = FakeStore::email(message_id, inbox_id, "inbox", "CopyProperties message");
+    email.body_text = "CopyProperties body from canonical mail".to_string();
+    email.bcc.push(JmapEmailAddress {
+        address: "hidden-copyprops@example.test".to_string(),
+        display_name: None,
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            inbox_id, "inbox", "Inbox",
+        )])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let folder_id = test_mapi_folder_id(5);
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&folder_id.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[0x03, 0x00, 0x01, 0x02]);
+    rops.extend_from_slice(&1200u16.to_le_bytes());
+    rops.extend_from_slice(&folder_id.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    rops.extend_from_slice(&[0x69, 0x00, 0x02, 0x03]);
+    rops.push(0);
+    rops.push(0);
+    rops.push(0x01);
+    rops.extend_from_slice(&2u16.to_le_bytes());
+    rops.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x1000_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&[0x4E, 0x00, 0x03]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x69, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, b"LPE-MAPI-FASTTRANSFER\0"));
+    assert!(contains_bytes(&response_rops, b"CopyProperties message"));
+    assert!(contains_bytes(
+        &response_rops,
+        b"CopyProperties body from canonical mail"
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        b"hidden-copyprops@example.test"
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_fast_transfer_upload_rops_return_rop_specific_protocol_errors() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            inbox_id, "inbox", "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[0x53, 0x00, 0x01, 0x02, 0x01, 0x00]);
+    rops.extend_from_slice(&[0x54, 0x00, 0x01]);
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&[0x86, 0x00, 0x01]);
+    rops.extend_from_slice(&[15, 20, 0, 1, 0, 0]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x53, 0x02, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x54, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x86, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &[0x00, 0x00, 0x02, 0x01, 0x04, 0x80]
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests() {
     let mailbox_id = "55555555-5555-5555-5555-555555555555";
     let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");

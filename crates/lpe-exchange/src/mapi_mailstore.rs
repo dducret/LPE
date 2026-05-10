@@ -212,6 +212,68 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
     buffer
 }
 
+pub(crate) fn fast_transfer_manifest_buffer_with_attachments(
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    attachment_facts: &[MessageAttachmentSyncFacts],
+) -> Vec<u8> {
+    let mut buffer = b"LPE-MAPI-FASTTRANSFER\0".to_vec();
+    buffer.extend_from_slice(&folder_id.to_le_bytes());
+    buffer.extend_from_slice(&(mailboxes.len().min(u32::MAX as usize) as u32).to_le_bytes());
+    buffer.extend_from_slice(&(emails.len().min(u32::MAX as usize) as u32).to_le_bytes());
+
+    let mut folders = mailboxes.iter().collect::<Vec<_>>();
+    folders.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+    for mailbox in folders {
+        let change_number = canonical_folder_change_number(mailbox);
+        write_prefixed_bytes(&mut buffer, &source_key_for_uuid(&mailbox.id));
+        buffer.extend_from_slice(&change_number.to_le_bytes());
+        write_prefixed_bytes(&mut buffer, mailbox.role.as_bytes());
+        write_prefixed_bytes(&mut buffer, mailbox.name.as_bytes());
+    }
+
+    let mut messages = emails.iter().collect::<Vec<_>>();
+    messages.sort_by(|left, right| {
+        left.received_at
+            .cmp(&right.received_at)
+            .then(left.subject.cmp(&right.subject))
+            .then(left.id.cmp(&right.id))
+    });
+    for email in messages {
+        let attachments = attachments_for_message(email.id, attachment_facts);
+        let change_number = canonical_message_change_number_with_attachments(email, attachments);
+        write_prefixed_bytes(&mut buffer, &source_key_for_uuid(&email.id));
+        buffer.extend_from_slice(&change_number.to_le_bytes());
+        buffer.extend_from_slice(&canonical_message_flags(email).to_le_bytes());
+        buffer.extend_from_slice(&canonical_flag_status(email).to_le_bytes());
+        write_prefixed_bytes(&mut buffer, email.subject.as_bytes());
+        write_prefixed_bytes(&mut buffer, email.body_text.as_bytes());
+        write_prefixed_bytes(&mut buffer, email.from_address.as_bytes());
+        write_prefixed_bytes(
+            &mut buffer,
+            email.from_display.as_deref().unwrap_or_default().as_bytes(),
+        );
+        write_visible_recipient_facts(&mut buffer, email);
+        buffer.extend_from_slice(&(attachments.len().min(u16::MAX as usize) as u16).to_le_bytes());
+        let mut attachments = attachments.iter().collect::<Vec<_>>();
+        attachments.sort_by(|left, right| {
+            left.file_name
+                .cmp(&right.file_name)
+                .then(left.media_type.cmp(&right.media_type))
+                .then(left.id.cmp(&right.id))
+        });
+        for attachment in attachments.into_iter().take(u16::MAX as usize) {
+            write_prefixed_bytes(&mut buffer, attachment.file_name.as_bytes());
+            write_prefixed_bytes(&mut buffer, attachment.media_type.as_bytes());
+            buffer.extend_from_slice(&attachment.size_octets.to_le_bytes());
+            write_prefixed_bytes(&mut buffer, attachment.file_reference.as_bytes());
+        }
+    }
+
+    buffer
+}
+
 pub(crate) fn canonical_message_flags(email: &JmapEmail) -> u32 {
     let mut flags = 0u32;
     if !email.unread {

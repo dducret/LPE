@@ -4016,6 +4016,82 @@ where
                 responses.extend_from_slice(&rop_synchronization_configure_response(&request));
                 output_handles.push(handle);
             }
+            0x4B => {
+                let Some(folder_id) =
+                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x4B,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                let requested_ids = request.fast_transfer_message_ids();
+                let mut selected = emails_for_folder(folder_id, mailboxes, emails)
+                    .into_iter()
+                    .filter(|email| requested_ids.contains(&mapi_message_id(email)))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                selected.sort_by(|left, right| left.id.cmp(&right.id));
+                let sync_attachment_facts =
+                    sync_attachment_facts_for(folder_id, &selected, snapshot);
+                let transfer_buffer =
+                    mapi_mailstore::fast_transfer_manifest_buffer_with_attachments(
+                        folder_id,
+                        &[],
+                        &selected,
+                        &sync_attachment_facts,
+                    );
+                let handle = session.allocate_output_handle(
+                    request.output_handle_index,
+                    MapiObject::SynchronizationSource {
+                        folder_id,
+                        sync_type: 0,
+                        state: Vec::new(),
+                        state_upload_buffer: Vec::new(),
+                        transfer_buffer,
+                        transfer_position: 0,
+                    },
+                );
+                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                responses.extend_from_slice(&rop_fast_transfer_source_copy_response(&request));
+                output_handles.push(handle);
+            }
+            0x4C | 0x4D | 0x69 => {
+                let Some(object) = input_object(session, &handle_slots, &request).cloned() else {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                let Some((folder_id, transfer_buffer)) =
+                    fast_transfer_manifest_for_object(&object, mailboxes, emails, snapshot)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                };
+                let handle = session.allocate_output_handle(
+                    request.output_handle_index,
+                    MapiObject::SynchronizationSource {
+                        folder_id,
+                        sync_type: 0,
+                        state: Vec::new(),
+                        state_upload_buffer: Vec::new(),
+                        transfer_buffer,
+                        transfer_position: 0,
+                    },
+                );
+                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                responses.extend_from_slice(&rop_fast_transfer_source_copy_response(&request));
+                output_handles.push(handle);
+            }
             0x4E => match input_object_mut(session, &handle_slots, &request) {
                 Some(MapiObject::SynchronizationSource {
                     sync_type,
@@ -5373,6 +5449,12 @@ fn rop_synchronization_configure_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x70, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
     response.push(0);
+    response
+}
+
+fn rop_fast_transfer_source_copy_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![request.rop_id, request.output_handle_index.unwrap_or(0)];
+    write_u32(&mut response, 0);
     response
 }
 
@@ -7265,6 +7347,58 @@ fn sync_attachment_facts_for(
         .collect()
 }
 
+fn fast_transfer_manifest_for_object(
+    object: &MapiObject,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Option<(u64, Vec<u8>)> {
+    match object {
+        MapiObject::Folder { folder_id } => {
+            let folder = folder_row_for_id(*folder_id, mailboxes)
+                .cloned()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let messages = emails_for_folder(*folder_id, mailboxes, emails)
+                .into_iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            let attachment_facts = sync_attachment_facts_for(*folder_id, &messages, snapshot);
+            Some((
+                *folder_id,
+                mapi_mailstore::fast_transfer_manifest_buffer_with_attachments(
+                    *folder_id,
+                    &folder,
+                    &messages,
+                    &attachment_facts,
+                ),
+            ))
+        }
+        MapiObject::Message {
+            folder_id,
+            message_id,
+        } => {
+            let message = message_for_id(*folder_id, *message_id, mailboxes, emails)?.clone();
+            let folder = folder_row_for_id(*folder_id, mailboxes)
+                .cloned()
+                .into_iter()
+                .collect::<Vec<_>>();
+            let messages = vec![message];
+            let attachment_facts = sync_attachment_facts_for(*folder_id, &messages, snapshot);
+            Some((
+                *folder_id,
+                mapi_mailstore::fast_transfer_manifest_buffer_with_attachments(
+                    *folder_id,
+                    &folder,
+                    &messages,
+                    &attachment_facts,
+                ),
+            ))
+        }
+        _ => None,
+    }
+}
+
 fn message_for_id<'a>(
     folder_id: u64,
     message_id: u64,
@@ -9099,7 +9233,10 @@ impl RopRequest {
     }
 
     fn response_handle_index(&self) -> u8 {
-        if matches!(self.rop_id, 0x0C | 0x11 | 0x25 | 0x70 | 0x72 | 0x7E | 0x82) {
+        if matches!(
+            self.rop_id,
+            0x0C | 0x11 | 0x25 | 0x4B | 0x4C | 0x4D | 0x53 | 0x69 | 0x70 | 0x72 | 0x7E | 0x82
+        ) {
             return self.output_handle_index.unwrap_or(0);
         }
         self.input_handle_index
@@ -9238,6 +9375,23 @@ impl RopRequest {
             .chunks_exact(8)
             .take(count)
             .map(|bytes| u64::from_le_bytes(bytes.try_into().unwrap_or_default()))
+            .collect()
+    }
+
+    fn fast_transfer_message_ids(&self) -> Vec<u64> {
+        let count = self
+            .payload
+            .get(..2)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .map(usize::from)
+            .unwrap_or(0);
+        self.payload
+            .get(2..)
+            .unwrap_or_default()
+            .chunks_exact(8)
+            .take(count)
+            .filter_map(|bytes| bytes.try_into().ok().map(u64::from_le_bytes))
             .collect()
     }
 
@@ -9980,6 +10134,80 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
+        0x4B => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            let message_id_count = cursor.read_u16()? as usize;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&(message_id_count as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(message_id_count * 8)?);
+            payload.push(cursor.read_u8()?);
+            payload.push(cursor.read_u8()?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
+        0x4C => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.push(cursor.read_u8()?);
+            payload.push(cursor.read_u8()?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
+        0x4D | 0x69 => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.push(cursor.read_u8()?);
+            if rop_id == 0x4D {
+                payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+            } else {
+                payload.push(cursor.read_u8()?);
+            }
+            payload.push(cursor.read_u8()?);
+            let property_tag_count = cursor.read_u16()? as usize;
+            payload.extend_from_slice(&(property_tag_count as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(property_tag_count * 4)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
+        0x53 => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            let payload = vec![cursor.read_u8()?, cursor.read_u8()?];
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
+        0x54 => {
+            let input_handle_index = cursor.read_u8()?;
+            let transfer_data_size = cursor.read_u16()? as usize;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&(transfer_data_size as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(transfer_data_size)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
         0x75 => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
@@ -10113,6 +10341,15 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: None,
                 payload: cursor.read_bytes(size)?.to_vec(),
+            })
+        }
+        0x86 => {
+            let input_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload: cursor.read_bytes(6)?.to_vec(),
             })
         }
         0x7F => {
