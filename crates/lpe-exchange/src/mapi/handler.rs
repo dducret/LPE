@@ -9237,6 +9237,7 @@ impl RopRequest {
             self.rop_id,
             0x0C | 0x11
                 | 0x25
+                | 0x29
                 | 0x3E
                 | 0x3F
                 | 0x4B
@@ -10083,6 +10084,27 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
+        0x29 => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            let notification_types = cursor.read_u16()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&notification_types.to_le_bytes());
+            if notification_types & 0x0400 != 0 {
+                payload.push(cursor.read_u8()?);
+            }
+            let want_whole_store = cursor.read_u8()?;
+            payload.push(want_whole_store);
+            if want_whole_store == 0 {
+                payload.extend_from_slice(cursor.read_bytes(16)?);
+            }
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
         0x30 => {
             let input_handle_index = cursor.read_u8()?;
             let restriction_size = cursor.read_u16()? as usize;
@@ -10108,6 +10130,15 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: None,
                 payload,
+            })
+        }
+        0x38 => {
+            let input_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload: Vec::new(),
             })
         }
         0x3E | 0x3F => {
@@ -10144,6 +10175,35 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
             if rules_count != 0 {
                 return Err(anyhow!("unsupported non-empty ModifyRules request"));
             }
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x42 | 0x45 => {
+            let input_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload: cursor.read_bytes(8)?.to_vec(),
+            })
+        }
+        0x50 => {
+            let input_handle_index = cursor.read_u8()?;
+            let payload = vec![cursor.read_u8()?];
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x58 | 0x92 => {
+            let input_handle_index = cursor.read_u8()?;
+            let payload = vec![cursor.read_u8()?, cursor.read_u8()?];
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
