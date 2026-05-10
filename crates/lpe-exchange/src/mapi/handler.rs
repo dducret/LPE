@@ -1993,6 +1993,7 @@ where
     let mut cursor = Cursor::new(requests);
     let mut responses = Vec::new();
     let mut output_handles = Vec::new();
+    let mut echo_input_handle_table = false;
     while cursor.remaining() > 0 {
         let request = match read_rop_request(&mut cursor) {
             Ok(request) => request,
@@ -2165,14 +2166,22 @@ where
                 responses.extend_from_slice(&rop_create_message_response(&request));
                 output_handles.push(handle);
             }
-            0x07 => responses.extend_from_slice(&rop_get_properties_specific_response(
-                &request,
-                input_object(session, &handle_slots, &request),
-                principal,
-                mailboxes,
-                emails,
-                snapshot,
-            )),
+            0x07 => {
+                if request
+                    .property_tags()
+                    .contains(&PID_TAG_SERIALIZED_REPLID_GUID_MAP)
+                {
+                    echo_input_handle_table = true;
+                }
+                responses.extend_from_slice(&rop_get_properties_specific_response(
+                    &request,
+                    input_object(session, &handle_slots, &request),
+                    principal,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                ));
+            }
             0x08 => responses.extend_from_slice(&rop_get_properties_all_response(
                 &request,
                 input_object(session, &handle_slots, &request),
@@ -4055,10 +4064,12 @@ where
             )),
         }
     }
+    let response_handles =
+        response_handle_table(&handle_slots, &output_handles, echo_input_handle_table);
     let response = if extended {
-        rop_buffer_with_response_spec(responses, &output_handles)
+        rop_buffer_with_response_spec(responses, &response_handles)
     } else {
-        rop_buffer_with_response(responses, &output_handles)
+        rop_buffer_with_response(responses, &response_handles)
     };
     if extended {
         rpc_header_ext_rop_buffer(response)
@@ -4308,6 +4319,22 @@ fn set_handle_slot(handle_slots: &mut Vec<u32>, output_handle_index: Option<u8>,
         handle_slots.resize(index + 1, u32::MAX);
     }
     handle_slots[index] = handle;
+}
+
+fn response_handle_table(
+    handle_slots: &[u32],
+    output_handles: &[u32],
+    echo_input_handles: bool,
+) -> Vec<u32> {
+    if !output_handles.is_empty() || !echo_input_handles {
+        return output_handles.to_vec();
+    }
+
+    let mut handles = handle_slots.to_vec();
+    while handles.last().is_some_and(|handle| *handle == u32::MAX) {
+        handles.pop();
+    }
+    handles
 }
 
 fn reset_table_position(object: &mut MapiObject) {

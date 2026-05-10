@@ -2683,6 +2683,8 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
     );
     assert_eq!(&response_rop[9..11], &1u16.to_le_bytes());
     assert_eq!(&response_rop[11..27], &mapi_mailstore::STORE_REPLICA_GUID);
+    assert_eq!(response_rop_size, response_rop.len() + 2);
+    assert_eq!(&payload[response_rop_size..], &1u32.to_le_bytes());
 }
 
 #[tokio::test]
