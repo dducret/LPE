@@ -343,6 +343,25 @@ where
         );
         return Ok(response);
     };
+    if client_info(headers).is_none() {
+        let response = mapi_diagnostic_response(
+            &request_type_label,
+            &request_id,
+            7,
+            "missing MAPI X-ClientInfo header",
+        );
+        let response = finalize_mapi_response(response, headers);
+        log_mapi_connection(
+            endpoint,
+            &principal,
+            headers,
+            _body,
+            &request_type_label,
+            &request_id,
+            &response,
+        );
+        return Ok(response);
+    }
     if !is_mapi_content_type(headers) {
         let response = mapi_diagnostic_response(
             &request_type_label,
@@ -1833,6 +1852,10 @@ fn request_id(headers: &HeaderMap) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn client_info(headers: &HeaderMap) -> Option<&HeaderValue> {
+    headers.get("x-clientinfo")
 }
 
 fn is_mapi_content_type(headers: &HeaderMap) -> bool {
