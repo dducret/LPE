@@ -3980,6 +3980,7 @@ where
                 ));
             }
             0x68 => responses.extend_from_slice(&rop_get_receive_folder_table_response(&request)),
+            0x49 => responses.extend_from_slice(&rop_get_address_types_response(&request)),
             0x55 => responses
                 .extend_from_slice(&rop_get_names_from_property_ids_response(&request, session)),
             0x56 => {
@@ -4937,6 +4938,16 @@ fn rop_get_local_replica_ids_response(
     response.extend_from_slice(&mapi_mailstore::STORE_REPLICA_GUID);
     write_u64(&mut response, mapi_store_id(first_global_counter));
     write_u32(&mut response, count);
+    response
+}
+
+fn rop_get_address_types_response(request: &RopRequest) -> Vec<u8> {
+    let address_types = b"EX\0SMTP\0";
+    let mut response = vec![0x49, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&2u16.to_le_bytes());
+    response.extend_from_slice(&(address_types.len() as u16).to_le_bytes());
+    response.extend_from_slice(address_types);
     response
 }
 

@@ -2879,6 +2879,45 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         &payload[response_rop_size..response_rop_size + 8],
         &[0xff, 0xff, 0xff, 0xff, 1, 0, 0, 0]
     );
+
+    renew_mapi_request_id(&mut execute_headers);
+    let address_types_request = hex_bytes(
+        "020000001100000000000400090009000500490000010000000780000000000000",
+    );
+    let address_types_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &address_types_request,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(address_types_response.status(), StatusCode::OK);
+    let body = response_bytes(address_types_response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    assert_eq!(&rop_buffer[0..4], &[0, 0, 4, 0]);
+    let payload_size = u16::from_le_bytes(rop_buffer[4..6].try_into().unwrap()) as usize;
+    let payload = &rop_buffer[8..8 + payload_size];
+    let response_rop_size = u16::from_le_bytes(payload[0..2].try_into().unwrap()) as usize;
+    let response_rop = &payload[2..response_rop_size];
+
+    assert_eq!(response_rop[0], 0x49);
+    assert_eq!(response_rop[1], 0x00);
+    assert_eq!(
+        u32::from_le_bytes(response_rop[2..6].try_into().unwrap()),
+        0
+    );
+    assert_eq!(
+        u16::from_le_bytes(response_rop[6..8].try_into().unwrap()),
+        2
+    );
+    assert_eq!(
+        u16::from_le_bytes(response_rop[8..10].try_into().unwrap()) as usize,
+        b"EX\0SMTP\0".len()
+    );
+    assert_eq!(&response_rop[10..], b"EX\0SMTP\0");
 }
 
 #[tokio::test]
