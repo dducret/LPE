@@ -507,8 +507,8 @@ where
         (_, MapiRequestType::Unsupported(value)) => mapi_diagnostic_response(
             &value,
             &request_id,
-            16,
-            &format!("MAPI request type {value} is not implemented by LPE yet."),
+            5,
+            &format!("invalid MAPI X-RequestType header: {value}"),
         ),
         (MapiEndpoint::Emsmdb, other) => mapi_diagnostic_response(
             other.header_value(),

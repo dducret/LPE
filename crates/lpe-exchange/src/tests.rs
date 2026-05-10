@@ -2431,6 +2431,29 @@ async fn mapi_over_http_rejects_missing_request_type_with_parseable_error() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_rejects_unknown_request_type_with_parseable_error() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("BogusRequest"), b"")
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-requesttype").unwrap(),
+        "BogusRequest"
+    );
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "5");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("invalid MAPI X-RequestType header"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_rejects_missing_client_info_with_parseable_error() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
