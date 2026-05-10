@@ -3125,6 +3125,13 @@ where
                 emails,
                 snapshot,
             )),
+            0x1A => responses.extend_from_slice(&rop_seek_row_fractional_response(
+                &request,
+                input_object_mut(session, &handle_slots, &request),
+                mailboxes,
+                emails,
+                snapshot,
+            )),
             0x1B => responses.extend_from_slice(&rop_create_bookmark_response(
                 &request,
                 input_object_mut(session, &handle_slots, &request),
@@ -7041,6 +7048,38 @@ fn rop_seek_row_bookmark_response(
     response
 }
 
+fn rop_seek_row_fractional_response(
+    request: &RopRequest,
+    object: Option<&mut MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    let Some(object) = object else {
+        return rop_error_response(0x1A, request.response_handle_index(), 0x8004_0102);
+    };
+    let total_rows = table_position_and_count(Some(object), mailboxes, emails, snapshot).1;
+    let Some(position) = table_position_mut(object) else {
+        return rop_error_response(0x1A, request.response_handle_index(), 0x8004_0102);
+    };
+    let Some((numerator, denominator)) = request.fractional_position() else {
+        return rop_error_response(0x1A, request.response_handle_index(), 0x8004_0102);
+    };
+    if denominator == 0 {
+        return rop_error_response(0x1A, request.response_handle_index(), 0x8004_0102);
+    }
+    let new_position = (total_rows as u128)
+        .saturating_mul(numerator as u128)
+        .checked_div(denominator as u128)
+        .unwrap_or(0)
+        .min(total_rows as u128) as usize;
+    *position = new_position;
+
+    let mut response = vec![0x1A, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response
+}
+
 fn rop_free_bookmark_response(request: &RopRequest, object: Option<&mut MapiObject>) -> Vec<u8> {
     let Some(object) = object else {
         return rop_error_response(0x89, request.response_handle_index(), 0x8004_0102);
@@ -9678,6 +9717,12 @@ impl RopRequest {
         self.payload.get(5).is_some_and(|want| *want != 0)
     }
 
+    fn fractional_position(&self) -> Option<(u32, u32)> {
+        let numerator = u32::from_le_bytes(self.payload.get(..4)?.try_into().ok()?);
+        let denominator = u32::from_le_bytes(self.payload.get(4..8)?.try_into().ok()?);
+        Some((numerator, denominator))
+    }
+
     fn sort_orders(&self) -> Vec<MapiSortOrder> {
         let Some(count_bytes) = self.payload.get(1..3) else {
             return Vec::new();
@@ -10363,6 +10408,31 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
+        0x6B => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(cursor.read_bytes(8)?);
+            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x6C => {
+            let input_handle_index = cursor.read_u8()?;
+            let collapse_state_size = cursor.read_u16()? as usize;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&(collapse_state_size as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(collapse_state_size)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
         0x70 => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
@@ -10685,6 +10755,18 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
             payload.extend_from_slice(cursor.read_bytes(bookmark_size)?);
             payload.extend_from_slice(&cursor.read_i32()?.to_le_bytes());
             payload.push(cursor.read_u8()?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x1A => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),

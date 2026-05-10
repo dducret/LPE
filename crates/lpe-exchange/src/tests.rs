@@ -4492,6 +4492,153 @@ async fn mapi_over_http_query_position_reports_table_cursor() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_seek_row_fractional_moves_table_cursor() {
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 4;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(
+                "87878787-8787-8787-8787-878787878787",
+                "55555555-5555-5555-5555-555555555555",
+                "inbox",
+                "Fractional first",
+            ),
+            FakeStore::email(
+                "88888888-8888-8888-8888-888888888888",
+                "55555555-5555-5555-5555-555555555555",
+                "inbox",
+                "Fractional second",
+            ),
+            FakeStore::email(
+                "89898989-8989-8989-8989-898989898989",
+                "55555555-5555-5555-5555-555555555555",
+                "inbox",
+                "Fractional third",
+            ),
+            FakeStore::email(
+                "8a8a8a8a-8a8a-8a8a-8a8a-8a8a8a8a8a8a",
+                "55555555-5555-5555-5555-555555555555",
+                "inbox",
+                "Fractional fourth",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
+        0x1A, 0x00, 0x02, // RopSeekRowFractional
+    ]);
+    rops.extend_from_slice(&1u32.to_le_bytes());
+    rops.extend_from_slice(&2u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x17, 0x00, 0x02, // RopQueryPosition
+    ]);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x1A, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x17, 0x02, 0, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0]
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_collapse_state_rops_return_rop_specific_protocol_errors() {
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "87878787-8787-8787-8787-878787878787",
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Categorized table probe",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]);
+    rops.extend_from_slice(&[0x6B, 0x00, 0x02]);
+    rops.extend_from_slice(
+        &test_mapi_message_id("87878787-8787-8787-8787-878787878787").to_le_bytes(),
+    );
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&[0x6C, 0x00, 0x02]);
+    rops.extend_from_slice(&4u16.to_le_bytes());
+    rops.extend_from_slice(b"LPEC");
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x6B, 0x02, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x6C, 0x02, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &[0x00, 0x00, 0x02, 0x01, 0x04, 0x80]
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_query_rows_no_advance_preserves_table_position() {
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     inbox.total_emails = 2;
