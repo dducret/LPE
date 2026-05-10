@@ -2723,6 +2723,47 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
     assert_eq!(&response_rop[10..12], &0x8002u16.to_le_bytes());
     assert_eq!(response_rop_size, response_rop.len() + 2);
     assert_eq!(&payload[response_rop_size..], &1u32.to_le_bytes());
+
+    renew_mapi_request_id(&mut execute_headers);
+    let ipm_subtree_property_request = hex_bytes(
+        "020000002c00000000000400240024001c00020000010100040000000000000700010000000001000201047c01000000ffffffff0780000000000000",
+    );
+    let ipm_subtree_property_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &ipm_subtree_property_request,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(ipm_subtree_property_response.status(), StatusCode::OK);
+    let body = response_bytes(ipm_subtree_property_response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    assert_eq!(&rop_buffer[0..4], &[0, 0, 4, 0]);
+    let payload_size = u16::from_le_bytes(rop_buffer[4..6].try_into().unwrap()) as usize;
+    let payload = &rop_buffer[8..8 + payload_size];
+    let response_rop_size = u16::from_le_bytes(payload[0..2].try_into().unwrap()) as usize;
+    let response_rops = &payload[2..response_rop_size];
+
+    assert_eq!(response_rops[0], 0x02);
+    assert_eq!(response_rops[1], 0x01);
+    assert_eq!(
+        u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
+        0
+    );
+    assert_eq!(response_rops[8], 0x07);
+    assert_eq!(response_rops[9], 0x01);
+    assert_eq!(
+        u32::from_le_bytes(response_rops[10..14].try_into().unwrap()),
+        0
+    );
+    assert_eq!(response_rop_size, response_rops.len() + 2);
+    assert_eq!(
+        &payload[response_rop_size..response_rop_size + 8],
+        &[1, 0, 0, 0, 2, 0, 0, 0]
+    );
 }
 
 #[tokio::test]

@@ -2167,12 +2167,7 @@ where
                 output_handles.push(handle);
             }
             0x07 => {
-                if request
-                    .property_tags()
-                    .contains(&PID_TAG_SERIALIZED_REPLID_GUID_MAP)
-                {
-                    echo_input_handle_table = true;
-                }
+                echo_input_handle_table = true;
                 responses.extend_from_slice(&rop_get_properties_specific_response(
                     &request,
                     input_object(session, &handle_slots, &request),
@@ -4327,7 +4322,7 @@ fn response_handle_table(
     output_handles: &[u32],
     echo_input_handles: bool,
 ) -> Vec<u32> {
-    if !output_handles.is_empty() || !echo_input_handles {
+    if !echo_input_handles {
         return output_handles.to_vec();
     }
 
@@ -4335,7 +4330,11 @@ fn response_handle_table(
     while handles.last().is_some_and(|handle| *handle == u32::MAX) {
         handles.pop();
     }
-    handles
+    if handles.is_empty() {
+        output_handles.to_vec()
+    } else {
+        handles
+    }
 }
 
 fn reset_table_position(object: &mut MapiObject) {
