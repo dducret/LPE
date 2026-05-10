@@ -3431,7 +3431,10 @@ where
                     partial_completion,
                 ));
             }
-            0x27 => responses.extend_from_slice(&rop_get_receive_folder_response(&request)),
+            0x27 => {
+                echo_input_handle_table = true;
+                responses.extend_from_slice(&rop_get_receive_folder_response(&request));
+            }
             0x66 => {
                 let folder_id = match input_object(session, &handle_slots, &request) {
                     Some(MapiObject::Folder { folder_id }) => *folder_id,
