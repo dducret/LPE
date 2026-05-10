@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use axum::{
     http::{
-        header::{CONTENT_TYPE, SET_COOKIE, WWW_AUTHENTICATE},
+        header::{CONTENT_LENGTH, CONTENT_TYPE, SET_COOKIE, WWW_AUTHENTICATE},
         HeaderMap, HeaderValue, StatusCode,
     },
     response::{IntoResponse, Response},
@@ -400,6 +400,63 @@ where
         );
         return Ok(response);
     }
+    if host_header(headers).is_none() {
+        let response = mapi_diagnostic_response(
+            &request_type_label,
+            &request_id,
+            7,
+            "missing MAPI Host header",
+        );
+        let response = finalize_mapi_response(response, headers);
+        log_mapi_connection(
+            endpoint,
+            &principal,
+            headers,
+            _body,
+            &request_type_label,
+            &request_id,
+            &response,
+        );
+        return Ok(response);
+    }
+    let Some(content_length) = content_length_header(headers) else {
+        let response = mapi_diagnostic_response(
+            &request_type_label,
+            &request_id,
+            7,
+            "missing MAPI Content-Length header",
+        );
+        let response = finalize_mapi_response(response, headers);
+        log_mapi_connection(
+            endpoint,
+            &principal,
+            headers,
+            _body,
+            &request_type_label,
+            &request_id,
+            &response,
+        );
+        return Ok(response);
+    };
+    if !is_valid_content_length(&content_length) {
+        let response = mapi_diagnostic_response(
+            &request_type_label,
+            &request_id,
+            4,
+            "invalid MAPI Content-Length header",
+        );
+        let response = finalize_mapi_response(response, headers);
+        log_mapi_connection(
+            endpoint,
+            &principal,
+            headers,
+            _body,
+            &request_type_label,
+            &request_id,
+            &response,
+        );
+        return Ok(response);
+    }
     if !is_mapi_content_type(headers) {
         let response = mapi_diagnostic_response(
             &request_type_label,
@@ -557,6 +614,16 @@ fn connect_response(
     headers: &HeaderMap,
     request_id: &str,
 ) -> Response {
+    if let Some(session_id) = request_cookie(endpoint, headers) {
+        if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
+            return mapi_diagnostic_response(
+                "Connect",
+                request_id,
+                6,
+                "invalid MAPI request sequence cookie",
+            );
+        }
+    }
     let session_id = reconnect_session(endpoint, principal, headers)
         .unwrap_or_else(|| create_session(endpoint, principal));
     let cookies = session_context_cookies(endpoint, &session_id, false);
@@ -612,6 +679,16 @@ fn bind_response(
     headers: &HeaderMap,
     request_id: &str,
 ) -> Response {
+    if let Some(session_id) = request_cookie(endpoint, headers) {
+        if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
+            return mapi_diagnostic_response(
+                "Bind",
+                request_id,
+                6,
+                "invalid MAPI request sequence cookie",
+            );
+        }
+    }
     let session_id = reconnect_session(endpoint, principal, headers)
         .unwrap_or_else(|| create_session(endpoint, principal));
     let cookies = session_context_cookies(endpoint, &session_id, false);
@@ -639,6 +716,14 @@ where
     let Some(session_id) = request_cookie(endpoint, headers) else {
         return execute_failure_response(request_id, 13, "missing MAPI session cookie", None);
     };
+    if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
+        return execute_failure_response(
+            request_id,
+            6,
+            "invalid MAPI request sequence cookie",
+            None,
+        );
+    }
     let Some(session) = get_session(&session_id) else {
         return execute_failure_response(request_id, 10, "MAPI session context not found", None);
     };
@@ -755,6 +840,14 @@ fn disconnect_response(
             "missing MAPI session cookie",
         );
     };
+    if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
+        return mapi_diagnostic_response(
+            response_request_type,
+            request_id,
+            6,
+            "invalid MAPI request sequence cookie",
+        );
+    }
     let Some(session) = remove_session(&session_id) else {
         return mapi_diagnostic_response(
             response_request_type,
@@ -803,6 +896,14 @@ fn notification_wait_response(
             "missing MAPI session cookie",
         );
     };
+    if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
+        return mapi_diagnostic_response(
+            "NotificationWait",
+            request_id,
+            6,
+            "invalid MAPI request sequence cookie",
+        );
+    }
     let Some(session) = remove_session(&session_id) else {
         return mapi_diagnostic_response(
             "NotificationWait",
@@ -842,12 +943,28 @@ fn ping_response(
     body: &[u8],
     request_id: &str,
 ) -> Response {
+    if content_length_header(headers).as_deref() != Some("0") {
+        return mapi_diagnostic_response(
+            "PING",
+            request_id,
+            4,
+            "PING requests must use Content-Length 0",
+        );
+    }
     if !body.is_empty() {
         return mapi_diagnostic_response("PING", request_id, 12, "PING request body must be empty");
     }
     let Some(session_id) = request_cookie(endpoint, headers) else {
         return mapi_diagnostic_response("PING", request_id, 13, "missing MAPI session cookie");
     };
+    if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
+        return mapi_diagnostic_response(
+            "PING",
+            request_id,
+            6,
+            "invalid MAPI request sequence cookie",
+        );
+    }
     let Some(session) = remove_session(&session_id) else {
         return mapi_diagnostic_response("PING", request_id, 10, "MAPI session context not found");
     };
@@ -1913,6 +2030,28 @@ fn client_info(headers: &HeaderMap) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn host_header(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("host")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn content_length_header(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn is_valid_content_length(value: &str) -> bool {
+    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
 fn is_mapi_content_type(headers: &HeaderMap) -> bool {
     headers
         .get(CONTENT_TYPE)
@@ -1967,6 +2106,7 @@ fn mapi_response_with_cookies(
     framed_body.extend_from_slice(b"\r\n");
     framed_body.extend_from_slice(&body);
 
+    let framed_body_len = framed_body.len();
     let mut response = (StatusCode::OK, framed_body).into_response();
     response.extensions_mut().insert(MapiResponseDebug {
         payload_bytes: body.len(),
@@ -1982,6 +2122,11 @@ fn mapi_response_with_cookies(
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static(MAPI_CONTENT_TYPE));
+    insert_header(
+        &mut response,
+        "content-length",
+        &framed_body_len.to_string(),
+    );
     insert_header(&mut response, "x-requesttype", request_type);
     insert_header(&mut response, "x-responsecode", &response_code.to_string());
     insert_header(&mut response, "x-requestid", request_id);
@@ -8525,7 +8670,25 @@ fn insert_header(response: &mut Response, name: &'static str, value: &str) {
 }
 
 fn request_cookie(endpoint: MapiEndpoint, headers: &HeaderMap) -> Option<String> {
-    let name = cookie_name(endpoint);
+    request_named_cookie(cookie_name(endpoint), headers)
+}
+
+fn request_sequence_cookie(endpoint: MapiEndpoint, headers: &HeaderMap) -> Option<String> {
+    request_named_cookie(sequence_cookie_name(endpoint), headers)
+}
+
+fn request_sequence_cookie_matches(
+    endpoint: MapiEndpoint,
+    headers: &HeaderMap,
+    session_id: &str,
+) -> bool {
+    match request_sequence_cookie(endpoint, headers) {
+        Some(sequence_id) => sequence_id == session_id,
+        None => true,
+    }
+}
+
+fn request_named_cookie(name: &str, headers: &HeaderMap) -> Option<String> {
     headers
         .get("cookie")
         .and_then(|value| value.to_str().ok())

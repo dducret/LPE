@@ -1272,6 +1272,7 @@ fn mapi_headers(request_type: &str) -> HeaderMap {
         axum::http::header::CONTENT_TYPE,
         HeaderValue::from_static("application/mapi-http"),
     );
+    insert_mapi_content_length(&mut headers);
     headers.insert(
         "x-requesttype",
         HeaderValue::from_str(request_type).unwrap(),
@@ -1284,7 +1285,15 @@ fn mapi_headers(request_type: &str) -> HeaderMap {
         "x-clientinfo",
         HeaderValue::from_str(&mapi_client_info()).unwrap(),
     );
+    headers.insert("host", HeaderValue::from_static("mail.example.test"));
     headers
+}
+
+fn insert_mapi_content_length(headers: &mut HeaderMap) {
+    headers.insert(
+        axum::http::header::CONTENT_LENGTH,
+        HeaderValue::from_static("0"),
+    );
 }
 
 fn renew_mapi_request_id(headers: &mut HeaderMap) {
@@ -1310,6 +1319,7 @@ fn mapi_client_info() -> String {
 
 fn mapi_headers_without_content_type(request_type: &str) -> HeaderMap {
     let mut headers = bearer_headers();
+    insert_mapi_content_length(&mut headers);
     headers.insert(
         "x-requesttype",
         HeaderValue::from_str(request_type).unwrap(),
@@ -1322,6 +1332,7 @@ fn mapi_headers_without_content_type(request_type: &str) -> HeaderMap {
         "x-clientinfo",
         HeaderValue::from_str(&mapi_client_info()).unwrap(),
     );
+    headers.insert("host", HeaderValue::from_static("mail.example.test"));
     headers
 }
 
@@ -1331,6 +1342,7 @@ fn mapi_headers_with_content_type(request_type: &str, content_type: &'static str
         axum::http::header::CONTENT_TYPE,
         HeaderValue::from_static(content_type),
     );
+    insert_mapi_content_length(&mut headers);
     headers.insert(
         "x-requesttype",
         HeaderValue::from_str(request_type).unwrap(),
@@ -1343,6 +1355,7 @@ fn mapi_headers_with_content_type(request_type: &str, content_type: &'static str
         "x-clientinfo",
         HeaderValue::from_str(&mapi_client_info()).unwrap(),
     );
+    headers.insert("host", HeaderValue::from_static("mail.example.test"));
     headers
 }
 
@@ -1352,10 +1365,16 @@ fn mapi_headers_without_request_id(request_type: &str) -> HeaderMap {
         axum::http::header::CONTENT_TYPE,
         HeaderValue::from_static("application/mapi-http"),
     );
+    insert_mapi_content_length(&mut headers);
     headers.insert(
         "x-requesttype",
         HeaderValue::from_str(request_type).unwrap(),
     );
+    headers.insert(
+        "x-clientinfo",
+        HeaderValue::from_str(&mapi_client_info()).unwrap(),
+    );
+    headers.insert("host", HeaderValue::from_static("mail.example.test"));
     headers
 }
 
@@ -1365,6 +1384,7 @@ fn mapi_headers_without_request_type() -> HeaderMap {
         axum::http::header::CONTENT_TYPE,
         HeaderValue::from_static("application/mapi-http"),
     );
+    insert_mapi_content_length(&mut headers);
     headers.insert(
         "x-requestid",
         HeaderValue::from_str(&mapi_request_id()).unwrap(),
@@ -1373,6 +1393,7 @@ fn mapi_headers_without_request_type() -> HeaderMap {
         "x-clientinfo",
         HeaderValue::from_str(&mapi_client_info()).unwrap(),
     );
+    headers.insert("host", HeaderValue::from_static("mail.example.test"));
     headers
 }
 
@@ -1382,6 +1403,7 @@ fn mapi_headers_without_client_info(request_type: &str) -> HeaderMap {
         axum::http::header::CONTENT_TYPE,
         HeaderValue::from_static("application/mapi-http"),
     );
+    insert_mapi_content_length(&mut headers);
     headers.insert(
         "x-requesttype",
         HeaderValue::from_str(request_type).unwrap(),
@@ -1390,6 +1412,7 @@ fn mapi_headers_without_client_info(request_type: &str) -> HeaderMap {
         "x-requestid",
         HeaderValue::from_str(&mapi_request_id()).unwrap(),
     );
+    headers.insert("host", HeaderValue::from_static("mail.example.test"));
     headers
 }
 
@@ -1402,6 +1425,27 @@ fn mapi_headers_with_request_id(request_type: &str, request_id: &'static str) ->
 fn mapi_headers_with_client_info(request_type: &str, client_info: &'static str) -> HeaderMap {
     let mut headers = mapi_headers(request_type);
     headers.insert("x-clientinfo", HeaderValue::from_static(client_info));
+    headers
+}
+
+fn mapi_headers_without_host(request_type: &str) -> HeaderMap {
+    let mut headers = mapi_headers(request_type);
+    headers.remove("host");
+    headers
+}
+
+fn mapi_headers_without_content_length(request_type: &str) -> HeaderMap {
+    let mut headers = mapi_headers(request_type);
+    headers.remove(axum::http::header::CONTENT_LENGTH);
+    headers
+}
+
+fn mapi_headers_with_content_length(request_type: &str, content_length: &'static str) -> HeaderMap {
+    let mut headers = mapi_headers(request_type);
+    headers.insert(
+        axum::http::header::CONTENT_LENGTH,
+        HeaderValue::from_static(content_length),
+    );
     headers
 }
 
@@ -1549,6 +1593,20 @@ fn mapi_cookie_header(response: &axum::response::Response) -> String {
         .iter()
         .filter_map(|value| value.to_str().ok())
         .filter_map(|value| value.split(';').next())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn mapi_cookie_header_with_mismatched_sequence(response: &axum::response::Response) -> String {
+    mapi_cookie_header(response)
+        .split("; ")
+        .map(|part| {
+            if part.starts_with("MapiSequence=") {
+                "MapiSequence=00000000-0000-0000-0000-000000000000".to_string()
+            } else {
+                part.to_string()
+            }
+        })
         .collect::<Vec<_>>()
         .join("; ")
 }
@@ -2219,6 +2277,14 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
         "1800000"
     );
     assert_eq!(response.headers().get("x-pendingperiod").unwrap(), "15000");
+    let content_length = response
+        .headers()
+        .get("content-length")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
     let set_cookie = response
         .headers()
         .get("set-cookie")
@@ -2247,6 +2313,7 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
         .await
         .unwrap()
         .to_vec();
+    assert_eq!(content_length, raw_body.len());
     assert!(raw_body.starts_with(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 0\r\n"));
     let body = strip_mapi_http_envelope(raw_body);
     assert_eq!(&body[0..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
@@ -2373,6 +2440,35 @@ async fn mapi_over_http_connect_reestablishes_session_context_with_open_sync_han
         &response_rops,
         b"Reconnect sync context message"
     ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_connect_rejects_mismatched_sequence_cookie() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut reconnect_headers = mapi_headers("Connect");
+    reconnect_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header_with_mismatched_sequence(&connect)).unwrap(),
+    );
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &reconnect_headers, b"")
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "6");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("invalid MAPI request sequence cookie"));
 }
 
 #[tokio::test]
@@ -2511,6 +2607,78 @@ async fn mapi_over_http_rejects_invalid_client_info_with_parseable_error() {
     );
     let body = String::from_utf8(response_bytes(response).await).unwrap();
     assert!(body.contains("invalid MAPI X-ClientInfo header"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_rejects_missing_host_with_parseable_error() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_headers_without_host("Connect"),
+            b"",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "7");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("missing MAPI Host header"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_rejects_missing_content_length_with_parseable_error() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_headers_without_content_length("Connect"),
+            b"",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "7");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("missing MAPI Content-Length header"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_rejects_invalid_content_length_with_parseable_error() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_headers_with_content_length("Connect", "not-a-length"),
+            b"",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "4");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("invalid MAPI Content-Length header"));
 }
 
 #[tokio::test]
@@ -2771,6 +2939,60 @@ async fn mapi_over_http_ping_requires_and_refreshes_session_cookie() {
         .await
         .unwrap();
     assert_eq!(invalid_body.headers().get("x-responsecode").unwrap(), "12");
+}
+
+#[tokio::test]
+async fn mapi_over_http_ping_rejects_mismatched_sequence_cookie() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let bad_cookie = mapi_cookie_header_with_mismatched_sequence(&connect);
+
+    let mut ping_headers = mapi_headers("PING");
+    ping_headers.insert("cookie", HeaderValue::from_str(&bad_cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &ping_headers, b"")
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "PING");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "6");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("invalid MAPI request sequence cookie"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_ping_rejects_nonzero_content_length() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut ping_headers = mapi_headers_with_content_length("PING", "1");
+    ping_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &ping_headers, b"")
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "PING");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "4");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("PING requests must use Content-Length 0"));
 }
 
 #[tokio::test]
