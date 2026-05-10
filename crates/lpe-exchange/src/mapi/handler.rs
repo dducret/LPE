@@ -78,6 +78,8 @@ enum MapiRequestType {
     GetProps,
     GetSpecialTable,
     GetTemplateInfo,
+    ModLinkAtt,
+    ModProps,
     GetAddressBookUrl,
     GetMailboxUrl,
     QueryColumns,
@@ -305,7 +307,25 @@ where
     let principal = authenticate_account(store, None, headers, "mapi").await?;
     let request_type = request_type(headers)?;
     let request_type_label = request_type.header_value().to_string();
-    let request_id = request_id(headers);
+    let Some(request_id) = request_id(headers) else {
+        let response = mapi_diagnostic_response(
+            &request_type_label,
+            "",
+            7,
+            "missing MAPI X-RequestId header",
+        );
+        let response = finalize_mapi_response(response, headers);
+        log_mapi_connection(
+            endpoint,
+            &principal,
+            headers,
+            _body,
+            &request_type_label,
+            "",
+            &response,
+        );
+        return Ok(response);
+    };
     if !is_mapi_content_type(headers) {
         let response = mapi_diagnostic_response(
             &request_type_label,
@@ -375,6 +395,16 @@ where
         (MapiEndpoint::Nspi, MapiRequestType::GetTemplateInfo) => {
             nspi_template_info_response(&principal, &request_id)
         }
+        (MapiEndpoint::Nspi, MapiRequestType::ModLinkAtt) => nspi_disabled_mutation_response(
+            "ModLinkAtt",
+            &request_id,
+            "NSPI link-attribute mutation is disabled; LPE address-book data is projected from canonical accounts and contacts.",
+        ),
+        (MapiEndpoint::Nspi, MapiRequestType::ModProps) => nspi_disabled_mutation_response(
+            "ModProps",
+            &request_id,
+            "NSPI property mutation is disabled; LPE address-book data is projected from canonical accounts and contacts.",
+        ),
         (MapiEndpoint::Nspi, MapiRequestType::GetAddressBookUrl) => {
             endpoint_url_response("GetAddressBookUrl", &request_id, headers, "/mapi/nspi/")
         }
@@ -772,6 +802,14 @@ fn endpoint_url_response(
     write_utf16z(&mut body, &public_endpoint_url(headers, path));
     write_u32(&mut body, 0);
     mapi_response(request_type, request_id, 0, body, None)
+}
+
+fn nspi_disabled_mutation_response(
+    request_type: &str,
+    request_id: &str,
+    message: &str,
+) -> Response {
+    mapi_diagnostic_response(request_type, request_id, 16, message)
 }
 
 const NSPI_BOOTSTRAP_PROPERTY_TAGS: &[u32] = &[
@@ -1756,6 +1794,8 @@ fn request_type(headers: &HeaderMap) -> Result<MapiRequestType> {
         "getprops" => MapiRequestType::GetProps,
         "getspecialtable" => MapiRequestType::GetSpecialTable,
         "gettemplateinfo" => MapiRequestType::GetTemplateInfo,
+        "modlinkatt" => MapiRequestType::ModLinkAtt,
+        "modprops" => MapiRequestType::ModProps,
         "getaddressbookurl" => MapiRequestType::GetAddressBookUrl,
         "getmailboxurl" => MapiRequestType::GetMailboxUrl,
         "querycolumns" => MapiRequestType::QueryColumns,
@@ -1769,14 +1809,13 @@ fn request_type(headers: &HeaderMap) -> Result<MapiRequestType> {
     })
 }
 
-fn request_id(headers: &HeaderMap) -> String {
+fn request_id(headers: &HeaderMap) -> Option<String> {
     headers
         .get("x-requestid")
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-        .unwrap_or_else(|| Uuid::new_v4().to_string())
 }
 
 fn is_mapi_content_type(headers: &HeaderMap) -> bool {
@@ -8518,6 +8557,8 @@ impl MapiRequestType {
             MapiRequestType::GetProps => "GetProps",
             MapiRequestType::GetSpecialTable => "GetSpecialTable",
             MapiRequestType::GetTemplateInfo => "GetTemplateInfo",
+            MapiRequestType::ModLinkAtt => "ModLinkAtt",
+            MapiRequestType::ModProps => "ModProps",
             MapiRequestType::GetAddressBookUrl => "GetAddressBookUrl",
             MapiRequestType::GetMailboxUrl => "GetMailboxUrl",
             MapiRequestType::QueryColumns => "QueryColumns",

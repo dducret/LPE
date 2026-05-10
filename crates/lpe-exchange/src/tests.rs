@@ -2300,7 +2300,7 @@ async fn mapi_over_http_connect_reestablishes_session_context_with_open_sync_han
 }
 
 #[tokio::test]
-async fn mapi_over_http_generates_request_id_when_client_omits_one() {
+async fn mapi_over_http_rejects_missing_request_id_with_parseable_error() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -2316,15 +2316,11 @@ async fn mapi_over_http_generates_request_id_when_client_omits_one() {
         .await
         .unwrap();
 
-    let request_id = response
-        .headers()
-        .get("x-requestid")
-        .unwrap()
-        .to_str()
-        .unwrap();
-    assert_ne!(request_id, "00000000-0000-0000-0000-000000000000");
-    assert_ne!(request_id, "request-1");
-    assert!(Uuid::parse_str(request_id).is_ok());
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "7");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("missing MAPI X-RequestId header"));
 }
 
 #[tokio::test]
@@ -9023,6 +9019,40 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
             }
             _ => {}
         }
+    }
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_mutation_requests_return_parseable_disabled_errors() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    for request_type in ["ModLinkAtt", "ModProps"] {
+        let response = service
+            .handle_mapi(MapiEndpoint::Nspi, &mapi_headers(request_type), &[0; 32])
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK, "{request_type}");
+        assert_eq!(
+            response.headers().get("x-requesttype").unwrap(),
+            request_type,
+            "{request_type}"
+        );
+        assert_eq!(
+            response.headers().get("x-responsecode").unwrap(),
+            "16",
+            "{request_type}"
+        );
+        let body = String::from_utf8(response_bytes(response).await).unwrap();
+        assert!(body.contains("disabled"), "{request_type}: {body}");
+        assert!(
+            body.contains("canonical accounts and contacts"),
+            "{request_type}: {body}"
+        );
     }
 }
 
