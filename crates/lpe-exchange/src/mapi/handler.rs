@@ -3984,6 +3984,7 @@ where
             0x55 => responses
                 .extend_from_slice(&rop_get_names_from_property_ids_response(&request, session)),
             0x56 => {
+                echo_input_handle_table = true;
                 let properties = match request.named_property_names() {
                     Ok(properties) => properties,
                     Err(_) => {
