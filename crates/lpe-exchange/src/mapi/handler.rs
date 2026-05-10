@@ -3579,6 +3579,7 @@ where
                 Some(MapiObject::SynchronizationSource {
                     state,
                     state_upload_buffer,
+                    sync_type,
                     transfer_buffer,
                     transfer_position,
                     ..
@@ -3586,7 +3587,7 @@ where
                     if !state_upload_buffer.is_empty() {
                         *state = std::mem::take(state_upload_buffer);
                     }
-                    *transfer_buffer = empty_incremental_sync_stream();
+                    *transfer_buffer = final_incremental_sync_stream(*sync_type);
                     *transfer_position = 0;
                     responses.extend_from_slice(&rop_simple_success_response(&request));
                 }
@@ -4876,15 +4877,30 @@ fn rop_synchronization_configure_response(request: &RopRequest) -> Vec<u8> {
     response
 }
 
-fn empty_incremental_sync_stream() -> Vec<u8> {
-    [
-        0x403A_0003u32, // IncrSyncStateBegin
-        0x403B_0003u32, // IncrSyncStateEnd
-        0x4014_0003u32, // IncrSyncEnd
-    ]
-    .into_iter()
-    .flat_map(u32::to_le_bytes)
-    .collect()
+fn final_incremental_sync_stream(sync_type: u8) -> Vec<u8> {
+    let mut stream = Vec::new();
+    write_u32(&mut stream, 0x403A_0003); // IncrSyncStateBegin
+    write_fast_transfer_binary_property(&mut stream, 0x4017_0102, &empty_replguid_idset());
+    write_fast_transfer_binary_property(&mut stream, 0x6796_0102, &empty_replguid_idset());
+    if sync_type == 0x01 {
+        write_fast_transfer_binary_property(&mut stream, 0x67DA_0102, &empty_replguid_idset());
+        write_fast_transfer_binary_property(&mut stream, 0x67D2_0102, &empty_replguid_idset());
+    }
+    write_u32(&mut stream, 0x403B_0003); // IncrSyncStateEnd
+    write_u32(&mut stream, 0x4014_0003); // IncrSyncEnd
+    stream
+}
+
+fn empty_replguid_idset() -> Vec<u8> {
+    let mut idset = mapi_mailstore::STORE_REPLICA_GUID.to_vec();
+    idset.push(0);
+    idset
+}
+
+fn write_fast_transfer_binary_property(stream: &mut Vec<u8>, property_tag: u32, value: &[u8]) {
+    write_u32(stream, property_tag);
+    write_u32(stream, value.len().min(u32::MAX as usize) as u32);
+    stream.extend_from_slice(value);
 }
 
 fn rop_fast_transfer_source_get_buffer_response(

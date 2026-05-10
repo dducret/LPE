@@ -2968,6 +2968,14 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
     ));
     assert!(contains_bytes(
         &response_rops,
+        &0x4017_0102u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x6796_0102u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
         &0x403B_0003u32.to_le_bytes()
     ));
     assert!(contains_bytes(
