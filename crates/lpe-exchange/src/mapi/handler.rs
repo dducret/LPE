@@ -343,7 +343,7 @@ where
         );
         return Ok(response);
     };
-    if !is_valid_request_id(&request_id) {
+    if !is_guid_counter_header(&request_id) {
         let response = mapi_diagnostic_response(
             &request_type_label,
             &request_id,
@@ -362,12 +362,31 @@ where
         );
         return Ok(response);
     }
-    if client_info(headers).is_none() {
+    let Some(client_info) = client_info(headers) else {
         let response = mapi_diagnostic_response(
             &request_type_label,
             &request_id,
             7,
             "missing MAPI X-ClientInfo header",
+        );
+        let response = finalize_mapi_response(response, headers);
+        log_mapi_connection(
+            endpoint,
+            &principal,
+            headers,
+            _body,
+            &request_type_label,
+            &request_id,
+            &response,
+        );
+        return Ok(response);
+    };
+    if !is_guid_counter_header(&client_info) {
+        let response = mapi_diagnostic_response(
+            &request_type_label,
+            &request_id,
+            4,
+            "invalid MAPI X-ClientInfo header; expected {GUID}:counter",
         );
         let response = finalize_mapi_response(response, headers);
         log_mapi_connection(
@@ -1873,7 +1892,7 @@ fn request_id(headers: &HeaderMap) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn is_valid_request_id(value: &str) -> bool {
+fn is_guid_counter_header(value: &str) -> bool {
     let Some(rest) = value.strip_prefix('{') else {
         return false;
     };
@@ -1885,8 +1904,13 @@ fn is_valid_request_id(value: &str) -> bool {
         && Uuid::parse_str(guid).is_ok()
 }
 
-fn client_info(headers: &HeaderMap) -> Option<&HeaderValue> {
-    headers.get("x-clientinfo")
+fn client_info(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("x-clientinfo")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn is_mapi_content_type(headers: &HeaderMap) -> bool {

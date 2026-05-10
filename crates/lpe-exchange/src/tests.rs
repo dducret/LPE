@@ -1280,7 +1280,10 @@ fn mapi_headers(request_type: &str) -> HeaderMap {
         "x-requestid",
         HeaderValue::from_str(&mapi_request_id()).unwrap(),
     );
-    headers.insert("x-clientinfo", HeaderValue::from_static("client-info-1"));
+    headers.insert(
+        "x-clientinfo",
+        HeaderValue::from_str(&mapi_client_info()).unwrap(),
+    );
     headers
 }
 
@@ -1298,6 +1301,13 @@ fn mapi_request_id() -> String {
     )
 }
 
+fn mapi_client_info() -> String {
+    format!(
+        "{{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}}:{}",
+        MAPI_TEST_REQUEST_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 fn mapi_headers_without_content_type(request_type: &str) -> HeaderMap {
     let mut headers = bearer_headers();
     headers.insert(
@@ -1308,7 +1318,10 @@ fn mapi_headers_without_content_type(request_type: &str) -> HeaderMap {
         "x-requestid",
         HeaderValue::from_str(&mapi_request_id()).unwrap(),
     );
-    headers.insert("x-clientinfo", HeaderValue::from_static("client-info-1"));
+    headers.insert(
+        "x-clientinfo",
+        HeaderValue::from_str(&mapi_client_info()).unwrap(),
+    );
     headers
 }
 
@@ -1326,7 +1339,10 @@ fn mapi_headers_with_content_type(request_type: &str, content_type: &'static str
         "x-requestid",
         HeaderValue::from_str(&mapi_request_id()).unwrap(),
     );
-    headers.insert("x-clientinfo", HeaderValue::from_static("client-info-1"));
+    headers.insert(
+        "x-clientinfo",
+        HeaderValue::from_str(&mapi_client_info()).unwrap(),
+    );
     headers
 }
 
@@ -1353,7 +1369,10 @@ fn mapi_headers_without_request_type() -> HeaderMap {
         "x-requestid",
         HeaderValue::from_str(&mapi_request_id()).unwrap(),
     );
-    headers.insert("x-clientinfo", HeaderValue::from_static("client-info-1"));
+    headers.insert(
+        "x-clientinfo",
+        HeaderValue::from_str(&mapi_client_info()).unwrap(),
+    );
     headers
 }
 
@@ -1377,6 +1396,12 @@ fn mapi_headers_without_client_info(request_type: &str) -> HeaderMap {
 fn mapi_headers_with_request_id(request_type: &str, request_id: &'static str) -> HeaderMap {
     let mut headers = mapi_headers(request_type);
     headers.insert("x-requestid", HeaderValue::from_static(request_id));
+    headers
+}
+
+fn mapi_headers_with_client_info(request_type: &str, client_info: &'static str) -> HeaderMap {
+    let mut headers = mapi_headers(request_type);
+    headers.insert("x-clientinfo", HeaderValue::from_static(client_info));
     headers
 }
 
@@ -2182,10 +2207,13 @@ async fn mapi_over_http_connect_creates_emsmdb_session() {
         response.headers().get("x-serverapplication").unwrap(),
         "Exchange/15.20.0485.000"
     );
-    assert_eq!(
-        response.headers().get("x-clientinfo").unwrap(),
-        "client-info-1"
-    );
+    assert!(response
+        .headers()
+        .get("x-clientinfo")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}:"));
     assert_eq!(
         response.headers().get("x-expirationinfo").unwrap(),
         "1800000"
@@ -2435,6 +2463,34 @@ async fn mapi_over_http_rejects_missing_client_info_with_parseable_error() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_rejects_invalid_client_info_with_parseable_error() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_headers_with_client_info("Connect", "not-a-guid-counter"),
+            b"",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "4");
+    assert_eq!(
+        response.headers().get("x-clientinfo").unwrap(),
+        "not-a-guid-counter"
+    );
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("invalid MAPI X-ClientInfo header"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_rejects_invalid_request_id_with_parseable_error() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -2511,10 +2567,13 @@ async fn mapi_over_http_accepts_outlook_octet_stream_bind_probe() {
     );
     assert_eq!(response.headers().get("x-requesttype").unwrap(), "Bind");
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
-    assert_eq!(
-        response.headers().get("x-clientinfo").unwrap(),
-        "client-info-1"
-    );
+    assert!(response
+        .headers()
+        .get("x-clientinfo")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .starts_with("{aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee}:"));
     assert_eq!(
         response.headers().get("x-expirationinfo").unwrap(),
         "1800000"
