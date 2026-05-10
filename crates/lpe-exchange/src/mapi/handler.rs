@@ -3579,9 +3579,18 @@ where
                 Some(MapiObject::SynchronizationSource {
                     state,
                     state_upload_buffer,
+                    transfer_buffer,
+                    transfer_position,
                     ..
-                })
-                | Some(MapiObject::SynchronizationCollector {
+                }) => {
+                    if !state_upload_buffer.is_empty() {
+                        *state = std::mem::take(state_upload_buffer);
+                    }
+                    *transfer_buffer = empty_incremental_sync_stream();
+                    *transfer_position = 0;
+                    responses.extend_from_slice(&rop_simple_success_response(&request));
+                }
+                Some(MapiObject::SynchronizationCollector {
                     state,
                     state_upload_buffer,
                     ..
@@ -4865,6 +4874,17 @@ fn rop_synchronization_configure_response(request: &RopRequest) -> Vec<u8> {
     write_u32(&mut response, 0);
     response.push(0);
     response
+}
+
+fn empty_incremental_sync_stream() -> Vec<u8> {
+    [
+        0x403A_0003u32, // IncrSyncStateBegin
+        0x403B_0003u32, // IncrSyncStateEnd
+        0x4014_0003u32, // IncrSyncEnd
+    ]
+    .into_iter()
+    .flat_map(u32::to_le_bytes)
+    .collect()
 }
 
 fn rop_fast_transfer_source_get_buffer_response(

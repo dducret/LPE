@@ -2962,6 +2962,19 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         &[0x4E, 0x02, 0x00, 0x00, 0x00, 0x00]
     ));
     assert!(!contains_bytes(&response_rops, &[0x02, 0x01, 0x04, 0x80]));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x403A_0003u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x403B_0003u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x4014_0003u32.to_le_bytes()
+    ));
+    assert!(!contains_bytes(&response_rops, b"LPE-MAPI-SYNC\0"));
 
     renew_mapi_request_id(&mut execute_headers);
     let address_types_request = hex_bytes(
