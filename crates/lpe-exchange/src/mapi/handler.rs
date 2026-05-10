@@ -19,7 +19,7 @@ use lpe_storage::{
 };
 use std::{
     cmp::Ordering,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env,
     sync::{Mutex, OnceLock},
     time::{Duration, SystemTime},
@@ -288,9 +288,40 @@ enum MapiObject {
 }
 
 static MAPI_SESSIONS: OnceLock<Mutex<HashMap<String, MapiSession>>> = OnceLock::new();
+static MAPI_ACTIVE_SESSION_REQUESTS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 fn sessions() -> &'static Mutex<HashMap<String, MapiSession>> {
     MAPI_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn active_session_requests() -> &'static Mutex<HashSet<String>> {
+    MAPI_ACTIVE_SESSION_REQUESTS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+struct ActiveSessionRequest {
+    session_id: String,
+}
+
+impl Drop for ActiveSessionRequest {
+    fn drop(&mut self) {
+        let mut guard = active_session_requests()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.remove(&self.session_id);
+    }
+}
+
+fn begin_active_session_request(session_id: &str) -> Option<ActiveSessionRequest> {
+    let mut guard = active_session_requests()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard.insert(session_id.to_string()) {
+        Some(ActiveSessionRequest {
+            session_id: session_id.to_string(),
+        })
+    } else {
+        None
+    }
 }
 
 pub(crate) async fn handle_mapi<S, V>(
@@ -477,6 +508,34 @@ where
         return Ok(response);
     }
 
+    let _nspi_active_request =
+        if endpoint == MapiEndpoint::Nspi && request_type.requires_nspi_session() {
+            match established_session_request(
+                endpoint,
+                &principal,
+                headers,
+                &request_type_label,
+                &request_id,
+            ) {
+                Ok(active_request) => Some(active_request),
+                Err(response) => {
+                    let response = finalize_mapi_response(response, headers);
+                    log_mapi_connection(
+                        endpoint,
+                        &principal,
+                        headers,
+                        _body,
+                        &request_type_label,
+                        &request_id,
+                        &response,
+                    );
+                    return Ok(response);
+                }
+            }
+        } else {
+            None
+        };
+
     let response = match (endpoint, request_type) {
         (MapiEndpoint::Emsmdb, MapiRequestType::Connect) => {
             connect_response(endpoint, &principal, headers, &request_id)
@@ -614,16 +673,6 @@ fn connect_response(
     headers: &HeaderMap,
     request_id: &str,
 ) -> Response {
-    if let Some(session_id) = request_cookie(endpoint, headers) {
-        if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
-            return mapi_diagnostic_response(
-                "Connect",
-                request_id,
-                6,
-                "invalid MAPI request sequence cookie",
-            );
-        }
-    }
     let session_id = reconnect_session(endpoint, principal, headers)
         .unwrap_or_else(|| create_session(endpoint, principal));
     let cookies = session_context_cookies(endpoint, &session_id, false);
@@ -679,16 +728,6 @@ fn bind_response(
     headers: &HeaderMap,
     request_id: &str,
 ) -> Response {
-    if let Some(session_id) = request_cookie(endpoint, headers) {
-        if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
-            return mapi_diagnostic_response(
-                "Bind",
-                request_id,
-                6,
-                "invalid MAPI request sequence cookie",
-            );
-        }
-    }
     let session_id = reconnect_session(endpoint, principal, headers)
         .unwrap_or_else(|| create_session(endpoint, principal));
     let cookies = session_context_cookies(endpoint, &session_id, false);
@@ -724,6 +763,14 @@ where
             None,
         );
     }
+    let Some(_active_request) = begin_active_session_request(&session_id) else {
+        return execute_failure_response(
+            request_id,
+            15,
+            "MAPI session already has an active request",
+            None,
+        );
+    };
     let Some(session) = get_session(&session_id) else {
         return execute_failure_response(request_id, 10, "MAPI session context not found", None);
     };
@@ -848,6 +895,14 @@ fn disconnect_response(
             "invalid MAPI request sequence cookie",
         );
     }
+    let Some(_active_request) = begin_active_session_request(&session_id) else {
+        return mapi_diagnostic_response(
+            response_request_type,
+            request_id,
+            15,
+            "MAPI session already has an active request",
+        );
+    };
     let Some(session) = remove_session(&session_id) else {
         return mapi_diagnostic_response(
             response_request_type,
@@ -904,6 +959,14 @@ fn notification_wait_response(
             "invalid MAPI request sequence cookie",
         );
     }
+    let Some(_active_request) = begin_active_session_request(&session_id) else {
+        return mapi_diagnostic_response(
+            "NotificationWait",
+            request_id,
+            15,
+            "MAPI session already has an active request",
+        );
+    };
     let Some(session) = remove_session(&session_id) else {
         return mapi_diagnostic_response(
             "NotificationWait",
@@ -965,6 +1028,14 @@ fn ping_response(
             "invalid MAPI request sequence cookie",
         );
     }
+    let Some(_active_request) = begin_active_session_request(&session_id) else {
+        return mapi_diagnostic_response(
+            "PING",
+            request_id,
+            15,
+            "MAPI session already has an active request",
+        );
+    };
     let Some(session) = remove_session(&session_id) else {
         return mapi_diagnostic_response("PING", request_id, 10, "MAPI session context not found");
     };
@@ -1933,6 +2004,57 @@ fn session_matches(
         && session.tenant_id == principal.tenant_id
         && session.account_id == principal.account_id
         && session.email == principal.email
+}
+
+fn established_session_request(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    headers: &HeaderMap,
+    request_type: &str,
+    request_id: &str,
+) -> std::result::Result<ActiveSessionRequest, Response> {
+    let Some(session_id) = request_cookie(endpoint, headers) else {
+        return Err(mapi_diagnostic_response(
+            request_type,
+            request_id,
+            13,
+            "missing MAPI session cookie",
+        ));
+    };
+    if !request_sequence_cookie_matches(endpoint, headers, &session_id) {
+        return Err(mapi_diagnostic_response(
+            request_type,
+            request_id,
+            6,
+            "invalid MAPI request sequence cookie",
+        ));
+    }
+    let Some(active_request) = begin_active_session_request(&session_id) else {
+        return Err(mapi_diagnostic_response(
+            request_type,
+            request_id,
+            15,
+            "MAPI session already has an active request",
+        ));
+    };
+    let Some(session) = get_session(&session_id) else {
+        return Err(mapi_diagnostic_response(
+            request_type,
+            request_id,
+            10,
+            "MAPI session context not found",
+        ));
+    };
+    if !session_matches(&session, endpoint, principal) {
+        return Err(mapi_diagnostic_response(
+            request_type,
+            request_id,
+            10,
+            "MAPI authentication context changed",
+        ));
+    }
+    store_session(session_id, session);
+    Ok(active_request)
 }
 
 fn cache_execute_response(
@@ -8828,6 +8950,29 @@ impl MapiRequestType {
             MapiRequestType::Ping => "PING",
             MapiRequestType::Unsupported(value) => value,
         }
+    }
+
+    fn requires_nspi_session(&self) -> bool {
+        matches!(
+            self,
+            MapiRequestType::CompareMids
+                | MapiRequestType::DnToMid
+                | MapiRequestType::GetMatches
+                | MapiRequestType::GetPropList
+                | MapiRequestType::GetProps
+                | MapiRequestType::GetSpecialTable
+                | MapiRequestType::GetTemplateInfo
+                | MapiRequestType::ModLinkAtt
+                | MapiRequestType::ModProps
+                | MapiRequestType::GetAddressBookUrl
+                | MapiRequestType::GetMailboxUrl
+                | MapiRequestType::QueryColumns
+                | MapiRequestType::QueryRows
+                | MapiRequestType::ResolveNames
+                | MapiRequestType::ResortRestriction
+                | MapiRequestType::SeekEntries
+                | MapiRequestType::UpdateStat
+        )
     }
 }
 

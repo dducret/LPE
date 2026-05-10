@@ -68,6 +68,8 @@ struct FakeStore {
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
     directory_accounts: Arc<Mutex<Vec<AuthenticatedAccount>>>,
     omit_principal_from_directory: bool,
+    mapi_mail_store_load_started: Option<Arc<tokio::sync::Notify>>,
+    mapi_mail_store_load_continue: Option<Arc<tokio::sync::Notify>>,
 }
 
 #[derive(Clone)]
@@ -818,7 +820,17 @@ impl ExchangeStore for FakeStore {
 
     fn fetch_jmap_mailboxes<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
         let mailboxes = self.mailboxes.lock().unwrap().clone();
-        Box::pin(async move { Ok(mailboxes) })
+        let load_started = self.mapi_mail_store_load_started.clone();
+        let load_continue = self.mapi_mail_store_load_continue.clone();
+        Box::pin(async move {
+            if let Some(load_started) = load_started {
+                load_started.notify_one();
+            }
+            if let Some(load_continue) = load_continue {
+                load_continue.notified().await;
+            }
+            Ok(mailboxes)
+        })
     }
 
     fn create_jmap_mailbox<'a>(
@@ -1609,6 +1621,19 @@ fn mapi_cookie_header_with_mismatched_sequence(response: &axum::response::Respon
         })
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+async fn nspi_bound_headers(service: &ExchangeService<FakeStore>, request_type: &str) -> HeaderMap {
+    let bind = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("Bind"), b"")
+        .await
+        .unwrap();
+    let mut headers = mapi_headers(request_type);
+    headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&bind)).unwrap(),
+    );
+    headers
 }
 
 fn parse_attachment_reference(value: &str) -> Option<(Uuid, Uuid)> {
@@ -2443,7 +2468,7 @@ async fn mapi_over_http_connect_reestablishes_session_context_with_open_sync_han
 }
 
 #[tokio::test]
-async fn mapi_over_http_connect_rejects_mismatched_sequence_cookie() {
+async fn mapi_over_http_connect_ignores_mismatched_sequence_cookie_on_reconnect() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -2466,9 +2491,20 @@ async fn mapi_over_http_connect_rejects_mismatched_sequence_cookie() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
-    assert_eq!(response.headers().get("x-responsecode").unwrap(), "6");
-    let body = String::from_utf8(response_bytes(response).await).unwrap();
-    assert!(body.contains("invalid MAPI request sequence cookie"));
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let set_cookies = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(set_cookies.len(), 2);
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiContext=")));
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiSequence=")));
 }
 
 #[tokio::test]
@@ -3063,6 +3099,54 @@ async fn mapi_over_http_execute_accepts_release_rop() {
     assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
     assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 2);
     assert_eq!(&body[16..18], &[0, 0]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_rejects_concurrent_session_request_with_invalid_sequence() {
+    let load_started = Arc::new(tokio::sync::Notify::new());
+    let load_continue = Arc::new(tokio::sync::Notify::new());
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mapi_mail_store_load_started: Some(load_started.clone()),
+        mapi_mail_store_load_continue: Some(load_continue.clone()),
+        ..Default::default()
+    };
+    let service = Arc::new(ExchangeService::new(store));
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&[0x01, 0x00, 0x00], &[1]));
+    let execute_service = service.clone();
+    let first_execute = tokio::spawn(async move {
+        execute_service
+            .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+            .await
+            .unwrap()
+    });
+    load_started.notified().await;
+
+    let mut ping_headers = mapi_headers("PING");
+    ping_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let ping = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &ping_headers, b"")
+        .await
+        .unwrap();
+
+    assert_eq!(ping.status(), StatusCode::OK);
+    assert_eq!(ping.headers().get("x-requesttype").unwrap(), "PING");
+    assert_eq!(ping.headers().get("x-responsecode").unwrap(), "15");
+    let body = String::from_utf8(response_bytes(ping).await).unwrap();
+    assert!(body.contains("MAPI session already has an active request"));
+
+    load_continue.notify_waiters();
+    let execute = first_execute.await.unwrap();
+    assert_eq!(execute.headers().get("x-requesttype").unwrap(), "Execute");
+    assert_eq!(execute.headers().get("x-responsecode").unwrap(), "0");
 }
 
 #[tokio::test]
@@ -9015,13 +9099,108 @@ async fn mapi_over_http_bind_reestablishes_nspi_session_cookie() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_bind_ignores_mismatched_sequence_cookie_on_reconnect() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let bind = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("Bind"), b"")
+        .await
+        .unwrap();
+
+    let mut rebind_headers = mapi_headers("Bind");
+    rebind_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header_with_mismatched_sequence(&bind)).unwrap(),
+    );
+    let rebind = service
+        .handle_mapi(MapiEndpoint::Nspi, &rebind_headers, b"")
+        .await
+        .unwrap();
+
+    assert_eq!(rebind.status(), StatusCode::OK);
+    assert_eq!(rebind.headers().get("x-requesttype").unwrap(), "Bind");
+    assert_eq!(rebind.headers().get("x-responsecode").unwrap(), "0");
+    let set_cookies = rebind
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(set_cookies.len(), 2);
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiContext=")));
+    assert!(set_cookies
+        .iter()
+        .any(|cookie| cookie.starts_with("MapiSequence=")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_operation_requires_bound_session_cookie() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("QueryRows"), &[0; 32])
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-requesttype").unwrap(),
+        "QueryRows"
+    );
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "13");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("missing MAPI session cookie"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_operation_rejects_mismatched_sequence_cookie() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let bind = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("Bind"), b"")
+        .await
+        .unwrap();
+    let mut headers = mapi_headers("QueryRows");
+    headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header_with_mismatched_sequence(&bind)).unwrap(),
+    );
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &[0; 32])
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-requesttype").unwrap(),
+        "QueryRows"
+    );
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "6");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("invalid MAPI request sequence cookie"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_returns_nspi_and_mailbox_urls() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
-    let mut headers = mapi_headers("GetAddressBookUrl");
+    let mut headers = nspi_bound_headers(&service, "GetAddressBookUrl").await;
     headers.insert("host", HeaderValue::from_static("mail.example.test"));
     headers.insert("x-forwarded-proto", HeaderValue::from_static("https"));
 
@@ -9046,6 +9225,7 @@ async fn mapi_over_http_returns_nspi_and_mailbox_urls() {
     assert!(body.ends_with(&[0, 0, 0, 0]));
 
     headers.insert("x-requesttype", HeaderValue::from_static("GetMailboxUrl"));
+    renew_mapi_request_id(&mut headers);
     let response = service
         .handle_mapi(MapiEndpoint::Nspi, &headers, b"")
         .await
@@ -9068,9 +9248,10 @@ async fn mapi_over_http_resolve_names_resolves_authenticated_mailbox() {
         ..Default::default()
     };
     let service = ExchangeService::new(store);
+    let headers = nspi_bound_headers(&service, "ResolveNames").await;
 
     let response = service
-        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &[0; 103])
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &[0; 103])
         .await
         .unwrap();
 
@@ -9104,9 +9285,10 @@ async fn mapi_over_http_resolve_names_honors_requested_rca_columns() {
     };
     let service = ExchangeService::new(store);
     let request = resolve_names_request("alice@example.test", &[0x3003_001F, 0x3001_001F]);
+    let headers = nspi_bound_headers(&service, "ResolveNames").await;
 
     let response = service
-        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &request)
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
         .await
         .unwrap();
 
@@ -9146,9 +9328,10 @@ async fn mapi_over_http_resolve_names_falls_back_to_authenticated_mailbox_for_rc
     };
     let service = ExchangeService::new(store);
     let request = resolve_names_request("alice@example.test", &[0x3003_001F, 0x3001_001F]);
+    let headers = nspi_bound_headers(&service, "ResolveNames").await;
 
     let response = service
-        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &request)
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
         .await
         .unwrap();
 
@@ -9177,9 +9360,10 @@ async fn mapi_over_http_resolve_names_resolves_canonical_contact() {
     };
     let service = ExchangeService::new(store);
     let request = resolve_names_request("bob@example.test", &[0x3003_001F, 0x3001_001F]);
+    let headers = nspi_bound_headers(&service, "ResolveNames").await;
 
     let response = service
-        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &request)
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
         .await
         .unwrap();
 
@@ -9200,23 +9384,26 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
     };
     let service = ExchangeService::new(store);
 
+    let query_headers = nspi_bound_headers(&service, "QueryRows").await;
     let response = service
-        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("QueryRows"), &[0; 32])
+        .handle_mapi(MapiEndpoint::Nspi, &query_headers, &[0; 32])
         .await
         .unwrap();
     let body = response_bytes(response).await;
     assert!(!contains_bytes(&body, &utf16z("alice@example.test")));
 
+    let matches_headers = nspi_bound_headers(&service, "GetMatches").await;
     let response = service
-        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("GetMatches"), &[0; 32])
+        .handle_mapi(MapiEndpoint::Nspi, &matches_headers, &[0; 32])
         .await
         .unwrap();
     let body = response_bytes(response).await;
     assert!(!contains_bytes(&body, &utf16z("alice@example.test")));
 
     let request = resolve_names_request("alice@example.test", &[0x3003_001F, 0x3001_001F]);
+    let resolve_headers = nspi_bound_headers(&service, "ResolveNames").await;
     let response = service
-        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &request)
+        .handle_mapi(MapiEndpoint::Nspi, &resolve_headers, &request)
         .await
         .unwrap();
     let body = response_bytes(response).await;
@@ -9244,8 +9431,9 @@ async fn mapi_over_http_query_rows_stays_in_authenticated_tenant() {
     };
     let service = ExchangeService::new(store);
 
+    let query_headers = nspi_bound_headers(&service, "QueryRows").await;
     let response = service
-        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("QueryRows"), &[0; 32])
+        .handle_mapi(MapiEndpoint::Nspi, &query_headers, &[0; 32])
         .await
         .unwrap();
 
@@ -9256,8 +9444,9 @@ async fn mapi_over_http_query_rows_stays_in_authenticated_tenant() {
     assert!(!contains_bytes(&body, &utf16z("mallory@other.test")));
 
     let request = resolve_names_request("mallory@other.test", &[0x3003_001F, 0x3001_001F]);
+    let resolve_headers = nspi_bound_headers(&service, "ResolveNames").await;
     let response = service
-        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &request)
+        .handle_mapi(MapiEndpoint::Nspi, &resolve_headers, &request)
         .await
         .unwrap();
     let body = response_bytes(response).await;
@@ -9291,9 +9480,10 @@ async fn mapi_over_http_get_matches_uses_complete_utf16_lookup_value() {
          1e00fe391e00163a1e00003a1e0002300201ff0f0300fe0f03000039030005390201f60f\
          1e00033000000000",
     );
+    let headers = nspi_bound_headers(&service, "GetMatches").await;
 
     let response = service
-        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("GetMatches"), &request)
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
         .await
         .unwrap();
 
@@ -9321,9 +9511,10 @@ async fn mapi_over_http_resolve_names_returns_no_match_for_unknown_name() {
     };
     let service = ExchangeService::new(store);
     let request = resolve_names_request("nobody@example.test", &[0x3003_001F, 0x3001_001F]);
+    let headers = nspi_bound_headers(&service, "ResolveNames").await;
 
     let response = service
-        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("ResolveNames"), &request)
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
         .await
         .unwrap();
 
@@ -9360,8 +9551,9 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
         "SeekEntries",
         "UpdateStat",
     ] {
+        let headers = nspi_bound_headers(&service, request_type).await;
         let response = service
-            .handle_mapi(MapiEndpoint::Nspi, &mapi_headers(request_type), &[0; 32])
+            .handle_mapi(MapiEndpoint::Nspi, &headers, &[0; 32])
             .await
             .unwrap();
 
@@ -9477,8 +9669,9 @@ async fn mapi_over_http_nspi_mutation_requests_return_parseable_disabled_errors(
     let service = ExchangeService::new(store);
 
     for request_type in ["ModLinkAtt", "ModProps"] {
+        let headers = nspi_bound_headers(&service, request_type).await;
         let response = service
-            .handle_mapi(MapiEndpoint::Nspi, &mapi_headers(request_type), &[0; 32])
+            .handle_mapi(MapiEndpoint::Nspi, &headers, &[0; 32])
             .await
             .unwrap();
 
@@ -9510,9 +9703,10 @@ async fn mapi_over_http_dn_to_mid_resolves_outlook_unprefixed_legacy_dn_to_princ
     };
     let service = ExchangeService::new(store);
     let request = b"\0\0\0\0\xff\x01\0\0\0/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice-example-test\0\0\0\0\0";
+    let headers = nspi_bound_headers(&service, "DNToMId").await;
 
     let response = service
-        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("DNToMId"), request)
+        .handle_mapi(MapiEndpoint::Nspi, &headers, request)
         .await
         .unwrap();
 
