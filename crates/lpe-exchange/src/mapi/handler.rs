@@ -2003,7 +2003,7 @@ where
             }
         };
         match request.rop_id {
-            0x01 => {}
+            0x01 => release_handle_slot(session, &mut handle_slots, &request),
             0x02 => {
                 let folder_id = request.folder_id().unwrap_or(ROOT_FOLDER_ID);
                 let handle = session.allocate_output_handle(
@@ -3963,6 +3963,7 @@ where
                 )),
             },
             0x7F => {
+                echo_input_handle_table = true;
                 let (first_global_counter, count) = mapi_mailstore::local_replica_id_range(
                     principal.account_id,
                     request.local_replica_id_count(),
@@ -4316,6 +4317,23 @@ fn set_handle_slot(handle_slots: &mut Vec<u32>, output_handle_index: Option<u8>,
         handle_slots.resize(index + 1, u32::MAX);
     }
     handle_slots[index] = handle;
+}
+
+fn release_handle_slot(
+    session: &mut MapiSession,
+    handle_slots: &mut [u32],
+    request: &RopRequest,
+) {
+    let Some(index) = request.input_handle_index().map(usize::from) else {
+        return;
+    };
+    let Some(handle) = handle_slots.get_mut(index) else {
+        return;
+    };
+    if *handle != u32::MAX {
+        session.handles.remove(handle);
+    }
+    *handle = u32::MAX;
 }
 
 fn response_handle_table(
