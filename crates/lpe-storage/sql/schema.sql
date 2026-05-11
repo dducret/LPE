@@ -233,6 +233,7 @@ CREATE TABLE mailboxes (
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, account_id, id),
     UNIQUE (tenant_id, account_id, normalized_display_name),
+    CHECK (parent_mailbox_id IS NULL OR parent_mailbox_id <> id),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, account_id, parent_mailbox_id)
         REFERENCES mailboxes (tenant_id, account_id, id)
@@ -252,6 +253,7 @@ CREATE TABLE message_raw_blobs (
     blob_bytes BYTEA NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, domain_id, id),
     UNIQUE (tenant_id, domain_id, content_sha256),
     FOREIGN KEY (tenant_id, domain_id) REFERENCES domains (tenant_id, id) ON DELETE RESTRICT
 );
@@ -272,7 +274,7 @@ CREATE TABLE messages (
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, id, domain_id),
     FOREIGN KEY (tenant_id, domain_id) REFERENCES domains (tenant_id, id) ON DELETE RESTRICT,
-    FOREIGN KEY (tenant_id, raw_blob_id) REFERENCES message_raw_blobs (tenant_id, id) ON DELETE RESTRICT
+    FOREIGN KEY (tenant_id, domain_id, raw_blob_id) REFERENCES message_raw_blobs (tenant_id, domain_id, id) ON DELETE RESTRICT
 );
 
 CREATE INDEX messages_tenant_received_idx
@@ -586,6 +588,9 @@ CREATE TABLE mail_search_documents (
 CREATE INDEX mail_search_documents_search_idx
     ON mail_search_documents USING GIN (search_vector);
 
+CREATE INDEX mail_search_documents_updated_idx
+    ON mail_search_documents (tenant_id, updated_at DESC);
+
 CREATE TABLE object_change_log (
     sequence BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tenant_id UUID NOT NULL,
@@ -613,6 +618,9 @@ CREATE TABLE object_change_log (
 
 CREATE INDEX object_change_log_account_idx
     ON object_change_log (tenant_id, account_id, category, sequence);
+
+CREATE INDEX object_change_log_category_idx
+    ON object_change_log (tenant_id, category, sequence);
 
 CREATE INDEX object_change_log_mailbox_idx
     ON object_change_log (tenant_id, mailbox_id, sequence)
@@ -842,6 +850,10 @@ CREATE TABLE outbound_message_queue (
 CREATE INDEX outbound_message_queue_pending_idx
     ON outbound_message_queue (tenant_id, status, next_attempt_at);
 
+CREATE INDEX outbound_message_queue_trace_idx
+    ON outbound_message_queue (tenant_id, last_trace_id)
+    WHERE last_trace_id IS NOT NULL;
+
 CREATE TABLE submission_result_history (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
@@ -899,12 +911,14 @@ CREATE TABLE contact_books (
     tenant_id UUID NOT NULL,
     owner_account_id UUID NOT NULL,
     display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+    normalized_display_name TEXT GENERATED ALWAYS AS (lower(display_name)) STORED,
     role TEXT NOT NULL DEFAULT 'contacts' CHECK (role IN ('contacts', 'directory', 'custom')),
     sync_modseq BIGINT NOT NULL DEFAULT 1 CHECK (sync_modseq > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, owner_account_id, id),
+    UNIQUE (tenant_id, owner_account_id, normalized_display_name),
     FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
@@ -944,6 +958,7 @@ CREATE TABLE calendars (
     tenant_id UUID NOT NULL,
     owner_account_id UUID NOT NULL,
     display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+    normalized_display_name TEXT GENERATED ALWAYS AS (lower(display_name)) STORED,
     color TEXT NOT NULL DEFAULT '',
     role TEXT NOT NULL DEFAULT 'calendar' CHECK (role IN ('calendar', 'birthdays', 'custom')),
     sync_modseq BIGINT NOT NULL DEFAULT 1 CHECK (sync_modseq > 0),
@@ -951,6 +966,7 @@ CREATE TABLE calendars (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, owner_account_id, id),
+    UNIQUE (tenant_id, owner_account_id, normalized_display_name),
     FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
@@ -992,6 +1008,7 @@ CREATE TABLE task_lists (
     tenant_id UUID NOT NULL,
     owner_account_id UUID NOT NULL,
     display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+    normalized_display_name TEXT GENERATED ALWAYS AS (lower(display_name)) STORED,
     role TEXT NOT NULL DEFAULT 'custom' CHECK (role IN ('inbox', 'custom')),
     sync_modseq BIGINT NOT NULL DEFAULT 1 CHECK (sync_modseq > 0),
     sort_order INTEGER NOT NULL DEFAULT 0,
@@ -999,6 +1016,7 @@ CREATE TABLE task_lists (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, owner_account_id, id),
+    UNIQUE (tenant_id, owner_account_id, normalized_display_name),
     FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 

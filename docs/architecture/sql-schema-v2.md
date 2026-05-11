@@ -109,6 +109,8 @@ tasks, attachments, `Sent`, drafts, or outbox state.
 `message_raw_blobs` stores the canonical raw RFC 5322 bytes and content hash per
 tenant/domain. `messages.raw_blob_id` points to that blob. Export and protocol
 body fetches reconstruct from this canonical MIME plus parsed part metadata.
+The raw blob reference is domain-bound so a message cannot point at a raw MIME
+blob deduplicated under another domain in the same tenant.
 
 `message_mime_parts` records MIME tree structure, headers, content IDs, file
 names, transfer encodings, byte offsets where available, and links to durable
@@ -223,6 +225,9 @@ DAV, ActiveSync, EWS, and MAPI projections to synchronize from the same
 canonical state.
 Non-custom collection roles are unique per owner for mailboxes, contact books,
 calendars, and task lists.
+Mailbox hierarchy rows cannot parent themselves. Contact books, calendars, and
+task lists also reserve normalized display names per owner, matching mailbox
+name behavior for client projections.
 Contacts, calendar events, and tasks have stable per-collection `uid` values for
 DAV/JMAP/EWS/MAPI import, export, and sync mappings. JSON payload columns used
 for contact addresses, phone numbers, and event attendees are constrained to
@@ -350,6 +355,8 @@ compatible. They do not replace canonical mail or collaboration tables.
   UID scans, account/category change scans, tombstone replay, attachment
   validation/extraction queues, outbound queue workers, and visible collection
   grants.
+- Include worker and replay indexes for search projection freshness, tenant-wide
+  category replay, and LPE-CT trace lookup.
 - Prefer partial unique indexes for optional idempotency keys and nullable
   cursor scopes so the schema states the intended uniqueness directly.
 - Include cleanup indexes for expiring JMAP staging uploads, query states,
