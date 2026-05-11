@@ -1,5 +1,4 @@
 use anyhow::Result;
-use lpe_attachments::extract_text_from_bytes;
 use serde::Serialize;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -36,7 +35,6 @@ impl Storage {
         let domain_id = self
             .load_account_domain_id_in_tx(tx, tenant_id, account_id)
             .await?;
-        let mut search_fragments = Vec::new();
         let mut attachment_ids = Vec::with_capacity(attachments.len());
 
         for (ordinal, attachment) in attachments.iter().enumerate() {
@@ -47,29 +45,19 @@ impl Storage {
                     tenant_id,
                     domain_id,
                     attachment.media_type.trim(),
+                    attachment.file_name.trim(),
                     &attachment.blob_bytes,
                 )
                 .await?;
-            let extracted_text = extract_supported_attachment_text(
-                attachment.media_type.trim(),
-                attachment.file_name.as_str(),
-                &attachment.blob_bytes,
-            )?;
-            if let Some(text) = extracted_text
-                .as_ref()
-                .filter(|text| !text.trim().is_empty())
-            {
-                search_fragments.push(text.clone());
-            }
 
             let mime_part_id = Uuid::new_v4();
             sqlx::query(
                 r#"
                 INSERT INTO mime_parts (
                     id, tenant_id, message_id, domain_id, part_path, ordinal,
-                    content_type, content_disposition, file_name, size_octets, blob_id
+                    content_type, content_disposition, content_id, file_name, size_octets, blob_id
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, 'attachment', $8, $9, $10)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 "#,
             )
             .bind(mime_part_id)
@@ -79,6 +67,8 @@ impl Storage {
             .bind(format!("attachment.{}", ordinal + 1))
             .bind(ordinal as i32)
             .bind(attachment.media_type.trim())
+            .bind(attachment_disposition(attachment.disposition.as_deref()))
+            .bind(attachment.content_id.as_deref().map(str::trim))
             .bind(attachment.file_name.trim())
             .bind(attachment.blob_bytes.len() as i64)
             .bind(blob.id)
@@ -89,9 +79,9 @@ impl Storage {
                 r#"
                 INSERT INTO attachments (
                     id, tenant_id, account_id, message_id, domain_id, mime_part_id,
-                    blob_id, file_name, disposition, ordinal, size_octets
+                    blob_id, file_name, disposition, content_id, ordinal, size_octets
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'attachment', $9, $10)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 "#,
             )
             .bind(attachment_id)
@@ -102,6 +92,8 @@ impl Storage {
             .bind(mime_part_id)
             .bind(blob.id)
             .bind(attachment.file_name.trim())
+            .bind(attachment_disposition(attachment.disposition.as_deref()))
+            .bind(attachment.content_id.as_deref().map(str::trim))
             .bind(ordinal as i32)
             .bind(attachment.blob_bytes.len() as i64)
             .execute(&mut **tx)
@@ -121,32 +113,6 @@ impl Storage {
         .execute(&mut **tx)
         .await?;
 
-        if !search_fragments.is_empty() {
-            sqlx::query(
-                r#"
-                INSERT INTO attachment_texts (
-                    tenant_id, blob_id, extracted_text, content_hash, search_vector
-                )
-                SELECT $1, a.blob_id, $2, $3, to_tsvector('simple', $2)
-                FROM attachments a
-                WHERE a.tenant_id = $1 AND a.message_id = $4
-                ORDER BY a.ordinal ASC
-                LIMIT 1
-                ON CONFLICT (tenant_id, blob_id) DO UPDATE SET
-                    extracted_text = EXCLUDED.extracted_text,
-                    content_hash = EXCLUDED.content_hash,
-                    search_vector = EXCLUDED.search_vector,
-                    extracted_at = NOW()
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(search_fragments.join("\n"))
-            .bind(sha256_hex(search_fragments.join("\n").as_bytes()))
-            .bind(message_id)
-            .execute(&mut **tx)
-            .await?;
-        }
-
         Ok(attachment_ids)
     }
 
@@ -156,6 +122,7 @@ impl Storage {
         tenant_id: &str,
         domain_id: Uuid,
         media_type: &str,
+        file_name: &str,
         blob_bytes: &[u8],
     ) -> Result<StoredAttachmentBlob> {
         let content_sha256 = sha256_hex(blob_bytes);
@@ -184,13 +151,19 @@ impl Storage {
         }
 
         let blob_id = Uuid::new_v4();
+        let extraction_status = if supports_attachment_text_extraction(media_type, file_name) {
+            "queued"
+        } else {
+            "unsupported"
+        };
         sqlx::query(
             r#"
             INSERT INTO blobs (
                 id, tenant_id, domain_id, blob_kind, content_sha256,
-                media_type, size_octets, blob_bytes, magika_status, validated_at
+                media_type, size_octets, blob_bytes, magika_status,
+                extraction_status, validated_at
             )
-            VALUES ($1, $2, $3, 'attachment', $4, $5, $6, $7, 'valid', NOW())
+            VALUES ($1, $2, $3, 'attachment', $4, $5, $6, $7, 'valid', $8, NOW())
             "#,
         )
         .bind(blob_id)
@@ -200,8 +173,23 @@ impl Storage {
         .bind(media_type)
         .bind(blob_bytes.len() as i64)
         .bind(blob_bytes)
+        .bind(extraction_status)
         .execute(&mut **tx)
         .await?;
+
+        if extraction_status == "queued" {
+            sqlx::query(
+                r#"
+                INSERT INTO attachment_extraction_jobs (id, tenant_id, blob_id, status)
+                VALUES ($1, $2, $3, 'queued')
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(tenant_id)
+            .bind(blob_id)
+            .execute(&mut **tx)
+            .await?;
+        }
 
         Ok(StoredAttachmentBlob {
             id: blob_id,
@@ -210,23 +198,23 @@ impl Storage {
     }
 }
 
-pub(crate) fn extract_supported_attachment_text(
-    media_type: &str,
-    file_name: &str,
-    blob_bytes: &[u8],
-) -> Result<Option<String>> {
-    match extract_text_from_bytes(blob_bytes, Some(media_type), Some(file_name)) {
-        Ok(text) => Ok(Some(text)),
-        Err(error) => {
-            let message = error.to_string();
-            if message.contains("unsupported validated attachment format")
-                || message.contains("blocked extraction")
-            {
-                Ok(None)
-            } else {
-                Err(error)
-            }
-        }
+pub(crate) fn supports_attachment_text_extraction(media_type: &str, file_name: &str) -> bool {
+    let media_type = media_type.trim().to_ascii_lowercase();
+    let file_name = file_name.trim().to_ascii_lowercase();
+    matches!(
+        media_type.as_str(),
+        "application/pdf"
+            | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            | "application/vnd.oasis.opendocument.text"
+    ) || file_name.ends_with(".pdf")
+        || file_name.ends_with(".docx")
+        || file_name.ends_with(".odt")
+}
+
+fn attachment_disposition(value: Option<&str>) -> &'static str {
+    match value.map(str::trim) {
+        Some(value) if value.eq_ignore_ascii_case("inline") => "inline",
+        _ => "attachment",
     }
 }
 
@@ -283,4 +271,34 @@ fn media_type_label(media_type: &str) -> Option<String> {
         return None;
     }
     Some(normalized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::supports_attachment_text_extraction;
+
+    #[test]
+    fn extraction_queue_scope_is_limited_to_document_text_formats() {
+        assert!(supports_attachment_text_extraction(
+            "application/pdf",
+            "report.bin"
+        ));
+        assert!(supports_attachment_text_extraction(
+            "application/octet-stream",
+            "brief.docx"
+        ));
+        assert!(supports_attachment_text_extraction(
+            "application/vnd.oasis.opendocument.text",
+            "notes.data"
+        ));
+
+        assert!(!supports_attachment_text_extraction(
+            "image/png",
+            "diagram.png"
+        ));
+        assert!(!supports_attachment_text_extraction(
+            "text/plain",
+            "notes.txt"
+        ));
+    }
 }

@@ -43,6 +43,8 @@ pub struct SubmittedRecipientInput {
 pub struct AttachmentUploadInput {
     pub file_name: String,
     pub media_type: String,
+    pub disposition: Option<String>,
+    pub content_id: Option<String>,
     pub blob_bytes: Vec<u8>,
 }
 
@@ -330,6 +332,13 @@ impl Storage {
                 bail!("draft not found");
             }
 
+            self.replace_message_headers_in_tx(
+                &mut tx,
+                &tenant_id,
+                message_id,
+                raw_message.as_bytes(),
+            )
+            .await?;
             sqlx::query("DELETE FROM message_recipients WHERE tenant_id = $1 AND message_id = $2")
                 .bind(&tenant_id)
                 .bind(message_id)
@@ -393,6 +402,13 @@ impl Storage {
             .bind(&subject)
             .bind(input.size_octets.max(0))
             .execute(&mut *tx)
+            .await?;
+            self.replace_message_headers_in_tx(
+                &mut tx,
+                &tenant_id,
+                message_id,
+                raw_message.as_bytes(),
+            )
             .await?;
         }
 
@@ -521,6 +537,14 @@ impl Storage {
             )
             .await?
         };
+        self.assign_message_attachments_membership_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            message_id,
+            membership_id,
+        )
+        .await?;
         Self::upsert_mail_search_document_in_tx(
             &mut tx,
             &tenant_id,
@@ -1128,6 +1152,13 @@ impl Storage {
                     .execute(&mut *tx)
                     .await?;
 
+                    self.replace_message_headers_in_tx(
+                        &mut tx,
+                        &tenant_id,
+                        message_id,
+                        raw_message.as_bytes(),
+                    )
+                    .await?;
                     self.upsert_message_body_in_tx(
                         &mut tx,
                         &tenant_id,
@@ -1233,6 +1264,14 @@ impl Storage {
                             "created",
                         )
                         .await?;
+                    self.assign_message_attachments_membership_in_tx(
+                        &mut tx,
+                        &tenant_id,
+                        input.account_id,
+                        message_id,
+                        mailbox_message_id,
+                    )
+                    .await?;
                     Self::upsert_mail_search_document_in_tx(
                         &mut tx,
                         &tenant_id,

@@ -871,6 +871,15 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 .await?
                 .ok_or_else(|| anyhow!("blob not found")),
             JmapBlobId::Message(message_id) => {
+                if include_bcc {
+                    if let Some(blob) = self
+                        .store
+                        .fetch_jmap_message_blob(requested_account_id, message_id)
+                        .await?
+                    {
+                        return Ok(blob);
+                    }
+                }
                 let email = self
                     .store
                     .fetch_jmap_emails(requested_account_id, &[message_id])

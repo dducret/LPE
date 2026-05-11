@@ -22,6 +22,12 @@ pub struct ParsedRfc822Message {
     pub attachments: Vec<AttachmentUploadInput>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedRfc822Header {
+    pub name: String,
+    pub value: String,
+}
+
 pub fn parse_message_attachments(bytes: &[u8]) -> Result<Vec<AttachmentUploadInput>> {
     collect_mime_attachment_parts(bytes)?
         .into_iter()
@@ -37,6 +43,17 @@ pub fn parse_message_attachments(bytes: &[u8]) -> Result<Vec<AttachmentUploadInp
             Ok(AttachmentUploadInput {
                 file_name,
                 media_type,
+                disposition: attachment.content_disposition.as_deref().and_then(|value| {
+                    let disposition = value.split(';').next().map(str::trim)?;
+                    if disposition.eq_ignore_ascii_case("inline") {
+                        Some("inline".to_string())
+                    } else if disposition.eq_ignore_ascii_case("attachment") {
+                        Some("attachment".to_string())
+                    } else {
+                        None
+                    }
+                }),
+                content_id: attachment.content_id,
                 blob_bytes: attachment.bytes,
             })
         })
@@ -103,6 +120,49 @@ pub fn parse_headers_map(raw_message: &[u8]) -> HashMap<String, String> {
     let raw = String::from_utf8_lossy(raw_message).replace("\r\n", "\n");
     let (header_text, _) = raw.split_once("\n\n").unwrap_or((raw.as_str(), ""));
     parse_headers(header_text)
+}
+
+pub fn parse_header_records(raw_message: &[u8]) -> Vec<ParsedRfc822Header> {
+    let mut headers = Vec::new();
+    let mut current_name: Option<String> = None;
+    let mut current_value = String::new();
+
+    for line in String::from_utf8_lossy(raw_message).lines() {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            break;
+        }
+
+        if line.starts_with(' ') || line.starts_with('\t') {
+            if !current_value.is_empty() {
+                current_value.push(' ');
+            }
+            current_value.push_str(line.trim());
+            continue;
+        }
+
+        if let Some(name) = current_name.take() {
+            headers.push(ParsedRfc822Header {
+                name,
+                value: current_value.trim().to_string(),
+            });
+            current_value.clear();
+        }
+
+        if let Some((name, value)) = line.split_once(':') {
+            current_name = Some(name.trim().to_string());
+            current_value.push_str(value.trim());
+        }
+    }
+
+    if let Some(name) = current_name {
+        headers.push(ParsedRfc822Header {
+            name,
+            value: current_value.trim().to_string(),
+        });
+    }
+
+    headers
 }
 
 fn normalize_email(value: &str) -> String {
@@ -257,6 +317,35 @@ mod tests {
         assert_eq!(attachments[0].file_name, "invoice.pdf");
         assert_eq!(attachments[0].media_type, "application/pdf");
         assert_eq!(attachments[0].blob_bytes, b"PDFDATA".to_vec());
+    }
+
+    #[test]
+    fn parse_message_attachments_preserves_inline_content_id_metadata() {
+        let message = concat!(
+            "Content-Type: multipart/related; boundary=\"rel\"\r\n",
+            "\r\n",
+            "--rel\r\n",
+            "Content-Type: text/html\r\n",
+            "\r\n",
+            "<img src=\"cid:logo@example.test\">\r\n",
+            "--rel\r\n",
+            "Content-Type: image/png; name=\"logo.png\"\r\n",
+            "Content-Disposition: inline; filename=\"logo.png\"\r\n",
+            "Content-ID: <logo@example.test>\r\n",
+            "\r\n",
+            "PNGDATA\r\n",
+            "--rel--\r\n"
+        );
+
+        let attachments = parse_message_attachments(message.as_bytes()).unwrap();
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].disposition.as_deref(), Some("inline"));
+        assert_eq!(
+            attachments[0].content_id.as_deref(),
+            Some("logo@example.test")
+        );
+        assert_eq!(attachments[0].file_name, "logo.png");
     }
 
     #[test]

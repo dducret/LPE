@@ -102,6 +102,7 @@ pub struct MimeAttachmentPart {
     pub filename: Option<String>,
     pub declared_mime: Option<String>,
     pub content_disposition: Option<String>,
+    pub content_id: Option<String>,
     pub bytes: Vec<u8>,
 }
 

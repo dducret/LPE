@@ -306,6 +306,8 @@ impl Storage {
                     message.attachments.push(AttachmentUploadInput {
                         file_name: decode_pst_field(parts[1]),
                         media_type: decode_pst_field(parts[2]),
+                        disposition: Some("attachment".to_string()),
+                        content_id: None,
                         blob_bytes: BASE64
                             .decode(parts[3])
                             .context("decode PST attachment payload")?,

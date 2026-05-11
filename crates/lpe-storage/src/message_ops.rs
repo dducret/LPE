@@ -450,12 +450,15 @@ impl Storage {
         let domain_id = self
             .load_account_domain_id_in_tx(&mut tx, &tenant_id, input.account_id)
             .await?;
-        let raw_message = format!(
-            "From: {}\r\nSubject: {}\r\n\r\n{}",
-            crate::normalize_email(&input.from_address),
-            input.subject,
-            input.body_text
-        );
+        let raw_message = input.raw_message.clone().unwrap_or_else(|| {
+            format!(
+                "From: {}\r\nSubject: {}\r\n\r\n{}",
+                crate::normalize_email(&input.from_address),
+                input.subject,
+                input.body_text
+            )
+            .into_bytes()
+        });
         let blob_id = self
             .store_message_blob_in_tx(
                 &mut tx,
@@ -463,7 +466,7 @@ impl Storage {
                 domain_id,
                 "raw_message",
                 "message/rfc822",
-                raw_message.as_bytes(),
+                &raw_message,
             )
             .await?;
         sqlx::query(
@@ -483,11 +486,14 @@ impl Storage {
         .bind(domain_id)
         .bind(blob_id)
         .bind(input.internet_message_id)
-        .bind(sha256_hex(raw_message.as_bytes()))
+        .bind(sha256_hex(&raw_message))
         .bind(crate::normalize_subject(&input.subject))
         .bind(input.size_octets.max(0))
         .execute(&mut *tx)
         .await?;
+
+        self.replace_message_headers_in_tx(&mut tx, &tenant_id, message_id, &raw_message)
+            .await?;
 
         self.upsert_message_body_in_tx(
             &mut tx,
@@ -585,6 +591,14 @@ impl Storage {
                 "created",
             )
             .await?;
+        self.assign_message_attachments_membership_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            message_id,
+            membership_id,
+        )
+        .await?;
         Self::upsert_mail_search_document_in_tx(
             &mut tx,
             &tenant_id,

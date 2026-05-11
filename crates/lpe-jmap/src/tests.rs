@@ -45,6 +45,7 @@ struct FakeStore {
     task_lists: Arc<Mutex<Vec<ClientTaskList>>>,
     tasks: Arc<Mutex<Vec<ClientTask>>>,
     uploads: Arc<Mutex<Vec<JmapUploadBlob>>>,
+    raw_message_blobs: Arc<Mutex<HashMap<Uuid, JmapUploadBlob>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
     active_sieve_script: Arc<Mutex<Option<String>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
@@ -861,6 +862,19 @@ impl JmapStore for FakeStore {
             .unwrap()
             .iter()
             .find(|blob| blob.id == blob_id)
+            .cloned())
+    }
+
+    async fn fetch_jmap_message_blob(
+        &self,
+        _account_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<JmapUploadBlob>> {
+        Ok(self
+            .raw_message_blobs
+            .lock()
+            .unwrap()
+            .get(&message_id)
             .cloned())
     }
 
@@ -4733,6 +4747,9 @@ async fn email_import_validates_and_preserves_multipart_attachments() {
 
     let imported = store.imported_emails.lock().unwrap();
     assert_eq!(imported.len(), 1);
+    assert!(imported[0].raw_message.as_deref().is_some_and(|raw| raw
+        .windows(b"Content-Type: multipart/mixed".len())
+        .any(|window| window == b"Content-Type: multipart/mixed")));
     assert_eq!(imported[0].body_text, "Hello plain");
     assert_eq!(
         imported[0].body_html_sanitized.as_deref(),
@@ -4814,6 +4831,53 @@ async fn email_get_exposes_canonical_blob_ids_and_download_accepts_upload_prefix
     assert!(draft_message.contains("To: Bob <bob@example.test>\r\n"));
     assert!(draft_message.contains("Bcc: hidden@example.test\r\n"));
     assert!(draft_message.contains("\r\nDraft body\r\n"));
+}
+
+#[tokio::test]
+async fn owned_message_download_prefers_stored_raw_mime_blob() {
+    let email = FakeStore::draft_email();
+    let raw_blob = JmapUploadBlob {
+        id: email.id,
+        account_id: FakeStore::account().account_id,
+        media_type: "message/rfc822".to_string(),
+        octet_size: 104,
+        blob_bytes: concat!(
+            "From: Alice <alice@example.test>\r\n",
+            "To: Bob <bob@example.test>\r\n",
+            "Bcc: Hidden <hidden@example.test>\r\n",
+            "Subject: Preserved raw\r\n",
+            "X-Custom: yes\r\n",
+            "\r\n",
+            "Raw body.\r\n"
+        )
+        .as_bytes()
+        .to_vec(),
+    };
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::draft_mailbox()],
+        emails: vec![email.clone()],
+        raw_message_blobs: Arc::new(Mutex::new(HashMap::from([(email.id, raw_blob.clone())]))),
+        ..Default::default()
+    };
+    let service = JmapService::new_with_validator(
+        store,
+        validator_ok("message/rfc822", "email", "eml", 0.99),
+    );
+
+    let blob = service
+        .handle_download(
+            Some("Bearer token"),
+            &FakeStore::account().account_id.to_string(),
+            &format!("message:{}", email.id),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(blob.blob_bytes, raw_blob.blob_bytes);
+    assert!(String::from_utf8(blob.blob_bytes)
+        .unwrap()
+        .contains("X-Custom: yes\r\n"));
 }
 
 #[tokio::test]

@@ -442,6 +442,69 @@ impl Storage {
         Ok(())
     }
 
+    pub(crate) async fn replace_message_headers_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        message_id: Uuid,
+        raw_message: &[u8],
+    ) -> Result<usize> {
+        sqlx::query("DELETE FROM message_headers WHERE tenant_id = $1 AND message_id = $2")
+            .bind(tenant_id)
+            .bind(message_id)
+            .execute(&mut **tx)
+            .await?;
+
+        let headers = crate::mail::parse_header_records(raw_message);
+        for (ordinal, header) in headers.iter().enumerate() {
+            sqlx::query(
+                r#"
+                INSERT INTO message_headers (
+                    id, tenant_id, message_id, header_name, header_value, ordinal
+                )
+                VALUES ($1, $2, $3, $4, $5, $6)
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(tenant_id)
+            .bind(message_id)
+            .bind(header.name.trim())
+            .bind(header.value.trim())
+            .bind(ordinal as i32)
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        Ok(headers.len())
+    }
+
+    pub(crate) async fn assign_message_attachments_membership_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Uuid,
+        message_id: Uuid,
+        mailbox_message_id: Uuid,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE attachments
+            SET mailbox_message_id = $4
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND message_id = $3
+              AND mailbox_message_id IS NULL
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .bind(mailbox_message_id)
+        .execute(&mut **tx)
+        .await?;
+        Ok(())
+    }
+
     pub(crate) async fn upsert_mail_search_document_in_tx(
         tx: &mut sqlx::Transaction<'_, Postgres>,
         tenant_id: &str,

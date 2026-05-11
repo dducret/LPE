@@ -481,19 +481,24 @@ impl Storage {
         .execute(&mut **tx)
         .await?;
 
+        let header_count = self
+            .replace_message_headers_in_tx(tx, tenant_id, message_id, &request.raw_message)
+            .await?;
+
         self.upsert_message_body_in_tx(tx, tenant_id, domain_id, message_id, body_text, None)
             .await?;
 
         sqlx::query(
             r#"
             INSERT INTO message_headers (id, tenant_id, message_id, header_name, header_value, ordinal)
-            VALUES ($1, $2, $3, 'x-lpe-ct-trace-id', $4, 0)
+            VALUES ($1, $2, $3, 'x-lpe-ct-trace-id', $4, $5)
             "#,
         )
         .bind(Uuid::new_v4())
         .bind(tenant_id)
         .bind(message_id)
         .bind(&request.trace_id)
+        .bind(header_count as i32)
         .execute(&mut **tx)
         .await?;
         sqlx::query(
@@ -539,6 +544,14 @@ impl Storage {
                 false, "created",
             )
             .await?;
+        self.assign_message_attachments_membership_in_tx(
+            tx,
+            tenant_id,
+            account_id,
+            message_id,
+            membership_id,
+        )
+        .await?;
         Self::upsert_mail_search_document_in_tx(
             tx,
             tenant_id,

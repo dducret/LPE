@@ -79,6 +79,10 @@ fn collect_attachment_parts(bytes: &[u8], attachments: &mut Vec<MimeAttachmentPa
     }
 
     let content_disposition = headers.get("content-disposition").cloned();
+    let content_id = headers
+        .get("content-id")
+        .map(|value| value.trim().trim_matches(['<', '>']).to_string())
+        .filter(|value| !value.is_empty());
     let filename = content_disposition
         .as_deref()
         .and_then(|value| content_type_parameter(value, "filename"))
@@ -92,6 +96,7 @@ fn collect_attachment_parts(bytes: &[u8], attachments: &mut Vec<MimeAttachmentPa
             filename,
             declared_mime: Some(strip_content_type_parameters(&content_type)),
             content_disposition,
+            content_id,
             bytes: decoded_body,
         });
     }

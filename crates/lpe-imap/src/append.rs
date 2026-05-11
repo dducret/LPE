@@ -182,6 +182,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                     submitted_by_account_id: principal.account_id,
                     mailbox_id: mailbox.id,
                     source: "imap-append".to_string(),
+                    raw_message: Some(literal.clone()),
                     from_display,
                     from_address,
                     sender_display: None,

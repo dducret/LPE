@@ -153,6 +153,14 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         account_id: Uuid,
         blob_id: Uuid,
     ) -> Result<Option<JmapUploadBlob>>;
+    async fn fetch_jmap_message_blob(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<JmapUploadBlob>> {
+        let _ = (account_id, message_id);
+        Ok(None)
+    }
     async fn save_draft_message(
         &self,
         input: SubmitMessageInput,
@@ -487,6 +495,14 @@ impl JmapStore for Storage {
         blob_id: Uuid,
     ) -> Result<Option<JmapUploadBlob>> {
         self.fetch_jmap_upload_blob(account_id, blob_id).await
+    }
+
+    async fn fetch_jmap_message_blob(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<JmapUploadBlob>> {
+        self.fetch_jmap_message_blob(account_id, message_id).await
     }
 
     async fn save_draft_message(

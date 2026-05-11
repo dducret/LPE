@@ -8815,6 +8815,8 @@ fn pending_attachment_upload(
     AttachmentUploadInput {
         file_name: pending_attachment_file_name(attach_num, properties),
         media_type: pending_attachment_media_type(properties),
+        disposition: Some("attachment".to_string()),
+        content_id: None,
         blob_bytes: data,
     }
 }
@@ -8879,6 +8881,7 @@ fn jmap_import_from_pending_message(
         submitted_by_account_id: principal.account_id,
         mailbox_id: mailbox.id,
         source: "mapi-save-message".to_string(),
+        raw_message: None,
         from_display,
         from_address,
         sender_display: None,

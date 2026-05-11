@@ -545,6 +545,10 @@ fn multipart_boundary(email: &ImapEmail) -> String {
     format!("lpe-alt-{}", email.id)
 }
 
+fn mixed_boundary(email: &ImapEmail) -> String {
+    format!("lpe-mixed-{}", email.id)
+}
+
 fn render_envelope(email: &ImapEmail) -> String {
     let from_address = fallback_address(&email.from_address);
     let from_display = normalized_display_name(email.from_display.as_deref(), from_address);
@@ -615,6 +619,20 @@ fn render_single_address(display_name: Option<&str>, address: &str) -> String {
 }
 
 fn render_bodystructure(email: &ImapEmail) -> String {
+    let body = render_body_bodystructure(email);
+    if email.has_attachments {
+        format!(
+            "({} {} \"MIXED\" (\"BOUNDARY\" \"{}\") NIL NIL)",
+            body,
+            render_generic_attachment_bodystructure(),
+            mixed_boundary(email)
+        )
+    } else {
+        body
+    }
+}
+
+fn render_body_bodystructure(email: &ImapEmail) -> String {
     let text = render_text_bodystructure(&email.body_text, "PLAIN");
     if let Some(html) = email.body_html_sanitized.as_deref() {
         format!(
@@ -635,6 +653,11 @@ fn render_text_bodystructure(value: &str, subtype: &str) -> String {
         value.as_bytes().len(),
         value.lines().count().max(1)
     )
+}
+
+fn render_generic_attachment_bodystructure() -> String {
+    "(\"APPLICATION\" \"OCTET-STREAM\" NIL NIL NIL \"BASE64\" 0 NIL (\"ATTACHMENT\" NIL) NIL)"
+        .to_string()
 }
 
 fn nstring(value: Option<&str>) -> String {
@@ -1128,5 +1151,53 @@ mod tests {
 
         assert!(response.contains("BODY[HEADER.FIELDS (FROM TO SUBJECT)]"));
         assert!(!response.contains("BODY.PEEK["));
+    }
+
+    #[test]
+    fn bodystructure_wraps_alternative_body_in_mixed_when_attachments_exist() {
+        let email = ImapEmail {
+            id: Uuid::new_v4(),
+            uid: 1,
+            modseq: 1,
+            thread_id: Uuid::new_v4(),
+            mailbox_id: Uuid::new_v4(),
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            received_at: "2026-05-03T10:00:00Z".to_string(),
+            sent_at: None,
+            from_address: "sender@example.test".to_string(),
+            from_display: None,
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Message".to_string(),
+            preview: String::new(),
+            body_text: "Plain".to_string(),
+            body_html_sanitized: Some("<p>HTML</p>".to_string()),
+            unread: true,
+            flagged: false,
+            deleted: false,
+            has_attachments: true,
+            size_octets: 4,
+            internet_message_id: None,
+            delivery_status: "stored".to_string(),
+        };
+
+        let response = String::from_utf8(
+            render_fetch_response(
+                1,
+                &email,
+                &FetchAttributes {
+                    items: vec![FetchItem::BodyStructure],
+                    mark_seen: false,
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert!(response.contains("\"ALTERNATIVE\""));
+        assert!(response.contains("\"MIXED\""));
+        assert!(response.contains("\"ATTACHMENT\""));
     }
 }

@@ -1766,6 +1766,8 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             uploads.push(lpe_storage::AttachmentUploadInput {
                 file_name: content.file_name,
                 media_type: content.media_type,
+                disposition: Some("attachment".to_string()),
+                content_id: None,
                 blob_bytes: content.blob_bytes,
             });
         }

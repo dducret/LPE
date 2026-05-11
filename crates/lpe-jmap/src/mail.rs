@@ -1416,6 +1416,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             submitted_by_account_id: account.account_id,
             mailbox_id: target_mailbox_id,
             source: "jmap-import".to_string(),
+            raw_message: Some(blob.blob_bytes),
             from_display: parsed
                 .from
                 .as_ref()

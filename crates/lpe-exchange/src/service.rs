@@ -3574,6 +3574,7 @@ fn imported_email_input(input: SubmitMessageInput, mailbox_id: Uuid) -> JmapImpo
         submitted_by_account_id: input.submitted_by_account_id,
         mailbox_id,
         source: input.source,
+        raw_message: None,
         from_display: input.from_display,
         from_address: input.from_address,
         sender_display: input.sender_display,
@@ -3629,6 +3630,8 @@ fn parse_file_attachment_upload(value: &str) -> Result<AttachmentUploadInput> {
     Ok(AttachmentUploadInput {
         file_name,
         media_type,
+        disposition: Some("attachment".to_string()),
+        content_id: None,
         blob_bytes,
     })
 }

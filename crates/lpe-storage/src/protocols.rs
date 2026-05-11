@@ -202,6 +202,7 @@ pub struct JmapImportedEmailInput {
     pub submitted_by_account_id: Uuid,
     pub mailbox_id: Uuid,
     pub source: String,
+    pub raw_message: Option<Vec<u8>>,
     pub from_display: Option<String>,
     pub from_address: String,
     pub sender_display: Option<String>,
@@ -1847,6 +1848,54 @@ impl Storage {
         })
     }
 
+    pub async fn fetch_jmap_message_blob(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<JmapUploadBlob>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let row = sqlx::query(
+            r#"
+            SELECT b.media_type, b.size_octets, b.blob_bytes
+            FROM messages m
+            JOIN blobs b
+              ON b.tenant_id = m.tenant_id
+             AND b.domain_id = m.domain_id
+             AND b.id = m.blob_id
+             AND b.blob_kind = 'raw_message'
+            WHERE m.tenant_id = $1
+              AND m.id = $2
+              AND EXISTS (
+                  SELECT 1
+                  FROM mailbox_messages mm
+                  WHERE mm.tenant_id = m.tenant_id
+                    AND mm.account_id = $3
+                    AND mm.message_id = m.id
+                    AND mm.visibility = 'visible'
+              )
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(message_id)
+        .bind(account_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| JmapUploadBlob {
+            id: message_id,
+            account_id,
+            media_type: row
+                .try_get("media_type")
+                .unwrap_or_else(|_| "message/rfc822".to_string()),
+            octet_size: row
+                .try_get::<i64, _>("size_octets")
+                .unwrap_or_default()
+                .max(0) as u64,
+            blob_bytes: row.try_get("blob_bytes").unwrap_or_default(),
+        }))
+    }
+
     pub async fn save_jmap_upload_blob(
         &self,
         account_id: Uuid,
@@ -1861,8 +1910,11 @@ impl Storage {
         let id = Uuid::new_v4();
         sqlx::query(
             r#"
-            INSERT INTO jmap_upload_blobs (id, tenant_id, account_id, media_type, octet_size, blob_bytes)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO jmap_upload_blobs (
+                id, tenant_id, account_id, media_type, size_octets,
+                content_sha256, blob_bytes, magika_status, expires_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'valid', NOW() + INTERVAL '1 hour')
             "#,
         )
         .bind(id)
@@ -1870,6 +1922,7 @@ impl Storage {
         .bind(account_id)
         .bind(media_type.trim())
         .bind(blob_bytes.len() as i64)
+        .bind(crate::sha256_hex(blob_bytes))
         .bind(blob_bytes)
         .execute(&mut *tx)
         .await?;
@@ -1892,9 +1945,11 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let row = sqlx::query_as::<_, JmapUploadBlobRow>(
             r#"
-            SELECT id, account_id, media_type, octet_size, blob_bytes
+            SELECT id, account_id, media_type, size_octets AS octet_size, blob_bytes
             FROM jmap_upload_blobs
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+              AND consumed_at IS NULL
+              AND expires_at > NOW()
             LIMIT 1
             "#,
         )
@@ -2257,11 +2312,19 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query_as::<_, ActiveSyncAttachmentRow>(
             r#"
-            SELECT a.id, a.message_id, a.file_name, a.media_type, a.size_octets
+            SELECT a.id, a.message_id, a.file_name, b.media_type, a.size_octets
             FROM attachments a
-            JOIN messages m ON m.id = a.message_id
+            JOIN blobs b
+              ON b.tenant_id = a.tenant_id
+             AND b.domain_id = a.domain_id
+             AND b.id = a.blob_id
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = a.tenant_id
+             AND mm.account_id = a.account_id
+             AND mm.message_id = a.message_id
+             AND mm.visibility = 'visible'
             WHERE a.tenant_id = $1
-              AND m.account_id = $2
+              AND a.account_id = $2
               AND a.message_id = $3
             ORDER BY a.file_name ASC, a.id ASC
             "#,
@@ -2299,14 +2362,21 @@ impl Storage {
 
         let row = sqlx::query(
             r#"
-            SELECT a.file_name, a.media_type, b.blob_bytes
+            SELECT a.file_name, b.media_type, b.blob_bytes
             FROM attachments a
-            JOIN messages m ON m.id = a.message_id
-            JOIN attachment_blobs b ON b.id = a.attachment_blob_id
+            JOIN blobs b
+              ON b.tenant_id = a.tenant_id
+             AND b.domain_id = a.domain_id
+             AND b.id = a.blob_id
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = a.tenant_id
+             AND mm.account_id = a.account_id
+             AND mm.message_id = a.message_id
+             AND mm.visibility = 'visible'
             WHERE a.tenant_id = $1
               AND a.id = $2
               AND a.message_id = $3
-              AND m.account_id = $4
+              AND a.account_id = $4
             LIMIT 1
             "#,
         )
@@ -2322,6 +2392,59 @@ impl Storage {
             file_name: row.try_get("file_name").unwrap_or_default(),
             media_type: row.try_get("media_type").unwrap_or_default(),
             blob_bytes: row.try_get("blob_bytes").unwrap_or_default(),
+        }))
+    }
+
+    pub async fn fetch_message_attachment_content_by_cid(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        content_id: &str,
+    ) -> Result<Option<ActiveSyncAttachmentContent>> {
+        let content_id = content_id.trim().trim_matches(['<', '>']);
+        if content_id.is_empty() {
+            return Ok(None);
+        }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let row = sqlx::query(
+            r#"
+            SELECT a.id, a.file_name, b.media_type, b.blob_bytes
+            FROM attachments a
+            JOIN blobs b
+              ON b.tenant_id = a.tenant_id
+             AND b.domain_id = a.domain_id
+             AND b.id = a.blob_id
+            WHERE a.tenant_id = $1
+              AND a.account_id = $2
+              AND a.message_id = $3
+              AND lower(a.content_id) = lower($4)
+              AND EXISTS (
+                  SELECT 1
+                  FROM mailbox_messages mm
+                  WHERE mm.tenant_id = a.tenant_id
+                    AND mm.account_id = a.account_id
+                    AND mm.message_id = a.message_id
+                    AND mm.visibility = 'visible'
+              )
+            ORDER BY a.ordinal ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .bind(content_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| {
+            let attachment_id = row.try_get("id").unwrap_or(message_id);
+            ActiveSyncAttachmentContent {
+                file_reference: format!("attachment:{message_id}:{attachment_id}"),
+                file_name: row.try_get("file_name").unwrap_or_default(),
+                media_type: row.try_get("media_type").unwrap_or_default(),
+                blob_bytes: row.try_get("blob_bytes").unwrap_or_default(),
+            }
         }))
     }
 
@@ -2345,9 +2468,13 @@ impl Storage {
         let mut tx = self.pool.begin().await?;
         let exists = sqlx::query(
             r#"
-            SELECT 1
-            FROM messages
-            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            SELECT id
+            FROM mailbox_messages
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND message_id = $3
+              AND visibility = 'visible'
+            ORDER BY updated_at DESC
             LIMIT 1
             "#,
         )
@@ -2356,10 +2483,10 @@ impl Storage {
         .bind(message_id)
         .fetch_optional(&mut *tx)
         .await?;
-        if exists.is_none() {
+        let Some(existing_membership) = exists else {
             tx.commit().await?;
             return Ok(None);
-        }
+        };
 
         let modseq = self
             .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
@@ -2378,43 +2505,27 @@ impl Storage {
             return Ok(None);
         };
 
+        self.assign_message_attachments_membership_in_tx(
+            &mut tx,
+            &tenant_id,
+            account_id,
+            message_id,
+            existing_membership.try_get("id")?,
+        )
+        .await?;
+
         sqlx::query(
             r#"
-            UPDATE messages
-            SET imap_modseq = $3
-            WHERE tenant_id = $1 AND account_id = $4 AND id = $2
+            UPDATE mailbox_messages
+            SET modseq = $3, updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $4 AND message_id = $2
+              AND visibility = 'visible'
             "#,
         )
         .bind(&tenant_id)
         .bind(message_id)
         .bind(modseq)
         .bind(account_id)
-        .execute(&mut *tx)
-        .await?;
-
-        sqlx::query(
-            r#"
-            UPDATE message_bodies
-            SET search_vector = to_tsvector(
-                'simple',
-                concat_ws(
-                    ' ',
-                    body_text,
-                    participants_normalized,
-                    COALESCE((
-                        SELECT string_agg(extracted_text, ' ')
-                        FROM attachments
-                        WHERE tenant_id = $1
-                          AND message_id = $2
-                          AND extracted_text IS NOT NULL
-                    ), '')
-                )
-            )
-            WHERE message_id = $2
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(message_id)
         .execute(&mut *tx)
         .await?;
 
@@ -2458,13 +2569,18 @@ impl Storage {
         let deleted = sqlx::query(
             r#"
             DELETE FROM attachments a
-            USING messages m
             WHERE a.tenant_id = $1
               AND a.id = $2
               AND a.message_id = $3
-              AND m.tenant_id = $1
-              AND m.account_id = $4
-              AND m.id = a.message_id
+              AND a.account_id = $4
+              AND EXISTS (
+                  SELECT 1
+                  FROM mailbox_messages mm
+                  WHERE mm.tenant_id = a.tenant_id
+                    AND mm.account_id = a.account_id
+                    AND mm.message_id = a.message_id
+                    AND mm.visibility = 'visible'
+              )
             RETURNING a.message_id
             "#,
         )
@@ -2488,41 +2604,27 @@ impl Storage {
                     SELECT 1
                     FROM attachments
                     WHERE tenant_id = $1 AND message_id = $2
-                ),
-                imap_modseq = $3
-            WHERE tenant_id = $1 AND account_id = $4 AND id = $2
+                )
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(message_id)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            UPDATE mailbox_messages
+            SET modseq = $3, updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $4 AND message_id = $2
+              AND visibility = 'visible'
             "#,
         )
         .bind(&tenant_id)
         .bind(message_id)
         .bind(modseq)
         .bind(account_id)
-        .execute(&mut *tx)
-        .await?;
-
-        sqlx::query(
-            r#"
-            UPDATE message_bodies
-            SET search_vector = to_tsvector(
-                'simple',
-                concat_ws(
-                    ' ',
-                    body_text,
-                    participants_normalized,
-                    COALESCE((
-                        SELECT string_agg(extracted_text, ' ')
-                        FROM attachments
-                        WHERE tenant_id = $1
-                          AND message_id = $2
-                          AND extracted_text IS NOT NULL
-                    ), '')
-                )
-            )
-            WHERE message_id = $2
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(message_id)
         .execute(&mut *tx)
         .await?;
 
