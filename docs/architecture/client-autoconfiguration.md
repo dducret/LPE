@@ -12,7 +12,7 @@
 - Publish `ActiveSync` only for clients that support `Exchange ActiveSync`.
 - Do not advertise `ActiveSync` as the Outlook for Windows desktop Exchange route.
 - Publish `EWS` only when `LPE_AUTOCONFIG_EWS_ENABLED` is true.
-- Publish `mapiHttp` only when the MAPI profile, sync, reconnect, and request-id replay gates pass and `LPE_AUTOCONFIG_MAPI_ENABLED` is true.
+- Publish `mapiHttp` only when the MAPI profile, sync, reconnect, request-id replay, live RCA, and real Outlook desktop profile-creation gates pass and `LPE_AUTOCONFIG_MAPI_ENABLED` is true. A client `X-MapiHttpCapability` probe never publishes MAPI by itself.
 - Publish top-level `EXCH` only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is true and an Exchange-style surface is enabled.
 - Publish top-level `EXPR` only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED` and `LPE_AUTOCONFIG_RPC_PROXY_ENABLED` are true and `/rpc/rpcproxy.dll` is implemented and exposed.
 - Publish SOAP `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is true and an `EWS` or `MAPI` surface is enabled.
@@ -78,7 +78,7 @@
 | --- | --- |
 | `Protocol=AutoDiscoverV1` | canonical POX URL |
 | `Protocol=EWS` | configured EWS URL only when `LPE_AUTOCONFIG_EWS_ENABLED` is true |
-| `Protocol=MapiHttp` | configured EMSMDB URL only when `LPE_AUTOCONFIG_MAPI_ENABLED` is true |
+| `Protocol=MapiHttp` | configured EMSMDB URL only when `LPE_AUTOCONFIG_MAPI_ENABLED` is true and the MAPI release/publication gate has passed |
 | `Protocol=ActiveSync` / `MobileSync` | ActiveSync endpoint for mobile-client probes |
 | `Protocol=JMAP` | configured public JMAP session URL |
 

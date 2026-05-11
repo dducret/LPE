@@ -4645,7 +4645,7 @@ async fn mapi_over_http_seek_row_fractional_moves_table_cursor() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_collapse_state_rops_return_rop_specific_protocol_errors() {
+async fn mapi_over_http_categorized_table_rops_return_rop_specific_protocol_errors() {
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     inbox.total_emails = 1;
     let store = FakeStore {
@@ -4674,6 +4674,15 @@ async fn mapi_over_http_collapse_state_rops_return_rop_specific_protocol_errors(
     rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
     rops.push(0);
     rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]);
+    rops.extend_from_slice(&[0x59, 0x00, 0x02]);
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(
+        &test_mapi_message_id("87878787-8787-8787-8787-878787878787").to_le_bytes(),
+    );
+    rops.extend_from_slice(&[0x5A, 0x00, 0x02]);
+    rops.extend_from_slice(
+        &test_mapi_message_id("87878787-8787-8787-8787-878787878787").to_le_bytes(),
+    );
     rops.extend_from_slice(&[0x6B, 0x00, 0x02]);
     rops.extend_from_slice(
         &test_mapi_message_id("87878787-8787-8787-8787-878787878787").to_le_bytes(),
@@ -4694,6 +4703,14 @@ async fn mapi_over_http_collapse_state_rops_return_rop_specific_protocol_errors(
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x59, 0x02, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x5A, 0x02, 0x02, 0x01, 0x04, 0x80]
+    ));
     assert!(contains_bytes(
         &response_rops,
         &[0x6B, 0x02, 0x02, 0x01, 0x04, 0x80]
@@ -5327,6 +5344,8 @@ async fn mapi_over_http_create_set_save_message_imports_canonical_email() {
         0x1035_001F,
         "<mapi-save@example.test>",
     );
+    let stream_body = utf16z("Body stream saved through MAPI");
+    let html_stream_body = b"<p>HTML stream saved through MAPI</p>";
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
@@ -5346,6 +5365,39 @@ async fn mapi_over_http_create_set_save_message_imports_canonical_email() {
     rops.extend_from_slice(&3u16.to_le_bytes());
     rops.extend_from_slice(&property_values);
     rops.extend_from_slice(&[
+        0x2B, 0x00, 0x02, 0x03, // RopOpenStream, create body stream
+    ]);
+    rops.extend_from_slice(&0x1000_001Fu32.to_le_bytes());
+    rops.push(2);
+    rops.extend_from_slice(&[
+        0x2F, 0x00, 0x03, // RopSetStreamSize
+    ]);
+    rops.extend_from_slice(&(stream_body.len() as u64).to_le_bytes());
+    rops.extend_from_slice(&[
+        0x5E, 0x00, 0x03, // RopGetStreamSize
+    ]);
+    rops.extend_from_slice(&[
+        0x2D, 0x00, 0x03, // RopWriteStream
+    ]);
+    rops.extend_from_slice(&(stream_body.len() as u16).to_le_bytes());
+    rops.extend_from_slice(&stream_body);
+    rops.extend_from_slice(&[
+        0x5D, 0x00, 0x03, // RopCommitStream
+    ]);
+    rops.extend_from_slice(&[
+        0x2B, 0x00, 0x02, 0x04, // RopOpenStream, create HTML body stream
+    ]);
+    rops.extend_from_slice(&0x1013_0102u32.to_le_bytes());
+    rops.push(2);
+    rops.extend_from_slice(&[
+        0xA3, 0x00, 0x04, // RopWriteStreamExtended
+    ]);
+    rops.extend_from_slice(&(html_stream_body.len() as u16).to_le_bytes());
+    rops.extend_from_slice(html_stream_body);
+    rops.extend_from_slice(&[
+        0x5D, 0x00, 0x04, // RopCommitStream
+    ]);
+    rops.extend_from_slice(&[
         0x07, 0x00, 0x02, // RopGetPropertiesSpecific on pending message
     ]);
     rops.extend_from_slice(&0u16.to_le_bytes());
@@ -5358,7 +5410,10 @@ async fn mapi_over_http_create_set_save_message_imports_canonical_email() {
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let request = execute_body(&rop_buffer(
+        &rops,
+        &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+    ));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
         .await
@@ -5377,10 +5432,40 @@ async fn mapi_over_http_create_set_save_message_imports_canonical_email() {
         response_rops,
         &[0x0A, 0x02, 0, 0, 0, 0, 0, 0]
     ));
+    assert!(contains_bytes(
+        response_rops,
+        &[0x2B, 0x03, 0, 0, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(response_rops, &[0x2F, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        response_rops,
+        &[0x5E, 0x03, 0, 0, 0, 0, stream_body.len() as u8, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        response_rops,
+        &[0x2D, 0x03, 0, 0, 0, 0, stream_body.len() as u8, 0]
+    ));
+    assert!(contains_bytes(response_rops, &[0x5D, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        response_rops,
+        &[
+            0xA3,
+            0x04,
+            0,
+            0,
+            0,
+            0,
+            html_stream_body.len() as u8,
+            0,
+            0,
+            0
+        ]
+    ));
+    assert!(contains_bytes(response_rops, &[0x5D, 0x04, 0, 0, 0, 0]));
     assert!(contains_bytes(response_rops, &utf16z("MAPI saved subject")));
     assert!(contains_bytes(
         response_rops,
-        &utf16z("Body saved through MAPI")
+        &utf16z("Body stream saved through MAPI")
     ));
     assert!(contains_bytes(
         response_rops,
@@ -5398,7 +5483,11 @@ async fn mapi_over_http_create_set_save_message_imports_canonical_email() {
     assert_eq!(recorded[0].from_address, "alice@example.test");
     assert_eq!(recorded[0].from_display.as_deref(), Some("Alice"));
     assert_eq!(recorded[0].subject, "MAPI saved subject");
-    assert_eq!(recorded[0].body_text, "Body saved through MAPI");
+    assert_eq!(recorded[0].body_text, "Body stream saved through MAPI");
+    assert_eq!(
+        recorded[0].body_html_sanitized.as_deref(),
+        Some("<p>HTML stream saved through MAPI</p>")
+    );
     assert_eq!(
         recorded[0].internet_message_id.as_deref(),
         Some("<mapi-save@example.test>")
@@ -7370,15 +7459,43 @@ async fn mapi_over_http_reads_canonical_attachment_data_stream() {
     rops.extend_from_slice(&0x3701_0102u32.to_le_bytes());
     rops.push(0);
     rops.extend_from_slice(&[
+        0x3B, 0x00, 0x04, 0x05, // RopCloneStream
+    ]);
+    rops.extend_from_slice(&[
+        0x2C, 0x00, 0x04, // RopReadStream
+    ]);
+    rops.extend_from_slice(&0xBABEu16.to_le_bytes());
+    rops.extend_from_slice(&5u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x2C, 0x00, 0x05, // RopReadStream from cloned stream
+    ]);
+    rops.extend_from_slice(&5u16.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x2E, 0x00, 0x04, 0x00, // RopSeekStream, stream beginning
+    ]);
+    rops.extend_from_slice(&6i64.to_le_bytes());
+    rops.extend_from_slice(&[
         0x2C, 0x00, 0x04, // RopReadStream
     ]);
     rops.extend_from_slice(&5u16.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x5B, 0x00, 0x04, // RopLockRegionStream
+    ]);
+    rops.extend_from_slice(&0u64.to_le_bytes());
+    rops.extend_from_slice(&5u64.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x5C, 0x00, 0x04, // RopUnlockRegionStream
+    ]);
+    rops.extend_from_slice(&0u64.to_le_bytes());
+    rops.extend_from_slice(&5u64.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let request = execute_body(&rop_buffer(
         &rops,
-        &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+        &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
     ));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
@@ -7395,12 +7512,267 @@ async fn mapi_over_http_reads_canonical_attachment_data_stream() {
 
     assert!(contains_bytes(
         response_rops,
-        &[0x2B, 0x04, 0, 0, 0, 0, 11, 0, 0, 0, 0, 0, 0, 0]
+        &[0x2B, 0x04, 0, 0, 0, 0, 11, 0, 0, 0]
     ));
+    assert!(contains_bytes(response_rops, &[0x3B, 0x05, 0, 0, 0, 0]));
     assert!(contains_bytes(
         response_rops,
         &[0x2C, 0x04, 0, 0, 0, 0, 5, 0, b'h', b'e', b'l', b'l', b'o']
     ));
+    assert!(contains_bytes(
+        response_rops,
+        &[0x2C, 0x05, 0, 0, 0, 0, 5, 0, b'h', b'e', b'l', b'l', b'o']
+    ));
+    assert!(contains_bytes(
+        response_rops,
+        &[0x2E, 0x04, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        response_rops,
+        &[0x2C, 0x04, 0, 0, 0, 0, 5, 0, b'w', b'o', b'r', b'l', b'd']
+    ));
+    assert!(contains_bytes(
+        response_rops,
+        &[0x5B, 0x04, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(contains_bytes(
+        response_rops,
+        &[0x5C, 0x04, 0x02, 0x01, 0x04, 0x80]
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_reads_canonical_message_body_stream() {
+    let message_id = "42424242-4242-4242-4242-424242424242";
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let mut email = FakeStore::email(
+        message_id,
+        "55555555-5555-5555-5555-555555555555",
+        "inbox",
+        "Message body stream",
+    );
+    email.body_text = "Canonical body stream".to_string();
+    email.body_html_sanitized = Some("<p>Canonical <b>HTML</b> stream</p>".to_string());
+    let body_bytes = utf16z(&email.body_text);
+    let html_bytes = email.body_html_sanitized.clone().unwrap().into_bytes();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x03, 0x00, 0x01, 0x02, // RopOpenMessage
+    ]);
+    rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    rops.extend_from_slice(&[
+        0x2B, 0x00, 0x02, 0x03, // RopOpenStream
+    ]);
+    rops.extend_from_slice(&0x1000_001Fu32.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x2C, 0x00, 0x03, // RopReadStream
+    ]);
+    rops.extend_from_slice(&0xBABEu16.to_le_bytes());
+    rops.extend_from_slice(&(body_bytes.len() as u32).to_le_bytes());
+    rops.extend_from_slice(&[
+        0x2B, 0x00, 0x02, 0x04, // RopOpenStream, PidTagHtml
+    ]);
+    rops.extend_from_slice(&0x1013_0102u32.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x2C, 0x00, 0x04, // RopReadStream
+    ]);
+    rops.extend_from_slice(&0xBABEu16.to_le_bytes());
+    rops.extend_from_slice(&(html_bytes.len() as u32).to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(
+        &rops,
+        &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+    ));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x2B, 0x03, 0, 0, 0, 0, body_bytes.len() as u8, 0, 0, 0]
+    ));
+    let mut read_response = vec![0x2C, 0x03, 0, 0, 0, 0];
+    read_response.extend_from_slice(&(body_bytes.len() as u16).to_le_bytes());
+    read_response.extend_from_slice(&body_bytes);
+    assert!(contains_bytes(&response_rops, &read_response));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x2B, 0x04, 0, 0, 0, 0, html_bytes.len() as u8, 0, 0, 0]
+    ));
+    let mut html_response = vec![0x2C, 0x04, 0, 0, 0, 0];
+    html_response.extend_from_slice(&(html_bytes.len() as u16).to_le_bytes());
+    html_response.extend_from_slice(&html_bytes);
+    assert!(contains_bytes(&response_rops, &html_response));
+}
+
+#[tokio::test]
+async fn mapi_over_http_copy_to_stream_saves_canonical_message_body() {
+    let source_message_id = "43434343-4343-4343-4343-434343434343";
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let mut source = FakeStore::email(
+        source_message_id,
+        &inbox_id.to_string(),
+        "inbox",
+        "Source message body",
+    );
+    source.body_text = "Copied canonical body stream".to_string();
+    let source_body = utf16z(&source.body_text);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![source])),
+        ..Default::default()
+    };
+    let imported_emails = store.imported_emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut subject_values = Vec::new();
+    append_mapi_utf16_property(&mut subject_values, 0x0037_001F, "Copied body destination");
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x03, 0x00, 0x01, 0x02, // RopOpenMessage, source
+    ]);
+    rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&test_mapi_message_id(source_message_id).to_le_bytes());
+    rops.extend_from_slice(&[
+        0x2B, 0x00, 0x02, 0x03, // RopOpenStream, source body
+    ]);
+    rops.extend_from_slice(&0x1000_001Fu32.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x06, 0x00, 0x01, 0x04, // RopCreateMessage, destination
+    ]);
+    rops.extend_from_slice(&1200u16.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x0A, 0x00, 0x04, // RopSetProperties, destination subject
+    ]);
+    rops.extend_from_slice(&((subject_values.len() + 2) as u16).to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&subject_values);
+    rops.extend_from_slice(&[
+        0x2B, 0x00, 0x04, 0x05, // RopOpenStream, destination body
+    ]);
+    rops.extend_from_slice(&0x1000_001Fu32.to_le_bytes());
+    rops.push(2);
+    rops.extend_from_slice(&[
+        0x3A, 0x00, 0x03, 0x05, // RopCopyToStream
+    ]);
+    rops.extend_from_slice(&(source_body.len() as u64).to_le_bytes());
+    rops.extend_from_slice(&[
+        0x0C, 0x00, 0x01, 0x04, 0x00, // RopSaveChangesMessage
+    ]);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(
+        &rops,
+        &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+    ));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[
+            0x3A,
+            0x03,
+            0,
+            0,
+            0,
+            0,
+            source_body.len() as u8,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            source_body.len() as u8,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ]
+    ));
+
+    let recorded = imported_emails.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].mailbox_id, inbox_id);
+    assert_eq!(recorded[0].subject, "Copied body destination");
+    assert_eq!(recorded[0].body_text, "Copied canonical body stream");
 }
 
 #[tokio::test]
@@ -7463,12 +7835,25 @@ async fn mapi_over_http_create_attachment_saves_canonical_attachment_from_proper
     rops.extend_from_slice(&3u16.to_le_bytes());
     rops.extend_from_slice(&property_values);
     rops.extend_from_slice(&[
+        0x2B, 0x00, 0x03, 0x04, // RopOpenStream, read-only
+    ]);
+    rops.extend_from_slice(&0x3701_0102u32.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x2D, 0x00, 0x04, // RopWriteStream
+    ]);
+    rops.extend_from_slice(&4u16.to_le_bytes());
+    rops.extend_from_slice(b"fake");
+    rops.extend_from_slice(&[
         0x25, 0x00, 0x02, 0x03, 0x00, // RopSaveChangesAttachment
     ]);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]));
+    let request = execute_body(&rop_buffer(
+        &rops,
+        &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+    ));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
         .await
@@ -7485,6 +7870,14 @@ async fn mapi_over_http_create_attachment_saves_canonical_attachment_from_proper
     assert!(contains_bytes(
         response_rops,
         &[0x23, 0x03, 0, 0, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        response_rops,
+        &[0x2B, 0x04, 0, 0, 0, 0, 9, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        response_rops,
+        &[0x2D, 0x04, 0x05, 0x00, 0x03, 0x80]
     ));
     assert!(contains_bytes(response_rops, &[0x25, 0x02, 0, 0, 0, 0]));
     let created = created_attachments.lock().unwrap();
@@ -7559,6 +7952,13 @@ async fn mapi_over_http_write_stream_saves_canonical_attachment() {
     rops.extend_from_slice(&0x3701_0102u32.to_le_bytes());
     rops.push(1);
     rops.extend_from_slice(&[
+        0x2F, 0x00, 0x04, // RopSetStreamSize
+    ]);
+    rops.extend_from_slice(&(stream_bytes.len() as u64).to_le_bytes());
+    rops.extend_from_slice(&[
+        0x5E, 0x00, 0x04, // RopGetStreamSize
+    ]);
+    rops.extend_from_slice(&[
         0x2D, 0x00, 0x04, // RopWriteStream
     ]);
     rops.extend_from_slice(&(stream_bytes.len() as u16).to_le_bytes());
@@ -7587,6 +7987,11 @@ async fn mapi_over_http_write_stream_saves_canonical_attachment() {
     let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
     let response_rops = &rop_buffer[2..2 + response_rop_size];
 
+    assert!(contains_bytes(response_rops, &[0x2F, 0x04, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        response_rops,
+        &[0x5E, 0x04, 0, 0, 0, 0, stream_bytes.len() as u8, 0, 0, 0]
+    ));
     assert!(contains_bytes(
         response_rops,
         &[0x2D, 0x04, 0, 0, 0, 0, stream_bytes.len() as u8, 0]
@@ -7596,6 +8001,173 @@ async fn mapi_over_http_write_stream_saves_canonical_attachment() {
     assert_eq!(created.len(), 1);
     assert_eq!(created[0].file_name, "stream-upload.pdf");
     assert_eq!(created[0].blob_bytes, stream_bytes);
+}
+
+#[tokio::test]
+async fn mapi_over_http_copy_to_stream_saves_canonical_attachment() {
+    let message_id = "41414141-4141-4141-4141-414141414141";
+    let message_uuid = Uuid::parse_str(message_id).unwrap();
+    let source_attachment_id = Uuid::parse_str("dadadada-dada-dada-dada-dadadadadada").unwrap();
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let mut email = FakeStore::email(
+        message_id,
+        "55555555-5555-5555-5555-555555555555",
+        "inbox",
+        "MAPI stream copy attachment message",
+    );
+    email.has_attachments = true;
+    let source_reference = format!("attachment:{message_uuid}:{source_attachment_id}");
+    let source_bytes = b"%PDF-copy-source";
+    let created_attachments = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        attachments: Arc::new(Mutex::new(HashMap::from([(
+            message_uuid,
+            vec![ActiveSyncAttachment {
+                id: source_attachment_id,
+                message_id: message_uuid,
+                file_name: "source.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                size_octets: source_bytes.len() as u64,
+                file_reference: source_reference.clone(),
+            }],
+        )]))),
+        attachment_contents: Arc::new(Mutex::new(HashMap::from([(
+            source_reference.clone(),
+            ActiveSyncAttachmentContent {
+                file_reference: source_reference,
+                file_name: "source.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                blob_bytes: source_bytes.to_vec(),
+            },
+        )]))),
+        created_attachments: created_attachments.clone(),
+        ..Default::default()
+    };
+    let service =
+        ExchangeService::new_with_validator(store, Validator::new(FakeDetector::pdf(), 0.8));
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x3707_001F, "copied-stream.pdf");
+    append_mapi_utf16_property(&mut property_values, 0x370E_001F, "application/pdf");
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x03, 0x00, 0x01, 0x02, // RopOpenMessage
+    ]);
+    rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    rops.extend_from_slice(&[
+        0x22, 0x00, 0x02, 0x03, 0x00, // RopOpenAttachment
+    ]);
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x2B, 0x00, 0x03, 0x04, // RopOpenStream, source
+    ]);
+    rops.extend_from_slice(&0x3701_0102u32.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x23, 0x00, 0x02, 0x05, // RopCreateAttachment
+        0x0A, 0x00, 0x05, // RopSetProperties
+    ]);
+    rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
+    rops.extend_from_slice(&2u16.to_le_bytes());
+    rops.extend_from_slice(&property_values);
+    rops.extend_from_slice(&[
+        0x2B, 0x00, 0x05, 0x06, // RopOpenStream, destination
+    ]);
+    rops.extend_from_slice(&0x3701_0102u32.to_le_bytes());
+    rops.push(1);
+    rops.extend_from_slice(&[
+        0x3A, 0x00, 0x04, 0x06, // RopCopyToStream
+    ]);
+    rops.extend_from_slice(&(source_bytes.len() as u64).to_le_bytes());
+    rops.extend_from_slice(&[
+        0x25, 0x00, 0x02, 0x05, 0x00, // RopSaveChangesAttachment
+    ]);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(
+        &rops,
+        &[
+            1,
+            u32::MAX,
+            u32::MAX,
+            u32::MAX,
+            u32::MAX,
+            u32::MAX,
+            u32::MAX,
+        ],
+    ));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &rop_buffer[2..2 + response_rop_size];
+
+    assert!(contains_bytes(
+        response_rops,
+        &[
+            0x3A,
+            0x04,
+            0,
+            0,
+            0,
+            0,
+            source_bytes.len() as u8,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            source_bytes.len() as u8,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ]
+    ));
+    assert!(contains_bytes(response_rops, &[0x25, 0x02, 0, 0, 0, 0]));
+    let created = created_attachments.lock().unwrap();
+    assert_eq!(created.len(), 1);
+    assert_eq!(created[0].file_name, "copied-stream.pdf");
+    assert_eq!(created[0].blob_bytes, source_bytes);
 }
 
 #[tokio::test]

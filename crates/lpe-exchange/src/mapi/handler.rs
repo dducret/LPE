@@ -187,6 +187,18 @@ enum PendingRecipientChange {
     Delete(u32),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StreamWriteTarget {
+    PendingAttachment(u32),
+    PendingMessageProperty { handle: u32, property_tag: u32 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StreamWriteError {
+    NotFound,
+    AccessDenied,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum MapiObject {
     Logon,
@@ -270,7 +282,7 @@ enum MapiObject {
     AttachmentStream {
         data: Vec<u8>,
         position: usize,
-        writable_attachment_handle: Option<u32>,
+        writable_target: Option<StreamWriteTarget>,
     },
     SynchronizationSource {
         folder_id: u64,
@@ -3684,14 +3696,6 @@ where
                 }
             }
             0x2B => {
-                if request.stream_property_tag() != Some(PID_TAG_ATTACH_DATA_BINARY) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x2B,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8004_0102,
-                    ));
-                    continue;
-                }
                 let Some(input_handle) = input_handle(&handle_slots, &request) else {
                     responses.extend_from_slice(&rop_error_response(
                         0x2B,
@@ -3700,8 +3704,18 @@ where
                     ));
                     continue;
                 };
-                let Some((stream_data, writable_attachment_handle)) =
-                    attachment_stream_data(store, principal, session, input_handle, snapshot).await
+                let Some((stream_data, writable_target)) = open_stream_data(
+                    store,
+                    principal,
+                    session,
+                    input_handle,
+                    request.stream_property_tag().unwrap_or(0),
+                    request.stream_open_mode().unwrap_or(0),
+                    mailboxes,
+                    emails,
+                    snapshot,
+                )
+                .await
                 else {
                     responses.extend_from_slice(&rop_error_response(
                         0x2B,
@@ -3716,7 +3730,7 @@ where
                     MapiObject::AttachmentStream {
                         data: stream_data,
                         position: 0,
-                        writable_attachment_handle,
+                        writable_target,
                     },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -3734,7 +3748,40 @@ where
                 };
                 responses.extend_from_slice(&rop_read_stream_response(&request, stream));
             }
-            0x2D | 0x90 => {
+            0x2E => {
+                let Some(stream) = input_object_mut(session, &handle_slots, &request) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x2E,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                responses.extend_from_slice(&rop_seek_stream_response(&request, stream));
+            }
+            0x2F => {
+                let Some(stream_handle) = input_handle(&handle_slots, &request) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x2F,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                match set_attachment_stream_size(
+                    session,
+                    stream_handle,
+                    request.stream_size().unwrap_or(u64::MAX),
+                ) {
+                    Some(()) => responses.extend_from_slice(&rop_simple_success_response(&request)),
+                    None => responses.extend_from_slice(&rop_error_response(
+                        0x2F,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    )),
+                }
+            }
+            0x2D | 0x90 | 0xA3 => {
                 let Some(stream_handle) = input_handle(&handle_slots, &request) else {
                     responses.extend_from_slice(&rop_error_response(
                         request.rop_id,
@@ -3743,17 +3790,98 @@ where
                     ));
                     continue;
                 };
-                match write_attachment_stream(session, stream_handle, request.stream_write_data()) {
+                match write_stream(session, stream_handle, request.stream_write_data()) {
                     Some(written) => {
                         responses.extend_from_slice(&rop_write_stream_response(&request, written))
                     }
-                    None => responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
+                    None => {
+                        let error_code = stream_write_error_code(
+                            stream_write_error(session, stream_handle)
+                                .unwrap_or(StreamWriteError::NotFound),
+                        );
+                        responses.extend_from_slice(&rop_error_response(
+                            request.rop_id,
+                            request.response_handle_index(),
+                            error_code,
+                        ))
+                    }
+                }
+            }
+            0x3A => {
+                let Some(source_handle) = input_handle(&handle_slots, &request) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x3A,
                         request.response_handle_index(),
                         0x8004_010F,
+                    ));
+                    continue;
+                };
+                let Some(destination_handle) = request.move_copy_target_handle(&handle_slots)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x3A,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                match copy_stream(
+                    session,
+                    source_handle,
+                    destination_handle,
+                    request.stream_size().unwrap_or(u64::MAX),
+                ) {
+                    Some((read, written)) => responses
+                        .extend_from_slice(&rop_copy_to_stream_response(&request, read, written)),
+                    None => responses.extend_from_slice(&rop_error_response(
+                        0x3A,
+                        request.response_handle_index(),
+                        0x8004_0102,
                     )),
                 }
             }
+            0x5E => match input_object(session, &handle_slots, &request) {
+                Some(MapiObject::AttachmentStream { data, .. }) => {
+                    responses.extend_from_slice(&rop_get_stream_size_response(&request, data.len()))
+                }
+                _ => responses.extend_from_slice(&rop_error_response(
+                    0x5E,
+                    request.response_handle_index(),
+                    0x8004_010F,
+                )),
+            },
+            0x3B => match input_object(session, &handle_slots, &request).cloned() {
+                Some(MapiObject::AttachmentStream {
+                    data,
+                    position,
+                    writable_target: None,
+                }) => {
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::AttachmentStream {
+                            data,
+                            position,
+                            writable_target: None,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_simple_success_response(&request));
+                    output_handles.push(handle);
+                }
+                Some(MapiObject::AttachmentStream { .. }) => responses.extend_from_slice(
+                    &rop_error_response(0x3B, request.response_handle_index(), 0x8004_0102),
+                ),
+                _ => responses.extend_from_slice(&rop_error_response(
+                    0x3B,
+                    request.response_handle_index(),
+                    0x8004_010F,
+                )),
+            },
+            0x5B | 0x5C => responses.extend_from_slice(&rop_error_response(
+                request.rop_id,
+                request.response_handle_index(),
+                0x8004_0102,
+            )),
             0x5D => match input_object(session, &handle_slots, &request) {
                 Some(MapiObject::AttachmentStream { .. }) => {
                     responses.extend_from_slice(&rop_simple_success_response(&request))
@@ -4579,6 +4707,11 @@ where
                     count,
                 ));
             }
+            0x59 | 0x5A => responses.extend_from_slice(&rop_error_response(
+                request.rop_id,
+                request.response_handle_index(),
+                0x8004_0102,
+            )),
             0x6D => responses.extend_from_slice(&rop_get_transport_folder_response(&request)),
             0x6F => responses.extend_from_slice(&rop_options_data_response(&request)),
             0x68 => responses.extend_from_slice(&rop_get_receive_folder_table_response(&request)),
@@ -4771,6 +4904,8 @@ const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;
 const PID_TAG_INSTANCE_KEY: u32 = 0x0FF6_0102;
 const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
 const PID_TAG_BODY_W: u32 = 0x1000_001F;
+const PID_TAG_BODY_HTML_W: u32 = 0x1013_001F;
+const PID_TAG_HTML_BINARY: u32 = 0x1013_0102;
 const PID_TAG_INTERNET_MESSAGE_ID_W: u32 = 0x1035_001F;
 const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
@@ -5455,7 +5590,7 @@ fn rop_create_attachment_response(request: &RopRequest, attach_num: u32) -> Vec<
 fn rop_open_stream_response(request: &RopRequest, stream_size: usize) -> Vec<u8> {
     let mut response = vec![0x2B, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
-    write_u64(&mut response, stream_size as u64);
+    write_u32(&mut response, stream_size.min(u32::MAX as usize) as u32);
     response
 }
 
@@ -5466,7 +5601,6 @@ fn rop_read_stream_response(request: &RopRequest, stream: &mut MapiObject) -> Ve
     };
     let requested = request
         .read_byte_count()
-        .map(usize::from)
         .unwrap_or(0)
         .min(u16::MAX as usize);
     let end = position.saturating_add(requested).min(data.len());
@@ -5480,10 +5614,58 @@ fn rop_read_stream_response(request: &RopRequest, stream: &mut MapiObject) -> Ve
     response
 }
 
+fn rop_seek_stream_response(request: &RopRequest, stream: &mut MapiObject) -> Vec<u8> {
+    let input_handle_index = request.input_handle_index().unwrap_or(0);
+    let MapiObject::AttachmentStream { data, position, .. } = stream else {
+        return rop_error_response(0x2E, input_handle_index, 0x8004_010F);
+    };
+    let Some(offset) = request.stream_seek_offset() else {
+        return rop_error_response(0x2E, input_handle_index, 0x8007_0057);
+    };
+    let base = match request.stream_seek_origin() {
+        Some(0) => 0i64,
+        Some(1) => *position as i64,
+        Some(2) => data.len() as i64,
+        _ => return rop_error_response(0x2E, input_handle_index, 0x8007_0057),
+    };
+    let Some(new_position) = base.checked_add(offset) else {
+        return rop_error_response(0x2E, input_handle_index, 0x8007_0057);
+    };
+    if new_position < 0 {
+        return rop_error_response(0x2E, input_handle_index, 0x8007_0057);
+    }
+    let new_position = new_position as usize;
+    *position = new_position;
+
+    let mut response = vec![0x2E, input_handle_index];
+    write_u32(&mut response, 0);
+    write_u64(&mut response, new_position as u64);
+    response
+}
+
 fn rop_write_stream_response(request: &RopRequest, written: usize) -> Vec<u8> {
     let mut response = vec![request.rop_id, request.response_handle_index()];
     write_u32(&mut response, 0);
-    response.extend_from_slice(&(written.min(u16::MAX as usize) as u16).to_le_bytes());
+    if request.rop_id == 0xA3 {
+        write_u32(&mut response, written.min(u32::MAX as usize) as u32);
+    } else {
+        response.extend_from_slice(&(written.min(u16::MAX as usize) as u16).to_le_bytes());
+    }
+    response
+}
+
+fn rop_copy_to_stream_response(request: &RopRequest, read: usize, written: usize) -> Vec<u8> {
+    let mut response = vec![0x3A, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    write_u64(&mut response, read as u64);
+    write_u64(&mut response, written as u64);
+    response
+}
+
+fn rop_get_stream_size_response(request: &RopRequest, stream_size: usize) -> Vec<u8> {
+    let mut response = vec![0x5E, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    write_u32(&mut response, stream_size.min(u32::MAX as usize) as u32);
     response
 }
 
@@ -7589,16 +7771,17 @@ fn next_pending_attachment_num(
 async fn attachment_stream_data<S: ExchangeStore>(
     store: &S,
     principal: &AccountPrincipal,
-    session: &MapiSession,
+    session: &mut MapiSession,
     input_handle: u32,
+    open_mode: u8,
     snapshot: &MapiMailStoreSnapshot,
-) -> Option<(Vec<u8>, Option<u32>)> {
+) -> Option<(Vec<u8>, Option<StreamWriteTarget>)> {
     match session.handles.get(&input_handle)?.clone() {
         MapiObject::Attachment {
             folder_id,
             message_id,
             attach_num,
-        } => {
+        } if open_mode == 0 => {
             let attachment = snapshot.attachment_for_message(folder_id, message_id, attach_num)?;
             let content = store
                 .fetch_attachment_content(principal.account_id, &attachment.file_reference)
@@ -7606,8 +7789,26 @@ async fn attachment_stream_data<S: ExchangeStore>(
                 .ok()??;
             Some((content.blob_bytes, None))
         }
-        MapiObject::PendingAttachment { data, .. } => Some((data, Some(input_handle))),
-        MapiObject::SavedAttachment { file_reference, .. } => {
+        MapiObject::PendingAttachment { data, .. } => match open_mode {
+            0 => Some((data, None)),
+            1 => Some((
+                data,
+                Some(StreamWriteTarget::PendingAttachment(input_handle)),
+            )),
+            2 => {
+                if let Some(MapiObject::PendingAttachment { data, .. }) =
+                    session.handles.get_mut(&input_handle)
+                {
+                    data.clear();
+                }
+                Some((
+                    Vec::new(),
+                    Some(StreamWriteTarget::PendingAttachment(input_handle)),
+                ))
+            }
+            _ => None,
+        },
+        MapiObject::SavedAttachment { file_reference, .. } if open_mode == 0 => {
             let content = store
                 .fetch_attachment_content(principal.account_id, &file_reference)
                 .await
@@ -7618,16 +7819,112 @@ async fn attachment_stream_data<S: ExchangeStore>(
     }
 }
 
-fn write_attachment_stream(
+async fn open_stream_data<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
     session: &mut MapiSession,
-    stream_handle: u32,
-    bytes: &[u8],
-) -> Option<usize> {
-    let (updated_data, writable_attachment_handle, written) = {
+    input_handle: u32,
+    property_tag: u32,
+    open_mode: u8,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Option<(Vec<u8>, Option<StreamWriteTarget>)> {
+    match property_tag {
+        PID_TAG_ATTACH_DATA_BINARY => {
+            attachment_stream_data(store, principal, session, input_handle, open_mode, snapshot)
+                .await
+        }
+        PID_TAG_BODY_W | PID_TAG_BODY_HTML_W | PID_TAG_HTML_BINARY => message_body_stream_data(
+            session,
+            input_handle,
+            property_tag,
+            open_mode,
+            mailboxes,
+            emails,
+        ),
+        _ => None,
+    }
+}
+
+fn message_body_stream_data(
+    session: &MapiSession,
+    input_handle: u32,
+    property_tag: u32,
+    open_mode: u8,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+) -> Option<(Vec<u8>, Option<StreamWriteTarget>)> {
+    let (body_text, body_html) = match session.handles.get(&input_handle)? {
+        MapiObject::Message {
+            folder_id,
+            message_id,
+        } if open_mode == 0 => {
+            let email = message_for_id(*folder_id, *message_id, mailboxes, emails)?;
+            (email.body_text.clone(), email.body_html_sanitized.clone())
+        }
+        MapiObject::PendingMessage { properties, .. } => match open_mode {
+            0 | 1 => (
+                pending_text_property(properties, &[PID_TAG_BODY_W]),
+                optional_pending_text_property(properties, &[PID_TAG_BODY_HTML_W])
+                    .or_else(|| pending_html_binary_property(properties)),
+            ),
+            2 => (String::new(), Some(String::new())),
+            _ => return None,
+        },
+        _ => return None,
+    };
+
+    let stream = match (property_tag, open_mode) {
+        (_, 2) => Vec::new(),
+        (PID_TAG_BODY_W, _) => utf16z_bytes(&body_text),
+        (PID_TAG_BODY_HTML_W, _) => utf16z_bytes(body_html.as_deref().unwrap_or("")),
+        (PID_TAG_HTML_BINARY, _) => body_html.unwrap_or_default().into_bytes(),
+        _ => return None,
+    };
+    let target = match (session.handles.get(&input_handle), open_mode) {
+        (Some(MapiObject::PendingMessage { .. }), 1 | 2) => {
+            Some(StreamWriteTarget::PendingMessageProperty {
+                handle: input_handle,
+                property_tag,
+            })
+        }
+        _ => None,
+    };
+    Some((stream, target))
+}
+
+fn utf16z_bytes(value: &str) -> Vec<u8> {
+    let mut bytes = value
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+    bytes
+}
+
+fn pending_html_binary_property(properties: &HashMap<u32, MapiValue>) -> Option<String> {
+    properties
+        .get(&PID_TAG_HTML_BINARY)
+        .and_then(|value| match value {
+            MapiValue::Binary(bytes) => String::from_utf8(bytes.clone()).ok(),
+            MapiValue::String(value) => Some(value.clone()),
+            _ => None,
+        })
+}
+
+fn pending_html_property(properties: &HashMap<u32, MapiValue>) -> Option<String> {
+    optional_pending_text_property(properties, &[PID_TAG_BODY_HTML_W])
+        .or_else(|| pending_html_binary_property(properties))
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn write_stream(session: &mut MapiSession, stream_handle: u32, bytes: &[u8]) -> Option<usize> {
+    let (updated_data, writable_target, written) = {
         let Some(MapiObject::AttachmentStream {
             data,
             position,
-            writable_attachment_handle,
+            writable_target: Some(writable_target),
         }) = session.handles.get_mut(&stream_handle)
         else {
             return None;
@@ -7639,18 +7936,135 @@ fn write_attachment_stream(
         }
         data[start..end].copy_from_slice(bytes);
         *position = end;
-        (data.clone(), *writable_attachment_handle, bytes.len())
+        (data.clone(), *writable_target, bytes.len())
     };
 
-    if let Some(attachment_handle) = writable_attachment_handle {
-        if let Some(MapiObject::PendingAttachment { data, .. }) =
-            session.handles.get_mut(&attachment_handle)
-        {
-            *data = updated_data;
+    sync_stream_target(session, writable_target, updated_data)?;
+    Some(written)
+}
+
+fn stream_write_error(session: &MapiSession, stream_handle: u32) -> Option<StreamWriteError> {
+    match session.handles.get(&stream_handle) {
+        Some(MapiObject::AttachmentStream {
+            writable_target: None,
+            ..
+        }) => Some(StreamWriteError::AccessDenied),
+        Some(MapiObject::AttachmentStream { .. }) => None,
+        _ => Some(StreamWriteError::NotFound),
+    }
+}
+
+fn stream_write_error_code(error: StreamWriteError) -> u32 {
+    match error {
+        StreamWriteError::NotFound => 0x8004_010F,
+        StreamWriteError::AccessDenied => 0x8003_0005,
+    }
+}
+
+fn copy_stream(
+    session: &mut MapiSession,
+    source_handle: u32,
+    destination_handle: u32,
+    byte_count: u64,
+) -> Option<(usize, usize)> {
+    let requested = usize::try_from(byte_count).ok()?;
+    let chunk = {
+        let Some(MapiObject::AttachmentStream { data, position, .. }) =
+            session.handles.get_mut(&source_handle)
+        else {
+            return None;
+        };
+        let end = position.saturating_add(requested).min(data.len());
+        let chunk = data[*position..end].to_vec();
+        *position = end;
+        chunk
+    };
+    let written = write_stream(session, destination_handle, &chunk)?;
+    Some((chunk.len(), written))
+}
+
+fn sync_stream_target(
+    session: &mut MapiSession,
+    target: StreamWriteTarget,
+    data: Vec<u8>,
+) -> Option<()> {
+    match target {
+        StreamWriteTarget::PendingAttachment(handle) => {
+            if let Some(MapiObject::PendingAttachment {
+                data: attachment_data,
+                ..
+            }) = session.handles.get_mut(&handle)
+            {
+                *attachment_data = data;
+                Some(())
+            } else {
+                None
+            }
+        }
+        StreamWriteTarget::PendingMessageProperty {
+            handle,
+            property_tag,
+        } => {
+            let value = stream_property_value(property_tag, data)?;
+            if let Some(MapiObject::PendingMessage { properties, .. }) =
+                session.handles.get_mut(&handle)
+            {
+                properties.insert(property_tag, value);
+                Some(())
+            } else {
+                None
+            }
         }
     }
+}
 
-    Some(written)
+fn stream_property_value(property_tag: u32, data: Vec<u8>) -> Option<MapiValue> {
+    match property_tag {
+        PID_TAG_BODY_W | PID_TAG_BODY_HTML_W => {
+            Some(MapiValue::String(decode_utf16_stream_value(&data)?))
+        }
+        PID_TAG_HTML_BINARY => Some(MapiValue::Binary(data)),
+        _ => None,
+    }
+}
+
+fn decode_utf16_stream_value(data: &[u8]) -> Option<String> {
+    let even_len = data.len() - (data.len() % 2);
+    let mut units = data[..even_len]
+        .chunks_exact(2)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        .collect::<Vec<_>>();
+    if units.last().is_some_and(|unit| *unit == 0) {
+        units.pop();
+    }
+    String::from_utf16(&units).ok()
+}
+
+fn set_attachment_stream_size(
+    session: &mut MapiSession,
+    stream_handle: u32,
+    stream_size: u64,
+) -> Option<()> {
+    let requested_size = usize::try_from(stream_size).ok()?;
+    if requested_size > i32::MAX as usize {
+        return None;
+    }
+
+    let (updated_data, writable_target) = {
+        let Some(MapiObject::AttachmentStream {
+            data,
+            position,
+            writable_target: Some(writable_target),
+        }) = session.handles.get_mut(&stream_handle)
+        else {
+            return None;
+        };
+        data.resize(requested_size, 0);
+        *position = (*position).min(data.len());
+        (data.clone(), *writable_target)
+    };
+
+    sync_stream_target(session, writable_target, updated_data)
 }
 
 fn email_matches_folder(email: &JmapEmail, folder_id: u64, mailboxes: &[JmapMailbox]) -> bool {
@@ -8378,7 +8792,7 @@ fn jmap_import_from_pending_message(
         bcc,
         subject,
         body_text,
-        body_html_sanitized: None,
+        body_html_sanitized: pending_html_property(properties),
         internet_message_id,
         mime_blob_ref: format!("mapi-save-message:{}", Uuid::new_v4()),
         size_octets,
@@ -8444,7 +8858,7 @@ fn mapi_submit_from_pending_message(
         bcc,
         subject,
         body_text,
-        body_html_sanitized: None,
+        body_html_sanitized: pending_html_property(properties),
         internet_message_id,
         mime_blob_ref: Some(format!("mapi-submit-message:{}", Uuid::new_v4())),
         size_octets: pending_message_size(properties),
@@ -9373,6 +9787,7 @@ impl RopRequest {
             0x0C | 0x11
                 | 0x25
                 | 0x29
+                | 0x3B
                 | 0x3E
                 | 0x3F
                 | 0x4B
@@ -9420,9 +9835,19 @@ impl RopRequest {
         Some(u32::from_le_bytes(bytes.try_into().ok()?))
     }
 
-    fn read_byte_count(&self) -> Option<u16> {
+    fn stream_open_mode(&self) -> Option<u8> {
+        self.payload.get(4).copied()
+    }
+
+    fn read_byte_count(&self) -> Option<usize> {
         let bytes = self.payload.get(..2)?;
-        Some(u16::from_le_bytes(bytes.try_into().ok()?))
+        let byte_count = u16::from_le_bytes(bytes.try_into().ok()?);
+        if byte_count == 0xBABE {
+            let maximum = self.payload.get(2..6)?;
+            let maximum = u32::from_le_bytes(maximum.try_into().ok()?);
+            return Some((maximum as usize).min(u16::MAX as usize));
+        }
+        Some(usize::from(byte_count))
     }
 
     fn stream_write_data(&self) -> &[u8] {
@@ -9434,6 +9859,20 @@ impl RopRequest {
             .map(usize::from)
             .unwrap_or(0);
         self.payload.get(2..2 + size).unwrap_or_default()
+    }
+
+    fn stream_seek_origin(&self) -> Option<u8> {
+        self.payload.first().copied()
+    }
+
+    fn stream_seek_offset(&self) -> Option<i64> {
+        let bytes = self.payload.get(1..9)?;
+        Some(i64::from_le_bytes(bytes.try_into().ok()?))
+    }
+
+    fn stream_size(&self) -> Option<u64> {
+        let bytes = self.payload.get(..8)?;
+        Some(u64::from_le_bytes(bytes.try_into().ok()?))
     }
 
     fn read_flags(&self) -> Option<u8> {
@@ -10212,8 +10651,12 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
         }
         0x2C => {
             let input_handle_index = cursor.read_u8()?;
+            let byte_count = cursor.read_u16()?;
             let mut payload = Vec::new();
-            payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
+            payload.extend_from_slice(&byte_count.to_le_bytes());
+            if byte_count == 0xBABE {
+                payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+            }
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
@@ -10221,7 +10664,7 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
-        0x2D | 0x90 => {
+        0x2D | 0x90 | 0xA3 => {
             let input_handle_index = cursor.read_u8()?;
             let size = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -10232,6 +10675,47 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: None,
                 payload,
+            })
+        }
+        0x2E => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.push(cursor.read_u8()?);
+            payload.extend_from_slice(cursor.read_bytes(8)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x2F => {
+            let input_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload: cursor.read_bytes(8)?.to_vec(),
+            })
+        }
+        0x3A => {
+            let source_handle_index = cursor.read_u8()?;
+            let dest_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(source_handle_index),
+                output_handle_index: Some(dest_handle_index),
+                payload: cursor.read_bytes(8)?.to_vec(),
+            })
+        }
+        0x3B => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload: Vec::new(),
             })
         }
         0x29 => {
@@ -10370,7 +10854,41 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
-        0x5D => {
+        0x59 => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(8)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x5A => {
+            let input_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload: cursor.read_bytes(8)?.to_vec(),
+            })
+        }
+        0x5B | 0x5C => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(cursor.read_bytes(8)?);
+            payload.extend_from_slice(cursor.read_bytes(8)?);
+            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        0x5D | 0x5E => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,

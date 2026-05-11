@@ -1245,6 +1245,25 @@ mod tests {
     }
 
     #[test]
+    fn outlook_autodiscover_mapi_http_capability_header_stays_env_gated() {
+        let config = PublishedEndpoints {
+            mapi_enabled: false,
+            mapi_http_requested: true,
+            legacy_exch_autodiscover_enabled: false,
+            legacy_expr_autodiscover_enabled: false,
+            ..sample_config()
+        };
+
+        let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(xml.contains("<Type>IMAP</Type>"));
+        assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+        assert!(!xml.contains("<Type>WEB</Type>"));
+    }
+
+    #[test]
     fn outlook_autodiscover_can_publish_exchange_provider_for_legacy_mapi_probe() {
         let config = PublishedEndpoints {
             mapi_enabled: true,
