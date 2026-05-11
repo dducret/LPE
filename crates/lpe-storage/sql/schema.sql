@@ -81,6 +81,7 @@ CREATE TABLE account_email_addresses (
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, account_id, id),
     UNIQUE (tenant_id, email),
+    CHECK ((NOT is_primary) OR address_kind = 'primary'),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, domain_id) REFERENCES domains (tenant_id, id) ON DELETE RESTRICT
 );
@@ -123,6 +124,7 @@ CREATE TABLE account_identities (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, account_id, id),
+    CHECK ((NOT is_default) OR may_send),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, account_id, email_address_id)
         REFERENCES account_email_addresses (tenant_id, account_id, id)
@@ -349,6 +351,8 @@ CREATE TABLE attachment_blobs (
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, domain_id, id),
     UNIQUE (tenant_id, domain_id, content_sha256),
+    CHECK ((magika_status = 'pending' AND validated_at IS NULL) OR (magika_status <> 'pending' AND validated_at IS NOT NULL)),
+    CHECK (validated_at IS NULL OR validated_at >= created_at),
     FOREIGN KEY (tenant_id, domain_id) REFERENCES domains (tenant_id, id) ON DELETE RESTRICT
 );
 
@@ -532,6 +536,14 @@ CREATE TABLE attachment_extraction_jobs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
+    CHECK (started_at IS NULL OR started_at >= created_at),
+    CHECK (completed_at IS NULL OR started_at IS NOT NULL),
+    CHECK (completed_at IS NULL OR completed_at >= started_at),
+    CHECK (
+        (status = 'queued' AND started_at IS NULL AND completed_at IS NULL)
+        OR (status = 'running' AND started_at IS NOT NULL AND completed_at IS NULL)
+        OR (status IN ('succeeded', 'failed', 'unsupported') AND completed_at IS NOT NULL)
+    ),
     FOREIGN KEY (tenant_id, attachment_blob_id) REFERENCES attachment_blobs (tenant_id, id) ON DELETE CASCADE
 );
 
@@ -669,6 +681,7 @@ CREATE TABLE jmap_upload_blobs (
     consumed_at TIMESTAMPTZ,
     CHECK (expires_at > created_at),
     CHECK (consumed_at IS NULL OR consumed_at >= created_at),
+    CHECK (consumed_at IS NULL OR consumed_at <= expires_at),
     UNIQUE (tenant_id, id),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
@@ -816,6 +829,8 @@ CREATE TABLE outbound_message_queue (
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, submission_id),
     UNIQUE (tenant_id, id, submission_id),
+    CHECK ((attempts = 0 AND last_attempt_at IS NULL) OR attempts > 0),
+    CHECK (last_attempt_at IS NULL OR last_attempt_at >= created_at),
     FOREIGN KEY (tenant_id, submission_id, account_id, account_message_id)
         REFERENCES submission_requests (tenant_id, id, account_id, sent_account_message_id)
         ON DELETE CASCADE,
@@ -866,7 +881,10 @@ CREATE TABLE lpe_ct_inbound_delivery_receipts (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, trace_id, recipient_account_id),
-    CHECK ((status IN ('delivered', 'duplicate') AND account_message_id IS NOT NULL) OR status = 'rejected'),
+    CHECK (
+        (status IN ('delivered', 'duplicate') AND account_message_id IS NOT NULL)
+        OR (status = 'rejected' AND account_message_id IS NULL)
+    ),
     FOREIGN KEY (tenant_id, recipient_account_id) REFERENCES accounts (tenant_id, id) ON DELETE RESTRICT,
     FOREIGN KEY (tenant_id, recipient_account_id, account_message_id)
         REFERENCES account_messages (tenant_id, account_id, id)
@@ -890,11 +908,16 @@ CREATE TABLE contact_books (
     FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
+CREATE UNIQUE INDEX contact_books_owner_role_idx
+    ON contact_books (tenant_id, owner_account_id, role)
+    WHERE role <> 'custom';
+
 CREATE TABLE contacts (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
     owner_account_id UUID NOT NULL,
     contact_book_id UUID NOT NULL,
+    uid TEXT NOT NULL CHECK (btrim(uid) <> ''),
     display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
     given_name TEXT NOT NULL DEFAULT '',
     family_name TEXT NOT NULL DEFAULT '',
@@ -905,6 +928,9 @@ CREATE TABLE contacts (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, owner_account_id, contact_book_id, uid),
+    CHECK (jsonb_typeof(emails_json) = 'array'),
+    CHECK (jsonb_typeof(phones_json) = 'array'),
     FOREIGN KEY (tenant_id, owner_account_id, contact_book_id)
         REFERENCES contact_books (tenant_id, owner_account_id, id)
         ON DELETE CASCADE
@@ -928,6 +954,10 @@ CREATE TABLE calendars (
     FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
+CREATE UNIQUE INDEX calendars_owner_role_idx
+    ON calendars (tenant_id, owner_account_id, role)
+    WHERE role <> 'custom';
+
 CREATE TABLE calendar_events (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
@@ -946,7 +976,9 @@ CREATE TABLE calendar_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, owner_account_id, calendar_id, uid),
     CHECK (ends_at >= starts_at),
+    CHECK (jsonb_typeof(attendees_json) = 'array'),
     FOREIGN KEY (tenant_id, owner_account_id, calendar_id)
         REFERENCES calendars (tenant_id, owner_account_id, id)
         ON DELETE CASCADE
@@ -979,6 +1011,7 @@ CREATE TABLE tasks (
     tenant_id UUID NOT NULL,
     owner_account_id UUID NOT NULL,
     task_list_id UUID NOT NULL,
+    uid TEXT NOT NULL CHECK (btrim(uid) <> ''),
     title TEXT NOT NULL CHECK (btrim(title) <> ''),
     description TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'needs_action'
@@ -990,6 +1023,8 @@ CREATE TABLE tasks (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, owner_account_id, task_list_id, uid),
+    CHECK ((status = 'completed' AND completed_at IS NOT NULL) OR (status <> 'completed' AND completed_at IS NULL)),
     FOREIGN KEY (tenant_id, owner_account_id, task_list_id)
         REFERENCES task_lists (tenant_id, owner_account_id, id)
         ON DELETE CASCADE
@@ -1109,7 +1144,6 @@ CREATE TABLE sender_rights (
     sender_right TEXT NOT NULL CHECK (sender_right IN ('send_as', 'send_on_behalf')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (tenant_id, owner_account_id, grantee_account_id, identity_id, sender_right),
     CHECK (owner_account_id <> grantee_account_id),
     FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, grantee_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,

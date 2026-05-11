@@ -125,6 +125,10 @@ Only `PDF`, `DOCX`, and `ODT` can enter text extraction. Other validated formats
 remain downloadable but not indexed.
 Lifecycle rows include update timestamps and worker-oriented indexes for Magika
 validation, async extraction, and retry scheduling.
+The schema enforces lifecycle timestamp consistency: completed Magika validation
+requires `validated_at`, queued extraction jobs have no start or completion
+time, running extraction jobs have a start time but no completion time, and
+terminal extraction jobs have a completion time.
 
 `attachments` is message/account metadata for a MIME part or uploaded file:
 file name, disposition, content ID, ordinal, size, and `attachment_blob_id`.
@@ -196,6 +200,8 @@ validate the authenticated actor against ownership, `send_as`, or
 Identity references are account-bound: a submission or sender-right grant for a
 specific identity may only reference an identity owned by the submitting or
 delegating account.
+Default identities must be send-enabled, and a primary account email address
+must use the primary address kind.
 
 Aliases route inbound recipient resolution to accounts or groups but do not
 become independent mailbox owners unless backed by an account/shared mailbox.
@@ -215,6 +221,13 @@ collection instead of a polymorphic `collection_id`. Changes write to
 `object_change_log` and tombstones write to `object_tombstones`, allowing JMAP,
 DAV, ActiveSync, EWS, and MAPI projections to synchronize from the same
 canonical state.
+Non-custom collection roles are unique per owner for mailboxes, contact books,
+calendars, and task lists.
+Contacts, calendar events, and tasks have stable per-collection `uid` values for
+DAV/JMAP/EWS/MAPI import, export, and sync mappings. JSON payload columns used
+for contact addresses, phone numbers, and event attendees are constrained to
+arrays. Completed tasks must carry `completed_at`, while non-completed tasks
+must not.
 
 ## LPE and LPE-CT Boundary
 
@@ -228,7 +241,7 @@ Core `LPE` schema includes:
 
 Inbound receipts always reference a real recipient account. Delivered and
 duplicate receipts additionally reference the committed canonical account
-message; rejected receipts may omit the message reference.
+message; rejected receipts must not reference a committed message.
 
 Core `LPE` schema excludes:
 
