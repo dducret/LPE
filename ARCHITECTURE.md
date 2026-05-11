@@ -95,6 +95,7 @@ The important non-negotiable rules are:
 
 ### Data, lifecycle, and compliance
 
+- `docs/architecture/sql-schema-v2.md`
 - `docs/architecture/attachments-v1.md`
 - `docs/architecture/collaboration-acl-delegation-mvp.md`
 - `docs/architecture/data-lifecycle-and-compliance.md`
