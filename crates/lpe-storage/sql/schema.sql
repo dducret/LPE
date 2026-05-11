@@ -302,6 +302,7 @@ CREATE TABLE message_visible_recipients (
     address TEXT NOT NULL CHECK (address = lower(btrim(address)) AND address <> ''),
     display_name TEXT,
     ordinal INTEGER NOT NULL DEFAULT 0 CHECK (ordinal >= 0),
+    UNIQUE (tenant_id, message_id, role, ordinal),
     FOREIGN KEY (tenant_id, message_id) REFERENCES messages (tenant_id, id) ON DELETE CASCADE
 );
 
@@ -321,6 +322,7 @@ CREATE TABLE message_protected_recipients (
     ordinal INTEGER NOT NULL DEFAULT 0 CHECK (ordinal >= 0),
     metadata_scope TEXT NOT NULL DEFAULT 'audit-compliance' CHECK (metadata_scope = 'audit-compliance'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, message_id, role, ordinal),
     FOREIGN KEY (tenant_id, message_id) REFERENCES messages (tenant_id, id) ON DELETE CASCADE
 );
 
@@ -760,6 +762,7 @@ CREATE TABLE submission_requests (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, id, account_id, sent_account_message_id),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, account_id, identity_id)
         REFERENCES account_identities (tenant_id, account_id, id)
@@ -785,6 +788,7 @@ CREATE TABLE submission_recipients (
     display_name TEXT,
     ordinal INTEGER NOT NULL DEFAULT 0 CHECK (ordinal >= 0),
     protected_metadata BOOLEAN NOT NULL DEFAULT FALSE,
+    UNIQUE (tenant_id, submission_id, role, ordinal),
     CHECK ((role = 'bcc' AND protected_metadata = TRUE) OR (role <> 'bcc' AND protected_metadata = FALSE)),
     FOREIGN KEY (tenant_id, submission_id) REFERENCES submission_requests (tenant_id, id) ON DELETE CASCADE
 );
@@ -811,7 +815,10 @@ CREATE TABLE outbound_message_queue (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, submission_id),
-    FOREIGN KEY (tenant_id, submission_id) REFERENCES submission_requests (tenant_id, id) ON DELETE CASCADE,
+    UNIQUE (tenant_id, id, submission_id),
+    FOREIGN KEY (tenant_id, submission_id, account_id, account_message_id)
+        REFERENCES submission_requests (tenant_id, id, account_id, sent_account_message_id)
+        ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, account_id, account_message_id)
         REFERENCES account_messages (tenant_id, account_id, id)
         ON DELETE RESTRICT
@@ -836,7 +843,9 @@ CREATE TABLE submission_result_history (
     received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, queue_id, trace_id),
-    FOREIGN KEY (tenant_id, queue_id) REFERENCES outbound_message_queue (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, queue_id, submission_id)
+        REFERENCES outbound_message_queue (tenant_id, id, submission_id)
+        ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, submission_id) REFERENCES submission_requests (tenant_id, id) ON DELETE CASCADE
 );
 
@@ -858,6 +867,7 @@ CREATE TABLE lpe_ct_inbound_delivery_receipts (
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, trace_id, recipient_account_id),
     CHECK ((status IN ('delivered', 'duplicate') AND account_message_id IS NOT NULL) OR status = 'rejected'),
+    FOREIGN KEY (tenant_id, recipient_account_id) REFERENCES accounts (tenant_id, id) ON DELETE RESTRICT,
     FOREIGN KEY (tenant_id, recipient_account_id, account_message_id)
         REFERENCES account_messages (tenant_id, account_id, id)
         ON DELETE RESTRICT

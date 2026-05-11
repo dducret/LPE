@@ -173,6 +173,9 @@ Submission uses:
 `LPE` creates the authoritative `Sent` mailbox membership before handoff to
 `LPE-CT`. `LPE-CT` remains responsible for SMTP custody, retries, DKIM, SPF,
 DMARC-related policy, queueing, quarantine, bounces, and DSN generation.
+Queue and result-history rows are constrained so a transport result cannot be
+recorded against a different submission than the queue item it describes.
+Recipient ordinal uniqueness is enforced per message/submission recipient role.
 
 ## Identity, Alias, and Sender Rights
 
@@ -222,6 +225,10 @@ Core `LPE` schema includes:
 - inbound delivery receipts keyed by `LPE-CT trace_id`
 - outbound queue rows prepared by canonical submission
 - immutable outbound result history received from `LPE-CT`
+
+Inbound receipts always reference a real recipient account. Delivered and
+duplicate receipts additionally reference the committed canonical account
+message; rejected receipts may omit the message reference.
 
 Core `LPE` schema excludes:
 
