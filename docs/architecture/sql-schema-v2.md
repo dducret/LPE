@@ -54,31 +54,32 @@ The mail model has four layers.
 
 | Layer | Tables | Purpose |
 | --- | --- | --- |
-| Canonical content | `message_raw_blobs`, `messages`, `message_headers`, `message_visible_recipients`, `message_protected_recipients`, `message_mime_parts`, `message_body_parts` | MIME fidelity, parsed projections, visible recipients, protected `Bcc` metadata |
-| Account email object | `account_messages`, `account_message_keywords` | JMAP `Email` object state, thread linkage, per-account modseq |
-| Mailbox membership | `mailboxes`, `mailbox_message_memberships` | IMAP folders, per-mailbox UID allocation, mailbox-specific membership state |
+| Canonical content | `blobs`, `messages`, `message_headers`, `message_recipients`, `protected_bcc_recipients`, `mime_parts`, `message_bodies` | MIME fidelity, parsed projections, visible recipients, protected `Bcc` metadata |
+| Mailbox membership | `mailboxes`, `mailbox_messages` | IMAP folders, per-mailbox UID allocation, mailbox-specific membership state |
 | Search and AI projection | `mail_search_documents`, `document_projections`, `document_chunks` | Bcc-safe searchable and AI-facing text |
 
 `messages` is not a mailbox row. A single `messages.id` can be represented in
-one or more accounts through `account_messages`, and each account-visible email
-can appear in one or more mailboxes through `mailbox_message_memberships`.
+one or more mailbox memberships through `mailbox_messages`.
 
 `mailboxes` owns:
 
-- `uidvalidity`
-- `uidnext`
-- `highest_modseq`
+- `uid_validity`
+- `uid_next`
+- `modseq`
 - special-use role
 - hierarchy fields
 
 Mailbox cached counters must remain internally consistent; `unread_messages`
-cannot exceed `total_messages`. Parent-folder lookup is indexed for hierarchy
-sync and folder-list projections.
+cannot exceed `total_messages`. Display names are unique within a parent
+folder, and root names are unique per account. Parent-folder lookup is indexed
+for hierarchy sync and folder-list projections.
 
-`mailbox_message_memberships` owns:
+`mailbox_messages` owns:
 
 - `imap_uid`
-- `membership_modseq`
+- `modseq`
+- flags and keywords
+- visibility and deletion state
 - membership timestamps
 - soft-delete / expunge state while visible to sync logic
 
@@ -93,12 +94,15 @@ Schema v2 uses counters plus append-only logs.
 | Table | Scope | Use |
 | --- | --- | --- |
 | `account_sync_state` | account/category | current modseq for mail, contacts, calendars, tasks, rights |
-| `mailboxes.highest_modseq` | mailbox | IMAP `HIGHESTMODSEQ`, QRESYNC, mailbox-scoped refresh |
-| `object_change_log` | object | JMAP changes, push replay, MAPI ICS manifests, DAV sync, ActiveSync deltas |
-| `object_tombstones` | deleted object | JMAP destroyed ids, IMAP expunge, MAPI ICS deletes, ActiveSync deletes |
+| `mailboxes.modseq` | mailbox | IMAP `HIGHESTMODSEQ`, QRESYNC, mailbox-scoped refresh |
+| `mail_change_log` | object | JMAP changes, push replay, MAPI ICS manifests, DAV sync, ActiveSync deltas |
+| `tombstones` | deleted object | JMAP destroyed ids, IMAP expunge, MAPI ICS deletes, ActiveSync deletes |
 
-Change and tombstone rows may carry `retained_until` so cleanup jobs can prune
-old replay data only after the configured protocol replay windows have passed.
+Change, tombstone, and submission-event rows are insert-only after creation.
+They may carry `retained_until` so cleanup jobs can prune old replay data only
+after the configured protocol replay windows have passed. Tombstones capture
+deleted message and mailbox-membership identifiers as historical facts rather
+than foreign-keying back to rows that deletion or expunge may remove.
 
 Protocol adapters store only cursor rows:
 
@@ -112,22 +116,24 @@ tasks, attachments, `Sent`, drafts, or outbox state.
 
 ## MIME, Body, Attachment, and Blob Model
 
-`message_raw_blobs` stores the canonical raw RFC 5322 bytes and content hash per
-tenant/domain. `messages.raw_blob_id` points to that blob. Export and protocol
+`blobs` stores durable raw RFC 5322 bytes, MIME part bytes, and attachment bytes
+with content hashes per tenant/domain. `messages.blob_id` points to the raw
+message blob. Export and protocol
 body fetches reconstruct from this canonical MIME plus parsed part metadata.
 The raw blob reference is domain-bound so a message cannot point at a raw MIME
 blob deduplicated under another domain in the same tenant.
 
-`message_mime_parts` records MIME tree structure, headers, content IDs, file
+`mime_parts` records MIME tree structure, headers, content IDs, file
 names, transfer encodings, byte offsets where available, and links to durable
 attachment blobs when the part is an attachment or inline binary body part.
 Part-to-blob references are domain-bound so a message in one tenant domain
 cannot point at a deduplicated blob owned by another domain in the same tenant.
 
-`message_body_parts` records Bcc-safe text and HTML body projections. Sanitized
+`message_bodies` records Bcc-safe text and HTML body projections. Sanitized
 HTML can be stored for client rendering; raw MIME remains the fidelity source.
 
-`attachment_blobs` is deduplicated per tenant/domain/content hash. It stores
+`blobs` is deduplicated per tenant/domain/blob kind/content hash, with an
+explicit per-domain uniqueness constraint for attachment blobs. It stores
 Magika validation results, validation status, and extraction lifecycle fields.
 Only `PDF`, `DOCX`, and `ODT` can enter text extraction. Other validated formats
 remain downloadable but not indexed.
@@ -139,8 +145,8 @@ time, running extraction jobs have a start time but no completion time, and
 terminal extraction jobs have a completion time.
 
 `attachments` is message/account metadata for a MIME part or uploaded file:
-file name, disposition, content ID, ordinal, size, and `attachment_blob_id`.
-Attachment metadata must prove the account message, canonical message, MIME
+file name, disposition, content ID, ordinal, size, and `blob_id`.
+Attachment metadata must prove the mailbox membership, canonical message, MIME
 part, and attachment blob belong to the same tenant and domain.
 
 `attachment_extraction_jobs` records async extraction attempts and results.
@@ -149,21 +155,21 @@ successful job.
 
 ## Bcc Protection
 
-Visible recipients live in `message_visible_recipients` with `to`, `cc`, `from`,
+Visible recipients live in `message_recipients` with `to`, `cc`, `from`,
 `sender`, and `reply_to` roles. `Bcc` lives only in
-`message_protected_recipients`.
+`protected_bcc_recipients`.
 
 The following tables must never include `Bcc` addresses or display names:
 
-- `message_body_parts`
+- `message_bodies`
 - `mail_search_documents`
 - `document_projections`
 - `document_chunks`
-- `object_change_log.summary_json`
+- `mail_change_log.summary_json`
 - protocol cursor/checkpoint payloads
 - transport logs intended for normal user diagnostics
 
-Audit/compliance access to `message_protected_recipients` must be explicit and
+Audit/compliance access to `protected_bcc_recipients` must be explicit and
 separate from user search, snippets, shared mailbox projections, and AI-facing
 pipelines.
 
@@ -174,19 +180,18 @@ They are not protocol-local rows.
 
 Submission uses:
 
-- `submission_requests` for canonical submission intent and sender
-  authorization.
+- `submission_queue` for canonical submission intent, sender authorization, and
+  LPE-to-LPE-CT handoff state.
 - `submission_recipients` for envelope recipients, including protected `Bcc`
   rows.
-- `outbound_message_queue` for LPE-to-LPE-CT handoff state.
-- `submission_result_history` for immutable relay, deferred, quarantine,
+- `submission_events` for immutable relay, deferred, quarantine,
   bounce, failure, and duplicate-handoff results.
 
 `LPE` creates the authoritative `Sent` mailbox membership before handoff to
 `LPE-CT`. `LPE-CT` remains responsible for SMTP custody, retries, DKIM, SPF,
 DMARC-related policy, queueing, quarantine, bounces, and DSN generation.
-Queue and result-history rows are constrained so a transport result cannot be
-recorded against a different submission than the queue item it describes.
+Queue and event rows are constrained so a transport result cannot be recorded
+against a different submission than the queue item it describes.
 Recipient ordinal uniqueness is enforced per message/submission recipient role.
 
 ## Identity, Alias, and Sender Rights
@@ -204,7 +209,7 @@ Core identity tables are:
 
 `account_identities` represents JMAP/EWS/MAPI send identities. Submission must
 validate the authenticated actor against ownership, `send_as`, or
-`send_on_behalf` rights before creating `submission_requests`.
+`send_on_behalf` rights before creating `submission_queue` rows.
 Identity references are account-bound: a submission or sender-right grant for a
 specific identity may only reference an identity owned by the submitting or
 delegating account.
@@ -226,7 +231,7 @@ Contacts, calendars, and tasks use canonical collections and items:
 All collaboration objects are tenant-scoped and owner-account-scoped. Grants are
 same-tenant only and use concrete tables with foreign keys to the owned
 collection instead of a polymorphic `collection_id`. Changes write to
-`object_change_log` and tombstones write to `object_tombstones`, allowing JMAP,
+`mail_change_log` and tombstones write to `tombstones`, allowing JMAP,
 DAV, ActiveSync, EWS, and MAPI projections to synchronize from the same
 canonical state.
 Non-custom collection roles are unique per owner for mailboxes, contact books,
@@ -289,17 +294,14 @@ collaboration, rights, or user-visible state.
 ### Mail, MIME, Search, and Attachments
 
 - `mailboxes`
-- `message_raw_blobs`
+- `blobs`
 - `messages`
 - `message_headers`
-- `message_visible_recipients`
-- `message_protected_recipients`
-- `message_mime_parts`
-- `message_body_parts`
-- `account_messages`
-- `account_message_keywords`
-- `mailbox_message_memberships`
-- `attachment_blobs`
+- `message_recipients`
+- `protected_bcc_recipients`
+- `mime_parts`
+- `message_bodies`
+- `mailbox_messages`
 - `attachments`
 - `attachment_extraction_jobs`
 - `attachment_texts`
@@ -308,8 +310,8 @@ collaboration, rights, or user-visible state.
 ### Sync, Changes, and Tombstones
 
 - `account_sync_state`
-- `object_change_log`
-- `object_tombstones`
+- `mail_change_log`
+- `tombstones`
 - `jmap_upload_blobs`
 - `jmap_query_states`
 - `activesync_sync_cursors`
@@ -317,10 +319,9 @@ collaboration, rights, or user-visible state.
 
 ### Submission and Transport Integration
 
-- `submission_requests`
+- `submission_queue`
 - `submission_recipients`
-- `outbound_message_queue`
-- `submission_result_history`
+- `submission_events`
 - `lpe_ct_inbound_delivery_receipts`
 
 ### Collaboration, ACLs, and Delegation

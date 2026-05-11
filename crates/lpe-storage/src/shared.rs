@@ -11,7 +11,7 @@ pub(crate) const DEFAULT_COLLECTION_ID: &str = "default";
 pub(crate) const DEFAULT_TASK_LIST_NAME: &str = "Tasks";
 pub(crate) const DEFAULT_TASK_LIST_ROLE: &str = "inbox";
 pub(crate) const CANONICAL_CHANGE_CHANNEL: &str = "lpe_canonical_changes";
-pub(crate) const EXPECTED_SCHEMA_VERSION: &str = "0.2.0";
+pub(crate) const EXPECTED_SCHEMA_VERSION: &str = "0.3.0-sql-v2";
 
 impl Storage {
     pub(crate) async fn allocate_mail_modseq_in_tx(

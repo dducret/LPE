@@ -52,7 +52,7 @@
   - store visible recipients in `message_recipients`
   - retain `Bcc` in protected storage
   - index the body in `message_bodies` without `Bcc` in `participants_normalized`
-  - add an `outbound_message_queue` entry for `LPE-CT`
+  - add a `submission_queue` entry for `LPE-CT`
   - record the action in `audit_events`
 - Webmail:
   - `/mail/` authenticates through `/api/mail/auth/login`
