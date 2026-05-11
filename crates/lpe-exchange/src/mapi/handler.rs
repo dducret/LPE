@@ -3030,19 +3030,17 @@ where
                 }
                 responses.extend_from_slice(&rop_set_message_read_flag_response(&request, changed));
             }
-            0x12 => match input_object_mut(session, &handle_slots, &request) {
-                Some(MapiObject::HierarchyTable { columns, .. })
-                | Some(MapiObject::ContentsTable { columns, .. })
-                | Some(MapiObject::AttachmentTable { columns, .. }) => {
-                    *columns = request.property_tags();
-                    responses.extend_from_slice(&rop_set_columns_response(&request));
+            0x12 => {
+                match input_object_mut(session, &handle_slots, &request) {
+                    Some(MapiObject::HierarchyTable { columns, .. })
+                    | Some(MapiObject::ContentsTable { columns, .. })
+                    | Some(MapiObject::AttachmentTable { columns, .. }) => {
+                        *columns = request.property_tags();
+                    }
+                    _ => {}
                 }
-                _ => responses.extend_from_slice(&rop_error_response(
-                    0x12,
-                    request.response_handle_index(),
-                    0x8004_0102,
-                )),
-            },
+                responses.extend_from_slice(&rop_set_columns_response(&request));
+            }
             0x13 => match input_object_mut(session, &handle_slots, &request) {
                 Some(MapiObject::HierarchyTable {
                     sort_orders,
@@ -3117,10 +3115,7 @@ where
                 emails,
                 snapshot,
             )),
-            0x16 => responses.extend_from_slice(&rop_get_status_response(
-                &request,
-                input_object(session, &handle_slots, &request),
-            )),
+            0x16 => responses.extend_from_slice(&rop_get_status_response(&request)),
             0x17 => responses.extend_from_slice(&rop_query_position_response(
                 &request,
                 input_object(session, &handle_slots, &request),
@@ -4079,26 +4074,7 @@ where
             )),
             0x27 => {
                 echo_input_handle_table = true;
-                let Some(message_class) = request.receive_folder_message_class() else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x27,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                };
-                if !valid_receive_folder_message_class(message_class) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x27,
-                        request.response_handle_index(),
-                        0x8007_0057,
-                    ));
-                    continue;
-                }
-                responses.extend_from_slice(&rop_get_receive_folder_response(
-                    &request,
-                    explicit_receive_folder_message_class(message_class),
-                ));
+                responses.extend_from_slice(&rop_get_receive_folder_response(&request));
             }
             0x66 => {
                 let folder_id = match input_object(session, &handle_slots, &request) {
@@ -4277,17 +4253,6 @@ where
                 }
                 _ => responses.extend_from_slice(&rop_error_response(
                     0x4E,
-                    request.response_handle_index(),
-                    0x8004_0102,
-                )),
-            },
-            0x86 => match input_object(session, &handle_slots, &request) {
-                Some(MapiObject::SynchronizationSource { .. })
-                | Some(MapiObject::SynchronizationCollector { .. }) => {
-                    responses.extend_from_slice(&rop_simple_success_response(&request));
-                }
-                _ => responses.extend_from_slice(&rop_error_response(
-                    0x86,
                     request.response_handle_index(),
                     0x8004_0102,
                 )),
@@ -4752,7 +4717,6 @@ where
             0x68 => responses.extend_from_slice(&rop_get_receive_folder_table_response(&request)),
             0x43 => responses.extend_from_slice(&rop_long_term_id_from_id_response(&request)),
             0x44 => responses.extend_from_slice(&rop_id_from_long_term_id_response(&request)),
-            0x45 => responses.extend_from_slice(&rop_public_folder_is_ghosted_response(&request)),
             0x49 => responses.extend_from_slice(&rop_get_address_types_response(&request)),
             0x55 => responses
                 .extend_from_slice(&rop_get_names_from_property_ids_response(&request, session)),
@@ -4816,17 +4780,10 @@ where
             }
             0x7B => responses.extend_from_slice(&rop_get_store_state_response(&request)),
             0x81 => {
-                if input_object_mut(session, &handle_slots, &request)
-                    .is_some_and(reset_table_position)
-                {
-                    responses.extend_from_slice(&rop_reset_table_response(&request));
-                } else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x81,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
+                if let Some(table) = input_object_mut(session, &handle_slots, &request) {
+                    reset_table_position(table);
                 }
+                responses.extend_from_slice(&rop_reset_table_response(&request));
             }
             0x89 => responses.extend_from_slice(&rop_free_bookmark_response(
                 &request,
@@ -5167,7 +5124,7 @@ fn response_handle_table(
     }
 }
 
-fn reset_table_position(object: &mut MapiObject) -> bool {
+fn reset_table_position(object: &mut MapiObject) {
     match object {
         MapiObject::HierarchyTable {
             position,
@@ -5186,9 +5143,8 @@ fn reset_table_position(object: &mut MapiObject) -> bool {
         } => {
             *position = 0;
             bookmarks.clear();
-            true
         }
-        _ => false,
+        _ => {}
     }
 }
 
@@ -6363,10 +6319,6 @@ fn rop_query_rows_response(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
-    if !object.as_deref().is_some_and(is_table_object) {
-        return rop_error_response(0x15, request.response_handle_index(), 0x8004_0102);
-    }
-
     let mut response = vec![0x15, request.response_handle_index()];
     write_u32(&mut response, 0);
     response.push(0x02);
@@ -7203,24 +7155,11 @@ fn serialize_attachment_row(attachment: &MapiAttachment, columns: &[u32]) -> Vec
     row
 }
 
-fn rop_get_status_response(request: &RopRequest, object: Option<&MapiObject>) -> Vec<u8> {
-    if !object.is_some_and(is_table_object) {
-        return rop_error_response(0x16, request.response_handle_index(), 0x8004_0102);
-    }
-
+fn rop_get_status_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x16, request.response_handle_index()];
     write_u32(&mut response, 0);
     response.push(0);
     response
-}
-
-fn is_table_object(object: &MapiObject) -> bool {
-    matches!(
-        object,
-        MapiObject::HierarchyTable { .. }
-            | MapiObject::ContentsTable { .. }
-            | MapiObject::AttachmentTable { .. }
-    )
 }
 
 fn rop_query_position_response(
@@ -7230,10 +7169,6 @@ fn rop_query_position_response(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
-    if !object.is_some_and(is_table_object) {
-        return rop_error_response(0x17, request.response_handle_index(), 0x8004_0102);
-    }
-
     let (position, row_count) = table_position_and_count(object, mailboxes, emails, snapshot);
     let mut response = vec![0x17, request.response_handle_index()];
     write_u32(&mut response, 0);
@@ -7610,36 +7545,12 @@ fn table_bookmark_state_mut(
     }
 }
 
-fn rop_get_receive_folder_response(request: &RopRequest, explicit_message_class: &str) -> Vec<u8> {
+fn rop_get_receive_folder_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x27, request.response_handle_index()];
     write_u32(&mut response, 0);
     write_u64(&mut response, INBOX_FOLDER_ID);
-    response.extend_from_slice(explicit_message_class.as_bytes());
-    response.push(0);
+    response.extend_from_slice(b"IPM.Note\0");
     response
-}
-
-fn valid_receive_folder_message_class(message_class: &str) -> bool {
-    let len = message_class.len() + 1;
-    len <= 255
-        && !message_class.starts_with('.')
-        && !message_class.ends_with('.')
-        && !message_class.contains("..")
-        && message_class
-            .bytes()
-            .all(|byte| (0x20..=0x7E).contains(&byte))
-}
-
-fn explicit_receive_folder_message_class(message_class: &str) -> &'static str {
-    if message_class.eq_ignore_ascii_case("IPM.Note")
-        || message_class
-            .get(..9)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("IPM.Note."))
-    {
-        "IPM.Note"
-    } else {
-        ""
-    }
 }
 
 fn rop_get_receive_folder_table_response(request: &RopRequest) -> Vec<u8> {
@@ -7664,13 +7575,6 @@ fn rop_get_store_state_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x7B, request.response_handle_index()];
     write_u32(&mut response, 0);
     write_u32(&mut response, 0);
-    response
-}
-
-fn rop_public_folder_is_ghosted_response(request: &RopRequest) -> Vec<u8> {
-    let mut response = vec![0x45, request.response_handle_index()];
-    write_u32(&mut response, 0);
-    response.push(0);
     response
 }
 
@@ -10108,11 +10012,6 @@ impl RopRequest {
         self.payload.as_slice()
     }
 
-    fn receive_folder_message_class(&self) -> Option<&str> {
-        let bytes = self.payload.strip_suffix(&[0])?;
-        std::str::from_utf8(bytes).ok()
-    }
-
     fn local_replica_id_count(&self) -> u32 {
         self.payload
             .get(..4)
@@ -11741,18 +11640,6 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 payload,
             })
         }
-        0x34 => {
-            let input_handle_index = cursor.read_u8()?;
-            let mut payload = Vec::new();
-            payload.extend_from_slice(cursor.read_bytes(8)?);
-            payload.extend_from_slice(cursor.read_bytes(8)?);
-            Ok(RopRequest {
-                rop_id,
-                input_handle_index: Some(input_handle_index),
-                output_handle_index: None,
-                payload,
-            })
-        }
         0x33 => {
             let source_handle_index = cursor.read_u8()?;
             let dest_handle_index = cursor.read_u8()?;
@@ -11766,60 +11653,6 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
                 rop_id,
                 input_handle_index: Some(source_handle_index),
                 output_handle_index: Some(dest_handle_index),
-                payload,
-            })
-        }
-        0x35 | 0x36 => {
-            let source_handle_index = cursor.read_u8()?;
-            let dest_handle_index = cursor.read_u8()?;
-            let want_asynchronous = cursor.read_u8()?;
-            let mut payload = vec![want_asynchronous];
-            if rop_id == 0x36 {
-                payload.push(cursor.read_u8()?);
-            }
-            let use_unicode = cursor.read_u8()?;
-            payload.push(use_unicode);
-            payload.extend_from_slice(cursor.read_bytes(8)?);
-            if use_unicode == 0 {
-                let folder_name = cursor.read_ascii_z()?;
-                payload.extend_from_slice(folder_name.as_bytes());
-                payload.push(0);
-            } else {
-                let folder_name = cursor.read_utf16z()?;
-                write_utf16z(&mut payload, &folder_name);
-            }
-            Ok(RopRequest {
-                rop_id,
-                input_handle_index: Some(source_handle_index),
-                output_handle_index: Some(dest_handle_index),
-                payload,
-            })
-        }
-        0x48 => {
-            let input_handle_index = cursor.read_u8()?;
-            let mut payload = Vec::new();
-            payload.extend_from_slice(cursor.read_bytes(8)?);
-            payload.push(cursor.read_u8()?);
-            Ok(RopRequest {
-                rop_id,
-                input_handle_index: Some(input_handle_index),
-                output_handle_index: None,
-                payload,
-            })
-        }
-        0x51 => {
-            let input_handle_index = cursor.read_u8()?;
-            let mut payload = Vec::new();
-            payload.extend_from_slice(cursor.read_bytes(8)?);
-            payload.extend_from_slice(cursor.read_bytes(8)?);
-            let message_class = cursor.read_ascii_z()?;
-            payload.extend_from_slice(message_class.as_bytes());
-            payload.push(0);
-            payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
-            Ok(RopRequest {
-                rop_id,
-                input_handle_index: Some(input_handle_index),
-                output_handle_index: None,
                 payload,
             })
         }
@@ -11847,22 +11680,6 @@ fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
             let mut payload = Vec::new();
             payload.extend_from_slice(&(property_id_count as u16).to_le_bytes());
             payload.extend_from_slice(cursor.read_bytes(property_id_count * 2)?);
-            Ok(RopRequest {
-                rop_id,
-                input_handle_index: Some(input_handle_index),
-                output_handle_index: None,
-                payload,
-            })
-        }
-        0x57 => {
-            let input_handle_index = cursor.read_u8()?;
-            let server_entry_id_size = cursor.read_u16()? as usize;
-            let mut payload = Vec::new();
-            payload.extend_from_slice(&(server_entry_id_size as u16).to_le_bytes());
-            payload.extend_from_slice(cursor.read_bytes(server_entry_id_size)?);
-            let client_entry_id_size = cursor.read_u16()? as usize;
-            payload.extend_from_slice(&(client_entry_id_size as u16).to_le_bytes());
-            payload.extend_from_slice(cursor.read_bytes(client_entry_id_size)?);
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),

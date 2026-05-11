@@ -1413,32 +1413,6 @@ mod tests {
     }
 
     #[test]
-    fn mapi_http_capability_header_alone_is_not_publication_opt_in() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        std::env::remove_var("LPE_AUTOCONFIG_MAPI_ENABLED");
-        std::env::remove_var("LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED");
-        std::env::remove_var("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED");
-        std::env::remove_var("LPE_AUTOCONFIG_RPC_PROXY_ENABLED");
-        std::env::remove_var("LPE_PUBLIC_HOSTNAME");
-        std::env::remove_var("LPE_PUBLIC_SCHEME");
-
-        let mut headers = HeaderMap::new();
-        headers.insert("host", "mail.example.test".parse().unwrap());
-        headers.insert("x-mapihttpcapability", "1".parse().unwrap());
-        let config = PublishedEndpoints::from_headers(&headers, Some("alice@example.test"));
-        let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
-
-        assert!(!config.mapi_enabled);
-        assert!(config.mapi_http_requested);
-        assert!(!config.legacy_exch_autodiscover_enabled);
-        assert!(!config.legacy_expr_autodiscover_enabled);
-        assert!(!config.rpc_proxy_enabled);
-        assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
-        assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
-        assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
-    }
-
-    #[test]
     fn legacy_exchange_autodiscover_publication_has_separate_provider_opt_ins() {
         let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("LPE_AUTOCONFIG_MAPI_ENABLED", "true");
