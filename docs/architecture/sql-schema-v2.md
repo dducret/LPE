@@ -38,6 +38,8 @@ Every durable tenant-scoped table includes `tenant_id`. User-visible or
 account-owned state also includes the owning `account_id` or explicit
 `owner_account_id`. Shared visibility is represented by grants, not by copying
 canonical ownership.
+Domain names are globally unique because Internet mail routing cannot assign the
+same domain to two tenants at once.
 
 Exceptions are intentionally limited:
 
@@ -68,6 +70,10 @@ can appear in one or more mailboxes through `mailbox_message_memberships`.
 - `highest_modseq`
 - special-use role
 - hierarchy fields
+
+Mailbox cached counters must remain internally consistent; `unread_messages`
+cannot exceed `total_messages`. Parent-folder lookup is indexed for hierarchy
+sync and folder-list projections.
 
 `mailbox_message_memberships` owns:
 

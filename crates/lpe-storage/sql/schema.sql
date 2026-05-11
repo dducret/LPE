@@ -45,8 +45,12 @@ CREATE TABLE domains (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, name),
+    UNIQUE (name),
     FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
 );
+
+CREATE INDEX domains_tenant_status_idx
+    ON domains (tenant_id, status, name);
 
 CREATE TABLE accounts (
     id UUID PRIMARY KEY,
@@ -67,6 +71,12 @@ CREATE TABLE accounts (
     FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, primary_domain_id) REFERENCES domains (tenant_id, id) ON DELETE RESTRICT
 );
+
+CREATE INDEX accounts_tenant_status_idx
+    ON accounts (tenant_id, status, account_kind);
+
+CREATE INDEX accounts_primary_domain_idx
+    ON accounts (tenant_id, primary_domain_id, status);
 
 CREATE TABLE account_email_addresses (
     id UUID PRIMARY KEY,
@@ -89,6 +99,9 @@ CREATE TABLE account_email_addresses (
 CREATE UNIQUE INDEX account_email_addresses_primary_idx
     ON account_email_addresses (tenant_id, account_id)
     WHERE is_primary = TRUE;
+
+CREATE INDEX account_email_addresses_account_idx
+    ON account_email_addresses (tenant_id, account_id, status);
 
 CREATE TABLE aliases (
     id UUID PRIMARY KEY,
@@ -234,6 +247,7 @@ CREATE TABLE mailboxes (
     UNIQUE (tenant_id, account_id, id),
     UNIQUE (tenant_id, account_id, normalized_display_name),
     CHECK (parent_mailbox_id IS NULL OR parent_mailbox_id <> id),
+    CHECK (unread_messages <= total_messages),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, account_id, parent_mailbox_id)
         REFERENCES mailboxes (tenant_id, account_id, id)
@@ -243,6 +257,9 @@ CREATE TABLE mailboxes (
 CREATE UNIQUE INDEX mailboxes_account_role_idx
     ON mailboxes (tenant_id, account_id, role)
     WHERE role <> 'custom';
+
+CREATE INDEX mailboxes_parent_idx
+    ON mailboxes (tenant_id, account_id, parent_mailbox_id, sort_order);
 
 CREATE TABLE message_raw_blobs (
     id UUID PRIMARY KEY,
