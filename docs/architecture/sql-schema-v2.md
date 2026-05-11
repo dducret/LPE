@@ -91,6 +91,9 @@ Schema v2 uses counters plus append-only logs.
 | `object_change_log` | object | JMAP changes, push replay, MAPI ICS manifests, DAV sync, ActiveSync deltas |
 | `object_tombstones` | deleted object | JMAP destroyed ids, IMAP expunge, MAPI ICS deletes, ActiveSync deletes |
 
+Change and tombstone rows may carry `retained_until` so cleanup jobs can prune
+old replay data only after the configured protocol replay windows have passed.
+
 Protocol adapters store only cursor rows:
 
 - `jmap_query_states` stores query token metadata and last observed canonical
@@ -110,6 +113,8 @@ body fetches reconstruct from this canonical MIME plus parsed part metadata.
 `message_mime_parts` records MIME tree structure, headers, content IDs, file
 names, transfer encodings, byte offsets where available, and links to durable
 attachment blobs when the part is an attachment or inline binary body part.
+Part-to-blob references are domain-bound so a message in one tenant domain
+cannot point at a deduplicated blob owned by another domain in the same tenant.
 
 `message_body_parts` records Bcc-safe text and HTML body projections. Sanitized
 HTML can be stored for client rendering; raw MIME remains the fidelity source.
@@ -118,9 +123,13 @@ HTML can be stored for client rendering; raw MIME remains the fidelity source.
 Magika validation results, validation status, and extraction lifecycle fields.
 Only `PDF`, `DOCX`, and `ODT` can enter text extraction. Other validated formats
 remain downloadable but not indexed.
+Lifecycle rows include update timestamps and worker-oriented indexes for Magika
+validation, async extraction, and retry scheduling.
 
 `attachments` is message/account metadata for a MIME part or uploaded file:
 file name, disposition, content ID, ordinal, size, and `attachment_blob_id`.
+Attachment metadata must prove the account message, canonical message, MIME
+part, and attachment blob belong to the same tenant and domain.
 
 `attachment_extraction_jobs` records async extraction attempts and results.
 `attachment_texts` stores extracted Bcc-safe text and search vectors after a
@@ -181,6 +190,9 @@ Core identity tables are:
 `account_identities` represents JMAP/EWS/MAPI send identities. Submission must
 validate the authenticated actor against ownership, `send_as`, or
 `send_on_behalf` rights before creating `submission_requests`.
+Identity references are account-bound: a submission or sender-right grant for a
+specific identity may only reference an identity owned by the submitting or
+delegating account.
 
 Aliases route inbound recipient resolution to accounts or groups but do not
 become independent mailbox owners unless backed by an account/shared mailbox.
@@ -192,12 +204,14 @@ Contacts, calendars, and tasks use canonical collections and items:
 - `contact_books`, `contacts`
 - `calendars`, `calendar_events`
 - `task_lists`, `tasks`
-- `collection_grants`
+- `contact_book_grants`, `calendar_grants`, `task_list_grants`
 
 All collaboration objects are tenant-scoped and owner-account-scoped. Grants are
-same-tenant only. Changes write to `object_change_log` and tombstones write to
-`object_tombstones`, allowing JMAP, DAV, ActiveSync, EWS, and MAPI projections
-to synchronize from the same canonical state.
+same-tenant only and use concrete tables with foreign keys to the owned
+collection instead of a polymorphic `collection_id`. Changes write to
+`object_change_log` and tombstones write to `object_tombstones`, allowing JMAP,
+DAV, ActiveSync, EWS, and MAPI projections to synchronize from the same
+canonical state.
 
 ## LPE and LPE-CT Boundary
 
@@ -286,7 +300,9 @@ collaboration, rights, or user-visible state.
 - `calendar_events`
 - `task_lists`
 - `tasks`
-- `collection_grants`
+- `contact_book_grants`
+- `calendar_grants`
+- `task_list_grants`
 - `mailbox_delegation_grants`
 - `sender_rights`
 
@@ -303,8 +319,8 @@ compatible. They do not replace canonical mail or collaboration tables.
 ## Implementation Notes
 
 - `schema.sql` v2 should create a fresh `0.3.0-sql-v2` schema.
-- Use composite foreign keys containing `tenant_id` to prevent cross-tenant
-  references.
+- Use composite foreign keys containing `tenant_id`, and include account or
+  domain ownership columns where same-tenant is not precise enough.
 - Prefer table-level `CHECK` constraints for bounded state values until the
   schema needs PostgreSQL enum migration semantics.
 - Do not add an LPE-core `antispam_quarantine` table. Quarantine custody is
@@ -314,4 +330,7 @@ compatible. They do not replace canonical mail or collaboration tables.
   UID scans, account/category change scans, tombstone replay, attachment
   validation/extraction queues, outbound queue workers, and visible collection
   grants.
-
+- Prefer partial unique indexes for optional idempotency keys and nullable
+  cursor scopes so the schema states the intended uniqueness directly.
+- Include cleanup indexes for expiring JMAP staging uploads, query states,
+  sessions, change logs, and tombstones.

@@ -79,6 +79,7 @@ CREATE TABLE account_email_addresses (
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, account_id, id),
     UNIQUE (tenant_id, email),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, domain_id) REFERENCES domains (tenant_id, id) ON DELETE RESTRICT
@@ -114,15 +115,18 @@ CREATE TABLE account_identities (
     account_id UUID NOT NULL,
     email_address_id UUID NOT NULL,
     display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
-    reply_to_email TEXT CHECK (reply_to_email IS NULL OR reply_to_email = lower(btrim(reply_to_email))),
+    reply_to_email TEXT CHECK (reply_to_email IS NULL OR (reply_to_email = lower(btrim(reply_to_email)) AND reply_to_email <> '')),
     signature_text TEXT NOT NULL DEFAULT '',
     may_send BOOLEAN NOT NULL DEFAULT TRUE,
     is_default BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, account_id, id),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id, email_address_id) REFERENCES account_email_addresses (tenant_id, id) ON DELETE RESTRICT
+    FOREIGN KEY (tenant_id, account_id, email_address_id)
+        REFERENCES account_email_addresses (tenant_id, account_id, id)
+        ON DELETE RESTRICT
 );
 
 CREATE UNIQUE INDEX account_identities_default_idx
@@ -156,6 +160,9 @@ CREATE TABLE account_sessions (
 CREATE INDEX account_sessions_account_idx
     ON account_sessions (tenant_id, account_id, expires_at DESC);
 
+CREATE INDEX account_sessions_expiry_idx
+    ON account_sessions (expires_at);
+
 CREATE TABLE admin_credentials (
     tenant_id UUID NOT NULL,
     admin_email TEXT NOT NULL CHECK (admin_email = lower(btrim(admin_email)) AND admin_email <> ''),
@@ -178,6 +185,9 @@ CREATE TABLE admin_sessions (
     CHECK (expires_at > created_at),
     FOREIGN KEY (tenant_id, admin_email) REFERENCES admin_credentials (tenant_id, admin_email) ON DELETE CASCADE
 );
+
+CREATE INDEX admin_sessions_expiry_idx
+    ON admin_sessions (expires_at);
 
 CREATE TABLE server_administrators (
     id UUID PRIMARY KEY,
@@ -258,6 +268,7 @@ CREATE TABLE messages (
     has_attachments BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, id, domain_id),
     FOREIGN KEY (tenant_id, domain_id) REFERENCES domains (tenant_id, id) ON DELETE RESTRICT,
     FOREIGN KEY (tenant_id, raw_blob_id) REFERENCES message_raw_blobs (tenant_id, id) ON DELETE RESTRICT
 );
@@ -331,8 +342,10 @@ CREATE TABLE attachment_blobs (
     extraction_status TEXT NOT NULL DEFAULT 'not_requested'
         CHECK (extraction_status IN ('not_requested', 'queued', 'running', 'succeeded', 'failed', 'unsupported')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     validated_at TIMESTAMPTZ,
     UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, domain_id, id),
     UNIQUE (tenant_id, domain_id, content_sha256),
     FOREIGN KEY (tenant_id, domain_id) REFERENCES domains (tenant_id, id) ON DELETE RESTRICT
 );
@@ -347,6 +360,7 @@ CREATE TABLE message_mime_parts (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
     message_id UUID NOT NULL,
+    domain_id UUID NOT NULL,
     parent_part_id UUID,
     part_path TEXT NOT NULL CHECK (btrim(part_path) <> ''),
     ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
@@ -362,9 +376,11 @@ CREATE TABLE message_mime_parts (
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, message_id, id),
     UNIQUE (tenant_id, message_id, part_path),
-    FOREIGN KEY (tenant_id, message_id) REFERENCES messages (tenant_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id, parent_part_id) REFERENCES message_mime_parts (tenant_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id, body_blob_id) REFERENCES attachment_blobs (tenant_id, id) ON DELETE RESTRICT
+    FOREIGN KEY (tenant_id, message_id, domain_id) REFERENCES messages (tenant_id, id, domain_id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, message_id, parent_part_id)
+        REFERENCES message_mime_parts (tenant_id, message_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, domain_id, body_blob_id) REFERENCES attachment_blobs (tenant_id, domain_id, id) ON DELETE RESTRICT
 );
 
 CREATE INDEX message_mime_parts_message_idx
@@ -409,6 +425,7 @@ CREATE TABLE account_messages (
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, account_id, id),
     UNIQUE (tenant_id, account_id, message_id),
+    UNIQUE (tenant_id, account_id, id, message_id),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, message_id) REFERENCES messages (tenant_id, id) ON DELETE RESTRICT
 );
@@ -473,6 +490,7 @@ CREATE TABLE attachments (
     account_id UUID NOT NULL,
     account_message_id UUID NOT NULL,
     message_id UUID NOT NULL,
+    domain_id UUID NOT NULL,
     mime_part_id UUID,
     attachment_blob_id UUID NOT NULL,
     file_name TEXT NOT NULL CHECK (btrim(file_name) <> ''),
@@ -482,14 +500,14 @@ CREATE TABLE attachments (
     size_octets BIGINT NOT NULL CHECK (size_octets >= 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
-    FOREIGN KEY (tenant_id, account_id, account_message_id)
-        REFERENCES account_messages (tenant_id, account_id, id)
+    FOREIGN KEY (tenant_id, account_id, account_message_id, message_id)
+        REFERENCES account_messages (tenant_id, account_id, id, message_id)
         ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id, message_id) REFERENCES messages (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, message_id, domain_id) REFERENCES messages (tenant_id, id, domain_id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, message_id, mime_part_id)
         REFERENCES message_mime_parts (tenant_id, message_id, id)
         ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id, attachment_blob_id) REFERENCES attachment_blobs (tenant_id, id) ON DELETE RESTRICT
+    FOREIGN KEY (tenant_id, domain_id, attachment_blob_id) REFERENCES attachment_blobs (tenant_id, domain_id, id) ON DELETE RESTRICT
 );
 
 CREATE INDEX attachments_account_message_idx
@@ -510,6 +528,7 @@ CREATE TABLE attachment_extraction_jobs (
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     FOREIGN KEY (tenant_id, attachment_blob_id) REFERENCES attachment_blobs (tenant_id, id) ON DELETE CASCADE
 );
@@ -544,8 +563,8 @@ CREATE TABLE mail_search_documents (
     search_vector TSVECTOR NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (tenant_id, account_id, account_message_id),
-    FOREIGN KEY (tenant_id, account_id, account_message_id)
-        REFERENCES account_messages (tenant_id, account_id, id)
+    FOREIGN KEY (tenant_id, account_id, account_message_id, message_id)
+        REFERENCES account_messages (tenant_id, account_id, id, message_id)
         ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, message_id) REFERENCES messages (tenant_id, id) ON DELETE CASCADE
 );
@@ -567,9 +586,15 @@ CREATE TABLE object_change_log (
     visible_to_account_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
     summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    retained_until TIMESTAMPTZ,
+    UNIQUE (tenant_id, sequence),
+    CHECK (mailbox_id IS NULL OR account_id IS NOT NULL),
+    CHECK (retained_until IS NULL OR retained_until >= created_at),
     FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id, mailbox_id) REFERENCES mailboxes (tenant_id, id) ON DELETE CASCADE
+    FOREIGN KEY (tenant_id, account_id, mailbox_id)
+        REFERENCES mailboxes (tenant_id, account_id, id)
+        ON DELETE CASCADE
 );
 
 CREATE INDEX object_change_log_account_idx
@@ -581,6 +606,10 @@ CREATE INDEX object_change_log_mailbox_idx
 
 CREATE INDEX object_change_log_visible_gin_idx
     ON object_change_log USING GIN (visible_to_account_ids);
+
+CREATE INDEX object_change_log_retention_idx
+    ON object_change_log (tenant_id, retained_until)
+    WHERE retained_until IS NOT NULL;
 
 CREATE TABLE object_tombstones (
     id UUID PRIMARY KEY,
@@ -596,11 +625,20 @@ CREATE TABLE object_tombstones (
     change_sequence BIGINT NOT NULL,
     reason TEXT NOT NULL CHECK (reason IN ('delete', 'expunge', 'destroyed', 'move', 'purge')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    retained_until TIMESTAMPTZ,
     UNIQUE (tenant_id, id),
+    CHECK (mailbox_id IS NULL OR account_id IS NOT NULL),
+    CHECK (account_message_id IS NULL OR account_id IS NOT NULL),
+    CHECK (retained_until IS NULL OR retained_until >= created_at),
     FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id, mailbox_id) REFERENCES mailboxes (tenant_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (change_sequence) REFERENCES object_change_log (sequence) ON DELETE RESTRICT
+    FOREIGN KEY (tenant_id, account_id, mailbox_id)
+        REFERENCES mailboxes (tenant_id, account_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, account_id, account_message_id)
+        REFERENCES account_messages (tenant_id, account_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, change_sequence) REFERENCES object_change_log (tenant_id, sequence) ON DELETE RESTRICT
 );
 
 CREATE INDEX object_tombstones_account_idx
@@ -609,6 +647,10 @@ CREATE INDEX object_tombstones_account_idx
 CREATE INDEX object_tombstones_mailbox_uid_idx
     ON object_tombstones (tenant_id, mailbox_id, imap_uid)
     WHERE mailbox_id IS NOT NULL AND imap_uid IS NOT NULL;
+
+CREATE INDEX object_tombstones_retention_idx
+    ON object_tombstones (tenant_id, retained_until)
+    WHERE retained_until IS NOT NULL;
 
 CREATE TABLE jmap_upload_blobs (
     id UUID PRIMARY KEY,
@@ -624,12 +666,17 @@ CREATE TABLE jmap_upload_blobs (
     expires_at TIMESTAMPTZ NOT NULL,
     consumed_at TIMESTAMPTZ,
     CHECK (expires_at > created_at),
+    CHECK (consumed_at IS NULL OR consumed_at >= created_at),
     UNIQUE (tenant_id, id),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX jmap_upload_blobs_expiry_idx
     ON jmap_upload_blobs (tenant_id, expires_at);
+
+CREATE INDEX jmap_upload_blobs_unconsumed_expiry_idx
+    ON jmap_upload_blobs (tenant_id, expires_at)
+    WHERE consumed_at IS NULL;
 
 CREATE TABLE jmap_query_states (
     id UUID PRIMARY KEY,
@@ -641,12 +688,16 @@ CREATE TABLE jmap_query_states (
     last_change_sequence BIGINT NOT NULL DEFAULT 0 CHECK (last_change_sequence >= 0),
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (expires_at > created_at),
     UNIQUE (tenant_id, id),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX jmap_query_states_account_idx
     ON jmap_query_states (tenant_id, account_id, method_name, expires_at);
+
+CREATE INDEX jmap_query_states_expiry_idx
+    ON jmap_query_states (tenant_id, expires_at);
 
 CREATE TABLE activesync_sync_cursors (
     id UUID PRIMARY KEY,
@@ -680,11 +731,17 @@ CREATE TABLE mapi_sync_checkpoints (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, account_id, mailbox_id, checkpoint_kind, mapi_replica_guid),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id, mailbox_id) REFERENCES mailboxes (tenant_id, id) ON DELETE CASCADE
+    FOREIGN KEY (tenant_id, account_id, mailbox_id)
+        REFERENCES mailboxes (tenant_id, account_id, id)
+        ON DELETE CASCADE
 );
 
 CREATE INDEX mapi_sync_checkpoints_account_idx
     ON mapi_sync_checkpoints (tenant_id, account_id, updated_at DESC);
+
+CREATE UNIQUE INDEX mapi_sync_checkpoints_hierarchy_idx
+    ON mapi_sync_checkpoints (tenant_id, account_id, checkpoint_kind, mapi_replica_guid)
+    WHERE mailbox_id IS NULL;
 
 CREATE TABLE submission_requests (
     id UUID PRIMARY KEY,
@@ -693,19 +750,20 @@ CREATE TABLE submission_requests (
     identity_id UUID,
     sent_account_message_id UUID NOT NULL,
     from_address TEXT NOT NULL CHECK (from_address = lower(btrim(from_address)) AND from_address <> ''),
-    sender_address TEXT CHECK (sender_address IS NULL OR sender_address = lower(btrim(sender_address))),
+    sender_address TEXT CHECK (sender_address IS NULL OR (sender_address = lower(btrim(sender_address)) AND sender_address <> '')),
     authorization_kind TEXT NOT NULL DEFAULT 'self'
         CHECK (authorization_kind IN ('self', 'send_as', 'send_on_behalf')),
     source_protocol TEXT NOT NULL CHECK (source_protocol IN ('web', 'jmap', 'ews', 'mapi', 'activesync', 'lpe_ct_submission')),
     status TEXT NOT NULL DEFAULT 'queued'
         CHECK (status IN ('queued', 'handed_off', 'relayed', 'deferred', 'quarantined', 'bounced', 'failed')),
-    idempotency_key TEXT,
+    idempotency_key TEXT CHECK (idempotency_key IS NULL OR btrim(idempotency_key) <> ''),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
-    UNIQUE (tenant_id, idempotency_key),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id, identity_id) REFERENCES account_identities (tenant_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (tenant_id, account_id, identity_id)
+        REFERENCES account_identities (tenant_id, account_id, id)
+        ON DELETE RESTRICT,
     FOREIGN KEY (tenant_id, account_id, sent_account_message_id)
         REFERENCES account_messages (tenant_id, account_id, id)
         ON DELETE RESTRICT
@@ -713,6 +771,10 @@ CREATE TABLE submission_requests (
 
 CREATE INDEX submission_requests_status_idx
     ON submission_requests (tenant_id, status, created_at);
+
+CREATE UNIQUE INDEX submission_requests_idempotency_idx
+    ON submission_requests (tenant_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
 
 CREATE TABLE submission_recipients (
     id UUID PRIMARY KEY,
@@ -781,6 +843,9 @@ CREATE TABLE submission_result_history (
 CREATE INDEX submission_result_history_submission_idx
     ON submission_result_history (tenant_id, submission_id, received_at DESC);
 
+CREATE INDEX submission_result_history_trace_idx
+    ON submission_result_history (tenant_id, trace_id, received_at DESC);
+
 CREATE TABLE lpe_ct_inbound_delivery_receipts (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
@@ -797,6 +862,9 @@ CREATE TABLE lpe_ct_inbound_delivery_receipts (
         REFERENCES account_messages (tenant_id, account_id, id)
         ON DELETE RESTRICT
 );
+
+CREATE INDEX lpe_ct_inbound_delivery_receipts_created_idx
+    ON lpe_ct_inbound_delivery_receipts (tenant_id, created_at DESC);
 
 CREATE TABLE contact_books (
     id UUID PRIMARY KEY,
@@ -920,11 +988,10 @@ CREATE TABLE tasks (
 CREATE INDEX tasks_owner_status_idx
     ON tasks (tenant_id, owner_account_id, task_list_id, status, sort_order);
 
-CREATE TABLE collection_grants (
+CREATE TABLE contact_book_grants (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
-    collection_kind TEXT NOT NULL CHECK (collection_kind IN ('mailbox', 'contacts', 'calendar', 'tasks')),
-    collection_id UUID NOT NULL,
+    contact_book_id UUID NOT NULL,
     owner_account_id UUID NOT NULL,
     grantee_account_id UUID NOT NULL,
     may_read BOOLEAN NOT NULL DEFAULT TRUE,
@@ -933,17 +1000,71 @@ CREATE TABLE collection_grants (
     may_share BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (tenant_id, collection_kind, collection_id, grantee_account_id),
+    UNIQUE (tenant_id, contact_book_id, grantee_account_id),
     CHECK (owner_account_id <> grantee_account_id),
     CHECK (may_read OR (NOT may_write AND NOT may_delete AND NOT may_share)),
     CHECK ((NOT may_delete) OR may_write),
     CHECK ((NOT may_share) OR may_write),
-    FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, owner_account_id, contact_book_id)
+        REFERENCES contact_books (tenant_id, owner_account_id, id)
+        ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, grantee_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
-CREATE INDEX collection_grants_grantee_idx
-    ON collection_grants (tenant_id, collection_kind, grantee_account_id, owner_account_id);
+CREATE INDEX contact_book_grants_grantee_idx
+    ON contact_book_grants (tenant_id, grantee_account_id, owner_account_id, contact_book_id);
+
+CREATE TABLE calendar_grants (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    calendar_id UUID NOT NULL,
+    owner_account_id UUID NOT NULL,
+    grantee_account_id UUID NOT NULL,
+    may_read BOOLEAN NOT NULL DEFAULT TRUE,
+    may_write BOOLEAN NOT NULL DEFAULT FALSE,
+    may_delete BOOLEAN NOT NULL DEFAULT FALSE,
+    may_share BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, calendar_id, grantee_account_id),
+    CHECK (owner_account_id <> grantee_account_id),
+    CHECK (may_read OR (NOT may_write AND NOT may_delete AND NOT may_share)),
+    CHECK ((NOT may_delete) OR may_write),
+    CHECK ((NOT may_share) OR may_write),
+    FOREIGN KEY (tenant_id, owner_account_id, calendar_id)
+        REFERENCES calendars (tenant_id, owner_account_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, grantee_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX calendar_grants_grantee_idx
+    ON calendar_grants (tenant_id, grantee_account_id, owner_account_id, calendar_id);
+
+CREATE TABLE task_list_grants (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    task_list_id UUID NOT NULL,
+    owner_account_id UUID NOT NULL,
+    grantee_account_id UUID NOT NULL,
+    may_read BOOLEAN NOT NULL DEFAULT TRUE,
+    may_write BOOLEAN NOT NULL DEFAULT FALSE,
+    may_delete BOOLEAN NOT NULL DEFAULT FALSE,
+    may_share BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, task_list_id, grantee_account_id),
+    CHECK (owner_account_id <> grantee_account_id),
+    CHECK (may_read OR (NOT may_write AND NOT may_delete AND NOT may_share)),
+    CHECK ((NOT may_delete) OR may_write),
+    CHECK ((NOT may_share) OR may_write),
+    FOREIGN KEY (tenant_id, owner_account_id, task_list_id)
+        REFERENCES task_lists (tenant_id, owner_account_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, grantee_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX task_list_grants_grantee_idx
+    ON task_list_grants (tenant_id, grantee_account_id, owner_account_id, task_list_id);
 
 CREATE TABLE mailbox_delegation_grants (
     id UUID PRIMARY KEY,
@@ -982,7 +1103,9 @@ CREATE TABLE sender_rights (
     CHECK (owner_account_id <> grantee_account_id),
     FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, grantee_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id, identity_id) REFERENCES account_identities (tenant_id, id) ON DELETE CASCADE
+    FOREIGN KEY (tenant_id, owner_account_id, identity_id)
+        REFERENCES account_identities (tenant_id, account_id, id)
+        ON DELETE CASCADE
 );
 
 CREATE INDEX sender_rights_grantee_idx
