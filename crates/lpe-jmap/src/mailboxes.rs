@@ -16,7 +16,11 @@ use crate::{
         ChangesArguments, MailboxCreateInput, MailboxGetArguments, MailboxQueryArguments,
         MailboxSetArguments, MailboxUpdateInput, QueryChangesArguments,
     },
-    state::{changes_response, encode_query_state, query_changes_response, query_position},
+    state::{
+        changes_response_with_cursor, decode_query_state, encode_query_state,
+        encode_query_state_reference, query_changes_response_from_diff, query_diff_for_kind,
+        query_position, validate_query_state_token,
+    },
     JmapService, DEFAULT_GET_LIMIT, MAX_QUERY_LIMIT,
 };
 
@@ -104,7 +108,26 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .take(limit)
             .cloned()
             .collect::<Vec<_>>();
-        let query_state = encode_query_state(account_id, "Mailbox/query", None, None, all_ids)?;
+        let cursor = self
+            .store
+            .fetch_jmap_mail_change_cursor(account_id)
+            .await?
+            .unwrap_or(0);
+        let query_state = match self
+            .store
+            .save_jmap_query_state(account_id, "Mailbox/query", None, None, cursor, &all_ids)
+            .await?
+        {
+            Some(state_id) => encode_query_state_reference(
+                account_id,
+                "Mailbox/query",
+                None,
+                None,
+                state_id,
+                cursor,
+            )?,
+            None => encode_query_state(account_id, "Mailbox/query", None, None, all_ids)?,
+        };
 
         Ok(json!({
             "accountId": account_id.to_string(),
@@ -126,6 +149,31 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .requested_account_access(account, arguments.account_id.as_deref())
             .await?;
         let account_id = account_access.account_id;
+        let previous = decode_query_state(&arguments.since_query_state)?;
+        let filter_state = arguments.filter;
+        let sort_state = arguments
+            .sort
+            .map(|sort| sort.into_iter().collect::<Vec<_>>());
+        validate_query_state_token(
+            account_id,
+            "Mailbox/query",
+            filter_state.as_ref(),
+            sort_state.as_ref(),
+            &previous,
+        )?;
+        let mut previous_cursor = previous.cursor.unwrap_or(0);
+        let previous_ids =
+            if let Some(state_id) = previous.state_id.as_deref().map(parse_uuid).transpose()? {
+                let stored = self
+                    .store
+                    .fetch_jmap_query_state(account_id, "Mailbox/query", state_id, None, None)
+                    .await?
+                    .ok_or_else(|| anyhow!("queryState is no longer available"))?;
+                previous_cursor = stored.last_change_sequence;
+                stored.snapshot_ids
+            } else {
+                previous.ids.clone()
+            };
         let mut mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
         mailboxes.sort_by_key(|mailbox| {
             (
@@ -139,15 +187,60 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .map(|mailbox| mailbox.id.to_string())
             .collect::<Vec<_>>();
         let total = current_ids.len() as u64;
-        query_changes_response(
+        let cursor = self
+            .store
+            .fetch_jmap_mail_change_cursor(account_id)
+            .await?
+            .unwrap_or(0);
+        let diff = query_diff_for_kind(
+            "Mailbox/query",
+            &previous_ids,
+            &current_ids,
+            arguments.max_changes,
+        );
+        let next_cursor = if diff.has_more_changes {
+            previous_cursor
+        } else {
+            cursor
+        };
+        let next_query_state = match self
+            .store
+            .save_jmap_query_state(
+                account_id,
+                "Mailbox/query",
+                filter_state.clone(),
+                sort_state.clone(),
+                next_cursor,
+                &diff.query_state_ids,
+            )
+            .await?
+        {
+            Some(state_id) => encode_query_state_reference(
+                account_id,
+                "Mailbox/query",
+                filter_state.clone(),
+                sort_state.clone(),
+                state_id,
+                next_cursor,
+            )?,
+            None => encode_query_state(
+                account_id,
+                "Mailbox/query",
+                filter_state.clone(),
+                sort_state.clone(),
+                diff.query_state_ids.clone(),
+            )?,
+        };
+        query_changes_response_from_diff(
             account_id,
             "Mailbox/query",
             arguments.since_query_state,
-            arguments.filter,
-            arguments.sort.map(|sort| sort.into_iter().collect()),
-            current_ids,
+            filter_state,
+            sort_state,
+            previous,
+            next_query_state,
             total,
-            arguments.max_changes,
+            diff,
         )
     }
 
@@ -162,12 +255,14 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .await?;
         let account_id = account_access.account_id;
         let entries = self.mailbox_object_state_entries(&account_access).await?;
-        changes_response(
+        let cursor = self.store.fetch_jmap_mail_change_cursor(account_id).await?;
+        changes_response_with_cursor(
             account_id,
             "Mailbox",
             &arguments.since_state,
             arguments.max_changes,
             entries,
+            cursor,
         )
     }
 

@@ -12,6 +12,11 @@ pub(crate) struct QueryStateToken {
     pub(crate) kind: String,
     pub(crate) filter: Option<Value>,
     pub(crate) sort: Option<Vec<Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) state_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cursor: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) ids: Vec<String>,
 }
 
@@ -29,6 +34,8 @@ pub(crate) struct StateToken {
     pub(crate) account_id: String,
     pub(crate) kind: String,
     pub(crate) entries: Vec<StateEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cursor: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,9 +58,27 @@ pub(crate) fn changes_response(
     max_changes: Option<u64>,
     current_entries: Vec<StateEntry>,
 ) -> Result<Value> {
+    changes_response_with_cursor(
+        account_id,
+        kind,
+        since_state,
+        max_changes,
+        current_entries,
+        None,
+    )
+}
+
+pub(crate) fn changes_response_with_cursor(
+    account_id: Uuid,
+    kind: &str,
+    since_state: &str,
+    max_changes: Option<u64>,
+    current_entries: Vec<StateEntry>,
+    current_cursor: Option<i64>,
+) -> Result<Value> {
     let max_changes = max_changes.unwrap_or(u64::MAX).max(1) as usize;
-    let previous_entries = if since_state == "0" {
-        Vec::new()
+    let (previous_entries, previous_cursor) = if since_state == "0" {
+        (Vec::new(), None)
     } else {
         let previous = decode_state(since_state)?;
         if previous.account_id != account_id.to_string() {
@@ -62,7 +87,7 @@ pub(crate) fn changes_response(
         if previous.kind != kind {
             bail!("state does not match requested method");
         }
-        previous.entries
+        (previous.entries, previous.cursor)
     };
 
     let previous_map = previous_entries
@@ -124,7 +149,12 @@ pub(crate) fn changes_response(
     } else {
         current_entries
     };
-    let new_state = encode_state(account_id, kind, new_state_entries)
+    let new_state_cursor = if has_more_changes {
+        previous_cursor
+    } else {
+        current_cursor
+    };
+    let new_state = encode_state_with_cursor(account_id, kind, new_state_entries, new_state_cursor)
         .unwrap_or_else(|_| crate::SESSION_STATE.to_string());
 
     Ok(json!({
@@ -178,6 +208,15 @@ pub(crate) fn encode_state(
     kind: &str,
     entries: Vec<StateEntry>,
 ) -> Result<String> {
+    encode_state_with_cursor(account_id, kind, entries, None)
+}
+
+pub(crate) fn encode_state_with_cursor(
+    account_id: Uuid,
+    kind: &str,
+    entries: Vec<StateEntry>,
+    cursor: Option<i64>,
+) -> Result<String> {
     let mut entries = entries;
     entries.sort_by(|left, right| left.id.cmp(&right.id));
     let token = StateToken {
@@ -185,6 +224,7 @@ pub(crate) fn encode_state(
         account_id: account_id.to_string(),
         kind: kind.to_string(),
         entries,
+        cursor,
     };
     Ok(URL_SAFE_NO_PAD.encode(serde_json::to_vec(&token)?))
 }
@@ -269,12 +309,45 @@ pub(crate) fn encode_query_state(
     sort: Option<Vec<Value>>,
     ids: Vec<String>,
 ) -> Result<String> {
+    encode_query_state_parts(account_id, kind, filter, sort, None, None, ids)
+}
+
+pub(crate) fn encode_query_state_reference(
+    account_id: Uuid,
+    kind: &str,
+    filter: Option<Value>,
+    sort: Option<Vec<Value>>,
+    state_id: Uuid,
+    cursor: i64,
+) -> Result<String> {
+    encode_query_state_parts(
+        account_id,
+        kind,
+        filter,
+        sort,
+        Some(state_id),
+        Some(cursor),
+        Vec::new(),
+    )
+}
+
+fn encode_query_state_parts(
+    account_id: Uuid,
+    kind: &str,
+    filter: Option<Value>,
+    sort: Option<Vec<Value>>,
+    state_id: Option<Uuid>,
+    cursor: Option<i64>,
+    ids: Vec<String>,
+) -> Result<String> {
     let token = QueryStateToken {
         version: crate::QUERY_STATE_VERSION.to_string(),
         account_id: account_id.to_string(),
         kind: kind.to_string(),
         filter,
         sort,
+        state_id: state_id.map(|id| id.to_string()),
+        cursor,
         ids,
     };
     Ok(URL_SAFE_NO_PAD.encode(serde_json::to_vec(&token)?))
@@ -303,17 +376,78 @@ pub(crate) fn query_changes_response(
     max_changes: Option<u64>,
 ) -> Result<Value> {
     let previous = decode_query_state(&since_query_state)?;
+    let previous_ids = previous.ids.clone();
+    let diff = query_diff_for_kind(kind, &previous_ids, &current_ids, max_changes);
+    let next_query_state = encode_query_state(
+        account_id,
+        kind,
+        filter.clone(),
+        sort.clone(),
+        diff.query_state_ids.clone(),
+    )?;
+    query_changes_response_from_diff(
+        account_id,
+        kind,
+        since_query_state,
+        filter,
+        sort,
+        previous,
+        next_query_state,
+        total,
+        diff,
+    )
+}
+
+pub(crate) fn query_changes_response_from_diff(
+    account_id: Uuid,
+    kind: &str,
+    since_query_state: String,
+    filter: Option<Value>,
+    sort: Option<Vec<Value>>,
+    previous: QueryStateToken,
+    next_query_state: String,
+    total: u64,
+    diff: QueryDiff,
+) -> Result<Value> {
+    validate_query_state_token(account_id, kind, filter.as_ref(), sort.as_ref(), &previous)?;
+
+    Ok(json!({
+        "accountId": account_id.to_string(),
+        "oldQueryState": since_query_state,
+        "newQueryState": next_query_state,
+        "removed": diff.removed,
+        "added": diff.added,
+        "total": total,
+        "hasMoreChanges": diff.has_more_changes,
+    }))
+}
+
+pub(crate) fn validate_query_state_token(
+    account_id: Uuid,
+    kind: &str,
+    filter: Option<&Value>,
+    sort: Option<&Vec<Value>>,
+    previous: &QueryStateToken,
+) -> Result<()> {
     if previous.account_id != account_id.to_string() {
         bail!("queryState does not match requested account");
     }
     if previous.kind != kind {
         bail!("queryState does not match requested method");
     }
-    if previous.filter != filter || previous.sort != sort {
+    if previous.filter.as_ref() != filter || previous.sort.as_ref() != sort {
         bail!("queryState does not match requested filter or sort");
     }
+    Ok(())
+}
 
-    let diff = if matches!(
+pub(crate) fn query_diff_for_kind(
+    kind: &str,
+    previous_ids: &[String],
+    current_ids: &[String],
+    max_changes: Option<u64>,
+) -> QueryDiff {
+    if matches!(
         kind,
         "Email/query"
             | "Thread/query"
@@ -325,22 +459,10 @@ pub(crate) fn query_changes_response(
             | "ContactCard"
             | "CalendarEvent"
     ) {
-        compute_query_diff_with_reorders(&previous.ids, &current_ids, max_changes)
+        compute_query_diff_with_reorders(previous_ids, current_ids, max_changes)
     } else {
-        compute_query_diff(&previous.ids, &current_ids, max_changes)
-    };
-    let next_query_state =
-        encode_query_state(account_id, kind, filter, sort, diff.query_state_ids.clone())?;
-
-    Ok(json!({
-        "accountId": account_id.to_string(),
-        "oldQueryState": since_query_state,
-        "newQueryState": next_query_state,
-        "removed": diff.removed,
-        "added": diff.added,
-        "total": total,
-        "hasMoreChanges": diff.has_more_changes,
-    }))
+        compute_query_diff(previous_ids, current_ids, max_changes)
+    }
 }
 
 pub(crate) fn query_position(
@@ -573,6 +695,52 @@ mod tests {
         assert!(
             changes_response(account_id, "Email", &wrong_kind_state, None, Vec::new()).is_err()
         );
+    }
+
+    #[test]
+    fn state_tokens_preserve_optional_change_log_cursor() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        let state =
+            encode_state_with_cursor(account_id, "Email", vec![entry("a", "old")], Some(42))
+                .unwrap();
+        assert_eq!(decode_state(&state).unwrap().cursor, Some(42));
+
+        let response = changes_response_with_cursor(
+            account_id,
+            "Email",
+            &state,
+            None,
+            vec![entry("a", "new")],
+            Some(43),
+        )
+        .unwrap();
+        let new_state = response["newState"].as_str().unwrap();
+        assert_eq!(decode_state(new_state).unwrap().cursor, Some(43));
+    }
+
+    #[test]
+    fn truncated_changes_do_not_advance_change_log_cursor() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        let state = encode_state_with_cursor(
+            account_id,
+            "Email",
+            vec![entry("a", "old"), entry("b", "old")],
+            Some(42),
+        )
+        .unwrap();
+
+        let response = changes_response_with_cursor(
+            account_id,
+            "Email",
+            &state,
+            Some(1),
+            vec![entry("a", "new"), entry("b", "new")],
+            Some(43),
+        )
+        .unwrap();
+        assert_eq!(response["hasMoreChanges"], Value::Bool(true));
+        let new_state = response["newState"].as_str().unwrap();
+        assert_eq!(decode_state(new_state).unwrap().cursor, Some(42));
     }
 
     #[test]

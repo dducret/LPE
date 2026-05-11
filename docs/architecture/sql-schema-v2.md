@@ -107,7 +107,8 @@ than foreign-keying back to rows that deletion or expunge may remove.
 Protocol adapters store only cursor rows:
 
 - `jmap_query_states` stores query token metadata and last observed canonical
-  change sequence.
+  change sequence plus the ordered object id snapshot needed to resume JMAP
+  `queryChanges` without embedding full snapshots in client-visible tokens.
 - `activesync_sync_cursors` stores device, collection, and last change sequence.
 - `mapi_sync_checkpoints` stores EMSMDB/ICS folder or hierarchy cursor state.
 

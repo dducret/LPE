@@ -20,8 +20,9 @@ use lpe_storage::{
     CanonicalChangeCategory, CanonicalChangeReplay, CanonicalPushChangeSet, ClientContact,
     ClientEvent, ClientTaskList, CollaborationCollection, CollaborationRights, CreateTaskListInput,
     JmapEmailAddress, JmapEmailSubmission, JmapImportedEmailInput, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JmapQuota, MailboxAccountAccess, SavedDraftMessage, SenderIdentity,
-    UpdateTaskListInput, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, MailboxAccountAccess,
+    SavedDraftMessage, SenderIdentity, UpdateTaskListInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -52,6 +53,8 @@ struct FakeStore {
     submitted_draft_sources: Arc<Mutex<Vec<String>>>,
     canonical_change_cursor: Option<i64>,
     canonical_change_replay: CanonicalChangeReplay,
+    persist_query_states: bool,
+    query_states: Arc<Mutex<HashMap<Uuid, JmapStoredQueryState>>>,
 }
 
 struct FakePushListener;
@@ -538,6 +541,53 @@ impl JmapStore for FakeStore {
         _principal_account_id: Uuid,
     ) -> Result<Option<i64>> {
         Ok(self.canonical_change_cursor)
+    }
+
+    async fn fetch_jmap_mail_change_cursor(&self, _account_id: Uuid) -> Result<Option<i64>> {
+        Ok(if self.persist_query_states {
+            self.canonical_change_cursor
+        } else {
+            None
+        })
+    }
+
+    async fn save_jmap_query_state(
+        &self,
+        account_id: Uuid,
+        method_name: &str,
+        _filter: Option<Value>,
+        _sort: Option<Vec<Value>>,
+        last_change_sequence: i64,
+        snapshot_ids: &[String],
+    ) -> Result<Option<Uuid>> {
+        if !self.persist_query_states {
+            return Ok(None);
+        }
+        let state_id = Uuid::new_v4();
+        self.query_states.lock().unwrap().insert(
+            state_id,
+            JmapStoredQueryState {
+                id: state_id,
+                account_id,
+                method_name: method_name.to_string(),
+                filter_hash: "test-filter".to_string(),
+                sort_hash: "test-sort".to_string(),
+                last_change_sequence,
+                snapshot_ids: snapshot_ids.to_vec(),
+            },
+        );
+        Ok(Some(state_id))
+    }
+
+    async fn fetch_jmap_query_state(
+        &self,
+        _account_id: Uuid,
+        _method_name: &str,
+        state_id: Uuid,
+        _filter: Option<Value>,
+        _sort: Option<Vec<Value>>,
+    ) -> Result<Option<JmapStoredQueryState>> {
+        Ok(self.query_states.lock().unwrap().get(&state_id).cloned())
     }
 
     async fn replay_canonical_changes(
@@ -3002,6 +3052,236 @@ async fn paged_query_states_keep_full_mailbox_and_email_snapshots() {
     assert_eq!(
         response.method_responses[1].1["removed"][0],
         Value::String(FakeStore::draft_email().id.to_string())
+    );
+}
+
+#[tokio::test]
+async fn stored_email_query_state_keeps_snapshot_out_of_token_and_paginates_changes() {
+    let query_states = Arc::new(Mutex::new(HashMap::new()));
+    let initial = JmapService::new_with_validator(
+        FakeStore {
+            session: Some(FakeStore::account()),
+            emails: vec![FakeStore::inbox_email(), FakeStore::draft_email()],
+            canonical_change_cursor: Some(7),
+            persist_query_states: true,
+            query_states: Arc::clone(&query_states),
+            ..Default::default()
+        },
+        validator_ok("message/rfc822", "email", "eml", 0.99),
+    );
+    let initial_response = initial
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Email/query".to_string(),
+                    json!({"position": 0, "limit": 1}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    let query_state = initial_response.method_responses[0].1["queryState"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let decoded = decode_query_state(&query_state).unwrap();
+    assert!(decoded.state_id.is_some());
+    assert_eq!(decoded.cursor, Some(7));
+    assert!(decoded.ids.is_empty());
+
+    let updated = JmapService::new_with_validator(
+        FakeStore {
+            session: Some(FakeStore::account()),
+            emails: Vec::new(),
+            canonical_change_cursor: Some(8),
+            persist_query_states: true,
+            query_states,
+            ..Default::default()
+        },
+        validator_ok("message/rfc822", "email", "eml", 0.99),
+    );
+    let first = updated
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Email/queryChanges".to_string(),
+                    json!({"sinceQueryState": query_state, "maxChanges": 1}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        first.method_responses[0].1["hasMoreChanges"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        first.method_responses[0].1["removed"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let next_query_state = first.method_responses[0].1["newQueryState"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let decoded = decode_query_state(&next_query_state).unwrap();
+    assert_eq!(decoded.cursor, Some(7));
+    assert!(decoded.ids.is_empty());
+
+    let second = updated
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Email/queryChanges".to_string(),
+                    json!({"sinceQueryState": next_query_state, "maxChanges": 1}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        second.method_responses[0].1["hasMoreChanges"],
+        Value::Bool(false)
+    );
+    assert_eq!(
+        second.method_responses[0].1["removed"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let final_query_state = second.method_responses[0].1["newQueryState"]
+        .as_str()
+        .unwrap();
+    assert_eq!(
+        decode_query_state(final_query_state).unwrap().cursor,
+        Some(8)
+    );
+}
+
+#[tokio::test]
+async fn stored_mailbox_query_state_keeps_snapshot_out_of_token_and_paginates_changes() {
+    let query_states = Arc::new(Mutex::new(HashMap::new()));
+    let initial = JmapService::new_with_validator(
+        FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::inbox_mailbox(), FakeStore::draft_mailbox()],
+            canonical_change_cursor: Some(7),
+            persist_query_states: true,
+            query_states: Arc::clone(&query_states),
+            ..Default::default()
+        },
+        validator_ok("message/rfc822", "email", "eml", 0.99),
+    );
+    let initial_response = initial
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Mailbox/query".to_string(),
+                    json!({"position": 0, "limit": 1}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    let query_state = initial_response.method_responses[0].1["queryState"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let decoded = decode_query_state(&query_state).unwrap();
+    assert!(decoded.state_id.is_some());
+    assert_eq!(decoded.cursor, Some(7));
+    assert!(decoded.ids.is_empty());
+
+    let updated = JmapService::new_with_validator(
+        FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: Vec::new(),
+            canonical_change_cursor: Some(8),
+            persist_query_states: true,
+            query_states,
+            ..Default::default()
+        },
+        validator_ok("message/rfc822", "email", "eml", 0.99),
+    );
+    let first = updated
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Mailbox/queryChanges".to_string(),
+                    json!({"sinceQueryState": query_state, "maxChanges": 1}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        first.method_responses[0].1["hasMoreChanges"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        first.method_responses[0].1["removed"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let next_query_state = first.method_responses[0].1["newQueryState"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let decoded = decode_query_state(&next_query_state).unwrap();
+    assert_eq!(decoded.cursor, Some(7));
+    assert!(decoded.ids.is_empty());
+
+    let second = updated
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Mailbox/queryChanges".to_string(),
+                    json!({"sinceQueryState": next_query_state, "maxChanges": 1}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        second.method_responses[0].1["hasMoreChanges"],
+        Value::Bool(false)
+    );
+    assert_eq!(
+        second.method_responses[0].1["removed"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let final_query_state = second.method_responses[0].1["newQueryState"]
+        .as_str()
+        .unwrap();
+    assert_eq!(
+        decode_query_state(final_query_state).unwrap().cursor,
+        Some(8)
     );
 }
 

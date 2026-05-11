@@ -28,7 +28,11 @@ use crate::{
         QueryChangesArguments, QuotaGetArguments, SearchSnippetGetArguments, ThreadGetArguments,
         ThreadQueryArguments,
     },
-    state::{changes_response, query_changes_response, query_position},
+    state::{
+        changes_response, changes_response_with_cursor, decode_query_state,
+        encode_query_state_reference, query_changes_response, query_changes_response_from_diff,
+        query_diff_for_kind, query_position, validate_query_state_token,
+    },
     upload::{expected_attachment_kind, parse_upload_blob_id},
     validation::validate_query_sort,
     JmapService, DEFAULT_GET_LIMIT, MAX_QUERY_LIMIT, SESSION_STATE,
@@ -88,21 +92,49 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .take(limit as usize)
             .cloned()
             .collect::<Vec<_>>();
-        let query_state = crate::encode_query_state(
-            account_id,
-            "Email/query",
-            arguments
-                .filter
-                .as_ref()
-                .map(serialize_email_query_filter)
-                .transpose()?,
-            arguments
-                .sort
-                .as_ref()
-                .map(|sort| serialize_email_query_sort(sort))
-                .transpose()?,
-            full_ids,
-        )?;
+        let filter_state = arguments
+            .filter
+            .as_ref()
+            .map(serialize_email_query_filter)
+            .transpose()?;
+        let sort_state = arguments
+            .sort
+            .as_ref()
+            .map(|sort| serialize_email_query_sort(sort))
+            .transpose()?;
+        let cursor = self
+            .store
+            .fetch_jmap_mail_change_cursor(account_id)
+            .await?
+            .unwrap_or(0);
+        let query_state = match self
+            .store
+            .save_jmap_query_state(
+                account_id,
+                "Email/query",
+                filter_state.clone(),
+                sort_state.clone(),
+                cursor,
+                &full_ids,
+            )
+            .await?
+        {
+            Some(state_id) => encode_query_state_reference(
+                account_id,
+                "Email/query",
+                filter_state,
+                sort_state,
+                state_id,
+                cursor,
+            )?,
+            None => crate::encode_query_state(
+                account_id,
+                "Email/query",
+                filter_state,
+                sort_state,
+                full_ids,
+            )?,
+        };
 
         Ok(json!({
             "accountId": account_id.to_string(),
@@ -137,6 +169,43 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .filter
             .as_ref()
             .and_then(|filter| filter.text.as_deref());
+        let filter_state = arguments
+            .filter
+            .as_ref()
+            .map(serialize_email_query_filter)
+            .transpose()?;
+        let sort_state = arguments
+            .sort
+            .as_ref()
+            .map(|sort| serialize_email_query_sort(sort))
+            .transpose()?;
+        let previous = decode_query_state(&arguments.since_query_state)?;
+        validate_query_state_token(
+            account_id,
+            "Email/query",
+            filter_state.as_ref(),
+            sort_state.as_ref(),
+            &previous,
+        )?;
+        let mut previous_cursor = previous.cursor.unwrap_or(0);
+        let previous_ids =
+            if let Some(state_id) = previous.state_id.as_deref().map(parse_uuid).transpose()? {
+                let stored = self
+                    .store
+                    .fetch_jmap_query_state(
+                        account_id,
+                        "Email/query",
+                        state_id,
+                        filter_state.clone(),
+                        sort_state.clone(),
+                    )
+                    .await?
+                    .ok_or_else(|| anyhow!("queryState is no longer available"))?;
+                previous_cursor = stored.last_change_sequence;
+                stored.snapshot_ids
+            } else {
+                previous.ids.clone()
+            };
         let query = self
             .store
             .query_jmap_email_ids(account_id, mailbox_id, search_text, 0, MAX_QUERY_LIMIT)
@@ -144,23 +213,60 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let current_ids = self
             .resolve_full_email_query_ids(account_id, mailbox_id, search_text, &query)
             .await?;
-        query_changes_response(
+        let cursor = self
+            .store
+            .fetch_jmap_mail_change_cursor(account_id)
+            .await?
+            .unwrap_or(0);
+        let diff = query_diff_for_kind(
+            "Email/query",
+            &previous_ids,
+            &current_ids,
+            arguments.max_changes,
+        );
+        let next_cursor = if diff.has_more_changes {
+            previous_cursor
+        } else {
+            cursor
+        };
+        let next_query_state = match self
+            .store
+            .save_jmap_query_state(
+                account_id,
+                "Email/query",
+                filter_state.clone(),
+                sort_state.clone(),
+                next_cursor,
+                &diff.query_state_ids,
+            )
+            .await?
+        {
+            Some(state_id) => encode_query_state_reference(
+                account_id,
+                "Email/query",
+                filter_state.clone(),
+                sort_state.clone(),
+                state_id,
+                next_cursor,
+            )?,
+            None => crate::encode_query_state(
+                account_id,
+                "Email/query",
+                filter_state.clone(),
+                sort_state.clone(),
+                diff.query_state_ids.clone(),
+            )?,
+        };
+        query_changes_response_from_diff(
             account_id,
             "Email/query",
             arguments.since_query_state,
-            arguments
-                .filter
-                .as_ref()
-                .map(serialize_email_query_filter)
-                .transpose()?,
-            arguments
-                .sort
-                .as_ref()
-                .map(|sort| serialize_email_query_sort(sort))
-                .transpose()?,
-            current_ids,
+            filter_state,
+            sort_state,
+            previous,
+            next_query_state,
             query.total,
-            arguments.max_changes,
+            diff,
         )
     }
 
@@ -227,12 +333,14 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let entries = self
             .mail_object_state_entries(&account_access, "Email")
             .await?;
-        changes_response(
+        let cursor = self.store.fetch_jmap_mail_change_cursor(account_id).await?;
+        changes_response_with_cursor(
             account_id,
             "Email",
             &arguments.since_state,
             arguments.max_changes,
             entries,
+            cursor,
         )
     }
 
@@ -1018,12 +1126,14 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let entries = self
             .mail_object_state_entries(&account_access, "Thread")
             .await?;
-        changes_response(
+        let cursor = self.store.fetch_jmap_mail_change_cursor(account_id).await?;
+        changes_response_with_cursor(
             account_id,
             "Thread",
             &arguments.since_state,
             arguments.max_changes,
             entries,
+            cursor,
         )
     }
 

@@ -43,7 +43,7 @@ pub use crate::protocols::{
     ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncItemState, ActiveSyncSyncState,
     ImapEmail, ImapMailboxState, JmapEmail, JmapEmailAddress, JmapEmailQuery, JmapEmailSubmission,
     JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
-    JmapThreadQuery, JmapUploadBlob,
+    JmapStoredQueryState, JmapThreadQuery, JmapUploadBlob,
 };
 pub use crate::pst::{NewPstTransferJob, PstJobExecutionSummary, PstTransferJobRecord};
 pub use crate::submission::{

@@ -35,6 +35,12 @@
   - event stream at `/api/jmap/events?types={types}&closeafter={closeafter}`
   - PostgreSQL `LISTEN` / `NOTIFY` wakes the adapter after canonical commits
   - owned and delegated mailboxes participate in canonical push state
+- State:
+  - `Email/changes`, `Thread/changes`, and `Mailbox/changes` carry the
+    canonical mail change cursor in state tokens
+  - `Email/queryChanges` and `Mailbox/queryChanges` store ordered query
+    snapshots in `jmap_query_states` and expose only resumable query-state
+    references to clients
 - Submission:
   - `EmailSubmission/set` loads a persisted draft
   - canonical submission creates authoritative `Sent`

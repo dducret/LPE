@@ -733,6 +733,7 @@ CREATE TABLE jmap_query_states (
     filter_hash TEXT NOT NULL CHECK (btrim(filter_hash) <> ''),
     sort_hash TEXT NOT NULL CHECK (btrim(sort_hash) <> ''),
     last_change_sequence BIGINT NOT NULL DEFAULT 0 CHECK (last_change_sequence >= 0),
+    snapshot_ids JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(snapshot_ids) = 'array'),
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CHECK (expires_at > created_at),

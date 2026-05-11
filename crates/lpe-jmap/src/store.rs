@@ -4,11 +4,12 @@ use lpe_storage::{
     CanonicalChangeCategory, CanonicalChangeListener, CanonicalChangeReplay,
     CanonicalPushChangeSet, ClientTask, ClientTaskList, CollaborationCollection,
     CreateTaskListInput, JmapEmail, JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput,
-    JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapThreadQuery,
-    JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, SenderIdentity, SieveScriptDocument,
-    Storage, SubmitMessageInput, SubmittedMessage, UpdateTaskListInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientTaskInput,
+    JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState,
+    JmapThreadQuery, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, SenderIdentity,
+    SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage, UpdateTaskListInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
+use serde_json::Value;
 use uuid::Uuid;
 
 #[allow(async_fn_in_trait)]
@@ -29,6 +30,40 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         &self,
         principal_account_id: Uuid,
     ) -> Result<Option<i64>>;
+    async fn fetch_jmap_mail_change_cursor(&self, account_id: Uuid) -> Result<Option<i64>> {
+        let _ = account_id;
+        Ok(None)
+    }
+    async fn save_jmap_query_state(
+        &self,
+        account_id: Uuid,
+        method_name: &str,
+        filter: Option<Value>,
+        sort: Option<Vec<Value>>,
+        last_change_sequence: i64,
+        snapshot_ids: &[String],
+    ) -> Result<Option<Uuid>> {
+        let _ = (
+            account_id,
+            method_name,
+            filter,
+            sort,
+            last_change_sequence,
+            snapshot_ids,
+        );
+        Ok(None)
+    }
+    async fn fetch_jmap_query_state(
+        &self,
+        account_id: Uuid,
+        method_name: &str,
+        state_id: Uuid,
+        filter: Option<Value>,
+        sort: Option<Vec<Value>>,
+    ) -> Result<Option<JmapStoredQueryState>> {
+        let _ = (account_id, method_name, state_id, filter, sort);
+        Ok(None)
+    }
     async fn replay_canonical_changes(
         &self,
         principal_account_id: Uuid,
@@ -254,6 +289,43 @@ impl JmapStore for Storage {
         principal_account_id: Uuid,
     ) -> Result<Option<i64>> {
         self.fetch_canonical_change_cursor(principal_account_id)
+            .await
+    }
+
+    async fn fetch_jmap_mail_change_cursor(&self, account_id: Uuid) -> Result<Option<i64>> {
+        self.fetch_jmap_mail_change_cursor(account_id).await
+    }
+
+    async fn save_jmap_query_state(
+        &self,
+        account_id: Uuid,
+        method_name: &str,
+        filter: Option<Value>,
+        sort: Option<Vec<Value>>,
+        last_change_sequence: i64,
+        snapshot_ids: &[String],
+    ) -> Result<Option<Uuid>> {
+        self.save_jmap_query_state(
+            account_id,
+            method_name,
+            filter,
+            sort,
+            last_change_sequence,
+            snapshot_ids,
+        )
+        .await
+        .map(Some)
+    }
+
+    async fn fetch_jmap_query_state(
+        &self,
+        account_id: Uuid,
+        method_name: &str,
+        state_id: Uuid,
+        filter: Option<Value>,
+        sort: Option<Vec<Value>>,
+    ) -> Result<Option<JmapStoredQueryState>> {
+        self.fetch_jmap_query_state(account_id, method_name, state_id, filter, sort)
             .await
     }
 

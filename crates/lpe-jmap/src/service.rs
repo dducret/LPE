@@ -36,7 +36,7 @@ use crate::{
         JmapApiRequest, JmapApiResponse, JmapMethodCall, JmapMethodResponse, SessionDocument,
     },
     session,
-    state::{encode_state, StateEntry},
+    state::{encode_state, encode_state_with_cursor, StateEntry},
     store::JmapStore,
     upload::{message_rfc822_bytes, JmapBlobId},
 };
@@ -543,7 +543,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         access: &MailboxAccountAccess,
     ) -> Result<String> {
         let entries = self.mailbox_object_state_entries(access).await?;
-        encode_state(access.account_id, "Mailbox", entries)
+        let cursor = self
+            .store
+            .fetch_jmap_mail_change_cursor(access.account_id)
+            .await?;
+        encode_state_with_cursor(access.account_id, "Mailbox", entries, cursor)
     }
 
     pub(crate) async fn mailbox_object_state_entries(
@@ -566,7 +570,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         data_type: &str,
     ) -> Result<String> {
         let entries = self.mail_object_state_entries(access, data_type).await?;
-        encode_state(access.account_id, data_type, entries)
+        let cursor = self
+            .store
+            .fetch_jmap_mail_change_cursor(access.account_id)
+            .await?;
+        encode_state_with_cursor(access.account_id, data_type, entries, cursor)
     }
 
     pub(crate) async fn email_delivery_object_state(&self, account_id: Uuid) -> Result<String> {

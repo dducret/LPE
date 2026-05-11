@@ -1,5 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde::Serialize;
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -138,6 +140,17 @@ pub struct JmapThreadQuery {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct JmapStoredQueryState {
+    pub id: Uuid,
+    pub account_id: Uuid,
+    pub method_name: String,
+    pub filter_hash: String,
+    pub sort_hash: String,
+    pub last_change_sequence: i64,
+    pub snapshot_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct JmapEmailSubmission {
     pub id: Uuid,
     pub email_id: Uuid,
@@ -207,6 +220,105 @@ pub struct JmapImportedEmailInput {
 }
 
 impl Storage {
+    pub async fn fetch_jmap_mail_change_cursor(&self, account_id: Uuid) -> Result<Option<i64>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        sqlx::query_scalar::<_, Option<i64>>(
+            r#"
+            SELECT MAX(cursor)
+            FROM mail_change_log
+            WHERE tenant_id = $1
+              AND (account_id = $2 OR affected_principal_ids @> ARRAY[$2]::uuid[])
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    pub async fn save_jmap_query_state(
+        &self,
+        account_id: Uuid,
+        method_name: &str,
+        filter: Option<Value>,
+        sort: Option<Vec<Value>>,
+        last_change_sequence: i64,
+        snapshot_ids: &[String],
+    ) -> Result<Uuid> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let state_id = Uuid::new_v4();
+        let snapshot_json = serde_json::to_value(snapshot_ids)?;
+        sqlx::query(
+            r#"
+            INSERT INTO jmap_query_states (
+                id, tenant_id, account_id, method_name, filter_hash, sort_hash,
+                last_change_sequence, snapshot_ids, expires_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW() + INTERVAL '1 hour')
+            "#,
+        )
+        .bind(state_id)
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(method_name)
+        .bind(jmap_query_hash(filter.as_ref())?)
+        .bind(jmap_query_hash(sort.as_ref())?)
+        .bind(last_change_sequence.max(0))
+        .bind(snapshot_json)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(state_id)
+    }
+
+    pub async fn fetch_jmap_query_state(
+        &self,
+        account_id: Uuid,
+        method_name: &str,
+        state_id: Uuid,
+        filter: Option<Value>,
+        sort: Option<Vec<Value>>,
+    ) -> Result<Option<JmapStoredQueryState>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let Some(row) = sqlx::query(
+            r#"
+            SELECT id, account_id, method_name, filter_hash, sort_hash,
+                   last_change_sequence, snapshot_ids
+            FROM jmap_query_states
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND method_name = $3
+              AND id = $4
+              AND filter_hash = $5
+              AND sort_hash = $6
+              AND expires_at > NOW()
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(method_name)
+        .bind(state_id)
+        .bind(jmap_query_hash(filter.as_ref())?)
+        .bind(jmap_query_hash(sort.as_ref())?)
+        .fetch_optional(&self.pool)
+        .await?
+        else {
+            return Ok(None);
+        };
+
+        let snapshot_json: Value = row.try_get("snapshot_ids")?;
+        Ok(Some(JmapStoredQueryState {
+            id: row.try_get("id")?,
+            account_id: row.try_get("account_id")?,
+            method_name: row.try_get("method_name")?,
+            filter_hash: row.try_get("filter_hash")?,
+            sort_hash: row.try_get("sort_hash")?,
+            last_change_sequence: row.try_get("last_change_sequence")?,
+            snapshot_ids: serde_json::from_value(snapshot_json)?,
+        }))
+    }
+
     pub async fn fetch_jmap_mailboxes(&self, account_id: Uuid) -> Result<Vec<JmapMailbox>> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query_as::<_, JmapMailboxRow>(
@@ -2424,6 +2536,12 @@ impl Storage {
             .into_iter()
             .next())
     }
+}
+
+fn jmap_query_hash<T: Serialize>(value: Option<&T>) -> Result<String> {
+    let bytes = serde_json::to_vec(&value)?;
+    let digest = Sha256::digest(bytes);
+    Ok(format!("{digest:x}"))
 }
 
 fn is_system_mailbox_role(role: &str) -> bool {
