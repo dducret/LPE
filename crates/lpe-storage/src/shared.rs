@@ -1,9 +1,9 @@
 use anyhow::{anyhow, bail, Result};
+use serde_json::{json, Value};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
-use crate::util::system_mailbox_aliases;
-use crate::{domain_from_email, normalize_email, AuditEntryInput, Storage};
+use crate::{domain_from_email, normalize_email, sha256_hex, AuditEntryInput, Storage};
 pub(crate) const PLATFORM_TENANT_ID: &str = "__platform__";
 pub(crate) const MAX_SIEVE_SCRIPT_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_SIEVE_SCRIPTS_PER_ACCOUNT: i64 = 16;
@@ -20,25 +20,21 @@ impl Storage {
         tenant_id: &str,
         account_id: Uuid,
     ) -> Result<i64> {
-        let modseq = sqlx::query_scalar::<_, i64>("SELECT nextval('message_modseq_seq')")
-            .fetch_one(&mut **tx)
-            .await?;
-
-        let updated = sqlx::query(
+        let modseq = sqlx::query_scalar::<_, i64>(
             r#"
-            UPDATE accounts
-            SET mail_sync_modseq = GREATEST(mail_sync_modseq, $3)
-            WHERE tenant_id = $1 AND id = $2
+            INSERT INTO account_sync_state (tenant_id, account_id, category, current_modseq)
+            VALUES ($1, $2, 'mail', 2)
+            ON CONFLICT (tenant_id, account_id, category)
+            DO UPDATE SET
+                current_modseq = account_sync_state.current_modseq + 1,
+                updated_at = NOW()
+            RETURNING current_modseq
             "#,
         )
         .bind(tenant_id)
         .bind(account_id)
-        .bind(modseq)
-        .execute(&mut **tx)
+        .fetch_one(&mut **tx)
         .await?;
-        if updated.rows_affected() == 0 {
-            bail!("account not found");
-        }
 
         Ok(modseq)
     }
@@ -77,156 +73,14 @@ impl Storage {
         role: &str,
         display_name: &str,
         sort_order: i32,
-        retention_days: i32,
+        _retention_days: i32,
     ) -> Result<Uuid> {
-        let aliases = system_mailbox_aliases(role, display_name);
-        if !aliases.is_empty() {
-            let rows = sqlx::query(
-                r#"
-                SELECT id, role
-                FROM mailboxes
-                WHERE tenant_id = $1
-                  AND account_id = $2
-                  AND (
-                    lower(btrim(role)) = $3
-                    OR lower(btrim(display_name)) = ANY($4)
-                  )
-                ORDER BY
-                    CASE
-                        WHEN lower(btrim(role)) = $3
-                         AND lower(btrim(display_name)) = lower(btrim($5)) THEN 0
-                        WHEN lower(btrim(display_name)) = lower(btrim($5)) THEN 1
-                        WHEN lower(btrim(role)) = $3 THEN 2
-                        ELSE 3
-                    END,
-                    created_at ASC
-                "#,
-            )
-            .bind(tenant_id)
-            .bind(account_id)
-            .bind(role)
-            .bind(&aliases)
-            .bind(display_name)
-            .fetch_all(&mut **tx)
-            .await?;
-
-            if let Some(canonical_row) = rows.first() {
-                let canonical_id = canonical_row.try_get::<Uuid, _>("id")?;
-                sqlx::query(
-                    r#"
-                    UPDATE mailboxes
-                    SET role = $4,
-                        display_name = $5,
-                        sort_order = $6,
-                        retention_days = $7
-                    WHERE tenant_id = $1 AND account_id = $2 AND id = $3
-                    "#,
-                )
-                .bind(tenant_id)
-                .bind(account_id)
-                .bind(canonical_id)
-                .bind(role)
-                .bind(display_name)
-                .bind(sort_order)
-                .bind(retention_days)
-                .execute(&mut **tx)
-                .await?;
-
-                let alias_ids = rows
-                    .iter()
-                    .skip(1)
-                    .map(|row| row.try_get::<Uuid, _>("id"))
-                    .collect::<std::result::Result<Vec<_>, sqlx::Error>>()?;
-                if !alias_ids.is_empty() {
-                    sqlx::query(
-                        r#"
-                        UPDATE mailbox_pst_jobs
-                        SET mailbox_id = $4
-                        WHERE tenant_id = $1
-                          AND mailbox_id = ANY($2)
-                          AND EXISTS (
-                              SELECT 1
-                              FROM mailboxes mb
-                              WHERE mb.tenant_id = $1
-                                AND mb.account_id = $3
-                                AND mb.id = mailbox_pst_jobs.mailbox_id
-                          )
-                        "#,
-                    )
-                    .bind(tenant_id)
-                    .bind(&alias_ids)
-                    .bind(account_id)
-                    .bind(canonical_id)
-                    .execute(&mut **tx)
-                    .await?;
-
-                    sqlx::query(
-                        r#"
-                        UPDATE messages
-                        SET mailbox_id = $4,
-                            imap_uid = nextval('message_imap_uid_seq'),
-                            imap_modseq = nextval('message_modseq_seq')
-                        WHERE tenant_id = $1
-                          AND mailbox_id = ANY($2)
-                          AND account_id = $3
-                        "#,
-                    )
-                    .bind(tenant_id)
-                    .bind(&alias_ids)
-                    .bind(account_id)
-                    .bind(canonical_id)
-                    .execute(&mut **tx)
-                    .await?;
-
-                    sqlx::query(
-                        r#"
-                        UPDATE accounts
-                        SET mail_sync_modseq = GREATEST(
-                            mail_sync_modseq,
-                            COALESCE((
-                                SELECT MAX(imap_modseq)
-                                FROM messages
-                                WHERE tenant_id = $1 AND account_id = $2
-                            ), mail_sync_modseq)
-                        )
-                        WHERE tenant_id = $1 AND id = $2
-                        "#,
-                    )
-                    .bind(tenant_id)
-                    .bind(account_id)
-                    .execute(&mut **tx)
-                    .await?;
-
-                    sqlx::query(
-                        r#"
-                        DELETE FROM mailboxes mb
-                        WHERE mb.tenant_id = $1
-                          AND mb.account_id = $2
-                          AND mb.id = ANY($3)
-                          AND NOT EXISTS (
-                              SELECT 1
-                              FROM messages m
-                              WHERE m.tenant_id = mb.tenant_id
-                                AND m.mailbox_id = mb.id
-                          )
-                          AND NOT EXISTS (
-                              SELECT 1
-                              FROM mailbox_pst_jobs job
-                              WHERE job.tenant_id = mb.tenant_id
-                                AND job.mailbox_id = mb.id
-                          )
-                        "#,
-                    )
-                    .bind(tenant_id)
-                    .bind(account_id)
-                    .bind(&alias_ids)
-                    .execute(&mut **tx)
-                    .await?;
-                }
-
-                return Ok(canonical_id);
-            }
-        } else if let Some(row) = sqlx::query(
+        let lookup_role = if role.trim().is_empty() {
+            "custom"
+        } else {
+            role.trim()
+        };
+        if let Some(row) = sqlx::query(
             r#"
             SELECT id
             FROM mailboxes
@@ -237,7 +91,7 @@ impl Storage {
         )
         .bind(tenant_id)
         .bind(account_id)
-        .bind(role)
+        .bind(lookup_role)
         .fetch_optional(&mut **tx)
         .await?
         {
@@ -245,10 +99,11 @@ impl Storage {
         }
 
         let mailbox_id = Uuid::new_v4();
+        let uid_validity = allocate_uid_validity();
         sqlx::query(
             r#"
             INSERT INTO mailboxes (
-                id, tenant_id, account_id, role, display_name, sort_order, retention_days
+                id, tenant_id, account_id, role, display_name, sort_order, uid_validity
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#,
@@ -256,14 +111,379 @@ impl Storage {
         .bind(mailbox_id)
         .bind(tenant_id)
         .bind(account_id)
-        .bind(role)
+        .bind(lookup_role)
         .bind(display_name)
         .bind(sort_order)
-        .bind(retention_days)
+        .bind(uid_validity)
         .execute(&mut **tx)
         .await?;
 
         Ok(mailbox_id)
+    }
+
+    pub(crate) async fn insert_mail_change_log_in_tx(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Option<Uuid>,
+        mailbox_id: Option<Uuid>,
+        object_kind: &str,
+        object_id: Uuid,
+        change_kind: &str,
+        modseq: i64,
+        affected_principal_ids: &[Uuid],
+        summary_json: Value,
+    ) -> Result<i64> {
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            INSERT INTO mail_change_log (
+                tenant_id, account_id, mailbox_id, object_kind, object_id, change_kind,
+                modseq, affected_principal_ids, summary_json
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING cursor
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(object_kind)
+        .bind(object_id)
+        .bind(change_kind)
+        .bind(modseq)
+        .bind(dedup_sorted_uuids(affected_principal_ids))
+        .bind(summary_json)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(Into::into)
+    }
+
+    pub(crate) async fn affected_mail_principals_in_tx(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Uuid,
+    ) -> Result<Vec<Uuid>> {
+        let mut principals = vec![account_id];
+        let delegated = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT grantee_account_id
+            FROM mailbox_delegation_grants
+            WHERE tenant_id = $1 AND owner_account_id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .fetch_all(&mut **tx)
+        .await?;
+        principals.extend(delegated);
+        principals.sort();
+        principals.dedup();
+        Ok(principals)
+    }
+
+    pub(crate) async fn allocate_mailbox_membership_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        message_id: Uuid,
+        thread_id: Uuid,
+        received_at_sql: &str,
+        is_seen: bool,
+        is_flagged: bool,
+        is_draft: bool,
+        change_kind: &str,
+    ) -> Result<Uuid> {
+        let modseq = self
+            .allocate_mail_modseq_in_tx(tx, tenant_id, account_id)
+            .await?;
+        let row = sqlx::query(
+            r#"
+            UPDATE mailboxes
+            SET uid_next = uid_next + 1,
+                modseq = GREATEST(modseq + 1, $4),
+                total_messages = total_messages + 1,
+                unread_messages = unread_messages + CASE WHEN $5 THEN 0 ELSE 1 END,
+                updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            RETURNING uid_next - 1 AS imap_uid
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(modseq)
+        .bind(is_seen)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| anyhow!("mailbox not found"))?;
+        let imap_uid: i64 = row.try_get("imap_uid")?;
+        let membership_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO mailbox_messages (
+                id, tenant_id, account_id, mailbox_id, message_id, thread_id,
+                imap_uid, modseq, is_seen, is_flagged, is_draft, received_at
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9, $10, $11, COALESCE($12::timestamptz, NOW())
+            )
+            "#,
+        )
+        .bind(membership_id)
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(message_id)
+        .bind(thread_id)
+        .bind(imap_uid)
+        .bind(modseq)
+        .bind(is_seen)
+        .bind(is_flagged)
+        .bind(is_draft)
+        .bind(if received_at_sql.trim().is_empty() {
+            None::<&str>
+        } else {
+            Some(received_at_sql)
+        })
+        .execute(&mut **tx)
+        .await?;
+
+        let principals = Self::affected_mail_principals_in_tx(tx, tenant_id, account_id).await?;
+        Self::insert_mail_change_log_in_tx(
+            tx,
+            tenant_id,
+            Some(account_id),
+            Some(mailbox_id),
+            "mailbox_message",
+            membership_id,
+            change_kind,
+            modseq,
+            &principals,
+            json!({
+                "messageId": message_id,
+                "mailboxId": mailbox_id,
+                "imapUid": imap_uid
+            }),
+        )
+        .await?;
+        Ok(membership_id)
+    }
+
+    pub(crate) async fn load_account_domain_id_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Uuid,
+    ) -> Result<Uuid> {
+        sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT primary_domain_id
+            FROM accounts
+            WHERE tenant_id = $1 AND id = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| anyhow!("account not found"))
+    }
+
+    pub(crate) async fn store_message_blob_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        domain_id: Uuid,
+        blob_kind: &str,
+        media_type: &str,
+        bytes: &[u8],
+    ) -> Result<Uuid> {
+        let content_sha256 = sha256_hex(bytes);
+        if let Some(blob_id) = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT id
+            FROM blobs
+            WHERE tenant_id = $1
+              AND domain_id = $2
+              AND blob_kind = $3
+              AND content_sha256 = $4
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(domain_id)
+        .bind(blob_kind)
+        .bind(&content_sha256)
+        .fetch_optional(&mut **tx)
+        .await?
+        {
+            return Ok(blob_id);
+        }
+
+        let blob_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO blobs (
+                id, tenant_id, domain_id, blob_kind, content_sha256,
+                media_type, size_octets, blob_bytes
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            "#,
+        )
+        .bind(blob_id)
+        .bind(tenant_id)
+        .bind(domain_id)
+        .bind(blob_kind)
+        .bind(content_sha256)
+        .bind(media_type)
+        .bind(bytes.len() as i64)
+        .bind(bytes)
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(blob_id)
+    }
+
+    pub(crate) async fn upsert_message_body_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        domain_id: Uuid,
+        message_id: Uuid,
+        body_text: &str,
+        body_html_sanitized: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query("DELETE FROM message_bodies WHERE tenant_id = $1 AND message_id = $2")
+            .bind(tenant_id)
+            .bind(message_id)
+            .execute(&mut **tx)
+            .await?;
+        sqlx::query("DELETE FROM mime_parts WHERE tenant_id = $1 AND message_id = $2")
+            .bind(tenant_id)
+            .bind(message_id)
+            .execute(&mut **tx)
+            .await?;
+
+        let text_part_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO mime_parts (
+                id, tenant_id, message_id, domain_id, part_path, ordinal,
+                content_type, size_octets
+            )
+            VALUES ($1, $2, $3, $4, '1', 0, 'text/plain; charset=utf-8', $5)
+            "#,
+        )
+        .bind(text_part_id)
+        .bind(tenant_id)
+        .bind(message_id)
+        .bind(domain_id)
+        .bind(body_text.len() as i64)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO message_bodies (
+                id, tenant_id, message_id, mime_part_id, body_kind,
+                body_text, sanitized_html, content_hash, search_vector
+            )
+            VALUES ($1, $2, $3, $4, 'text', $5, NULL, $6, to_tsvector('simple', $5))
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(tenant_id)
+        .bind(message_id)
+        .bind(text_part_id)
+        .bind(body_text)
+        .bind(sha256_hex(body_text.as_bytes()))
+        .execute(&mut **tx)
+        .await?;
+
+        if let Some(html) = body_html_sanitized.filter(|value| !value.trim().is_empty()) {
+            let html_part_id = Uuid::new_v4();
+            sqlx::query(
+                r#"
+                INSERT INTO mime_parts (
+                    id, tenant_id, message_id, domain_id, part_path, ordinal,
+                    content_type, size_octets
+                )
+                VALUES ($1, $2, $3, $4, '2', 1, 'text/html; charset=utf-8', $5)
+                "#,
+            )
+            .bind(html_part_id)
+            .bind(tenant_id)
+            .bind(message_id)
+            .bind(domain_id)
+            .bind(html.len() as i64)
+            .execute(&mut **tx)
+            .await?;
+            sqlx::query(
+                r#"
+                INSERT INTO message_bodies (
+                    id, tenant_id, message_id, mime_part_id, body_kind,
+                    body_text, sanitized_html, content_hash, search_vector
+                )
+                VALUES ($1, $2, $3, $4, 'html', $5, $5, $6, to_tsvector('simple', $5))
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(tenant_id)
+            .bind(message_id)
+            .bind(html_part_id)
+            .bind(html)
+            .bind(sha256_hex(html.as_bytes()))
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    pub(crate) async fn upsert_mail_search_document_in_tx(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Uuid,
+        mailbox_message_id: Uuid,
+        message_id: Uuid,
+        subject_text: &str,
+        participants_visible: &str,
+        body_text: &str,
+        attachment_text: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO mail_search_documents (
+                tenant_id, account_id, mailbox_message_id, message_id,
+                subject_text, participants_visible, body_text, attachment_text, search_vector
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8,
+                to_tsvector('simple', concat_ws(' ', $5, $6, $7, $8))
+            )
+            ON CONFLICT (tenant_id, account_id, mailbox_message_id)
+            DO UPDATE SET
+                subject_text = EXCLUDED.subject_text,
+                participants_visible = EXCLUDED.participants_visible,
+                body_text = EXCLUDED.body_text,
+                attachment_text = EXCLUDED.attachment_text,
+                search_vector = EXCLUDED.search_vector,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(mailbox_message_id)
+        .bind(message_id)
+        .bind(subject_text)
+        .bind(participants_visible)
+        .bind(body_text)
+        .bind(attachment_text)
+        .execute(&mut **tx)
+        .await?;
+        Ok(())
     }
 
     pub(crate) async fn insert_audit(
@@ -407,6 +627,22 @@ impl Storage {
 
         Ok(PLATFORM_TENANT_ID.to_string())
     }
+}
+
+fn allocate_uid_validity() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs().max(1) as i64)
+        .unwrap_or(1)
+}
+
+fn dedup_sorted_uuids(values: &[Uuid]) -> Vec<Uuid> {
+    let mut values = values.to_vec();
+    values.sort();
+    values.dedup();
+    values
 }
 
 #[cfg(test)]

@@ -10,7 +10,7 @@ use crate::{
         first_unseen_sequence, mailbox_name_matches, parse_status_items, render_list_flags,
         render_mailbox_name, render_status_response, resolve_message_indexes, sanitize_imap_quoted,
     },
-    MessageRefKind, SelectedMailbox, Session, UID_VALIDITY,
+    MessageRefKind, SelectedMailbox, Session,
 };
 
 impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
@@ -209,12 +209,12 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .store
             .fetch_imap_emails(principal.account_id, mailbox.id)
             .await?;
-        let highest_modseq = self
+        let state = self
             .store
-            .fetch_imap_highest_modseq(principal.account_id)
+            .fetch_imap_mailbox_state(principal.account_id, mailbox.id)
             .await?;
         let requested = parse_status_items(arguments)?;
-        let response = render_status_response(&mailbox, &emails, &requested, highest_modseq);
+        let response = render_status_response(&mailbox, &emails, &requested, &state);
 
         writer.write_all(response.as_bytes()).await?;
         writer
@@ -225,7 +225,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             mailbox = %render_mailbox_name(&mailbox),
             mailbox_role = %mailbox.role,
             messages = emails.len(),
-            highest_modseq,
+            highest_modseq = state.highest_modseq,
             requested = %requested.join(" "),
             "IMAP STATUS completed"
         );
@@ -388,15 +388,11 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .store
             .fetch_imap_emails(principal.account_id, mailbox.id)
             .await?;
-        let highest_modseq = self
+        let state = self
             .store
-            .fetch_imap_highest_modseq(principal.account_id)
+            .fetch_imap_mailbox_state(principal.account_id, mailbox.id)
             .await?;
         let exists = emails.len();
-        let uid_next = emails
-            .last()
-            .map(|email| email.uid.saturating_add(1))
-            .unwrap_or(1);
         self.selected = Some(SelectedMailbox {
             mailbox_id: mailbox.id,
             mailbox_name: mailbox.name.clone(),
@@ -430,17 +426,21 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .write_all(
                 format!(
                     "* OK [UIDVALIDITY {}] stable uid validity\r\n",
-                    UID_VALIDITY
+                    state.uid_validity
                 )
                 .as_bytes(),
             )
             .await?;
         writer
-            .write_all(format!("* OK [UIDNEXT {}] next uid\r\n", uid_next).as_bytes())
+            .write_all(format!("* OK [UIDNEXT {}] next uid\r\n", state.uid_next).as_bytes())
             .await?;
         writer
             .write_all(
-                format!("* OK [HIGHESTMODSEQ {}] highest modseq\r\n", highest_modseq).as_bytes(),
+                format!(
+                    "* OK [HIGHESTMODSEQ {}] highest modseq\r\n",
+                    state.highest_modseq
+                )
+                .as_bytes(),
             )
             .await?;
         let access = if read_only { "READ-ONLY" } else { "READ-WRITE" };
@@ -454,8 +454,8 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             mailbox = %render_mailbox_name(&mailbox),
             mailbox_role = %mailbox.role,
             exists,
-            uid_next,
-            highest_modseq,
+            uid_next = state.uid_next,
+            highest_modseq = state.highest_modseq,
             read_only,
             "IMAP mailbox selected"
         );

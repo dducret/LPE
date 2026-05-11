@@ -18,7 +18,6 @@ use crate::{
 
 const CAPABILITIES: &str =
     "IMAP4rev1 AUTH=PLAIN AUTH=LOGIN AUTH=XOAUTH2 SASL-IR ID IDLE MOVE NAMESPACE UIDPLUS CONDSTORE ENABLE ACL SPECIAL-USE UNSELECT";
-pub(crate) const UID_VALIDITY: u32 = 1;
 
 #[derive(Clone)]
 pub struct ImapServer<S, D> {

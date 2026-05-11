@@ -14,7 +14,7 @@ mod uid;
 
 pub use service::{serve, ImapServer};
 
-pub(crate) use service::{MessageRefKind, SelectedMailbox, Session, UID_VALIDITY};
+pub(crate) use service::{MessageRefKind, SelectedMailbox, Session};
 
 #[cfg(test)]
 mod tests;

@@ -8,8 +8,8 @@ use base64::Engine as _;
 use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_mail_auth::{issue_oauth_access_token, AccountAuthStore, StoreFuture};
 use lpe_storage::{
-    AccountLogin, AuditEntryInput, AuthenticatedAccount, ImapEmail, JmapEmailAddress,
-    JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, MailboxAccountAccess,
+    AccountLogin, AuditEntryInput, AuthenticatedAccount, ImapEmail, ImapMailboxState,
+    JmapEmailAddress, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, MailboxAccountAccess,
     MailboxDelegationGrant, MailboxDelegationGrantInput, SavedDraftMessage, SenderDelegationGrant,
     SenderDelegationGrantInput, SenderDelegationRight, SubmitMessageInput,
 };
@@ -192,6 +192,30 @@ impl ImapStore for FakeStore {
     fn fetch_imap_highest_modseq<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, u64> {
         let highest_modseq = *self.highest_modseq.lock().unwrap();
         Box::pin(async move { Ok(highest_modseq) })
+    }
+
+    fn fetch_imap_mailbox_state<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_id: Uuid,
+    ) -> StoreFuture<'a, ImapMailboxState> {
+        let highest_modseq = *self.highest_modseq.lock().unwrap();
+        let uid_next = self
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|email| email.mailbox_id == mailbox_id)
+            .map(|email| email.uid.saturating_add(1))
+            .max()
+            .unwrap_or(1);
+        Box::pin(async move {
+            Ok(ImapMailboxState {
+                uid_validity: 1,
+                uid_next,
+                highest_modseq,
+            })
+        })
     }
 
     fn fetch_imap_emails<'a>(

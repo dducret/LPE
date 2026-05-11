@@ -12,7 +12,7 @@ use crate::{
     },
     search::SearchExpression,
     store_args::{parse_flag_list, parse_store_arguments, parse_store_mode},
-    MessageRefKind, SelectedMailbox, Session, UID_VALIDITY,
+    MessageRefKind, SelectedMailbox, Session,
 };
 
 impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
@@ -143,7 +143,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             _ => None,
         };
 
-        let principal = self.require_auth()?;
+        let principal = self.require_auth()?.clone();
         let modified_ids = self
             .store
             .update_imap_flags(
@@ -276,7 +276,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         let selected = self.require_selected()?;
         ensure_copy_allowed(&selected.mailbox_role, &target_mailbox.role)?;
         let indices = resolve_message_indexes(&selected.emails, set_token, ref_kind)?;
-        let principal = self.require_auth()?;
+        let principal = self.require_auth()?.clone();
         let mut source_uids = Vec::new();
         let mut target_uids = Vec::new();
 
@@ -310,9 +310,13 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         let response = if source_uids.is_empty() {
             format!("{tag} OK COPY completed\r\n")
         } else {
+            let state = self
+                .store
+                .fetch_imap_mailbox_state(principal.account_id, target_mailbox.id)
+                .await?;
             format!(
                 "{tag} OK [COPYUID {} {} {}] COPY completed\r\n",
-                UID_VALIDITY,
+                state.uid_validity,
                 source_uids.join(","),
                 target_uids.join(",")
             )
@@ -337,7 +341,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         let selected = self.require_selected()?.clone();
         ensure_move_allowed(&selected, &target_mailbox)?;
         let indices = resolve_message_indexes(&selected.emails, set_token, ref_kind)?;
-        let principal = self.require_auth()?;
+        let principal = self.require_auth()?.clone();
         let mut source_uids = Vec::new();
         let mut target_uids = Vec::new();
 
@@ -376,9 +380,13 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         let response = if source_uids.is_empty() {
             format!("{tag} OK MOVE completed\r\n")
         } else {
+            let state = self
+                .store
+                .fetch_imap_mailbox_state(principal.account_id, target_mailbox.id)
+                .await?;
             format!(
                 "{tag} OK [COPYUID {} {} {}] MOVE completed\r\n",
-                UID_VALIDITY,
+                state.uid_validity,
                 source_uids.join(","),
                 target_uids.join(",")
             )

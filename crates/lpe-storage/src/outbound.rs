@@ -13,7 +13,7 @@ use crate::{
 };
 
 fn queue_status_is_terminal(status: &str) -> bool {
-    matches!(status, "relayed" | "quarantined" | "bounced" | "failed")
+    matches!(status, "relayed" | "bounced" | "failed" | "cancelled")
 }
 
 fn same_trace_id(current_trace_id: Option<&str>, response_trace_id: &str) -> bool {
@@ -70,6 +70,13 @@ fn default_retry_after_seconds(attempts: i32) -> i32 {
     next_attempt.saturating_mul(60).min(3600)
 }
 
+fn submission_queue_status(status: &str) -> &str {
+    match status {
+        "quarantined" => "failed",
+        other => other,
+    }
+}
+
 fn normalize_handoff_response(
     attempts: i32,
     response: &OutboundMessageHandoffResponse,
@@ -119,23 +126,44 @@ impl Storage {
             r#"
             SELECT
                 q.id AS queue_id,
-                q.message_id,
+                m.id AS message_id,
                 q.account_id,
                 q.attempts,
-                m.from_address,
-                m.from_display,
-                m.sender_address,
-                m.sender_display,
-                m.sender_authorization_kind,
-                m.subject_normalized AS subject,
-                COALESCE(b.body_text, '') AS body_text,
-                b.body_html_sanitized,
+                q.from_address,
+                fr.display_name AS from_display,
+                q.sender_address,
+                sr.display_name AS sender_display,
+                q.authorization_kind AS sender_authorization_kind,
+                m.normalized_subject AS subject,
+                COALESCE(tb.body_text, '') AS body_text,
+                hb.sanitized_html AS body_html_sanitized,
                 m.internet_message_id,
                 q.last_error
-            FROM outbound_message_queue q
-            JOIN messages m ON m.id = q.message_id
-            LEFT JOIN message_bodies b ON b.message_id = m.id
-            WHERE q.status IN ('queued', 'deferred')
+            FROM submission_queue q
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = q.tenant_id
+             AND mm.account_id = q.account_id
+             AND mm.id = q.sent_mailbox_message_id
+            JOIN messages m
+              ON m.tenant_id = mm.tenant_id
+             AND m.id = mm.message_id
+            LEFT JOIN message_recipients fr
+              ON fr.tenant_id = m.tenant_id AND fr.message_id = m.id AND fr.role = 'from'
+            LEFT JOIN message_recipients sr
+              ON sr.tenant_id = m.tenant_id AND sr.message_id = m.id AND sr.role = 'sender'
+            LEFT JOIN LATERAL (
+                SELECT body_text
+                FROM message_bodies
+                WHERE tenant_id = m.tenant_id AND message_id = m.id AND body_kind = 'text'
+                LIMIT 1
+            ) tb ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT sanitized_html
+                FROM message_bodies
+                WHERE tenant_id = m.tenant_id AND message_id = m.id AND body_kind = 'html'
+                LIMIT 1
+            ) hb ON TRUE
+            WHERE q.status IN ('queued', 'ready', 'deferred')
               AND q.next_attempt_at <= NOW()
             ORDER BY q.created_at ASC, q.id ASC
             LIMIT $1
@@ -152,14 +180,14 @@ impl Storage {
                 r#"
                 SELECT
                     r.message_id,
-                    r.kind,
+                    r.role AS kind,
                     r.address,
                     r.display_name,
                     r.ordinal AS _ordinal
                 FROM message_recipients r
                 WHERE r.tenant_id = $1
                   AND r.message_id = $2
-                ORDER BY r.kind ASC, r.ordinal ASC
+                ORDER BY r.role ASC, r.ordinal ASC
                 "#,
             )
             .bind(&tenant_id)
@@ -170,7 +198,7 @@ impl Storage {
             let bcc = sqlx::query_as::<_, MessageBccRecipientRow>(
                 r#"
                 SELECT address, display_name
-                FROM message_bcc_recipients
+                FROM protected_bcc_recipients
                 WHERE tenant_id = $1 AND message_id = $2
                 ORDER BY ordinal ASC
                 "#,
@@ -236,16 +264,26 @@ impl Storage {
             r#"
             SELECT
                 tenant_id,
-                message_id,
+                account_id,
+                mm.message_id,
                 status,
                 attempts,
                 last_trace_id,
                 remote_message_ref,
-                retry_after_seconds,
-                retry_policy,
-                last_result_json
-            FROM outbound_message_queue
-            WHERE id = $1
+                NULL::integer AS retry_after_seconds,
+                NULL::text AS retry_policy,
+                jsonb_build_object(
+                    'status', status,
+                    'traceId', last_trace_id,
+                    'remoteMessageRef', remote_message_ref,
+                    'lastError', last_error
+                ) AS last_result_json
+            FROM submission_queue q
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = q.tenant_id
+             AND mm.account_id = q.account_id
+             AND mm.id = q.sent_mailbox_message_id
+            WHERE q.id = $1
             LIMIT 1
             "#,
         )
@@ -273,16 +311,15 @@ impl Storage {
         }
 
         let normalized = normalize_handoff_response(current.attempts, response);
-        let status_value = normalized.status.as_str().to_string();
+        let status_value = submission_queue_status(normalized.status.as_str()).to_string();
         let retry_after_seconds = normalized
             .retry
             .as_ref()
             .map(|retry| retry.retry_after_seconds.min(i32::MAX as u32) as i32);
-        let retry_policy = normalized.retry.as_ref().map(|retry| retry.policy.clone());
         let technical_status = serde_json::to_value(&normalized)?;
         let row = sqlx::query(
             r#"
-            UPDATE outbound_message_queue
+            UPDATE submission_queue
             SET status = $3,
                 attempts = attempts + 1,
                 next_attempt_at = CASE
@@ -295,21 +332,28 @@ impl Storage {
                     ELSE $5
                 END,
                 remote_message_ref = COALESCE($6, remote_message_ref),
-                last_result_json = $7,
                 last_attempt_at = NOW(),
-                retry_after_seconds = $4,
-                retry_policy = $8,
-                last_dsn_action = $9,
-                last_dsn_status = $10,
-                last_smtp_code = $11,
-                last_enhanced_status = $12,
-                last_routing_rule = $13,
-                last_throttle_scope = $14,
-                last_throttle_delay_seconds = $15,
-                last_trace_id = $16,
+                terminal_at = CASE
+                    WHEN $3 IN ('relayed', 'bounced', 'failed', 'cancelled')
+                        THEN COALESCE(terminal_at, NOW())
+                    ELSE terminal_at
+                END,
+                last_trace_id = $7,
                 updated_at = NOW()
             WHERE tenant_id = $1 AND id = $2
-            RETURNING message_id, status, last_trace_id, remote_message_ref, retry_after_seconds, retry_policy, last_result_json
+            RETURNING
+                status,
+                last_trace_id,
+                remote_message_ref,
+                NULL::integer AS retry_after_seconds,
+                NULL::text AS retry_policy,
+                jsonb_build_object(
+                    'status', status,
+                    'traceId', last_trace_id,
+                    'remoteMessageRef', remote_message_ref,
+                    'lastError', last_error,
+                    'transportResponse', $8::jsonb
+                ) AS last_result_json
             "#,
         )
         .bind(&current.tenant_id)
@@ -318,33 +362,13 @@ impl Storage {
         .bind(retry_after_seconds)
         .bind(normalized.detail.as_deref())
         .bind(normalized.remote_message_ref.as_deref())
-        .bind(&technical_status)
-        .bind(retry_policy.as_deref())
-        .bind(normalized.dsn.as_ref().map(|dsn| dsn.action.as_str()))
-        .bind(normalized.dsn.as_ref().map(|dsn| dsn.status.as_str()))
-        .bind(normalized.technical.as_ref().and_then(|status| status.smtp_code.map(i32::from)))
-        .bind(
-            normalized
-                .technical
-                .as_ref()
-                .and_then(|status| status.enhanced_code.as_deref()),
-        )
-        .bind(normalized.route.as_ref().and_then(|route| route.rule_id.as_deref()))
-        .bind(
-            normalized
-                .throttle
-                .as_ref()
-                .map(|throttle| throttle.scope.as_str()),
-        )
-        .bind(normalized.throttle.as_ref().map(|throttle| {
-            throttle.retry_after_seconds.min(i32::MAX as u32) as i32
-        }))
         .bind(&normalized.trace_id)
+        .bind(&technical_status)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| anyhow!("outbound queue item not found"))?;
 
-        let message_id: Uuid = row.try_get("message_id")?;
+        let message_id = current.message_id;
         let stored_status: String = row.try_get("status")?;
         let stored_trace_id: Option<String> = row.try_get("last_trace_id")?;
         let stored_remote_message_ref: Option<String> = row.try_get("remote_message_ref")?;
@@ -352,18 +376,28 @@ impl Storage {
         let stored_retry_policy: Option<String> = row.try_get("retry_policy")?;
         let stored_technical_status: Value = row.try_get("last_result_json")?;
 
-        sqlx::query(
-            r#"
-            UPDATE messages
-            SET delivery_status = $3
-            WHERE tenant_id = $1 AND id = $2
-            "#,
+        let mut tx = self.pool.begin().await?;
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &current.tenant_id, current.account_id)
+            .await?;
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &current.tenant_id, current.account_id)
+                .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &current.tenant_id,
+            Some(current.account_id),
+            None,
+            "submission",
+            response.queue_id,
+            "updated",
+            modseq,
+            &principals,
+            serde_json::json!({"messageId": message_id, "status": stored_status}),
         )
-        .bind(&current.tenant_id)
-        .bind(message_id)
-        .bind(&stored_status)
-        .execute(&self.pool)
         .await?;
+        Self::emit_mail_change(&mut tx, &current.tenant_id, current.account_id).await?;
+        tx.commit().await?;
 
         Ok(OutboundQueueStatusUpdate {
             queue_id: response.queue_id,

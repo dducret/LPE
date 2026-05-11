@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::{
     parse::{parse_literal_size, tokenize},
     render::mailbox_name_matches,
-    Session, UID_VALIDITY,
+    Session,
 };
 
 impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
@@ -61,11 +61,15 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                     .and_then(|message| message.message_id.as_deref()),
             );
             if let Some(uid) = append_uid {
+                let state = self
+                    .store
+                    .fetch_imap_mailbox_state(principal.account_id, mailbox.id)
+                    .await?;
                 writer
                     .write_all(
                         format!(
                             "{tag} OK [APPENDUID {} {}] APPEND completed\r\n",
-                            UID_VALIDITY, uid
+                            state.uid_validity, uid
                         )
                         .as_bytes(),
                     )
@@ -147,6 +151,10 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                 .into_iter()
                 .find(|email| email.id == saved.message_id)
                 .ok_or_else(|| anyhow!("saved draft message not found"))?;
+            let state = self
+                .store
+                .fetch_imap_mailbox_state(principal.account_id, saved.draft_mailbox_id)
+                .await?;
 
             if matches!(self.selected.as_ref(), Some(selected) if selected.mailbox_id == saved.draft_mailbox_id)
             {
@@ -157,7 +165,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                 .write_all(
                     format!(
                         "{tag} OK [APPENDUID {} {}] APPEND completed\r\n",
-                        UID_VALIDITY, appended.uid
+                        state.uid_validity, appended.uid
                     )
                     .as_bytes(),
                 )
@@ -215,12 +223,16 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         if matches!(self.selected.as_ref(), Some(selected) if selected.mailbox_id == mailbox.id) {
             self.refresh_selected().await?;
         }
+        let state = self
+            .store
+            .fetch_imap_mailbox_state(principal.account_id, mailbox.id)
+            .await?;
 
         writer
             .write_all(
                 format!(
                     "{tag} OK [APPENDUID {} {}] APPEND completed\r\n",
-                    UID_VALIDITY, appended.uid
+                    state.uid_validity, appended.uid
                 )
                 .as_bytes(),
             )

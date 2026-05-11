@@ -1,9 +1,9 @@
 use anyhow::Result;
 use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
-    AuditEntryInput, ImapEmail, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, JmapMailboxUpdateInput, MailboxAccountAccess, MailboxDelegationGrant,
-    MailboxDelegationGrantInput, SavedDraftMessage, SenderDelegationGrant,
+    AuditEntryInput, ImapEmail, ImapMailboxState, JmapEmailQuery, JmapImportedEmailInput,
+    JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, MailboxAccountAccess,
+    MailboxDelegationGrant, MailboxDelegationGrantInput, SavedDraftMessage, SenderDelegationGrant,
     SenderDelegationGrantInput, SenderDelegationRight, Storage, SubmitMessageInput,
 };
 use std::{future::Future, pin::Pin};
@@ -14,6 +14,11 @@ pub(crate) type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Se
 pub trait ImapStore: AccountAuthStore {
     fn ensure_imap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>>;
     fn fetch_imap_highest_modseq<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, u64>;
+    fn fetch_imap_mailbox_state<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+    ) -> StoreFuture<'a, ImapMailboxState>;
     fn fetch_imap_emails<'a>(
         &'a self,
         account_id: Uuid,
@@ -131,6 +136,14 @@ impl ImapStore for Storage {
 
     fn fetch_imap_highest_modseq<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, u64> {
         Box::pin(async move { self.fetch_imap_highest_modseq(account_id).await })
+    }
+
+    fn fetch_imap_mailbox_state<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+    ) -> StoreFuture<'a, ImapMailboxState> {
+        Box::pin(async move { self.fetch_imap_mailbox_state(account_id, mailbox_id).await })
     }
 
     fn fetch_imap_emails<'a>(

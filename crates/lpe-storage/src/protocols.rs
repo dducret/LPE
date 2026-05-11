@@ -119,6 +119,13 @@ pub struct ImapEmail {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct ImapMailboxState {
+    pub uid_validity: u32,
+    pub uid_next: u32,
+    pub highest_modseq: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct JmapEmailQuery {
     pub ids: Vec<Uuid>,
     pub total: u64,
@@ -209,16 +216,11 @@ impl Storage {
                 mb.role,
                 mb.display_name,
                 mb.sort_order,
-                COUNT(m.id) AS total_emails,
-                COUNT(*) FILTER (WHERE m.unread) AS unread_emails
+                mb.total_messages::bigint AS total_emails,
+                mb.unread_messages::bigint AS unread_emails
             FROM mailboxes mb
-            LEFT JOIN messages m
-              ON m.mailbox_id = mb.id
-             AND m.tenant_id = mb.tenant_id
-             AND m.account_id = mb.account_id
             WHERE mb.tenant_id = $1
               AND mb.account_id = $2
-            GROUP BY mb.id, mb.role, mb.display_name, mb.sort_order
             ORDER BY mb.sort_order ASC, lower(mb.display_name) ASC
             "#,
         )
@@ -262,9 +264,9 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let modseq = sqlx::query_scalar::<_, i64>(
             r#"
-            SELECT mail_sync_modseq
-            FROM accounts
-            WHERE tenant_id = $1 AND id = $2
+            SELECT current_modseq
+            FROM account_sync_state
+            WHERE tenant_id = $1 AND account_id = $2 AND category = 'mail'
             LIMIT 1
             "#,
         )
@@ -272,9 +274,39 @@ impl Storage {
         .bind(account_id)
         .fetch_optional(&self.pool)
         .await?
-        .ok_or_else(|| anyhow!("account not found"))?;
+        .unwrap_or(1);
 
         u64::try_from(modseq).map_err(|_| anyhow!("mail sync modseq is out of range"))
+    }
+
+    pub async fn fetch_imap_mailbox_state(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+    ) -> Result<ImapMailboxState> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let row = sqlx::query(
+            r#"
+            SELECT uid_validity, uid_next, modseq
+            FROM mailboxes
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| anyhow!("mailbox not found"))?;
+        Ok(ImapMailboxState {
+            uid_validity: u32::try_from(row.try_get::<i64, _>("uid_validity")?)
+                .map_err(|_| anyhow!("mailbox UIDVALIDITY is out of range"))?,
+            uid_next: u32::try_from(row.try_get::<i64, _>("uid_next")?)
+                .map_err(|_| anyhow!("mailbox UIDNEXT is out of range"))?,
+            highest_modseq: u64::try_from(row.try_get::<i64, _>("modseq")?)
+                .map_err(|_| anyhow!("mailbox modseq is out of range"))?,
+        })
     }
 
     pub async fn fetch_jmap_mailbox_ids(&self, account_id: Uuid) -> Result<Vec<Uuid>> {
@@ -342,7 +374,7 @@ impl Storage {
         )
         .bind(&tenant_id)
         .bind(input.account_id)
-        .bind(name)
+        .bind(&name)
         .fetch_optional(&mut *tx)
         .await?;
         if duplicate.is_some() {
@@ -363,21 +395,41 @@ impl Storage {
 
         let mailbox_id = Uuid::new_v4();
         let sort_order = input.sort_order.unwrap_or(next_sort_order);
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, input.account_id)
+            .await?;
         sqlx::query(
             r#"
-            INSERT INTO mailboxes (id, tenant_id, account_id, role, display_name, sort_order, retention_days)
-            VALUES ($1, $2, $3, 'custom', $4, $5, 365)
+            INSERT INTO mailboxes (id, tenant_id, account_id, role, display_name, sort_order, uid_validity)
+            VALUES ($1, $2, $3, 'custom', $4, $5, $6)
             "#,
         )
         .bind(mailbox_id)
         .bind(&tenant_id)
         .bind(input.account_id)
-        .bind(name)
+        .bind(&name)
         .bind(sort_order)
+        .bind(mailbox_uid_validity())
         .execute(&mut *tx)
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, input.account_id).await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(input.account_id),
+            Some(mailbox_id),
+            "mailbox",
+            mailbox_id,
+            "created",
+            modseq,
+            &principals,
+            serde_json::json!({"name": name}),
+        )
+        .await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, input.account_id).await?;
         tx.commit().await?;
 
         self.fetch_jmap_mailboxes(input.account_id)
@@ -444,22 +496,41 @@ impl Storage {
             bail!("mailbox already exists");
         }
 
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, input.account_id)
+            .await?;
         sqlx::query(
             r#"
             UPDATE mailboxes
-            SET display_name = $4, sort_order = $5
+            SET display_name = $4, sort_order = $5, modseq = GREATEST(modseq + 1, $6), updated_at = NOW()
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             "#,
         )
         .bind(&tenant_id)
         .bind(input.account_id)
         .bind(input.mailbox_id)
-        .bind(name)
+        .bind(&name)
         .bind(input.sort_order.unwrap_or(current_sort_order))
+        .bind(modseq)
         .execute(&mut *tx)
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, input.account_id).await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(input.account_id),
+            Some(input.mailbox_id),
+            "mailbox",
+            input.mailbox_id,
+            "updated",
+            modseq,
+            &principals,
+            serde_json::json!({"name": name}),
+        )
+        .await?;
         Self::emit_mail_change(&mut tx, &tenant_id, input.account_id).await?;
         tx.commit().await?;
 
@@ -501,8 +572,11 @@ impl Storage {
         let message_count: i64 = sqlx::query_scalar(
             r#"
             SELECT COUNT(*)
-            FROM messages
-            WHERE tenant_id = $1 AND account_id = $2 AND mailbox_id = $3
+            FROM mailbox_messages
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND mailbox_id = $3
+              AND visibility <> 'expunged'
             "#,
         )
         .bind(&tenant_id)
@@ -513,6 +587,25 @@ impl Storage {
         if message_count > 0 {
             bail!("mailbox is not empty");
         }
+
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            Some(mailbox_id),
+            "mailbox",
+            mailbox_id,
+            "destroyed",
+            modseq,
+            &principals,
+            serde_json::json!({"reason": "delete"}),
+        )
+        .await?;
 
         sqlx::query(
             r#"
@@ -547,15 +640,19 @@ impl Storage {
         let ids = sqlx::query(
             r#"
             SELECT s.message_id AS id
-            FROM searchable_mail_documents s
+            FROM mail_search_documents s
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = s.tenant_id
+             AND mm.account_id = s.account_id
+             AND mm.id = s.mailbox_message_id
             WHERE s.account_id = $1
-              AND ($2::uuid IS NULL OR s.mailbox_id = $2)
+              AND mm.visibility = 'visible'
+              AND ($2::uuid IS NULL OR mm.mailbox_id = $2)
               AND (
                 $3::text IS NULL
-                OR (s.message_search_vector || s.attachment_search_vector)
-                    @@ websearch_to_tsquery('simple', $3)
+                OR s.search_vector @@ websearch_to_tsquery('simple', $3)
               )
-            ORDER BY s.received_at DESC, s.message_id DESC
+            ORDER BY mm.received_at DESC, s.message_id DESC
             OFFSET $4
             LIMIT $5
             "#,
@@ -574,13 +671,17 @@ impl Storage {
         let total: i64 = sqlx::query_scalar(
             r#"
             SELECT COUNT(*)
-            FROM searchable_mail_documents s
+            FROM mail_search_documents s
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = s.tenant_id
+             AND mm.account_id = s.account_id
+             AND mm.id = s.mailbox_message_id
             WHERE s.account_id = $1
-              AND ($2::uuid IS NULL OR s.mailbox_id = $2)
+              AND mm.visibility = 'visible'
+              AND ($2::uuid IS NULL OR mm.mailbox_id = $2)
               AND (
                 $3::text IS NULL
-                OR (s.message_search_vector || s.attachment_search_vector)
-                    @@ websearch_to_tsquery('simple', $3)
+                OR s.search_vector @@ websearch_to_tsquery('simple', $3)
               )
             "#,
         )
@@ -600,10 +701,15 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query(
             r#"
-            SELECT id
-            FROM messages
-            WHERE tenant_id = $1 AND account_id = $2
-            ORDER BY COALESCE(sent_at, received_at) DESC, id DESC
+            SELECT DISTINCT m.id
+            FROM messages m
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = m.tenant_id
+             AND mm.message_id = m.id
+            WHERE m.tenant_id = $1
+              AND mm.account_id = $2
+              AND mm.visibility = 'visible'
+            ORDER BY m.id
             "#,
         )
         .bind(&tenant_id)
@@ -621,8 +727,13 @@ impl Storage {
         let rows = sqlx::query(
             r#"
             SELECT DISTINCT thread_id
-            FROM messages
-            WHERE tenant_id = $1 AND account_id = $2
+            FROM messages m
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = m.tenant_id
+             AND mm.message_id = m.id
+            WHERE m.tenant_id = $1
+              AND mm.account_id = $2
+              AND mm.visibility = 'visible'
             ORDER BY thread_id
             "#,
         )
@@ -653,15 +764,19 @@ impl Storage {
             WITH matched_threads AS (
                 SELECT
                     m.thread_id,
-                    MAX(s.received_at) AS latest_received_at
-                FROM searchable_mail_documents s
-                JOIN messages m ON m.id = s.message_id
+                    MAX(mm.received_at) AS latest_received_at
+                FROM mail_search_documents s
+                JOIN mailbox_messages mm
+                  ON mm.tenant_id = s.tenant_id
+                 AND mm.account_id = s.account_id
+                 AND mm.id = s.mailbox_message_id
+                JOIN messages m ON m.tenant_id = s.tenant_id AND m.id = s.message_id
                 WHERE s.account_id = $1
-                  AND ($2::uuid IS NULL OR s.mailbox_id = $2)
+                  AND mm.visibility = 'visible'
+                  AND ($2::uuid IS NULL OR mm.mailbox_id = $2)
                   AND (
                     $3::text IS NULL
-                    OR (s.message_search_vector || s.attachment_search_vector)
-                        @@ websearch_to_tsquery('simple', $3)
+                    OR s.search_vector @@ websearch_to_tsquery('simple', $3)
                   )
                 GROUP BY m.thread_id
             )
@@ -688,14 +803,18 @@ impl Storage {
             SELECT COUNT(*)
             FROM (
                 SELECT m.thread_id
-                FROM searchable_mail_documents s
-                JOIN messages m ON m.id = s.message_id
+                FROM mail_search_documents s
+                JOIN mailbox_messages mm
+                  ON mm.tenant_id = s.tenant_id
+                 AND mm.account_id = s.account_id
+                 AND mm.id = s.mailbox_message_id
+                JOIN messages m ON m.tenant_id = s.tenant_id AND m.id = s.message_id
                 WHERE s.account_id = $1
-                  AND ($2::uuid IS NULL OR s.mailbox_id = $2)
+                  AND mm.visibility = 'visible'
+                  AND ($2::uuid IS NULL OR mm.mailbox_id = $2)
                   AND (
                     $3::text IS NULL
-                    OR (s.message_search_vector || s.attachment_search_vector)
-                        @@ websearch_to_tsquery('simple', $3)
+                    OR s.search_vector @@ websearch_to_tsquery('simple', $3)
                   )
                 GROUP BY m.thread_id
             ) matched_threads
@@ -726,10 +845,10 @@ impl Storage {
         let rows = sqlx::query_as::<_, JmapEmailRow>(
             r#"
             SELECT
+                DISTINCT ON (m.id)
                 m.id,
-                m.imap_modseq,
-                m.thread_id,
-                m.mailbox_id,
+                COALESCE(mm.thread_id, m.id) AS thread_id,
+                mm.mailbox_id,
                 mb.role AS mailbox_role,
                 mb.display_name AS mailbox_name,
                 to_char(m.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at,
@@ -737,30 +856,58 @@ impl Storage {
                     WHEN m.sent_at IS NULL THEN NULL
                     ELSE to_char(m.sent_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS sent_at,
-                m.from_address,
-                NULLIF(m.from_display, '') AS from_display,
-                NULLIF(m.sender_address, '') AS sender_address,
-                NULLIF(m.sender_display, '') AS sender_display,
-                m.sender_authorization_kind,
-                m.submitted_by_account_id,
-                m.subject_normalized AS subject,
-                m.preview_text AS preview,
-                COALESCE(b.body_text, '') AS body_text,
-                b.body_html_sanitized,
-                m.unread,
-                m.flagged,
-                m.imap_deleted,
+                COALESCE(fr.address, '') AS from_address,
+                NULLIF(fr.display_name, '') AS from_display,
+                NULLIF(sr.address, '') AS sender_address,
+                NULLIF(sr.display_name, '') AS sender_display,
+                'self' AS sender_authorization_kind,
+                mm.account_id AS submitted_by_account_id,
+                m.normalized_subject AS subject,
+                LEFT(COALESCE(tb.body_text, hb.body_text, ''), 160) AS preview,
+                COALESCE(tb.body_text, '') AS body_text,
+                hb.sanitized_html AS body_html_sanitized,
+                NOT mm.is_seen AS unread,
+                mm.is_flagged AS flagged,
                 m.has_attachments,
                 m.size_octets,
                 m.internet_message_id,
-                m.mime_blob_ref,
-                m.delivery_status
+                ('message:' || m.id::text) AS mime_blob_ref,
+                COALESCE(sq.status, CASE WHEN mm.is_draft THEN 'draft' ELSE 'stored' END) AS delivery_status
             FROM messages m
-            JOIN mailboxes mb ON mb.id = m.mailbox_id
-            LEFT JOIN message_bodies b ON b.message_id = m.id
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = m.tenant_id
+             AND mm.message_id = m.id
+             AND mm.visibility = 'visible'
+            JOIN mailboxes mb
+              ON mb.tenant_id = mm.tenant_id
+             AND mb.account_id = mm.account_id
+             AND mb.id = mm.mailbox_id
+            LEFT JOIN message_recipients fr
+              ON fr.tenant_id = m.tenant_id AND fr.message_id = m.id AND fr.role = 'from'
+            LEFT JOIN message_recipients sr
+              ON sr.tenant_id = m.tenant_id AND sr.message_id = m.id AND sr.role = 'sender'
+            LEFT JOIN LATERAL (
+                SELECT body_text
+                FROM message_bodies
+                WHERE tenant_id = m.tenant_id AND message_id = m.id AND body_kind = 'text'
+                ORDER BY id ASC
+                LIMIT 1
+            ) tb ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT body_text, sanitized_html
+                FROM message_bodies
+                WHERE tenant_id = m.tenant_id AND message_id = m.id AND body_kind = 'html'
+                ORDER BY id ASC
+                LIMIT 1
+            ) hb ON TRUE
+            LEFT JOIN submission_queue sq
+              ON sq.tenant_id = mm.tenant_id
+             AND sq.account_id = mm.account_id
+             AND sq.sent_mailbox_message_id = mm.id
             WHERE m.tenant_id = $1
-              AND m.account_id = $2
+              AND mm.account_id = $2
               AND m.id = ANY($3)
+            ORDER BY m.id, mm.updated_at DESC
             "#,
         )
         .bind(&tenant_id)
@@ -773,16 +920,22 @@ impl Storage {
             r#"
             SELECT
                 r.message_id,
-                r.kind,
+                r.role AS kind,
                 r.address,
                 r.display_name,
                 r.ordinal AS _ordinal
             FROM message_recipients r
-            JOIN messages m ON m.id = r.message_id
             WHERE r.tenant_id = $1
-              AND m.account_id = $2
+              AND EXISTS (
+                  SELECT 1
+                  FROM mailbox_messages mm
+                  WHERE mm.tenant_id = r.tenant_id
+                    AND mm.account_id = $2
+                    AND mm.message_id = r.message_id
+                    AND mm.visibility = 'visible'
+              )
               AND r.message_id = ANY($3)
-            ORDER BY r.message_id ASC, r.kind ASC, r.ordinal ASC
+            ORDER BY r.message_id ASC, r.role ASC, r.ordinal ASC
             "#,
         )
         .bind(&tenant_id)
@@ -813,7 +966,7 @@ impl Storage {
                 let bcc = sqlx::query(
                     r#"
                     SELECT address, display_name
-                    FROM message_bcc_recipients
+                    FROM protected_bcc_recipients
                     WHERE tenant_id = $1 AND message_id = $2
                     ORDER BY ordinal ASC
                     "#,
@@ -874,42 +1027,63 @@ impl Storage {
             r#"
             SELECT
                 m.id,
-                m.imap_uid,
-                m.imap_modseq,
-                m.thread_id,
-                m.mailbox_id,
+                mm.imap_uid,
+                mm.modseq AS imap_modseq,
+                COALESCE(mm.thread_id, m.id) AS thread_id,
+                mm.mailbox_id,
                 mb.role AS mailbox_role,
                 mb.display_name AS mailbox_name,
-                to_char(m.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at,
+                to_char(mm.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at,
                 CASE
                     WHEN m.sent_at IS NULL THEN NULL
                     ELSE to_char(m.sent_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS sent_at,
-                m.from_address,
-                NULLIF(m.from_display, '') AS from_display,
-                NULLIF(m.sender_address, '') AS sender_address,
-                NULLIF(m.sender_display, '') AS sender_display,
-                m.sender_authorization_kind,
-                m.submitted_by_account_id,
-                m.subject_normalized AS subject,
-                m.preview_text AS preview,
-                COALESCE(b.body_text, '') AS body_text,
-                b.body_html_sanitized,
-                m.unread,
-                m.flagged,
-                m.imap_deleted,
+                COALESCE(fr.address, '') AS from_address,
+                NULLIF(fr.display_name, '') AS from_display,
+                m.normalized_subject AS subject,
+                LEFT(COALESCE(tb.body_text, hb.body_text, ''), 160) AS preview,
+                COALESCE(tb.body_text, '') AS body_text,
+                hb.sanitized_html AS body_html_sanitized,
+                NOT mm.is_seen AS unread,
+                mm.is_flagged AS flagged,
+                mm.is_deleted AS imap_deleted,
                 m.has_attachments,
                 m.size_octets,
                 m.internet_message_id,
-                m.mime_blob_ref,
-                m.delivery_status
+                COALESCE(sq.status, CASE WHEN mm.is_draft THEN 'draft' ELSE 'stored' END) AS delivery_status
             FROM messages m
-            JOIN mailboxes mb ON mb.id = m.mailbox_id
-            LEFT JOIN message_bodies b ON b.message_id = m.id
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = m.tenant_id
+             AND mm.message_id = m.id
+            JOIN mailboxes mb
+              ON mb.tenant_id = mm.tenant_id
+             AND mb.account_id = mm.account_id
+             AND mb.id = mm.mailbox_id
+            LEFT JOIN message_recipients fr
+              ON fr.tenant_id = m.tenant_id AND fr.message_id = m.id AND fr.role = 'from'
+            LEFT JOIN LATERAL (
+                SELECT body_text
+                FROM message_bodies
+                WHERE tenant_id = m.tenant_id AND message_id = m.id AND body_kind = 'text'
+                ORDER BY id ASC
+                LIMIT 1
+            ) tb ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT body_text, sanitized_html
+                FROM message_bodies
+                WHERE tenant_id = m.tenant_id AND message_id = m.id AND body_kind = 'html'
+                ORDER BY id ASC
+                LIMIT 1
+            ) hb ON TRUE
+            LEFT JOIN submission_queue sq
+              ON sq.tenant_id = mm.tenant_id
+             AND sq.account_id = mm.account_id
+             AND sq.sent_mailbox_message_id = mm.id
             WHERE m.tenant_id = $1
-              AND m.account_id = $2
-              AND m.mailbox_id = $3
-            ORDER BY m.imap_uid ASC
+              AND mm.account_id = $2
+              AND mm.mailbox_id = $3
+              AND mm.visibility = 'visible'
+            ORDER BY mm.imap_uid ASC
             "#,
         )
         .bind(&tenant_id)
@@ -927,16 +1101,22 @@ impl Storage {
             r#"
             SELECT
                 r.message_id,
-                r.kind,
+                r.role AS kind,
                 r.address,
                 r.display_name,
                 r.ordinal AS _ordinal
             FROM message_recipients r
-            JOIN messages m ON m.id = r.message_id
             WHERE r.tenant_id = $1
-              AND m.account_id = $2
+              AND EXISTS (
+                  SELECT 1
+                  FROM mailbox_messages mm
+                  WHERE mm.tenant_id = r.tenant_id
+                    AND mm.account_id = $2
+                    AND mm.message_id = r.message_id
+                    AND mm.visibility = 'visible'
+              )
               AND r.message_id = ANY($3)
-            ORDER BY r.message_id ASC, r.kind ASC, r.ordinal ASC
+            ORDER BY r.message_id ASC, r.role ASC, r.ordinal ASC
             "#,
         )
         .bind(&tenant_id)
@@ -948,7 +1128,7 @@ impl Storage {
         let bcc_rows = sqlx::query_as::<_, MessageBccRecipientRecordRow>(
             r#"
             SELECT message_id, address, display_name
-            FROM message_bcc_recipients
+            FROM protected_bcc_recipients
             WHERE tenant_id = $1 AND message_id = ANY($2)
             ORDER BY message_id ASC, ordinal ASC
             "#,
@@ -1042,13 +1222,14 @@ impl Storage {
         let modified_ids = if let Some(limit) = unchanged_since_i64 {
             sqlx::query_scalar::<_, Uuid>(
                 r#"
-                SELECT id
-                FROM messages
+                SELECT message_id
+                FROM mailbox_messages
                 WHERE tenant_id = $1
                   AND account_id = $2
                   AND mailbox_id = $3
-                  AND id = ANY($4)
-                  AND imap_modseq > $5
+                  AND message_id = ANY($4)
+                  AND visibility = 'visible'
+                  AND modseq > $5
                 ORDER BY imap_uid ASC
                 "#,
             )
@@ -1071,19 +1252,26 @@ impl Storage {
             .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
             .await?;
 
-        sqlx::query(
+        let rows = sqlx::query(
             r#"
-            UPDATE messages
+            UPDATE mailbox_messages
             SET
-                unread = COALESCE($4, unread),
-                flagged = COALESCE($5, flagged),
-                imap_deleted = COALESCE($6, imap_deleted),
-                imap_modseq = $7
+                is_seen = COALESCE(NOT $4, is_seen),
+                is_flagged = COALESCE($5, is_flagged),
+                is_deleted = COALESCE($6, is_deleted),
+                deleted_at = CASE
+                    WHEN COALESCE($6, is_deleted) THEN COALESCE(deleted_at, NOW())
+                    ELSE NULL
+                END,
+                modseq = $7,
+                updated_at = NOW()
             WHERE tenant_id = $1
               AND account_id = $2
               AND mailbox_id = $3
-              AND id = ANY($8)
-              AND ($9::bigint IS NULL OR imap_modseq <= $9)
+              AND message_id = ANY($8)
+              AND visibility = 'visible'
+              AND ($9::bigint IS NULL OR modseq <= $9)
+            RETURNING id, message_id
             "#,
         )
         .bind(&tenant_id)
@@ -1095,8 +1283,33 @@ impl Storage {
         .bind(modseq)
         .bind(message_ids)
         .bind(unchanged_since_i64)
-        .execute(&mut *tx)
+        .fetch_all(&mut *tx)
         .await?;
+
+        if !rows.is_empty() {
+            let principals =
+                Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+            for row in rows {
+                let membership_id: Uuid = row.try_get("id")?;
+                let message_id: Uuid = row.try_get("message_id")?;
+                Self::insert_mail_change_log_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    Some(account_id),
+                    Some(mailbox_id),
+                    "mailbox_message",
+                    membership_id,
+                    "updated",
+                    modseq,
+                    &principals,
+                    serde_json::json!({
+                        "messageId": message_id,
+                        "flagsChanged": true
+                    }),
+                )
+                .await?;
+            }
+        }
 
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         tx.commit().await?;
@@ -1117,24 +1330,124 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
 
-        let deleted = sqlx::query(
+        let expunge_rows = sqlx::query(
             r#"
-            DELETE FROM messages
+            SELECT id, message_id, imap_uid, is_seen
+            FROM mailbox_messages
             WHERE tenant_id = $1
               AND account_id = $2
               AND mailbox_id = $3
-              AND id = ANY($4)
-              AND imap_deleted = TRUE
+              AND message_id = ANY($4)
+              AND visibility = 'visible'
+              AND is_deleted = TRUE
+            ORDER BY imap_uid ASC
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
         .bind(mailbox_id)
         .bind(message_ids)
-        .execute(&mut *tx)
+        .fetch_all(&mut *tx)
         .await?;
 
-        if deleted.rows_affected() > 0 {
+        if !expunge_rows.is_empty() {
+            let modseq = self
+                .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+                .await?;
+            let principals =
+                Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+            for row in &expunge_rows {
+                let membership_id: Uuid = row.try_get("id")?;
+                let message_id: Uuid = row.try_get("message_id")?;
+                let imap_uid: i64 = row.try_get("imap_uid")?;
+                let cursor = Self::insert_mail_change_log_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    Some(account_id),
+                    Some(mailbox_id),
+                    "mailbox_message",
+                    membership_id,
+                    "expunged",
+                    modseq,
+                    &principals,
+                    serde_json::json!({
+                        "messageId": message_id,
+                        "imapUid": imap_uid
+                    }),
+                )
+                .await?;
+                sqlx::query(
+                    r#"
+                    INSERT INTO tombstones (
+                        id, tenant_id, account_id, mailbox_id, object_kind, object_id,
+                        message_id, mailbox_message_id, imap_uid, deleted_modseq,
+                        change_cursor, reason
+                    )
+                    VALUES (
+                        $1, $2, $3, $4, 'mailbox_message', $5,
+                        $6, $5, $7, $8, $9, 'expunge'
+                    )
+                    "#,
+                )
+                .bind(Uuid::new_v4())
+                .bind(&tenant_id)
+                .bind(account_id)
+                .bind(mailbox_id)
+                .bind(membership_id)
+                .bind(message_id)
+                .bind(imap_uid)
+                .bind(modseq)
+                .bind(cursor)
+                .execute(&mut *tx)
+                .await?;
+            }
+            let unread_removed = expunge_rows
+                .iter()
+                .filter(|row| !row.try_get::<bool, _>("is_seen").unwrap_or(true))
+                .count() as i32;
+            sqlx::query(
+                r#"
+                UPDATE mailbox_messages
+                SET visibility = 'expunged',
+                    expunged_at = NOW(),
+                    modseq = $5,
+                    updated_at = NOW()
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND mailbox_id = $3
+                  AND id = ANY($4)
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(mailbox_id)
+            .bind(
+                &expunge_rows
+                    .iter()
+                    .filter_map(|row| row.try_get::<Uuid, _>("id").ok())
+                    .collect::<Vec<_>>(),
+            )
+            .bind(modseq)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                r#"
+                UPDATE mailboxes
+                SET total_messages = GREATEST(0, total_messages - $4),
+                    unread_messages = GREATEST(0, unread_messages - $5),
+                    modseq = GREATEST(modseq + 1, $6),
+                    updated_at = NOW()
+                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(mailbox_id)
+            .bind(expunge_rows.len() as i32)
+            .bind(unread_removed)
+            .bind(modseq)
+            .execute(&mut *tx)
+            .await?;
             self.insert_audit(&mut tx, &tenant_id, audit).await?;
             Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         }
@@ -1151,17 +1464,18 @@ impl Storage {
     ) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
-        self.allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
-            .await?;
-
-        let deleted = sqlx::query(
+        let rows = sqlx::query(
             r#"
-            DELETE FROM messages m
-            USING mailboxes mb
-            WHERE m.mailbox_id = mb.id
-              AND m.tenant_id = $1
-              AND m.account_id = $2
-              AND m.id = $3
+            SELECT mm.id
+            FROM mailbox_messages mm
+            JOIN mailboxes mb
+              ON mb.tenant_id = mm.tenant_id
+             AND mb.account_id = mm.account_id
+             AND mb.id = mm.mailbox_id
+            WHERE mm.tenant_id = $1
+              AND mm.account_id = $2
+              AND mm.message_id = $3
+              AND mm.visibility = 'visible'
               AND mb.tenant_id = $1
               AND mb.account_id = $2
               AND mb.role = 'custom'
@@ -1170,18 +1484,18 @@ impl Storage {
         .bind(&tenant_id)
         .bind(account_id)
         .bind(message_id)
-        .execute(&mut *tx)
+        .fetch_all(&mut *tx)
         .await?;
 
-        if deleted.rows_affected() == 0 {
+        if rows.is_empty() {
             bail!("custom mailbox message not found");
         }
 
-        self.insert_audit(&mut tx, &tenant_id, audit).await?;
-        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
-        tx.commit().await?;
-
-        Ok(())
+        drop(rows);
+        tx.rollback().await?;
+        self.delete_jmap_email(account_id, message_id, audit)
+            .await?;
+        return Ok(());
     }
 
     pub async fn delete_jmap_email(
@@ -1192,26 +1506,91 @@ impl Storage {
     ) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
-        self.allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
-            .await?;
-
-        let deleted = sqlx::query(
+        let rows = sqlx::query(
             r#"
-            DELETE FROM messages
+            SELECT id, mailbox_id, imap_uid, is_seen
+            FROM mailbox_messages
             WHERE tenant_id = $1
               AND account_id = $2
-              AND id = $3
+              AND message_id = $3
+              AND visibility = 'visible'
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
         .bind(message_id)
-        .execute(&mut *tx)
+        .fetch_all(&mut *tx)
         .await?;
 
-        if deleted.rows_affected() == 0 {
+        if rows.is_empty() {
             bail!("message not found");
         }
+
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        for row in &rows {
+            let membership_id: Uuid = row.try_get("id")?;
+            let mailbox_id: Uuid = row.try_get("mailbox_id")?;
+            let imap_uid: i64 = row.try_get("imap_uid")?;
+            let cursor = Self::insert_mail_change_log_in_tx(
+                &mut tx,
+                &tenant_id,
+                Some(account_id),
+                Some(mailbox_id),
+                "mailbox_message",
+                membership_id,
+                "destroyed",
+                modseq,
+                &principals,
+                serde_json::json!({"messageId": message_id, "imapUid": imap_uid}),
+            )
+            .await?;
+            sqlx::query(
+                r#"
+                INSERT INTO tombstones (
+                    id, tenant_id, account_id, mailbox_id, object_kind, object_id,
+                    message_id, mailbox_message_id, imap_uid, deleted_modseq,
+                    change_cursor, reason
+                )
+                VALUES ($1, $2, $3, $4, 'mailbox_message', $5, $6, $5, $7, $8, $9, 'delete')
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(mailbox_id)
+            .bind(membership_id)
+            .bind(message_id)
+            .bind(imap_uid)
+            .bind(modseq)
+            .bind(cursor)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        let membership_ids = rows
+            .iter()
+            .map(|row| row.try_get::<Uuid, _>("id"))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        sqlx::query(
+            r#"
+            UPDATE mailbox_messages
+            SET visibility = 'expunged',
+                expunged_at = NOW(),
+                modseq = $4,
+                updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $2 AND id = ANY($3)
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(&membership_ids)
+        .bind(modseq)
+        .execute(&mut *tx)
+        .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
@@ -1237,16 +1616,22 @@ impl Storage {
             r#"
             SELECT
                 q.id,
-                q.message_id AS email_id,
-                m.thread_id,
-                m.from_address,
-                NULLIF(m.sender_address, '') AS sender_address,
-                m.sender_authorization_kind,
+                mm.message_id AS email_id,
+                COALESCE(mm.thread_id, m.id) AS thread_id,
+                q.from_address,
+                NULLIF(q.sender_address, '') AS sender_address,
+                q.authorization_kind AS sender_authorization_kind,
                 to_char(q.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS send_at,
                 q.status AS queue_status,
-                m.delivery_status
-            FROM outbound_message_queue q
-            JOIN messages m ON m.id = q.message_id
+                q.status AS delivery_status
+            FROM submission_queue q
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = q.tenant_id
+             AND mm.account_id = q.account_id
+             AND mm.id = q.sent_mailbox_message_id
+            JOIN messages m
+              ON m.tenant_id = mm.tenant_id
+             AND m.id = mm.message_id
             WHERE q.tenant_id = $1
               AND q.account_id = $2
               AND ($3::uuid[] IS NULL OR q.id = ANY($3))
@@ -1270,15 +1655,23 @@ impl Storage {
             sqlx::query_as::<_, JmapEmailRecipientRow>(
                 r#"
                 SELECT
-                    r.message_id,
-                    r.kind,
+                    mm.message_id,
+                    r.role AS kind,
                     r.address,
                     r.display_name,
                     r.ordinal AS _ordinal
-                FROM message_recipients r
+                FROM submission_recipients r
+                JOIN submission_queue q
+                  ON q.tenant_id = r.tenant_id
+                 AND q.id = r.submission_queue_id
+                JOIN mailbox_messages mm
+                  ON mm.tenant_id = q.tenant_id
+                 AND mm.account_id = q.account_id
+                 AND mm.id = q.sent_mailbox_message_id
                 WHERE r.tenant_id = $1
-                  AND r.message_id = ANY($2)
-                ORDER BY r.message_id ASC, r.kind ASC, r.ordinal ASC
+                  AND mm.message_id = ANY($2)
+                  AND r.role <> 'bcc'
+                ORDER BY mm.message_id ASC, r.role ASC, r.ordinal ASC
                 "#,
             )
             .bind(&tenant_id)
@@ -2036,6 +2429,15 @@ impl Storage {
 fn is_system_mailbox_role(role: &str) -> bool {
     let role = role.trim();
     !role.is_empty() && !role.eq_ignore_ascii_case("custom")
+}
+
+fn mailbox_uid_validity() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs().max(1) as i64)
+        .unwrap_or(1)
 }
 
 #[cfg(test)]

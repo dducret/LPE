@@ -2,9 +2,9 @@ use anyhow::{anyhow, bail, Result};
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use lpe_storage::{ImapEmail, JmapEmailAddress, JmapMailbox};
+use lpe_storage::{ImapEmail, ImapMailboxState, JmapEmailAddress, JmapMailbox};
 
-use crate::{parse::tokenize, MessageRefKind, SelectedMailbox, UID_VALIDITY};
+use crate::{parse::tokenize, MessageRefKind, SelectedMailbox};
 
 pub(crate) struct FetchAttributes {
     pub(crate) items: Vec<FetchItem>,
@@ -387,22 +387,18 @@ pub(crate) fn render_status_response(
     mailbox: &JmapMailbox,
     emails: &[ImapEmail],
     requested: &[String],
-    highest_modseq: u64,
+    state: &ImapMailboxState,
 ) -> String {
-    let uid_next = emails
-        .last()
-        .map(|email| email.uid.saturating_add(1))
-        .unwrap_or(1);
     let unseen = emails.iter().filter(|email| email.unread).count();
     let items = requested
         .iter()
         .map(|item| match item.as_str() {
             "MESSAGES" => format!("MESSAGES {}", emails.len()),
             "RECENT" => "RECENT 0".to_string(),
-            "UIDNEXT" => format!("UIDNEXT {}", uid_next),
-            "UIDVALIDITY" => format!("UIDVALIDITY {}", UID_VALIDITY),
+            "UIDNEXT" => format!("UIDNEXT {}", state.uid_next),
+            "UIDVALIDITY" => format!("UIDVALIDITY {}", state.uid_validity),
             "UNSEEN" => format!("UNSEEN {}", unseen),
-            "HIGHESTMODSEQ" => format!("HIGHESTMODSEQ {}", highest_modseq),
+            "HIGHESTMODSEQ" => format!("HIGHESTMODSEQ {}", state.highest_modseq),
             _ => format!("{} 0", item),
         })
         .collect::<Vec<_>>()

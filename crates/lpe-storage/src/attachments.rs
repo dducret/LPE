@@ -1,10 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use lpe_attachments::extract_text_from_bytes;
 use serde::Serialize;
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
-use crate::{domain_from_email, sha256_hex, submission::AttachmentUploadInput, Storage};
+use crate::{sha256_hex, submission::AttachmentUploadInput, Storage};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ClientAttachment {
@@ -17,6 +17,7 @@ pub struct ClientAttachment {
 #[derive(Debug)]
 struct StoredAttachmentBlob {
     id: Uuid,
+    domain_id: Uuid,
 }
 
 impl Storage {
@@ -32,16 +33,19 @@ impl Storage {
             return Ok(Vec::new());
         }
 
-        let domain_name = self.load_account_domain_in_tx(tx, account_id).await?;
+        let domain_id = self
+            .load_account_domain_id_in_tx(tx, tenant_id, account_id)
+            .await?;
         let mut search_fragments = Vec::new();
         let mut attachment_ids = Vec::with_capacity(attachments.len());
 
-        for attachment in attachments {
+        for (ordinal, attachment) in attachments.iter().enumerate() {
             let attachment_id = Uuid::new_v4();
             let blob = self
                 .store_attachment_blob_in_tx(
                     tx,
-                    &domain_name,
+                    tenant_id,
+                    domain_id,
                     attachment.media_type.trim(),
                     &attachment.blob_bytes,
                 )
@@ -58,24 +62,48 @@ impl Storage {
                 search_fragments.push(text.clone());
             }
 
+            let mime_part_id = Uuid::new_v4();
+            sqlx::query(
+                r#"
+                INSERT INTO mime_parts (
+                    id, tenant_id, message_id, domain_id, part_path, ordinal,
+                    content_type, content_disposition, file_name, size_octets, blob_id
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, 'attachment', $8, $9, $10)
+                "#,
+            )
+            .bind(mime_part_id)
+            .bind(tenant_id)
+            .bind(message_id)
+            .bind(blob.domain_id)
+            .bind(format!("attachment.{}", ordinal + 1))
+            .bind(ordinal as i32)
+            .bind(attachment.media_type.trim())
+            .bind(attachment.file_name.trim())
+            .bind(attachment.blob_bytes.len() as i64)
+            .bind(blob.id)
+            .execute(&mut **tx)
+            .await?;
+
             sqlx::query(
                 r#"
                 INSERT INTO attachments (
-                    id, tenant_id, message_id, file_name, media_type, size_octets,
-                    blob_ref, extracted_text, extracted_text_tsv, attachment_blob_id
+                    id, tenant_id, account_id, message_id, domain_id, mime_part_id,
+                    blob_id, file_name, disposition, ordinal, size_octets
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, to_tsvector('simple', COALESCE($8, '')), $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'attachment', $9, $10)
                 "#,
             )
             .bind(attachment_id)
             .bind(tenant_id)
+            .bind(account_id)
             .bind(message_id)
-            .bind(attachment.file_name.trim())
-            .bind(attachment.media_type.trim())
-            .bind(attachment.blob_bytes.len() as i64)
-            .bind(format!("attachment-blob:{}", blob.id))
-            .bind(extracted_text)
+            .bind(blob.domain_id)
+            .bind(mime_part_id)
             .bind(blob.id)
+            .bind(attachment.file_name.trim())
+            .bind(ordinal as i32)
+            .bind(attachment.blob_bytes.len() as i64)
             .execute(&mut **tx)
             .await?;
             attachment_ids.push(attachment_id);
@@ -94,19 +122,27 @@ impl Storage {
         .await?;
 
         if !search_fragments.is_empty() {
-            let attachment_text = search_fragments.join("\n");
             sqlx::query(
                 r#"
-                UPDATE message_bodies
-                SET search_vector = to_tsvector(
-                    'simple',
-                    concat_ws(' ', body_text, participants_normalized, $2)
+                INSERT INTO attachment_texts (
+                    tenant_id, blob_id, extracted_text, content_hash, search_vector
                 )
-                WHERE message_id = $1
+                SELECT $1, a.blob_id, $2, $3, to_tsvector('simple', $2)
+                FROM attachments a
+                WHERE a.tenant_id = $1 AND a.message_id = $4
+                ORDER BY a.ordinal ASC
+                LIMIT 1
+                ON CONFLICT (tenant_id, blob_id) DO UPDATE SET
+                    extracted_text = EXCLUDED.extracted_text,
+                    content_hash = EXCLUDED.content_hash,
+                    search_vector = EXCLUDED.search_vector,
+                    extracted_at = NOW()
                 "#,
             )
+            .bind(tenant_id)
+            .bind(search_fragments.join("\n"))
+            .bind(sha256_hex(search_fragments.join("\n").as_bytes()))
             .bind(message_id)
-            .bind(attachment_text)
             .execute(&mut **tx)
             .await?;
         }
@@ -117,7 +153,8 @@ impl Storage {
     async fn store_attachment_blob_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        domain_name: &str,
+        tenant_id: &str,
+        domain_id: Uuid,
         media_type: &str,
         blob_bytes: &[u8],
     ) -> Result<StoredAttachmentBlob> {
@@ -126,34 +163,39 @@ impl Storage {
         if let Some(row) = sqlx::query(
             r#"
             SELECT id
-            FROM attachment_blobs
-            WHERE tenant_id = $1 AND domain_name = $2 AND content_sha256 = $3
+            FROM blobs
+            WHERE tenant_id = $1
+              AND domain_id = $2
+              AND blob_kind = 'attachment'
+              AND content_sha256 = $3
             LIMIT 1
             "#,
         )
-        .bind(self.tenant_id_for_domain_name(domain_name).await?)
-        .bind(domain_name)
+        .bind(tenant_id)
+        .bind(domain_id)
         .bind(&content_sha256)
         .fetch_optional(&mut **tx)
         .await?
         {
             return Ok(StoredAttachmentBlob {
                 id: row.try_get("id")?,
+                domain_id,
             });
         }
 
         let blob_id = Uuid::new_v4();
         sqlx::query(
             r#"
-            INSERT INTO attachment_blobs (
-                id, tenant_id, domain_name, content_sha256, media_type, size_octets, blob_bytes
+            INSERT INTO blobs (
+                id, tenant_id, domain_id, blob_kind, content_sha256,
+                media_type, size_octets, blob_bytes, magika_status, validated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, 'attachment', $4, $5, $6, $7, 'valid', NOW())
             "#,
         )
         .bind(blob_id)
-        .bind(self.tenant_id_for_domain_name(domain_name).await?)
-        .bind(domain_name)
+        .bind(tenant_id)
+        .bind(domain_id)
         .bind(content_sha256)
         .bind(media_type)
         .bind(blob_bytes.len() as i64)
@@ -161,28 +203,10 @@ impl Storage {
         .execute(&mut **tx)
         .await?;
 
-        Ok(StoredAttachmentBlob { id: blob_id })
-    }
-
-    async fn load_account_domain_in_tx(
-        &self,
-        tx: &mut sqlx::Transaction<'_, Postgres>,
-        account_id: Uuid,
-    ) -> Result<String> {
-        let row = sqlx::query(
-            r#"
-            SELECT primary_email
-            FROM accounts
-            WHERE id = $1
-            LIMIT 1
-            "#,
-        )
-        .bind(account_id)
-        .fetch_optional(&mut **tx)
-        .await?
-        .ok_or_else(|| anyhow!("account not found"))?;
-        let primary_email: String = row.try_get("primary_email")?;
-        domain_from_email(&primary_email)
+        Ok(StoredAttachmentBlob {
+            id: blob_id,
+            domain_id,
+        })
     }
 }
 

@@ -4,7 +4,7 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use crate::{
-    normalize_email, normalize_subject, preview_text, trim_optional_text, AuditEntryInput,
+    normalize_email, normalize_subject, sha256_hex, trim_optional_text, AuditEntryInput,
     JmapEmailRecipientRow, MailboxAccountAccessRow, MailboxDelegationGrantRow,
     SenderDelegationGrantRow, Storage,
 };
@@ -260,50 +260,58 @@ impl Storage {
 
         let message_id = input.draft_message_id.unwrap_or_else(Uuid::new_v4);
         let thread_id = Uuid::new_v4();
-        let preview_text = preview_text(&body_text);
         let participants_normalized = participants_normalized(&from_address, &visible_recipients);
-        let mime_blob_ref = input
-            .mime_blob_ref
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| format!("draft-message:{message_id}"));
-        let content_hash = format!("draft:{message_id}");
         let unread = input.unread.unwrap_or(false);
         let flagged = input.flagged.unwrap_or(false);
         let modseq = self
             .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, input.account_id)
             .await?;
+        let domain_id = self
+            .load_account_domain_id_in_tx(&mut tx, &tenant_id, input.account_id)
+            .await?;
+        let raw_message = format!(
+            "From: {}\r\nSubject: {}\r\n\r\n{}",
+            authorization.from_address, input.subject, body_text
+        );
+        let blob_id = self
+            .store_message_blob_in_tx(
+                &mut tx,
+                &tenant_id,
+                domain_id,
+                "raw_message",
+                "message/rfc822",
+                raw_message.as_bytes(),
+            )
+            .await?;
 
         if input.draft_message_id.is_some() {
             let updated = sqlx::query(
                 r#"
-                UPDATE messages m
-                SET
-                    internet_message_id = $5,
+                UPDATE messages
+                SET internet_message_id = $5,
+                    blob_id = $6,
+                    message_hash = $7,
+                    normalized_subject = $8,
                     received_at = NOW(),
                     sent_at = NULL,
-                    from_display = $6,
-                    from_address = $7,
-                    sender_display = $8,
-                    sender_address = $9,
-                    sender_authorization_kind = $10,
-                    submitted_by_account_id = $11,
-                    subject_normalized = $12,
-                    preview_text = $13,
-                    size_octets = $14,
-                    mime_blob_ref = $15,
-                    unread = $16,
-                    flagged = $17,
-                    has_attachments = FALSE,
-                    submission_source = $18,
-                    imap_modseq = $19,
-                    delivery_status = 'draft'
-                FROM mailboxes mb
-                WHERE m.mailbox_id = mb.id
-                  AND m.tenant_id = $1
-                  AND m.account_id = $2
-                  AND m.id = $3
-                  AND mb.role = 'drafts'
-                  AND mb.id = $4
+                    size_octets = $9,
+                    has_attachments = FALSE
+                WHERE tenant_id = $1
+                  AND id = $3
+                  AND EXISTS (
+                      SELECT 1
+                      FROM mailbox_messages mm
+                      JOIN mailboxes mb
+                        ON mb.tenant_id = mm.tenant_id
+                       AND mb.account_id = mm.account_id
+                       AND mb.id = mm.mailbox_id
+                      WHERE mm.tenant_id = messages.tenant_id
+                        AND mm.account_id = $2
+                        AND mm.message_id = messages.id
+                        AND mm.mailbox_id = $4
+                        AND mm.visibility = 'visible'
+                        AND mb.role = 'drafts'
+                  )
                 "#,
             )
             .bind(&tenant_id)
@@ -311,20 +319,10 @@ impl Storage {
             .bind(message_id)
             .bind(draft_mailbox_id)
             .bind(input.internet_message_id)
-            .bind(authorization.from_display.as_deref())
-            .bind(&authorization.from_address)
-            .bind(authorization.sender_display.as_deref())
-            .bind(authorization.sender_address.as_deref())
-            .bind(authorization.authorization_kind.as_str())
-            .bind(authorization.submitted_by.id)
+            .bind(blob_id)
+            .bind(sha256_hex(raw_message.as_bytes()))
             .bind(&subject)
-            .bind(&preview_text)
             .bind(input.size_octets.max(0))
-            .bind(&mime_blob_ref)
-            .bind(unread)
-            .bind(flagged)
-            .bind(input.source.trim().to_lowercase())
-            .bind(modseq)
             .execute(&mut *tx)
             .await?;
 
@@ -338,7 +336,7 @@ impl Storage {
                 .execute(&mut *tx)
                 .await?;
             sqlx::query(
-                "DELETE FROM message_bcc_recipients WHERE tenant_id = $1 AND message_id = $2",
+                "DELETE FROM protected_bcc_recipients WHERE tenant_id = $1 AND message_id = $2",
             )
             .bind(&tenant_id)
             .bind(message_id)
@@ -349,77 +347,103 @@ impl Storage {
                 .bind(message_id)
                 .execute(&mut *tx)
                 .await?;
+            sqlx::query(
+                r#"
+                UPDATE mailbox_messages
+                SET modseq = $4,
+                    is_seen = NOT $5,
+                    is_flagged = $6,
+                    is_draft = TRUE,
+                    updated_at = NOW()
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND message_id = $3
+                  AND mailbox_id = $7
+                  AND visibility = 'visible'
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(input.account_id)
+            .bind(message_id)
+            .bind(modseq)
+            .bind(unread)
+            .bind(flagged)
+            .bind(draft_mailbox_id)
+            .execute(&mut *tx)
+            .await?;
         } else {
             sqlx::query(
                 r#"
                 INSERT INTO messages (
-                    id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                    imap_modseq, received_at, sent_at, from_display, from_address, sender_display,
-                    sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
-                    preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
-                    submission_source, delivery_status
+                    id, tenant_id, domain_id, blob_id, internet_message_id, message_hash,
+                    normalized_subject, sent_at, received_at, size_octets, has_attachments
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6,
-                    $7, NOW(), NULL, $8, $9, $10,
-                    $11, $12, $13, $14, $15, $16, $17, FALSE, $18, $19,
-                    $20, 'draft'
+                    $7, NULL, NOW(), $8, FALSE
                 )
                 "#,
             )
             .bind(message_id)
             .bind(&tenant_id)
-            .bind(input.account_id)
-            .bind(draft_mailbox_id)
-            .bind(thread_id)
+            .bind(domain_id)
+            .bind(blob_id)
             .bind(input.internet_message_id)
-            .bind(modseq)
-            .bind(authorization.from_display.as_deref())
-            .bind(&authorization.from_address)
-            .bind(authorization.sender_display.as_deref())
-            .bind(authorization.sender_address.as_deref())
-            .bind(authorization.authorization_kind.as_str())
-            .bind(authorization.submitted_by.id)
+            .bind(sha256_hex(raw_message.as_bytes()))
             .bind(&subject)
-            .bind(&preview_text)
-            .bind(unread)
-            .bind(flagged)
             .bind(input.size_octets.max(0))
-            .bind(&mime_blob_ref)
-            .bind(input.source.trim().to_lowercase())
             .execute(&mut *tx)
             .await?;
         }
 
+        self.upsert_message_body_in_tx(
+            &mut tx,
+            &tenant_id,
+            domain_id,
+            message_id,
+            &body_text,
+            input.body_html_sanitized.as_deref(),
+        )
+        .await?;
+
         sqlx::query(
             r#"
-            INSERT INTO message_bodies (
-                message_id, body_text, body_html_sanitized, participants_normalized,
-                language_code, content_hash, search_vector
+            INSERT INTO message_recipients (
+                id, tenant_id, message_id, role, address, display_name, ordinal
             )
-            VALUES ($1, $2, $3, $4, NULL, $5, to_tsvector('simple', $6))
-            ON CONFLICT (message_id) DO UPDATE SET
-                body_text = EXCLUDED.body_text,
-                body_html_sanitized = EXCLUDED.body_html_sanitized,
-                participants_normalized = EXCLUDED.participants_normalized,
-                content_hash = EXCLUDED.content_hash,
-                search_vector = EXCLUDED.search_vector
+            VALUES ($1, $2, $3, 'from', $4, $5, 0)
             "#,
         )
+        .bind(Uuid::new_v4())
+        .bind(&tenant_id)
         .bind(message_id)
-        .bind(&body_text)
-        .bind(input.body_html_sanitized)
-        .bind(&participants_normalized)
-        .bind(content_hash)
-        .bind(format!("{subject} {body_text} {participants_normalized}"))
+        .bind(&authorization.from_address)
+        .bind(authorization.from_display.as_deref())
         .execute(&mut *tx)
         .await?;
+        if let Some(sender_address) = authorization.sender_address.as_deref() {
+            sqlx::query(
+                r#"
+                INSERT INTO message_recipients (
+                    id, tenant_id, message_id, role, address, display_name, ordinal
+                )
+                VALUES ($1, $2, $3, 'sender', $4, $5, 0)
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(&tenant_id)
+            .bind(message_id)
+            .bind(sender_address)
+            .bind(authorization.sender_display.as_deref())
+            .execute(&mut *tx)
+            .await?;
+        }
 
         for (ordinal, (kind, recipient)) in visible_recipients.iter().enumerate() {
             sqlx::query(
                 r#"
                 INSERT INTO message_recipients (
-                    id, tenant_id, message_id, kind, address, display_name, ordinal
+                    id, tenant_id, message_id, role, address, display_name, ordinal
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                 "#,
@@ -438,7 +462,7 @@ impl Storage {
         for (ordinal, recipient) in bcc_recipients.iter().enumerate() {
             sqlx::query(
                 r#"
-                INSERT INTO message_bcc_recipients (
+                INSERT INTO protected_bcc_recipients (
                     id, tenant_id, message_id, address, display_name, ordinal, metadata_scope
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, 'audit-compliance')
@@ -460,6 +484,53 @@ impl Storage {
             input.account_id,
             message_id,
             &input.attachments,
+        )
+        .await?;
+        let membership_id = if input.draft_message_id.is_some() {
+            sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT id
+                FROM mailbox_messages
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND mailbox_id = $3
+                  AND message_id = $4
+                  AND visibility = 'visible'
+                LIMIT 1
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(input.account_id)
+            .bind(draft_mailbox_id)
+            .bind(message_id)
+            .fetch_one(&mut *tx)
+            .await?
+        } else {
+            self.allocate_mailbox_membership_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                draft_mailbox_id,
+                message_id,
+                thread_id,
+                "",
+                !unread,
+                flagged,
+                true,
+                "created",
+            )
+            .await?
+        };
+        Self::upsert_mail_search_document_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            membership_id,
+            message_id,
+            &subject,
+            &participants_normalized,
+            &body_text,
+            "",
         )
         .await?;
 
@@ -993,18 +1064,27 @@ impl Storage {
         let message_id = Uuid::new_v4();
         let thread_id = Uuid::new_v4();
         let outbound_queue_id = Uuid::new_v4();
-        let preview_text = preview_text(&body_text);
         let participants_normalized =
             participants_normalized(&authorization.from_address, &visible_recipients);
-        let mime_blob_ref = input
-            .mime_blob_ref
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| format!("canonical-message:{message_id}"));
-        let content_hash = format!("message:{message_id}");
-        let modseq = self
-            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, input.account_id)
+        let domain_id = self
+            .load_account_domain_id_in_tx(&mut tx, &tenant_id, input.account_id)
+            .await?;
+        let raw_message = format!(
+            "From: {}\r\nSubject: {}\r\n\r\n{}",
+            authorization.from_address, input.subject, body_text
+        );
+        let blob_id = self
+            .store_message_blob_in_tx(
+                &mut tx,
+                &tenant_id,
+                domain_id,
+                "raw_message",
+                "message/rfc822",
+                raw_message.as_bytes(),
+            )
             .await?;
         let mut sent_mailbox_id = None;
+        let mut sent_mailbox_message_id = None;
 
         for phase in canonical_submission_phases(input.draft_message_id.is_some()) {
             match phase {
@@ -1028,64 +1108,74 @@ impl Storage {
                     sqlx::query(
                         r#"
                         INSERT INTO messages (
-                            id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                            imap_modseq, received_at, sent_at, from_display, from_address, sender_display,
-                            sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
-                            preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
-                            submission_source, delivery_status
+                            id, tenant_id, domain_id, blob_id, internet_message_id, message_hash,
+                            normalized_subject, sent_at, received_at, size_octets, has_attachments
                         )
                         VALUES (
                             $1, $2, $3, $4, $5, $6,
-                            $7, NOW(), NOW(), $8, $9, $10,
-                            $11, $12, $13, $14, $15, FALSE, FALSE, FALSE, $16, $17,
-                            $18, 'queued'
+                            $7, NOW(), NOW(), $8, FALSE
                         )
                         "#,
                     )
                     .bind(message_id)
                     .bind(&tenant_id)
-                    .bind(input.account_id)
-                    .bind(sent_mailbox_id)
-                    .bind(thread_id)
+                    .bind(domain_id)
+                    .bind(blob_id)
                     .bind(input.internet_message_id.clone())
-                    .bind(modseq)
-                    .bind(authorization.from_display.as_deref())
-                    .bind(&authorization.from_address)
-                    .bind(authorization.sender_display.as_deref())
-                    .bind(authorization.sender_address.as_deref())
-                    .bind(authorization.authorization_kind.as_str())
-                    .bind(authorization.submitted_by.id)
+                    .bind(sha256_hex(raw_message.as_bytes()))
                     .bind(&subject)
-                    .bind(&preview_text)
                     .bind(input.size_octets.max(0))
-                    .bind(&mime_blob_ref)
-                    .bind(input.source.trim().to_lowercase())
                     .execute(&mut *tx)
+                    .await?;
+
+                    self.upsert_message_body_in_tx(
+                        &mut tx,
+                        &tenant_id,
+                        domain_id,
+                        message_id,
+                        &body_text,
+                        input.body_html_sanitized.as_deref(),
+                    )
                     .await?;
 
                     sqlx::query(
                         r#"
-                        INSERT INTO message_bodies (
-                            message_id, body_text, body_html_sanitized, participants_normalized,
-                            language_code, content_hash, search_vector
+                        INSERT INTO message_recipients (
+                            id, tenant_id, message_id, role, address, display_name, ordinal
                         )
-                        VALUES ($1, $2, $3, $4, NULL, $5, to_tsvector('simple', $6))
+                        VALUES ($1, $2, $3, 'from', $4, $5, 0)
                         "#,
                     )
+                    .bind(Uuid::new_v4())
+                    .bind(&tenant_id)
                     .bind(message_id)
-                    .bind(&body_text)
-                    .bind(input.body_html_sanitized.clone())
-                    .bind(&participants_normalized)
-                    .bind(content_hash.clone())
-                    .bind(format!("{subject} {body_text} {participants_normalized}"))
+                    .bind(&authorization.from_address)
+                    .bind(authorization.from_display.as_deref())
                     .execute(&mut *tx)
                     .await?;
+                    if let Some(sender_address) = authorization.sender_address.as_deref() {
+                        sqlx::query(
+                            r#"
+                            INSERT INTO message_recipients (
+                                id, tenant_id, message_id, role, address, display_name, ordinal
+                            )
+                            VALUES ($1, $2, $3, 'sender', $4, $5, 0)
+                            "#,
+                        )
+                        .bind(Uuid::new_v4())
+                        .bind(&tenant_id)
+                        .bind(message_id)
+                        .bind(sender_address)
+                        .bind(authorization.sender_display.as_deref())
+                        .execute(&mut *tx)
+                        .await?;
+                    }
 
                     for (ordinal, (kind, recipient)) in visible_recipients.iter().enumerate() {
                         sqlx::query(
                             r#"
                             INSERT INTO message_recipients (
-                                id, tenant_id, message_id, kind, address, display_name, ordinal
+                                id, tenant_id, message_id, role, address, display_name, ordinal
                             )
                             VALUES ($1, $2, $3, $4, $5, $6, $7)
                             "#,
@@ -1104,7 +1194,7 @@ impl Storage {
                     for (ordinal, recipient) in bcc_recipients.iter().enumerate() {
                         sqlx::query(
                             r#"
-                            INSERT INTO message_bcc_recipients (
+                            INSERT INTO protected_bcc_recipients (
                                 id, tenant_id, message_id, address, display_name, ordinal, metadata_scope
                             )
                             VALUES ($1, $2, $3, $4, $5, $6, 'audit-compliance')
@@ -1128,22 +1218,100 @@ impl Storage {
                         &input.attachments,
                     )
                     .await?;
+                    let mailbox_message_id = self
+                        .allocate_mailbox_membership_in_tx(
+                            &mut tx,
+                            &tenant_id,
+                            input.account_id,
+                            sent_mailbox_id,
+                            message_id,
+                            thread_id,
+                            "",
+                            true,
+                            false,
+                            false,
+                            "created",
+                        )
+                        .await?;
+                    Self::upsert_mail_search_document_in_tx(
+                        &mut tx,
+                        &tenant_id,
+                        input.account_id,
+                        mailbox_message_id,
+                        message_id,
+                        &subject,
+                        &participants_normalized,
+                        &body_text,
+                        "",
+                    )
+                    .await?;
+                    sent_mailbox_message_id = Some(mailbox_message_id);
                 }
                 CanonicalSubmissionPhase::PersistOutboundQueue => {
+                    let sent_mailbox_message_id = sent_mailbox_message_id.ok_or_else(|| {
+                        anyhow!("sent mailbox message must exist before queue handoff")
+                    })?;
                     sqlx::query(
                         r#"
-                        INSERT INTO outbound_message_queue (
-                            id, tenant_id, message_id, account_id, transport, status
+                        INSERT INTO submission_queue (
+                            id, tenant_id, account_id, sent_mailbox_message_id,
+                            from_address, sender_address, authorization_kind,
+                            source_protocol, transport, status
                         )
-                        VALUES ($1, $2, $3, $4, 'lpe-ct-smtp', 'queued')
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'lpe-ct-smtp', 'queued')
                         "#,
                     )
                     .bind(outbound_queue_id)
                     .bind(&tenant_id)
-                    .bind(message_id)
                     .bind(input.account_id)
+                    .bind(sent_mailbox_message_id)
+                    .bind(&authorization.from_address)
+                    .bind(authorization.sender_address.as_deref())
+                    .bind(submission_authorization_kind_sql(
+                        authorization.authorization_kind,
+                    ))
+                    .bind(source_protocol_sql(&input.source))
                     .execute(&mut *tx)
                     .await?;
+                    for (ordinal, (kind, recipient)) in visible_recipients.iter().enumerate() {
+                        sqlx::query(
+                            r#"
+                            INSERT INTO submission_recipients (
+                                id, tenant_id, submission_queue_id, role,
+                                address, display_name, ordinal, protected_metadata
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE)
+                            "#,
+                        )
+                        .bind(Uuid::new_v4())
+                        .bind(&tenant_id)
+                        .bind(outbound_queue_id)
+                        .bind(kind)
+                        .bind(&recipient.address)
+                        .bind(recipient.display_name.as_deref())
+                        .bind(ordinal as i32)
+                        .execute(&mut *tx)
+                        .await?;
+                    }
+                    for (ordinal, recipient) in bcc_recipients.iter().enumerate() {
+                        sqlx::query(
+                            r#"
+                            INSERT INTO submission_recipients (
+                                id, tenant_id, submission_queue_id, role,
+                                address, display_name, ordinal, protected_metadata
+                            )
+                            VALUES ($1, $2, $3, 'bcc', $4, $5, $6, TRUE)
+                            "#,
+                        )
+                        .bind(Uuid::new_v4())
+                        .bind(&tenant_id)
+                        .bind(outbound_queue_id)
+                        .bind(&recipient.address)
+                        .bind(recipient.display_name.as_deref())
+                        .bind(ordinal as i32)
+                        .execute(&mut *tx)
+                        .await?;
+                    }
                 }
                 CanonicalSubmissionPhase::DeleteSourceDraft => {
                     if let Some(draft_message_id) = input.draft_message_id {
@@ -1194,14 +1362,14 @@ impl Storage {
             r#"
             SELECT
                 r.message_id,
-                r.kind,
+                r.role AS kind,
                 r.address,
                 r.display_name,
                 r.ordinal AS _ordinal
             FROM message_recipients r
             WHERE r.tenant_id = $1
               AND r.message_id = $2
-            ORDER BY r.kind ASC, r.ordinal ASC
+            ORDER BY r.role ASC, r.ordinal ASC
             "#,
         )
         .bind(&tenant_id)
@@ -1212,7 +1380,7 @@ impl Storage {
         let bcc_rows = sqlx::query(
             r#"
             SELECT address, display_name
-            FROM message_bcc_recipients
+            FROM protected_bcc_recipients
             WHERE tenant_id = $1 AND message_id = $2
             ORDER BY ordinal ASC
             "#,
@@ -1547,28 +1715,103 @@ impl Storage {
         account_id: Uuid,
         message_id: Uuid,
     ) -> Result<()> {
-        self.allocate_mail_modseq_in_tx(tx, tenant_id, account_id)
+        let modseq = self
+            .allocate_mail_modseq_in_tx(tx, tenant_id, account_id)
             .await?;
-        let deleted = sqlx::query(
+        let row = sqlx::query(
             r#"
-            DELETE FROM messages m
-            USING mailboxes mb
-            WHERE m.mailbox_id = mb.id
-              AND m.tenant_id = $1
-              AND m.account_id = $2
-              AND m.id = $3
+            SELECT mm.id, mm.mailbox_id, mm.imap_uid, mm.is_seen
+            FROM mailbox_messages mm
+            JOIN mailboxes mb
+              ON mb.tenant_id = mm.tenant_id
+             AND mb.account_id = mm.account_id
+             AND mb.id = mm.mailbox_id
+            WHERE mm.tenant_id = $1
+              AND mm.account_id = $2
+              AND mm.message_id = $3
+              AND mm.visibility = 'visible'
               AND mb.role = 'drafts'
+            LIMIT 1
             "#,
         )
         .bind(tenant_id)
         .bind(account_id)
         .bind(message_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .ok_or_else(|| anyhow!("draft not found"))?;
+        let mailbox_message_id: Uuid = row.try_get("id")?;
+        let mailbox_id: Uuid = row.try_get("mailbox_id")?;
+        let imap_uid: i64 = row.try_get("imap_uid")?;
+        let is_seen: bool = row.try_get("is_seen")?;
+        let principals = Self::affected_mail_principals_in_tx(tx, tenant_id, account_id).await?;
+        let cursor = Self::insert_mail_change_log_in_tx(
+            tx,
+            tenant_id,
+            Some(account_id),
+            Some(mailbox_id),
+            "mailbox_message",
+            mailbox_message_id,
+            "destroyed",
+            modseq,
+            &principals,
+            serde_json::json!({"messageId": message_id, "imapUid": imap_uid}),
+        )
+        .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO tombstones (
+                id, tenant_id, account_id, mailbox_id, object_kind, object_id,
+                message_id, mailbox_message_id, imap_uid, deleted_modseq,
+                change_cursor, reason
+            )
+            VALUES ($1, $2, $3, $4, 'mailbox_message', $5, $6, $5, $7, $8, $9, 'destroyed')
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(mailbox_message_id)
+        .bind(message_id)
+        .bind(imap_uid)
+        .bind(modseq)
+        .bind(cursor)
         .execute(&mut **tx)
         .await?;
-
-        if deleted.rows_affected() == 0 {
-            bail!("draft not found");
-        }
+        sqlx::query(
+            r#"
+            UPDATE mailbox_messages
+            SET visibility = 'expunged',
+                expunged_at = NOW(),
+                modseq = $4,
+                updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(mailbox_message_id)
+        .bind(modseq)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query(
+            r#"
+            UPDATE mailboxes
+            SET total_messages = GREATEST(0, total_messages - 1),
+                unread_messages = GREATEST(0, unread_messages - CASE WHEN $4 THEN 0 ELSE 1 END),
+                modseq = GREATEST(modseq + 1, $5),
+                updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(is_seen)
+        .bind(modseq)
+        .execute(&mut **tx)
+        .await?;
 
         Ok(())
     }
@@ -1691,6 +1934,26 @@ pub(crate) fn sender_authorization_kind_from_str(value: &str) -> SenderAuthoriza
 
 pub(crate) fn sender_identity_id(kind: SenderAuthorizationKind, owner_account_id: Uuid) -> String {
     format!("{}:{}", kind.as_str(), owner_account_id)
+}
+
+fn submission_authorization_kind_sql(kind: SenderAuthorizationKind) -> &'static str {
+    match kind {
+        SenderAuthorizationKind::SelfSend => "self",
+        SenderAuthorizationKind::SendAs => "send_as",
+        SenderAuthorizationKind::SendOnBehalf => "send_on_behalf",
+    }
+}
+
+fn source_protocol_sql(source: &str) -> &'static str {
+    match source.trim().to_lowercase().as_str() {
+        "web" => "web",
+        "jmap" => "jmap",
+        "ews" => "ews",
+        "mapi" => "mapi",
+        "activesync" => "activesync",
+        "lpe_ct_submission" | "lpe-ct-submission" => "lpe_ct_submission",
+        _ => "jmap",
+    }
 }
 
 #[cfg(test)]

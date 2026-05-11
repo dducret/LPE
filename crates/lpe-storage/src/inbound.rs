@@ -437,64 +437,77 @@ impl Storage {
         request: &InboundDeliveryRequest,
         mail_from: &str,
         subject: &str,
-        preview: &str,
+        _preview: &str,
         size_octets: i64,
         body_text: &str,
         participants: &str,
         visible_recipients: &[(&'static str, SubmittedRecipientInput)],
         attachments: &[AttachmentUploadInput],
     ) -> Result<()> {
-        let mime_blob_ref = format!("lpe-ct-inbound:{}:{message_id}", request.trace_id);
-        let modseq = self
-            .allocate_mail_modseq_in_tx(tx, tenant_id, account_id)
+        let domain_id = self
+            .load_account_domain_id_in_tx(tx, tenant_id, account_id)
+            .await?;
+        let blob_id = self
+            .store_message_blob_in_tx(
+                tx,
+                tenant_id,
+                domain_id,
+                "raw_message",
+                "message/rfc822",
+                &request.raw_message,
+            )
             .await?;
 
         sqlx::query(
             r#"
             INSERT INTO messages (
-                id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                imap_modseq, received_at, sent_at, from_display, from_address, sender_display,
-                sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
-                preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
-                submission_source, delivery_status
+                id, tenant_id, domain_id, blob_id, internet_message_id, message_hash,
+                normalized_subject, sent_at, received_at, size_octets, has_attachments
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, NOW(), NULL, NULL, $8, NULL,
-                NULL, 'self', $3, $9, $10, TRUE, FALSE, FALSE, $11, $12,
-                'lpe-ct', 'stored'
+                $7, NULL, NOW(), $8, FALSE
             )
             "#,
         )
         .bind(message_id)
         .bind(tenant_id)
-        .bind(account_id)
-        .bind(mailbox_id)
-        .bind(thread_id)
+        .bind(domain_id)
+        .bind(blob_id)
         .bind(request.internet_message_id.as_deref())
-        .bind(modseq)
-        .bind(mail_from)
+        .bind(crate::sha256_hex(&request.raw_message))
         .bind(subject)
-        .bind(preview)
         .bind(size_octets.max(0))
-        .bind(&mime_blob_ref)
         .execute(&mut **tx)
         .await?;
 
+        self.upsert_message_body_in_tx(tx, tenant_id, domain_id, message_id, body_text, None)
+            .await?;
+
         sqlx::query(
             r#"
-            INSERT INTO message_bodies (
-                message_id, body_text, body_html_sanitized, participants_normalized,
-                language_code, content_hash, search_vector
-            )
-            VALUES ($1, $2, NULL, $3, NULL, $4, to_tsvector('simple', $5))
+            INSERT INTO message_headers (id, tenant_id, message_id, header_name, header_value, ordinal)
+            VALUES ($1, $2, $3, 'x-lpe-ct-trace-id', $4, 0)
             "#,
         )
+        .bind(Uuid::new_v4())
+        .bind(tenant_id)
         .bind(message_id)
-        .bind(body_text)
-        .bind(participants)
-        .bind(format!("inbound:{}:{message_id}", request.trace_id))
-        .bind(format!("{subject} {body_text} {participants}"))
+        .bind(&request.trace_id)
+        .execute(&mut **tx)
+        .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO message_recipients (
+                id, tenant_id, message_id, role, address, display_name, ordinal
+            )
+            VALUES ($1, $2, $3, 'from', $4, NULL, 0)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(tenant_id)
+        .bind(message_id)
+        .bind(mail_from)
         .execute(&mut **tx)
         .await?;
 
@@ -502,7 +515,7 @@ impl Storage {
             sqlx::query(
                 r#"
                 INSERT INTO message_recipients (
-                    id, tenant_id, message_id, kind, address, display_name, ordinal
+                    id, tenant_id, message_id, role, address, display_name, ordinal
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                 "#,
@@ -520,6 +533,24 @@ impl Storage {
 
         self.ingest_message_attachments_in_tx(tx, tenant_id, account_id, message_id, attachments)
             .await?;
+        let membership_id = self
+            .allocate_mailbox_membership_in_tx(
+                tx, tenant_id, account_id, mailbox_id, message_id, thread_id, "", false, false,
+                false, "created",
+            )
+            .await?;
+        Self::upsert_mail_search_document_in_tx(
+            tx,
+            tenant_id,
+            account_id,
+            membership_id,
+            message_id,
+            subject,
+            participants,
+            body_text,
+            "",
+        )
+        .await?;
         Ok(())
     }
 
@@ -529,7 +560,7 @@ impl Storage {
         tenant_id: &str,
         account_id: Uuid,
         display_name: &str,
-        retention_days: i32,
+        _retention_days: i32,
     ) -> Result<Uuid> {
         let display_name = display_name.trim();
         if display_name.is_empty() {
@@ -567,9 +598,9 @@ impl Storage {
         sqlx::query(
             r#"
             INSERT INTO mailboxes (
-                id, tenant_id, account_id, role, display_name, sort_order, retention_days
+                id, tenant_id, account_id, role, display_name, sort_order, uid_validity
             )
-            VALUES ($1, $2, $3, '', $4, $5, $6)
+            VALUES ($1, $2, $3, 'custom', $4, $5, $6)
             "#,
         )
         .bind(mailbox_id)
@@ -577,7 +608,7 @@ impl Storage {
         .bind(account_id)
         .bind(display_name)
         .bind(sort_order)
-        .bind(retention_days)
+        .bind(mailbox_uid_validity())
         .execute(&mut **tx)
         .await?;
         Ok(mailbox_id)
@@ -601,18 +632,26 @@ async fn existing_inbound_delivery_response_in_tx(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     trace_id: &str,
 ) -> Result<Option<InboundDeliveryResponse>> {
-    let prefix = inbound_mime_blob_ref_prefix(trace_id);
     let rows = sqlx::query(
         r#"
         SELECT a.primary_email, m.id
         FROM messages m
-        JOIN accounts a ON a.tenant_id = m.tenant_id AND a.id = m.account_id
-        WHERE m.submission_source = 'lpe-ct'
-          AND strpos(m.mime_blob_ref, $1) = 1
+        JOIN mailbox_messages mm
+          ON mm.tenant_id = m.tenant_id
+         AND mm.message_id = m.id
+         AND mm.visibility = 'visible'
+        JOIN accounts a
+          ON a.tenant_id = mm.tenant_id
+         AND a.id = mm.account_id
+        JOIN message_headers h
+          ON h.tenant_id = m.tenant_id
+         AND h.message_id = m.id
+         AND lower(h.header_name) = 'x-lpe-ct-trace-id'
+        WHERE h.header_value = $1
         ORDER BY a.primary_email ASC, m.id ASC
         "#,
     )
-    .bind(&prefix)
+    .bind(trace_id.trim())
     .fetch_all(&mut **tx)
     .await?;
 
@@ -666,10 +705,6 @@ fn duplicate_inbound_delivery_response(
     }
 }
 
-fn inbound_mime_blob_ref_prefix(trace_id: &str) -> String {
-    format!("lpe-ct-inbound:{}:", trace_id.trim())
-}
-
 fn inbound_trace_advisory_lock_keys(trace_id: &str) -> (i32, i32) {
     let mut hasher = Sha256::new();
     hasher.update(b"lpe-inbound-trace-v1\0");
@@ -679,6 +714,14 @@ fn inbound_trace_advisory_lock_keys(trace_id: &str) -> (i32, i32) {
         i32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]),
         i32::from_be_bytes([digest[4], digest[5], digest[6], digest[7]]),
     )
+}
+
+fn mailbox_uid_validity() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs().max(1) as i64)
+        .unwrap_or(1)
 }
 
 fn estimate_generated_message_size(
@@ -709,10 +752,6 @@ mod tests {
 
     #[test]
     fn inbound_trace_id_helpers_normalize_whitespace() {
-        assert_eq!(
-            inbound_mime_blob_ref_prefix(" trace-1 "),
-            "lpe-ct-inbound:trace-1:"
-        );
         assert_eq!(
             inbound_trace_advisory_lock_keys("trace-1"),
             inbound_trace_advisory_lock_keys(" trace-1 ")

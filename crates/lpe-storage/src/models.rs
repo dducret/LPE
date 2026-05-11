@@ -199,6 +199,7 @@ pub(crate) struct PendingOutboundQueueRow {
 #[derive(Debug, FromRow)]
 pub(crate) struct OutboundQueueStateRow {
     pub(crate) tenant_id: String,
+    pub(crate) account_id: Uuid,
     pub(crate) message_id: Uuid,
     pub(crate) status: String,
     pub(crate) attempts: i32,

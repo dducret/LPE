@@ -3,8 +3,8 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{
-    preview_text, submission, ActiveSyncSyncState, ActiveSyncSyncStateRow, AuditEntryInput,
-    CanonicalChangeCategory, JmapEmail, JmapImportedEmailInput, SenderAuthorizationKind, Storage,
+    sha256_hex, submission, ActiveSyncSyncState, ActiveSyncSyncStateRow, AuditEntryInput,
+    CanonicalChangeCategory, JmapEmail, JmapImportedEmailInput, Storage,
 };
 
 impl Storage {
@@ -78,15 +78,10 @@ impl Storage {
         audit: AuditEntryInput,
     ) -> Result<JmapEmail> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
-        self.fetch_jmap_emails(account_id, &[message_id])
-            .await?
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("message not found"))?;
-
-        let target_mailbox = sqlx::query(
+        let mut tx = self.pool.begin().await?;
+        let target_role = sqlx::query_scalar::<_, String>(
             r#"
-            SELECT role, display_name
+            SELECT role
             FROM mailboxes
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             LIMIT 1
@@ -95,174 +90,90 @@ impl Storage {
         .bind(&tenant_id)
         .bind(account_id)
         .bind(target_mailbox_id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| anyhow::anyhow!("target mailbox not found"))?;
-
-        let target_role = target_mailbox.try_get::<String, _>("role")?;
-        let copied_message_id = Uuid::new_v4();
-        let delivery_status = if target_role == "drafts" {
-            "draft"
-        } else {
-            "stored"
-        };
-
-        let mut tx = self.pool.begin().await?;
-        let modseq = self
-            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
-            .await?;
-        sqlx::query(
+        let source = sqlx::query(
             r#"
-            INSERT INTO messages (
-                id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                imap_modseq, received_at, sent_at, from_display, from_address, sender_display,
-                sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
-                preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
-                submission_source, delivery_status
-            )
-            SELECT
-                $4, tenant_id, account_id, $5, thread_id, internet_message_id,
-                $6, NOW(),
-                CASE WHEN $7 = 'draft' THEN NULL ELSE sent_at END,
-                from_display, from_address, sender_display,
-                sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
-                preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
-                submission_source, $7
-            FROM messages
-            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            SELECT message_id, thread_id, is_seen, is_flagged, received_at::text AS received_at
+            FROM mailbox_messages
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND message_id = $3
+              AND visibility = 'visible'
+            ORDER BY updated_at DESC
+            LIMIT 1
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
         .bind(message_id)
-        .bind(copied_message_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("message not found"))?;
+        if sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM mailbox_messages
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND mailbox_id = $3
+                  AND message_id = $4
+                  AND visibility <> 'expunged'
+            )
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
         .bind(target_mailbox_id)
-        .bind(modseq)
-        .bind(delivery_status)
-        .execute(&mut *tx)
-        .await?;
+        .bind(message_id)
+        .fetch_one(&mut *tx)
+        .await?
+        {
+            bail!("message already exists in target mailbox");
+        }
 
+        let membership_id = self
+            .allocate_mailbox_membership_in_tx(
+                &mut tx,
+                &tenant_id,
+                account_id,
+                target_mailbox_id,
+                message_id,
+                source.try_get("thread_id")?,
+                &source.try_get::<String, _>("received_at")?,
+                source.try_get("is_seen")?,
+                source.try_get("is_flagged")?,
+                target_role == "drafts",
+                "created",
+            )
+            .await?;
         sqlx::query(
             r#"
-            INSERT INTO message_bodies (
-                message_id, body_text, body_html_sanitized, participants_normalized,
-                language_code, content_hash, search_vector
+            INSERT INTO mail_search_documents (
+                tenant_id, account_id, mailbox_message_id, message_id,
+                subject_text, participants_visible, body_text, attachment_text, search_vector
             )
             SELECT
-                $2, body_text, body_html_sanitized, participants_normalized,
-                language_code, $3, search_vector
-            FROM message_bodies
-            WHERE message_id = $1
+                tenant_id, account_id, $3, message_id,
+                subject_text, participants_visible, body_text, attachment_text, search_vector
+            FROM mail_search_documents
+            WHERE tenant_id = $1 AND message_id = $2
+            ORDER BY updated_at DESC
+            LIMIT 1
             "#,
         )
+        .bind(&tenant_id)
         .bind(message_id)
-        .bind(copied_message_id)
-        .bind(format!("copy:{copied_message_id}"))
+        .bind(membership_id)
         .execute(&mut *tx)
         .await?;
-
-        let recipient_rows = sqlx::query(
-            r#"
-            SELECT kind, address, display_name, ordinal
-            FROM message_recipients
-            WHERE tenant_id = $1 AND message_id = $2
-            ORDER BY kind ASC, ordinal ASC
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(message_id)
-        .fetch_all(&mut *tx)
-        .await?;
-        for row in recipient_rows {
-            sqlx::query(
-                r#"
-                INSERT INTO message_recipients (id, tenant_id, message_id, kind, address, display_name, ordinal)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                "#,
-            )
-            .bind(Uuid::new_v4())
-            .bind(&tenant_id)
-            .bind(copied_message_id)
-            .bind(row.try_get::<String, _>("kind")?)
-            .bind(row.try_get::<String, _>("address")?)
-            .bind(row.try_get::<Option<String>, _>("display_name")?)
-            .bind(row.try_get::<i32, _>("ordinal")?)
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        let bcc_rows = sqlx::query(
-            r#"
-            SELECT address, display_name, ordinal, metadata_scope
-            FROM message_bcc_recipients
-            WHERE tenant_id = $1 AND message_id = $2
-            ORDER BY ordinal ASC
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(message_id)
-        .fetch_all(&mut *tx)
-        .await?;
-        for row in bcc_rows {
-            sqlx::query(
-                r#"
-                INSERT INTO message_bcc_recipients (id, tenant_id, message_id, address, display_name, ordinal, metadata_scope)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                "#,
-            )
-            .bind(Uuid::new_v4())
-            .bind(&tenant_id)
-            .bind(copied_message_id)
-            .bind(row.try_get::<String, _>("address")?)
-            .bind(row.try_get::<Option<String>, _>("display_name")?)
-            .bind(row.try_get::<i32, _>("ordinal")?)
-            .bind(row.try_get::<String, _>("metadata_scope")?)
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        let attachment_rows = sqlx::query(
-            r#"
-            SELECT file_name, media_type, size_octets, blob_ref, extracted_text, attachment_blob_id
-            FROM attachments
-            WHERE tenant_id = $1 AND message_id = $2
-            ORDER BY file_name ASC
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(message_id)
-        .fetch_all(&mut *tx)
-        .await?;
-        for row in attachment_rows {
-            sqlx::query(
-                r#"
-                INSERT INTO attachments (
-                    id, tenant_id, message_id, file_name, media_type, size_octets,
-                    blob_ref, extracted_text, extracted_text_tsv, attachment_blob_id
-                )
-                VALUES (
-                    $1, $2, $3, $4, $5, $6,
-                    $7, $8, to_tsvector('simple', COALESCE($8, '')), $9
-                )
-                "#,
-            )
-            .bind(Uuid::new_v4())
-            .bind(&tenant_id)
-            .bind(copied_message_id)
-            .bind(row.try_get::<String, _>("file_name")?)
-            .bind(row.try_get::<String, _>("media_type")?)
-            .bind(row.try_get::<i64, _>("size_octets")?)
-            .bind(row.try_get::<String, _>("blob_ref")?)
-            .bind(row.try_get::<Option<String>, _>("extracted_text")?)
-            .bind(row.try_get::<Option<Uuid>, _>("attachment_blob_id")?)
-            .execute(&mut *tx)
-            .await?;
-        }
-
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         tx.commit().await?;
 
-        self.fetch_jmap_emails(account_id, &[copied_message_id])
+        self.fetch_jmap_emails(account_id, &[message_id])
             .await?
             .into_iter()
             .next()
@@ -283,7 +194,38 @@ impl Storage {
             .next()
             .ok_or_else(|| anyhow::anyhow!("message not found"))?;
 
-        let target_mailbox = sqlx::query(
+        let mut tx = self.pool.begin().await?;
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+        let source = sqlx::query(
+            r#"
+            SELECT id, mailbox_id, imap_uid, is_seen, is_flagged
+            FROM mailbox_messages
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND message_id = $3
+              AND visibility = 'visible'
+            ORDER BY updated_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("message not found"))?;
+        let source_mailbox_id: Uuid = source.try_get("mailbox_id")?;
+        if source_mailbox_id == target_mailbox_id {
+            return self
+                .fetch_jmap_emails(account_id, &[message_id])
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("moved message not found"));
+        }
+        let target_role = sqlx::query_scalar::<_, String>(
             r#"
             SELECT role
             FROM mailboxes
@@ -294,38 +236,63 @@ impl Storage {
         .bind(&tenant_id)
         .bind(account_id)
         .bind(target_mailbox_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        let target_role = target_mailbox
-            .ok_or_else(|| anyhow::anyhow!("target mailbox not found"))?
-            .try_get::<String, _>("role")?;
-        let delivery_status = if target_role == "drafts" {
-            "draft"
-        } else {
-            "stored"
-        };
-
-        let mut tx = self.pool.begin().await?;
-        let modseq = self
-            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
-            .await?;
-        let moved = sqlx::query(
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("target mailbox not found"))?;
+        let target_uid: i64 = sqlx::query_scalar(
             r#"
-            UPDATE messages
-            SET
-                mailbox_id = $4,
-                imap_uid = nextval('message_imap_uid_seq'),
-                imap_modseq = $5,
-                delivery_status = $6
+            UPDATE mailboxes
+            SET uid_next = uid_next + 1,
+                total_messages = total_messages + 1,
+                unread_messages = unread_messages + CASE WHEN $4 THEN 0 ELSE 1 END,
+                modseq = GREATEST(modseq + 1, $5),
+                updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            RETURNING uid_next - 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(target_mailbox_id)
+        .bind(source.try_get::<bool, _>("is_seen")?)
+        .bind(modseq)
+        .fetch_one(&mut *tx)
+        .await?;
+        sqlx::query(
+            r#"
+            UPDATE mailboxes
+            SET total_messages = GREATEST(0, total_messages - 1),
+                unread_messages = GREATEST(0, unread_messages - CASE WHEN $4 THEN 0 ELSE 1 END),
+                modseq = GREATEST(modseq + 1, $5),
+                updated_at = NOW()
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
-        .bind(message_id)
-        .bind(target_mailbox_id)
+        .bind(source_mailbox_id)
+        .bind(source.try_get::<bool, _>("is_seen")?)
         .bind(modseq)
-        .bind(delivery_status)
+        .execute(&mut *tx)
+        .await?;
+        let moved = sqlx::query(
+            r#"
+            UPDATE mailbox_messages
+            SET mailbox_id = $4,
+                imap_uid = $5,
+                modseq = $6,
+                is_draft = $7,
+                updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(source.try_get::<Uuid, _>("id")?)
+        .bind(target_mailbox_id)
+        .bind(target_uid)
+        .bind(modseq)
+        .bind(target_role == "drafts")
         .execute(&mut *tx)
         .await?;
         if moved.rows_affected() == 0 {
@@ -333,6 +300,26 @@ impl Storage {
         }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            Some(target_mailbox_id),
+            "mailbox_message",
+            source.try_get("id")?,
+            "moved",
+            modseq,
+            &principals,
+            serde_json::json!({
+                "messageId": message_id,
+                "sourceMailboxId": source_mailbox_id,
+                "targetMailboxId": target_mailbox_id,
+                "imapUid": target_uid
+            }),
+        )
+        .await?;
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         tx.commit().await?;
 
@@ -365,14 +352,16 @@ impl Storage {
         let modseq = self
             .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
             .await?;
-        let updated = sqlx::query(
+        let rows = sqlx::query(
             r#"
-            UPDATE messages
-            SET
-                unread = COALESCE($4, unread),
-                flagged = COALESCE($5, flagged),
-                imap_modseq = $6
-            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            UPDATE mailbox_messages
+            SET is_seen = CASE WHEN $4::bool IS NULL THEN is_seen ELSE NOT $4 END,
+                is_flagged = COALESCE($5, is_flagged),
+                modseq = $6,
+                updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
+              AND visibility = 'visible'
+            RETURNING id, mailbox_id, imap_uid
             "#,
         )
         .bind(&tenant_id)
@@ -381,13 +370,33 @@ impl Storage {
         .bind(unread)
         .bind(flagged)
         .bind(modseq)
-        .execute(&mut *tx)
+        .fetch_all(&mut *tx)
         .await?;
-        if updated.rows_affected() == 0 {
+        if rows.is_empty() {
             bail!("message not found");
         }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        for row in rows {
+            Self::insert_mail_change_log_in_tx(
+                &mut tx,
+                &tenant_id,
+                Some(account_id),
+                Some(row.try_get("mailbox_id")?),
+                "mailbox_message",
+                row.try_get("id")?,
+                "updated",
+                modseq,
+                &principals,
+                serde_json::json!({
+                    "messageId": message_id,
+                    "imapUid": row.try_get::<i64, _>("imap_uid")?
+                }),
+            )
+            .await?;
+        }
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         tx.commit().await?;
 
@@ -422,7 +431,6 @@ impl Storage {
 
         let message_id = Uuid::new_v4();
         let thread_id = Uuid::new_v4();
-        let preview = preview_text(&input.body_text);
         let recipients = input
             .to
             .iter()
@@ -434,85 +442,81 @@ impl Storage {
             &crate::normalize_email(&input.from_address),
             &recipients,
         );
-        let delivery_status = if target_role == "drafts" {
-            "draft"
-        } else {
-            "stored"
-        };
 
         let mut tx = self.pool.begin().await?;
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         self.ensure_account_exists(&mut tx, &tenant_id, input.account_id)
             .await?;
-        let modseq = self
-            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, input.account_id)
+        let domain_id = self
+            .load_account_domain_id_in_tx(&mut tx, &tenant_id, input.account_id)
+            .await?;
+        let raw_message = format!(
+            "From: {}\r\nSubject: {}\r\n\r\n{}",
+            crate::normalize_email(&input.from_address),
+            input.subject,
+            input.body_text
+        );
+        let blob_id = self
+            .store_message_blob_in_tx(
+                &mut tx,
+                &tenant_id,
+                domain_id,
+                "raw_message",
+                "message/rfc822",
+                raw_message.as_bytes(),
+            )
             .await?;
         sqlx::query(
             r#"
             INSERT INTO messages (
-                id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                imap_modseq, received_at, sent_at, from_display, from_address, sender_display,
-                sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
-                preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
-                submission_source, delivery_status
+                id, tenant_id, domain_id, blob_id, internet_message_id, message_hash,
+                normalized_subject, sent_at, received_at, size_octets, has_attachments
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, NOW(), NULL, $8, $9, $10,
-                $11, $12, $13, $14, $15, FALSE, FALSE, FALSE, $16, $17,
-                $18, $19
+                $7, NULL, NOW(), $8, FALSE
             )
             "#,
         )
         .bind(message_id)
         .bind(&tenant_id)
-        .bind(input.account_id)
-        .bind(input.mailbox_id)
-        .bind(thread_id)
+        .bind(domain_id)
+        .bind(blob_id)
         .bind(input.internet_message_id)
-        .bind(modseq)
-        .bind(input.from_display)
-        .bind(crate::normalize_email(&input.from_address))
-        .bind(input.sender_display)
-        .bind(input.sender_address.map(|value| crate::normalize_email(&value)))
-        .bind(SenderAuthorizationKind::SelfSend.as_str())
-        .bind(input.submitted_by_account_id)
+        .bind(sha256_hex(raw_message.as_bytes()))
         .bind(crate::normalize_subject(&input.subject))
-        .bind(preview)
         .bind(input.size_octets.max(0))
-        .bind(input.mime_blob_ref)
-        .bind(input.source)
-        .bind(delivery_status)
         .execute(&mut *tx)
+        .await?;
+
+        self.upsert_message_body_in_tx(
+            &mut tx,
+            &tenant_id,
+            domain_id,
+            message_id,
+            &input.body_text,
+            input.body_html_sanitized.as_deref(),
+        )
         .await?;
 
         sqlx::query(
             r#"
-            INSERT INTO message_bodies (
-                message_id, body_text, body_html_sanitized, participants_normalized,
-                language_code, content_hash, search_vector
-            )
-            VALUES ($1, $2, $3, $4, NULL, $5, to_tsvector('simple', $6))
+            INSERT INTO message_recipients (id, tenant_id, message_id, role, address, display_name, ordinal)
+            VALUES ($1, $2, $3, 'from', $4, $5, 0)
             "#,
         )
+        .bind(Uuid::new_v4())
+        .bind(&tenant_id)
         .bind(message_id)
-        .bind(&input.body_text)
-        .bind(input.body_html_sanitized)
-        .bind(&participants)
-        .bind(format!("import:{message_id}"))
-        .bind(format!(
-            "{} {} {}",
-            crate::normalize_subject(&input.subject),
-            input.body_text,
-            participants
-        ))
+        .bind(crate::normalize_email(&input.from_address))
+        .bind(input.from_display.as_deref())
         .execute(&mut *tx)
         .await?;
 
         for (ordinal, recipient) in input.to.iter().enumerate() {
             sqlx::query(
                 r#"
-                INSERT INTO message_recipients (id, tenant_id, message_id, kind, address, display_name, ordinal)
+                INSERT INTO message_recipients (id, tenant_id, message_id, role, address, display_name, ordinal)
                 VALUES ($1, $2, $3, 'to', $4, $5, $6)
                 "#,
             )
@@ -528,7 +532,7 @@ impl Storage {
         for (ordinal, recipient) in input.cc.iter().enumerate() {
             sqlx::query(
                 r#"
-                INSERT INTO message_recipients (id, tenant_id, message_id, kind, address, display_name, ordinal)
+                INSERT INTO message_recipients (id, tenant_id, message_id, role, address, display_name, ordinal)
                 VALUES ($1, $2, $3, 'cc', $4, $5, $6)
                 "#,
             )
@@ -544,7 +548,7 @@ impl Storage {
         for (ordinal, recipient) in input.bcc.iter().enumerate() {
             sqlx::query(
                 r#"
-                INSERT INTO message_bcc_recipients (id, tenant_id, message_id, address, display_name, ordinal, metadata_scope)
+                INSERT INTO protected_bcc_recipients (id, tenant_id, message_id, address, display_name, ordinal, metadata_scope)
                 VALUES ($1, $2, $3, $4, $5, $6, 'audit-compliance')
                 "#,
             )
@@ -564,6 +568,33 @@ impl Storage {
             input.account_id,
             message_id,
             &input.attachments,
+        )
+        .await?;
+        let membership_id = self
+            .allocate_mailbox_membership_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                input.mailbox_id,
+                message_id,
+                thread_id,
+                "",
+                true,
+                false,
+                target_role == "drafts",
+                "created",
+            )
+            .await?;
+        Self::upsert_mail_search_document_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            membership_id,
+            message_id,
+            &crate::normalize_subject(&input.subject),
+            &participants,
+            &input.body_text,
+            "",
         )
         .await?;
 
