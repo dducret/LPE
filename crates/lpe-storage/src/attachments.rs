@@ -39,6 +39,7 @@ impl Storage {
 
         for (ordinal, attachment) in attachments.iter().enumerate() {
             let attachment_id = Uuid::new_v4();
+            let content_id = normalize_attachment_content_id(attachment.content_id.as_deref());
             let blob = self
                 .store_attachment_blob_in_tx(
                     tx,
@@ -68,7 +69,7 @@ impl Storage {
             .bind(ordinal as i32)
             .bind(attachment.media_type.trim())
             .bind(attachment_disposition(attachment.disposition.as_deref()))
-            .bind(attachment.content_id.as_deref().map(str::trim))
+            .bind(content_id.as_deref())
             .bind(attachment.file_name.trim())
             .bind(attachment.blob_bytes.len() as i64)
             .bind(blob.id)
@@ -93,7 +94,7 @@ impl Storage {
             .bind(blob.id)
             .bind(attachment.file_name.trim())
             .bind(attachment_disposition(attachment.disposition.as_deref()))
-            .bind(attachment.content_id.as_deref().map(str::trim))
+            .bind(content_id.as_deref())
             .bind(ordinal as i32)
             .bind(attachment.blob_bytes.len() as i64)
             .execute(&mut **tx)
@@ -218,6 +219,14 @@ fn attachment_disposition(value: Option<&str>) -> &'static str {
     }
 }
 
+fn normalize_attachment_content_id(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .map(|value| value.trim_matches(['<', '>']).trim())
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
 pub(crate) fn attachment_kind(media_type: &str, name: &str) -> String {
     let lower_media = media_type.to_lowercase();
     let lower_name = name.to_lowercase();
@@ -275,7 +284,7 @@ fn media_type_label(media_type: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::supports_attachment_text_extraction;
+    use super::{normalize_attachment_content_id, supports_attachment_text_extraction};
 
     #[test]
     fn extraction_queue_scope_is_limited_to_document_text_formats() {
@@ -300,5 +309,15 @@ mod tests {
             "text/plain",
             "notes.txt"
         ));
+    }
+
+    #[test]
+    fn attachment_content_id_is_normalized_for_lookup() {
+        assert_eq!(
+            normalize_attachment_content_id(Some(" <logo@example.test> ")).as_deref(),
+            Some("logo@example.test")
+        );
+        assert_eq!(normalize_attachment_content_id(Some(" <> ")), None);
+        assert_eq!(normalize_attachment_content_id(None), None);
     }
 }

@@ -473,6 +473,7 @@ impl ImapStore for FakeStore {
             size_octets: source.size_octets,
             internet_message_id: source.internet_message_id,
             delivery_status: "stored".to_string(),
+            mime_parts: source.mime_parts,
         };
         emails.push(copied.clone());
         Box::pin(async move { Ok(copied) })
@@ -577,6 +578,7 @@ impl ImapStore for FakeStore {
             size_octets: input.size_octets,
             internet_message_id: input.internet_message_id,
             delivery_status: "draft".to_string(),
+            mime_parts: Vec::new(),
         });
         let account_id = self.login.account_id;
         Box::pin(async move {
@@ -653,6 +655,7 @@ impl ImapStore for FakeStore {
             size_octets: input.size_octets,
             internet_message_id: input.internet_message_id,
             delivery_status: "stored".to_string(),
+            mime_parts: Vec::new(),
         };
         emails.push(message.clone());
         Box::pin(async move { Ok(message) })
@@ -2318,6 +2321,7 @@ fn email(
         size_octets: 64,
         internet_message_id: Some(format!("<{}@example.test>", id)),
         delivery_status: "stored".to_string(),
+        mime_parts: Vec::new(),
     }
 }
 

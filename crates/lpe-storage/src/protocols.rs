@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{anyhow, bail, Result};
 use serde::Serialize;
 use serde_json::Value;
@@ -118,6 +120,19 @@ pub struct ImapEmail {
     pub size_octets: i64,
     pub internet_message_id: Option<String>,
     pub delivery_status: String,
+    pub mime_parts: Vec<ImapMimePart>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ImapMimePart {
+    pub part_path: String,
+    pub content_type: String,
+    pub content_disposition: Option<String>,
+    pub content_id: Option<String>,
+    pub file_name: Option<String>,
+    pub transfer_encoding: Option<String>,
+    pub charset_name: Option<String>,
+    pub size_octets: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1251,6 +1266,55 @@ impl Storage {
         .fetch_all(&self.pool)
         .await?;
 
+        let part_rows = sqlx::query(
+            r#"
+            SELECT
+                mp.message_id,
+                mp.part_path,
+                mp.content_type,
+                mp.content_disposition,
+                mp.content_id,
+                mp.file_name,
+                mp.transfer_encoding,
+                mp.charset_name,
+                mp.size_octets
+            FROM mime_parts mp
+            WHERE mp.tenant_id = $1
+              AND mp.message_id = ANY($2)
+              AND EXISTS (
+                  SELECT 1
+                  FROM mailbox_messages mm
+                  WHERE mm.tenant_id = mp.tenant_id
+                    AND mm.account_id = $3
+                    AND mm.message_id = mp.message_id
+                    AND mm.visibility = 'visible'
+              )
+            ORDER BY mp.message_id ASC, mp.ordinal ASC, mp.part_path ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(&message_ids)
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut mime_parts_by_message: HashMap<Uuid, Vec<ImapMimePart>> = HashMap::new();
+        for part in part_rows {
+            let message_id: Uuid = part.try_get("message_id")?;
+            mime_parts_by_message
+                .entry(message_id)
+                .or_default()
+                .push(ImapMimePart {
+                    part_path: part.try_get("part_path")?,
+                    content_type: part.try_get("content_type")?,
+                    content_disposition: part.try_get("content_disposition")?,
+                    content_id: part.try_get("content_id")?,
+                    file_name: part.try_get("file_name")?,
+                    transfer_encoding: part.try_get("transfer_encoding")?,
+                    charset_name: part.try_get("charset_name")?,
+                    size_octets: part.try_get("size_octets")?,
+                });
+        }
+
         rows.into_iter()
             .map(|row| {
                 let uid = u32::try_from(row.imap_uid)
@@ -1308,6 +1372,7 @@ impl Storage {
                     size_octets: row.size_octets,
                     internet_message_id: row.internet_message_id,
                     delivery_status: row.delivery_status,
+                    mime_parts: mime_parts_by_message.remove(&row.id).unwrap_or_default(),
                 })
             })
             .collect()
@@ -2417,7 +2482,7 @@ impl Storage {
             WHERE a.tenant_id = $1
               AND a.account_id = $2
               AND a.message_id = $3
-              AND lower(a.content_id) = lower($4)
+              AND lower(btrim(btrim(a.content_id), '<>')) = lower($4)
               AND EXISTS (
                   SELECT 1
                   FROM mailbox_messages mm

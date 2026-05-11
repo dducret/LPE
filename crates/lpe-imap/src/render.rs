@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use lpe_storage::{ImapEmail, ImapMailboxState, JmapEmailAddress, JmapMailbox};
+use lpe_storage::{ImapEmail, ImapMailboxState, ImapMimePart, JmapEmailAddress, JmapMailbox};
 
 use crate::{parse::tokenize, MessageRefKind, SelectedMailbox};
 
@@ -620,11 +620,27 @@ fn render_single_address(display_name: Option<&str>, address: &str) -> String {
 
 fn render_bodystructure(email: &ImapEmail) -> String {
     let body = render_body_bodystructure(email);
-    if email.has_attachments {
+    let attachment_parts = email
+        .mime_parts
+        .iter()
+        .filter(|part| imap_attachment_part(part))
+        .collect::<Vec<_>>();
+    if !attachment_parts.is_empty() {
         format!(
             "({} {} \"MIXED\" (\"BOUNDARY\" \"{}\") NIL NIL)",
             body,
-            render_generic_attachment_bodystructure(),
+            attachment_parts
+                .iter()
+                .map(|part| render_attachment_bodystructure(part))
+                .collect::<Vec<_>>()
+                .join(" "),
+            mixed_boundary(email)
+        )
+    } else if email.has_attachments {
+        format!(
+            "({} {} \"MIXED\" (\"BOUNDARY\" \"{}\") NIL NIL)",
+            body,
+            render_fallback_attachment_bodystructure(),
             mixed_boundary(email)
         )
     } else {
@@ -655,9 +671,134 @@ fn render_text_bodystructure(value: &str, subtype: &str) -> String {
     )
 }
 
-fn render_generic_attachment_bodystructure() -> String {
+fn render_attachment_bodystructure(part: &ImapMimePart) -> String {
+    let (type_name, subtype) = split_content_type(&part.content_type);
+    let parameters = render_content_type_parameters(part);
+    let encoding = part
+        .transfer_encoding
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("BASE64")
+        .to_ascii_uppercase();
+    format!(
+        "({} {} {} {} {} {} {} NIL {} NIL)",
+        nstring(Some(&type_name)),
+        nstring(Some(&subtype)),
+        parameters,
+        nstring(part.content_id.as_deref()),
+        "NIL",
+        nstring(Some(&encoding)),
+        part.size_octets.max(0),
+        render_disposition(part),
+    )
+}
+
+fn render_fallback_attachment_bodystructure() -> String {
     "(\"APPLICATION\" \"OCTET-STREAM\" NIL NIL NIL \"BASE64\" 0 NIL (\"ATTACHMENT\" NIL) NIL)"
         .to_string()
+}
+
+fn imap_attachment_part(part: &ImapMimePart) -> bool {
+    part.content_disposition
+        .as_deref()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "attachment" | "inline"
+            )
+        })
+        .unwrap_or(false)
+        || part
+            .file_name
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        || part
+            .content_id
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn split_content_type(content_type: &str) -> (String, String) {
+    let media_type = content_type
+        .split(';')
+        .next()
+        .unwrap_or("application/octet-stream")
+        .trim();
+    let (type_name, subtype) = media_type
+        .split_once('/')
+        .unwrap_or(("application", "octet-stream"));
+    (
+        imap_media_token(type_name, "APPLICATION"),
+        imap_media_token(subtype, "OCTET-STREAM"),
+    )
+}
+
+fn imap_media_token(value: &str, fallback: &str) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        fallback.to_string()
+    } else {
+        value.to_ascii_uppercase()
+    }
+}
+
+fn render_content_type_parameters(part: &ImapMimePart) -> String {
+    let mut parameters = Vec::new();
+    if let Some(charset) = part
+        .charset_name
+        .as_deref()
+        .or_else(|| content_type_parameter(&part.content_type, "charset"))
+        .filter(|value| !value.trim().is_empty())
+    {
+        parameters.push(("CHARSET", charset.trim().to_string()));
+    }
+    if let Some(file_name) = part
+        .file_name
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        parameters.push(("NAME", file_name.trim().to_string()));
+    }
+    if parameters.is_empty() {
+        return "NIL".to_string();
+    }
+    format!(
+        "({})",
+        parameters
+            .into_iter()
+            .map(|(name, value)| format!("{} {}", nstring(Some(name)), nstring(Some(&value))))
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
+}
+
+fn content_type_parameter<'a>(content_type: &'a str, name: &str) -> Option<&'a str> {
+    content_type.split(';').skip(1).find_map(|parameter| {
+        let (key, value) = parameter.trim().split_once('=')?;
+        if key.trim().eq_ignore_ascii_case(name) {
+            Some(value.trim().trim_matches('"'))
+        } else {
+            None
+        }
+    })
+}
+
+fn render_disposition(part: &ImapMimePart) -> String {
+    let disposition = part
+        .content_disposition
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("attachment")
+        .to_ascii_uppercase();
+    let parameters = part
+        .file_name
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(|file_name| format!("(\"FILENAME\" {})", nstring(Some(file_name))))
+        .unwrap_or_else(|| "NIL".to_string());
+    format!("({} {})", nstring(Some(&disposition)), parameters)
 }
 
 fn nstring(value: Option<&str>) -> String {
@@ -992,7 +1133,7 @@ pub(crate) fn first_unseen_sequence(selected: &SelectedMailbox) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{render_fetch_response, FetchAttributes, FetchItem};
-    use lpe_storage::ImapEmail;
+    use lpe_storage::{ImapEmail, ImapMimePart};
     use uuid::Uuid;
 
     #[test]
@@ -1023,6 +1164,7 @@ mod tests {
             size_octets: 4,
             internet_message_id: None,
             delivery_status: "stored".to_string(),
+            mime_parts: Vec::new(),
         };
 
         let response = String::from_utf8(
@@ -1071,6 +1213,7 @@ mod tests {
             size_octets: 4,
             internet_message_id: None,
             delivery_status: "stored".to_string(),
+            mime_parts: Vec::new(),
         };
         email.to.push(lpe_storage::JmapEmailAddress {
             address: "recipient@example.test".to_string(),
@@ -1129,6 +1272,7 @@ mod tests {
             size_octets: 4,
             internet_message_id: None,
             delivery_status: "stored".to_string(),
+            mime_parts: Vec::new(),
         };
 
         let response = String::from_utf8(
@@ -1181,6 +1325,16 @@ mod tests {
             size_octets: 4,
             internet_message_id: None,
             delivery_status: "stored".to_string(),
+            mime_parts: vec![ImapMimePart {
+                part_path: "attachment.1".to_string(),
+                content_type: "image/png".to_string(),
+                content_disposition: Some("inline".to_string()),
+                content_id: Some("logo@example.test".to_string()),
+                file_name: Some("logo.png".to_string()),
+                transfer_encoding: Some("base64".to_string()),
+                charset_name: None,
+                size_octets: 128,
+            }],
         };
 
         let response = String::from_utf8(
@@ -1198,6 +1352,11 @@ mod tests {
 
         assert!(response.contains("\"ALTERNATIVE\""));
         assert!(response.contains("\"MIXED\""));
-        assert!(response.contains("\"ATTACHMENT\""));
+        assert!(response.contains("\"INLINE\""));
+        assert!(response.contains("\"logo@example.test\""));
+        assert!(response.contains("\"IMAGE\" \"PNG\""));
+        assert!(response.contains("\"NAME\" \"logo.png\""));
+        assert!(response.contains("NIL \"BASE64\" 128 NIL"));
+        assert!(response.contains("\"FILENAME\" \"logo.png\""));
     }
 }
