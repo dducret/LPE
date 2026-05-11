@@ -19,6 +19,10 @@ submission, rights, search, contact, calendar, task, blob, and sync state. They
 must not introduce protocol-local canonical stores, search indexes, `Sent`,
 `Drafts`, or `Outbox` behavior.
 
+IMAP and JMAP discovery are scoped to their own implemented endpoints. Publishing
+either surface must not promote Exchange-style MAPI autodiscover, which remains a
+separate opt-in compatibility gate.
+
 ## IMAP
 
 IMAP is a mailbox compatibility layer. It exposes mail folders, messages,
@@ -66,9 +70,9 @@ contacts, calendars, tasks, blobs, push, and submission over canonical LPE state
 | `MUST` | Core request handling | Request batching, method-call ordering, result references, created-id references, and method-level errors must follow JMAP Core semantics. |
 | `MUST` | Mailbox data | `Mailbox/get`, `Mailbox/query`, `Mailbox/changes`, and `Mailbox/set` where exposed must use canonical mailbox state and roles. |
 | `MUST` | Email read and query | `Email/get`, `Email/query`, `Email/changes`, and `Email/queryChanges` must read canonical messages, threads, keywords, mailbox membership, text and HTML body values, body sizes, blobs, and state tokens. Compatibility protocol projections, including IMAP body fetch and MAPI body streams, must not maintain divergent body data. |
-| `MUST` | Email write/import/copy | `Email/set`, `Email/import`, and `Email/copy` must mutate canonical messages, including text and HTML body values, and validate uploaded content before persistence. Compatibility draft/write paths such as MAPI pending-message body streams must feed the same canonical message/draft model, while read-only projections must reject mutation with protocol-specific errors instead of silently forking state. |
+| `MUST` | Email write/import/copy | `Email/set`, `Email/import`, and `Email/copy` must mutate canonical messages, including text and HTML body values, and validate uploaded content before persistence. Compatibility draft/write paths such as MAPI pending-message body streams and ICS imported-message save flows must feed the same canonical message/draft model, while read-only projections must reject mutation with protocol-specific errors instead of silently forking state. |
 | `MUST` | Drafts | Draft creation and update must persist in canonical `Drafts`; no JMAP-local draft store is allowed. |
-| `MUST` | Submission | `EmailSubmission/set` must submit through canonical LPE submission, create the authoritative `Sent` copy before relay or handoff, and never bypass LPE-CT for transport. |
+| `MUST` | Submission | `EmailSubmission/set` must submit through canonical LPE submission, create the authoritative `Sent` copy before relay or handoff, and never bypass LPE-CT for transport. Compatibility transport/spooler probes must not create IMAP-local or JMAP-local submission queues, Outbox state, or advisory event stores. |
 | `MUST` | Blob upload/download/copy | Blob methods and endpoints must use canonical blob storage, attachment deduplication, permissions, and validation. |
 | `MUST` | Threads and snippets | `Thread/*` and `SearchSnippet/get` must be derived from canonical message/search state and must not expose `Bcc`. |
 | `MUST` | Push and reconnect | WebSocket and event-stream push must resume from canonical push state or fall back to safe full state when replay is unavailable. |
@@ -79,6 +83,7 @@ contacts, calendars, tasks, blobs, push, and submission over canonical LPE state
 | `SHOULD` | Identity management | `Identity/*` should reflect canonical account identities, delegation, and sender permissions. |
 | `SHOULD` | Vacation response | `VacationResponse/*` should be implemented only when backed by canonical sieve/vacation state. |
 | `SHOULD` | MDN and parse helpers | Add message disposition notification and parse behavior when backed by canonical message/submission rules. |
+| `SHOULD` | Filtering and rules | Any future JMAP filtering or rule surface must use canonical LPE filtering state. Compatibility rule probes and deferred-action message updates must not create IMAP-local or JMAP-local rule state. |
 | `SHOULD` | Advanced search and sort | Expand filters, sort comparators, and pagination only through canonical search/query primitives. |
 | `SHOULD` | Cross-account copy | Support only when canonical rights and blob/mailbox ownership rules permit it. |
 | `SHOULD` | Import/export MIME fidelity | Preserve raw message fidelity, attachment references, charsets, and recipient metadata without leaking protected fields. |
@@ -96,14 +101,17 @@ contacts, calendars, tasks, blobs, push, and submission over canonical LPE state
 
 | Data | Canonical owner | IMAP mapping | JMAP mapping |
 | --- | --- | --- | --- |
-| Mailboxes and roles | Core LPE mailbox state | `LIST`, `XLIST`, `STATUS`, `SELECT`, `EXAMINE` | `Mailbox/*` |
+| Mailboxes and roles | Core LPE mailbox state | `LIST`, `XLIST`, `STATUS`, `SELECT`, `EXAMINE`; compatibility receive-folder and folder move/copy probes must map back to canonical mailbox roles rather than IMAP-local routing or hierarchy state | `Mailbox/*`; compatibility receive-folder and folder move/copy probes must map back to canonical mailbox roles rather than JMAP-local routing or hierarchy state |
 | Messages and MIME bodies | Core LPE message state | `FETCH`, `UID FETCH`, `APPEND`; body and HTML variants are canonical projections, not IMAP-local data | `Email/*`, upload/download; text and HTML body values are canonical projections reused by MAPI body streams |
 | Flags and keywords | Core LPE message state | system flags and keywords | `keywords` |
 | Drafts | Core LPE draft/mailbox state | `APPEND` to canonical drafts; delete/move through canonical mutations | `Email/set` in canonical `Drafts` |
-| Sent mail | Core LPE submission state | visible as canonical `Sent`; not created by IMAP send | `EmailSubmission/set` creates canonical `Sent` |
+| Sent mail | Core LPE submission state | visible as canonical `Sent`; not created by IMAP send; compatibility transport/spooler probes do not create IMAP-local Outbox or queue state | `EmailSubmission/set` creates canonical `Sent`; compatibility transport/spooler probes do not create JMAP-local Outbox or queue state |
 | Attachments and blobs | Core LPE blob state | MIME body fetch/import | Blob endpoints and `Email` body parts |
 | Search | Core LPE search state | `SEARCH`, `UID SEARCH` without `Bcc` | `Email/query`, `SearchSnippet/get` without `Bcc` |
-| Change/sync state | Core LPE change and push state | UID/mod-sequence/IDLE refresh | `changes`, `queryChanges`, push |
+| Change/sync state | Core LPE change and push state | UID/mod-sequence/IDLE refresh; compatibility sync/version and local-replica checkpoint probes must not create IMAP-local state | `changes`, `queryChanges`, push; compatibility sync/version and local-replica checkpoint probes must not create JMAP-local state |
+| Compatibility table views | Core LPE mailbox/message/attachment projections | IMAP list/status/fetch views and MAPI table set/query/status/reset probes must validate the selected canonical view instead of reporting success for unrelated object handles | JMAP mailbox/message/blob query projections and MAPI table set/query/status/reset probes must validate the selected canonical view instead of reporting success for unrelated object handles |
+| Public-folder compatibility probes | Core LPE mailbox/public-folder state when implemented | Private-mailbox public-folder ghost checks may return non-ghosted compatibility metadata, but replica topology probes must not create IMAP-local public-folder state | Private-mailbox public-folder ghost checks may return non-ghosted compatibility metadata, but replica topology probes must not create JMAP-local public-folder state |
+| Filtering and rules | Core LPE filtering/rule state | IMAP has no canonical rule store; compatibility rule probes must not create IMAP-local rule or deferred-action state | Future JMAP filtering surfaces must use canonical rule state; compatibility rule probes must not create JMAP-local rule or deferred-action state |
 | Rights and shared visibility | Core LPE rights state | shared folders only when rights-backed | delegated/shared accounts and objects |
 | Contacts/calendars/tasks | Core LPE collaboration state | ignored | JMAP collaboration methods where exposed |
 | Client discovery | Autoconfiguration policy | IMAP may be published only as implemented mailbox access, with client `SMTP` only when real authenticated submission exists | JMAP publishes only JMAP endpoints; Exchange/MAPI discovery remains separately gated and opt-in |
