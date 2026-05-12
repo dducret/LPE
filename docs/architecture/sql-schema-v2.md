@@ -173,9 +173,14 @@ remain downloadable but not indexed.
 `storage_pools` and `blob_placements` record where durable attachment and
 MIME-part blobs are stored, with the current database-backed pool still reading
 bytes from `blobs.blob_bytes`. Raw RFC 5322 message blobs remain
-database-backed initially and do not require placement rows. Schema v2 still
-treats PostgreSQL as the authoritative metadata store. Policy changes record
-intent for future writes only and do not implicitly migrate existing blobs.
+database-backed initially and do not require placement rows. Durable attachment
+and MIME-part `BlobStore` read/stat/verify paths require an active
+database-backed placement row; a missing active placement is a storage-layer
+failure, not a missing mailbox or message. Schema v2 still treats PostgreSQL as
+the authoritative metadata store. Policy changes record intent for future writes
+only and do not implicitly migrate existing blobs. Milestone 2 does not
+implement cloud storage, object storage, migration workers, admin policy UI, or
+mailbox-level storage policy.
 Lifecycle rows include update timestamps and worker-oriented indexes for Magika
 validation, async extraction, and retry scheduling.
 The schema enforces lifecycle timestamp consistency: completed Magika validation

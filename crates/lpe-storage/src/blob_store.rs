@@ -1,9 +1,11 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Postgres, Row};
 use uuid::Uuid;
 
 use crate::sha256_hex;
+
+const POSTGRES_PRIMARY_STORAGE_POOL_ID: Uuid = Uuid::from_u128(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -90,11 +92,21 @@ impl PostgresBlobStore {
         .fetch_optional(&mut **tx)
         .await?
         {
+            let blob_id = row.try_get("id")?;
+            let size_octets = row.try_get("size_octets")?;
+            self.ensure_database_placement_in_tx(
+                tx,
+                &request,
+                blob_id,
+                &content_sha256,
+                size_octets,
+            )
+            .await?;
             return Ok(StoredBlobRef {
-                id: row.try_get("id")?,
+                id: blob_id,
                 domain_id: request.domain_id,
                 content_sha256,
-                size_octets: row.try_get("size_octets")?,
+                size_octets,
                 created: false,
             });
         }
@@ -124,6 +136,15 @@ impl PostgresBlobStore {
         .execute(&mut **tx)
         .await?;
 
+        self.ensure_database_placement_in_tx(
+            tx,
+            &request,
+            blob_id,
+            &content_sha256,
+            request.bytes.len() as i64,
+        )
+        .await?;
+
         Ok(StoredBlobRef {
             id: blob_id,
             domain_id: request.domain_id,
@@ -131,6 +152,37 @@ impl PostgresBlobStore {
             size_octets: request.bytes.len() as i64,
             created: true,
         })
+    }
+
+    async fn ensure_database_placement_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        request: &PutBlobRequest<'_>,
+        blob_id: Uuid,
+        content_sha256: &str,
+        size_octets: i64,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO blob_placements (
+                id, tenant_id, domain_id, blob_id, blob_kind, storage_pool_id,
+                placement_status, verified_content_sha256, verified_size_octets, verified_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, NOW())
+            ON CONFLICT DO NOTHING
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(request.tenant_id)
+        .bind(request.domain_id)
+        .bind(blob_id)
+        .bind(request.kind.as_str())
+        .bind(POSTGRES_PRIMARY_STORAGE_POOL_ID)
+        .bind(content_sha256)
+        .bind(size_octets)
+        .execute(&mut **tx)
+        .await?;
+        Ok(())
     }
 
     pub(crate) async fn read_durable_blob(
@@ -143,12 +195,24 @@ impl PostgresBlobStore {
     ) -> Result<Option<StoredBlobBytes>> {
         let row = sqlx::query(
             r#"
-            SELECT id, media_type, size_octets, content_sha256, blob_bytes
-            FROM blobs
-            WHERE tenant_id = $1
-              AND domain_id = $2
-              AND blob_kind = $3
-              AND id = $4
+            SELECT b.id, b.media_type, b.size_octets, b.content_sha256, b.blob_bytes
+            FROM blobs b
+            JOIN blob_placements bp
+              ON bp.tenant_id = b.tenant_id
+             AND bp.domain_id = b.domain_id
+             AND bp.blob_id = b.id
+             AND bp.blob_kind = b.blob_kind
+             AND bp.verified_content_sha256 = b.content_sha256
+             AND bp.verified_size_octets = b.size_octets
+             AND bp.placement_status = 'active'
+            JOIN storage_pools sp
+              ON sp.id = bp.storage_pool_id
+             AND sp.pool_kind = 'postgres'
+             AND sp.status = 'active'
+            WHERE b.tenant_id = $1
+              AND b.domain_id = $2
+              AND b.blob_kind = $3
+              AND b.id = $4
             LIMIT 1
             "#,
         )
@@ -159,16 +223,21 @@ impl PostgresBlobStore {
         .fetch_optional(pool)
         .await?;
 
-        row.map(|row| {
-            Ok(StoredBlobBytes {
+        if let Some(row) = row {
+            return Ok(Some(StoredBlobBytes {
                 id: row.try_get("id")?,
                 media_type: row.try_get("media_type")?,
                 size_octets: row.try_get("size_octets")?,
                 content_sha256: row.try_get("content_sha256")?,
                 bytes: row.try_get("blob_bytes")?,
-            })
-        })
-        .transpose()
+            }));
+        }
+
+        self.error_if_durable_blob_lacks_active_placement(
+            pool, tenant_id, domain_id, kind, blob_id,
+        )
+        .await?;
+        Ok(None)
     }
 
     pub(crate) async fn stat_durable_blob(
@@ -181,12 +250,24 @@ impl PostgresBlobStore {
     ) -> Result<Option<StoredBlobStat>> {
         let row = sqlx::query(
             r#"
-            SELECT id, media_type, size_octets, content_sha256
-            FROM blobs
-            WHERE tenant_id = $1
-              AND domain_id = $2
-              AND blob_kind = $3
-              AND id = $4
+            SELECT b.id, b.media_type, b.size_octets, b.content_sha256
+            FROM blobs b
+            JOIN blob_placements bp
+              ON bp.tenant_id = b.tenant_id
+             AND bp.domain_id = b.domain_id
+             AND bp.blob_id = b.id
+             AND bp.blob_kind = b.blob_kind
+             AND bp.verified_content_sha256 = b.content_sha256
+             AND bp.verified_size_octets = b.size_octets
+             AND bp.placement_status = 'active'
+            JOIN storage_pools sp
+              ON sp.id = bp.storage_pool_id
+             AND sp.pool_kind = 'postgres'
+             AND sp.status = 'active'
+            WHERE b.tenant_id = $1
+              AND b.domain_id = $2
+              AND b.blob_kind = $3
+              AND b.id = $4
             LIMIT 1
             "#,
         )
@@ -197,15 +278,55 @@ impl PostgresBlobStore {
         .fetch_optional(pool)
         .await?;
 
-        row.map(|row| {
-            Ok(StoredBlobStat {
+        if let Some(row) = row {
+            return Ok(Some(StoredBlobStat {
                 id: row.try_get("id")?,
                 media_type: row.try_get("media_type")?,
                 size_octets: row.try_get("size_octets")?,
                 content_sha256: row.try_get("content_sha256")?,
-            })
-        })
-        .transpose()
+            }));
+        }
+
+        self.error_if_durable_blob_lacks_active_placement(
+            pool, tenant_id, domain_id, kind, blob_id,
+        )
+        .await?;
+        Ok(None)
+    }
+
+    async fn error_if_durable_blob_lacks_active_placement(
+        &self,
+        pool: &PgPool,
+        tenant_id: &str,
+        domain_id: Uuid,
+        kind: DurableBlobKind,
+        blob_id: Uuid,
+    ) -> Result<()> {
+        let exists = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM blobs
+                WHERE tenant_id = $1
+                  AND domain_id = $2
+                  AND blob_kind = $3
+                  AND id = $4
+            )
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(domain_id)
+        .bind(kind.as_str())
+        .bind(blob_id)
+        .fetch_one(pool)
+        .await?;
+
+        if exists {
+            return Err(anyhow!(
+                "durable blob {blob_id} has no active database placement"
+            ));
+        }
+        Ok(())
     }
 
     #[allow(dead_code)]
@@ -279,6 +400,23 @@ mod tests {
         .execute(storage.pool())
         .await
         .expect("insert domain");
+    }
+
+    async fn active_placement_count(storage: &Storage, tenant_id: Uuid, blob_id: Uuid) -> i64 {
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM blob_placements
+            WHERE tenant_id = $1
+              AND blob_id = $2
+              AND placement_status = 'active'
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(blob_id)
+        .fetch_one(storage.pool())
+        .await
+        .expect("count active placements")
     }
 
     #[tokio::test]
@@ -380,6 +518,18 @@ mod tests {
         assert_ne!(first.id, other_domain.id);
         assert_eq!(first.content_sha256, sha256_hex(bytes));
         assert_eq!(first.size_octets, bytes.len() as i64);
+        assert_eq!(
+            active_placement_count(&storage, tenant_id, first.id).await,
+            1
+        );
+        assert_eq!(
+            active_placement_count(&storage, tenant_id, mime_part.id).await,
+            1
+        );
+        assert_eq!(
+            active_placement_count(&storage, tenant_id, other_domain.id).await,
+            1
+        );
 
         let read = blob_store
             .read_durable_blob(
@@ -422,6 +572,29 @@ mod tests {
             )
             .await
             .expect("verify attachment blob"));
+        sqlx::query(
+            r#"
+            UPDATE blobs
+            SET blob_bytes = $1
+            WHERE tenant_id = $2 AND id = $3
+            "#,
+        )
+        .bind(b"tampered".as_slice())
+        .bind(tenant_id)
+        .bind(first.id)
+        .execute(storage.pool())
+        .await
+        .expect("tamper attachment blob bytes");
+        assert!(!blob_store
+            .verify_durable_blob(
+                storage.pool(),
+                &tenant,
+                domain_id,
+                DurableBlobKind::Attachment,
+                first.id,
+            )
+            .await
+            .expect("verify tampered attachment blob"));
         assert!(blob_store
             .read_durable_blob(
                 storage.pool(),
@@ -433,6 +606,61 @@ mod tests {
             .await
             .expect("read wrong-domain blob")
             .is_none());
+        sqlx::query(
+            r#"
+            DELETE FROM blob_placements
+            WHERE tenant_id = $1 AND blob_id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(first.id)
+        .execute(storage.pool())
+        .await
+        .expect("delete active placement");
+        assert_eq!(
+            active_placement_count(&storage, tenant_id, first.id).await,
+            0
+        );
+        for error in [
+            blob_store
+                .read_durable_blob(
+                    storage.pool(),
+                    &tenant,
+                    domain_id,
+                    DurableBlobKind::Attachment,
+                    first.id,
+                )
+                .await
+                .expect_err("read without active placement must fail")
+                .to_string(),
+            blob_store
+                .stat_durable_blob(
+                    storage.pool(),
+                    &tenant,
+                    domain_id,
+                    DurableBlobKind::Attachment,
+                    first.id,
+                )
+                .await
+                .expect_err("stat without active placement must fail")
+                .to_string(),
+            blob_store
+                .verify_durable_blob(
+                    storage.pool(),
+                    &tenant,
+                    domain_id,
+                    DurableBlobKind::Attachment,
+                    first.id,
+                )
+                .await
+                .expect_err("verify without active placement must fail")
+                .to_string(),
+        ] {
+            assert!(
+                error.contains("active database placement"),
+                "unexpected storage error: {error}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -490,6 +718,10 @@ mod tests {
         .execute(storage.pool())
         .await
         .expect("insert raw message blob");
+        assert_eq!(
+            active_placement_count(&storage, tenant_id, raw_blob_id).await,
+            0
+        );
         sqlx::query(
             r#"
             INSERT INTO messages (

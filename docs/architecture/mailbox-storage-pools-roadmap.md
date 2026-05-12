@@ -56,9 +56,10 @@ legal hold, and migration safety windows.
 ## Target Model
 
 `LPE` should treat physical storage as named storage pools behind a canonical
-blob layer. The implemented local/current `BlobStore` boundary is the first
-internal step toward this model; it does not by itself implement storage pools,
-placement metadata, cloud storage, or mailbox movement.
+blob layer. The implemented local/current `BlobStore` boundary now records
+database-backed storage pool and placement metadata for durable attachment and
+MIME-part blobs, but blob bytes still live in PostgreSQL and mailbox movement is
+not implemented.
 
 ```text
 PostgreSQL
@@ -84,9 +85,10 @@ Blob storage manager
 ```
 
 Mailboxes do not point to paths or buckets. Messages and MIME parts reference
-canonical blob ids. PostgreSQL remains the metadata authority. Once placement
-metadata exists, blob metadata points to one or more verified storage
-placements.
+canonical blob ids. PostgreSQL remains the metadata authority. Placement
+metadata points durable attachment and MIME-part blobs at the current
+database-backed pool only. Cloud, object storage, migration workers, and
+mailbox-level policy remain future milestones.
 
 ## Storage Policy Levels
 
@@ -177,6 +179,13 @@ Current non-goals for Milestone 1:
 
 Teach PostgreSQL where a blob is stored without moving mailbox state.
 
+Status: implemented for database-backed durable attachment and MIME-part blobs.
+`storage_pools` and `blob_placements` are metadata only in this milestone.
+Blob bytes still live in `blobs.blob_bytes`, and active database-backed
+placements are required for durable attachment and MIME-part `BlobStore`
+read/stat/verify paths. Raw RFC 5322 message blobs remain database-backed
+initially and do not require placement rows.
+
 Deliverables:
 
 - storage pool table
@@ -188,6 +197,8 @@ Deliverables:
   `retiring`, and `failed`
 - checksum and size verification fields
 - indexes for blob fetch and migration workers
+- no cloud backend, migration worker, admin UI, mailbox-level policy, or
+  automatic policy-triggered movement
 
 Verification:
 
@@ -195,6 +206,8 @@ Verification:
 - tests prove a message can fetch a blob through placement metadata
 - tests prove a missing active placement fails as a storage error, not as
   missing mailbox state
+- policy changes still record intent for future writes only and do not
+  implicitly migrate existing blobs
 
 ### Milestone 3: Online Migration Worker
 
