@@ -36,7 +36,10 @@ use crate::{
         JmapApiRequest, JmapApiResponse, JmapMethodCall, JmapMethodResponse, SessionDocument,
     },
     session,
-    state::{encode_state, encode_state_with_cursor, StateEntry},
+    state::{
+        changes_response_from_durable_with_cursor, changes_response_with_cursor, encode_state,
+        encode_state_with_cursor, state_cursor, DurableObjectChange, StateEntry,
+    },
     store::JmapStore,
     upload::{message_rfc822_bytes, JmapBlobId},
 };
@@ -535,7 +538,60 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
     pub(crate) async fn object_state(&self, account_id: Uuid, data_type: &str) -> Result<String> {
         let entries = self.object_state_entries(account_id, data_type).await?;
-        encode_state(account_id, data_type, entries)
+        let cursor = self
+            .store
+            .fetch_jmap_object_change_cursor(account_id, data_type)
+            .await?;
+        encode_state_with_cursor(account_id, data_type, entries, cursor)
+    }
+
+    pub(crate) async fn object_changes_response(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+        since_state: &str,
+        max_changes: Option<u64>,
+        entries: Vec<StateEntry>,
+    ) -> Result<Value> {
+        let cursor = self
+            .store
+            .fetch_jmap_object_change_cursor(account_id, data_type)
+            .await?;
+        if let Some(after_cursor) = state_cursor(account_id, data_type, since_state)? {
+            if let Some(changes) = self
+                .store
+                .replay_jmap_object_changes(
+                    account_id,
+                    data_type,
+                    after_cursor,
+                    crate::store::MAX_JMAP_MAIL_OBJECT_REPLAY_ROWS,
+                )
+                .await?
+            {
+                return changes_response_from_durable_with_cursor(
+                    account_id,
+                    data_type,
+                    since_state,
+                    max_changes,
+                    entries,
+                    cursor,
+                    changes
+                        .into_iter()
+                        .map(|change| DurableObjectChange {
+                            id: change.object_id.to_string(),
+                        })
+                        .collect(),
+                );
+            }
+        }
+        changes_response_with_cursor(
+            account_id,
+            data_type,
+            since_state,
+            max_changes,
+            entries,
+            cursor,
+        )
     }
 
     pub(crate) async fn mailbox_object_state(
@@ -594,7 +650,11 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let entries = self
             .email_submission_object_state_entries(account_id)
             .await?;
-        encode_state(account_id, "EmailSubmission", entries)
+        let cursor = self
+            .store
+            .fetch_jmap_object_change_cursor(account_id, "EmailSubmission")
+            .await?;
+        encode_state_with_cursor(account_id, "EmailSubmission", entries, cursor)
     }
 
     pub(crate) async fn email_submission_object_state_entries(

@@ -133,7 +133,6 @@ pub(crate) fn default_permissions_for_role(role: &str) -> Vec<String> {
             "policies",
             "security",
             "ai",
-            "antispam",
             "pst",
             "audit",
             "mail",
@@ -163,7 +162,7 @@ pub(crate) fn default_permissions_for_role(role: &str) -> Vec<String> {
             .into_iter()
             .map(ToString::to_string)
             .collect(),
-        "transport-operator" => vec!["dashboard", "antispam", "operations", "protocols"]
+        "transport-operator" => vec!["dashboard", "operations", "protocols"]
             .into_iter()
             .map(ToString::to_string)
             .collect(),

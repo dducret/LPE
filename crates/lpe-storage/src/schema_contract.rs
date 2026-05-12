@@ -1,6 +1,7 @@
 const SCHEMA: &str = include_str!("../sql/schema.sql");
 const CHANGE_STORAGE: &str = include_str!("change.rs");
 const COLLABORATION_STORAGE: &str = include_str!("collaboration.rs");
+const INBOUND_STORAGE: &str = include_str!("inbound.rs");
 const MESSAGE_OPS_STORAGE: &str = include_str!("message_ops.rs");
 const PROTOCOLS_STORAGE: &str = include_str!("protocols.rs");
 const SHARED_STORAGE: &str = include_str!("shared.rs");
@@ -16,6 +17,34 @@ fn assert_schema_contains_all(needles: &[&str]) {
             "schema.sql is missing expected collaboration contract fragment: {needle}"
         );
     }
+}
+
+fn table_definition(table_name: &str) -> &str {
+    let start = SCHEMA
+        .find(&format!("CREATE TABLE {table_name}"))
+        .unwrap_or_else(|| panic!("schema.sql is missing CREATE TABLE {table_name}"));
+    let rest = &SCHEMA[start..];
+    let end = rest.find("\n\nCREATE ").unwrap_or(rest.len());
+    &rest[..end]
+}
+
+fn assert_contains_before(haystack: &str, first: &str, second: &str, message: &str) {
+    let first_index = haystack
+        .find(first)
+        .unwrap_or_else(|| panic!("{message}: missing {first}"));
+    let second_index = haystack
+        .find(second)
+        .unwrap_or_else(|| panic!("{message}: missing {second}"));
+    assert!(first_index < second_index, "{message}");
+}
+
+fn function_body<'a>(source: &'a str, signature: &str) -> &'a str {
+    let start = source
+        .find(signature)
+        .unwrap_or_else(|| panic!("missing function signature: {signature}"));
+    let rest = &source[start..];
+    let next = rest.find("\n    pub ").unwrap_or(rest.len());
+    &rest[..next]
 }
 
 #[test]
@@ -153,6 +182,22 @@ fn grant_changes_emit_canonical_rights_journal_entries() {
 }
 
 #[test]
+fn grant_changes_emit_object_level_mail_change_log_entries() {
+    assert!(
+        COLLABORATION_STORAGE.contains("insert_mail_change_log_in_tx")
+            && COLLABORATION_STORAGE.contains("\"contact_book_grant\"")
+            && COLLABORATION_STORAGE.contains("\"calendar_grant\"")
+            && COLLABORATION_STORAGE.contains("\"task_list_grant\"")
+            && TASKS_STORAGE.contains("insert_mail_change_log_in_tx")
+            && TASKS_STORAGE.contains("\"task_list_grant\"")
+            && SUBMISSION_STORAGE.contains("insert_mail_change_log_in_tx")
+            && SUBMISSION_STORAGE.contains("\"mailbox_delegation_grant\"")
+            && SUBMISSION_STORAGE.contains("\"sender_right\""),
+        "grant upsert/delete paths must write object-level mail_change_log entries"
+    );
+}
+
+#[test]
 fn collaboration_changes_and_tombstones_are_object_level() {
     assert_schema_contains_all(&[
         "CREATE TABLE mail_change_log",
@@ -201,6 +246,55 @@ fn collaboration_deletes_write_tombstones() {
                 >= 2,
         "mailbox and task-list physical deletes must write tombstones before removing rows"
     );
+    assert_contains_before(
+        function_body(MESSAGE_OPS_STORAGE, "pub async fn delete_client_contact"),
+        "insert_collaboration_tombstone_in_tx",
+        "DELETE FROM contacts",
+        "contact delete must write a tombstone before physical deletion",
+    );
+    assert_contains_before(
+        function_body(MESSAGE_OPS_STORAGE, "pub async fn delete_client_event"),
+        "insert_collaboration_tombstone_in_tx",
+        "DELETE FROM calendar_events",
+        "calendar event delete must write a tombstone before physical deletion",
+    );
+    assert_contains_before(
+        function_body(TASKS_STORAGE, "pub async fn delete_client_task"),
+        "insert_collaboration_tombstone_in_tx",
+        "DELETE FROM tasks",
+        "task delete must write a tombstone before physical deletion",
+    );
+    assert!(
+        TASKS_STORAGE.contains("let mut affected_account_ids = grantee_account_ids.clone();")
+            && TASKS_STORAGE.contains("&affected_account_ids")
+            && TASKS_STORAGE.contains("&grantee_account_ids"),
+        "task deletes must include shared task-list grantees in tombstones and access changes"
+    );
+}
+
+#[test]
+fn attachment_metadata_changes_write_mail_change_log_entries() {
+    assert!(
+        PROTOCOLS_STORAGE.contains("pub async fn delete_message_attachment")
+            && PROTOCOLS_STORAGE.contains("pub async fn add_message_attachment")
+            && PROTOCOLS_STORAGE.contains("\"attachment\"")
+            && PROTOCOLS_STORAGE.contains("\"attachmentId\"")
+            && PROTOCOLS_STORAGE.contains("\"created\"")
+            && PROTOCOLS_STORAGE.contains("\"destroyed\""),
+        "attachment metadata changes must write durable mail_change_log entries"
+    );
+}
+
+#[test]
+fn existing_draft_updates_write_mailbox_message_change_log_entries() {
+    assert!(
+        SUBMISSION_STORAGE.contains("existing_draft_update")
+            && SUBMISSION_STORAGE.contains("insert_mail_change_log_in_tx")
+            && SUBMISSION_STORAGE.contains("\"mailbox_message\"")
+            && SUBMISSION_STORAGE.contains("\"updated\"")
+            && SUBMISSION_STORAGE.contains("\"threadId\""),
+        "existing draft updates must write durable mailbox_message change rows"
+    );
 }
 
 #[test]
@@ -228,17 +322,92 @@ fn imap_uid_state_is_mailbox_scoped_without_global_sequence() {
             && !MESSAGE_OPS_STORAGE.contains("MAX(imap_uid)"),
         "storage must allocate UIDNEXT from mailbox uid_next, not visible max UID"
     );
+    assert!(
+        SHARED_STORAGE.contains("pub(crate) fn allocate_uid_validity() -> i64")
+            && ADMIN_STORAGE.contains("allocate_uid_validity()")
+            && INBOUND_STORAGE.contains("allocate_uid_validity()")
+            && PROTOCOLS_STORAGE.contains("allocate_uid_validity()"),
+        "new mailbox paths must share the mailbox UIDVALIDITY allocator"
+    );
+    assert!(
+        !ADMIN_STORAGE.contains("fn mailbox_uid_validity")
+            && !INBOUND_STORAGE.contains("fn mailbox_uid_validity")
+            && !PROTOCOLS_STORAGE.contains("fn mailbox_uid_validity"),
+        "new mailbox paths must not carry protocol-local UIDVALIDITY helpers"
+    );
 }
 
 #[test]
 fn jmap_mail_changes_have_durable_replay_path() {
     assert!(
         PROTOCOLS_STORAGE.contains("pub async fn replay_jmap_mail_object_changes")
+            && PROTOCOLS_STORAGE.contains("pub async fn replay_jmap_object_changes")
             && PROTOCOLS_STORAGE.contains("FROM mail_change_log")
             && PROTOCOLS_STORAGE.contains("sourceMailboxId")
-            && PROTOCOLS_STORAGE.contains("messageId"),
-        "JMAP Mailbox/changes and Email/changes need a durable mail_change_log replay path"
+            && PROTOCOLS_STORAGE.contains("messageId")
+            && PROTOCOLS_STORAGE.contains("threadId")
+            && PROTOCOLS_STORAGE.contains("\"Thread\"")
+            && PROTOCOLS_STORAGE.contains("\"EmailSubmission\"")
+            && PROTOCOLS_STORAGE.contains("jmap_object_replay_kinds"),
+        "JMAP Mailbox/changes, Email/changes, Thread/changes, EmailSubmission/changes, and collaboration changes need durable mail_change_log replay paths"
     );
+    assert!(
+        PROTOCOLS_STORAGE.contains("fn jmap_replay_object_id")
+            && PROTOCOLS_STORAGE.contains("contact_book_grant")
+            && PROTOCOLS_STORAGE.contains("calendar_grant")
+            && PROTOCOLS_STORAGE.contains("task_list_grant")
+            && PROTOCOLS_STORAGE.contains("collectionId"),
+        "collection-level JMAP changes must replay grant rows through durable collection ids"
+    );
+}
+
+#[test]
+fn bcc_is_absent_from_search_log_cursor_and_ai_projection_tables() {
+    assert!(
+        SCHEMA.contains("CREATE TABLE protected_bcc_recipients"),
+        "Bcc must remain in the explicit protected metadata table"
+    );
+    for table_name in [
+        "mail_search_documents",
+        "document_projections",
+        "document_chunks",
+        "mail_change_log",
+        "jmap_query_states",
+        "activesync_sync_cursors",
+        "mapi_sync_checkpoints",
+    ] {
+        let definition = table_definition(table_name).to_ascii_lowercase();
+        assert!(
+            !definition.contains("bcc"),
+            "{table_name} must not carry Bcc columns or Bcc-named payloads"
+        );
+    }
+}
+
+#[test]
+fn protocol_cursor_tables_do_not_store_canonical_content() {
+    for table_name in [
+        "jmap_query_states",
+        "activesync_sync_cursors",
+        "mapi_sync_checkpoints",
+    ] {
+        let definition = table_definition(table_name).to_ascii_lowercase();
+        for forbidden in [
+            "subject_text",
+            "body_text",
+            "attachment_text",
+            "search_vector",
+            "raw_mime",
+            "message_rfc822",
+            "participants_visible",
+            "protected_bcc",
+        ] {
+            assert!(
+                !definition.contains(forbidden),
+                "{table_name} must stay a protocol cursor/checkpoint table, not a canonical content store"
+            );
+        }
+    }
 }
 
 #[test]

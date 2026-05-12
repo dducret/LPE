@@ -878,13 +878,14 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         } else {
             Vec::new()
         };
-        changes_response(
+        self.object_changes_response(
             account_id,
             "EmailSubmission",
             &arguments.since_state,
             arguments.max_changes,
             entries,
         )
+        .await
     }
 
     pub(crate) async fn handle_identity_get(
@@ -1155,6 +1156,33 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .mail_object_state_entries(&account_access, "Thread")
             .await?;
         let cursor = self.store.fetch_jmap_mail_change_cursor(account_id).await?;
+        if let Some(after_cursor) = state_cursor(account_id, "Thread", &arguments.since_state)? {
+            if let Some(changes) = self
+                .store
+                .replay_jmap_mail_object_changes(
+                    account_id,
+                    "Thread",
+                    after_cursor,
+                    crate::store::MAX_JMAP_MAIL_OBJECT_REPLAY_ROWS,
+                )
+                .await?
+            {
+                return changes_response_from_durable_with_cursor(
+                    account_id,
+                    "Thread",
+                    &arguments.since_state,
+                    arguments.max_changes,
+                    entries,
+                    cursor,
+                    changes
+                        .into_iter()
+                        .map(|change| DurableObjectChange {
+                            id: change.object_id.to_string(),
+                        })
+                        .collect(),
+                );
+            }
+        }
         changes_response_with_cursor(
             account_id,
             "Thread",

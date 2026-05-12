@@ -349,6 +349,16 @@ mod tests {
     }
 
     #[test]
+    fn antispam_console_writes_are_lpe_ct_owned() {
+        let console_source = include_str!("console.rs");
+
+        assert!(console_source.contains("perimeter filtering settings are managed by LPE-CT"));
+        assert!(console_source.contains("perimeter filtering rules are managed by LPE-CT"));
+        assert!(!console_source.contains("update-antispam-settings"));
+        assert!(!console_source.contains("create-antispam-rule"));
+    }
+
+    #[test]
     #[ignore = "env-sensitive"]
     fn integration_secret_rejects_missing_or_weak_values() {
         let _guard = env_lock();

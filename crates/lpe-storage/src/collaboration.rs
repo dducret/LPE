@@ -2,12 +2,12 @@ use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use sqlx::Postgres;
+use sqlx::{Postgres, Row};
 
 use crate::{
-    normalize_email, AuditEntryInput, CollaborationCollectionRow, CollaborationGrantRow, Storage,
-    UpsertClientContactInput, UpsertClientEventInput, DEFAULT_COLLECTION_ID,
-    DEFAULT_TASK_LIST_ROLE,
+    normalize_email, AuditEntryInput, CanonicalChangeCategory, CollaborationCollectionRow,
+    CollaborationGrantRow, Storage, UpsertClientContactInput, UpsertClientEventInput,
+    DEFAULT_COLLECTION_ID, DEFAULT_TASK_LIST_ROLE,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -156,11 +156,11 @@ impl Storage {
             bail!("self-delegation is not supported");
         }
 
-        match input.kind {
+        let (grant_id, collection_id, object_kind, category) = match input.kind {
             CollaborationResourceKind::Contacts => {
                 let collection_id =
                     Self::ensure_default_contact_book_in_tx(&mut tx, &tenant_id, owner.id).await?;
-                sqlx::query(
+                let grant_id = sqlx::query_scalar::<_, Uuid>(
                     r#"
                     INSERT INTO contact_book_grants (
                         id, tenant_id, contact_book_id, owner_account_id, grantee_account_id,
@@ -174,6 +174,7 @@ impl Storage {
                         may_delete = EXCLUDED.may_delete,
                         may_share = EXCLUDED.may_share,
                         updated_at = NOW()
+                    RETURNING id
                     "#,
                 )
                 .bind(Uuid::new_v4())
@@ -185,13 +186,19 @@ impl Storage {
                 .bind(input.may_write)
                 .bind(input.may_delete)
                 .bind(input.may_share)
-                .execute(&mut *tx)
+                .fetch_one(&mut *tx)
                 .await?;
+                (
+                    grant_id,
+                    collection_id,
+                    "contact_book_grant",
+                    CanonicalChangeCategory::Contacts,
+                )
             }
             CollaborationResourceKind::Calendar => {
                 let collection_id =
                     Self::ensure_default_calendar_in_tx(&mut tx, &tenant_id, owner.id).await?;
-                sqlx::query(
+                let grant_id = sqlx::query_scalar::<_, Uuid>(
                     r#"
                     INSERT INTO calendar_grants (
                         id, tenant_id, calendar_id, owner_account_id, grantee_account_id,
@@ -205,6 +212,7 @@ impl Storage {
                         may_delete = EXCLUDED.may_delete,
                         may_share = EXCLUDED.may_share,
                         updated_at = NOW()
+                    RETURNING id
                     "#,
                 )
                 .bind(Uuid::new_v4())
@@ -216,13 +224,19 @@ impl Storage {
                 .bind(input.may_write)
                 .bind(input.may_delete)
                 .bind(input.may_share)
-                .execute(&mut *tx)
+                .fetch_one(&mut *tx)
                 .await?;
+                (
+                    grant_id,
+                    collection_id,
+                    "calendar_grant",
+                    CanonicalChangeCategory::Calendar,
+                )
             }
             CollaborationResourceKind::Tasks => {
                 let task_list =
                     Self::ensure_default_task_list(&mut tx, &tenant_id, owner.id).await?;
-                sqlx::query(
+                let grant_id = sqlx::query_scalar::<_, Uuid>(
                     r#"
                     INSERT INTO task_list_grants (
                         id, tenant_id, task_list_id, owner_account_id, grantee_account_id,
@@ -236,6 +250,7 @@ impl Storage {
                         may_delete = EXCLUDED.may_delete,
                         may_share = EXCLUDED.may_share,
                         updated_at = NOW()
+                    RETURNING id
                     "#,
                 )
                 .bind(Uuid::new_v4())
@@ -247,10 +262,35 @@ impl Storage {
                 .bind(input.may_write)
                 .bind(input.may_delete)
                 .bind(input.may_share)
-                .execute(&mut *tx)
+                .fetch_one(&mut *tx)
                 .await?;
+                (
+                    grant_id,
+                    task_list.id,
+                    "task_list_grant",
+                    CanonicalChangeCategory::Tasks,
+                )
             }
-        }
+        };
+        let modseq = self
+            .allocate_account_modseq_in_tx(&mut tx, &tenant_id, owner.id, category.as_str())
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(owner.id),
+            None,
+            object_kind,
+            grant_id,
+            "updated",
+            modseq,
+            &[owner.id, grantee.id],
+            serde_json::json!({
+                "collectionId": collection_id,
+                "granteeId": grantee.id
+            }),
+        )
+        .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         Self::emit_collaboration_grant_change(
@@ -273,9 +313,9 @@ impl Storage {
     ) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
         let mut tx = self.pool.begin().await?;
-        let deleted = match kind {
+        let (grant_id, collection_id, object_kind, category) = match kind {
             CollaborationResourceKind::Contacts => {
-                sqlx::query(
+                let row = sqlx::query(
                     r#"
                 DELETE FROM contact_book_grants g
                 USING contact_books b
@@ -286,16 +326,25 @@ impl Storage {
                   AND b.owner_account_id = g.owner_account_id
                   AND b.id = g.contact_book_id
                   AND b.role = 'contacts'
+                RETURNING g.id, g.contact_book_id
                 "#,
                 )
                 .bind(&tenant_id)
                 .bind(owner_account_id)
                 .bind(grantee_account_id)
-                .execute(&mut *tx)
-                .await?
+                .fetch_optional(&mut *tx)
+                .await?;
+                row.map(|row| -> Result<_> {
+                    Ok((
+                        row.try_get::<Uuid, _>("id")?,
+                        row.try_get::<Uuid, _>("contact_book_id")?,
+                        "contact_book_grant",
+                        CanonicalChangeCategory::Contacts,
+                    ))
+                })
             }
             CollaborationResourceKind::Calendar => {
-                sqlx::query(
+                let row = sqlx::query(
                     r#"
                 DELETE FROM calendar_grants g
                 USING calendars c
@@ -306,16 +355,25 @@ impl Storage {
                   AND c.owner_account_id = g.owner_account_id
                   AND c.id = g.calendar_id
                   AND c.role = 'calendar'
+                RETURNING g.id, g.calendar_id
                 "#,
                 )
                 .bind(&tenant_id)
                 .bind(owner_account_id)
                 .bind(grantee_account_id)
-                .execute(&mut *tx)
-                .await?
+                .fetch_optional(&mut *tx)
+                .await?;
+                row.map(|row| -> Result<_> {
+                    Ok((
+                        row.try_get::<Uuid, _>("id")?,
+                        row.try_get::<Uuid, _>("calendar_id")?,
+                        "calendar_grant",
+                        CanonicalChangeCategory::Calendar,
+                    ))
+                })
             }
             CollaborationResourceKind::Tasks => {
-                sqlx::query(
+                let row = sqlx::query(
                     r#"
                 DELETE FROM task_list_grants g
                 USING task_lists l
@@ -326,20 +384,47 @@ impl Storage {
                   AND l.owner_account_id = g.owner_account_id
                   AND l.id = g.task_list_id
                   AND l.role = $4
+                RETURNING g.id, g.task_list_id
                 "#,
                 )
                 .bind(&tenant_id)
                 .bind(owner_account_id)
                 .bind(grantee_account_id)
                 .bind(DEFAULT_TASK_LIST_ROLE)
-                .execute(&mut *tx)
-                .await?
+                .fetch_optional(&mut *tx)
+                .await?;
+                row.map(|row| -> Result<_> {
+                    Ok((
+                        row.try_get::<Uuid, _>("id")?,
+                        row.try_get::<Uuid, _>("task_list_id")?,
+                        "task_list_grant",
+                        CanonicalChangeCategory::Tasks,
+                    ))
+                })
             }
-        };
-
-        if deleted.rows_affected() == 0 {
-            bail!("collaboration grant not found");
         }
+        .transpose()?
+        .ok_or_else(|| anyhow!("collaboration grant not found"))?;
+
+        let modseq = self
+            .allocate_account_modseq_in_tx(&mut tx, &tenant_id, owner_account_id, category.as_str())
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(owner_account_id),
+            None,
+            object_kind,
+            grant_id,
+            "destroyed",
+            modseq,
+            &[owner_account_id, grantee_account_id],
+            serde_json::json!({
+                "collectionId": collection_id,
+                "granteeId": grantee_account_id
+            }),
+        )
+        .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         Self::emit_collaboration_grant_change(

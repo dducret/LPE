@@ -21,7 +21,7 @@ use crate::{
         CalendarEventSetArguments, CalendarGetArguments, CalendarQueryArguments, ChangesArguments,
         EntityQuerySort, QueryChangesArguments,
     },
-    state::{changes_response, query_changes_response, query_position, StateEntry},
+    state::{query_changes_response, query_position, StateEntry},
     validation::{validate_calendar_event_filter, validate_entity_sort},
     JmapService, DEFAULT_GET_LIMIT, MAX_QUERY_LIMIT,
 };
@@ -166,13 +166,14 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 fingerprint: super::collection_state_fingerprint(&collection),
             })
             .collect::<Vec<_>>();
-        changes_response(
+        self.object_changes_response(
             account_id,
             "Calendar",
             &arguments.since_state,
             arguments.max_changes,
             entries,
         )
+        .await
     }
 
     pub(crate) async fn handle_calendar_event_get(
@@ -308,13 +309,14 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let entries = self
             .object_state_entries(account_id, "CalendarEvent")
             .await?;
-        changes_response(
+        self.object_changes_response(
             account_id,
             "CalendarEvent",
             &arguments.since_state,
             arguments.max_changes,
             entries,
         )
+        .await
     }
 
     pub(crate) async fn handle_calendar_event_set(

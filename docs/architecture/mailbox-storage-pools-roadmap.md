@@ -16,11 +16,21 @@ legal hold, and migration safety windows.
   mailbox membership, sync state, quotas, retention, and rights.
 - User-facing protocols continue to read and write canonical `LPE` state.
 - `LPE-CT` does not store canonical mailbox or collaboration state.
-- Blob bytes may live outside PostgreSQL once a documented blob storage
-  boundary exists.
+- Blob bytes may live outside PostgreSQL once placement metadata and non-database
+  storage backends are implemented. The current `BlobStore` boundary preserves
+  database-backed storage while keeping protocols independent from that detail.
 - Storage movement must be transparent to users and protocol clients.
 - Administrators should not need to know object keys or disk paths, but they
   must see policy, placement, health, migration progress, and risk.
+
+## Resolved Decisions
+
+| Decision | Outcome |
+| --- | --- |
+| RFC 5322 message blobs | Keep database-backed initially. Move attachment and MIME blob handling behind the storage boundary first. |
+| Storage policy evaluation | Evaluate storage policy at write time only. Policy changes do not trigger implicit immediate migration. |
+| Public-cloud encryption | Use the existing deployment secret model for the first public-cloud release. |
+| Mailbox-level policy | Defer mailbox-level policy until tenant, domain, and account policy are proven. |
 
 ## Success Criteria
 
@@ -46,7 +56,9 @@ legal hold, and migration safety windows.
 ## Target Model
 
 `LPE` should treat physical storage as named storage pools behind a canonical
-blob layer.
+blob layer. The implemented local/current `BlobStore` boundary is the first
+internal step toward this model; it does not by itself implement storage pools,
+placement metadata, cloud storage, or mailbox movement.
 
 ```text
 PostgreSQL
@@ -72,7 +84,8 @@ Blob storage manager
 ```
 
 Mailboxes do not point to paths or buckets. Messages and MIME parts reference
-canonical blob ids. Blob metadata points to one or more verified storage
+canonical blob ids. PostgreSQL remains the metadata authority. Once placement
+metadata exists, blob metadata points to one or more verified storage
 placements.
 
 ## Storage Policy Levels
@@ -85,7 +98,6 @@ Storage policy should be assignable in this order of specificity:
 | Tenant | Business or compliance default |
 | Domain | Domain-specific storage and residency |
 | Account | VIP, archive, or high-volume account rules |
-| Mailbox | Exceptional mailbox placement only |
 
 Policy should describe intent, not vendor details:
 
@@ -95,6 +107,13 @@ Policy should describe intent, not vendor details:
 - migration window
 - retention/legal-hold behavior
 - maximum tolerated degraded time
+
+Policy is evaluated when new canonical blob bytes are written. Changing a
+policy records new intent for future writes; explicit migration jobs are
+required to move existing blobs.
+
+Mailbox-level policy remains deferred. The first admin surface should stop at
+platform, tenant, domain, and account policy.
 
 ## Phased Plan
 
@@ -120,19 +139,39 @@ Verification:
 
 Create one internal blob storage abstraction inside `lpe-storage`.
 
+Status: implemented for the local/current storage behavior. `lpe-storage`
+contains an internal `BlobStore` boundary for durable attachment blobs and the
+schema-supported MIME-part blob kind. The boundary supports put, read, stat, and
+checksum/size verification while continuing to store bytes in PostgreSQL.
+Protocol adapters continue to call canonical `lpe-storage` APIs and do not know
+about storage backends.
+
 Deliverables:
 
-- a minimal Rust trait or service boundary for put, read, stat, verify, and
-  delete-after-retention
-- a local storage implementation that preserves current behavior
-- tests proving current attachment and message flows still work
+- a minimal Rust service boundary for put, read, stat, and verify
+- a local/current storage implementation that preserves PostgreSQL-backed byte
+  storage
+- raw RFC 5322 message blobs remain database-backed initially
+- JMAP upload blobs remain expiring PostgreSQL staging objects, not durable
+  storage placements
+- tests proving current attachment, protocol fetch, and export flows still work
 - no cloud dependency yet
+- delete-after-retention remains deferred until retention, legal-hold, and
+  placement garbage-collection rules exist
 
 Verification:
 
 - `cargo test -p lpe-storage`
 - protocol tests that fetch attachments still pass
 - export tests still reconstruct messages with blobs
+
+Current non-goals for Milestone 1:
+
+- no storage-pool table
+- no blob-placement table
+- no non-database backend
+- no automatic movement of existing blobs when policy changes
+- no mailbox-visible movement semantics yet
 
 ### Milestone 2: Blob Placement Metadata
 
@@ -142,6 +181,9 @@ Deliverables:
 
 - storage pool table
 - blob placement table
+- placement metadata for attachment and MIME blobs first; raw RFC 5322 message
+  blob placement can remain database-backed until later evidence justifies
+  moving it
 - placement status values such as `active`, `copying`, `verified`,
   `retiring`, and `failed`
 - checksum and size verification fields
@@ -200,12 +242,14 @@ Deliverables:
 - admin API for storage pools and policies
 - migration status endpoints
 - health indicators for degraded pools and missing replicas
+- policy controls for platform, tenant, domain, and account levels only
 - admin UI list and right-side drawer following the default management pattern
 
 Verification:
 
 - tenant admins see only allowed tenant/domain/account policy controls
 - global admins can manage platform pools
+- mailbox-level policy is not exposed in the first admin release
 - UI exposes progress and risk without leaking secrets or provider internals
 
 ### Milestone 6: S3-Compatible Object Storage
@@ -216,6 +260,7 @@ Deliverables:
 
 - S3-compatible storage adapter
 - configuration and secret handling
+- encryption integrated with the existing deployment secret model
 - multipart upload/download policy where needed
 - integration tests gated by environment variables
 
@@ -232,6 +277,8 @@ Add AWS S3 or Azure Blob only when generic S3-compatible behavior is not enough.
 Deliverables:
 
 - provider-specific configuration
+- encryption integrated with the existing deployment secret model unless a
+  later architecture decision explicitly introduces a separate key hierarchy
 - provider health checks
 - documented durability and consistency assumptions
 - cloud-cost and egress warnings in operational docs
@@ -293,6 +340,8 @@ for lpe-storage.
 
 Constraints:
 - PostgreSQL remains the metadata authority.
+- Raw RFC 5322 message blobs remain database-backed initially.
+- Storage policy is evaluated at write time only.
 - Protocol adapters must not know storage backends.
 - Keep lib.rs as module declarations, re-exports, and minimal wiring only.
 - Do not add cloud support.
@@ -316,6 +365,7 @@ Implement the approved minimal BlobStore boundary in lpe-storage.
 
 Scope:
 - local/current storage behavior only
+- keep raw RFC 5322 message blobs database-backed initially
 - no S3, Azure, AWS, private cloud, or admin UI
 - no unrelated cleanup
 - no changes to protocol semantics
@@ -372,17 +422,18 @@ Do not document future S3/AWS/Azure implementation as complete.
 Verification:
 - docs consistently say PostgreSQL is metadata authority
 - docs consistently say blob bytes may be stored through the BlobStore boundary
+- docs consistently say raw RFC 5322 message blobs remain database-backed
+  initially
+- docs consistently say policy changes do not implicitly migrate existing blobs
 - docs do not claim mailbox movement is implemented unless tests prove it
 ```
 
-## Open Decisions
+## Deferred Decisions
 
-- Whether raw RFC 5322 message blobs should move to external blob storage in the
-  first implementation or remain database-backed until attachment blobs are
-  proven.
-- Whether storage policy is evaluated at write time only or can trigger
-  immediate migration when changed.
-- Whether public-cloud backends require a separate encryption key hierarchy or
-  can rely on the existing deployment secret model for the first release.
-- Whether mailbox-level policy is needed in the first admin release or should
-  wait until tenant/domain/account policy is proven.
+- When, if ever, raw RFC 5322 message blobs should move out of the database.
+- Whether policy changes should gain an optional explicit "create migration
+  plan" workflow after write-time policy behavior is proven.
+- Whether public-cloud backends need a separate encryption key hierarchy after
+  the existing deployment secret model is proven in restore drills.
+- Whether mailbox-level policy is needed after tenant, domain, and account
+  policy is proven.

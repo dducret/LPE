@@ -15,7 +15,7 @@ use crate::{
         ContactCardGetArguments, ContactCardQueryArguments, ContactCardQueryFilter,
         ContactCardSetArguments, EntityQuerySort, QueryChangesArguments,
     },
-    state::{changes_response, query_changes_response, query_position, StateEntry},
+    state::{query_changes_response, query_position, StateEntry},
     validation::{validate_contact_filter, validate_entity_sort},
     JmapService, DEFAULT_GET_LIMIT, MAX_QUERY_LIMIT,
 };
@@ -160,13 +160,14 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 fingerprint: super::collection_state_fingerprint(&collection),
             })
             .collect::<Vec<_>>();
-        changes_response(
+        self.object_changes_response(
             account_id,
             "AddressBook",
             &arguments.since_state,
             arguments.max_changes,
             entries,
         )
+        .await
     }
 
     pub(crate) async fn handle_contact_get(
@@ -304,13 +305,14 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let arguments: ChangesArguments = serde_json::from_value(arguments)?;
         let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
         let entries = self.object_state_entries(account_id, "ContactCard").await?;
-        changes_response(
+        self.object_changes_response(
             account_id,
             "ContactCard",
             &arguments.since_state,
             arguments.max_changes,
             entries,
         )
+        .await
     }
 
     pub(crate) async fn handle_contact_set(

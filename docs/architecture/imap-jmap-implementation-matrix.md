@@ -83,7 +83,7 @@ contacts, calendars, tasks, blobs, push, and submission over canonical LPE state
 | `SHOULD` | Identity management | `Identity/*` should reflect canonical account identities, delegation, and sender permissions. |
 | `SHOULD` | Vacation response | `VacationResponse/*` should be implemented only when backed by canonical sieve/vacation state. |
 | `SHOULD` | MDN and parse helpers | Add message disposition notification and parse behavior when backed by canonical message/submission rules. |
-| `SHOULD` | Filtering and rules | Any future JMAP filtering or rule surface must use canonical LPE filtering state. Compatibility rule probes and deferred-action message updates must not create IMAP-local or JMAP-local rule state. |
+| `SHOULD` | Mailbox filtering and rules | Any future JMAP mailbox-rule surface must use canonical core LPE mailbox rule state, such as Sieve-backed user rules. Perimeter filtering, antispam policy, quarantine retention, and quarantine actions remain LPE-CT-owned. Compatibility rule probes and deferred-action message updates must not create IMAP-local or JMAP-local rule state. |
 | `SHOULD` | Advanced search and sort | Expand filters, sort comparators, and pagination only through canonical search/query primitives. |
 | `SHOULD` | Cross-account copy | Support only when canonical rights and blob/mailbox ownership rules permit it. |
 | `SHOULD` | Import/export MIME fidelity | Preserve raw message fidelity, attachment references, charsets, and recipient metadata without leaking protected fields. |

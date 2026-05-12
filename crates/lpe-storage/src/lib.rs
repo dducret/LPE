@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod attachments;
 pub mod auth;
+mod blob_store;
 pub mod calendar;
 pub mod change;
 pub mod collaboration;

@@ -36,7 +36,25 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         let _ = account_id;
         Ok(None)
     }
+    async fn fetch_jmap_object_change_cursor(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+    ) -> Result<Option<i64>> {
+        let _ = (account_id, data_type);
+        Ok(None)
+    }
     async fn replay_jmap_mail_object_changes(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+        after_cursor: i64,
+        max_rows: u64,
+    ) -> Result<Option<Vec<JmapMailObjectChange>>> {
+        let _ = (account_id, data_type, after_cursor, max_rows);
+        Ok(None)
+    }
+    async fn replay_jmap_object_changes(
         &self,
         account_id: Uuid,
         data_type: &str,
@@ -316,6 +334,15 @@ impl JmapStore for Storage {
         self.fetch_jmap_mail_change_cursor(account_id).await
     }
 
+    async fn fetch_jmap_object_change_cursor(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+    ) -> Result<Option<i64>> {
+        self.fetch_jmap_object_change_cursor(account_id, data_type)
+            .await
+    }
+
     async fn replay_jmap_mail_object_changes(
         &self,
         account_id: Uuid,
@@ -324,6 +351,17 @@ impl JmapStore for Storage {
         max_rows: u64,
     ) -> Result<Option<Vec<JmapMailObjectChange>>> {
         self.replay_jmap_mail_object_changes(account_id, data_type, after_cursor, max_rows)
+            .await
+    }
+
+    async fn replay_jmap_object_changes(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+        after_cursor: i64,
+        max_rows: u64,
+    ) -> Result<Option<Vec<JmapMailObjectChange>>> {
+        self.replay_jmap_object_changes(account_id, data_type, after_cursor, max_rows)
             .await
     }
 

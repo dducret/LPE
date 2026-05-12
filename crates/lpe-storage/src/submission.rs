@@ -502,41 +502,69 @@ impl Storage {
             &input.attachments,
         )
         .await?;
-        let membership_id = if input.draft_message_id.is_some() {
-            sqlx::query_scalar::<_, Uuid>(
-                r#"
-                SELECT id
-                FROM mailbox_messages
-                WHERE tenant_id = $1
-                  AND account_id = $2
-                  AND mailbox_id = $3
-                  AND message_id = $4
-                  AND visibility = 'visible'
-                LIMIT 1
-                "#,
-            )
-            .bind(&tenant_id)
-            .bind(input.account_id)
-            .bind(draft_mailbox_id)
-            .bind(message_id)
-            .fetch_one(&mut *tx)
-            .await?
-        } else {
-            self.allocate_mailbox_membership_in_tx(
+        let (membership_id, membership_thread_id, existing_draft_update) =
+            if input.draft_message_id.is_some() {
+                let row = sqlx::query(
+                    r#"
+                    SELECT id, thread_id
+                    FROM mailbox_messages
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                      AND mailbox_id = $3
+                      AND message_id = $4
+                      AND visibility = 'visible'
+                    LIMIT 1
+                    "#,
+                )
+                .bind(&tenant_id)
+                .bind(input.account_id)
+                .bind(draft_mailbox_id)
+                .bind(message_id)
+                .fetch_one(&mut *tx)
+                .await?;
+                (
+                    row.try_get::<Uuid, _>("id")?,
+                    row.try_get::<Uuid, _>("thread_id")?,
+                    true,
+                )
+            } else {
+                let membership_id = self
+                    .allocate_mailbox_membership_in_tx(
+                        &mut tx,
+                        &tenant_id,
+                        input.account_id,
+                        draft_mailbox_id,
+                        message_id,
+                        thread_id,
+                        "",
+                        !unread,
+                        flagged,
+                        true,
+                        "created",
+                    )
+                    .await?;
+                (membership_id, thread_id, false)
+            };
+        if existing_draft_update {
+            let principals =
+                Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, input.account_id).await?;
+            Self::insert_mail_change_log_in_tx(
                 &mut tx,
                 &tenant_id,
-                input.account_id,
-                draft_mailbox_id,
-                message_id,
-                thread_id,
-                "",
-                !unread,
-                flagged,
-                true,
-                "created",
+                Some(input.account_id),
+                Some(draft_mailbox_id),
+                "mailbox_message",
+                membership_id,
+                "updated",
+                modseq,
+                &principals,
+                serde_json::json!({
+                    "messageId": message_id,
+                    "threadId": membership_thread_id
+                }),
             )
-            .await?
-        };
+            .await?;
+        }
         self.assign_message_attachments_membership_in_tx(
             &mut tx,
             &tenant_id,
@@ -610,7 +638,7 @@ impl Storage {
             bail!("self-delegation is not supported");
         }
 
-        sqlx::query(
+        let grant_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             INSERT INTO mailbox_delegation_grants (
                 id, tenant_id, owner_account_id, grantee_account_id, may_write
@@ -620,6 +648,7 @@ impl Storage {
             DO UPDATE SET
                 may_write = EXCLUDED.may_write,
                 updated_at = NOW()
+            RETURNING id
             "#,
         )
         .bind(Uuid::new_v4())
@@ -627,7 +656,27 @@ impl Storage {
         .bind(owner.id)
         .bind(grantee.id)
         .bind(input.may_write)
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, owner.id)
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(owner.id),
+            None,
+            "mailbox_delegation_grant",
+            grant_id,
+            "updated",
+            modseq,
+            &[owner.id, grantee.id],
+            serde_json::json!({
+                "granteeId": grantee.id,
+                "mayWrite": input.may_write
+            }),
+        )
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
@@ -647,23 +696,43 @@ impl Storage {
     ) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
         let mut tx = self.pool.begin().await?;
-        let deleted = sqlx::query(
+        let grant_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             DELETE FROM mailbox_delegation_grants
             WHERE tenant_id = $1
               AND owner_account_id = $2
               AND grantee_account_id = $3
+            RETURNING id
             "#,
         )
         .bind(&tenant_id)
         .bind(owner_account_id)
         .bind(grantee_account_id)
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await?;
 
-        if deleted.rows_affected() == 0 {
+        let Some(grant_id) = grant_id else {
             bail!("mailbox delegation grant not found");
-        }
+        };
+
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, owner_account_id)
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(owner_account_id),
+            None,
+            "mailbox_delegation_grant",
+            grant_id,
+            "destroyed",
+            modseq,
+            &[owner_account_id, grantee_account_id],
+            serde_json::json!({
+                "granteeId": grantee_account_id
+            }),
+        )
+        .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         Self::emit_mail_delegation_change(
@@ -739,7 +808,7 @@ impl Storage {
             bail!("self-delegation is not supported");
         }
 
-        sqlx::query(
+        let grant_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             INSERT INTO sender_rights (
                 id, tenant_id, owner_account_id, grantee_account_id, sender_right
@@ -748,6 +817,7 @@ impl Storage {
             ON CONFLICT (tenant_id, owner_account_id, grantee_account_id, sender_right)
             WHERE identity_id IS NULL
             DO UPDATE SET updated_at = NOW()
+            RETURNING id
             "#,
         )
         .bind(Uuid::new_v4())
@@ -755,7 +825,27 @@ impl Storage {
         .bind(owner.id)
         .bind(grantee.id)
         .bind(input.sender_right.as_str())
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, owner.id)
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(owner.id),
+            None,
+            "sender_right",
+            grant_id,
+            "updated",
+            modseq,
+            &[owner.id, grantee.id],
+            serde_json::json!({
+                "granteeId": grantee.id,
+                "senderRight": input.sender_right.as_str()
+            }),
+        )
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
@@ -776,7 +866,7 @@ impl Storage {
     ) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
         let mut tx = self.pool.begin().await?;
-        let deleted = sqlx::query(
+        let grant_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             DELETE FROM sender_rights
             WHERE tenant_id = $1
@@ -784,18 +874,39 @@ impl Storage {
               AND grantee_account_id = $3
               AND sender_right = $4
               AND identity_id IS NULL
+            RETURNING id
             "#,
         )
         .bind(&tenant_id)
         .bind(owner_account_id)
         .bind(grantee_account_id)
         .bind(sender_right.as_str())
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await?;
 
-        if deleted.rows_affected() == 0 {
+        let Some(grant_id) = grant_id else {
             bail!("sender delegation grant not found");
-        }
+        };
+
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, owner_account_id)
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(owner_account_id),
+            None,
+            "sender_right",
+            grant_id,
+            "destroyed",
+            modseq,
+            &[owner_account_id, grantee_account_id],
+            serde_json::json!({
+                "granteeId": grantee_account_id,
+                "senderRight": sender_right.as_str()
+            }),
+        )
+        .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         Self::emit_mail_delegation_change(
@@ -1357,6 +1468,28 @@ impl Storage {
                         .execute(&mut *tx)
                         .await?;
                     }
+                    let modseq = self
+                        .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, input.account_id)
+                        .await?;
+                    let principals =
+                        Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, input.account_id)
+                            .await?;
+                    Self::insert_mail_change_log_in_tx(
+                        &mut tx,
+                        &tenant_id,
+                        Some(input.account_id),
+                        None,
+                        "submission",
+                        outbound_queue_id,
+                        "created",
+                        modseq,
+                        &principals,
+                        serde_json::json!({
+                            "messageId": message_id,
+                            "status": "queued"
+                        }),
+                    )
+                    .await?;
                 }
                 CanonicalSubmissionPhase::DeleteSourceDraft => {
                     if let Some(draft_message_id) = input.draft_message_id {
@@ -1766,7 +1899,7 @@ impl Storage {
             .await?;
         let row = sqlx::query(
             r#"
-            SELECT mm.id, mm.mailbox_id, mm.imap_uid, mm.is_seen
+            SELECT mm.id, mm.mailbox_id, mm.thread_id, mm.imap_uid, mm.is_seen
             FROM mailbox_messages mm
             JOIN mailboxes mb
               ON mb.tenant_id = mm.tenant_id
@@ -1801,7 +1934,11 @@ impl Storage {
             "destroyed",
             modseq,
             &principals,
-            serde_json::json!({"messageId": message_id, "imapUid": imap_uid}),
+            serde_json::json!({
+                "messageId": message_id,
+                "threadId": row.try_get::<Uuid, _>("thread_id")?,
+                "imapUid": imap_uid
+            }),
         )
         .await?;
         sqlx::query(

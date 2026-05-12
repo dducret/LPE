@@ -57,6 +57,7 @@ struct FakeStore {
     canonical_change_cursor: Option<i64>,
     canonical_change_replay: CanonicalChangeReplay,
     jmap_mail_object_changes: Arc<Mutex<Option<Vec<JmapMailObjectChange>>>>,
+    jmap_object_changes: Arc<Mutex<Option<Vec<JmapMailObjectChange>>>>,
     persist_query_states: bool,
     query_states: Arc<Mutex<HashMap<Uuid, JmapStoredQueryState>>>,
 }
@@ -557,6 +558,18 @@ impl JmapStore for FakeStore {
         })
     }
 
+    async fn fetch_jmap_object_change_cursor(
+        &self,
+        _account_id: Uuid,
+        _data_type: &str,
+    ) -> Result<Option<i64>> {
+        Ok(if self.jmap_object_changes.lock().unwrap().is_some() {
+            self.canonical_change_cursor
+        } else {
+            None
+        })
+    }
+
     async fn replay_jmap_mail_object_changes(
         &self,
         _account_id: Uuid,
@@ -565,6 +578,16 @@ impl JmapStore for FakeStore {
         _max_rows: u64,
     ) -> Result<Option<Vec<JmapMailObjectChange>>> {
         Ok(self.jmap_mail_object_changes.lock().unwrap().clone())
+    }
+
+    async fn replay_jmap_object_changes(
+        &self,
+        _account_id: Uuid,
+        _data_type: &str,
+        _after_cursor: i64,
+        _max_rows: u64,
+    ) -> Result<Option<Vec<JmapMailObjectChange>>> {
+        Ok(self.jmap_object_changes.lock().unwrap().clone())
     }
 
     async fn save_jmap_query_state(
@@ -3062,6 +3085,54 @@ async fn email_changes_use_durable_log_ids_when_state_has_cursor() {
 }
 
 #[tokio::test]
+async fn thread_changes_use_durable_log_ids_when_state_has_cursor() {
+    let account_id = FakeStore::account().account_id;
+    let prior_state = encode_state_with_cursor(
+        account_id,
+        "Thread",
+        vec![StateEntry {
+            id: FakeStore::draft_email().thread_id.to_string(),
+            fingerprint: "old-thread".to_string(),
+        }],
+        Some(9),
+    )
+    .unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: vec![FakeStore::draft_email(), FakeStore::inbox_email()],
+        canonical_change_cursor: Some(10),
+        persist_query_states: true,
+        jmap_mail_object_changes: Arc::new(Mutex::new(Some(vec![JmapMailObjectChange {
+            cursor: 10,
+            object_id: FakeStore::draft_email().thread_id,
+            change_kind: "updated".to_string(),
+        }]))),
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Thread/changes".to_string(),
+                    json!({"sinceState": prior_state}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.method_responses[0].1["updated"],
+        json!([FakeStore::draft_email().thread_id.to_string()])
+    );
+}
+
+#[tokio::test]
 async fn mailbox_changes_use_durable_log_ids_when_state_has_cursor() {
     let account_id = FakeStore::account().account_id;
     let prior_state = encode_state_with_cursor(
@@ -4292,6 +4363,56 @@ async fn email_submission_changes_tracks_submission_rows() {
             .kind,
         "EmailSubmission"
     );
+}
+
+#[tokio::test]
+async fn email_submission_changes_use_durable_log_ids_when_state_has_cursor() {
+    let queued = FakeStore::email_submission();
+    let prior_state = encode_state_with_cursor(
+        FakeStore::account().account_id,
+        "EmailSubmission",
+        vec![],
+        Some(31),
+    )
+    .unwrap();
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        email_submissions: vec![queued.clone()],
+        canonical_change_cursor: Some(32),
+        jmap_object_changes: Arc::new(Mutex::new(Some(vec![JmapMailObjectChange {
+            cursor: 32,
+            object_id: queued.id,
+            change_kind: "created".to_string(),
+        }]))),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_SUBMISSION_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![JmapMethodCall(
+                    "EmailSubmission/changes".to_string(),
+                    json!({"sinceState": prior_state}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses[0].0, "EmailSubmission/changes");
+    assert_eq!(
+        response.method_responses[0].1["created"],
+        json!([queued.id.to_string()])
+    );
+    let decoded =
+        decode_state(response.method_responses[0].1["newState"].as_str().unwrap()).unwrap();
+    assert_eq!(decoded.cursor, Some(32));
 }
 
 #[tokio::test]
@@ -7462,6 +7583,85 @@ async fn contact_and_calendar_set_support_property_patches() {
     assert!(events[0]
         .attendees_json
         .contains("\"partstat\":\"tentative\""));
+}
+
+#[tokio::test]
+async fn collaboration_changes_use_durable_log_ids_when_state_has_cursor() {
+    let account_id = FakeStore::account().account_id;
+    let contact_state = encode_state_with_cursor(
+        account_id,
+        "ContactCard",
+        vec![StateEntry {
+            id: FakeStore::contact().id.to_string(),
+            fingerprint: "old-contact".to_string(),
+        }],
+        Some(31),
+    )
+    .unwrap();
+    let event_state = encode_state_with_cursor(
+        account_id,
+        "CalendarEvent",
+        vec![StateEntry {
+            id: FakeStore::event().id.to_string(),
+            fingerprint: "old-event".to_string(),
+        }],
+        Some(31),
+    )
+    .unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contacts: Arc::new(Mutex::new(vec![FakeStore::contact()])),
+        events: Arc::new(Mutex::new(vec![FakeStore::event()])),
+        canonical_change_cursor: Some(32),
+        jmap_object_changes: Arc::new(Mutex::new(Some(vec![
+            JmapMailObjectChange {
+                cursor: 32,
+                object_id: FakeStore::contact().id,
+                change_kind: "updated".to_string(),
+            },
+            JmapMailObjectChange {
+                cursor: 32,
+                object_id: FakeStore::event().id,
+                change_kind: "updated".to_string(),
+            },
+        ]))),
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CONTACTS_CAPABILITY.to_string(),
+                    JMAP_CALENDARS_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "ContactCard/changes".to_string(),
+                        json!({"sinceState": contact_state}),
+                        "cc".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "CalendarEvent/changes".to_string(),
+                        json!({"sinceState": event_state}),
+                        "ce".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.method_responses[0].1["updated"],
+        json!([FakeStore::contact().id.to_string()])
+    );
+    assert_eq!(
+        response.method_responses[1].1["updated"],
+        json!([FakeStore::event().id.to_string()])
+    );
 }
 
 #[tokio::test]

@@ -62,6 +62,10 @@
   - core `LPE` administration surfaces may show immutable handoff and delivery
     result history received from `LPE-CT`, but must not read or persist
     quarantine custody or perimeter policy tables
+  - core `LPE` API handlers reject antispam settings and filtering-rule writes;
+    those administrative mutations must be sent to the `LPE-CT` API
+  - core `LPE` built-in roles must not grant an `antispam` permission; LPE-CT
+    owns any perimeter filtering operator roles
 
 ## Reference Table/List
 

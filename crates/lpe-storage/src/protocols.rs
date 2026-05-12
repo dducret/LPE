@@ -8,12 +8,14 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{
+    blob_store::{DurableBlobKind, PostgresBlobStore},
+    shared::allocate_uid_validity,
     submission,
     submission::{AttachmentUploadInput, SubmittedRecipientInput},
     util::{canonical_system_mailbox_display_name, system_mailbox_role_for_display_name},
-    AccountQuotaRow, ActiveSyncAttachmentRow, ActiveSyncSyncStateRow, AuditEntryInput,
-    ImapEmailRow, JmapEmailRecipientRow, JmapEmailRow, JmapEmailSubmissionRow, JmapMailboxRow,
-    JmapUploadBlobRow, MessageBccRecipientRecordRow, Storage,
+    AccountQuotaRow, ActiveSyncSyncStateRow, AuditEntryInput, ImapEmailRow, JmapEmailRecipientRow,
+    JmapEmailRow, JmapEmailSubmissionRow, JmapMailboxRow, JmapUploadBlobRow,
+    MessageBccRecipientRecordRow, Storage,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -331,6 +333,23 @@ impl Storage {
                         change_kind: jmap_change_kind(&change_kind),
                     });
                 }
+                "Thread" => {
+                    if object_kind != "mailbox_message" {
+                        return Ok(None);
+                    }
+                    let Some(thread_id) = summary_json
+                        .get("threadId")
+                        .and_then(Value::as_str)
+                        .and_then(|value| Uuid::parse_str(value).ok())
+                    else {
+                        return Ok(None);
+                    };
+                    changes.push(JmapMailObjectChange {
+                        cursor,
+                        object_id: thread_id,
+                        change_kind: jmap_change_kind(&change_kind),
+                    });
+                }
                 "Mailbox" => match object_kind.as_str() {
                     "mailbox" => changes.push(JmapMailObjectChange {
                         cursor,
@@ -362,6 +381,109 @@ impl Storage {
                 },
                 _ => return Ok(None),
             }
+        }
+
+        Ok(Some(changes))
+    }
+
+    pub async fn fetch_jmap_object_change_cursor(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+    ) -> Result<Option<i64>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let Some(object_kinds) = jmap_object_replay_kinds(data_type) else {
+            return Ok(None);
+        };
+        sqlx::query_scalar::<_, Option<i64>>(
+            r#"
+            SELECT MAX(cursor)
+            FROM mail_change_log
+            WHERE tenant_id = $1
+              AND object_kind = ANY($3)
+              AND (account_id = $2 OR affected_principal_ids @> ARRAY[$2]::uuid[])
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(object_kinds)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    pub async fn replay_jmap_object_changes(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+        after_cursor: i64,
+        max_rows: u64,
+    ) -> Result<Option<Vec<JmapMailObjectChange>>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let Some(object_kinds) = jmap_object_replay_kinds(data_type) else {
+            return Ok(None);
+        };
+        if jmap_exact_object_kind(data_type).is_none() {
+            return Ok(None);
+        }
+        let earliest_retained_cursor = sqlx::query_scalar::<_, Option<i64>>(
+            r#"
+            SELECT MIN(cursor)
+            FROM mail_change_log
+            WHERE tenant_id = $1
+              AND object_kind = ANY($3)
+              AND (account_id = $2 OR affected_principal_ids @> ARRAY[$2]::uuid[])
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(object_kinds.clone())
+        .fetch_one(&self.pool)
+        .await?;
+        if earliest_retained_cursor.is_some_and(|cursor| after_cursor < cursor - 1) {
+            return Ok(None);
+        }
+
+        let rows = sqlx::query(
+            r#"
+            SELECT cursor, object_kind, object_id, change_kind, summary_json
+            FROM mail_change_log
+            WHERE tenant_id = $1
+              AND cursor > $2
+              AND object_kind = ANY($4)
+              AND (account_id = $3 OR affected_principal_ids @> ARRAY[$3]::uuid[])
+            ORDER BY cursor ASC
+            LIMIT $5
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(after_cursor)
+        .bind(account_id)
+        .bind(object_kinds)
+        .bind((max_rows + 1) as i64)
+        .fetch_all(&self.pool)
+        .await?;
+        if rows.len() > max_rows as usize {
+            return Ok(None);
+        }
+
+        let mut changes = Vec::new();
+        for row in rows {
+            let object_kind: String = row.try_get("object_kind")?;
+            let summary_json: Value = row.try_get("summary_json")?;
+            let Some(replay_object_id) = jmap_replay_object_id(
+                data_type,
+                &object_kind,
+                row.try_get("object_id")?,
+                &summary_json,
+            ) else {
+                return Ok(None);
+            };
+            changes.push(JmapMailObjectChange {
+                cursor: row.try_get("cursor")?,
+                object_id: replay_object_id,
+                change_kind: jmap_change_kind(&row.try_get::<String, _>("change_kind")?),
+            });
         }
 
         Ok(Some(changes))
@@ -651,7 +773,7 @@ impl Storage {
         .bind(input.account_id)
         .bind(&name)
         .bind(sort_order)
-        .bind(mailbox_uid_validity())
+        .bind(allocate_uid_validity())
         .execute(&mut *tx)
         .await?;
 
@@ -1580,7 +1702,7 @@ impl Storage {
               AND message_id = ANY($8)
               AND visibility = 'visible'
               AND ($9::bigint IS NULL OR modseq <= $9)
-            RETURNING id, message_id
+            RETURNING id, message_id, thread_id
             "#,
         )
         .bind(&tenant_id)
@@ -1613,6 +1735,7 @@ impl Storage {
                     &principals,
                     serde_json::json!({
                         "messageId": message_id,
+                        "threadId": row.try_get::<Uuid, _>("thread_id")?,
                         "flagsChanged": true
                     }),
                 )
@@ -1641,7 +1764,7 @@ impl Storage {
 
         let expunge_rows = sqlx::query(
             r#"
-            SELECT id, message_id, imap_uid, is_seen
+            SELECT id, message_id, thread_id, imap_uid, is_seen
             FROM mailbox_messages
             WHERE tenant_id = $1
               AND account_id = $2
@@ -1681,6 +1804,7 @@ impl Storage {
                     &principals,
                     serde_json::json!({
                         "messageId": message_id,
+                        "threadId": row.try_get::<Uuid, _>("thread_id")?,
                         "imapUid": imap_uid
                     }),
                 )
@@ -1817,7 +1941,7 @@ impl Storage {
         let mut tx = self.pool.begin().await?;
         let rows = sqlx::query(
             r#"
-            SELECT id, mailbox_id, imap_uid, is_seen
+            SELECT id, mailbox_id, thread_id, imap_uid, is_seen
             FROM mailbox_messages
             WHERE tenant_id = $1
               AND account_id = $2
@@ -1854,7 +1978,11 @@ impl Storage {
                 "destroyed",
                 modseq,
                 &principals,
-                serde_json::json!({"messageId": message_id, "imapUid": imap_uid}),
+                serde_json::json!({
+                    "messageId": message_id,
+                    "threadId": row.try_get::<Uuid, _>("thread_id")?,
+                    "imapUid": imap_uid
+                }),
             )
             .await?;
             sqlx::query(
@@ -2524,14 +2652,10 @@ impl Storage {
         message_id: Uuid,
     ) -> Result<Vec<ActiveSyncAttachment>> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
-        let rows = sqlx::query_as::<_, ActiveSyncAttachmentRow>(
+        let rows = sqlx::query(
             r#"
-            SELECT a.id, a.message_id, a.file_name, b.media_type, a.size_octets
+            SELECT a.id, a.message_id, a.file_name, a.domain_id, a.blob_id, a.size_octets
             FROM attachments a
-            JOIN blobs b
-              ON b.tenant_id = a.tenant_id
-             AND b.domain_id = a.domain_id
-             AND b.id = a.blob_id
             JOIN mailbox_messages mm
               ON mm.tenant_id = a.tenant_id
              AND mm.account_id = a.account_id
@@ -2549,17 +2673,38 @@ impl Storage {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| ActiveSyncAttachment {
-                id: row.id,
-                message_id: row.message_id,
-                file_name: row.file_name,
-                media_type: row.media_type,
-                size_octets: row.size_octets.max(0) as u64,
-                file_reference: format!("attachment:{}:{}", row.message_id, row.id),
-            })
-            .collect())
+        let blob_store = PostgresBlobStore;
+        let mut attachments = Vec::with_capacity(rows.len());
+        for row in rows {
+            let attachment_id: Uuid = row.try_get("id")?;
+            let message_id: Uuid = row.try_get("message_id")?;
+            let domain_id: Uuid = row.try_get("domain_id")?;
+            let blob_id: Uuid = row.try_get("blob_id")?;
+            let Some(blob) = blob_store
+                .stat_durable_blob(
+                    &self.pool,
+                    &tenant_id,
+                    domain_id,
+                    DurableBlobKind::Attachment,
+                    blob_id,
+                )
+                .await?
+            else {
+                continue;
+            };
+            attachments.push(ActiveSyncAttachment {
+                id: attachment_id,
+                message_id,
+                file_name: row.try_get("file_name")?,
+                media_type: blob.media_type,
+                size_octets: row
+                    .try_get::<i64, _>("size_octets")
+                    .unwrap_or(blob.size_octets)
+                    .max(0) as u64,
+                file_reference: format!("attachment:{message_id}:{attachment_id}"),
+            });
+        }
+        Ok(attachments)
     }
 
     pub async fn fetch_activesync_attachment_content(
@@ -2576,12 +2721,8 @@ impl Storage {
 
         let row = sqlx::query(
             r#"
-            SELECT a.file_name, b.media_type, b.blob_bytes
+            SELECT a.file_name, a.domain_id, a.blob_id
             FROM attachments a
-            JOIN blobs b
-              ON b.tenant_id = a.tenant_id
-             AND b.domain_id = a.domain_id
-             AND b.id = a.blob_id
             JOIN mailbox_messages mm
               ON mm.tenant_id = a.tenant_id
              AND mm.account_id = a.account_id
@@ -2601,11 +2742,27 @@ impl Storage {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|row| ActiveSyncAttachmentContent {
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let Some(blob) = PostgresBlobStore
+            .read_durable_blob(
+                &self.pool,
+                &tenant_id,
+                row.try_get("domain_id")?,
+                DurableBlobKind::Attachment,
+                row.try_get("blob_id")?,
+            )
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(ActiveSyncAttachmentContent {
             file_reference: file_reference.trim().to_string(),
             file_name: row.try_get("file_name").unwrap_or_default(),
-            media_type: row.try_get("media_type").unwrap_or_default(),
-            blob_bytes: row.try_get("blob_bytes").unwrap_or_default(),
+            media_type: blob.media_type,
+            blob_bytes: blob.bytes,
         }))
     }
 
@@ -2622,12 +2779,8 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let row = sqlx::query(
             r#"
-            SELECT a.id, a.file_name, b.media_type, b.blob_bytes
+            SELECT a.id, a.file_name, a.domain_id, a.blob_id
             FROM attachments a
-            JOIN blobs b
-              ON b.tenant_id = a.tenant_id
-             AND b.domain_id = a.domain_id
-             AND b.id = a.blob_id
             WHERE a.tenant_id = $1
               AND a.account_id = $2
               AND a.message_id = $3
@@ -2651,14 +2804,27 @@ impl Storage {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|row| {
-            let attachment_id = row.try_get("id").unwrap_or(message_id);
-            ActiveSyncAttachmentContent {
-                file_reference: format!("attachment:{message_id}:{attachment_id}"),
-                file_name: row.try_get("file_name").unwrap_or_default(),
-                media_type: row.try_get("media_type").unwrap_or_default(),
-                blob_bytes: row.try_get("blob_bytes").unwrap_or_default(),
-            }
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let Some(blob) = PostgresBlobStore
+            .read_durable_blob(
+                &self.pool,
+                &tenant_id,
+                row.try_get("domain_id")?,
+                DurableBlobKind::Attachment,
+                row.try_get("blob_id")?,
+            )
+            .await?
+        else {
+            return Ok(None);
+        };
+        let attachment_id = row.try_get("id").unwrap_or(message_id);
+        Ok(Some(ActiveSyncAttachmentContent {
+            file_reference: format!("attachment:{message_id}:{attachment_id}"),
+            file_name: row.try_get("file_name").unwrap_or_default(),
+            media_type: blob.media_type,
+            blob_bytes: blob.bytes,
         }))
     }
 
@@ -2725,6 +2891,25 @@ impl Storage {
             account_id,
             message_id,
             existing_membership.try_get("id")?,
+        )
+        .await?;
+
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            None,
+            "attachment",
+            attachment_id,
+            "created",
+            modseq,
+            &principals,
+            serde_json::json!({
+                "messageId": message_id,
+                "attachmentId": attachment_id
+            }),
         )
         .await?;
 
@@ -2810,6 +2995,25 @@ impl Storage {
             return Ok(None);
         }
 
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            None,
+            "attachment",
+            attachment_id,
+            "destroyed",
+            modseq,
+            &principals,
+            serde_json::json!({
+                "messageId": message_id,
+                "attachmentId": attachment_id
+            }),
+        )
+        .await?;
+
         sqlx::query(
             r#"
             UPDATE messages
@@ -2865,15 +3069,6 @@ fn is_system_mailbox_role(role: &str) -> bool {
     !role.is_empty() && !role.eq_ignore_ascii_case("custom")
 }
 
-fn mailbox_uid_validity() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs().max(1) as i64)
-        .unwrap_or(1)
-}
-
 pub(crate) fn activesync_collection_kind(collection_id: &str) -> &'static str {
     match collection_id.trim() {
         "__folders__" => "folders",
@@ -2893,9 +3088,60 @@ fn jmap_change_kind(change_kind: &str) -> String {
     .to_string()
 }
 
+fn jmap_exact_object_kind(data_type: &str) -> Option<&'static str> {
+    match data_type {
+        "AddressBook" => Some("contact_book"),
+        "ContactCard" => Some("contact"),
+        "Calendar" => Some("calendar"),
+        "CalendarEvent" => Some("calendar_event"),
+        "TaskList" => Some("task_list"),
+        "Task" => Some("task"),
+        "EmailSubmission" => Some("submission"),
+        _ => None,
+    }
+}
+
+fn jmap_replay_object_id(
+    data_type: &str,
+    object_kind: &str,
+    object_id: Uuid,
+    summary_json: &Value,
+) -> Option<Uuid> {
+    if object_kind == jmap_exact_object_kind(data_type)? {
+        return Some(object_id);
+    }
+    match (data_type, object_kind) {
+        ("AddressBook", "contact_book_grant")
+        | ("Calendar", "calendar_grant")
+        | ("TaskList", "task_list_grant") => summary_json
+            .get("collectionId")
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok()),
+        _ => None,
+    }
+}
+
+fn jmap_object_replay_kinds(data_type: &str) -> Option<Vec<&'static str>> {
+    match data_type {
+        "AddressBook" => Some(vec!["contact_book", "contact_book_grant"]),
+        "ContactCard" => Some(vec!["contact", "contact_book", "contact_book_grant"]),
+        "Calendar" => Some(vec!["calendar", "calendar_grant"]),
+        "CalendarEvent" => Some(vec!["calendar_event", "calendar", "calendar_grant"]),
+        "TaskList" => Some(vec!["task_list", "task_list_grant"]),
+        "Task" => Some(vec!["task", "task_list", "task_list_grant"]),
+        "EmailSubmission" => Some(vec!["submission"]),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{activesync_collection_kind, is_system_mailbox_role};
+    use super::{
+        activesync_collection_kind, is_system_mailbox_role, jmap_exact_object_kind,
+        jmap_object_replay_kinds, jmap_replay_object_id,
+    };
+    use serde_json::json;
+    use uuid::Uuid;
 
     #[test]
     fn activesync_collection_kind_maps_builtin_and_mail_collections() {
@@ -2905,6 +3151,74 @@ mod tests {
         assert_eq!(
             activesync_collection_kind("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
             "mail"
+        );
+    }
+
+    #[test]
+    fn jmap_object_replay_kinds_include_visibility_dependencies() {
+        assert_eq!(jmap_exact_object_kind("ContactCard"), Some("contact"));
+        assert_eq!(
+            jmap_object_replay_kinds("ContactCard").unwrap(),
+            vec!["contact", "contact_book", "contact_book_grant"]
+        );
+        assert_eq!(
+            jmap_exact_object_kind("CalendarEvent"),
+            Some("calendar_event")
+        );
+        assert_eq!(
+            jmap_object_replay_kinds("CalendarEvent").unwrap(),
+            vec!["calendar_event", "calendar", "calendar_grant"]
+        );
+        assert_eq!(jmap_exact_object_kind("Task"), Some("task"));
+        assert_eq!(
+            jmap_object_replay_kinds("Task").unwrap(),
+            vec!["task", "task_list", "task_list_grant"]
+        );
+        assert_eq!(
+            jmap_exact_object_kind("EmailSubmission"),
+            Some("submission")
+        );
+        assert_eq!(
+            jmap_object_replay_kinds("EmailSubmission").unwrap(),
+            vec!["submission"]
+        );
+    }
+
+    #[test]
+    fn jmap_collection_replay_maps_grant_rows_to_collection_ids() {
+        let grant_id = Uuid::new_v4();
+        let collection_id = Uuid::new_v4();
+        let summary = json!({ "collectionId": collection_id });
+
+        assert_eq!(
+            jmap_replay_object_id("AddressBook", "contact_book_grant", grant_id, &summary),
+            Some(collection_id)
+        );
+        assert_eq!(
+            jmap_replay_object_id("Calendar", "calendar_grant", grant_id, &summary),
+            Some(collection_id)
+        );
+        assert_eq!(
+            jmap_replay_object_id("TaskList", "task_list_grant", grant_id, &summary),
+            Some(collection_id)
+        );
+        assert_eq!(
+            jmap_replay_object_id("ContactCard", "contact_book_grant", grant_id, &summary),
+            None
+        );
+    }
+
+    #[test]
+    fn jmap_collection_replay_keeps_exact_object_rows() {
+        let object_id = Uuid::new_v4();
+
+        assert_eq!(
+            jmap_replay_object_id("AddressBook", "contact_book", object_id, &json!({})),
+            Some(object_id)
+        );
+        assert_eq!(
+            jmap_replay_object_id("CalendarEvent", "calendar", object_id, &json!({})),
+            None
         );
     }
 

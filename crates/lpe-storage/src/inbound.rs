@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 use crate::mail::{parse_header_recipients, parse_headers_map, parse_message_attachments};
+use crate::shared::allocate_uid_validity;
 use crate::{submission, AttachmentUploadInput, AuditEntryInput, Storage, SubmittedRecipientInput};
 
 const MAX_SIEVE_REDIRECTS_PER_MESSAGE: usize = 4;
@@ -621,7 +622,7 @@ impl Storage {
         .bind(account_id)
         .bind(display_name)
         .bind(sort_order)
-        .bind(mailbox_uid_validity())
+        .bind(allocate_uid_validity())
         .execute(&mut **tx)
         .await?;
         Ok(mailbox_id)
@@ -727,14 +728,6 @@ fn inbound_trace_advisory_lock_keys(trace_id: &str) -> (i32, i32) {
         i32::from_be_bytes([digest[0], digest[1], digest[2], digest[3]]),
         i32::from_be_bytes([digest[4], digest[5], digest[6], digest[7]]),
     )
-}
-
-fn mailbox_uid_validity() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs().max(1) as i64)
-        .unwrap_or(1)
 }
 
 fn estimate_generated_message_size(

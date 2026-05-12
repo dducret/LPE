@@ -361,15 +361,6 @@ pub(crate) struct ClientAttachmentRow {
 }
 
 #[derive(Debug, FromRow)]
-pub(crate) struct ActiveSyncAttachmentRow {
-    pub(crate) id: Uuid,
-    pub(crate) message_id: Uuid,
-    pub(crate) file_name: String,
-    pub(crate) media_type: String,
-    pub(crate) size_octets: i64,
-}
-
-#[derive(Debug, FromRow)]
 pub(crate) struct ClientEventRow {
     pub(crate) id: Uuid,
     pub(crate) uid: String,

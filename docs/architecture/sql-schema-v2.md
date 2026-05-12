@@ -91,7 +91,8 @@ Protocol adapters and tests must treat `uid_validity` and `uid_next` as mailbox
 state. They must not derive `UIDNEXT` from the maximum currently visible
 `mailbox_messages.imap_uid`, because expunged and otherwise hidden historical
 memberships still consume UIDs. The retired global `message_imap_uid_seq` is not
-part of schema v2.
+part of schema v2. Every new mailbox path uses the shared storage UIDVALIDITY
+allocator rather than protocol-local constants or helper functions.
 
 ## Change and Tombstone Model
 
@@ -110,12 +111,20 @@ after the configured protocol replay windows have passed. Tombstones capture
 deleted message and mailbox-membership identifiers as historical facts rather
 than foreign-keying back to rows that deletion or expunge may remove.
 
-JMAP `Mailbox/changes` and `Email/changes` use `mail_change_log` replay when
-the client state token carries a retained change cursor and the intervening rows
-map cleanly to the requested JMAP type. Rows that affect the projection but
-cannot be mapped precisely, such as rights changes for mailbox projections,
-force a current-state diff fallback. This fallback is compatibility behavior,
-not a protocol-local canonical store.
+JMAP `Mailbox/changes`, `Email/changes`, `Thread/changes`,
+`EmailSubmission/changes`, and collaboration object changes use
+`mail_change_log` replay when the client state token carries a retained change
+cursor and the intervening rows map cleanly to the requested JMAP type. Thread
+replay requires mailbox-message log rows with durable `threadId` summary data;
+older rows without that summary fall back to the current-state diff. Submission
+creation and transport status changes write `submission` rows so
+`EmailSubmission/changes` can replay from the same durable log. Rows that affect
+the projection but cannot be mapped precisely force a current-state diff
+fallback. Collection-level JMAP changes map contact-book, calendar, and
+task-list grant rows through their durable `collectionId` summary. Item-level
+visibility changes still fall back because one grant row can affect many child
+objects. This fallback is compatibility behavior, not a protocol-local
+canonical store.
 
 Protocol adapters store only cursor rows:
 
@@ -136,11 +145,16 @@ tasks, attachments, `Sent`, drafts, or outbox state.
 ## MIME, Body, Attachment, and Blob Model
 
 `blobs` stores durable raw RFC 5322 bytes, MIME part bytes, and attachment bytes
-with content hashes per tenant/domain. `messages.blob_id` points to the raw
-message blob. Export and protocol
-body fetches reconstruct from this canonical MIME plus parsed part metadata.
-The raw blob reference is domain-bound so a message cannot point at a raw MIME
-blob deduplicated under another domain in the same tenant.
+with content hashes per tenant/domain. PostgreSQL remains the metadata
+authority for canonical blob identifiers, tenant/domain ownership, hashes,
+lifecycle state, and references from mail objects. The current local
+implementation stores blob bytes in PostgreSQL, with durable attachment bytes
+and the schema-supported MIME-part blob kind accessed through the internal
+`lpe-storage` `BlobStore` boundary. Raw RFC 5322 message blobs remain
+database-backed initially. `messages.blob_id` points to the raw message blob.
+Export and protocol body fetches reconstruct from this canonical MIME plus
+parsed part metadata. The raw blob reference is domain-bound so a message cannot
+point at a raw MIME blob deduplicated under another domain in the same tenant.
 
 `mime_parts` records MIME tree structure, headers, content IDs, file
 names, transfer encodings, byte offsets where available, and links to durable
@@ -156,6 +170,10 @@ explicit per-domain uniqueness constraint for attachment blobs. It stores
 Magika validation results, validation status, and extraction lifecycle fields.
 Only `PDF`, `DOCX`, and `ODT` can enter text extraction. Other validated formats
 remain downloadable but not indexed.
+Future storage-placement metadata may allow blob bytes to live outside
+PostgreSQL behind the `BlobStore` boundary, but schema v2 still treats
+PostgreSQL as the authoritative metadata store. Policy changes record intent for
+future writes only and do not implicitly migrate existing blobs.
 Lifecycle rows include update timestamps and worker-oriented indexes for Magika
 validation, async extraction, and retry scheduling.
 The schema enforces lifecycle timestamp consistency: completed Magika validation
@@ -212,6 +230,9 @@ DMARC-related policy, queueing, quarantine, bounces, and DSN generation.
 Queue and event rows are constrained so a transport result cannot be recorded
 against a different submission than the queue item it describes.
 Recipient ordinal uniqueness is enforced per message/submission recipient role.
+Saving over an existing draft updates the existing draft mailbox membership and
+writes a `mail_change_log` row for that mailbox-message projection; it must not
+replace the draft through protocol-local state.
 
 ## Identity, Alias, and Sender Rights
 
@@ -252,7 +273,9 @@ same-tenant only and use concrete tables with foreign keys to the owned
 collection instead of a polymorphic `collection_id`. Changes write to
 `mail_change_log` and tombstones write to `tombstones`, allowing JMAP,
 DAV, ActiveSync, EWS, and MAPI projections to synchronize from the same
-canonical state.
+canonical state. Physical collaboration deletes write the tombstone before
+removing the live row; shared task deletes include task-list grantees in the
+affected principals so delegated projections can observe the removal.
 Non-custom collection roles are unique per owner for mailboxes, contact books,
 calendars, and task lists.
 Mailbox hierarchy rows cannot parent themselves. Contact books, calendars, and
@@ -276,6 +299,17 @@ grants, sender rights, contacts, calendars, events, task lists, and tasks must
 write canonical change rows and tombstones so JMAP, DAV, EWS, MAPI,
 ActiveSync, and web push can remove visibility after revocation or deletion
 without maintaining protocol-local rights tables.
+Grant and sender-right upsert/delete paths write object-level
+`mail_change_log` rows before emitting rights journals. Collection grant rows
+include `collectionId` summary data so `AddressBook/changes`,
+`Calendar/changes`, and `TaskList/changes` can replay them durably; child item
+changes fall back to a current-state diff when the row cannot map to one exact
+JMAP object id.
+
+Attachment metadata creates and deletes write `mail_change_log` rows with
+`object_kind = 'attachment'` before message projection recomputation. They do
+not create attachment tombstones in v2 because message-level export remains
+anchored on canonical MIME and blob retention metadata.
 
 ## LPE and LPE-CT Boundary
 
@@ -395,7 +429,8 @@ compatible. They do not replace canonical mail or collaboration tables.
   Perimeter filtering policy, quarantine retention, release, reject, and delete
   workflows belong to LPE-CT local stores and LPE-CT administration APIs. Core
   LPE may expose immutable LPE-CT handoff or delivery result history, but not
-  quarantine custody or perimeter policy state.
+  quarantine custody or perimeter policy state. Core LPE admin API handlers
+  must reject write attempts for these perimeter-owned settings and rules.
 - Add indexes around the access paths protocol adapters need: account/mailbox
   UID scans, account/category change scans, tombstone replay, attachment
   validation/extraction queues, outbound queue workers, and visible collection

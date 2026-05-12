@@ -60,7 +60,7 @@ pub async fn bootstrap_admin(
                 display_name: display_name.clone(),
                 role: "server-admin".to_string(),
                 rights_summary:
-                    "server, domains, accounts, aliases, admins, policies, security, ai, antispam, pst, audit, mail"
+                    "server, domains, accounts, aliases, admins, policies, security, ai, pst, audit, mail"
                         .to_string(),
                 permissions: vec!["*".to_string()],
             },

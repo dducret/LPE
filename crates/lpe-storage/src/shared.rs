@@ -276,6 +276,7 @@ impl Storage {
             json!({
                 "messageId": message_id,
                 "mailboxId": mailbox_id,
+                "threadId": thread_id,
                 "imapUid": imap_uid
             }),
         )
@@ -704,7 +705,7 @@ impl Storage {
     }
 }
 
-fn allocate_uid_validity() -> i64 {
+pub(crate) fn allocate_uid_validity() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     SystemTime::now()
@@ -917,7 +918,15 @@ mod tests {
             .iter()
             .any(|permission| permission == "dashboard"));
         assert!(permissions.iter().any(|permission| permission == "domains"));
+        assert!(!permissions
+            .iter()
+            .any(|permission| permission == "antispam"));
         assert!(!permissions.iter().any(|permission| permission == "*"));
+
+        let transport_permissions = default_permissions_for_role("transport-operator");
+        assert!(!transport_permissions
+            .iter()
+            .any(|permission| permission == "antispam"));
     }
 
     #[test]

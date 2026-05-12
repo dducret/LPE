@@ -11,7 +11,10 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use uuid::Uuid;
 
-use crate::{preview_text, AttachmentUploadInput, Storage};
+use crate::{
+    blob_store::{DurableBlobKind, PostgresBlobStore},
+    preview_text, AttachmentUploadInput, Storage,
+};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PstTransferJobRecord {
@@ -251,10 +254,9 @@ impl Storage {
                 r#"
                 SELECT
                     a.file_name,
-                    a.media_type,
-                    b.blob_bytes
+                    a.domain_id,
+                    a.blob_id
                 FROM attachments a
-                JOIN attachment_blobs b ON b.id = a.attachment_blob_id
                 WHERE a.tenant_id = $1 AND a.message_id = $2
                 ORDER BY a.file_name ASC
                 "#,
@@ -266,14 +268,24 @@ impl Storage {
 
             for attachment in attachments {
                 let file_name: String = attachment.try_get("file_name")?;
-                let media_type: String = attachment.try_get("media_type")?;
-                let blob_bytes: Vec<u8> = attachment.try_get("blob_bytes")?;
+                let Some(blob) = PostgresBlobStore
+                    .read_durable_blob(
+                        &self.pool,
+                        &job.tenant_id,
+                        attachment.try_get("domain_id")?,
+                        DurableBlobKind::Attachment,
+                        attachment.try_get("blob_id")?,
+                    )
+                    .await?
+                else {
+                    continue;
+                };
                 writeln!(
                     file,
                     "ATTACHMENT\t{}\t{}\t{}",
                     encode_pst_field(&file_name),
-                    encode_pst_field(&media_type),
-                    BASE64.encode(blob_bytes)
+                    encode_pst_field(&blob.media_type),
+                    BASE64.encode(blob.bytes)
                 )?;
             }
         }

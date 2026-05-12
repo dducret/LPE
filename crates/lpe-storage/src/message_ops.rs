@@ -11,6 +11,35 @@ impl Storage {
     pub async fn delete_client_contact(&self, account_id: Uuid, contact_id: Uuid) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
+        let exists = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT id
+            FROM contacts
+            WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(contact_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if exists.is_none() {
+            bail!("contact not found");
+        }
+
+        self.insert_collaboration_tombstone_in_tx(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Contacts,
+            account_id,
+            None,
+            "contact",
+            contact_id,
+            None,
+            &[account_id],
+        )
+        .await?;
         let deleted = sqlx::query(
             r#"
             DELETE FROM contacts
@@ -27,18 +56,6 @@ impl Storage {
             bail!("contact not found");
         }
 
-        self.insert_collaboration_tombstone_in_tx(
-            &mut tx,
-            &tenant_id,
-            CanonicalChangeCategory::Contacts,
-            account_id,
-            None,
-            "contact",
-            contact_id,
-            None,
-            &[account_id],
-        )
-        .await?;
         Self::emit_collaboration_change(
             &mut tx,
             &tenant_id,
@@ -54,6 +71,35 @@ impl Storage {
     pub async fn delete_client_event(&self, account_id: Uuid, event_id: Uuid) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
+        let exists = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT id
+            FROM calendar_events
+            WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(event_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if exists.is_none() {
+            bail!("event not found");
+        }
+
+        self.insert_collaboration_tombstone_in_tx(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Calendar,
+            account_id,
+            None,
+            "calendar_event",
+            event_id,
+            None,
+            &[account_id],
+        )
+        .await?;
         let deleted = sqlx::query(
             r#"
             DELETE FROM calendar_events
@@ -70,18 +116,6 @@ impl Storage {
             bail!("event not found");
         }
 
-        self.insert_collaboration_tombstone_in_tx(
-            &mut tx,
-            &tenant_id,
-            CanonicalChangeCategory::Calendar,
-            account_id,
-            None,
-            "calendar_event",
-            event_id,
-            None,
-            &[account_id],
-        )
-        .await?;
         Self::emit_collaboration_change(
             &mut tx,
             &tenant_id,
@@ -224,7 +258,7 @@ impl Storage {
             .await?;
         let source = sqlx::query(
             r#"
-            SELECT id, mailbox_id, imap_uid, is_seen, is_flagged
+            SELECT id, mailbox_id, thread_id, imap_uid, is_seen, is_flagged
             FROM mailbox_messages
             WHERE tenant_id = $1
               AND account_id = $2
@@ -340,6 +374,7 @@ impl Storage {
                 "messageId": message_id,
                 "sourceMailboxId": source_mailbox_id,
                 "targetMailboxId": target_mailbox_id,
+                "threadId": source.try_get::<Uuid, _>("thread_id")?,
                 "imapUid": target_uid
             }),
         )
@@ -385,7 +420,7 @@ impl Storage {
                 updated_at = NOW()
             WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
               AND visibility = 'visible'
-            RETURNING id, mailbox_id, imap_uid
+            RETURNING id, mailbox_id, thread_id, imap_uid
             "#,
         )
         .bind(&tenant_id)
@@ -416,6 +451,7 @@ impl Storage {
                 &principals,
                 serde_json::json!({
                     "messageId": message_id,
+                    "threadId": row.try_get::<Uuid, _>("thread_id")?,
                     "imapUid": row.try_get::<i64, _>("imap_uid")?
                 }),
             )

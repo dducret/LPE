@@ -429,7 +429,7 @@ impl Storage {
             bail!("self-delegation is not supported");
         }
 
-        sqlx::query(
+        let grant_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             INSERT INTO task_list_grants (
                 id, tenant_id, task_list_id, owner_account_id, grantee_account_id,
@@ -443,6 +443,7 @@ impl Storage {
                 may_delete = EXCLUDED.may_delete,
                 may_share = EXCLUDED.may_share,
                 updated_at = NOW()
+            RETURNING id
             "#,
         )
         .bind(Uuid::new_v4())
@@ -454,7 +455,32 @@ impl Storage {
         .bind(input.may_write)
         .bind(input.may_delete)
         .bind(input.may_share)
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                owner.id,
+                CanonicalChangeCategory::Tasks.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(owner.id),
+            None,
+            "task_list_grant",
+            grant_id,
+            "updated",
+            modseq,
+            &[owner.id, grantee.id],
+            serde_json::json!({
+                "collectionId": task_list.id,
+                "granteeId": grantee.id
+            }),
+        )
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
@@ -482,25 +508,51 @@ impl Storage {
     ) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
         let mut tx = self.pool.begin().await?;
-        let deleted = sqlx::query(
+        let grant_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             DELETE FROM task_list_grants
             WHERE tenant_id = $1
               AND owner_account_id = $2
               AND task_list_id = $3
               AND grantee_account_id = $4
+            RETURNING id
             "#,
         )
         .bind(&tenant_id)
         .bind(owner_account_id)
         .bind(task_list_id)
         .bind(grantee_account_id)
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await?;
 
-        if deleted.rows_affected() == 0 {
+        let Some(grant_id) = grant_id else {
             bail!("task-list grant not found");
-        }
+        };
+
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                owner_account_id,
+                CanonicalChangeCategory::Tasks.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(owner_account_id),
+            None,
+            "task_list_grant",
+            grant_id,
+            "destroyed",
+            modseq,
+            &[owner_account_id, grantee_account_id],
+            serde_json::json!({
+                "collectionId": task_list_id,
+                "granteeId": grantee_account_id
+            }),
+        )
+        .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         Self::emit_task_access_change(
@@ -919,6 +971,34 @@ impl Storage {
             .tenant_id_for_account_id(existing.owner_account_id)
             .await?;
         let mut tx = self.pool.begin().await?;
+        let grantee_account_ids = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT grantee_account_id
+            FROM task_list_grants
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND task_list_id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(existing.owner_account_id)
+        .bind(existing.task_list_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut affected_account_ids = grantee_account_ids.clone();
+        affected_account_ids.push(existing.owner_account_id);
+        self.insert_collaboration_tombstone_in_tx(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Tasks,
+            existing.owner_account_id,
+            Some(existing.task_list_id),
+            "task",
+            task_id,
+            None,
+            &affected_account_ids,
+        )
+        .await?;
         let deleted = sqlx::query(
             r#"
             DELETE FROM tasks
@@ -935,24 +1015,12 @@ impl Storage {
             bail!("task not found");
         }
 
-        self.insert_collaboration_tombstone_in_tx(
-            &mut tx,
-            &tenant_id,
-            CanonicalChangeCategory::Tasks,
-            existing.owner_account_id,
-            Some(existing.task_list_id),
-            "task",
-            task_id,
-            None,
-            &[existing.owner_account_id],
-        )
-        .await?;
         Self::emit_task_access_change(
             &mut tx,
             &tenant_id,
             existing.owner_account_id,
             &[existing.task_list_id],
-            &[],
+            &grantee_account_ids,
         )
         .await?;
         tx.commit().await?;

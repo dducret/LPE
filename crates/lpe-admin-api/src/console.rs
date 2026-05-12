@@ -8,7 +8,7 @@ use lpe_core::CoreService;
 use lpe_storage::{
     AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput, DashboardUpdate,
     EmailTraceResult, EmailTraceSearchInput, LocalAiSettings, NewAccount, NewAlias, NewDomain,
-    NewFilterRule, NewMailbox, NewPstTransferJob, NewServerAdministrator, PstJobExecutionSummary,
+    NewMailbox, NewPstTransferJob, NewServerAdministrator, PstJobExecutionSummary,
     SecuritySettings, ServerSettings, Storage, UpdateAccount, UpdateDomain,
 };
 use tokio::io::AsyncWriteExt;
@@ -652,34 +652,17 @@ pub(crate) async fn update_antispam_settings(
     headers: HeaderMap,
     Json(request): Json<UpdateAntispamSettingsRequest>,
 ) -> ApiResult<AdminDashboard> {
-    let admin = require_admin(&storage, &headers, "antispam").await?;
-    let existing = storage
-        .fetch_admin_dashboard()
-        .await
-        .map_err(internal_error)?;
-    storage
-        .update_settings(
-            DashboardUpdate {
-                server_settings: existing.server_settings,
-                security_settings: existing.security_settings,
-                local_ai_settings: existing.local_ai_settings,
-                antispam_settings: lpe_storage::AntispamSettings {
-                    content_filtering_enabled: request.content_filtering_enabled,
-                    spam_engine: request.spam_engine.clone(),
-                    quarantine_enabled: request.quarantine_enabled,
-                    quarantine_retention_days: request.quarantine_retention_days.max(1),
-                },
-            },
-            AuditEntryInput {
-                actor: admin.email,
-                action: "update-antispam-settings".to_string(),
-                subject: request.spam_engine,
-            },
-        )
-        .await
-        .map_err(internal_error)?;
-
-    dashboard(State(storage), headers).await
+    require_admin(&storage, &headers, "antispam").await?;
+    let _ = (
+        request.content_filtering_enabled,
+        request.spam_engine,
+        request.quarantine_enabled,
+        request.quarantine_retention_days,
+    );
+    Err((
+        StatusCode::BAD_REQUEST,
+        "perimeter filtering settings are managed by LPE-CT".to_string(),
+    ))
 }
 
 pub(crate) async fn create_server_administrator(
@@ -735,25 +718,12 @@ pub(crate) async fn create_filter_rule(
     headers: HeaderMap,
     Json(request): Json<CreateFilterRuleRequest>,
 ) -> ApiResult<AdminDashboard> {
-    let admin = require_admin(&storage, &headers, "antispam").await?;
-    storage
-        .create_filter_rule(
-            NewFilterRule {
-                name: request.name.clone(),
-                scope: request.scope,
-                action: request.action,
-                status: request.status,
-            },
-            AuditEntryInput {
-                actor: admin.email,
-                action: "create-antispam-rule".to_string(),
-                subject: request.name,
-            },
-        )
-        .await
-        .map_err(internal_error)?;
-
-    dashboard(State(storage), headers).await
+    require_admin(&storage, &headers, "antispam").await?;
+    let _ = (request.name, request.scope, request.action, request.status);
+    Err((
+        StatusCode::BAD_REQUEST,
+        "perimeter filtering rules are managed by LPE-CT".to_string(),
+    ))
 }
 
 pub(crate) async fn search_email_trace(

@@ -1,9 +1,13 @@
 use anyhow::Result;
 use serde::Serialize;
-use sqlx::{Postgres, Row};
+use sqlx::Postgres;
 use uuid::Uuid;
 
-use crate::{sha256_hex, submission::AttachmentUploadInput, Storage};
+use crate::{
+    blob_store::{DurableBlobKind, PostgresBlobStore, PutBlobRequest, StoredBlobRef},
+    submission::AttachmentUploadInput,
+    Storage,
+};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ClientAttachment {
@@ -11,12 +15,6 @@ pub struct ClientAttachment {
     pub name: String,
     pub kind: String,
     pub size: String,
-}
-
-#[derive(Debug)]
-struct StoredAttachmentBlob {
-    id: Uuid,
-    domain_id: Uuid,
 }
 
 impl Storage {
@@ -125,60 +123,29 @@ impl Storage {
         media_type: &str,
         file_name: &str,
         blob_bytes: &[u8],
-    ) -> Result<StoredAttachmentBlob> {
-        let content_sha256 = sha256_hex(blob_bytes);
-
-        if let Some(row) = sqlx::query(
-            r#"
-            SELECT id
-            FROM blobs
-            WHERE tenant_id = $1
-              AND domain_id = $2
-              AND blob_kind = 'attachment'
-              AND content_sha256 = $3
-            LIMIT 1
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(domain_id)
-        .bind(&content_sha256)
-        .fetch_optional(&mut **tx)
-        .await?
-        {
-            return Ok(StoredAttachmentBlob {
-                id: row.try_get("id")?,
-                domain_id,
-            });
-        }
-
-        let blob_id = Uuid::new_v4();
+    ) -> Result<StoredBlobRef> {
         let extraction_status = if supports_attachment_text_extraction(media_type, file_name) {
             "queued"
         } else {
             "unsupported"
         };
-        sqlx::query(
-            r#"
-            INSERT INTO blobs (
-                id, tenant_id, domain_id, blob_kind, content_sha256,
-                media_type, size_octets, blob_bytes, magika_status,
-                extraction_status, validated_at
+        let blob = PostgresBlobStore
+            .put_durable_blob_in_tx(
+                tx,
+                PutBlobRequest {
+                    tenant_id,
+                    domain_id,
+                    kind: DurableBlobKind::Attachment,
+                    media_type,
+                    bytes: blob_bytes,
+                    magika_status: "valid",
+                    extraction_status,
+                    validated: true,
+                },
             )
-            VALUES ($1, $2, $3, 'attachment', $4, $5, $6, $7, 'valid', $8, NOW())
-            "#,
-        )
-        .bind(blob_id)
-        .bind(tenant_id)
-        .bind(domain_id)
-        .bind(content_sha256)
-        .bind(media_type)
-        .bind(blob_bytes.len() as i64)
-        .bind(blob_bytes)
-        .bind(extraction_status)
-        .execute(&mut **tx)
-        .await?;
+            .await?;
 
-        if extraction_status == "queued" {
+        if blob.created && extraction_status == "queued" {
             sqlx::query(
                 r#"
                 INSERT INTO attachment_extraction_jobs (id, tenant_id, blob_id, status)
@@ -187,15 +154,12 @@ impl Storage {
             )
             .bind(Uuid::new_v4())
             .bind(tenant_id)
-            .bind(blob_id)
+            .bind(blob.id)
             .execute(&mut **tx)
             .await?;
         }
 
-        Ok(StoredAttachmentBlob {
-            id: blob_id,
-            domain_id,
-        })
+        Ok(blob)
     }
 }
 

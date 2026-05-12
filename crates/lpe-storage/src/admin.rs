@@ -3,6 +3,7 @@ use lpe_core::sieve::parse_script;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::shared::allocate_uid_validity;
 use crate::{
     env_bind_address, env_hostname, normalize_admin_permissions, normalize_directory_kind,
     normalize_email, normalize_gal_visibility, permission_summary, permissions_from_storage,
@@ -344,7 +345,7 @@ impl Storage {
             .bind(Uuid::new_v4())
             .bind(&tenant_id)
             .bind(account_id)
-            .bind(mailbox_uid_validity())
+            .bind(allocate_uid_validity())
             .execute(&mut *tx)
             .await?;
 
@@ -467,7 +468,7 @@ impl Storage {
             .bind(input.display_name.trim())
             .bind(sort_order)
             .bind(input.retention_days as i32)
-            .bind(mailbox_uid_validity())
+            .bind(allocate_uid_validity())
             .execute(&mut *tx)
             .await?;
 
@@ -1667,15 +1668,6 @@ impl Storage {
     async fn fetch_antispam_rules(&self) -> Result<Vec<FilterRule>> {
         Ok(Vec::new())
     }
-}
-
-fn mailbox_uid_validity() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs().max(1) as i64)
-        .unwrap_or(1)
 }
 
 fn map_mail_flow_row(row: MailFlowRow) -> MailFlowEntry {
