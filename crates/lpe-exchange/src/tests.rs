@@ -614,6 +614,7 @@ impl ExchangeStore for FakeStore {
             id: input.id.unwrap_or_else(|| {
                 Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap()
             }),
+            uid: input.uid,
             collection_id: collection_id.unwrap_or("default").to_string(),
             owner_account_id: principal_account_id,
             owner_email: account.email,
@@ -14296,6 +14297,7 @@ async fn get_user_availability_returns_canonical_busy_events() {
         events: Arc::new(Mutex::new(vec![
             AccessibleEvent {
                 id: Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap(),
+                uid: "cccccccc-cccc-cccc-cccc-cccccccccccc".to_string(),
                 collection_id: "default".to_string(),
                 owner_account_id: FakeStore::account().account_id,
                 owner_email: "alice@example.test".to_string(),
@@ -14314,6 +14316,7 @@ async fn get_user_availability_returns_canonical_busy_events() {
             },
             AccessibleEvent {
                 id: Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap(),
+                uid: "ffffffff-ffff-ffff-ffff-ffffffffffff".to_string(),
                 collection_id: "default".to_string(),
                 owner_account_id: FakeStore::account().account_id,
                 owner_email: "alice@example.test".to_string(),
@@ -17338,6 +17341,7 @@ async fn find_item_returns_calendar_items_from_canonical_store() {
         calendar_collections: Arc::new(Mutex::new(vec![collection.clone()])),
         events: Arc::new(Mutex::new(vec![AccessibleEvent {
             id: event_id,
+            uid: event_id.to_string(),
             collection_id: collection.id.clone(),
             owner_account_id: collection.owner_account_id,
             owner_email: collection.owner_email.clone(),

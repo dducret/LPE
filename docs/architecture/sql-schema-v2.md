@@ -87,6 +87,12 @@ UID allocation must update the mailbox row and insert membership rows in the
 same transaction. Expunge removes the live membership row only after writing a
 tombstone row.
 
+Protocol adapters and tests must treat `uid_validity` and `uid_next` as mailbox
+state. They must not derive `UIDNEXT` from the maximum currently visible
+`mailbox_messages.imap_uid`, because expunged and otherwise hidden historical
+memberships still consume UIDs. The retired global `message_imap_uid_seq` is not
+part of schema v2.
+
 ## Change and Tombstone Model
 
 Schema v2 uses counters plus append-only logs.
@@ -109,7 +115,12 @@ Protocol adapters store only cursor rows:
 - `jmap_query_states` stores query token metadata and last observed canonical
   change sequence plus the ordered object id snapshot needed to resume JMAP
   `queryChanges` without embedding full snapshots in client-visible tokens.
-- `activesync_sync_cursors` stores device, collection, and last change sequence.
+- `activesync_sync_cursors` stores device, collection, last change sequence,
+  and compact protocol cursor state needed to validate the current sync key and
+  finish paged responses. This cursor state may contain object identifiers,
+  fingerprints, and pending change ids, but not canonical message, contact,
+  calendar, task, attachment, `Sent`, draft, outbox, search, rights, or
+  quarantine data.
 - `mapi_sync_checkpoints` stores EMSMDB/ICS folder or hierarchy cursor state.
 
 None of these tables stores canonical messages, folders, contacts, calendars,
@@ -243,8 +254,21 @@ name behavior for client projections.
 Contacts, calendar events, and tasks have stable per-collection `uid` values for
 DAV/JMAP/EWS/MAPI import, export, and sync mappings. JSON payload columns used
 for contact addresses, phone numbers, and event attendees are constrained to
-arrays. Completed tasks must carry `completed_at`, while non-completed tasks
-must not.
+arrays. Contacts store structured name parts, email/phone/address arrays,
+organization/title fields, notes, raw vCard text, and source/import metadata so
+JMAP, DAV, EWS, and MAPI can project from one canonical row. Calendar events
+store `UID`, `SEQUENCE`, organizer, attendees, recurrence, recurrence
+exceptions, timezone, location, and body fields without adapter-local event
+tables. Tasks store start, due, completed, priority, and recurrence fields where
+the documented adapters expose them. Completed tasks must carry `completed_at`,
+while non-completed tasks must not.
+
+Object-level change logs and tombstones cover mailbox and collaboration
+objects. Custom mailbox deletes, collaboration grants, mailbox delegation
+grants, sender rights, contacts, calendars, events, task lists, and tasks must
+write canonical change rows and tombstones so JMAP, DAV, EWS, MAPI,
+ActiveSync, and web push can remove visibility after revocation or deletion
+without maintaining protocol-local rights tables.
 
 ## LPE and LPE-CT Boundary
 
@@ -265,6 +289,7 @@ Core `LPE` schema excludes:
 - Internet SMTP spool
 - outbound relay spool
 - quarantine indexes and quarantine message custody
+- core antispam rule, quarantine setting, and quarantine item tables
 - Bayesian filtering data
 - greylisting state
 - reputation state
@@ -359,6 +384,11 @@ compatible. They do not replace canonical mail or collaboration tables.
 - Do not add an LPE-core `antispam_quarantine` table. Quarantine custody is
   represented only as LPE-CT result history against submission or inbound
   delivery receipts.
+- Do not add LPE-core `antispam_settings` or `antispam_filter_rules` tables.
+  Perimeter filtering policy, quarantine retention, release, reject, and delete
+  workflows belong to LPE-CT local stores and LPE-CT administration APIs. Core
+  LPE may expose immutable LPE-CT handoff or delivery result history, but not
+  quarantine custody or perimeter policy state.
 - Add indexes around the access paths protocol adapters need: account/mailbox
   UID scans, account/category change scans, tombstone replay, attachment
   validation/extraction queues, outbound queue workers, and visible collection

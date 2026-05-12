@@ -2003,6 +2003,7 @@ fn parse_event_input(
     Ok(UpsertClientEventInput {
         id,
         account_id,
+        uid: existing.map(|event| event.uid.clone()).unwrap_or_default(),
         date,
         time,
         time_zone: field_text(application_data, "TimeZone")

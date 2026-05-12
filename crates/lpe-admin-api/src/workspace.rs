@@ -245,6 +245,7 @@ pub(crate) async fn upsert_client_event(
     let input = UpsertClientEventInput {
         id: request.id,
         account_id: account.account_id,
+        uid: request.uid,
         date: request.date,
         time: request.time,
         time_zone: request.time_zone,
@@ -269,6 +270,7 @@ pub(crate) async fn upsert_client_event(
     };
     Ok(Json(ClientEvent {
         id: event.id,
+        uid: event.uid,
         date: event.date,
         time: event.time,
         time_zone: event.time_zone,

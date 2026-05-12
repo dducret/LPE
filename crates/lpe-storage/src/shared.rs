@@ -20,10 +20,21 @@ impl Storage {
         tenant_id: &str,
         account_id: Uuid,
     ) -> Result<i64> {
+        self.allocate_account_modseq_in_tx(tx, tenant_id, account_id, "mail")
+            .await
+    }
+
+    pub(crate) async fn allocate_account_modseq_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        account_id: Uuid,
+        category: &str,
+    ) -> Result<i64> {
         let modseq = sqlx::query_scalar::<_, i64>(
             r#"
             INSERT INTO account_sync_state (tenant_id, account_id, category, current_modseq)
-            VALUES ($1, $2, 'mail', 2)
+            VALUES ($1, $2, $3, 2)
             ON CONFLICT (tenant_id, account_id, category)
             DO UPDATE SET
                 current_modseq = account_sync_state.current_modseq + 1,
@@ -33,6 +44,7 @@ impl Storage {
         )
         .bind(tenant_id)
         .bind(account_id)
+        .bind(category)
         .fetch_one(&mut **tx)
         .await?;
 

@@ -2,9 +2,12 @@ use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use sqlx::Postgres;
+
 use crate::{
     normalize_email, AuditEntryInput, CollaborationCollectionRow, CollaborationGrantRow, Storage,
     UpsertClientContactInput, UpsertClientEventInput, DEFAULT_COLLECTION_ID,
+    DEFAULT_TASK_LIST_ROLE,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -76,6 +79,7 @@ pub struct AccessibleContact {
 #[serde(rename_all = "camelCase")]
 pub struct AccessibleEvent {
     pub id: Uuid,
+    pub uid: String,
     pub collection_id: String,
     pub owner_account_id: Uuid,
     pub owner_email: String,
@@ -152,33 +156,101 @@ impl Storage {
             bail!("self-delegation is not supported");
         }
 
-        sqlx::query(
-            r#"
-            INSERT INTO collaboration_collection_grants (
-                id, tenant_id, collection_kind, owner_account_id, grantee_account_id,
-                may_read, may_write, may_delete, may_share
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            ON CONFLICT (tenant_id, collection_kind, owner_account_id, grantee_account_id)
-            DO UPDATE SET
-                may_read = EXCLUDED.may_read,
-                may_write = EXCLUDED.may_write,
-                may_delete = EXCLUDED.may_delete,
-                may_share = EXCLUDED.may_share,
-                updated_at = NOW()
-            "#,
-        )
-        .bind(Uuid::new_v4())
-        .bind(&tenant_id)
-        .bind(input.kind.as_str())
-        .bind(input.owner_account_id)
-        .bind(grantee.id)
-        .bind(input.may_read)
-        .bind(input.may_write)
-        .bind(input.may_delete)
-        .bind(input.may_share)
-        .execute(&mut *tx)
-        .await?;
+        match input.kind {
+            CollaborationResourceKind::Contacts => {
+                let collection_id =
+                    Self::ensure_default_contact_book_in_tx(&mut tx, &tenant_id, owner.id).await?;
+                sqlx::query(
+                    r#"
+                    INSERT INTO contact_book_grants (
+                        id, tenant_id, contact_book_id, owner_account_id, grantee_account_id,
+                        may_read, may_write, may_delete, may_share
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    ON CONFLICT (tenant_id, contact_book_id, grantee_account_id)
+                    DO UPDATE SET
+                        may_read = EXCLUDED.may_read,
+                        may_write = EXCLUDED.may_write,
+                        may_delete = EXCLUDED.may_delete,
+                        may_share = EXCLUDED.may_share,
+                        updated_at = NOW()
+                    "#,
+                )
+                .bind(Uuid::new_v4())
+                .bind(&tenant_id)
+                .bind(collection_id)
+                .bind(owner.id)
+                .bind(grantee.id)
+                .bind(input.may_read)
+                .bind(input.may_write)
+                .bind(input.may_delete)
+                .bind(input.may_share)
+                .execute(&mut *tx)
+                .await?;
+            }
+            CollaborationResourceKind::Calendar => {
+                let collection_id =
+                    Self::ensure_default_calendar_in_tx(&mut tx, &tenant_id, owner.id).await?;
+                sqlx::query(
+                    r#"
+                    INSERT INTO calendar_grants (
+                        id, tenant_id, calendar_id, owner_account_id, grantee_account_id,
+                        may_read, may_write, may_delete, may_share
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    ON CONFLICT (tenant_id, calendar_id, grantee_account_id)
+                    DO UPDATE SET
+                        may_read = EXCLUDED.may_read,
+                        may_write = EXCLUDED.may_write,
+                        may_delete = EXCLUDED.may_delete,
+                        may_share = EXCLUDED.may_share,
+                        updated_at = NOW()
+                    "#,
+                )
+                .bind(Uuid::new_v4())
+                .bind(&tenant_id)
+                .bind(collection_id)
+                .bind(owner.id)
+                .bind(grantee.id)
+                .bind(input.may_read)
+                .bind(input.may_write)
+                .bind(input.may_delete)
+                .bind(input.may_share)
+                .execute(&mut *tx)
+                .await?;
+            }
+            CollaborationResourceKind::Tasks => {
+                let task_list =
+                    Self::ensure_default_task_list(&mut tx, &tenant_id, owner.id).await?;
+                sqlx::query(
+                    r#"
+                    INSERT INTO task_list_grants (
+                        id, tenant_id, task_list_id, owner_account_id, grantee_account_id,
+                        may_read, may_write, may_delete, may_share
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    ON CONFLICT (tenant_id, task_list_id, grantee_account_id)
+                    DO UPDATE SET
+                        may_read = EXCLUDED.may_read,
+                        may_write = EXCLUDED.may_write,
+                        may_delete = EXCLUDED.may_delete,
+                        may_share = EXCLUDED.may_share,
+                        updated_at = NOW()
+                    "#,
+                )
+                .bind(Uuid::new_v4())
+                .bind(&tenant_id)
+                .bind(task_list.id)
+                .bind(owner.id)
+                .bind(grantee.id)
+                .bind(input.may_read)
+                .bind(input.may_write)
+                .bind(input.may_delete)
+                .bind(input.may_share)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         Self::emit_collaboration_grant_change(
@@ -201,21 +273,69 @@ impl Storage {
     ) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
         let mut tx = self.pool.begin().await?;
-        let deleted = sqlx::query(
-            r#"
-            DELETE FROM collaboration_collection_grants
-            WHERE tenant_id = $1
-              AND collection_kind = $2
-              AND owner_account_id = $3
-              AND grantee_account_id = $4
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(kind.as_str())
-        .bind(owner_account_id)
-        .bind(grantee_account_id)
-        .execute(&mut *tx)
-        .await?;
+        let deleted = match kind {
+            CollaborationResourceKind::Contacts => {
+                sqlx::query(
+                    r#"
+                DELETE FROM contact_book_grants g
+                USING contact_books b
+                WHERE g.tenant_id = $1
+                  AND g.owner_account_id = $2
+                  AND g.grantee_account_id = $3
+                  AND b.tenant_id = g.tenant_id
+                  AND b.owner_account_id = g.owner_account_id
+                  AND b.id = g.contact_book_id
+                  AND b.role = 'contacts'
+                "#,
+                )
+                .bind(&tenant_id)
+                .bind(owner_account_id)
+                .bind(grantee_account_id)
+                .execute(&mut *tx)
+                .await?
+            }
+            CollaborationResourceKind::Calendar => {
+                sqlx::query(
+                    r#"
+                DELETE FROM calendar_grants g
+                USING calendars c
+                WHERE g.tenant_id = $1
+                  AND g.owner_account_id = $2
+                  AND g.grantee_account_id = $3
+                  AND c.tenant_id = g.tenant_id
+                  AND c.owner_account_id = g.owner_account_id
+                  AND c.id = g.calendar_id
+                  AND c.role = 'calendar'
+                "#,
+                )
+                .bind(&tenant_id)
+                .bind(owner_account_id)
+                .bind(grantee_account_id)
+                .execute(&mut *tx)
+                .await?
+            }
+            CollaborationResourceKind::Tasks => {
+                sqlx::query(
+                    r#"
+                DELETE FROM task_list_grants g
+                USING task_lists l
+                WHERE g.tenant_id = $1
+                  AND g.owner_account_id = $2
+                  AND g.grantee_account_id = $3
+                  AND l.tenant_id = g.tenant_id
+                  AND l.owner_account_id = g.owner_account_id
+                  AND l.id = g.task_list_id
+                  AND l.role = $4
+                "#,
+                )
+                .bind(&tenant_id)
+                .bind(owner_account_id)
+                .bind(grantee_account_id)
+                .bind(DEFAULT_TASK_LIST_ROLE)
+                .execute(&mut *tx)
+                .await?
+            }
+        };
 
         if deleted.rows_affected() == 0 {
             bail!("collaboration grant not found");
@@ -241,39 +361,117 @@ impl Storage {
         grantee_account_id: Uuid,
     ) -> Result<Option<CollaborationGrant>> {
         let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
-        let row = sqlx::query_as::<_, CollaborationGrantRow>(
-            r#"
-            SELECT
-                g.id,
-                g.collection_kind AS kind,
-                g.owner_account_id,
-                owner.primary_email AS owner_email,
-                owner.display_name AS owner_display_name,
-                g.grantee_account_id,
-                grantee.primary_email AS grantee_email,
-                grantee.display_name AS grantee_display_name,
-                g.may_read,
-                g.may_write,
-                g.may_delete,
-                g.may_share,
-                to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
-                to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
-            FROM collaboration_collection_grants g
-            JOIN accounts owner ON owner.id = g.owner_account_id
-            JOIN accounts grantee ON grantee.id = g.grantee_account_id
-            WHERE g.tenant_id = $1
-              AND g.collection_kind = $2
-              AND g.owner_account_id = $3
-              AND g.grantee_account_id = $4
-            LIMIT 1
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(kind.as_str())
-        .bind(owner_account_id)
-        .bind(grantee_account_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = match kind {
+            CollaborationResourceKind::Contacts => sqlx::query_as::<_, CollaborationGrantRow>(
+                r#"
+                SELECT
+                    g.id,
+                    'contacts'::text AS kind,
+                    g.owner_account_id,
+                    owner.primary_email AS owner_email,
+                    owner.display_name AS owner_display_name,
+                    g.grantee_account_id,
+                    grantee.primary_email AS grantee_email,
+                    grantee.display_name AS grantee_display_name,
+                    g.may_read,
+                    g.may_write,
+                    g.may_delete,
+                    g.may_share,
+                    to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                    to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                FROM contact_book_grants g
+                JOIN contact_books b
+                  ON b.tenant_id = g.tenant_id
+                 AND b.owner_account_id = g.owner_account_id
+                 AND b.id = g.contact_book_id
+                 AND b.role = 'contacts'
+                JOIN accounts owner ON owner.id = g.owner_account_id
+                JOIN accounts grantee ON grantee.id = g.grantee_account_id
+                WHERE g.tenant_id = $1
+                  AND g.owner_account_id = $2
+                  AND g.grantee_account_id = $3
+                LIMIT 1
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(owner_account_id)
+            .bind(grantee_account_id)
+            .fetch_optional(&self.pool)
+            .await?,
+            CollaborationResourceKind::Calendar => sqlx::query_as::<_, CollaborationGrantRow>(
+                r#"
+                SELECT
+                    g.id,
+                    'calendar'::text AS kind,
+                    g.owner_account_id,
+                    owner.primary_email AS owner_email,
+                    owner.display_name AS owner_display_name,
+                    g.grantee_account_id,
+                    grantee.primary_email AS grantee_email,
+                    grantee.display_name AS grantee_display_name,
+                    g.may_read,
+                    g.may_write,
+                    g.may_delete,
+                    g.may_share,
+                    to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                    to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                FROM calendar_grants g
+                JOIN calendars c
+                  ON c.tenant_id = g.tenant_id
+                 AND c.owner_account_id = g.owner_account_id
+                 AND c.id = g.calendar_id
+                 AND c.role = 'calendar'
+                JOIN accounts owner ON owner.id = g.owner_account_id
+                JOIN accounts grantee ON grantee.id = g.grantee_account_id
+                WHERE g.tenant_id = $1
+                  AND g.owner_account_id = $2
+                  AND g.grantee_account_id = $3
+                LIMIT 1
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(owner_account_id)
+            .bind(grantee_account_id)
+            .fetch_optional(&self.pool)
+            .await?,
+            CollaborationResourceKind::Tasks => sqlx::query_as::<_, CollaborationGrantRow>(
+                r#"
+                SELECT
+                    g.id,
+                    'tasks'::text AS kind,
+                    g.owner_account_id,
+                    owner.primary_email AS owner_email,
+                    owner.display_name AS owner_display_name,
+                    g.grantee_account_id,
+                    grantee.primary_email AS grantee_email,
+                    grantee.display_name AS grantee_display_name,
+                    g.may_read,
+                    g.may_write,
+                    g.may_delete,
+                    g.may_share,
+                    to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                    to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                FROM task_list_grants g
+                JOIN task_lists l
+                  ON l.tenant_id = g.tenant_id
+                 AND l.owner_account_id = g.owner_account_id
+                 AND l.id = g.task_list_id
+                 AND l.role = $4
+                JOIN accounts owner ON owner.id = g.owner_account_id
+                JOIN accounts grantee ON grantee.id = g.grantee_account_id
+                WHERE g.tenant_id = $1
+                  AND g.owner_account_id = $2
+                  AND g.grantee_account_id = $3
+                LIMIT 1
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(owner_account_id)
+            .bind(grantee_account_id)
+            .bind(DEFAULT_TASK_LIST_ROLE)
+            .fetch_optional(&self.pool)
+            .await?,
+        };
 
         Ok(row.map(map_collaboration_grant))
     }
@@ -284,37 +482,111 @@ impl Storage {
         kind: CollaborationResourceKind,
     ) -> Result<Vec<CollaborationGrant>> {
         let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
-        let rows = sqlx::query_as::<_, CollaborationGrantRow>(
-            r#"
-            SELECT
-                g.id,
-                g.collection_kind AS kind,
-                g.owner_account_id,
-                owner.primary_email AS owner_email,
-                owner.display_name AS owner_display_name,
-                g.grantee_account_id,
-                grantee.primary_email AS grantee_email,
-                grantee.display_name AS grantee_display_name,
-                g.may_read,
-                g.may_write,
-                g.may_delete,
-                g.may_share,
-                to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
-                to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
-            FROM collaboration_collection_grants g
-            JOIN accounts owner ON owner.id = g.owner_account_id
-            JOIN accounts grantee ON grantee.id = g.grantee_account_id
-            WHERE g.tenant_id = $1
-              AND g.collection_kind = $2
-              AND g.owner_account_id = $3
-            ORDER BY lower(grantee.primary_email) ASC
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(kind.as_str())
-        .bind(owner_account_id)
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = match kind {
+            CollaborationResourceKind::Contacts => sqlx::query_as::<_, CollaborationGrantRow>(
+                r#"
+                SELECT
+                    g.id,
+                    'contacts'::text AS kind,
+                    g.owner_account_id,
+                    owner.primary_email AS owner_email,
+                    owner.display_name AS owner_display_name,
+                    g.grantee_account_id,
+                    grantee.primary_email AS grantee_email,
+                    grantee.display_name AS grantee_display_name,
+                    g.may_read,
+                    g.may_write,
+                    g.may_delete,
+                    g.may_share,
+                    to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                    to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                FROM contact_book_grants g
+                JOIN contact_books b
+                  ON b.tenant_id = g.tenant_id
+                 AND b.owner_account_id = g.owner_account_id
+                 AND b.id = g.contact_book_id
+                 AND b.role = 'contacts'
+                JOIN accounts owner ON owner.id = g.owner_account_id
+                JOIN accounts grantee ON grantee.id = g.grantee_account_id
+                WHERE g.tenant_id = $1
+                  AND g.owner_account_id = $2
+                ORDER BY lower(grantee.primary_email) ASC
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(owner_account_id)
+            .fetch_all(&self.pool)
+            .await?,
+            CollaborationResourceKind::Calendar => sqlx::query_as::<_, CollaborationGrantRow>(
+                r#"
+                SELECT
+                    g.id,
+                    'calendar'::text AS kind,
+                    g.owner_account_id,
+                    owner.primary_email AS owner_email,
+                    owner.display_name AS owner_display_name,
+                    g.grantee_account_id,
+                    grantee.primary_email AS grantee_email,
+                    grantee.display_name AS grantee_display_name,
+                    g.may_read,
+                    g.may_write,
+                    g.may_delete,
+                    g.may_share,
+                    to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                    to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                FROM calendar_grants g
+                JOIN calendars c
+                  ON c.tenant_id = g.tenant_id
+                 AND c.owner_account_id = g.owner_account_id
+                 AND c.id = g.calendar_id
+                 AND c.role = 'calendar'
+                JOIN accounts owner ON owner.id = g.owner_account_id
+                JOIN accounts grantee ON grantee.id = g.grantee_account_id
+                WHERE g.tenant_id = $1
+                  AND g.owner_account_id = $2
+                ORDER BY lower(grantee.primary_email) ASC
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(owner_account_id)
+            .fetch_all(&self.pool)
+            .await?,
+            CollaborationResourceKind::Tasks => sqlx::query_as::<_, CollaborationGrantRow>(
+                r#"
+                SELECT
+                    g.id,
+                    'tasks'::text AS kind,
+                    g.owner_account_id,
+                    owner.primary_email AS owner_email,
+                    owner.display_name AS owner_display_name,
+                    g.grantee_account_id,
+                    grantee.primary_email AS grantee_email,
+                    grantee.display_name AS grantee_display_name,
+                    g.may_read,
+                    g.may_write,
+                    g.may_delete,
+                    g.may_share,
+                    to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                    to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                FROM task_list_grants g
+                JOIN task_lists l
+                  ON l.tenant_id = g.tenant_id
+                 AND l.owner_account_id = g.owner_account_id
+                 AND l.id = g.task_list_id
+                 AND l.role = $3
+                JOIN accounts owner ON owner.id = g.owner_account_id
+                JOIN accounts grantee ON grantee.id = g.grantee_account_id
+                WHERE g.tenant_id = $1
+                  AND g.owner_account_id = $2
+                ORDER BY lower(grantee.primary_email) ASC
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(owner_account_id)
+            .bind(DEFAULT_TASK_LIST_ROLE)
+            .fetch_all(&self.pool)
+            .await?,
+        };
 
         Ok(rows.into_iter().map(map_collaboration_grant).collect())
     }
@@ -537,6 +809,7 @@ impl Storage {
             .upsert_client_event(UpsertClientEventInput {
                 id: input.id,
                 account_id: access.owner_account_id,
+                uid: input.uid,
                 date: input.date,
                 time: input.time,
                 time_zone: input.time_zone,
@@ -576,6 +849,11 @@ impl Storage {
         self.upsert_client_event(UpsertClientEventInput {
             id: Some(event_id),
             account_id: existing.owner_account_id,
+            uid: if input.uid.trim().is_empty() {
+                existing.uid.clone()
+            } else {
+                input.uid
+            },
             date: input.date,
             time: input.time,
             time_zone: input.time_zone,
@@ -638,30 +916,96 @@ impl Storage {
             },
         }];
 
-        let rows = sqlx::query_as::<_, CollaborationCollectionRow>(
-            r#"
-            SELECT
-                g.owner_account_id,
-                owner.primary_email AS owner_email,
-                owner.display_name AS owner_display_name,
-                g.may_read,
-                g.may_write,
-                g.may_delete,
-                g.may_share
-            FROM collaboration_collection_grants g
-            JOIN accounts owner ON owner.id = g.owner_account_id
-            WHERE g.tenant_id = $1
-              AND g.collection_kind = $2
-              AND g.grantee_account_id = $3
-              AND g.may_read = TRUE
-            ORDER BY lower(owner.primary_email) ASC
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(kind.as_str())
-        .bind(principal_account_id)
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = match kind {
+            CollaborationResourceKind::Contacts => {
+                sqlx::query_as::<_, CollaborationCollectionRow>(
+                    r#"
+                SELECT
+                    g.owner_account_id,
+                    owner.primary_email AS owner_email,
+                    owner.display_name AS owner_display_name,
+                    g.may_read,
+                    g.may_write,
+                    g.may_delete,
+                    g.may_share
+                FROM contact_book_grants g
+                JOIN contact_books b
+                  ON b.tenant_id = g.tenant_id
+                 AND b.owner_account_id = g.owner_account_id
+                 AND b.id = g.contact_book_id
+                 AND b.role = 'contacts'
+                JOIN accounts owner ON owner.id = g.owner_account_id
+                WHERE g.tenant_id = $1
+                  AND g.grantee_account_id = $2
+                  AND g.may_read = TRUE
+                ORDER BY lower(owner.primary_email) ASC
+                "#,
+                )
+                .bind(&tenant_id)
+                .bind(principal_account_id)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            CollaborationResourceKind::Calendar => {
+                sqlx::query_as::<_, CollaborationCollectionRow>(
+                    r#"
+                SELECT
+                    g.owner_account_id,
+                    owner.primary_email AS owner_email,
+                    owner.display_name AS owner_display_name,
+                    g.may_read,
+                    g.may_write,
+                    g.may_delete,
+                    g.may_share
+                FROM calendar_grants g
+                JOIN calendars c
+                  ON c.tenant_id = g.tenant_id
+                 AND c.owner_account_id = g.owner_account_id
+                 AND c.id = g.calendar_id
+                 AND c.role = 'calendar'
+                JOIN accounts owner ON owner.id = g.owner_account_id
+                WHERE g.tenant_id = $1
+                  AND g.grantee_account_id = $2
+                  AND g.may_read = TRUE
+                ORDER BY lower(owner.primary_email) ASC
+                "#,
+                )
+                .bind(&tenant_id)
+                .bind(principal_account_id)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            CollaborationResourceKind::Tasks => {
+                sqlx::query_as::<_, CollaborationCollectionRow>(
+                    r#"
+                SELECT
+                    g.owner_account_id,
+                    owner.primary_email AS owner_email,
+                    owner.display_name AS owner_display_name,
+                    g.may_read,
+                    g.may_write,
+                    g.may_delete,
+                    g.may_share
+                FROM task_list_grants g
+                JOIN task_lists l
+                  ON l.tenant_id = g.tenant_id
+                 AND l.owner_account_id = g.owner_account_id
+                 AND l.id = g.task_list_id
+                 AND l.role = $3
+                JOIN accounts owner ON owner.id = g.owner_account_id
+                WHERE g.tenant_id = $1
+                  AND g.grantee_account_id = $2
+                  AND g.may_read = TRUE
+                ORDER BY lower(owner.primary_email) ASC
+                "#,
+                )
+                .bind(&tenant_id)
+                .bind(principal_account_id)
+                .bind(DEFAULT_TASK_LIST_ROLE)
+                .fetch_all(&self.pool)
+                .await?
+            }
+        };
 
         collections.extend(rows.into_iter().map(|row| CollaborationCollection {
             id: shared_collection_id(kind, row.owner_account_id),
@@ -728,31 +1072,35 @@ impl Storage {
             r#"
             SELECT
                 c.id,
-                c.account_id AS owner_account_id,
+                c.owner_account_id,
                 owner.primary_email AS owner_email,
                 owner.display_name AS owner_display_name,
-                CASE WHEN c.account_id = $2 THEN TRUE ELSE COALESCE(g.may_read, FALSE) END AS may_read,
-                CASE WHEN c.account_id = $2 THEN TRUE ELSE COALESCE(g.may_write, FALSE) END AS may_write,
-                CASE WHEN c.account_id = $2 THEN TRUE ELSE COALESCE(g.may_delete, FALSE) END AS may_delete,
-                CASE WHEN c.account_id = $2 THEN TRUE ELSE COALESCE(g.may_share, FALSE) END AS may_share,
-                c.name,
+                CASE WHEN c.owner_account_id = $2 THEN TRUE ELSE COALESCE(g.may_read, FALSE) END AS may_read,
+                CASE WHEN c.owner_account_id = $2 THEN TRUE ELSE COALESCE(g.may_write, FALSE) END AS may_write,
+                CASE WHEN c.owner_account_id = $2 THEN TRUE ELSE COALESCE(g.may_delete, FALSE) END AS may_delete,
+                CASE WHEN c.owner_account_id = $2 THEN TRUE ELSE COALESCE(g.may_share, FALSE) END AS may_share,
+                c.display_name AS name,
                 c.role,
-                c.email,
-                c.phone,
-                c.team,
+                COALESCE(c.emails_json->0->>'email', '') AS email,
+                COALESCE(c.phones_json->0->>'phone', '') AS phone,
+                c.organization_unit AS team,
                 c.notes
             FROM contacts c
-            JOIN accounts owner ON owner.id = c.account_id
-            LEFT JOIN collaboration_collection_grants g
+            JOIN accounts owner ON owner.id = c.owner_account_id
+            LEFT JOIN contact_books b
+              ON b.tenant_id = c.tenant_id
+             AND b.owner_account_id = c.owner_account_id
+             AND b.role = 'contacts'
+            LEFT JOIN contact_book_grants g
               ON g.tenant_id = c.tenant_id
-             AND g.collection_kind = 'contacts'
-             AND g.owner_account_id = c.account_id
+             AND g.contact_book_id = b.id
+             AND g.owner_account_id = c.owner_account_id
              AND g.grantee_account_id = $2
             WHERE c.tenant_id = $1
-              AND (c.account_id = $2 OR COALESCE(g.may_read, FALSE))
-              AND ($3::uuid IS NULL OR c.account_id = $3)
+              AND (c.owner_account_id = $2 OR COALESCE(g.may_read, FALSE))
+              AND ($3::uuid IS NULL OR c.owner_account_id = $3)
               AND ($4::uuid[] IS NULL OR c.id = ANY($4))
-            ORDER BY lower(c.name) ASC, c.id ASC
+            ORDER BY lower(c.display_name) ASC, c.id ASC
             "#,
         )
         .bind(&tenant_id)
@@ -816,35 +1164,40 @@ impl Storage {
             r#"
             SELECT
                 e.id,
-                e.account_id AS owner_account_id,
+                e.uid,
+                e.owner_account_id,
                 owner.primary_email AS owner_email,
                 owner.display_name AS owner_display_name,
-                CASE WHEN e.account_id = $2 THEN TRUE ELSE COALESCE(g.may_read, FALSE) END AS may_read,
-                CASE WHEN e.account_id = $2 THEN TRUE ELSE COALESCE(g.may_write, FALSE) END AS may_write,
-                CASE WHEN e.account_id = $2 THEN TRUE ELSE COALESCE(g.may_delete, FALSE) END AS may_delete,
-                CASE WHEN e.account_id = $2 THEN TRUE ELSE COALESCE(g.may_share, FALSE) END AS may_share,
-                to_char(e.event_date, 'YYYY-MM-DD') AS date,
-                to_char(e.event_time, 'HH24:MI') AS time,
+                CASE WHEN e.owner_account_id = $2 THEN TRUE ELSE COALESCE(g.may_read, FALSE) END AS may_read,
+                CASE WHEN e.owner_account_id = $2 THEN TRUE ELSE COALESCE(g.may_write, FALSE) END AS may_write,
+                CASE WHEN e.owner_account_id = $2 THEN TRUE ELSE COALESCE(g.may_delete, FALSE) END AS may_delete,
+                CASE WHEN e.owner_account_id = $2 THEN TRUE ELSE COALESCE(g.may_share, FALSE) END AS may_share,
+                to_char(e.starts_at AT TIME ZONE COALESCE(NULLIF(e.time_zone, ''), 'UTC'), 'YYYY-MM-DD') AS date,
+                to_char(e.starts_at AT TIME ZONE COALESCE(NULLIF(e.time_zone, ''), 'UTC'), 'HH24:MI') AS time,
                 e.time_zone,
-                e.duration_minutes,
-                e.recurrence_rule,
+                GREATEST(0, EXTRACT(EPOCH FROM (e.ends_at - e.starts_at))::int / 60) AS duration_minutes,
+                COALESCE(e.recurrence_rule, '') AS recurrence_rule,
                 e.title,
                 e.location,
-                e.attendees,
-                e.attendees_json,
-                e.notes
+                COALESCE(e.source_payload_json->>'attendees', '') AS attendees,
+                e.attendees_json::text AS attendees_json,
+                e.body_text AS notes
             FROM calendar_events e
-            JOIN accounts owner ON owner.id = e.account_id
-            LEFT JOIN collaboration_collection_grants g
+            JOIN accounts owner ON owner.id = e.owner_account_id
+            LEFT JOIN calendars c
+              ON c.tenant_id = e.tenant_id
+             AND c.owner_account_id = e.owner_account_id
+             AND c.role = 'calendar'
+            LEFT JOIN calendar_grants g
               ON g.tenant_id = e.tenant_id
-             AND g.collection_kind = 'calendar'
-             AND g.owner_account_id = e.account_id
+             AND g.calendar_id = c.id
+             AND g.owner_account_id = e.owner_account_id
              AND g.grantee_account_id = $2
             WHERE e.tenant_id = $1
-              AND (e.account_id = $2 OR COALESCE(g.may_read, FALSE))
-              AND ($3::uuid IS NULL OR e.account_id = $3)
+              AND (e.owner_account_id = $2 OR COALESCE(g.may_read, FALSE))
+              AND ($3::uuid IS NULL OR e.owner_account_id = $3)
               AND ($4::uuid[] IS NULL OR e.id = ANY($4))
-            ORDER BY e.event_date ASC, e.event_time ASC, e.id ASC
+            ORDER BY e.starts_at ASC, e.id ASC
             "#,
         )
         .bind(&tenant_id)
@@ -858,6 +1211,7 @@ impl Storage {
             .into_iter()
             .map(|row| AccessibleEvent {
                 id: row.id,
+                uid: row.uid,
                 collection_id: collection_id_for_owner(
                     CollaborationResourceKind::Calendar,
                     principal_account_id,
@@ -884,6 +1238,52 @@ impl Storage {
                 notes: row.notes,
             })
             .collect())
+    }
+
+    pub(crate) async fn ensure_default_contact_book_in_tx(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        owner_account_id: Uuid,
+    ) -> Result<Uuid> {
+        sqlx::query_scalar::<_, Uuid>(
+            r#"
+            INSERT INTO contact_books (id, tenant_id, owner_account_id, display_name, role)
+            VALUES ($1, $2, $3, 'Contacts', 'contacts')
+            ON CONFLICT (tenant_id, owner_account_id, role)
+            WHERE role <> 'custom'
+            DO UPDATE SET display_name = contact_books.display_name
+            RETURNING id
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(tenant_id)
+        .bind(owner_account_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(Into::into)
+    }
+
+    pub(crate) async fn ensure_default_calendar_in_tx(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        owner_account_id: Uuid,
+    ) -> Result<Uuid> {
+        sqlx::query_scalar::<_, Uuid>(
+            r#"
+            INSERT INTO calendars (id, tenant_id, owner_account_id, display_name, role)
+            VALUES ($1, $2, $3, 'Calendar', 'calendar')
+            ON CONFLICT (tenant_id, owner_account_id, role)
+            WHERE role <> 'custom'
+            DO UPDATE SET display_name = calendars.display_name
+            RETURNING id
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(tenant_id)
+        .bind(owner_account_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(Into::into)
     }
 }
 

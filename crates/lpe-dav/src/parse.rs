@@ -64,6 +64,7 @@ pub(crate) fn parse_ical(
 ) -> Result<UpsertClientEventInput> {
     let content = std::str::from_utf8(body)?;
     let mut date = String::new();
+    let mut uid = id.to_string();
     let mut time = String::new();
     let mut time_zone = String::new();
     let mut duration_minutes = 0;
@@ -85,6 +86,7 @@ pub(crate) fn parse_ical(
             .to_ascii_uppercase();
         let value = text_unescape(raw_value.trim());
         match key.as_str() {
+            "UID" => uid = value,
             "DTSTART" => {
                 let (parsed_date, parsed_time) = parse_ical_datetime(&value)?;
                 date = parsed_date;
@@ -114,6 +116,7 @@ pub(crate) fn parse_ical(
     Ok(UpsertClientEventInput {
         id: Some(id),
         account_id,
+        uid,
         date,
         time,
         time_zone,

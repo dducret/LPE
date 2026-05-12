@@ -34,6 +34,10 @@
   - record grant create/update/delete actions
   - record delegated submission decisions
   - preserve actor, owner, grantee, resource, and permission set
+- Change replay:
+  - write object-level change-log rows for collaboration objects and grants
+  - write tombstones for deleted contacts, events, task lists, tasks, collaboration grants, mailbox delegation grants, and sender rights
+  - revocation wakes affected principals and removes protocol visibility through canonical change state
 
 ## Reference Table/List
 

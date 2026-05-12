@@ -6,8 +6,8 @@ use uuid::Uuid;
 use crate::{
     collaboration::{validate_collaboration_rights, CollaborationRights},
     normalize_email, normalize_task_list_name, normalize_task_status, AuditEntryInput,
-    ClientTaskListRow, ClientTaskRow, DavTaskRow, Storage, TaskListGrantRow,
-    DEFAULT_TASK_LIST_NAME, DEFAULT_TASK_LIST_ROLE,
+    CanonicalChangeCategory, ClientTaskListRow, ClientTaskRow, DavTaskRow, Storage,
+    TaskListGrantRow, DEFAULT_TASK_LIST_NAME, DEFAULT_TASK_LIST_ROLE,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -285,8 +285,9 @@ impl Storage {
             INSERT INTO tasks (
                 id,
                 tenant_id,
-                account_id,
+                owner_account_id,
                 task_list_id,
+                uid,
                 title,
                 description,
                 status,
@@ -299,6 +300,7 @@ impl Storage {
                 $2,
                 $3,
                 $4,
+                $1::text,
                 $5,
                 $6,
                 $7,
@@ -319,10 +321,10 @@ impl Storage {
                 sort_order = EXCLUDED.sort_order,
                 updated_at = NOW()
             WHERE tasks.tenant_id = EXCLUDED.tenant_id
-              AND tasks.account_id = EXCLUDED.account_id
+              AND tasks.owner_account_id = EXCLUDED.owner_account_id
             RETURNING
                 tasks.id,
-                tasks.account_id AS owner_account_id,
+                tasks.owner_account_id,
                 $11::text AS owner_email,
                 $12::text AS owner_display_name,
                 $13::boolean AS is_owned,
@@ -335,7 +337,7 @@ impl Storage {
                     SELECT sort_order
                     FROM task_lists
                     WHERE task_lists.tenant_id = tasks.tenant_id
-                      AND task_lists.account_id = tasks.account_id
+                      AND task_lists.owner_account_id = tasks.owner_account_id
                       AND task_lists.id = tasks.task_list_id
                 ) AS task_list_sort_order,
                 tasks.title,
@@ -525,7 +527,7 @@ impl Storage {
             SELECT
                 g.id,
                 g.task_list_id,
-                task_lists.name AS task_list_name,
+                task_lists.display_name AS task_list_name,
                 g.owner_account_id,
                 owner.primary_email AS owner_email,
                 owner.display_name AS owner_display_name,
@@ -541,7 +543,7 @@ impl Storage {
             FROM task_list_grants g
             JOIN task_lists
               ON task_lists.tenant_id = g.tenant_id
-             AND task_lists.account_id = g.owner_account_id
+             AND task_lists.owner_account_id = g.owner_account_id
              AND task_lists.id = g.task_list_id
             JOIN accounts owner ON owner.id = g.owner_account_id
             JOIN accounts grantee ON grantee.id = g.grantee_account_id
@@ -572,7 +574,7 @@ impl Storage {
             SELECT
                 g.id,
                 g.task_list_id,
-                task_lists.name AS task_list_name,
+                task_lists.display_name AS task_list_name,
                 g.owner_account_id,
                 owner.primary_email AS owner_email,
                 owner.display_name AS owner_display_name,
@@ -588,13 +590,13 @@ impl Storage {
             FROM task_list_grants g
             JOIN task_lists
               ON task_lists.tenant_id = g.tenant_id
-             AND task_lists.account_id = g.owner_account_id
+             AND task_lists.owner_account_id = g.owner_account_id
              AND task_lists.id = g.task_list_id
             JOIN accounts owner ON owner.id = g.owner_account_id
             JOIN accounts grantee ON grantee.id = g.grantee_account_id
             WHERE g.tenant_id = $1
               AND g.owner_account_id = $2
-            ORDER BY lower(task_lists.name) ASC, lower(grantee.primary_email) ASC
+            ORDER BY lower(task_lists.display_name) ASC, lower(grantee.primary_email) ASC
             "#,
         )
         .bind(&tenant_id)
@@ -613,41 +615,41 @@ impl Storage {
             r#"
             SELECT
                 task_lists.id,
-                task_lists.account_id AS owner_account_id,
+                task_lists.owner_account_id,
                 owner.primary_email AS owner_email,
                 owner.display_name AS owner_display_name,
-                (task_lists.account_id = $2) AS is_owned,
+                (task_lists.owner_account_id = $2) AS is_owned,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_read, FALSE)
                 END AS may_read,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_write, FALSE)
                 END AS may_write,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_delete, FALSE)
                 END AS may_delete,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_share, FALSE)
                 END AS may_share,
-                task_lists.name,
+                task_lists.display_name AS name,
                 task_lists.role,
                 task_lists.sort_order,
                 to_char(task_lists.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
             FROM task_lists
-            JOIN accounts owner ON owner.id = task_lists.account_id
+            JOIN accounts owner ON owner.id = task_lists.owner_account_id
             LEFT JOIN task_list_grants g
               ON g.tenant_id = task_lists.tenant_id
              AND g.task_list_id = task_lists.id
-             AND g.owner_account_id = task_lists.account_id
+             AND g.owner_account_id = task_lists.owner_account_id
              AND g.grantee_account_id = $2
             WHERE task_lists.tenant_id = $1
-              AND (task_lists.account_id = $2 OR COALESCE(g.may_read, FALSE))
+              AND (task_lists.owner_account_id = $2 OR COALESCE(g.may_read, FALSE))
             ORDER BY
-                CASE WHEN task_lists.account_id = $2 THEN 0 ELSE 1 END ASC,
+                CASE WHEN task_lists.owner_account_id = $2 THEN 0 ELSE 1 END ASC,
                 lower(owner.primary_email) ASC,
                 task_lists.sort_order ASC,
                 task_lists.created_at ASC,
@@ -678,42 +680,42 @@ impl Storage {
             r#"
             SELECT
                 task_lists.id,
-                task_lists.account_id AS owner_account_id,
+                task_lists.owner_account_id,
                 owner.primary_email AS owner_email,
                 owner.display_name AS owner_display_name,
-                (task_lists.account_id = $2) AS is_owned,
+                (task_lists.owner_account_id = $2) AS is_owned,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_read, FALSE)
                 END AS may_read,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_write, FALSE)
                 END AS may_write,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_delete, FALSE)
                 END AS may_delete,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_share, FALSE)
                 END AS may_share,
-                task_lists.name,
+                task_lists.display_name AS name,
                 task_lists.role,
                 task_lists.sort_order,
                 to_char(task_lists.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
             FROM task_lists
-            JOIN accounts owner ON owner.id = task_lists.account_id
+            JOIN accounts owner ON owner.id = task_lists.owner_account_id
             LEFT JOIN task_list_grants g
               ON g.tenant_id = task_lists.tenant_id
              AND g.task_list_id = task_lists.id
-             AND g.owner_account_id = task_lists.account_id
+             AND g.owner_account_id = task_lists.owner_account_id
              AND g.grantee_account_id = $2
             WHERE task_lists.tenant_id = $1
               AND task_lists.id = ANY($3)
-              AND (task_lists.account_id = $2 OR COALESCE(g.may_read, FALSE))
+              AND (task_lists.owner_account_id = $2 OR COALESCE(g.may_read, FALSE))
             ORDER BY
-                CASE WHEN task_lists.account_id = $2 THEN 0 ELSE 1 END ASC,
+                CASE WHEN task_lists.owner_account_id = $2 THEN 0 ELSE 1 END ASC,
                 lower(owner.primary_email) ASC,
                 task_lists.sort_order ASC,
                 task_lists.created_at ASC,
@@ -737,11 +739,11 @@ impl Storage {
         Self::ensure_default_task_list(&mut tx, &tenant_id, input.account_id).await?;
         let row = sqlx::query_as::<_, ClientTaskListRow>(
             r#"
-            INSERT INTO task_lists (id, tenant_id, account_id, name, role, sort_order)
+            INSERT INTO task_lists (id, tenant_id, owner_account_id, display_name, role, sort_order)
             VALUES ($1, $2, $3, $4, NULL, $5)
             RETURNING
                 id,
-                account_id AS owner_account_id,
+                owner_account_id,
                 ''::text AS owner_email,
                 ''::text AS owner_display_name,
                 TRUE AS is_owned,
@@ -749,7 +751,7 @@ impl Storage {
                 TRUE AS may_write,
                 TRUE AS may_delete,
                 TRUE AS may_share,
-                name,
+                display_name AS name,
                 role,
                 sort_order,
                 to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
@@ -781,18 +783,18 @@ impl Storage {
             r#"
             UPDATE task_lists
             SET
-                name = COALESCE($4, name),
+                display_name = COALESCE($4, display_name),
                 sort_order = COALESCE($5, sort_order),
                 updated_at = CASE
                     WHEN $4 IS NULL AND $5 IS NULL THEN updated_at
                     ELSE NOW()
                 END
             WHERE tenant_id = $1
-              AND account_id = $2
+              AND owner_account_id = $2
               AND id = $3
             RETURNING
                 id,
-                account_id AS owner_account_id,
+                owner_account_id,
                 ''::text AS owner_email,
                 ''::text AS owner_display_name,
                 TRUE AS is_owned,
@@ -800,7 +802,7 @@ impl Storage {
                 TRUE AS may_write,
                 TRUE AS may_delete,
                 TRUE AS may_share,
-                name,
+                display_name AS name,
                 role,
                 sort_order,
                 to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
@@ -839,7 +841,7 @@ impl Storage {
             r#"
             SELECT COUNT(*)
             FROM tasks
-            WHERE tenant_id = $1 AND account_id = $2 AND task_list_id = $3
+            WHERE tenant_id = $1 AND owner_account_id = $2 AND task_list_id = $3
             "#,
         )
         .bind(&tenant_id)
@@ -864,10 +866,24 @@ impl Storage {
         .bind(task_list_id)
         .fetch_all(&mut *tx)
         .await?;
+        let mut affected_account_ids = grantee_account_ids.clone();
+        affected_account_ids.push(account_id);
+        self.insert_collaboration_tombstone_in_tx(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Tasks,
+            account_id,
+            Some(task_list_id),
+            "task_list",
+            task_list_id,
+            None,
+            &affected_account_ids,
+        )
+        .await?;
         sqlx::query(
             r#"
             DELETE FROM task_lists
-            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
             "#,
         )
         .bind(&tenant_id)
@@ -906,7 +922,7 @@ impl Storage {
         let deleted = sqlx::query(
             r#"
             DELETE FROM tasks
-            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
             "#,
         )
         .bind(&tenant_id)
@@ -919,6 +935,18 @@ impl Storage {
             bail!("task not found");
         }
 
+        self.insert_collaboration_tombstone_in_tx(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Tasks,
+            existing.owner_account_id,
+            Some(existing.task_list_id),
+            "task",
+            task_id,
+            None,
+            &[existing.owner_account_id],
+        )
+        .await?;
         Self::emit_task_access_change(
             &mut tx,
             &tenant_id,
@@ -940,28 +968,28 @@ impl Storage {
             r#"
             SELECT
                 tasks.id,
-                task_lists.account_id AS owner_account_id,
+                task_lists.owner_account_id,
                 owner.primary_email AS owner_email,
                 owner.display_name AS owner_display_name,
-                (task_lists.account_id = $2) AS is_owned,
+                (task_lists.owner_account_id = $2) AS is_owned,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_read, FALSE)
                 END AS may_read,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_write, FALSE)
                 END AS may_write,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_delete, FALSE)
                 END AS may_delete,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_share, FALSE)
                 END AS may_share,
                 tasks.task_list_id,
-                task_lists.name AS task_list_name,
+                task_lists.display_name AS task_list_name,
                 tasks.title,
                 tasks.description,
                 tasks.status,
@@ -978,18 +1006,18 @@ impl Storage {
             FROM tasks
             JOIN task_lists
               ON task_lists.tenant_id = tasks.tenant_id
-             AND task_lists.account_id = tasks.account_id
+             AND task_lists.owner_account_id = tasks.owner_account_id
              AND task_lists.id = tasks.task_list_id
-            JOIN accounts owner ON owner.id = task_lists.account_id
+            JOIN accounts owner ON owner.id = task_lists.owner_account_id
             LEFT JOIN task_list_grants g
               ON g.tenant_id = task_lists.tenant_id
              AND g.task_list_id = task_lists.id
-             AND g.owner_account_id = task_lists.account_id
+             AND g.owner_account_id = task_lists.owner_account_id
              AND g.grantee_account_id = $2
             WHERE tasks.tenant_id = $1
-              AND (task_lists.account_id = $2 OR COALESCE(g.may_read, FALSE))
+              AND (task_lists.owner_account_id = $2 OR COALESCE(g.may_read, FALSE))
             ORDER BY
-                CASE WHEN task_lists.account_id = $2 THEN 0 ELSE 1 END ASC,
+                CASE WHEN task_lists.owner_account_id = $2 THEN 0 ELSE 1 END ASC,
                 lower(owner.primary_email) ASC,
                 task_lists.sort_order ASC,
                 tasks.sort_order ASC,
@@ -1021,28 +1049,28 @@ impl Storage {
             r#"
             SELECT
                 tasks.id,
-                task_lists.account_id AS owner_account_id,
+                task_lists.owner_account_id,
                 owner.primary_email AS owner_email,
                 owner.display_name AS owner_display_name,
-                (task_lists.account_id = $2) AS is_owned,
+                (task_lists.owner_account_id = $2) AS is_owned,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_read, FALSE)
                 END AS may_read,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_write, FALSE)
                 END AS may_write,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_delete, FALSE)
                 END AS may_delete,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_share, FALSE)
                 END AS may_share,
                 tasks.task_list_id,
-                task_lists.name AS task_list_name,
+                task_lists.display_name AS task_list_name,
                 tasks.title,
                 tasks.description,
                 tasks.status,
@@ -1059,19 +1087,19 @@ impl Storage {
             FROM tasks
             JOIN task_lists
               ON task_lists.tenant_id = tasks.tenant_id
-             AND task_lists.account_id = tasks.account_id
+             AND task_lists.owner_account_id = tasks.owner_account_id
              AND task_lists.id = tasks.task_list_id
-            JOIN accounts owner ON owner.id = task_lists.account_id
+            JOIN accounts owner ON owner.id = task_lists.owner_account_id
             LEFT JOIN task_list_grants g
               ON g.tenant_id = task_lists.tenant_id
              AND g.task_list_id = task_lists.id
-             AND g.owner_account_id = task_lists.account_id
+             AND g.owner_account_id = task_lists.owner_account_id
              AND g.grantee_account_id = $2
             WHERE tasks.tenant_id = $1
               AND tasks.id = ANY($3)
-              AND (task_lists.account_id = $2 OR COALESCE(g.may_read, FALSE))
+              AND (task_lists.owner_account_id = $2 OR COALESCE(g.may_read, FALSE))
             ORDER BY
-                CASE WHEN task_lists.account_id = $2 THEN 0 ELSE 1 END ASC,
+                CASE WHEN task_lists.owner_account_id = $2 THEN 0 ELSE 1 END ASC,
                 lower(owner.primary_email) ASC,
                 task_lists.sort_order ASC,
                 tasks.sort_order ASC,
@@ -1134,24 +1162,24 @@ impl Storage {
             r#"
             SELECT
                 tasks.id,
-                task_lists.account_id AS owner_account_id,
+                task_lists.owner_account_id,
                 owner.primary_email AS owner_email,
                 owner.display_name AS owner_display_name,
-                (task_lists.account_id = $2) AS is_owned,
+                (task_lists.owner_account_id = $2) AS is_owned,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_read, FALSE)
                 END AS may_read,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_write, FALSE)
                 END AS may_write,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_delete, FALSE)
                 END AS may_delete,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_share, FALSE)
                 END AS may_share,
                 tasks.task_list_id,
@@ -1172,18 +1200,18 @@ impl Storage {
             FROM tasks
             JOIN task_lists
               ON task_lists.tenant_id = tasks.tenant_id
-             AND task_lists.account_id = tasks.account_id
+             AND task_lists.owner_account_id = tasks.owner_account_id
              AND task_lists.id = tasks.task_list_id
-            JOIN accounts owner ON owner.id = task_lists.account_id
+            JOIN accounts owner ON owner.id = task_lists.owner_account_id
             LEFT JOIN task_list_grants g
               ON g.tenant_id = task_lists.tenant_id
              AND g.task_list_id = task_lists.id
-             AND g.owner_account_id = task_lists.account_id
+             AND g.owner_account_id = task_lists.owner_account_id
              AND g.grantee_account_id = $2
             WHERE tasks.tenant_id = $1
-              AND (task_lists.account_id = $2 OR COALESCE(g.may_read, FALSE))
+              AND (task_lists.owner_account_id = $2 OR COALESCE(g.may_read, FALSE))
             ORDER BY
-                CASE WHEN task_lists.account_id = $2 THEN 0 ELSE 1 END ASC,
+                CASE WHEN task_lists.owner_account_id = $2 THEN 0 ELSE 1 END ASC,
                 lower(owner.primary_email) ASC,
                 task_lists.sort_order ASC,
                 tasks.sort_order ASC,
@@ -1216,24 +1244,24 @@ impl Storage {
             r#"
             SELECT
                 tasks.id,
-                task_lists.account_id AS owner_account_id,
+                task_lists.owner_account_id,
                 owner.primary_email AS owner_email,
                 owner.display_name AS owner_display_name,
-                (task_lists.account_id = $2) AS is_owned,
+                (task_lists.owner_account_id = $2) AS is_owned,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_read, FALSE)
                 END AS may_read,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_write, FALSE)
                 END AS may_write,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_delete, FALSE)
                 END AS may_delete,
                 CASE
-                    WHEN task_lists.account_id = $2 THEN TRUE
+                    WHEN task_lists.owner_account_id = $2 THEN TRUE
                     ELSE COALESCE(g.may_share, FALSE)
                 END AS may_share,
                 tasks.task_list_id,
@@ -1254,19 +1282,19 @@ impl Storage {
             FROM tasks
             JOIN task_lists
               ON task_lists.tenant_id = tasks.tenant_id
-             AND task_lists.account_id = tasks.account_id
+             AND task_lists.owner_account_id = tasks.owner_account_id
              AND task_lists.id = tasks.task_list_id
-            JOIN accounts owner ON owner.id = task_lists.account_id
+            JOIN accounts owner ON owner.id = task_lists.owner_account_id
             LEFT JOIN task_list_grants g
               ON g.tenant_id = task_lists.tenant_id
              AND g.task_list_id = task_lists.id
-             AND g.owner_account_id = task_lists.account_id
+             AND g.owner_account_id = task_lists.owner_account_id
              AND g.grantee_account_id = $2
             WHERE tasks.tenant_id = $1
               AND tasks.id = ANY($3)
-              AND (task_lists.account_id = $2 OR COALESCE(g.may_read, FALSE))
+              AND (task_lists.owner_account_id = $2 OR COALESCE(g.may_read, FALSE))
             ORDER BY
-                CASE WHEN task_lists.account_id = $2 THEN 0 ELSE 1 END ASC,
+                CASE WHEN task_lists.owner_account_id = $2 THEN 0 ELSE 1 END ASC,
                 lower(owner.primary_email) ASC,
                 task_lists.sort_order ASC,
                 tasks.sort_order ASC,
@@ -1291,13 +1319,13 @@ impl Storage {
     ) -> Result<ClientTaskListRow> {
         sqlx::query_as::<_, ClientTaskListRow>(
             r#"
-            INSERT INTO task_lists (id, tenant_id, account_id, name, role, sort_order)
+            INSERT INTO task_lists (id, tenant_id, owner_account_id, display_name, role, sort_order)
             VALUES ($1, $2, $3, $4, $5, 0)
-            ON CONFLICT (tenant_id, account_id, role) DO UPDATE SET
-                name = task_lists.name
+            ON CONFLICT (tenant_id, owner_account_id, role) DO UPDATE SET
+                display_name = task_lists.display_name
             RETURNING
                 id,
-                account_id AS owner_account_id,
+                owner_account_id,
                 ''::text AS owner_email,
                 ''::text AS owner_display_name,
                 TRUE AS is_owned,
@@ -1305,7 +1333,7 @@ impl Storage {
                 TRUE AS may_write,
                 TRUE AS may_delete,
                 TRUE AS may_share,
-                name,
+                display_name AS name,
                 role,
                 sort_order,
                 to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
@@ -1331,7 +1359,7 @@ impl Storage {
             r#"
             SELECT
                 id,
-                account_id AS owner_account_id,
+                owner_account_id,
                 ''::text AS owner_email,
                 ''::text AS owner_display_name,
                 TRUE AS is_owned,
@@ -1339,13 +1367,13 @@ impl Storage {
                 TRUE AS may_write,
                 TRUE AS may_delete,
                 TRUE AS may_share,
-                name,
+                display_name AS name,
                 role,
                 sort_order,
                 to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
             FROM task_lists
             WHERE tenant_id = $1
-              AND account_id = $2
+              AND owner_account_id = $2
               AND id = $3
             LIMIT 1
             "#,

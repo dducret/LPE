@@ -372,6 +372,7 @@ pub(crate) struct ActiveSyncAttachmentRow {
 #[derive(Debug, FromRow)]
 pub(crate) struct ClientEventRow {
     pub(crate) id: Uuid,
+    pub(crate) uid: String,
     pub(crate) date: String,
     pub(crate) time: String,
     pub(crate) time_zone: String,
@@ -445,6 +446,7 @@ pub(crate) struct AccessibleContactRow {
 #[derive(Debug, FromRow)]
 pub(crate) struct AccessibleEventRow {
     pub(crate) id: Uuid,
+    pub(crate) uid: String,
     pub(crate) owner_account_id: Uuid,
     pub(crate) owner_email: String,
     pub(crate) owner_display_name: String,
@@ -541,26 +543,6 @@ pub(crate) struct TaskListGrantRow {
     pub(crate) may_share: bool,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
-}
-
-#[derive(Debug, FromRow)]
-pub(crate) struct FilterRuleRow {
-    pub(crate) id: Uuid,
-    pub(crate) name: String,
-    pub(crate) scope: String,
-    pub(crate) action: String,
-    pub(crate) status: String,
-}
-
-#[derive(Debug, FromRow)]
-pub(crate) struct QuarantineRow {
-    pub(crate) id: Uuid,
-    pub(crate) message_ref: String,
-    pub(crate) sender: String,
-    pub(crate) recipient: String,
-    pub(crate) reason: String,
-    pub(crate) status: String,
-    pub(crate) created_at: String,
 }
 
 #[derive(Debug, FromRow)]

@@ -384,6 +384,8 @@ pub struct UpsertClientEventRequest {
     pub id: Option<Uuid>,
     #[serde(rename = "collectionId")]
     pub collection_id: Option<String>,
+    #[serde(default)]
+    pub uid: String,
     pub date: String,
     pub time: String,
     #[serde(default)]

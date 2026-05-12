@@ -39,6 +39,7 @@ pub struct ClientMessage {
 #[derive(Debug, Clone, Serialize)]
 pub struct ClientEvent {
     pub id: Uuid,
+    pub uid: String,
     pub date: String,
     pub time: String,
     pub time_zone: String,
@@ -78,6 +79,7 @@ pub struct UpsertClientContactInput {
 pub struct UpsertClientEventInput {
     pub id: Option<Uuid>,
     pub account_id: Uuid,
+    pub uid: String,
     pub date: String,
     pub time: String,
     pub time_zone: String,
@@ -212,28 +214,51 @@ impl Storage {
         let contact_id = input.id.unwrap_or_else(Uuid::new_v4);
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         let mut tx = self.pool.begin().await?;
+        let contact_book_id =
+            Self::ensure_default_contact_book_in_tx(&mut tx, &tenant_id, input.account_id).await?;
         let row = sqlx::query_as::<_, ClientContactRow>(
             r#"
             INSERT INTO contacts (
-                id, tenant_id, account_id, name, role, email, phone, team, notes
+                id, tenant_id, owner_account_id, contact_book_id, uid,
+                display_name, role, emails_json, phones_json, organization_unit, notes
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES (
+                $1, $2, $3, $4, $1::text,
+                $5, $6,
+                jsonb_build_array(jsonb_build_object('email', $7::text, 'label', 'work', 'isDefault', true)),
+                CASE
+                    WHEN NULLIF($8, '') IS NULL THEN '[]'::jsonb
+                    ELSE jsonb_build_array(jsonb_build_object('phone', $8::text, 'label', 'work'))
+                END,
+                $9,
+                $10
+            )
             ON CONFLICT (id) DO UPDATE SET
-                name = EXCLUDED.name,
+                contact_book_id = EXCLUDED.contact_book_id,
+                uid = EXCLUDED.uid,
+                display_name = EXCLUDED.display_name,
                 role = EXCLUDED.role,
-                email = EXCLUDED.email,
-                phone = EXCLUDED.phone,
-                team = EXCLUDED.team,
+                emails_json = EXCLUDED.emails_json,
+                phones_json = EXCLUDED.phones_json,
+                organization_unit = EXCLUDED.organization_unit,
                 notes = EXCLUDED.notes,
                 updated_at = NOW()
             WHERE contacts.tenant_id = EXCLUDED.tenant_id
-              AND contacts.account_id = EXCLUDED.account_id
-            RETURNING id, name, role, email, phone, team, notes
+              AND contacts.owner_account_id = EXCLUDED.owner_account_id
+            RETURNING
+                id,
+                display_name AS name,
+                role,
+                COALESCE(emails_json->0->>'email', '') AS email,
+                COALESCE(phones_json->0->>'phone', '') AS phone,
+                organization_unit AS team,
+                notes
             "#,
         )
         .bind(contact_id)
         .bind(&tenant_id)
         .bind(input.account_id)
+        .bind(contact_book_id)
         .bind(name)
         .bind(input.role.trim())
         .bind(email)
@@ -266,45 +291,66 @@ impl Storage {
         let event_id = input.id.unwrap_or_else(Uuid::new_v4);
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         let mut tx = self.pool.begin().await?;
+        let calendar_id =
+            Self::ensure_default_calendar_in_tx(&mut tx, &tenant_id, input.account_id).await?;
         let row = sqlx::query_as::<_, ClientEventRow>(
             r#"
             INSERT INTO calendar_events (
-                id, tenant_id, account_id, event_date, event_time,
-                time_zone, duration_minutes, recurrence_rule,
-                title, location, attendees, attendees_json, notes
+                id, tenant_id, owner_account_id, calendar_id, uid,
+                starts_at, ends_at, time_zone, recurrence_rule,
+                title, location, attendees_json, body_text, source_payload_json
             )
-            VALUES ($1, $2, $3, $4::date, $5::time, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES (
+                $1, $2, $3, $4, COALESCE(NULLIF($5, ''), $1::text),
+                (($6::date + $7::time) AT TIME ZONE COALESCE(NULLIF($8, ''), 'UTC')),
+                ((($6::date + $7::time) AT TIME ZONE COALESCE(NULLIF($8, ''), 'UTC')) + make_interval(mins => GREATEST($9, 0))),
+                $8,
+                NULLIF($10, ''),
+                $11,
+                $12,
+                CASE
+                    WHEN NULLIF($14, '') IS NOT NULL THEN $14::jsonb
+                    WHEN NULLIF($13, '') IS NOT NULL THEN jsonb_build_array(jsonb_build_object('email', $13::text))
+                    ELSE '[]'::jsonb
+                END,
+                $15,
+                jsonb_build_object('attendees', $13::text)
+            )
             ON CONFLICT (id) DO UPDATE SET
-                event_date = EXCLUDED.event_date,
-                event_time = EXCLUDED.event_time,
+                calendar_id = EXCLUDED.calendar_id,
+                uid = EXCLUDED.uid,
+                starts_at = EXCLUDED.starts_at,
+                ends_at = EXCLUDED.ends_at,
                 time_zone = EXCLUDED.time_zone,
-                duration_minutes = EXCLUDED.duration_minutes,
                 recurrence_rule = EXCLUDED.recurrence_rule,
                 title = EXCLUDED.title,
                 location = EXCLUDED.location,
-                attendees = EXCLUDED.attendees,
                 attendees_json = EXCLUDED.attendees_json,
-                notes = EXCLUDED.notes,
+                body_text = EXCLUDED.body_text,
+                source_payload_json = EXCLUDED.source_payload_json,
                 updated_at = NOW()
             WHERE calendar_events.tenant_id = EXCLUDED.tenant_id
-              AND calendar_events.account_id = EXCLUDED.account_id
+              AND calendar_events.owner_account_id = EXCLUDED.owner_account_id
             RETURNING
                 id,
-                to_char(event_date, 'YYYY-MM-DD') AS date,
-                to_char(event_time, 'HH24:MI') AS time,
+                uid,
+                to_char(starts_at AT TIME ZONE COALESCE(NULLIF(time_zone, ''), 'UTC'), 'YYYY-MM-DD') AS date,
+                to_char(starts_at AT TIME ZONE COALESCE(NULLIF(time_zone, ''), 'UTC'), 'HH24:MI') AS time,
                 time_zone,
-                duration_minutes,
-                recurrence_rule,
+                GREATEST(0, EXTRACT(EPOCH FROM (ends_at - starts_at))::int / 60) AS duration_minutes,
+                COALESCE(recurrence_rule, '') AS recurrence_rule,
                 title,
                 location,
-                attendees,
-                attendees_json,
-                notes
+                COALESCE(source_payload_json->>'attendees', '') AS attendees,
+                attendees_json::text AS attendees_json,
+                body_text AS notes
             "#,
         )
         .bind(event_id)
         .bind(&tenant_id)
         .bind(input.account_id)
+        .bind(calendar_id)
+        .bind(input.uid.trim())
         .bind(input.date.trim())
         .bind(input.time.trim())
         .bind(input.time_zone.trim())
@@ -336,19 +382,20 @@ impl Storage {
             r#"
             SELECT
                 id,
-                to_char(event_date, 'YYYY-MM-DD') AS date,
-                to_char(event_time, 'HH24:MI') AS time,
+                uid,
+                to_char(starts_at AT TIME ZONE COALESCE(NULLIF(time_zone, ''), 'UTC'), 'YYYY-MM-DD') AS date,
+                to_char(starts_at AT TIME ZONE COALESCE(NULLIF(time_zone, ''), 'UTC'), 'HH24:MI') AS time,
                 time_zone,
-                duration_minutes,
-                recurrence_rule,
+                GREATEST(0, EXTRACT(EPOCH FROM (ends_at - starts_at))::int / 60) AS duration_minutes,
+                COALESCE(recurrence_rule, '') AS recurrence_rule,
                 title,
                 location,
-                attendees,
-                attendees_json,
-                notes
+                COALESCE(source_payload_json->>'attendees', '') AS attendees,
+                attendees_json::text AS attendees_json,
+                body_text AS notes
             FROM calendar_events
-            WHERE tenant_id = $1 AND account_id = $2
-            ORDER BY event_date ASC, event_time ASC
+            WHERE tenant_id = $1 AND owner_account_id = $2
+            ORDER BY starts_at ASC, id ASC
             "#,
         )
         .bind(&tenant_id)
@@ -373,21 +420,22 @@ impl Storage {
             r#"
             SELECT
                 id,
-                to_char(event_date, 'YYYY-MM-DD') AS date,
-                to_char(event_time, 'HH24:MI') AS time,
+                uid,
+                to_char(starts_at AT TIME ZONE COALESCE(NULLIF(time_zone, ''), 'UTC'), 'YYYY-MM-DD') AS date,
+                to_char(starts_at AT TIME ZONE COALESCE(NULLIF(time_zone, ''), 'UTC'), 'HH24:MI') AS time,
                 time_zone,
-                duration_minutes,
-                recurrence_rule,
+                GREATEST(0, EXTRACT(EPOCH FROM (ends_at - starts_at))::int / 60) AS duration_minutes,
+                COALESCE(recurrence_rule, '') AS recurrence_rule,
                 title,
                 location,
-                attendees,
-                attendees_json,
-                notes
+                COALESCE(source_payload_json->>'attendees', '') AS attendees,
+                attendees_json::text AS attendees_json,
+                body_text AS notes
             FROM calendar_events
             WHERE tenant_id = $1
-              AND account_id = $2
+              AND owner_account_id = $2
               AND id = ANY($3)
-            ORDER BY event_date ASC, event_time ASC
+            ORDER BY starts_at ASC, id ASC
             "#,
         )
         .bind(&tenant_id)
@@ -403,10 +451,17 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query_as::<_, ClientContactRow>(
             r#"
-            SELECT id, name, role, email, phone, team, notes
+            SELECT
+                id,
+                display_name AS name,
+                role,
+                COALESCE(emails_json->0->>'email', '') AS email,
+                COALESCE(phones_json->0->>'phone', '') AS phone,
+                organization_unit AS team,
+                notes
             FROM contacts
-            WHERE tenant_id = $1 AND account_id = $2
-            ORDER BY name ASC
+            WHERE tenant_id = $1 AND owner_account_id = $2
+            ORDER BY display_name ASC
             "#,
         )
         .bind(&tenant_id)
@@ -429,12 +484,19 @@ impl Storage {
 
         let rows = sqlx::query_as::<_, ClientContactRow>(
             r#"
-            SELECT id, name, role, email, phone, team, notes
+            SELECT
+                id,
+                display_name AS name,
+                role,
+                COALESCE(emails_json->0->>'email', '') AS email,
+                COALESCE(phones_json->0->>'phone', '') AS phone,
+                organization_unit AS team,
+                notes
             FROM contacts
             WHERE tenant_id = $1
-              AND account_id = $2
+              AND owner_account_id = $2
               AND id = ANY($3)
-            ORDER BY name ASC
+            ORDER BY display_name ASC
             "#,
         )
         .bind(&tenant_id)
@@ -496,6 +558,7 @@ fn format_size(size_octets: i64) -> String {
 fn map_event(row: ClientEventRow) -> ClientEvent {
     ClientEvent {
         id: row.id,
+        uid: row.uid,
         date: row.date,
         time: row.time,
         time_zone: row.time_zone,

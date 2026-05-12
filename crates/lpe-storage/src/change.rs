@@ -12,6 +12,7 @@ pub enum CanonicalChangeCategory {
     Contacts,
     Calendar,
     Tasks,
+    Rights,
 }
 
 impl CanonicalChangeCategory {
@@ -21,6 +22,7 @@ impl CanonicalChangeCategory {
             Self::Contacts => "contacts",
             Self::Calendar => "calendar",
             Self::Tasks => "tasks",
+            Self::Rights => "rights",
         }
     }
 
@@ -30,6 +32,7 @@ impl CanonicalChangeCategory {
             "contacts" => Some(Self::Contacts),
             "calendar" => Some(Self::Calendar),
             "tasks" => Some(Self::Tasks),
+            "rights" => Some(Self::Rights),
             _ => None,
         }
     }
@@ -257,6 +260,14 @@ impl Storage {
             &principal_account_ids,
             &[owner_account_id],
         )
+        .await?;
+        Self::emit_canonical_change(
+            tx,
+            tenant_id,
+            CanonicalChangeCategory::Rights,
+            &principal_account_ids,
+            &[owner_account_id],
+        )
         .await
     }
 
@@ -266,28 +277,62 @@ impl Storage {
         category: CanonicalChangeCategory,
         owner_account_id: Uuid,
     ) -> Result<()> {
-        let collection_kind = match category {
-            CanonicalChangeCategory::Contacts => CollaborationResourceKind::Contacts,
-            CanonicalChangeCategory::Calendar => CollaborationResourceKind::Calendar,
-            CanonicalChangeCategory::Tasks => CollaborationResourceKind::Tasks,
+        let mut principal_account_ids = HashSet::from([owner_account_id]);
+        let shared_with = match category {
+            CanonicalChangeCategory::Contacts => {
+                sqlx::query_scalar::<_, Uuid>(
+                    r#"
+                SELECT g.grantee_account_id
+                FROM contact_book_grants g
+                JOIN contact_books b
+                  ON b.tenant_id = g.tenant_id
+                 AND b.owner_account_id = g.owner_account_id
+                 AND b.id = g.contact_book_id
+                 AND b.role = 'contacts'
+                WHERE g.tenant_id = $1
+                  AND g.owner_account_id = $2
+                "#,
+                )
+                .bind(tenant_id)
+                .bind(owner_account_id)
+                .fetch_all(&mut **tx)
+                .await?
+            }
+            CanonicalChangeCategory::Calendar => {
+                sqlx::query_scalar::<_, Uuid>(
+                    r#"
+                SELECT g.grantee_account_id
+                FROM calendar_grants g
+                JOIN calendars c
+                  ON c.tenant_id = g.tenant_id
+                 AND c.owner_account_id = g.owner_account_id
+                 AND c.id = g.calendar_id
+                 AND c.role = 'calendar'
+                WHERE g.tenant_id = $1
+                  AND g.owner_account_id = $2
+                "#,
+                )
+                .bind(tenant_id)
+                .bind(owner_account_id)
+                .fetch_all(&mut **tx)
+                .await?
+            }
+            CanonicalChangeCategory::Tasks => {
+                sqlx::query_scalar::<_, Uuid>(
+                    r#"
+                SELECT grantee_account_id
+                FROM task_list_grants
+                WHERE tenant_id = $1
+                  AND owner_account_id = $2
+                "#,
+                )
+                .bind(tenant_id)
+                .bind(owner_account_id)
+                .fetch_all(&mut **tx)
+                .await?
+            }
             _ => bail!("unsupported collaboration change category"),
         };
-
-        let mut principal_account_ids = HashSet::from([owner_account_id]);
-        let shared_with = sqlx::query_scalar::<_, Uuid>(
-            r#"
-            SELECT grantee_account_id
-            FROM collaboration_collection_grants
-            WHERE tenant_id = $1
-              AND collection_kind = $2
-              AND owner_account_id = $3
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(collection_kind.as_str())
-        .bind(owner_account_id)
-        .fetch_all(&mut **tx)
-        .await?;
         principal_account_ids.extend(shared_with);
 
         let mut principal_account_ids = principal_account_ids.into_iter().collect::<Vec<_>>();
@@ -297,6 +342,14 @@ impl Storage {
             tx,
             tenant_id,
             category,
+            &principal_account_ids,
+            &principal_account_ids,
+        )
+        .await?;
+        Self::emit_canonical_change(
+            tx,
+            tenant_id,
+            CanonicalChangeCategory::Rights,
             &principal_account_ids,
             &principal_account_ids,
         )
@@ -323,6 +376,14 @@ impl Storage {
             tx,
             tenant_id,
             category,
+            &principal_account_ids,
+            &principal_account_ids,
+        )
+        .await?;
+        Self::emit_canonical_change(
+            tx,
+            tenant_id,
+            CanonicalChangeCategory::Rights,
             &principal_account_ids,
             &principal_account_ids,
         )
@@ -369,6 +430,62 @@ impl Storage {
             &principal_account_ids,
         )
         .await
+    }
+
+    pub(crate) async fn insert_collaboration_tombstone_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &str,
+        category: CanonicalChangeCategory,
+        owner_account_id: Uuid,
+        collection_id: Option<Uuid>,
+        object_kind: &str,
+        object_id: Uuid,
+        object_uid: Option<&str>,
+        affected_principal_ids: &[Uuid],
+    ) -> Result<()> {
+        let modseq = self
+            .allocate_account_modseq_in_tx(tx, tenant_id, owner_account_id, category.as_str())
+            .await?;
+        let cursor = Self::insert_mail_change_log_in_tx(
+            tx,
+            tenant_id,
+            Some(owner_account_id),
+            None,
+            object_kind,
+            object_id,
+            "destroyed",
+            modseq,
+            affected_principal_ids,
+            serde_json::json!({
+                "collectionId": collection_id,
+                "objectUid": object_uid,
+            }),
+        )
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO tombstones (
+                id, tenant_id, account_id, collection_id, object_kind, object_id,
+                object_uid, deleted_modseq, change_cursor, reason
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'delete')
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(tenant_id)
+        .bind(owner_account_id)
+        .bind(collection_id)
+        .bind(object_kind)
+        .bind(object_id)
+        .bind(object_uid)
+        .bind(modseq)
+        .bind(cursor)
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(())
     }
 
     pub async fn fetch_canonical_change_cursor(
@@ -514,7 +631,16 @@ fn cursor_is_before_retained_floor(
 
 #[cfg(test)]
 mod tests {
-    use super::cursor_is_before_retained_floor;
+    use super::{cursor_is_before_retained_floor, CanonicalChangeCategory};
+
+    #[test]
+    fn rights_change_category_round_trips() {
+        assert_eq!(CanonicalChangeCategory::Rights.as_str(), "rights");
+        assert_eq!(
+            CanonicalChangeCategory::from_str("rights"),
+            Some(CanonicalChangeCategory::Rights)
+        );
+    }
 
     #[test]
     fn retained_floor_detects_stale_cursor_with_newer_journal() {

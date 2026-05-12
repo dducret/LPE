@@ -593,8 +593,14 @@ impl ActiveSyncStore for FakeStore {
         &'a self,
         input: UpsertClientEventInput,
     ) -> StoreFuture<'a, ClientEvent> {
+        let event_id = input.id.unwrap_or_else(Uuid::new_v4);
         let event = ClientEvent {
-            id: input.id.unwrap_or_else(Uuid::new_v4),
+            id: event_id,
+            uid: if input.uid.trim().is_empty() {
+                event_id.to_string()
+            } else {
+                input.uid
+            },
             date: input.date,
             time: input.time,
             time_zone: input.time_zone,

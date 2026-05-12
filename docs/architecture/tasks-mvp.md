@@ -47,7 +47,7 @@
 | Status | Meaning |
 | --- | --- |
 | `needs-action` | open |
-| `in-process` | started |
+| `in-progress` | started |
 | `completed` | done |
 | `cancelled` | cancelled |
 

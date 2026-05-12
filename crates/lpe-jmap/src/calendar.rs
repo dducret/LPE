@@ -517,7 +517,7 @@ fn calendar_event_properties(properties: Option<Vec<String>>) -> HashSet<String>
 fn calendar_event_to_value(event: &AccessibleEvent, properties: &HashSet<String>) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", event.id.to_string());
-    insert_if(properties, &mut object, "uid", event.id.to_string());
+    insert_if(properties, &mut object, "uid", event.uid.clone());
     insert_if(properties, &mut object, "@type", "Event");
     insert_if(properties, &mut object, "title", event.title.clone());
     insert_if(
@@ -774,10 +774,13 @@ fn parse_calendar_event_input(
     if event_type != "Event" {
         bail!("only @type=Event is supported");
     }
-    if let Some(uid) = object.get("uid").and_then(Value::as_str) {
-        if uid.trim().is_empty() {
-            bail!("uid must not be empty");
-        }
+    let uid = object
+        .get("uid")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default();
+    if object.contains_key("uid") && uid.is_empty() {
+        bail!("uid must not be empty");
     }
 
     let (date, time) = parse_local_datetime(
@@ -792,6 +795,7 @@ fn parse_calendar_event_input(
         UpsertClientEventInput {
             id,
             account_id,
+            uid: uid.to_string(),
             date,
             time,
             time_zone: parse_optional_string(object.get("timeZone"))?.unwrap_or_default(),

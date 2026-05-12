@@ -49,6 +49,7 @@ struct FakeStore {
     login: AccountLogin,
     mailboxes: Arc<Mutex<Vec<JmapMailbox>>>,
     emails: Arc<Mutex<Vec<ImapEmail>>>,
+    mailbox_uid_validity: Arc<Mutex<HashMap<Uuid, u32>>>,
     mailbox_uid_next: Arc<Mutex<HashMap<Uuid, u32>>>,
     highest_modseq: Arc<Mutex<u64>>,
     mailbox_grants: Arc<Mutex<Vec<MailboxDelegationGrant>>>,
@@ -103,6 +104,12 @@ impl FakeStore {
                     true,
                 ),
             ])),
+            mailbox_uid_validity: Arc::new(Mutex::new(HashMap::from([
+                (inbox_id, 111),
+                (sent_id, 222),
+                (drafts_id, 333),
+                (trash_id, 444),
+            ]))),
             mailbox_uid_next: Arc::new(Mutex::new(HashMap::from([
                 (inbox_id, 2),
                 (sent_id, 3),
@@ -130,6 +137,16 @@ impl FakeStore {
         uid
     }
 
+    fn allocate_uid_validity(&self, mailbox_id: Uuid) -> u32 {
+        let mut uid_validity = self.mailbox_uid_validity.lock().unwrap();
+        if let Some(existing) = uid_validity.get(&mailbox_id) {
+            return *existing;
+        }
+        let next = 1_000 + uid_validity.len() as u32;
+        uid_validity.insert(mailbox_id, next);
+        next
+    }
+
     fn enqueue_post_flag_update_action(&self, action: PostFlagUpdateAction) {
         *self.post_flag_update_action.lock().unwrap() = Some(action);
     }
@@ -147,6 +164,22 @@ impl FakeStore {
 #[derive(Clone, Copy)]
 enum PostFlagUpdateAction {
     RemoveMessage { message_id: Uuid },
+}
+
+#[tokio::test]
+async fn fake_store_uidnext_comes_from_mailbox_state_not_visible_max_uid() {
+    let store = FakeStore::new();
+    let inbox_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    store.mailbox_uid_next.lock().unwrap().insert(inbox_id, 2);
+    store.emails.lock().unwrap()[0].uid = 384;
+
+    let state = store
+        .fetch_imap_mailbox_state(store.login.account_id, inbox_id)
+        .await
+        .unwrap();
+
+    assert_eq!(state.uid_next, 2);
+    assert_eq!(state.uid_validity, 111);
 }
 
 impl AccountAuthStore for FakeStore {
@@ -212,25 +245,17 @@ impl ImapStore for FakeStore {
         mailbox_id: Uuid,
     ) -> StoreFuture<'a, ImapMailboxState> {
         let highest_modseq = *self.highest_modseq.lock().unwrap();
-        let visible_uid_next = self
-            .emails
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|email| email.mailbox_id == mailbox_id)
-            .map(|email| email.uid.saturating_add(1))
-            .max()
-            .unwrap_or(1);
         let stored_uid_next = *self
             .mailbox_uid_next
             .lock()
             .unwrap()
             .get(&mailbox_id)
             .unwrap_or(&1);
-        let uid_next = stored_uid_next.max(visible_uid_next);
+        let uid_validity = self.allocate_uid_validity(mailbox_id);
+        let uid_next = stored_uid_next;
         Box::pin(async move {
             Ok(ImapMailboxState {
-                uid_validity: 1,
+                uid_validity,
                 uid_next,
                 highest_modseq,
             })
@@ -368,6 +393,7 @@ impl ImapStore for FakeStore {
                 canonical_name,
                 sort_order,
             );
+            self.allocate_uid_validity(created.id);
             self.mailbox_uid_next.lock().unwrap().insert(created.id, 1);
             mailboxes.push(created.clone());
             let _ = account_id;
@@ -387,6 +413,7 @@ impl ImapStore for FakeStore {
         );
         let created = mailbox.clone();
         let _ = account_id;
+        self.allocate_uid_validity(mailbox.id);
         self.mailbox_uid_next.lock().unwrap().insert(mailbox.id, 1);
         mailboxes.push(mailbox);
         Box::pin(async move { Ok(created) })
@@ -934,7 +961,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     .await;
     assert!(append_junk_prelude.contains("+ Ready for literal data"));
     let append_junk = send_command(&mut stream, &format!("{junk_literal}\r\n"), "A8K").await;
-    assert!(append_junk.contains("A8K OK [APPENDUID 1 1] APPEND completed"));
+    assert!(append_junk.contains("A8K OK [APPENDUID 1005 1] APPEND completed"));
     let search_junk = send_command(&mut stream, "A8L UID SEARCH SUBJECT Junk\r\n", "A8L").await;
     assert!(search_junk.contains("* SEARCH 1"));
 
@@ -950,7 +977,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     )
     .await;
     assert!(status.contains(
-        "* STATUS \"Projects\" (MESSAGES 0 UIDNEXT 1 UIDVALIDITY 1 UNSEEN 0 HIGHESTMODSEQ 5)"
+        "* STATUS \"Projects\" (MESSAGES 0 UIDNEXT 1 UIDVALIDITY 1004 UNSEEN 0 HIGHESTMODSEQ 5)"
     ));
 
     let rename_projects = send_command(&mut stream, "A10 RENAME Projects Archive\r\n", "A10").await;
@@ -960,7 +987,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     assert!(select_inbox_for_copy.contains("* 1 EXISTS"));
 
     let copy = send_command(&mut stream, "A11 COPY 1 Archive\r\n", "A11").await;
-    assert!(copy.contains("A11 OK [COPYUID 1 1 1] COPY completed"));
+    assert!(copy.contains("A11 OK [COPYUID 1004 1 1] COPY completed"));
 
     let select_archive = send_command(&mut stream, "A12 SELECT Archive\r\n", "A12").await;
     assert!(select_archive.contains("* 1 EXISTS"));
@@ -976,7 +1003,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     let move_response = send_command(&mut stream, "A14 UID MOVE 1 Inbox\r\n", "A14").await;
     assert!(move_response.contains("* 1 EXPUNGE"));
     assert!(move_response.contains("* 0 EXISTS"));
-    assert!(move_response.contains("A14 OK [COPYUID 1 1 2] MOVE completed"));
+    assert!(move_response.contains("A14 OK [COPYUID 111 1 2] MOVE completed"));
 
     let select_archive_after_move =
         send_command(&mut stream, "A15 SELECT Archive\r\n", "A15").await;
@@ -1000,7 +1027,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
         "A17",
     )
     .await;
-    assert!(append.contains("A17 OK [APPENDUID 1 1] APPEND completed"));
+    assert!(append.contains("A17 OK [APPENDUID 333 1] APPEND completed"));
 
     let drafts = send_command(&mut stream, "A18 UID SEARCH TEXT Draft\r\n", "A18").await;
     assert!(drafts.contains("* SEARCH 1"));
@@ -1023,7 +1050,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     .await;
     assert!(append_sent_prelude.contains("+ Ready for literal data"));
     let append_sent = send_command(&mut stream, &format!("{sent_literal}\r\n"), "A18S").await;
-    assert!(append_sent.contains("A18S OK [APPENDUID 1 2] APPEND completed"));
+    assert!(append_sent.contains("A18S OK [APPENDUID 222 2] APPEND completed"));
     let sent_status = send_command(&mut stream, "A18T STATUS Sent (MESSAGES)\r\n", "A18T").await;
     assert!(sent_status.contains("* STATUS \"Sent\" (MESSAGES 1)"));
 
@@ -1133,7 +1160,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
     let select = send_command(&mut stream, "OL9 SELECT Inbox\r\n", "OL9").await;
     assert!(select.contains("* 1 EXISTS"));
     assert!(select.contains("* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Deleted \\Draft)]"));
-    assert!(select.contains("* OK [UIDVALIDITY 1]"));
+    assert!(select.contains("* OK [UIDVALIDITY 111]"));
     assert!(select.contains("* OK [UIDNEXT 2]"));
     assert!(select.contains("* OK [HIGHESTMODSEQ 3]"));
 
@@ -1300,7 +1327,7 @@ async fn thunderbird_copy_to_trash_then_expunge_removes_source_only() {
 
     let copy_to_trash =
         send_command(&mut stream, "A4 UID COPY 1 \"Deleted Items\"\r\n", "A4").await;
-    assert!(copy_to_trash.contains("A4 OK [COPYUID 1 1 "));
+    assert!(copy_to_trash.contains("A4 OK [COPYUID 444 1 "));
 
     let mark_deleted = send_command(
         &mut stream,
@@ -1359,7 +1386,7 @@ async fn thunderbird_delete_draft_by_move_to_trash_removes_drafts_copy() {
     .await;
     assert!(append_prelude.contains("+ Ready for literal data"));
     let append = send_command(&mut stream, &format!("{draft_literal}\r\n"), "A2").await;
-    assert!(append.contains("A2 OK [APPENDUID 1 1] APPEND completed"));
+    assert!(append.contains("A2 OK [APPENDUID 333 1] APPEND completed"));
 
     let select_drafts = send_command(&mut stream, "A3 SELECT Drafts\r\n", "A3").await;
     assert!(select_drafts.contains("* 1 EXISTS"));
@@ -1368,7 +1395,7 @@ async fn thunderbird_delete_draft_by_move_to_trash_removes_drafts_copy() {
         send_command(&mut stream, "A4 UID MOVE 1 \"Deleted Items\"\r\n", "A4").await;
     assert!(move_to_trash.contains("* 1 EXPUNGE"));
     assert!(move_to_trash.contains("* 0 EXISTS"));
-    assert!(move_to_trash.contains("A4 OK [COPYUID 1 1 1] MOVE completed"));
+    assert!(move_to_trash.contains("A4 OK [COPYUID 444 1 1] MOVE completed"));
 
     let select_drafts_after = send_command(&mut stream, "A5 SELECT Drafts\r\n", "A5").await;
     assert!(select_drafts_after.contains("* 0 EXISTS"));
@@ -1422,7 +1449,7 @@ async fn close_expunges_deleted_in_read_write_mailbox_without_untagged_expunge()
 
     let select_after = send_command(&mut stream, "A5 SELECT Inbox\r\n", "A5").await;
     assert!(select_after.contains("* 0 EXISTS"));
-    assert!(select_after.contains("* OK [UIDVALIDITY 1]"));
+    assert!(select_after.contains("* OK [UIDVALIDITY 111]"));
     assert!(select_after.contains("* OK [UIDNEXT 2]"));
     assert!(store
         .emails
@@ -1509,6 +1536,11 @@ async fn outlook_large_mailbox_refresh_keeps_uid_fetch_and_search_stable() {
             )
         })
         .collect();
+    store
+        .mailbox_uid_next
+        .lock()
+        .unwrap()
+        .insert(Uuid::parse_str(inbox_id).unwrap(), 385);
     *store.highest_modseq.lock().unwrap() = 385;
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

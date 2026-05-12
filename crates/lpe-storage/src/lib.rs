@@ -19,6 +19,9 @@ pub mod types;
 pub mod util;
 pub mod workspace;
 
+#[cfg(test)]
+mod schema_contract;
+
 pub use crate::attachments::ClientAttachment;
 pub use crate::auth::{
     AccountAppPassword, AccountAuthFactor, AccountCredentialInput, AccountLogin, AccountOidcClaims,

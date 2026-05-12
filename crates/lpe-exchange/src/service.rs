@@ -2837,6 +2837,7 @@ fn parse_create_event_input(
     Ok(UpsertClientEventInput {
         id: None,
         account_id: principal.account_id,
+        uid: String::new(),
         date,
         time,
         time_zone: requested_time_zone(request).unwrap_or_else(|| "UTC".to_string()),
@@ -2890,6 +2891,7 @@ fn parse_update_event_input(
     Ok(UpsertClientEventInput {
         id: Some(existing.id),
         account_id: principal.account_id,
+        uid: existing.uid.clone(),
         date,
         time,
         time_zone: requested_time_zone(request).unwrap_or_else(|| existing.time_zone.clone()),

@@ -8544,6 +8544,7 @@ fn serialize_pending_event_row(
     .unwrap_or_else(|_| default_event_input(principal.account_id, None));
     let event = AccessibleEvent {
         id: Uuid::nil(),
+        uid: Uuid::nil().to_string(),
         collection_id: "default".to_string(),
         owner_account_id: principal.account_id,
         owner_email: principal.email.clone(),
@@ -8627,6 +8628,7 @@ fn default_contact_for_mapping(account_id: Uuid, collection_id: &str) -> Accessi
 fn default_event_for_mapping(account_id: Uuid, collection_id: &str) -> AccessibleEvent {
     AccessibleEvent {
         id: Uuid::nil(),
+        uid: Uuid::nil().to_string(),
         collection_id: collection_id.to_string(),
         owner_account_id: account_id,
         owner_email: String::new(),
@@ -8651,6 +8653,7 @@ fn default_event_input(account_id: Uuid, id: Option<Uuid>) -> UpsertClientEventI
     UpsertClientEventInput {
         id,
         account_id,
+        uid: String::new(),
         date: "1970-01-01".to_string(),
         time: "00:00".to_string(),
         time_zone: "UTC".to_string(),
@@ -8751,6 +8754,7 @@ fn event_input_from_mapi(
     Ok(UpsertClientEventInput {
         id,
         account_id,
+        uid: existing.uid.clone(),
         date,
         time,
         time_zone: existing.time_zone.clone(),

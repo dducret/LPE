@@ -219,6 +219,7 @@ impl FakeStore {
         let account = Self::account();
         AccessibleEvent {
             id: event.id,
+            uid: event.uid,
             collection_id: "default".to_string(),
             owner_account_id: account.account_id,
             owner_email: account.email.clone(),
@@ -357,6 +358,7 @@ impl FakeStore {
     fn event() -> ClientEvent {
         ClientEvent {
             id: Uuid::parse_str("34343434-3434-3434-3434-343434343434").unwrap(),
+            uid: "34343434-3434-3434-3434-343434343434".to_string(),
             date: "2026-04-20".to_string(),
             time: "09:30".to_string(),
             time_zone: "".to_string(),
@@ -1132,8 +1134,14 @@ impl JmapStore for FakeStore {
         _collection_id: Option<&str>,
         input: UpsertClientEventInput,
     ) -> Result<AccessibleEvent> {
+        let event_id = input.id.unwrap_or_else(Uuid::new_v4);
         let event = ClientEvent {
-            id: input.id.unwrap_or_else(Uuid::new_v4),
+            id: event_id,
+            uid: if input.uid.trim().is_empty() {
+                event_id.to_string()
+            } else {
+                input.uid
+            },
             date: input.date,
             time: input.time,
             time_zone: input.time_zone,
@@ -3592,6 +3600,7 @@ async fn big_three_query_changes_ignore_backend_order_for_equal_sort_keys() {
     };
     let first_event = ClientEvent {
         id: Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap(),
+        uid: "55555555-5555-5555-5555-555555555555".to_string(),
         date: "2026-05-01".to_string(),
         time: "09:00".to_string(),
         time_zone: "".to_string(),
@@ -3605,6 +3614,7 @@ async fn big_three_query_changes_ignore_backend_order_for_equal_sort_keys() {
     };
     let second_event = ClientEvent {
         id: Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap(),
+        uid: "66666666-6666-6666-6666-666666666666".to_string(),
         date: "2026-05-01".to_string(),
         time: "09:00".to_string(),
         time_zone: "".to_string(),
@@ -7195,6 +7205,7 @@ async fn calendar_methods_use_canonical_event_store() {
                             "create": {
                                 "ev1": {
                                     "@type": "Event",
+                                    "uid": "external-planning-uid",
                                     "title": "Planning",
                                     "start": "2026-04-21T11:00:00",
                                     "duration": "PT0S",
@@ -7249,6 +7260,7 @@ async fn calendar_methods_use_canonical_event_store() {
         .iter()
         .find(|event| event.title == "Planning")
         .unwrap();
+    assert_eq!(created.uid, "external-planning-uid");
     assert_eq!(created.attendees, "Bob");
     assert!(created.attendees_json.contains("\"organizer\""));
     assert!(created.attendees_json.contains("\"partstat\":\"accepted\""));

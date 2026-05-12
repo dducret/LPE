@@ -203,6 +203,7 @@ impl FakeStore {
     ) -> AccessibleEvent {
         AccessibleEvent {
             id,
+            uid: id.to_string(),
             collection_id: collection.id.clone(),
             owner_account_id: collection.owner_account_id,
             owner_email: collection.owner_email.clone(),
@@ -468,6 +469,11 @@ impl DavStore for FakeStore {
         } else {
             let event = AccessibleEvent {
                 id: input.id.unwrap(),
+                uid: if input.uid.trim().is_empty() {
+                    input.id.unwrap().to_string()
+                } else {
+                    input.uid
+                },
                 collection_id: collection.id.clone(),
                 owner_account_id: collection.owner_account_id,
                 owner_email: collection.owner_email.clone(),
@@ -550,6 +556,11 @@ impl DavStore for FakeStore {
             Ok(existing) => {
                 let event = AccessibleEvent {
                     id: event_id,
+                    uid: if input.uid.trim().is_empty() {
+                        event_id.to_string()
+                    } else {
+                        input.uid
+                    },
                     collection_id: existing.collection_id,
                     owner_account_id: existing.owner_account_id,
                     owner_email: existing.owner_email,
@@ -988,7 +999,7 @@ async fn put_parses_structured_calendar_metadata() {
                     "/dav/calendars/me/default/99999999-9999-9999-9999-999999999999.ics",
                 ),
                 &bearer_headers(),
-                b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:99999999-9999-9999-9999-999999999999\r\nDTSTART;TZID=Europe/Berlin:20260423T103000\r\nDURATION:PT45M\r\nRRULE:FREQ=WEEKLY;BYDAY=TH\r\nSUMMARY:Interop review\r\nORGANIZER;CN=Owner Example:mailto:owner@example.test\r\nATTENDEE;CN=Alice Example;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE:mailto:alice@example.test\r\nDESCRIPTION:Calendar interop\r\nEND:VEVENT\r\nEND:VCALENDAR",
+                b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:external-dav-event-uid\r\nDTSTART;TZID=Europe/Berlin:20260423T103000\r\nDURATION:PT45M\r\nRRULE:FREQ=WEEKLY;BYDAY=TH\r\nSUMMARY:Interop review\r\nORGANIZER;CN=Owner Example:mailto:owner@example.test\r\nATTENDEE;CN=Alice Example;ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=TRUE:mailto:alice@example.test\r\nDESCRIPTION:Calendar interop\r\nEND:VEVENT\r\nEND:VCALENDAR",
             )
             .await
             .unwrap();
@@ -997,6 +1008,7 @@ async fn put_parses_structured_calendar_metadata() {
     let events = store.events.lock().unwrap();
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].id, event_id);
+    assert_eq!(events[0].uid, "external-dav-event-uid");
     assert_eq!(events[0].time_zone, "Europe/Berlin");
     assert_eq!(events[0].duration_minutes, 45);
     assert_eq!(events[0].recurrence_rule, "FREQ=WEEKLY;BYDAY=TH");

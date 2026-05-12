@@ -721,7 +721,7 @@ impl Storage {
             .await?;
         let principals =
             Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
-        Self::insert_mail_change_log_in_tx(
+        let cursor = Self::insert_mail_change_log_in_tx(
             &mut tx,
             &tenant_id,
             Some(account_id),
@@ -733,6 +733,23 @@ impl Storage {
             &principals,
             serde_json::json!({"reason": "delete"}),
         )
+        .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO tombstones (
+                id, tenant_id, account_id, mailbox_id, object_kind, object_id,
+                deleted_modseq, change_cursor, reason
+            )
+            VALUES ($1, $2, $3, $4, 'mailbox', $4, $5, $6, 'delete')
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(modseq)
+        .bind(cursor)
+        .execute(&mut *tx)
         .await?;
 
         sqlx::query(
@@ -2042,23 +2059,37 @@ impl Storage {
         snapshot_json: &str,
     ) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let collection_kind = activesync_collection_kind(collection_id);
+        let state_json = serde_json::from_str::<Value>(snapshot_json.trim())?;
+        let last_change_sequence = self
+            .fetch_canonical_change_cursor(account_id)
+            .await?
+            .unwrap_or(0);
         sqlx::query(
             r#"
-            INSERT INTO activesync_sync_states (
-                id, tenant_id, account_id, device_id, collection_id, sync_key, snapshot_json
+            INSERT INTO activesync_sync_cursors (
+                id, tenant_id, account_id, device_id, collection_kind, collection_key,
+                sync_key, last_change_sequence, state_json, expires_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (tenant_id, account_id, device_id, collection_id, sync_key)
-            DO UPDATE SET snapshot_json = EXCLUDED.snapshot_json
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW() + INTERVAL '30 days')
+            ON CONFLICT (tenant_id, account_id, device_id, collection_kind, collection_key)
+            DO UPDATE SET
+                sync_key = EXCLUDED.sync_key,
+                last_change_sequence = EXCLUDED.last_change_sequence,
+                state_json = EXCLUDED.state_json,
+                updated_at = NOW(),
+                expires_at = EXCLUDED.expires_at
             "#,
         )
         .bind(Uuid::new_v4())
         .bind(&tenant_id)
         .bind(account_id)
         .bind(device_id.trim())
+        .bind(collection_kind)
         .bind(collection_id.trim())
         .bind(sync_key.trim())
-        .bind(snapshot_json.trim())
+        .bind(last_change_sequence)
+        .bind(state_json)
         .execute(&self.pool)
         .await?;
 
@@ -2073,21 +2104,25 @@ impl Storage {
         sync_key: &str,
     ) -> Result<Option<ActiveSyncSyncState>> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let collection_kind = activesync_collection_kind(collection_id);
         let row = sqlx::query_as::<_, ActiveSyncSyncStateRow>(
             r#"
-            SELECT sync_key, snapshot_json
-            FROM activesync_sync_states
+            SELECT sync_key, state_json::text AS snapshot_json
+            FROM activesync_sync_cursors
             WHERE tenant_id = $1
               AND account_id = $2
               AND device_id = $3
-              AND collection_id = $4
-              AND sync_key = $5
+              AND collection_kind = $4
+              AND collection_key = $5
+              AND sync_key = $6
+              AND expires_at > NOW()
             LIMIT 1
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
         .bind(device_id.trim())
+        .bind(collection_kind)
         .bind(collection_id.trim())
         .bind(sync_key.trim())
         .fetch_optional(&self.pool)
@@ -2246,8 +2281,8 @@ impl Storage {
                 id,
                 to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fingerprint
             FROM contacts
-            WHERE tenant_id = $1 AND account_id = $2
-            ORDER BY name ASC, id ASC
+            WHERE tenant_id = $1 AND owner_account_id = $2
+            ORDER BY display_name ASC, id ASC
             "#,
         )
         .bind(&tenant_id)
@@ -2282,7 +2317,7 @@ impl Storage {
                 to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fingerprint
             FROM contacts
             WHERE tenant_id = $1
-              AND account_id = $2
+              AND owner_account_id = $2
               AND id = ANY($3)
             "#,
         )
@@ -2313,8 +2348,8 @@ impl Storage {
                 id,
                 to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fingerprint
             FROM calendar_events
-            WHERE tenant_id = $1 AND account_id = $2
-            ORDER BY event_date ASC, event_time ASC, id ASC
+            WHERE tenant_id = $1 AND owner_account_id = $2
+            ORDER BY starts_at ASC, id ASC
             "#,
         )
         .bind(&tenant_id)
@@ -2349,7 +2384,7 @@ impl Storage {
                 to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS fingerprint
             FROM calendar_events
             WHERE tenant_id = $1
-              AND account_id = $2
+              AND owner_account_id = $2
               AND id = ANY($3)
             "#,
         )
@@ -2725,9 +2760,30 @@ fn mailbox_uid_validity() -> i64 {
         .unwrap_or(1)
 }
 
+pub(crate) fn activesync_collection_kind(collection_id: &str) -> &'static str {
+    match collection_id.trim() {
+        "__folders__" => "folders",
+        "contacts" => "contacts",
+        "calendar" => "calendar",
+        "tasks" => "tasks",
+        _ => "mail",
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::is_system_mailbox_role;
+    use super::{activesync_collection_kind, is_system_mailbox_role};
+
+    #[test]
+    fn activesync_collection_kind_maps_builtin_and_mail_collections() {
+        assert_eq!(activesync_collection_kind("__folders__"), "folders");
+        assert_eq!(activesync_collection_kind("contacts"), "contacts");
+        assert_eq!(activesync_collection_kind("calendar"), "calendar");
+        assert_eq!(
+            activesync_collection_kind("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+            "mail"
+        );
+    }
 
     #[test]
     fn custom_mailbox_role_is_user_managed() {

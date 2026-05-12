@@ -14,7 +14,7 @@ impl Storage {
         let deleted = sqlx::query(
             r#"
             DELETE FROM contacts
-            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
             "#,
         )
         .bind(&tenant_id)
@@ -27,6 +27,18 @@ impl Storage {
             bail!("contact not found");
         }
 
+        self.insert_collaboration_tombstone_in_tx(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Contacts,
+            account_id,
+            None,
+            "contact",
+            contact_id,
+            None,
+            &[account_id],
+        )
+        .await?;
         Self::emit_collaboration_change(
             &mut tx,
             &tenant_id,
@@ -45,7 +57,7 @@ impl Storage {
         let deleted = sqlx::query(
             r#"
             DELETE FROM calendar_events
-            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
             "#,
         )
         .bind(&tenant_id)
@@ -58,6 +70,18 @@ impl Storage {
             bail!("event not found");
         }
 
+        self.insert_collaboration_tombstone_in_tx(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Calendar,
+            account_id,
+            None,
+            "calendar_event",
+            event_id,
+            None,
+            &[account_id],
+        )
+        .await?;
         Self::emit_collaboration_change(
             &mut tx,
             &tenant_id,
@@ -630,14 +654,17 @@ impl Storage {
         collection_id: &str,
     ) -> Result<Option<ActiveSyncSyncState>> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let collection_kind = crate::protocols::activesync_collection_kind(collection_id);
         let row = sqlx::query_as::<_, ActiveSyncSyncStateRow>(
             r#"
-            SELECT sync_key, snapshot_json
-            FROM activesync_sync_states
+            SELECT sync_key, state_json::text AS snapshot_json
+            FROM activesync_sync_cursors
             WHERE tenant_id = $1
               AND account_id = $2
               AND device_id = $3
-              AND collection_id = $4
+              AND collection_kind = $4
+              AND collection_key = $5
+              AND expires_at > NOW()
             ORDER BY created_at DESC
             LIMIT 1
             "#,
@@ -645,6 +672,7 @@ impl Storage {
         .bind(&tenant_id)
         .bind(account_id)
         .bind(device_id.trim())
+        .bind(collection_kind)
         .bind(collection_id.trim())
         .fetch_optional(&self.pool)
         .await?;

@@ -9,11 +9,11 @@ use crate::{
     validate_sieve_script_content, validate_sieve_script_name, AccountRow, AdminDashboard,
     AliasRecord, AliasRow, AntispamSettings, AuditEntryInput, AuditEvent, AuditRow,
     DashboardUpdate, DomainRecord, DomainRow, EmailTraceResult, EmailTraceRow,
-    EmailTraceSearchInput, FilterRule, FilterRuleRow, HealthResponse, LocalAiSettings,
+    EmailTraceSearchInput, FilterRule, HealthResponse, LocalAiSettings,
     MailFlowEntry, MailFlowRow, MailboxRecord, MailboxRow, NewAccount, NewAlias, NewDomain,
     NewMailbox, NewPstTransferJob, NewServerAdministrator, OverviewStats, ProtocolStatus,
-    PstTransferJobRecord, PstTransferJobRow, QuarantineItem, QuarantineRow, SecuritySettings,
-    ServerAdministrator, ServerAdministratorRow, ServerSettings, SieveScriptDocument,
+    PstTransferJobRecord, PstTransferJobRow, SecuritySettings, ServerAdministrator,
+    ServerAdministratorRow, ServerSettings, SieveScriptDocument,
     SieveScriptSummary, Storage, StorageOverview, UpdateAccount, UpdateDomain,
     MAX_SIEVE_SCRIPTS_PER_ACCOUNT, PLATFORM_TENANT_ID,
 };
@@ -187,7 +187,6 @@ impl Storage {
         let antispam_settings = self.fetch_antispam_settings().await?;
         let server_admins = self.fetch_server_administrators().await?;
         let antispam_rules = self.fetch_antispam_rules().await?;
-        let quarantine_items = self.fetch_quarantine_items().await?;
 
         let audit_log = sqlx::query_as::<_, AuditRow>(
             r#"
@@ -287,7 +286,7 @@ impl Storage {
             local_ai_settings,
             antispam_settings,
             antispam_rules,
-            quarantine_items,
+            quarantine_items: Vec::new(),
             storage: StorageOverview {
                 primary_store: "PostgreSQL".to_string(),
                 search_engine: "PostgreSQL FTS + pg_trgm".to_string(),
@@ -337,13 +336,16 @@ impl Storage {
 
             sqlx::query(
                 r#"
-                INSERT INTO mailboxes (id, tenant_id, account_id, role, display_name, sort_order, retention_days)
-                VALUES ($1, $2, $3, 'inbox', 'Inbox', 0, 365)
+                INSERT INTO mailboxes (
+                    id, tenant_id, account_id, role, display_name, sort_order, retention_days, uid_validity
+                )
+                VALUES ($1, $2, $3, 'inbox', 'Inbox', 0, 365, $4)
                 "#,
             )
             .bind(Uuid::new_v4())
             .bind(&tenant_id)
             .bind(account_id)
+            .bind(mailbox_uid_validity())
             .execute(&mut *tx)
             .await?;
 
@@ -453,8 +455,10 @@ impl Storage {
 
             sqlx::query(
                 r#"
-                INSERT INTO mailboxes (id, tenant_id, account_id, role, display_name, sort_order, retention_days)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                INSERT INTO mailboxes (
+                    id, tenant_id, account_id, role, display_name, sort_order, retention_days, uid_validity
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 "#,
             )
             .bind(Uuid::new_v4())
@@ -464,6 +468,7 @@ impl Storage {
             .bind(input.display_name.trim())
             .bind(sort_order)
             .bind(input.retention_days as i32)
+            .bind(mailbox_uid_validity())
             .execute(&mut *tx)
             .await?;
 
@@ -1060,26 +1065,8 @@ impl Storage {
         input: crate::NewFilterRule,
         audit: AuditEntryInput,
     ) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-        sqlx::query(
-            r#"
-            INSERT INTO antispam_filter_rules (id, tenant_id, name, scope, action, status)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            "#,
-        )
-        .bind(Uuid::new_v4())
-        .bind(PLATFORM_TENANT_ID)
-        .bind(input.name.trim())
-        .bind(input.scope.trim())
-        .bind(input.action.trim())
-        .bind(input.status.trim())
-        .execute(&mut *tx)
-        .await?;
-
-        self.insert_audit(&mut tx, PLATFORM_TENANT_ID, audit)
-            .await?;
-        tx.commit().await?;
-        Ok(())
+        let _ = (input, audit);
+        bail!("perimeter filtering rules are managed by LPE-CT")
     }
 
     pub async fn update_settings(
@@ -1253,29 +1240,6 @@ impl Storage {
         .bind(update.local_ai_settings.model)
         .bind(update.local_ai_settings.offline_only)
         .bind(update.local_ai_settings.indexing_enabled)
-        .execute(&mut *tx)
-        .await?;
-
-        sqlx::query(
-            r#"
-            INSERT INTO antispam_settings (
-                tenant_id, content_filtering_enabled, spam_engine,
-                quarantine_enabled, quarantine_retention_days
-            )
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (tenant_id) DO UPDATE SET
-                content_filtering_enabled = EXCLUDED.content_filtering_enabled,
-                spam_engine = EXCLUDED.spam_engine,
-                quarantine_enabled = EXCLUDED.quarantine_enabled,
-                quarantine_retention_days = EXCLUDED.quarantine_retention_days,
-                updated_at = NOW()
-            "#,
-        )
-        .bind(PLATFORM_TENANT_ID)
-        .bind(update.antispam_settings.content_filtering_enabled)
-        .bind(update.antispam_settings.spam_engine)
-        .bind(update.antispam_settings.quarantine_enabled)
-        .bind(update.antispam_settings.quarantine_retention_days as i32)
         .execute(&mut *tx)
         .await?;
 
@@ -1649,31 +1613,11 @@ impl Storage {
     }
 
     async fn fetch_antispam_settings(&self) -> Result<AntispamSettings> {
-        let row = sqlx::query(
-            r#"
-            SELECT content_filtering_enabled, spam_engine, quarantine_enabled, quarantine_retention_days
-            FROM antispam_settings
-            WHERE tenant_id = $1
-            "#,
-        )
-        .bind(PLATFORM_TENANT_ID)
-        .fetch_optional(&self.pool)
-        .await?;
-
-        Ok(match row {
-            Some(row) => AntispamSettings {
-                content_filtering_enabled: row.try_get("content_filtering_enabled")?,
-                spam_engine: row.try_get("spam_engine")?,
-                quarantine_enabled: row.try_get("quarantine_enabled")?,
-                quarantine_retention_days: row.try_get::<i32, _>("quarantine_retention_days")?
-                    as u32,
-            },
-            None => AntispamSettings {
-                content_filtering_enabled: true,
-                spam_engine: "rspamd-ready".to_string(),
-                quarantine_enabled: true,
-                quarantine_retention_days: 30,
-            },
+        Ok(AntispamSettings {
+            content_filtering_enabled: false,
+            spam_engine: "lpe-ct-managed".to_string(),
+            quarantine_enabled: false,
+            quarantine_retention_days: 0,
         })
     }
 
@@ -1722,64 +1666,17 @@ impl Storage {
     }
 
     async fn fetch_antispam_rules(&self) -> Result<Vec<FilterRule>> {
-        let rows = sqlx::query_as::<_, FilterRuleRow>(
-            r#"
-            SELECT id, name, scope, action, status
-            FROM antispam_filter_rules
-            WHERE tenant_id = $1
-            ORDER BY created_at ASC
-            "#,
-        )
-        .bind(PLATFORM_TENANT_ID)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(rows
-            .into_iter()
-            .map(|row| FilterRule {
-                id: row.id,
-                name: row.name,
-                scope: row.scope,
-                action: row.action,
-                status: row.status,
-            })
-            .collect())
+        Ok(Vec::new())
     }
+}
 
-    async fn fetch_quarantine_items(&self) -> Result<Vec<QuarantineItem>> {
-        let rows = sqlx::query_as::<_, QuarantineRow>(
-            r#"
-            SELECT
-                id,
-                message_ref,
-                sender,
-                recipient,
-                reason,
-                status,
-                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at
-            FROM antispam_quarantine
-            WHERE tenant_id = $1
-            ORDER BY created_at DESC
-            LIMIT 50
-            "#,
-        )
-        .bind(PLATFORM_TENANT_ID)
-        .fetch_all(&self.pool)
-        .await?;
+fn mailbox_uid_validity() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-        Ok(rows
-            .into_iter()
-            .map(|row| QuarantineItem {
-                id: row.id,
-                message_ref: row.message_ref,
-                sender: row.sender,
-                recipient: row.recipient,
-                reason: row.reason,
-                status: row.status,
-                created_at: row.created_at,
-            })
-            .collect())
-    }
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs().max(1) as i64)
+        .unwrap_or(1)
 }
 
 fn map_mail_flow_row(row: MailFlowRow) -> MailFlowEntry {

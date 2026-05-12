@@ -56,6 +56,12 @@
   - both services expose `GET /metrics`
   - `x-trace-id` is propagated and returned
   - transport logs include `message_id` and `internet_message_id` when available
+- Administration boundary:
+  - quarantine lists, release/reject/delete actions, perimeter filtering rules,
+    and quarantine retention policy are served by `LPE-CT`
+  - core `LPE` administration surfaces may show immutable handoff and delivery
+    result history received from `LPE-CT`, but must not read or persist
+    quarantine custody or perimeter policy tables
 
 ## Reference Table/List
 

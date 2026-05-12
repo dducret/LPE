@@ -741,11 +741,12 @@ impl Storage {
 
         sqlx::query(
             r#"
-            INSERT INTO sender_delegation_grants (
+            INSERT INTO sender_rights (
                 id, tenant_id, owner_account_id, grantee_account_id, sender_right
             )
             VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (tenant_id, owner_account_id, grantee_account_id, sender_right)
+            WHERE identity_id IS NULL
             DO UPDATE SET updated_at = NOW()
             "#,
         )
@@ -777,11 +778,12 @@ impl Storage {
         let mut tx = self.pool.begin().await?;
         let deleted = sqlx::query(
             r#"
-            DELETE FROM sender_delegation_grants
+            DELETE FROM sender_rights
             WHERE tenant_id = $1
               AND owner_account_id = $2
               AND grantee_account_id = $3
               AND sender_right = $4
+              AND identity_id IS NULL
             "#,
         )
         .bind(&tenant_id)
@@ -827,13 +829,14 @@ impl Storage {
                 g.sender_right,
                 to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
                 to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
-            FROM sender_delegation_grants g
+            FROM sender_rights g
             JOIN accounts owner ON owner.id = g.owner_account_id
             JOIN accounts grantee ON grantee.id = g.grantee_account_id
             WHERE g.tenant_id = $1
               AND g.owner_account_id = $2
               AND g.grantee_account_id = $3
               AND g.sender_right = $4
+              AND g.identity_id IS NULL
             LIMIT 1
             "#,
         )
@@ -899,11 +902,12 @@ impl Storage {
                 g.sender_right,
                 to_char(g.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
                 to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
-            FROM sender_delegation_grants g
+            FROM sender_rights g
             JOIN accounts owner ON owner.id = g.owner_account_id
             JOIN accounts grantee ON grantee.id = g.grantee_account_id
             WHERE g.tenant_id = $1
               AND g.owner_account_id = $2
+              AND g.identity_id IS NULL
             ORDER BY lower(grantee.primary_email) ASC, g.sender_right ASC
             "#,
         )
@@ -941,19 +945,21 @@ impl Storage {
                 g.may_write,
                 EXISTS(
                     SELECT 1
-                    FROM sender_delegation_grants sg
+                    FROM sender_rights sg
                     WHERE sg.tenant_id = g.tenant_id
                       AND sg.owner_account_id = g.owner_account_id
                       AND sg.grantee_account_id = g.grantee_account_id
                       AND sg.sender_right = 'send_as'
+                      AND sg.identity_id IS NULL
                 ) AS may_send_as,
                 EXISTS(
                     SELECT 1
-                    FROM sender_delegation_grants sg
+                    FROM sender_rights sg
                     WHERE sg.tenant_id = g.tenant_id
                       AND sg.owner_account_id = g.owner_account_id
                       AND sg.grantee_account_id = g.grantee_account_id
                       AND sg.sender_right = 'send_on_behalf'
+                      AND sg.identity_id IS NULL
                 ) AS may_send_on_behalf
             FROM mailbox_delegation_grants g
             JOIN accounts owner ON owner.id = g.owner_account_id
@@ -1598,11 +1604,12 @@ impl Storage {
             r#"
             SELECT EXISTS(
                 SELECT 1
-                FROM sender_delegation_grants
+                FROM sender_rights
                 WHERE tenant_id = $1
                   AND owner_account_id = $2
                   AND grantee_account_id = $3
                   AND sender_right = $4
+                  AND identity_id IS NULL
             )
             "#,
         )

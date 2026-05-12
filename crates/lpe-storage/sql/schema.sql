@@ -596,8 +596,27 @@ CREATE TABLE mail_change_log (
     tenant_id UUID NOT NULL,
     account_id UUID,
     mailbox_id UUID,
-    object_kind TEXT NOT NULL CHECK (object_kind IN ('message', 'mailbox', 'mailbox_message', 'attachment', 'submission')),
+    collection_id UUID,
+    object_kind TEXT NOT NULL CHECK (object_kind IN (
+        'message',
+        'mailbox',
+        'mailbox_message',
+        'attachment',
+        'submission',
+        'contact_book',
+        'contact',
+        'calendar',
+        'calendar_event',
+        'task_list',
+        'task',
+        'contact_book_grant',
+        'calendar_grant',
+        'task_list_grant',
+        'mailbox_delegation_grant',
+        'sender_right'
+    )),
     object_id UUID NOT NULL,
+    object_uid TEXT,
     change_kind TEXT NOT NULL CHECK (change_kind IN ('created', 'updated', 'destroyed', 'moved', 'expunged')),
     modseq BIGINT NOT NULL CHECK (modseq > 0),
     affected_principal_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
@@ -617,6 +636,22 @@ CREATE INDEX mail_change_log_account_idx
 CREATE INDEX mail_change_log_mailbox_idx
     ON mail_change_log (tenant_id, mailbox_id, cursor)
     WHERE mailbox_id IS NOT NULL;
+
+CREATE INDEX mail_change_log_collaboration_idx
+    ON mail_change_log (tenant_id, account_id, collection_id, object_kind, cursor)
+    WHERE object_kind IN (
+        'contact_book',
+        'contact',
+        'calendar',
+        'calendar_event',
+        'task_list',
+        'task',
+        'contact_book_grant',
+        'calendar_grant',
+        'task_list_grant',
+        'mailbox_delegation_grant',
+        'sender_right'
+    );
 
 CREATE INDEX mail_change_log_principals_gin_idx
     ON mail_change_log USING GIN (affected_principal_ids);
@@ -644,8 +679,25 @@ CREATE TABLE tombstones (
     tenant_id UUID NOT NULL,
     account_id UUID,
     mailbox_id UUID,
-    object_kind TEXT NOT NULL CHECK (object_kind IN ('message', 'mailbox_message')),
+    collection_id UUID,
+    object_kind TEXT NOT NULL CHECK (object_kind IN (
+        'message',
+        'mailbox',
+        'mailbox_message',
+        'contact_book',
+        'contact',
+        'calendar',
+        'calendar_event',
+        'task_list',
+        'task',
+        'contact_book_grant',
+        'calendar_grant',
+        'task_list_grant',
+        'mailbox_delegation_grant',
+        'sender_right'
+    )),
     object_id UUID NOT NULL,
+    object_uid TEXT,
     message_id UUID,
     mailbox_message_id UUID,
     imap_uid BIGINT CHECK (imap_uid IS NULL OR imap_uid > 0),
@@ -667,6 +719,15 @@ CREATE TABLE tombstones (
             AND imap_uid IS NULL
         )
         OR (
+            object_kind = 'mailbox'
+            AND object_id = mailbox_id
+            AND account_id IS NOT NULL
+            AND mailbox_id IS NOT NULL
+            AND message_id IS NULL
+            AND mailbox_message_id IS NULL
+            AND imap_uid IS NULL
+        )
+        OR (
             object_kind = 'mailbox_message'
             AND object_id = mailbox_message_id
             AND account_id IS NOT NULL
@@ -674,6 +735,26 @@ CREATE TABLE tombstones (
             AND mailbox_message_id IS NOT NULL
             AND message_id IS NOT NULL
             AND imap_uid IS NOT NULL
+        )
+        OR (
+            object_kind IN (
+                'contact_book',
+                'contact',
+                'calendar',
+                'calendar_event',
+                'task_list',
+                'task',
+                'contact_book_grant',
+                'calendar_grant',
+                'task_list_grant',
+                'mailbox_delegation_grant',
+                'sender_right'
+            )
+            AND account_id IS NOT NULL
+            AND mailbox_id IS NULL
+            AND message_id IS NULL
+            AND mailbox_message_id IS NULL
+            AND imap_uid IS NULL
         )
     ),
     CHECK (retained_until IS NULL OR retained_until >= created_at),
@@ -685,9 +766,29 @@ CREATE TABLE tombstones (
 CREATE INDEX tombstones_account_idx
     ON tombstones (tenant_id, account_id, object_kind, change_cursor);
 
+CREATE INDEX tombstones_mailbox_idx
+    ON tombstones (tenant_id, account_id, mailbox_id, change_cursor)
+    WHERE object_kind = 'mailbox';
+
 CREATE INDEX tombstones_mailbox_uid_idx
     ON tombstones (tenant_id, mailbox_id, imap_uid)
     WHERE mailbox_id IS NOT NULL AND imap_uid IS NOT NULL;
+
+CREATE INDEX tombstones_collaboration_idx
+    ON tombstones (tenant_id, account_id, collection_id, object_kind, change_cursor)
+    WHERE object_kind IN (
+        'contact_book',
+        'contact',
+        'calendar',
+        'calendar_event',
+        'task_list',
+        'task',
+        'contact_book_grant',
+        'calendar_grant',
+        'task_list_grant',
+        'mailbox_delegation_grant',
+        'sender_right'
+    );
 
 CREATE INDEX tombstones_retention_idx
     ON tombstones (tenant_id, retained_until)
@@ -697,6 +798,26 @@ CREATE TRIGGER tombstones_append_only_update_guard
     BEFORE UPDATE ON tombstones
     FOR EACH ROW
     EXECUTE FUNCTION prevent_append_only_update();
+
+CREATE TABLE canonical_change_journal (
+    sequence BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'rights')),
+    principal_account_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
+    account_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, sequence),
+    FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+);
+
+CREATE INDEX canonical_change_journal_principals_gin_idx
+    ON canonical_change_journal USING GIN (principal_account_ids);
+
+CREATE INDEX canonical_change_journal_replay_idx
+    ON canonical_change_journal (tenant_id, category, sequence);
+
+CREATE INDEX canonical_change_journal_retention_idx
+    ON canonical_change_journal (tenant_id, created_at);
 
 CREATE TABLE jmap_upload_blobs (
     id UUID PRIMARY KEY,
@@ -752,15 +873,17 @@ CREATE TABLE activesync_sync_cursors (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
     device_id TEXT NOT NULL CHECK (btrim(device_id) <> ''),
-    collection_kind TEXT NOT NULL CHECK (collection_kind IN ('mail', 'contacts', 'calendar', 'tasks')),
-    collection_id UUID NOT NULL,
+    collection_kind TEXT NOT NULL CHECK (collection_kind IN ('folders', 'mail', 'contacts', 'calendar', 'tasks')),
+    collection_key TEXT NOT NULL CHECK (btrim(collection_key) <> ''),
     sync_key TEXT NOT NULL CHECK (btrim(sync_key) <> ''),
     last_change_sequence BIGINT NOT NULL DEFAULT 0 CHECK (last_change_sequence >= 0),
+    state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL,
     CHECK (expires_at > created_at),
-    UNIQUE (tenant_id, account_id, device_id, collection_kind, collection_id),
+    CHECK (jsonb_typeof(state_json) IN ('object', 'array')),
+    UNIQUE (tenant_id, account_id, device_id, collection_kind, collection_key),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
@@ -977,11 +1100,28 @@ CREATE TABLE contacts (
     contact_book_id UUID NOT NULL,
     uid TEXT NOT NULL CHECK (btrim(uid) <> ''),
     display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+    name_prefix TEXT NOT NULL DEFAULT '',
     given_name TEXT NOT NULL DEFAULT '',
+    middle_name TEXT NOT NULL DEFAULT '',
     family_name TEXT NOT NULL DEFAULT '',
+    name_suffix TEXT NOT NULL DEFAULT '',
+    nickname TEXT NOT NULL DEFAULT '',
+    phonetic_given_name TEXT NOT NULL DEFAULT '',
+    phonetic_family_name TEXT NOT NULL DEFAULT '',
+    job_title TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT '',
+    organization_name TEXT NOT NULL DEFAULT '',
+    organization_unit TEXT NOT NULL DEFAULT '',
     emails_json JSONB NOT NULL DEFAULT '[]'::jsonb,
     phones_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    addresses_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    urls_json JSONB NOT NULL DEFAULT '[]'::jsonb,
     notes TEXT NOT NULL DEFAULT '',
+    raw_vcard TEXT,
+    import_source TEXT NOT NULL DEFAULT 'local' CHECK (import_source IN ('local', 'jmap', 'dav', 'ews', 'mapi', 'activesync', 'import')),
+    source_uid TEXT,
+    source_etag TEXT,
+    source_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     modseq BIGINT NOT NULL DEFAULT 1 CHECK (modseq > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -989,6 +1129,9 @@ CREATE TABLE contacts (
     UNIQUE (tenant_id, owner_account_id, contact_book_id, uid),
     CHECK (jsonb_typeof(emails_json) = 'array'),
     CHECK (jsonb_typeof(phones_json) = 'array'),
+    CHECK (jsonb_typeof(addresses_json) = 'array'),
+    CHECK (jsonb_typeof(urls_json) = 'array'),
+    CHECK (jsonb_typeof(source_payload_json) = 'object'),
     FOREIGN KEY (tenant_id, owner_account_id, contact_book_id)
         REFERENCES contact_books (tenant_id, owner_account_id, id)
         ON DELETE CASCADE
@@ -1024,23 +1167,45 @@ CREATE TABLE calendar_events (
     owner_account_id UUID NOT NULL,
     calendar_id UUID NOT NULL,
     uid TEXT NOT NULL CHECK (btrim(uid) <> ''),
+    sequence INTEGER NOT NULL DEFAULT 0 CHECK (sequence >= 0),
     title TEXT NOT NULL CHECK (btrim(title) <> ''),
-    description TEXT NOT NULL DEFAULT '',
+    body_text TEXT NOT NULL DEFAULT '',
+    body_html TEXT,
     location TEXT NOT NULL DEFAULT '',
     starts_at TIMESTAMPTZ NOT NULL,
     ends_at TIMESTAMPTZ NOT NULL,
     time_zone TEXT NOT NULL DEFAULT '',
-    recurrence_rule TEXT,
+    all_day BOOLEAN NOT NULL DEFAULT FALSE,
+    status TEXT NOT NULL DEFAULT 'confirmed' CHECK (status IN ('confirmed', 'tentative', 'cancelled')),
+    organizer_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     attendees_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    recurrence_rule TEXT,
+    recurrence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    recurrence_exceptions_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    exception_for_event_id UUID,
+    exception_recurrence_id TEXT,
+    raw_icalendar TEXT,
+    import_source TEXT NOT NULL DEFAULT 'local' CHECK (import_source IN ('local', 'jmap', 'dav', 'ews', 'mapi', 'activesync', 'import')),
+    source_uid TEXT,
+    source_etag TEXT,
+    source_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     modseq BIGINT NOT NULL DEFAULT 1 CHECK (modseq > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, owner_account_id, calendar_id, id),
     UNIQUE (tenant_id, owner_account_id, calendar_id, uid),
     CHECK (ends_at >= starts_at),
+    CHECK (jsonb_typeof(organizer_json) = 'object'),
     CHECK (jsonb_typeof(attendees_json) = 'array'),
+    CHECK (jsonb_typeof(recurrence_json) = 'object'),
+    CHECK (jsonb_typeof(recurrence_exceptions_json) = 'array'),
+    CHECK (jsonb_typeof(source_payload_json) = 'object'),
     FOREIGN KEY (tenant_id, owner_account_id, calendar_id)
         REFERENCES calendars (tenant_id, owner_account_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, owner_account_id, calendar_id, exception_for_event_id)
+        REFERENCES calendar_events (tenant_id, owner_account_id, calendar_id, id)
         ON DELETE CASCADE
 );
 
@@ -1076,10 +1241,19 @@ CREATE TABLE tasks (
     uid TEXT NOT NULL CHECK (btrim(uid) <> ''),
     title TEXT NOT NULL CHECK (btrim(title) <> ''),
     description TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'needs_action'
-        CHECK (status IN ('needs_action', 'in_progress', 'completed', 'cancelled')),
+    status TEXT NOT NULL DEFAULT 'needs-action'
+        CHECK (status IN ('needs-action', 'in-progress', 'completed', 'cancelled')),
+    starts_at TIMESTAMPTZ,
     due_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
+    priority INTEGER NOT NULL DEFAULT 0 CHECK (priority BETWEEN 0 AND 9),
+    recurrence_rule TEXT,
+    recurrence_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    raw_vtodo TEXT,
+    import_source TEXT NOT NULL DEFAULT 'local' CHECK (import_source IN ('local', 'jmap', 'dav', 'ews', 'mapi', 'activesync', 'import')),
+    source_uid TEXT,
+    source_etag TEXT,
+    source_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     modseq BIGINT NOT NULL DEFAULT 1 CHECK (modseq > 0),
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -1087,6 +1261,8 @@ CREATE TABLE tasks (
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, owner_account_id, task_list_id, uid),
     CHECK ((status = 'completed' AND completed_at IS NOT NULL) OR (status <> 'completed' AND completed_at IS NULL)),
+    CHECK (jsonb_typeof(recurrence_json) = 'object'),
+    CHECK (jsonb_typeof(source_payload_json) = 'object'),
     FOREIGN KEY (tenant_id, owner_account_id, task_list_id)
         REFERENCES task_lists (tenant_id, owner_account_id, id)
         ON DELETE CASCADE
@@ -1182,12 +1358,14 @@ CREATE TABLE mailbox_delegation_grants (
     may_read BOOLEAN NOT NULL DEFAULT TRUE,
     may_write BOOLEAN NOT NULL DEFAULT FALSE,
     may_delete BOOLEAN NOT NULL DEFAULT FALSE,
+    may_share BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, mailbox_id, grantee_account_id),
     CHECK (owner_account_id <> grantee_account_id),
-    CHECK (may_read OR (NOT may_write AND NOT may_delete)),
+    CHECK (may_read OR (NOT may_write AND NOT may_delete AND NOT may_share)),
     CHECK ((NOT may_delete) OR may_write),
+    CHECK ((NOT may_share) OR may_write),
     FOREIGN KEY (tenant_id, owner_account_id, mailbox_id)
         REFERENCES mailboxes (tenant_id, account_id, id)
         ON DELETE CASCADE,
