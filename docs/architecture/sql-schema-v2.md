@@ -170,10 +170,12 @@ explicit per-domain uniqueness constraint for attachment blobs. It stores
 Magika validation results, validation status, and extraction lifecycle fields.
 Only `PDF`, `DOCX`, and `ODT` can enter text extraction. Other validated formats
 remain downloadable but not indexed.
-Future storage-placement metadata may allow blob bytes to live outside
-PostgreSQL behind the `BlobStore` boundary, but schema v2 still treats
-PostgreSQL as the authoritative metadata store. Policy changes record intent for
-future writes only and do not implicitly migrate existing blobs.
+`storage_pools` and `blob_placements` record where durable attachment and
+MIME-part blobs are stored, with the current database-backed pool still reading
+bytes from `blobs.blob_bytes`. Raw RFC 5322 message blobs remain
+database-backed initially and do not require placement rows. Schema v2 still
+treats PostgreSQL as the authoritative metadata store. Policy changes record
+intent for future writes only and do not implicitly migrate existing blobs.
 Lifecycle rows include update timestamps and worker-oriented indexes for Magika
 validation, async extraction, and retry scheduling.
 The schema enforces lifecycle timestamp consistency: completed Magika validation
@@ -361,7 +363,9 @@ collaboration, rights, or user-visible state.
 ### Mail, MIME, Search, and Attachments
 
 - `mailboxes`
+- `storage_pools`
 - `blobs`
+- `blob_placements`
 - `messages`
 - `message_headers`
 - `message_recipients`

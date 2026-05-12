@@ -270,6 +270,19 @@ CREATE INDEX mailboxes_parent_idx
 CREATE INDEX mailboxes_hierarchy_idx
     ON mailboxes (tenant_id, account_id, hierarchy_path);
 
+CREATE TABLE storage_pools (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL CHECK (name = lower(btrim(name)) AND name <> ''),
+    pool_kind TEXT NOT NULL CHECK (pool_kind IN ('postgres')),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (name)
+);
+
+INSERT INTO storage_pools (id, name, pool_kind)
+VALUES ('00000000-0000-0000-0000-000000000001', 'postgres-primary', 'postgres');
+
 CREATE TABLE blobs (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
@@ -291,6 +304,7 @@ CREATE TABLE blobs (
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, domain_id, id),
     UNIQUE (tenant_id, domain_id, blob_kind, content_sha256),
+    UNIQUE (tenant_id, domain_id, id, blob_kind, content_sha256, size_octets),
     CHECK (
         (magika_status IN ('not_required', 'pending') AND validated_at IS NULL)
         OR (magika_status IN ('valid', 'rejected', 'failed') AND validated_at IS NOT NULL)
@@ -310,6 +324,61 @@ CREATE INDEX blobs_extraction_idx
 CREATE UNIQUE INDEX blobs_attachment_dedupe_idx
     ON blobs (tenant_id, domain_id, content_sha256)
     WHERE blob_kind = 'attachment';
+
+CREATE TABLE blob_placements (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    domain_id UUID NOT NULL,
+    blob_id UUID NOT NULL,
+    blob_kind TEXT NOT NULL CHECK (blob_kind IN ('attachment', 'mime_part')),
+    storage_pool_id UUID NOT NULL,
+    placement_status TEXT NOT NULL DEFAULT 'active'
+        CHECK (placement_status IN ('active', 'copying', 'verified', 'retiring', 'failed')),
+    verified_content_sha256 TEXT NOT NULL CHECK (verified_content_sha256 ~ '^[0-9a-f]{64}$'),
+    verified_size_octets BIGINT NOT NULL CHECK (verified_size_octets >= 0),
+    verified_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    CHECK (placement_status IN ('copying', 'failed') OR verified_at IS NOT NULL),
+    CHECK (verified_at IS NULL OR verified_at >= created_at),
+    FOREIGN KEY (
+        tenant_id,
+        domain_id,
+        blob_id,
+        blob_kind,
+        verified_content_sha256,
+        verified_size_octets
+    )
+        REFERENCES blobs (
+            tenant_id,
+            domain_id,
+            id,
+            blob_kind,
+            content_sha256,
+            size_octets
+        )
+        ON DELETE CASCADE,
+    FOREIGN KEY (storage_pool_id) REFERENCES storage_pools (id) ON DELETE RESTRICT
+);
+
+CREATE UNIQUE INDEX blob_placements_active_idx
+    ON blob_placements (tenant_id, domain_id, blob_id)
+    WHERE placement_status = 'active';
+
+CREATE UNIQUE INDEX blob_placements_live_pool_idx
+    ON blob_placements (tenant_id, domain_id, blob_id, storage_pool_id)
+    WHERE placement_status IN ('active', 'copying', 'verified', 'retiring');
+
+CREATE INDEX blob_placements_fetch_idx
+    ON blob_placements (tenant_id, domain_id, blob_id, blob_kind)
+    WHERE placement_status = 'active';
+
+CREATE INDEX blob_placements_status_idx
+    ON blob_placements (tenant_id, placement_status, updated_at);
+
+CREATE INDEX blob_placements_pool_status_idx
+    ON blob_placements (storage_pool_id, placement_status, updated_at);
 
 CREATE TABLE messages (
     id UUID PRIMARY KEY,

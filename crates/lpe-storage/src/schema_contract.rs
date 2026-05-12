@@ -286,6 +286,75 @@ fn attachment_metadata_changes_write_mail_change_log_entries() {
 }
 
 #[test]
+fn blob_placement_metadata_is_tenant_domain_and_blob_safe() {
+    let storage_pools = table_definition("storage_pools");
+    assert!(
+        storage_pools.contains("pool_kind TEXT NOT NULL CHECK (pool_kind IN ('postgres'))")
+            && storage_pools
+                .contains("status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled'))")
+            && storage_pools.contains("UNIQUE (name)"),
+        "storage_pools must represent the current database-backed storage pool only"
+    );
+
+    let blob_placements = table_definition("blob_placements");
+    for required in [
+        "blob_kind TEXT NOT NULL CHECK (blob_kind IN ('attachment', 'mime_part'))",
+        "placement_status TEXT NOT NULL DEFAULT 'active'",
+        "CHECK (placement_status IN ('active', 'copying', 'verified', 'retiring', 'failed'))",
+        "verified_content_sha256 TEXT NOT NULL CHECK (verified_content_sha256 ~ '^[0-9a-f]{64}$')",
+        "verified_size_octets BIGINT NOT NULL CHECK (verified_size_octets >= 0)",
+        "UNIQUE (tenant_id, id)",
+        "CHECK (placement_status IN ('copying', 'failed') OR verified_at IS NOT NULL)",
+        "FOREIGN KEY (",
+        "tenant_id,",
+        "domain_id,",
+        "blob_id,",
+        "blob_kind,",
+        "verified_content_sha256,",
+        "verified_size_octets",
+        "REFERENCES blobs (",
+        "content_sha256,",
+        "size_octets",
+        "FOREIGN KEY (storage_pool_id) REFERENCES storage_pools (id) ON DELETE RESTRICT",
+    ] {
+        assert!(
+            blob_placements.contains(required),
+            "blob_placements is missing required placement contract fragment: {required}"
+        );
+    }
+    assert!(
+        !blob_placements.contains("'raw_message'"),
+        "raw RFC 5322 blobs must not require placement metadata in Milestone 2"
+    );
+
+    assert_schema_contains_all(&[
+        "UNIQUE (tenant_id, domain_id, id, blob_kind, content_sha256, size_octets)",
+        "INSERT INTO storage_pools (id, name, pool_kind)",
+        "'postgres-primary', 'postgres'",
+        "CREATE UNIQUE INDEX blob_placements_active_idx",
+        "ON blob_placements (tenant_id, domain_id, blob_id)",
+        "WHERE placement_status = 'active'",
+        "CREATE UNIQUE INDEX blob_placements_live_pool_idx",
+        "ON blob_placements (tenant_id, domain_id, blob_id, storage_pool_id)",
+        "WHERE placement_status IN ('active', 'copying', 'verified', 'retiring')",
+        "CREATE INDEX blob_placements_fetch_idx",
+        "ON blob_placements (tenant_id, domain_id, blob_id, blob_kind)",
+        "CREATE INDEX blob_placements_status_idx",
+        "CREATE INDEX blob_placements_pool_status_idx",
+    ]);
+
+    for unsupported_backend in ["s3", "aws", "azure", "cloud", "bucket"] {
+        assert!(
+            !storage_pools.to_ascii_lowercase().contains(unsupported_backend)
+                && !blob_placements
+                    .to_ascii_lowercase()
+                    .contains(unsupported_backend),
+            "Milestone 2 schema must not introduce backend config for {unsupported_backend}"
+        );
+    }
+}
+
+#[test]
 fn existing_draft_updates_write_mailbox_message_change_log_entries() {
     assert!(
         SUBMISSION_STORAGE.contains("existing_draft_update")

@@ -428,6 +428,189 @@ Verification:
 - docs do not claim mailbox movement is implemented unless tests prove it
 ```
 
+## Codex Prompt Pack: Milestone 2
+
+Use these prompts one at a time. Milestone 2 is only about PostgreSQL placement
+metadata. It must not add a non-database backend, migration worker, admin UI,
+cloud provider, mailbox-level policy, or automatic policy-triggered movement.
+
+### Prompt 1: Inspect Milestone 1 Baseline
+
+```text
+Read AGENTS.md, ARCHITECTURE.md, docs/architecture/initial-architecture.md,
+LICENSE.md, docs/architecture/sql-schema-v2.md, docs/architecture/attachments-v1.md,
+and docs/architecture/mailbox-storage-pools-roadmap.md.
+
+Goal: inspect the completed Milestone 1 BlobStore boundary and identify the
+smallest schema change needed for Milestone 2 blob placement metadata.
+
+Scope:
+- lpe-storage only unless a test proves another crate must change
+- inspect crates/lpe-storage/src/blob_store.rs
+- inspect crates/lpe-storage/sql/schema.sql
+- inspect schema_contract tests
+- inspect durable attachment fetch/write paths
+
+Return:
+- current BlobStore methods and callers
+- current blobs table fields and constraints
+- proposed storage_pools and blob_placements columns
+- exact constraints needed to keep tenant/domain/blob references safe
+- risks or unclear points before editing
+
+Do not edit files.
+```
+
+### Prompt 2: Design Minimal Placement Schema
+
+```text
+Design the minimal Milestone 2 schema for storage pool and blob placement
+metadata.
+
+Constraints:
+- PostgreSQL remains the metadata authority.
+- Blob bytes remain in the current PostgreSQL blobs.blob_bytes column.
+- Raw RFC 5322 message blobs remain database-backed initially.
+- Durable attachment and MIME-part blob kinds get placement metadata first.
+- Storage policy is evaluated at write time only.
+- No migration worker.
+- No admin API or UI.
+- No cloud, S3, Azure, AWS, or private object storage implementation.
+- No mailbox-level policy.
+- Do not add new dependencies.
+
+Return:
+- table names and columns
+- CHECK constraints for storage pool kind and placement status
+- uniqueness rules for active placements
+- foreign keys proving tenant/domain/blob ownership
+- indexes for fetch and future migration workers
+- tests to add to schema_contract.rs
+- any simpler alternative and why it is or is not enough
+
+Do not edit code yet.
+```
+
+### Prompt 3: Implement Placement Metadata Schema
+
+```text
+Implement the approved Milestone 2 storage-pool and blob-placement schema.
+
+Scope:
+- update crates/lpe-storage/sql/schema.sql
+- update docs/architecture/sql-schema-v2.md only if terminology or table groups
+  need to reflect the new schema
+- update schema_contract tests for table presence, constraints, foreign keys,
+  and active-placement uniqueness
+- no runtime behavior changes unless schema compilation/tests require a small
+  adjustment
+
+Required behavior:
+- include a database-backed storage pool representation for current blobs
+- allow placement rows for durable attachment and MIME-part blobs
+- do not require placement rows for raw RFC 5322 message blobs
+- do not duplicate blob bytes into placement rows
+
+Verification:
+- cargo test -p lpe-storage
+
+Report:
+- changed files
+- exact tests run
+- any runtime behavior intentionally left unchanged
+```
+
+### Prompt 4: Write Placement Rows For New Durable Blobs
+
+```text
+Wire Milestone 2 placement metadata into new durable attachment and MIME-part
+blob writes.
+
+Scope:
+- lpe-storage BlobStore write path only
+- database-backed placement rows only
+- no migration worker
+- no external storage backend
+- no admin API or UI
+- no protocol adapter storage-backend awareness
+
+Required behavior:
+- when a new durable attachment or MIME-part blob is created, create an active
+  database-backed placement row in the same transaction
+- duplicate/deduplicated durable blob writes must not create duplicate active
+  placement rows
+- raw RFC 5322 message blob writes remain database-backed and do not need
+  placement rows in this milestone
+
+Verification:
+- add or update focused lpe-storage tests proving new blobs get one active
+  placement
+- add or update tests proving duplicate writes reuse existing placement metadata
+- cargo test -p lpe-storage
+
+Report:
+- changed files
+- exact tests run
+- whether any existing blobs require backfill outside this milestone
+```
+
+### Prompt 5: Read Through Placement Metadata
+
+```text
+Make durable attachment and MIME-part BlobStore reads consult placement metadata
+without changing the physical byte source.
+
+Scope:
+- lpe-storage BlobStore read/stat/verify paths only
+- current database-backed placement only
+- no external backend
+- no migration worker
+- no protocol adapter changes unless a lpe-storage API signature changes
+
+Required behavior:
+- read/stat/verify succeeds through an active database-backed placement
+- missing active placement returns a storage-layer error or explicit failure,
+  not "mailbox/message missing"
+- wrong-tenant, wrong-domain, wrong-kind, and wrong-blob placement rows cannot
+  satisfy reads
+
+Verification:
+- tests prove reads fail when the durable blob lacks an active placement
+- tests prove wrong-domain placement cannot satisfy a read
+- tests prove verify still checks checksum and size
+- cargo test -p lpe-storage
+
+Report:
+- changed files
+- exact tests run
+- residual compatibility risk for pre-placement blobs, if any
+```
+
+### Prompt 6: Document Milestone 2 Completion
+
+```text
+Update only directly relevant architecture documentation for the implemented
+Milestone 2 placement metadata.
+
+Scope:
+- docs/architecture/mailbox-storage-pools-roadmap.md
+- docs/architecture/sql-schema-v2.md
+- docs/architecture/operations-and-disaster-recovery.md only if restore
+  behavior changed
+
+Required documentation:
+- storage pools and placements are metadata only in Milestone 2
+- blob bytes still live in PostgreSQL
+- raw RFC 5322 message blobs remain database-backed initially
+- policy changes still do not implicitly migrate existing blobs
+- no cloud backend, migration worker, or mailbox-level policy is implemented
+
+Verification:
+- docs do not claim transparent mailbox movement is implemented yet
+- docs do not claim S3/AWS/Azure support is implemented yet
+- cargo test -p lpe-storage if documentation touched schema_contract expectations
+```
+
 ## Deferred Decisions
 
 - When, if ever, raw RFC 5322 message blobs should move out of the database.
