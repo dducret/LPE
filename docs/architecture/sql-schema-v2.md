@@ -178,9 +178,16 @@ and MIME-part `BlobStore` read/stat/verify paths require an active
 database-backed placement row; a missing active placement is a storage-layer
 failure, not a missing mailbox or message. Schema v2 still treats PostgreSQL as
 the authoritative metadata store. Policy changes record intent for future writes
-only and do not implicitly migrate existing blobs. Milestone 2 does not
-implement cloud storage, object storage, migration workers, admin policy UI, or
-mailbox-level storage policy.
+only and do not implicitly migrate existing blobs. `blob_migration_jobs` records
+explicit Milestone 3 online migration work for durable attachment and MIME-part
+placements between database-backed pools, including retry, verification, switch,
+cancellation, and rollback-window metadata. During the switch, the verified
+target placement becomes active and the old source placement is retained as
+`retiring` with `rollback_until` metadata; cleanup and deletion are not part of
+Milestone 3. Raw RFC 5322 message blobs remain database-backed initially and
+outside migration scope. Milestone 3 does not add cloud storage, object storage,
+admin policy UI, mailbox-level storage policy, or retention/legal-hold garbage
+collection.
 Lifecycle rows include update timestamps and worker-oriented indexes for Magika
 validation, async extraction, and retry scheduling.
 The schema enforces lifecycle timestamp consistency: completed Magika validation
@@ -371,6 +378,7 @@ collaboration, rights, or user-visible state.
 - `storage_pools`
 - `blobs`
 - `blob_placements`
+- `blob_migration_jobs`
 - `messages`
 - `message_headers`
 - `message_recipients`

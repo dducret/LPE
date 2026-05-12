@@ -303,8 +303,11 @@ fn blob_placement_metadata_is_tenant_domain_and_blob_safe() {
         "CHECK (placement_status IN ('active', 'copying', 'verified', 'retiring', 'failed'))",
         "verified_content_sha256 TEXT NOT NULL CHECK (verified_content_sha256 ~ '^[0-9a-f]{64}$')",
         "verified_size_octets BIGINT NOT NULL CHECK (verified_size_octets >= 0)",
+        "rollback_until TIMESTAMPTZ",
         "UNIQUE (tenant_id, id)",
+        "UNIQUE (tenant_id, domain_id, id, blob_id, blob_kind, storage_pool_id)",
         "CHECK (placement_status IN ('copying', 'failed') OR verified_at IS NOT NULL)",
+        "CHECK (rollback_until IS NULL OR placement_status = 'retiring')",
         "FOREIGN KEY (",
         "tenant_id,",
         "domain_id,",
@@ -350,6 +353,79 @@ fn blob_placement_metadata_is_tenant_domain_and_blob_safe() {
                     .to_ascii_lowercase()
                     .contains(unsupported_backend),
             "Milestone 2 schema must not introduce backend config for {unsupported_backend}"
+        );
+    }
+}
+
+#[test]
+fn blob_migration_jobs_capture_milestone_three_worker_contract() {
+    let jobs = table_definition("blob_migration_jobs");
+    for required in [
+        "blob_kind TEXT NOT NULL CHECK (blob_kind IN ('attachment', 'mime_part'))",
+        "job_kind TEXT NOT NULL DEFAULT 'placement_migration' CHECK (job_kind = 'placement_migration')",
+        "source_placement_id UUID NOT NULL",
+        "source_storage_pool_id UUID NOT NULL",
+        "target_storage_pool_id UUID NOT NULL",
+        "target_placement_id UUID",
+        "status TEXT NOT NULL DEFAULT 'pending'",
+        "CHECK (status IN ('pending', 'running', 'verified', 'switched', 'failed', 'cancelled'))",
+        "attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0)",
+        "next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+        "lease_expires_at TIMESTAMPTZ",
+        "rollback_until TIMESTAMPTZ",
+        "UNIQUE (tenant_id, id)",
+        "CHECK (source_storage_pool_id <> target_storage_pool_id)",
+        "CHECK (target_placement_id IS NULL OR target_placement_id <> source_placement_id)",
+        "CHECK (status <> 'running' OR (started_at IS NOT NULL AND lease_expires_at IS NOT NULL))",
+        "CHECK (status NOT IN ('verified', 'switched') OR target_placement_id IS NOT NULL)",
+        "CHECK (status <> 'switched' OR (switched_at IS NOT NULL AND rollback_until IS NOT NULL))",
+        "CHECK (status <> 'cancelled' OR cancelled_at IS NOT NULL)",
+        "REFERENCES blob_placements (",
+        "storage_pool_id",
+        "ON DELETE RESTRICT",
+        "FOREIGN KEY (source_storage_pool_id) REFERENCES storage_pools (id) ON DELETE RESTRICT",
+        "FOREIGN KEY (target_storage_pool_id) REFERENCES storage_pools (id) ON DELETE RESTRICT",
+    ] {
+        assert!(
+            jobs.contains(required),
+            "blob_migration_jobs is missing required Milestone 3 contract fragment: {required}"
+        );
+    }
+    assert!(
+        !jobs.contains("'raw_message'"),
+        "raw RFC 5322 blobs must stay out of migration jobs"
+    );
+
+    for required in [
+        "tenant_id,\n        domain_id,\n        source_placement_id,\n        blob_id,\n        blob_kind,\n        source_storage_pool_id",
+        "tenant_id,\n        domain_id,\n        target_placement_id,\n        blob_id,\n        blob_kind,\n        target_storage_pool_id",
+        "CREATE UNIQUE INDEX blob_migration_jobs_open_target_idx",
+        "ON blob_migration_jobs (tenant_id, domain_id, blob_id, target_storage_pool_id)",
+        "WHERE status IN ('pending', 'running', 'verified')",
+        "CREATE INDEX blob_migration_jobs_pending_idx",
+        "ON blob_migration_jobs (next_attempt_at, created_at, id)",
+        "WHERE status = 'pending'",
+        "CREATE INDEX blob_migration_jobs_running_lease_idx",
+        "ON blob_migration_jobs (lease_expires_at, started_at)",
+        "WHERE status = 'running'",
+        "CREATE INDEX blob_migration_jobs_blob_idx",
+        "ON blob_migration_jobs (tenant_id, domain_id, blob_id, created_at DESC)",
+        "CREATE INDEX blob_migration_jobs_source_placement_idx",
+        "ON blob_migration_jobs (tenant_id, source_placement_id)",
+        "CREATE INDEX blob_migration_jobs_target_placement_idx",
+        "ON blob_migration_jobs (tenant_id, target_placement_id)",
+        "WHERE target_placement_id IS NOT NULL",
+    ] {
+        assert!(
+            SCHEMA.contains(required),
+            "schema.sql is missing required migration job index or ownership fragment: {required}"
+        );
+    }
+
+    for unsupported_backend in ["s3", "aws", "azure", "cloud", "bucket"] {
+        assert!(
+            !jobs.to_ascii_lowercase().contains(unsupported_backend),
+            "Milestone 3 migration jobs must not introduce backend config for {unsupported_backend}"
         );
     }
 }

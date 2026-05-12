@@ -86,9 +86,11 @@ Blob storage manager
 
 Mailboxes do not point to paths or buckets. Messages and MIME parts reference
 canonical blob ids. PostgreSQL remains the metadata authority. Placement
-metadata points durable attachment and MIME-part blobs at the current
-database-backed pool only. Cloud, object storage, migration workers, and
-mailbox-level policy remain future milestones.
+metadata points durable attachment and MIME-part blobs at database-backed pools
+only. Milestone 3 adds explicit migration jobs and a database-backed
+copy/verify/switch worker over those placement rows. Cloud, object storage,
+cleanup, retention/legal-hold integration, admin UI, and mailbox-level policy
+remain future milestones.
 
 ## Storage Policy Levels
 
@@ -213,14 +215,25 @@ Verification:
 
 Move blob bytes between pools without changing mailbox-visible state.
 
+Status: implemented for explicit job-driven movement between database-backed
+durable attachment and MIME-part placements. Policy changes still record intent
+for future writes only and do not create implicit migration jobs. Raw RFC 5322
+message blobs remain database-backed initially and outside migration scope.
+Source placements are marked `retiring` and retained with rollback-window
+metadata after the active-placement switch; cleanup and deletion remain future
+work.
+
 Deliverables:
 
 - migration job table
 - copy worker
 - checksum verification
 - atomic active-placement switch
-- old-placement retention window
+- source-placement rollback window
 - retry and failure states
+- database-backed source and target placements only
+- no cloud backend, admin UI, mailbox-level policy, or retention/legal-hold
+  garbage collection
 
 Verification:
 
@@ -228,6 +241,7 @@ Verification:
 - reads continue during migration
 - rollback can use the old placement before garbage collection
 - duplicate migration jobs do not corrupt placement state
+- exactly one active placement remains after switch
 
 ### Milestone 4: Quota, Retention, and Legal Hold Integration
 
@@ -319,235 +333,243 @@ Verification:
 - restore drill reconstructs messages and attachments
 - protocol clients remain stable during storage movement
 
-## Codex Prompt Pack: Milestone 3
+## Codex Prompt Pack: Milestone 4
 
-Use these prompts one at a time. Milestone 3 introduces online migration job
-metadata and a database-backed migration worker over existing placement rows.
-It must not add S3, AWS, Azure, private object storage, admin UI, mailbox-level
-policy, retention/legal-hold deletion, or automatic migration when a policy
+Use these prompts one at a time. Milestone 4 integrates logical quota,
+retention, legal hold, and safe placement cleanup rules after explicit
+database-backed migration. It must not add S3, AWS, Azure, private object
+storage, admin UI, mailbox-level policy, or automatic migration when a policy
 changes.
 
-### Prompt 1: Inspect Placement Baseline
+### Prompt 1: Inspect Lifecycle Baseline
 
 ```text
 Read AGENTS.md, ARCHITECTURE.md, docs/architecture/initial-architecture.md,
-LICENSE.md, docs/architecture/sql-schema-v2.md, docs/architecture/attachments-v1.md,
-and docs/architecture/mailbox-storage-pools-roadmap.md.
+LICENSE.md, docs/architecture/sql-schema-v2.md,
+docs/architecture/data-lifecycle-and-compliance.md,
+docs/architecture/attachments-v1.md, and
+docs/architecture/mailbox-storage-pools-roadmap.md.
 
-Goal: inspect the completed Milestone 2 placement metadata and identify the
-smallest Milestone 3 online migration worker design.
+Goal: inspect the completed Milestone 3 migration flow and identify the
+smallest Milestone 4 lifecycle integration for logical quota, retention, legal
+hold, and placement garbage collection.
 
 Scope:
 - lpe-storage only unless a test proves another crate must change
-- inspect crates/lpe-storage/src/blob_store.rs
-- inspect crates/lpe-storage/sql/schema.sql
-- inspect schema_contract tests
-- inspect durable attachment and MIME-part placement read/write paths
+- inspect blob placement, migration, and BlobStore code
+- inspect current quota/account/domain size accounting
+- inspect retention and legal-hold schema or documented gaps
+- inspect attachment/blob reference paths from messages, MIME parts,
+  attachments, extraction jobs, and attachment texts
 
 Return:
-- current storage_pools and blob_placements schema
-- current BlobStore placement behavior
-- proposed migration job table fields
-- proposed worker states and transitions
-- where copy, verify, switch, rollback window, and retry should live
+- current logical size accounting behavior
+- current retiring placement behavior after migration
+- current retention/legal-hold model and any missing schema
+- exact blockers to deleting old placements safely
+- proposed minimal Milestone 4 implementation slices
 - risks or unclear points before editing
 
 Do not edit files.
 ```
 
-### Prompt 2: Design Migration Job Schema
+### Prompt 2: Design Lifecycle And Cleanup Rules
 
 ```text
-Design the minimal Milestone 3 migration job schema for durable attachment and
-MIME-part blob placement movement.
+Design the minimal Milestone 4 lifecycle rules for quota, retention, legal hold,
+and old-placement cleanup.
 
 Constraints:
 - PostgreSQL remains the metadata authority.
-- Existing blob bytes still live in PostgreSQL.
-- Source and target placements are database-backed in this milestone.
-- Raw RFC 5322 message blobs remain database-backed initially and are out of
-  migration scope.
+- Quota accounting is based on canonical logical blob/message size, not the
+  number of physical placements.
+- Raw RFC 5322 message blobs remain database-backed initially.
 - Storage policy is evaluated at write time only; policy changes do not create
   implicit migration jobs.
+- Cleanup only applies to non-active old placements that are safe to remove.
+- Do not delete canonical blobs, messages, MIME parts, attachments, extraction
+  jobs, or attachment text rows in this milestone unless the existing code
+  already has a safe deletion path.
 - No cloud, S3, AWS, Azure, or private object storage implementation.
 - No admin API or UI.
 - No mailbox-level policy.
-- No retention/legal-hold garbage collection.
 - Do not add new dependencies.
 
 Return:
-- table name and columns
-- CHECK constraints for job kind/status
-- foreign keys proving tenant/domain/blob/source/target ownership
-- idempotency and duplicate-job prevention rules
-- indexes for pending work, retries, and blob lookup
-- schema_contract tests to add
+- lifecycle state rules for active, retiring, and deleted placement rows
+- the retention and legal-hold checks required before deleting placement bytes
+- the reference checks required before deleting an old placement
+- how quota reports remain stable before and after migration
+- schema additions, if any, and why they are necessary
+- tests required for each rule
 - any simpler alternative and why it is or is not enough
 
 Do not edit code yet.
 ```
 
-### Prompt 3: Implement Migration Job Schema
+### Prompt 3: Implement Logical Quota Stability
 
 ```text
-Implement the approved Milestone 3 migration job schema.
+Implement Milestone 4 quota stability so mailbox/account/domain quota behavior
+uses canonical logical size and is not affected by placement count.
 
 Scope:
-- update crates/lpe-storage/sql/schema.sql
-- update schema_contract tests for table presence, constraints, foreign keys,
-  indexes, and duplicate-job prevention
-- update docs/architecture/sql-schema-v2.md only if table groups or migration
-  terminology need to reflect the new schema
-- no worker logic yet
-- no runtime behavior changes unless schema compilation/tests require a small
-  adjustment
-
-Required behavior:
-- migration jobs target durable attachment and MIME-part blobs only
-- raw RFC 5322 message blobs stay out of migration scope
-- jobs reference real source and target storage pools or placements
-- jobs can represent pending, running, verified, switched, failed, and cancelled
-  states without deleting any old placement
-
-Verification:
-- cargo test -p lpe-storage
-
-Report:
-- changed files
-- exact tests run
-- any runtime behavior intentionally left unchanged
-```
-
-### Prompt 4: Add Migration Job API Inside lpe-storage
-
-```text
-Add internal lpe-storage functions for creating and loading blob migration jobs.
-
-Scope:
-- lpe-storage only
-- internal Rust API only; no admin API or UI
-- no worker copy/switch execution yet
-- no protocol adapter changes
-- no cloud backend
-
-Required behavior:
-- create an explicit migration job for a durable attachment or MIME-part blob
-- reject raw RFC 5322 message blobs
-- reject jobs without an active source placement
-- reject jobs where source and target pool are the same unless the design has a
-  concrete repair use case
-- make duplicate create calls idempotent or return the existing pending/running
-  job
-- expose a query for pending/retryable jobs in deterministic order
-
-Verification:
-- focused lpe-storage tests for create, duplicate create, invalid blob kind,
-  missing source placement, and pending-job query order
-- cargo test -p lpe-storage
-
-Report:
-- changed files
-- exact tests run
-- any explicit non-goals preserved
-```
-
-### Prompt 5: Implement Copy And Verify Worker Step
-
-```text
-Implement the Milestone 3 worker step that copies and verifies a durable blob
-from the active source placement to a target database-backed placement.
-
-Scope:
-- lpe-storage only
-- database-backed source and target placements only
-- no external backend
-- no active-placement switch yet
-- no deletion of source placement
+- lpe-storage quota and storage-overview paths only
 - no admin API or UI
+- no external storage backend
+- no placement deletion yet
+- no unrelated quota refactor
 
 Required behavior:
-- claim one pending/retryable job safely
-- copy bytes through the BlobStore boundary
-- create or reuse a target placement in a non-active verifying/verified state
-- verify checksum and size before marking the job verified
-- record retryable failure state with attempt count and next_attempt_at
-- repeated worker execution is idempotent
+- active plus retiring placements for one blob do not double-count quota
+- moving a blob between database-backed placements does not change mailbox,
+  account, or domain logical size reports
+- deduplicated blobs continue to count according to the existing canonical
+  quota model, not physical placement count
 
 Verification:
-- tests prove interrupted/repeated worker execution does not create duplicate
-  target placements
-- tests prove checksum or size mismatch fails the job without changing the
-  active source placement
-- tests prove reads continue from the original active placement during copy
+- focused lpe-storage tests for quota before migration, during retiring
+  placement state, and after cleanup eligibility
+- tests include deduplicated attachment blobs where feasible
 - cargo test -p lpe-storage
 
 Report:
 - changed files
 - exact tests run
-- remaining work before active switch
+- any existing quota behavior intentionally preserved
 ```
 
-### Prompt 6: Implement Atomic Placement Switch
+### Prompt 4: Add Retention And Legal-Hold Guards
 
 ```text
-Implement the Milestone 3 atomic switch from source active placement to verified
-target placement.
+Add the minimal Milestone 4 guards that prevent old placement cleanup while a
+blob is protected by retention, legal hold, or live canonical references.
+
+Scope:
+- lpe-storage only
+- old placement cleanup eligibility only
+- no message deletion feature expansion
+- no admin API or UI
+- no external storage backend
+
+Required behavior:
+- a retiring placement is not cleanup-eligible before its rollback window
+  expires
+- a retiring placement is not cleanup-eligible while the blob is referenced by
+  live messages, MIME parts, attachments, extraction jobs, or attachment texts
+  in a way that still needs the placement
+- a retiring placement is not cleanup-eligible when existing or newly added
+  retention/legal-hold metadata says the blob must be preserved
+- guards return explicit reasons that tests can assert
+
+Verification:
+- tests for rollback-window protection
+- tests for live reference protection
+- tests for retention/legal-hold protection
+- cargo test -p lpe-storage
+
+Report:
+- changed files
+- exact tests run
+- any retention/legal-hold limitation that remains documented
+```
+
+### Prompt 5: Implement Safe Placement Cleanup Worker
+
+```text
+Implement the Milestone 4 cleanup worker for old non-active placements that have
+passed all lifecycle guards.
 
 Scope:
 - lpe-storage only
 - database-backed placements only
-- no source deletion
-- no retention/legal-hold garbage collection
+- old placement cleanup only
+- no canonical blob/message deletion
+- no active placement deletion
+- no external storage backend
 - no admin API or UI
-- no protocol adapter storage-backend awareness
 
 Required behavior:
-- switch only verified migration jobs
-- in one transaction, mark the target placement active and the old active
-  placement retiring
-- keep the old placement available for rollback until a later cleanup milestone
-- ensure there is only one active placement per durable blob after the switch
-- duplicate switch execution must be idempotent
-- BlobStore read/stat/verify must use the new active placement after switch
+- cleanup claims eligible retiring placements deterministically
+- cleanup never deletes the only active placement for a blob
+- cleanup marks placement cleanup/deletion state before removing or clearing
+  physical placement bytes, according to the approved design
+- repeated cleanup execution is idempotent
+- failed cleanup records retryable state without making the blob unreadable
 
 Verification:
-- tests prove there is one active placement after switch
-- tests prove repeated switch execution is safe
-- tests prove reads continue before, during, and after switch
-- tests prove rollback-window metadata remains on the retiring old placement
+- tests prove active placement reads still work after old placement cleanup
+- tests prove cleanup refuses the last active placement
+- tests prove repeated cleanup is safe
+- tests prove failed cleanup can retry
 - cargo test -p lpe-storage
 
 Report:
 - changed files
 - exact tests run
-- cleanup behavior intentionally left for later milestones
+- cleanup behavior intentionally limited to old placements
 ```
 
-### Prompt 7: Document Milestone 3 Completion
+### Prompt 6: Prove Export And Protocol Fetch Stability
+
+```text
+Verify that Milestone 4 quota and cleanup behavior does not break canonical
+message export or protocol attachment fetches.
+
+Scope:
+- lpe-storage tests first
+- protocol crate changes only if an existing test proves a regression
+- no new protocol features
+- no external storage backend
+- no admin API or UI
+
+Required behavior:
+- export reconstructs messages and attachments after migration and old-placement
+  cleanup
+- JMAP, ActiveSync, EWS/MAPI, and IMAP-facing storage paths still use canonical
+  lpe-storage APIs
+- missing cleaned-up old placements do not surface as missing mailbox/message
+  state
+
+Verification:
+- add or update focused lpe-storage tests for export/fetch after cleanup
+- run cargo test -p lpe-storage
+- run narrow protocol tests only if lpe-storage API signatures or behavior
+  changed in a way protocol crates compile against
+
+Report:
+- changed files
+- exact tests run
+- protocol paths checked
+```
+
+### Prompt 7: Document Milestone 4 Completion
 
 ```text
 Update only directly relevant architecture documentation for the implemented
-Milestone 3 online migration worker.
+Milestone 4 lifecycle integration.
 
 Scope:
 - docs/architecture/mailbox-storage-pools-roadmap.md
 - docs/architecture/sql-schema-v2.md
-- docs/architecture/operations-and-disaster-recovery.md only if restore or
-  rollback behavior changed
+- docs/architecture/data-lifecycle-and-compliance.md
+- docs/architecture/operations-and-disaster-recovery.md only if restore,
+  rollback, or cleanup behavior changed
 
 Required documentation:
-- migration is explicit job-driven movement, not automatic policy-triggered
-  movement
-- Milestone 3 uses database-backed placements only
+- quota accounting is logical and independent of placement count
+- old placement cleanup is guarded by rollback windows, live references,
+  retention, and legal hold
+- canonical blobs/messages are not deleted by placement cleanup
 - raw RFC 5322 message blobs remain database-backed initially
-- source placements are retained after switch for rollback
-- cleanup, retention/legal-hold integration, cloud backends, admin UI, and
-  mailbox-level policy remain future milestones
+- policy changes still do not implicitly migrate existing blobs
+- cloud backends, admin UI, and mailbox-level policy remain future milestones
 
 Verification:
 - docs do not claim S3/AWS/Azure support is implemented
-- docs do not claim old placements are garbage-collected
 - docs do not claim mailbox-level policy is implemented
+- docs clearly distinguish placement cleanup from canonical message/blob
+  deletion
 - cargo test -p lpe-storage if documentation touched schema_contract
   expectations
 ```

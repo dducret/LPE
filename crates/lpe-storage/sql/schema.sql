@@ -337,11 +337,14 @@ CREATE TABLE blob_placements (
     verified_content_sha256 TEXT NOT NULL CHECK (verified_content_sha256 ~ '^[0-9a-f]{64}$'),
     verified_size_octets BIGINT NOT NULL CHECK (verified_size_octets >= 0),
     verified_at TIMESTAMPTZ,
+    rollback_until TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, domain_id, id, blob_id, blob_kind, storage_pool_id),
     CHECK (placement_status IN ('copying', 'failed') OR verified_at IS NOT NULL),
     CHECK (verified_at IS NULL OR verified_at >= created_at),
+    CHECK (rollback_until IS NULL OR placement_status = 'retiring'),
     FOREIGN KEY (
         tenant_id,
         domain_id,
@@ -379,6 +382,101 @@ CREATE INDEX blob_placements_status_idx
 
 CREATE INDEX blob_placements_pool_status_idx
     ON blob_placements (storage_pool_id, placement_status, updated_at);
+
+CREATE TABLE blob_migration_jobs (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    domain_id UUID NOT NULL,
+    blob_id UUID NOT NULL,
+    blob_kind TEXT NOT NULL CHECK (blob_kind IN ('attachment', 'mime_part')),
+    job_kind TEXT NOT NULL DEFAULT 'placement_migration' CHECK (job_kind = 'placement_migration'),
+    source_placement_id UUID NOT NULL,
+    source_storage_pool_id UUID NOT NULL,
+    target_storage_pool_id UUID NOT NULL,
+    target_placement_id UUID,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'running', 'verified', 'switched', 'failed', 'cancelled')),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_error TEXT,
+    started_at TIMESTAMPTZ,
+    lease_expires_at TIMESTAMPTZ,
+    verified_at TIMESTAMPTZ,
+    switched_at TIMESTAMPTZ,
+    cancelled_at TIMESTAMPTZ,
+    rollback_until TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    CHECK (source_storage_pool_id <> target_storage_pool_id),
+    CHECK (target_placement_id IS NULL OR target_placement_id <> source_placement_id),
+    CHECK (started_at IS NULL OR started_at >= created_at),
+    CHECK (verified_at IS NULL OR verified_at >= created_at),
+    CHECK (switched_at IS NULL OR verified_at IS NOT NULL),
+    CHECK (rollback_until IS NULL OR switched_at IS NOT NULL),
+    CHECK (status <> 'running' OR (started_at IS NOT NULL AND lease_expires_at IS NOT NULL)),
+    CHECK (status NOT IN ('verified', 'switched') OR target_placement_id IS NOT NULL),
+    CHECK (status <> 'switched' OR (switched_at IS NOT NULL AND rollback_until IS NOT NULL)),
+    CHECK (status <> 'cancelled' OR cancelled_at IS NOT NULL),
+    FOREIGN KEY (
+        tenant_id,
+        domain_id,
+        source_placement_id,
+        blob_id,
+        blob_kind,
+        source_storage_pool_id
+    )
+        REFERENCES blob_placements (
+            tenant_id,
+            domain_id,
+            id,
+            blob_id,
+            blob_kind,
+            storage_pool_id
+        )
+        ON DELETE RESTRICT,
+    FOREIGN KEY (
+        tenant_id,
+        domain_id,
+        target_placement_id,
+        blob_id,
+        blob_kind,
+        target_storage_pool_id
+    )
+        REFERENCES blob_placements (
+            tenant_id,
+            domain_id,
+            id,
+            blob_id,
+            blob_kind,
+            storage_pool_id
+        )
+        ON DELETE RESTRICT,
+    FOREIGN KEY (source_storage_pool_id) REFERENCES storage_pools (id) ON DELETE RESTRICT,
+    FOREIGN KEY (target_storage_pool_id) REFERENCES storage_pools (id) ON DELETE RESTRICT
+);
+
+CREATE UNIQUE INDEX blob_migration_jobs_open_target_idx
+    ON blob_migration_jobs (tenant_id, domain_id, blob_id, target_storage_pool_id)
+    WHERE status IN ('pending', 'running', 'verified');
+
+CREATE INDEX blob_migration_jobs_pending_idx
+    ON blob_migration_jobs (next_attempt_at, created_at, id)
+    WHERE status = 'pending';
+
+CREATE INDEX blob_migration_jobs_running_lease_idx
+    ON blob_migration_jobs (lease_expires_at, started_at)
+    WHERE status = 'running';
+
+CREATE INDEX blob_migration_jobs_blob_idx
+    ON blob_migration_jobs (tenant_id, domain_id, blob_id, created_at DESC);
+
+CREATE INDEX blob_migration_jobs_source_placement_idx
+    ON blob_migration_jobs (tenant_id, source_placement_id);
+
+CREATE INDEX blob_migration_jobs_target_placement_idx
+    ON blob_migration_jobs (tenant_id, target_placement_id)
+    WHERE target_placement_id IS NOT NULL;
 
 CREATE TABLE messages (
     id UUID PRIMARY KEY,

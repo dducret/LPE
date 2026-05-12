@@ -25,6 +25,9 @@ Operations protect canonical `LPE` PostgreSQL state, blob storage, and `LPE-CT` 
 - Restore rules:
   - restore core PostgreSQL before starting protocol adapters
   - restore blobs with database consistency
+  - treat storage migration rollback as placement metadata recovery: after a
+    Milestone 3 switch, the old source placement remains `retiring` with a
+    rollback window until a later cleanup milestone deletes it
   - restore `LPE-CT` spool before accepting SMTP traffic
   - validate `/health/ready`
 - Node replacement:
