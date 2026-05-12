@@ -319,210 +319,95 @@ Verification:
 - restore drill reconstructs messages and attachments
 - protocol clients remain stable during storage movement
 
-## Codex Prompt Pack: Milestone 1
+## Codex Prompt Pack: Milestone 3
 
-Use these prompts one at a time. Each prompt assumes the previous prompt has
-been completed and verified.
+Use these prompts one at a time. Milestone 3 introduces online migration job
+metadata and a database-backed migration worker over existing placement rows.
+It must not add S3, AWS, Azure, private object storage, admin UI, mailbox-level
+policy, retention/legal-hold deletion, or automatic migration when a policy
+changes.
 
-### Prompt 1: Inspect Current Blob Flows
-
-```text
-Read AGENTS.md, ARCHITECTURE.md, docs/architecture/initial-architecture.md,
-LICENSE.md, docs/architecture/sql-schema-v2.md, docs/architecture/attachments-v1.md,
-and docs/architecture/mailbox-storage-pools-roadmap.md.
-
-Goal: inspect current blob creation, lookup, attachment fetch, JMAP upload, and
-message export flows in lpe-storage without changing code.
-
-Return:
-- the files and functions that currently write blobs
-- the files and functions that currently read blobs
-- where raw message blobs, MIME part blobs, attachment blobs, and JMAP upload
-  blobs are handled
-- the smallest implementation boundary for a BlobStore abstraction
-- risks or unclear points that need confirmation before editing
-
-Do not refactor or edit files.
-```
-
-### Prompt 2: Design The Minimal Boundary
-
-```text
-Using the inspection results, propose the smallest internal BlobStore boundary
-for lpe-storage.
-
-Constraints:
-- PostgreSQL remains the metadata authority.
-- Raw RFC 5322 message blobs remain database-backed initially.
-- Storage policy is evaluated at write time only.
-- Protocol adapters must not know storage backends.
-- Keep lib.rs as module declarations, re-exports, and minimal wiring only.
-- Do not add cloud support.
-- Do not add new dependencies unless absolutely required and checked against
-  LICENSE.md.
-
-Return:
-- trait or service methods with Rust signatures
-- the module where the boundary should live
-- the current code paths that should call it
-- tests required before and after implementation
-- any simpler alternative and why it is or is not enough
-
-Do not edit code yet.
-```
-
-### Prompt 3: Implement Local BlobStore Only
-
-```text
-Implement the approved minimal BlobStore boundary in lpe-storage.
-
-Scope:
-- local/current storage behavior only
-- keep raw RFC 5322 message blobs database-backed initially
-- no S3, Azure, AWS, private cloud, or admin UI
-- no unrelated cleanup
-- no changes to protocol semantics
-
-Verification:
-- add or update focused lpe-storage tests for storing, reading, stat/checksum,
-  and attachment fetch through the boundary
-- run cargo test -p lpe-storage
-
-Report:
-- changed files
-- exact tests run
-- any behavior intentionally left unchanged
-```
-
-### Prompt 4: Reconnect Protocol Fetch Paths
-
-```text
-Audit JMAP, IMAP, ActiveSync, EWS/MAPI, and export paths that fetch message or
-attachment bytes.
-
-Goal: ensure they still fetch through canonical lpe-storage behavior and do not
-gain direct storage-backend knowledge.
-
-Scope:
-- only fix call sites broken or bypassed by the BlobStore boundary
-- no new storage backends
-- no protocol feature expansion
-
-Verification:
-- cargo test -p lpe-storage
-- run the narrow protocol crate tests affected by changed call sites
-
-Report:
-- changed files
-- protocol paths checked
-- tests run
-```
-
-### Prompt 5: Document The Implemented Boundary
-
-```text
-Update only the directly relevant architecture documentation for the implemented
-BlobStore boundary.
-
-Scope:
-- docs/architecture/mailbox-storage-pools-roadmap.md
-- docs/architecture/sql-schema-v2.md if schema terminology changed
-- docs/architecture/operations-and-disaster-recovery.md if restore behavior
-  changed
-
-Do not document future S3/AWS/Azure implementation as complete.
-
-Verification:
-- docs consistently say PostgreSQL is metadata authority
-- docs consistently say blob bytes may be stored through the BlobStore boundary
-- docs consistently say raw RFC 5322 message blobs remain database-backed
-  initially
-- docs consistently say policy changes do not implicitly migrate existing blobs
-- docs do not claim mailbox movement is implemented unless tests prove it
-```
-
-## Codex Prompt Pack: Milestone 2
-
-Use these prompts one at a time. Milestone 2 is only about PostgreSQL placement
-metadata. It must not add a non-database backend, migration worker, admin UI,
-cloud provider, mailbox-level policy, or automatic policy-triggered movement.
-
-### Prompt 1: Inspect Milestone 1 Baseline
+### Prompt 1: Inspect Placement Baseline
 
 ```text
 Read AGENTS.md, ARCHITECTURE.md, docs/architecture/initial-architecture.md,
 LICENSE.md, docs/architecture/sql-schema-v2.md, docs/architecture/attachments-v1.md,
 and docs/architecture/mailbox-storage-pools-roadmap.md.
 
-Goal: inspect the completed Milestone 1 BlobStore boundary and identify the
-smallest schema change needed for Milestone 2 blob placement metadata.
+Goal: inspect the completed Milestone 2 placement metadata and identify the
+smallest Milestone 3 online migration worker design.
 
 Scope:
 - lpe-storage only unless a test proves another crate must change
 - inspect crates/lpe-storage/src/blob_store.rs
 - inspect crates/lpe-storage/sql/schema.sql
 - inspect schema_contract tests
-- inspect durable attachment fetch/write paths
+- inspect durable attachment and MIME-part placement read/write paths
 
 Return:
-- current BlobStore methods and callers
-- current blobs table fields and constraints
-- proposed storage_pools and blob_placements columns
-- exact constraints needed to keep tenant/domain/blob references safe
+- current storage_pools and blob_placements schema
+- current BlobStore placement behavior
+- proposed migration job table fields
+- proposed worker states and transitions
+- where copy, verify, switch, rollback window, and retry should live
 - risks or unclear points before editing
 
 Do not edit files.
 ```
 
-### Prompt 2: Design Minimal Placement Schema
+### Prompt 2: Design Migration Job Schema
 
 ```text
-Design the minimal Milestone 2 schema for storage pool and blob placement
-metadata.
+Design the minimal Milestone 3 migration job schema for durable attachment and
+MIME-part blob placement movement.
 
 Constraints:
 - PostgreSQL remains the metadata authority.
-- Blob bytes remain in the current PostgreSQL blobs.blob_bytes column.
-- Raw RFC 5322 message blobs remain database-backed initially.
-- Durable attachment and MIME-part blob kinds get placement metadata first.
-- Storage policy is evaluated at write time only.
-- No migration worker.
+- Existing blob bytes still live in PostgreSQL.
+- Source and target placements are database-backed in this milestone.
+- Raw RFC 5322 message blobs remain database-backed initially and are out of
+  migration scope.
+- Storage policy is evaluated at write time only; policy changes do not create
+  implicit migration jobs.
+- No cloud, S3, AWS, Azure, or private object storage implementation.
 - No admin API or UI.
-- No cloud, S3, Azure, AWS, or private object storage implementation.
 - No mailbox-level policy.
+- No retention/legal-hold garbage collection.
 - Do not add new dependencies.
 
 Return:
-- table names and columns
-- CHECK constraints for storage pool kind and placement status
-- uniqueness rules for active placements
-- foreign keys proving tenant/domain/blob ownership
-- indexes for fetch and future migration workers
-- tests to add to schema_contract.rs
+- table name and columns
+- CHECK constraints for job kind/status
+- foreign keys proving tenant/domain/blob/source/target ownership
+- idempotency and duplicate-job prevention rules
+- indexes for pending work, retries, and blob lookup
+- schema_contract tests to add
 - any simpler alternative and why it is or is not enough
 
 Do not edit code yet.
 ```
 
-### Prompt 3: Implement Placement Metadata Schema
+### Prompt 3: Implement Migration Job Schema
 
 ```text
-Implement the approved Milestone 2 storage-pool and blob-placement schema.
+Implement the approved Milestone 3 migration job schema.
 
 Scope:
 - update crates/lpe-storage/sql/schema.sql
-- update docs/architecture/sql-schema-v2.md only if terminology or table groups
-  need to reflect the new schema
 - update schema_contract tests for table presence, constraints, foreign keys,
-  and active-placement uniqueness
+  indexes, and duplicate-job prevention
+- update docs/architecture/sql-schema-v2.md only if table groups or migration
+  terminology need to reflect the new schema
+- no worker logic yet
 - no runtime behavior changes unless schema compilation/tests require a small
   adjustment
 
 Required behavior:
-- include a database-backed storage pool representation for current blobs
-- allow placement rows for durable attachment and MIME-part blobs
-- do not require placement rows for raw RFC 5322 message blobs
-- do not duplicate blob bytes into placement rows
+- migration jobs target durable attachment and MIME-part blobs only
+- raw RFC 5322 message blobs stay out of migration scope
+- jobs reference real source and target storage pools or placements
+- jobs can represent pending, running, verified, switched, failed, and cancelled
+  states without deleting any old placement
 
 Verification:
 - cargo test -p lpe-storage
@@ -533,95 +418,138 @@ Report:
 - any runtime behavior intentionally left unchanged
 ```
 
-### Prompt 4: Write Placement Rows For New Durable Blobs
+### Prompt 4: Add Migration Job API Inside lpe-storage
 
 ```text
-Wire Milestone 2 placement metadata into new durable attachment and MIME-part
-blob writes.
+Add internal lpe-storage functions for creating and loading blob migration jobs.
 
 Scope:
-- lpe-storage BlobStore write path only
-- database-backed placement rows only
-- no migration worker
-- no external storage backend
+- lpe-storage only
+- internal Rust API only; no admin API or UI
+- no worker copy/switch execution yet
+- no protocol adapter changes
+- no cloud backend
+
+Required behavior:
+- create an explicit migration job for a durable attachment or MIME-part blob
+- reject raw RFC 5322 message blobs
+- reject jobs without an active source placement
+- reject jobs where source and target pool are the same unless the design has a
+  concrete repair use case
+- make duplicate create calls idempotent or return the existing pending/running
+  job
+- expose a query for pending/retryable jobs in deterministic order
+
+Verification:
+- focused lpe-storage tests for create, duplicate create, invalid blob kind,
+  missing source placement, and pending-job query order
+- cargo test -p lpe-storage
+
+Report:
+- changed files
+- exact tests run
+- any explicit non-goals preserved
+```
+
+### Prompt 5: Implement Copy And Verify Worker Step
+
+```text
+Implement the Milestone 3 worker step that copies and verifies a durable blob
+from the active source placement to a target database-backed placement.
+
+Scope:
+- lpe-storage only
+- database-backed source and target placements only
+- no external backend
+- no active-placement switch yet
+- no deletion of source placement
+- no admin API or UI
+
+Required behavior:
+- claim one pending/retryable job safely
+- copy bytes through the BlobStore boundary
+- create or reuse a target placement in a non-active verifying/verified state
+- verify checksum and size before marking the job verified
+- record retryable failure state with attempt count and next_attempt_at
+- repeated worker execution is idempotent
+
+Verification:
+- tests prove interrupted/repeated worker execution does not create duplicate
+  target placements
+- tests prove checksum or size mismatch fails the job without changing the
+  active source placement
+- tests prove reads continue from the original active placement during copy
+- cargo test -p lpe-storage
+
+Report:
+- changed files
+- exact tests run
+- remaining work before active switch
+```
+
+### Prompt 6: Implement Atomic Placement Switch
+
+```text
+Implement the Milestone 3 atomic switch from source active placement to verified
+target placement.
+
+Scope:
+- lpe-storage only
+- database-backed placements only
+- no source deletion
+- no retention/legal-hold garbage collection
 - no admin API or UI
 - no protocol adapter storage-backend awareness
 
 Required behavior:
-- when a new durable attachment or MIME-part blob is created, create an active
-  database-backed placement row in the same transaction
-- duplicate/deduplicated durable blob writes must not create duplicate active
-  placement rows
-- raw RFC 5322 message blob writes remain database-backed and do not need
-  placement rows in this milestone
+- switch only verified migration jobs
+- in one transaction, mark the target placement active and the old active
+  placement retiring
+- keep the old placement available for rollback until a later cleanup milestone
+- ensure there is only one active placement per durable blob after the switch
+- duplicate switch execution must be idempotent
+- BlobStore read/stat/verify must use the new active placement after switch
 
 Verification:
-- add or update focused lpe-storage tests proving new blobs get one active
-  placement
-- add or update tests proving duplicate writes reuse existing placement metadata
+- tests prove there is one active placement after switch
+- tests prove repeated switch execution is safe
+- tests prove reads continue before, during, and after switch
+- tests prove rollback-window metadata remains on the retiring old placement
 - cargo test -p lpe-storage
 
 Report:
 - changed files
 - exact tests run
-- whether any existing blobs require backfill outside this milestone
+- cleanup behavior intentionally left for later milestones
 ```
 
-### Prompt 5: Read Through Placement Metadata
-
-```text
-Make durable attachment and MIME-part BlobStore reads consult placement metadata
-without changing the physical byte source.
-
-Scope:
-- lpe-storage BlobStore read/stat/verify paths only
-- current database-backed placement only
-- no external backend
-- no migration worker
-- no protocol adapter changes unless a lpe-storage API signature changes
-
-Required behavior:
-- read/stat/verify succeeds through an active database-backed placement
-- missing active placement returns a storage-layer error or explicit failure,
-  not "mailbox/message missing"
-- wrong-tenant, wrong-domain, wrong-kind, and wrong-blob placement rows cannot
-  satisfy reads
-
-Verification:
-- tests prove reads fail when the durable blob lacks an active placement
-- tests prove wrong-domain placement cannot satisfy a read
-- tests prove verify still checks checksum and size
-- cargo test -p lpe-storage
-
-Report:
-- changed files
-- exact tests run
-- residual compatibility risk for pre-placement blobs, if any
-```
-
-### Prompt 6: Document Milestone 2 Completion
+### Prompt 7: Document Milestone 3 Completion
 
 ```text
 Update only directly relevant architecture documentation for the implemented
-Milestone 2 placement metadata.
+Milestone 3 online migration worker.
 
 Scope:
 - docs/architecture/mailbox-storage-pools-roadmap.md
 - docs/architecture/sql-schema-v2.md
-- docs/architecture/operations-and-disaster-recovery.md only if restore
-  behavior changed
+- docs/architecture/operations-and-disaster-recovery.md only if restore or
+  rollback behavior changed
 
 Required documentation:
-- storage pools and placements are metadata only in Milestone 2
-- blob bytes still live in PostgreSQL
+- migration is explicit job-driven movement, not automatic policy-triggered
+  movement
+- Milestone 3 uses database-backed placements only
 - raw RFC 5322 message blobs remain database-backed initially
-- policy changes still do not implicitly migrate existing blobs
-- no cloud backend, migration worker, or mailbox-level policy is implemented
+- source placements are retained after switch for rollback
+- cleanup, retention/legal-hold integration, cloud backends, admin UI, and
+  mailbox-level policy remain future milestones
 
 Verification:
-- docs do not claim transparent mailbox movement is implemented yet
-- docs do not claim S3/AWS/Azure support is implemented yet
-- cargo test -p lpe-storage if documentation touched schema_contract expectations
+- docs do not claim S3/AWS/Azure support is implemented
+- docs do not claim old placements are garbage-collected
+- docs do not claim mailbox-level policy is implemented
+- cargo test -p lpe-storage if documentation touched schema_contract
+  expectations
 ```
 
 ## Deferred Decisions
