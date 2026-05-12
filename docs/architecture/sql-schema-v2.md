@@ -110,6 +110,13 @@ after the configured protocol replay windows have passed. Tombstones capture
 deleted message and mailbox-membership identifiers as historical facts rather
 than foreign-keying back to rows that deletion or expunge may remove.
 
+JMAP `Mailbox/changes` and `Email/changes` use `mail_change_log` replay when
+the client state token carries a retained change cursor and the intervening rows
+map cleanly to the requested JMAP type. Rows that affect the projection but
+cannot be mapped precisely, such as rights changes for mailbox projections,
+force a current-state diff fallback. This fallback is compatibility behavior,
+not a protocol-local canonical store.
+
 Protocol adapters store only cursor rows:
 
 - `jmap_query_states` stores query token metadata and last observed canonical

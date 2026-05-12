@@ -195,7 +195,10 @@ fn collaboration_deletes_write_tombstones() {
     assert!(
         PROTOCOLS_STORAGE.contains("INSERT INTO tombstones")
             && PROTOCOLS_STORAGE.contains("'mailbox'")
-            && TASKS_STORAGE.matches("insert_collaboration_tombstone_in_tx").count() >= 2,
+            && TASKS_STORAGE
+                .matches("insert_collaboration_tombstone_in_tx")
+                .count()
+                >= 2,
         "mailbox and task-list physical deletes must write tombstones before removing rows"
     );
 }
@@ -224,6 +227,17 @@ fn imap_uid_state_is_mailbox_scoped_without_global_sequence() {
             && !PROTOCOLS_STORAGE.contains("MAX(imap_uid)")
             && !MESSAGE_OPS_STORAGE.contains("MAX(imap_uid)"),
         "storage must allocate UIDNEXT from mailbox uid_next, not visible max UID"
+    );
+}
+
+#[test]
+fn jmap_mail_changes_have_durable_replay_path() {
+    assert!(
+        PROTOCOLS_STORAGE.contains("pub async fn replay_jmap_mail_object_changes")
+            && PROTOCOLS_STORAGE.contains("FROM mail_change_log")
+            && PROTOCOLS_STORAGE.contains("sourceMailboxId")
+            && PROTOCOLS_STORAGE.contains("messageId"),
+        "JMAP Mailbox/changes and Email/changes need a durable mail_change_log replay path"
     );
 }
 

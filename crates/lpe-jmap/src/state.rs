@@ -51,6 +51,11 @@ pub(crate) struct StateEntry {
     pub(crate) fingerprint: String,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct DurableObjectChange {
+    pub(crate) id: String,
+}
+
 pub(crate) fn changes_response(
     account_id: Uuid,
     kind: &str,
@@ -65,6 +70,94 @@ pub(crate) fn changes_response(
         max_changes,
         current_entries,
         None,
+    )
+}
+
+pub(crate) fn state_cursor(account_id: Uuid, kind: &str, since_state: &str) -> Result<Option<i64>> {
+    if since_state == "0" {
+        return Ok(None);
+    }
+    let previous = decode_state(since_state)?;
+    if previous.account_id != account_id.to_string() {
+        bail!("state does not match requested account");
+    }
+    if previous.kind != kind {
+        bail!("state does not match requested method");
+    }
+    Ok(previous.cursor)
+}
+
+pub(crate) fn changes_response_from_durable_with_cursor(
+    account_id: Uuid,
+    kind: &str,
+    since_state: &str,
+    max_changes: Option<u64>,
+    current_entries: Vec<StateEntry>,
+    current_cursor: Option<i64>,
+    durable_changes: Vec<DurableObjectChange>,
+) -> Result<Value> {
+    let max_changes = max_changes.unwrap_or(u64::MAX).max(1) as usize;
+    let (previous_entries, previous_cursor) = if since_state == "0" {
+        (Vec::new(), None)
+    } else {
+        let previous = decode_state(since_state)?;
+        if previous.account_id != account_id.to_string() {
+            bail!("state does not match requested account");
+        }
+        if previous.kind != kind {
+            bail!("state does not match requested method");
+        }
+        (previous.entries, previous.cursor)
+    };
+
+    let previous_map = previous_entries
+        .iter()
+        .cloned()
+        .into_iter()
+        .map(|entry| (entry.id, entry.fingerprint))
+        .collect::<HashMap<_, _>>();
+    let current_map = current_entries
+        .iter()
+        .cloned()
+        .into_iter()
+        .map(|entry| (entry.id, entry.fingerprint))
+        .collect::<HashMap<_, _>>();
+    let mut changed_ids = durable_changes
+        .into_iter()
+        .map(|change| change.id)
+        .collect::<Vec<_>>();
+    changed_ids.sort();
+    changed_ids.dedup();
+
+    let mut created = Vec::new();
+    let mut updated = Vec::new();
+    let mut destroyed = Vec::new();
+    for id in changed_ids {
+        match (previous_map.get(&id), current_map.get(&id)) {
+            (None, Some(_)) => created.push(id),
+            (Some(previous), Some(current)) if previous != current => updated.push(id),
+            (Some(_), None) => destroyed.push(id),
+            _ => {}
+        }
+    }
+
+    created.sort();
+    updated.sort();
+    destroyed.sort();
+
+    finish_changes_response(
+        account_id,
+        kind,
+        since_state,
+        max_changes,
+        previous_entries,
+        previous_cursor,
+        current_entries,
+        current_cursor,
+        &current_map,
+        created,
+        updated,
+        destroyed,
     )
 }
 
@@ -127,6 +220,36 @@ pub(crate) fn changes_response_with_cursor(
     updated.sort();
     destroyed.sort();
 
+    finish_changes_response(
+        account_id,
+        kind,
+        since_state,
+        max_changes,
+        previous_entries,
+        previous_cursor,
+        current_entries,
+        current_cursor,
+        &current_map,
+        created,
+        updated,
+        destroyed,
+    )
+}
+
+fn finish_changes_response(
+    account_id: Uuid,
+    kind: &str,
+    since_state: &str,
+    max_changes: usize,
+    previous_entries: Vec<StateEntry>,
+    previous_cursor: Option<i64>,
+    current_entries: Vec<StateEntry>,
+    current_cursor: Option<i64>,
+    current_map: &HashMap<String, String>,
+    mut created: Vec<String>,
+    mut updated: Vec<String>,
+    mut destroyed: Vec<String>,
+) -> Result<Value> {
     let total_changes = created.len() + updated.len() + destroyed.len();
     let has_more_changes = total_changes > max_changes;
     if has_more_changes {

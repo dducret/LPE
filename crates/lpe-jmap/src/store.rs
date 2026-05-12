@@ -4,13 +4,15 @@ use lpe_storage::{
     CanonicalChangeCategory, CanonicalChangeListener, CanonicalChangeReplay,
     CanonicalPushChangeSet, ClientTask, ClientTaskList, CollaborationCollection,
     CreateTaskListInput, JmapEmail, JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput,
-    JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState,
-    JmapThreadQuery, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, SenderIdentity,
-    SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage, UpdateTaskListInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    JmapMailObjectChange, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
+    JmapStoredQueryState, JmapThreadQuery, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage,
+    SenderIdentity, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
+    UpdateTaskListInput, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use serde_json::Value;
 use uuid::Uuid;
+
+pub(crate) const MAX_JMAP_MAIL_OBJECT_REPLAY_ROWS: u64 = 4096;
 
 #[allow(async_fn_in_trait)]
 pub trait JmapPushListener: Send {
@@ -32,6 +34,16 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
     ) -> Result<Option<i64>>;
     async fn fetch_jmap_mail_change_cursor(&self, account_id: Uuid) -> Result<Option<i64>> {
         let _ = account_id;
+        Ok(None)
+    }
+    async fn replay_jmap_mail_object_changes(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+        after_cursor: i64,
+        max_rows: u64,
+    ) -> Result<Option<Vec<JmapMailObjectChange>>> {
+        let _ = (account_id, data_type, after_cursor, max_rows);
         Ok(None)
     }
     async fn save_jmap_query_state(
@@ -302,6 +314,17 @@ impl JmapStore for Storage {
 
     async fn fetch_jmap_mail_change_cursor(&self, account_id: Uuid) -> Result<Option<i64>> {
         self.fetch_jmap_mail_change_cursor(account_id).await
+    }
+
+    async fn replay_jmap_mail_object_changes(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+        after_cursor: i64,
+        max_rows: u64,
+    ) -> Result<Option<Vec<JmapMailObjectChange>>> {
+        self.replay_jmap_mail_object_changes(account_id, data_type, after_cursor, max_rows)
+            .await
     }
 
     async fn save_jmap_query_state(

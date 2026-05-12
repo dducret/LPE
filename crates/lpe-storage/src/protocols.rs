@@ -165,6 +165,13 @@ pub struct JmapStoredQueryState {
     pub snapshot_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct JmapMailObjectChange {
+    pub cursor: i64,
+    pub object_id: Uuid,
+    pub change_kind: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct JmapEmailSubmission {
     pub id: Uuid,
@@ -251,6 +258,113 @@ impl Storage {
         .fetch_one(&self.pool)
         .await
         .map_err(Into::into)
+    }
+
+    pub async fn replay_jmap_mail_object_changes(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+        after_cursor: i64,
+        max_rows: u64,
+    ) -> Result<Option<Vec<JmapMailObjectChange>>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let earliest_retained_cursor = sqlx::query_scalar::<_, Option<i64>>(
+            r#"
+            SELECT MIN(cursor)
+            FROM mail_change_log
+            WHERE tenant_id = $1
+              AND (account_id = $2 OR affected_principal_ids @> ARRAY[$2]::uuid[])
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .fetch_one(&self.pool)
+        .await?;
+        if earliest_retained_cursor.is_some_and(|cursor| after_cursor < cursor - 1) {
+            return Ok(None);
+        }
+
+        let rows = sqlx::query(
+            r#"
+            SELECT cursor, object_kind, object_id, mailbox_id, change_kind, summary_json
+            FROM mail_change_log
+            WHERE tenant_id = $1
+              AND cursor > $2
+              AND (account_id = $3 OR affected_principal_ids @> ARRAY[$3]::uuid[])
+            ORDER BY cursor ASC
+            LIMIT $4
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(after_cursor)
+        .bind(account_id)
+        .bind((max_rows + 1) as i64)
+        .fetch_all(&self.pool)
+        .await?;
+        if rows.len() > max_rows as usize {
+            return Ok(None);
+        }
+
+        let mut changes = Vec::new();
+        for row in rows {
+            let cursor: i64 = row.try_get("cursor")?;
+            let object_kind: String = row.try_get("object_kind")?;
+            let object_id: Uuid = row.try_get("object_id")?;
+            let mailbox_id: Option<Uuid> = row.try_get("mailbox_id")?;
+            let change_kind: String = row.try_get("change_kind")?;
+            let summary_json: Value = row.try_get("summary_json")?;
+            match data_type {
+                "Email" => {
+                    if object_kind != "mailbox_message" {
+                        return Ok(None);
+                    }
+                    let Some(message_id) = summary_json
+                        .get("messageId")
+                        .and_then(Value::as_str)
+                        .and_then(|value| Uuid::parse_str(value).ok())
+                    else {
+                        return Ok(None);
+                    };
+                    changes.push(JmapMailObjectChange {
+                        cursor,
+                        object_id: message_id,
+                        change_kind: jmap_change_kind(&change_kind),
+                    });
+                }
+                "Mailbox" => match object_kind.as_str() {
+                    "mailbox" => changes.push(JmapMailObjectChange {
+                        cursor,
+                        object_id,
+                        change_kind: jmap_change_kind(&change_kind),
+                    }),
+                    "mailbox_message" => {
+                        let Some(target_mailbox_id) = mailbox_id else {
+                            return Ok(None);
+                        };
+                        if let Some(source_mailbox_id) = summary_json
+                            .get("sourceMailboxId")
+                            .and_then(Value::as_str)
+                            .and_then(|value| Uuid::parse_str(value).ok())
+                        {
+                            changes.push(JmapMailObjectChange {
+                                cursor,
+                                object_id: source_mailbox_id,
+                                change_kind: "updated".to_string(),
+                            });
+                        }
+                        changes.push(JmapMailObjectChange {
+                            cursor,
+                            object_id: target_mailbox_id,
+                            change_kind: "updated".to_string(),
+                        });
+                    }
+                    _ => return Ok(None),
+                },
+                _ => return Ok(None),
+            }
+        }
+
+        Ok(Some(changes))
     }
 
     pub async fn save_jmap_query_state(
@@ -2768,6 +2882,15 @@ pub(crate) fn activesync_collection_kind(collection_id: &str) -> &'static str {
         "tasks" => "tasks",
         _ => "mail",
     }
+}
+
+fn jmap_change_kind(change_kind: &str) -> String {
+    match change_kind {
+        "destroyed" | "expunged" => "destroyed",
+        "created" => "created",
+        _ => "updated",
+    }
+    .to_string()
 }
 
 #[cfg(test)]

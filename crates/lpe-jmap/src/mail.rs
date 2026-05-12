@@ -29,9 +29,10 @@ use crate::{
         ThreadQueryArguments,
     },
     state::{
-        changes_response, changes_response_with_cursor, decode_query_state,
-        encode_query_state_reference, query_changes_response, query_changes_response_from_diff,
-        query_diff_for_kind, query_position, validate_query_state_token,
+        changes_response, changes_response_from_durable_with_cursor, changes_response_with_cursor,
+        decode_query_state, encode_query_state_reference, query_changes_response,
+        query_changes_response_from_diff, query_diff_for_kind, query_position, state_cursor,
+        validate_query_state_token, DurableObjectChange,
     },
     upload::{expected_attachment_kind, parse_upload_blob_id},
     validation::validate_query_sort,
@@ -334,6 +335,33 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .mail_object_state_entries(&account_access, "Email")
             .await?;
         let cursor = self.store.fetch_jmap_mail_change_cursor(account_id).await?;
+        if let Some(after_cursor) = state_cursor(account_id, "Email", &arguments.since_state)? {
+            if let Some(changes) = self
+                .store
+                .replay_jmap_mail_object_changes(
+                    account_id,
+                    "Email",
+                    after_cursor,
+                    crate::store::MAX_JMAP_MAIL_OBJECT_REPLAY_ROWS,
+                )
+                .await?
+            {
+                return changes_response_from_durable_with_cursor(
+                    account_id,
+                    "Email",
+                    &arguments.since_state,
+                    arguments.max_changes,
+                    entries,
+                    cursor,
+                    changes
+                        .into_iter()
+                        .map(|change| DurableObjectChange {
+                            id: change.object_id.to_string(),
+                        })
+                        .collect(),
+                );
+            }
+        }
         changes_response_with_cursor(
             account_id,
             "Email",

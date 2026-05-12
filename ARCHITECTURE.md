@@ -97,6 +97,7 @@ The important non-negotiable rules are:
 
 - `docs/architecture/sql-schema-v2.md`
 - `docs/architecture/attachments-v1.md`
+- `docs/architecture/mailbox-storage-pools-roadmap.md`
 - `docs/architecture/collaboration-acl-delegation-mvp.md`
 - `docs/architecture/data-lifecycle-and-compliance.md`
 
