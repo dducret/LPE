@@ -1584,6 +1584,7 @@ dependencies = [
  "anyhow",
  "base64",
  "hmac",
+ "idna",
  "lpe-core",
  "lpe-domain",
  "lpe-magika",

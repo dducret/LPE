@@ -31,6 +31,8 @@ These exceptions are currently accepted because they are common in the Rust ecos
 
 `rustls`, `tokio-rustls`, and `rustls-pemfile` are acceptable for implicit-TLS `SMTP` submission because they are published under `Apache-2.0`-compatible dual licenses and keep TLS termination inside the Rust service boundary.
 
+`idna` is acceptable for mailbox-domain normalization because its Rust source is published under `Apache-2.0 OR MIT`, it implements UTS 46 processing instead of adding local IDNA logic, and it is already present in the workspace dependency graph.
+
 Google `Magika` is an acceptable candidate for file-type validation because its official project is published under `Apache-2.0`. As with every dependency, the selected integration path and its transitive dependencies must still be reviewed before adoption.
 
 ## External Reference Constraint

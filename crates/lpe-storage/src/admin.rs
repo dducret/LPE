@@ -6,16 +6,17 @@ use uuid::Uuid;
 use crate::shared::allocate_uid_validity;
 use crate::{
     env_bind_address, env_hostname, normalize_admin_permissions, normalize_directory_kind,
-    normalize_email, normalize_gal_visibility, permission_summary, permissions_from_storage,
-    validate_sieve_script_content, validate_sieve_script_name, AccountRow, AdminDashboard,
-    AliasRecord, AliasRow, AntispamSettings, AuditEntryInput, AuditEvent, AuditRow,
-    DashboardUpdate, DomainRecord, DomainRow, EmailTraceResult, EmailTraceRow,
-    EmailTraceSearchInput, FilterRule, HealthResponse, LocalAiSettings, MailFlowEntry, MailFlowRow,
-    MailboxRecord, MailboxRow, NewAccount, NewAlias, NewDomain, NewMailbox, NewPstTransferJob,
-    NewServerAdministrator, OverviewStats, ProtocolStatus, PstTransferJobRecord, PstTransferJobRow,
-    SecuritySettings, ServerAdministrator, ServerAdministratorRow, ServerSettings,
-    SieveScriptDocument, SieveScriptSummary, Storage, StorageOverview, UpdateAccount, UpdateDomain,
-    MAX_SIEVE_SCRIPTS_PER_ACCOUNT, PLATFORM_TENANT_ID,
+    normalize_domain_name, normalize_email, normalize_gal_visibility, permission_summary,
+    permissions_from_storage, validate_sieve_script_content, validate_sieve_script_name,
+    AccountRow, AdminDashboard, AliasRecord, AliasRow, AntispamSettings, AuditEntryInput,
+    AuditEvent, AuditRow, DashboardUpdate, DomainRecord, DomainRow, EmailTraceResult,
+    EmailTraceRow, EmailTraceSearchInput, FilterRule, HealthResponse, LocalAiSettings,
+    MailFlowEntry, MailFlowRow, MailboxRecord, MailboxRow, NewAccount, NewAlias, NewDomain,
+    NewMailbox, NewPstTransferJob, NewServerAdministrator, OverviewStats, ProtocolStatus,
+    PstTransferJobRecord, PstTransferJobRow, SecuritySettings, ServerAdministrator,
+    ServerAdministratorRow, ServerSettings, SieveScriptDocument, SieveScriptSummary, Storage,
+    StorageOverview, UpdateAccount, UpdateDomain, MAX_SIEVE_SCRIPTS_PER_ACCOUNT,
+    PLATFORM_TENANT_ID,
 };
 
 impl Storage {
@@ -316,7 +317,7 @@ impl Storage {
     pub async fn create_account(&self, input: NewAccount, audit: AuditEntryInput) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         let account_id = Uuid::new_v4();
-        let email = input.email.trim().to_lowercase();
+        let email = normalize_email(&input.email);
         let display_name = input.display_name.trim();
         let tenant_id = self.tenant_id_for_account_email(&email).await?;
 
@@ -329,8 +330,8 @@ impl Storage {
             SELECT $1, $2, d.id, $3, $4, $5, 0, 'active'
             FROM domains d
             WHERE d.tenant_id = $2
-              AND d.name = split_part($3, '@', 2)
-            ON CONFLICT (tenant_id, primary_email) DO NOTHING
+              AND d.normalized_name = split_part($3, '@', 2)
+            ON CONFLICT (tenant_id, normalized_primary_email) DO NOTHING
             "#,
         )
         .bind(account_id)
@@ -571,6 +572,7 @@ impl Storage {
     pub async fn create_domain(&self, input: NewDomain, audit: AuditEntryInput) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         let tenant_id = PLATFORM_TENANT_ID;
+        let domain_name = normalize_domain_name(&input.name)?;
         let result = sqlx::query(
             r#"
             INSERT INTO domains (
@@ -578,12 +580,12 @@ impl Storage {
                 default_sieve_script, jmap_push_journal_retention_days
             )
             VALUES ($1, $2, $3, 'active', $4, $5, $6, $7, $8)
-            ON CONFLICT (tenant_id, name) DO NOTHING
+            ON CONFLICT (tenant_id, normalized_name) DO NOTHING
             "#,
         )
         .bind(Uuid::new_v4())
         .bind(&tenant_id)
-        .bind(input.name.trim().to_lowercase())
+        .bind(domain_name)
         .bind(input.inbound_enabled)
         .bind(input.outbound_enabled)
         .bind(input.default_quota_mb as i32)
@@ -635,20 +637,20 @@ impl Storage {
 
     pub async fn create_alias(&self, input: NewAlias, audit: AuditEntryInput) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        let tenant_id = self
-            .tenant_id_for_account_email(input.source.trim())
-            .await?;
+        let source = normalize_email(&input.source);
+        let target = normalize_email(&input.target);
+        let tenant_id = self.tenant_id_for_account_email(&source).await?;
         let result = sqlx::query(
             r#"
             INSERT INTO aliases (id, tenant_id, source, target, kind, status)
             VALUES ($1, $2, $3, $4, $5, 'active')
-            ON CONFLICT (tenant_id, source) DO NOTHING
+            ON CONFLICT (tenant_id, normalized_source) DO NOTHING
             "#,
         )
         .bind(Uuid::new_v4())
         .bind(&tenant_id)
-        .bind(input.source.trim().to_lowercase())
-        .bind(input.target.trim().to_lowercase())
+        .bind(source)
+        .bind(target)
         .bind(input.kind.trim())
         .execute(&mut *tx)
         .await?;

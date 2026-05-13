@@ -165,10 +165,6 @@ pub fn parse_header_records(raw_message: &[u8]) -> Vec<ParsedRfc822Header> {
     headers
 }
 
-fn normalize_email(value: &str) -> String {
-    value.trim().to_lowercase()
-}
-
 fn parse_headers(input: &str) -> HashMap<String, String> {
     let mut headers = HashMap::new();
     let mut current_name: Option<String> = None;
@@ -239,7 +235,7 @@ fn parse_single_address(value: &str) -> Option<ParsedMailAddress> {
     }
 
     if let Some((display, address)) = trimmed.rsplit_once('<') {
-        let email = normalize_email(address.trim().trim_end_matches('>'));
+        let email = crate::normalize_email(address.trim().trim_end_matches('>'));
         if email.is_empty() {
             return None;
         }
@@ -250,7 +246,7 @@ fn parse_single_address(value: &str) -> Option<ParsedMailAddress> {
         });
     }
 
-    let email = normalize_email(trimmed.trim_matches(['<', '>']).trim_matches('"'));
+    let email = crate::normalize_email(trimmed.trim_matches(['<', '>']).trim_matches('"'));
     if email.is_empty() {
         None
     } else {

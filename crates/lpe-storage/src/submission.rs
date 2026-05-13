@@ -1703,7 +1703,7 @@ impl Storage {
             r#"
             SELECT id, primary_email, display_name
             FROM accounts
-            WHERE tenant_id = $1 AND lower(primary_email) = lower($2)
+            WHERE tenant_id = $1 AND normalized_primary_email = $2
             LIMIT 1
             "#,
         )
@@ -1877,7 +1877,7 @@ impl Storage {
             r#"
             SELECT id, primary_email, display_name
             FROM accounts
-            WHERE tenant_id = $1 AND lower(primary_email) = lower($2)
+            WHERE tenant_id = $1 AND normalized_primary_email = $2
             LIMIT 1
             "#,
         )

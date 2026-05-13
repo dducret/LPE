@@ -8,6 +8,7 @@ license.workspace = true
 anyhow.workspace = true
 base64.workspace = true
 hmac.workspace = true
+idna.workspace = true
 lpe-core = { path = "../lpe-core" }
 lpe-domain = { path = "../lpe-domain" }
 lpe-magika = { path = "../lpe-magika" }

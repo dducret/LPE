@@ -41,7 +41,7 @@ impl Storage {
             SELECT EXISTS (
                 SELECT 1
                 FROM accounts
-                WHERE lower(primary_email) = lower($1)
+                WHERE normalized_primary_email = $1
             )
             "#,
         )
@@ -97,7 +97,7 @@ impl Storage {
             r#"
             SELECT id, tenant_id, primary_email, display_name
             FROM accounts
-            WHERE lower(primary_email) = ANY($1)
+            WHERE normalized_primary_email = ANY($1)
             ORDER BY primary_email ASC
         "#,
         )

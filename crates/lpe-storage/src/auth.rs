@@ -837,7 +837,7 @@ impl Storage {
             r#"
             SELECT 1
             FROM accounts
-            WHERE tenant_id = $1 AND lower(primary_email) = lower($2)
+            WHERE tenant_id = $1 AND normalized_primary_email = $2
             LIMIT 1
             "#,
         )
@@ -999,8 +999,8 @@ impl Storage {
             FROM account_credentials ac
             JOIN accounts a
               ON a.tenant_id = ac.tenant_id
-             AND lower(a.primary_email) = lower(ac.account_email)
-            WHERE ac.tenant_id = $1 AND lower(ac.account_email) = lower($2)
+             AND a.normalized_primary_email = ac.normalized_account_email
+            WHERE ac.tenant_id = $1 AND ac.normalized_account_email = $2
             LIMIT 1
             "#,
         )
@@ -1171,7 +1171,7 @@ impl Storage {
              AND ac.account_email = s.account_email
             JOIN accounts a
               ON a.tenant_id = s.tenant_id
-             AND lower(a.primary_email) = lower(s.account_email)
+             AND a.normalized_primary_email = s.normalized_account_email
             WHERE s.tenant_id = $1
               AND s.token = $2
               AND s.expires_at > NOW()

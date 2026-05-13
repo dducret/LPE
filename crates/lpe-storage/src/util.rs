@@ -3,8 +3,48 @@ use sha2::{Digest, Sha256};
 use std::env;
 use uuid::Uuid;
 
+pub fn normalize_mailbox_domain(value: &str) -> String {
+    normalize_domain_name(value).unwrap_or_default()
+}
+
+pub fn normalize_mailbox_email(value: &str) -> String {
+    normalize_email(value)
+}
+
 pub(crate) fn normalize_email(value: &str) -> String {
-    value.trim().to_lowercase()
+    normalize_email_result(value).unwrap_or_default()
+}
+
+pub(crate) fn normalize_domain_name(value: &str) -> Result<String> {
+    let trimmed = value.trim().trim_end_matches('.');
+    if trimmed.is_empty() {
+        bail!("domain name is required");
+    }
+    if trimmed
+        .chars()
+        .any(|ch| ch.is_control() || ch.is_whitespace())
+    {
+        bail!("invalid domain name");
+    }
+    let ascii = idna::domain_to_ascii(trimmed).map_err(|_| anyhow!("invalid domain name"))?;
+    let normalized = ascii.to_ascii_lowercase();
+    if normalized.is_empty() {
+        bail!("domain name is required");
+    }
+    Ok(normalized)
+}
+
+fn normalize_email_result(value: &str) -> Result<String> {
+    let trimmed = value.trim();
+    let Some((local_part, domain)) = trimmed.split_once('@') else {
+        bail!("email address must contain a domain");
+    };
+    if local_part.trim().is_empty() || local_part.contains('@') {
+        bail!("email address local part is invalid");
+    }
+    let local_part = local_part.trim().to_lowercase();
+    let domain = normalize_domain_name(domain)?;
+    Ok(format!("{local_part}@{domain}"))
 }
 
 pub(crate) fn normalize_admin_session_auth_method(value: &str) -> &'static str {
@@ -46,9 +86,8 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
 pub(crate) fn domain_from_email(email: &str) -> Result<String> {
     email
         .split_once('@')
-        .map(|(_, domain)| domain.trim().to_lowercase())
-        .filter(|domain| !domain.is_empty())
-        .ok_or_else(|| anyhow!("account email does not contain a domain"))
+        .map(|(_, domain)| normalize_domain_name(domain))
+        .ok_or_else(|| anyhow!("account email does not contain a domain"))?
 }
 
 pub(crate) fn preview_text(body_text: &str) -> String {

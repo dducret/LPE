@@ -3,7 +3,9 @@ use serde_json::{json, Value};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
-use crate::{domain_from_email, normalize_email, sha256_hex, AuditEntryInput, Storage};
+use crate::{
+    domain_from_email, normalize_domain_name, normalize_email, sha256_hex, AuditEntryInput, Storage,
+};
 pub(crate) const PLATFORM_TENANT_ID: Uuid = Uuid::from_u128(1);
 pub(crate) const MAX_SIEVE_SCRIPT_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_SIEVE_SCRIPTS_PER_ACCOUNT: i64 = 16;
@@ -591,16 +593,13 @@ impl Storage {
     }
 
     pub(crate) async fn tenant_id_for_domain_name(&self, domain_name: &str) -> Result<Uuid> {
-        let domain_name = domain_name.trim().to_lowercase();
-        if domain_name.is_empty() {
-            bail!("domain name is required");
-        }
+        let domain_name = normalize_domain_name(domain_name)?;
 
         let existing = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT tenant_id
             FROM domains
-            WHERE lower(name) = lower($1)
+            WHERE normalized_name = $1
             ORDER BY created_at ASC
             LIMIT 1
             "#,
@@ -652,7 +651,7 @@ impl Storage {
             r#"
             SELECT tenant_id
             FROM accounts
-            WHERE lower(primary_email) = lower($1)
+            WHERE normalized_primary_email = $1
             ORDER BY created_at ASC
             LIMIT 1
             "#,
@@ -735,8 +734,8 @@ mod tests {
     };
     use crate::{
         default_permissions_for_role, domain_from_email, normalize_admin_permissions,
-        normalize_admin_session_auth_method, normalize_task_status, SubmitMessageInput,
-        SubmittedRecipientInput,
+        normalize_admin_session_auth_method, normalize_domain_name, normalize_email,
+        normalize_task_status, SubmitMessageInput, SubmittedRecipientInput,
     };
     use lpe_magika::{
         write_validation_record, ExpectedKind, IngressContext, PolicyDecision, ValidationOutcome,
@@ -883,6 +882,24 @@ mod tests {
             domain_from_email("Alice@Example.Test").unwrap(),
             "example.test"
         );
+    }
+
+    #[test]
+    fn mailbox_email_normalization_allows_eai_and_idna_domains() {
+        assert_eq!(
+            normalize_email(" Jörg@Bücher.Example "),
+            "jörg@xn--bcher-kva.example"
+        );
+        assert_eq!(
+            domain_from_email("Jörg@Bücher.Example").unwrap(),
+            "xn--bcher-kva.example"
+        );
+    }
+
+    #[test]
+    fn mailbox_domain_normalization_rejects_invalid_domains() {
+        assert!(normalize_domain_name("").is_err());
+        assert!(normalize_domain_name("exa mple.test").is_err());
     }
 
     #[test]

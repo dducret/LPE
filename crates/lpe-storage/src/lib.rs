@@ -79,6 +79,7 @@ pub use crate::types::{
     StoragePoolConfigSummary, StoragePoolHealth, StoragePoolReference, StoragePoolSummary,
     UpdateAccount, UpdateDomain, UpdateStoragePool,
 };
+pub use crate::util::{normalize_mailbox_domain, normalize_mailbox_email};
 pub use crate::workspace::{
     ClientContact, ClientEvent, ClientMessage, ClientWorkspace, UpsertClientContactInput,
     UpsertClientEventInput,

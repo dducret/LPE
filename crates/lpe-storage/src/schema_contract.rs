@@ -13,6 +13,7 @@ const SUBMISSION_STORAGE: &str = include_str!("submission.rs");
 const TASKS_STORAGE: &str = include_str!("tasks.rs");
 const WORKSPACE_STORAGE: &str = include_str!("workspace.rs");
 const ADMIN_STORAGE: &str = include_str!("admin.rs");
+const AUTH_STORAGE: &str = include_str!("auth.rs");
 
 fn assert_schema_contains_all(needles: &[&str]) {
     for needle in needles {
@@ -617,6 +618,76 @@ fn admin_domain_account_and_audit_paths_bind_uuid_tenant_ids() {
             && SHARED_STORAGE.contains("tenant_id: &Uuid"),
         "admin domain creation, account creation, and audit writes must bind UUID tenant ids"
     );
+}
+
+#[test]
+fn mailbox_identity_schema_has_generated_normalized_address_helpers() {
+    let domains = table_definition("domains");
+    assert!(
+        domains.contains("normalized_name TEXT GENERATED ALWAYS AS (lower(name)) STORED")
+            && domains.contains("UNIQUE (tenant_id, normalized_name)")
+            && domains.contains("UNIQUE (normalized_name)"),
+        "domains must keep generated IDNA-ready normalized lookup keys"
+    );
+
+    let accounts = table_definition("accounts");
+    for required in [
+        "normalized_primary_email TEXT GENERATED ALWAYS AS (lower(primary_email)) STORED",
+        "normalized_primary_email_local_part TEXT GENERATED ALWAYS AS (lower(split_part(primary_email, '@', 1))) STORED",
+        "normalized_primary_email_domain TEXT GENERATED ALWAYS AS (lower(split_part(primary_email, '@', 2))) STORED",
+        "UNIQUE (tenant_id, normalized_primary_email)",
+    ] {
+        assert!(
+            accounts.contains(required),
+            "accounts must expose generated mailbox normalization helper: {required}"
+        );
+    }
+
+    let addresses = table_definition("account_email_addresses");
+    for required in [
+        "normalized_email TEXT GENERATED ALWAYS AS (lower(email)) STORED",
+        "normalized_email_local_part TEXT GENERATED ALWAYS AS (lower(split_part(email, '@', 1))) STORED",
+        "normalized_email_domain TEXT GENERATED ALWAYS AS (lower(split_part(email, '@', 2))) STORED",
+        "UNIQUE (tenant_id, normalized_email)",
+    ] {
+        assert!(
+            addresses.contains(required),
+            "account_email_addresses must expose generated mailbox normalization helper: {required}"
+        );
+    }
+
+    let aliases = table_definition("aliases");
+    assert!(
+        aliases.contains("normalized_source TEXT GENERATED ALWAYS AS (lower(source)) STORED")
+            && aliases
+                .contains("normalized_target TEXT GENERATED ALWAYS AS (lower(target)) STORED")
+            && aliases.contains("UNIQUE (tenant_id, normalized_source)"),
+        "aliases must use generated normalized source and target helpers"
+    );
+}
+
+#[test]
+fn mailbox_identity_runtime_uses_generated_normalized_lookup_keys() {
+    assert!(
+        ADMIN_STORAGE.contains("normalize_domain_name(&input.name)")
+            && ADMIN_STORAGE.contains("normalize_email(&input.email)")
+            && ADMIN_STORAGE.contains("ON CONFLICT (tenant_id, normalized_primary_email)")
+            && ADMIN_STORAGE.contains("ON CONFLICT (tenant_id, normalized_name)")
+            && ADMIN_STORAGE.contains("ON CONFLICT (tenant_id, normalized_source)"),
+        "admin identity writes must normalize once and target generated normalized keys"
+    );
+    for (name, source) in [
+        ("shared.rs", SHARED_STORAGE),
+        ("auth.rs", AUTH_STORAGE),
+        ("submission.rs", SUBMISSION_STORAGE),
+        ("inbound.rs", INBOUND_STORAGE),
+    ] {
+        assert!(
+            source.contains("normalized_primary_email")
+                || source.contains("normalized_account_email"),
+            "{name} must use generated normalized mailbox lookup keys"
+        );
+    }
 }
 
 #[test]

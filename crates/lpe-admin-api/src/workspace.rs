@@ -619,6 +619,7 @@ mod tests {
 
     fn owned_mailbox_access(authenticated: &AuthenticatedAccount) -> MailboxAccountAccess {
         MailboxAccountAccess {
+            tenant_id: authenticated.tenant_id,
             account_id: authenticated.account_id,
             email: authenticated.email.clone(),
             display_name: authenticated.display_name.clone(),
@@ -643,6 +644,7 @@ mod tests {
     fn delegated_send_on_behalf_defaults_sender_to_authenticated_account() {
         let authenticated = account();
         let mailbox_access = MailboxAccountAccess {
+            tenant_id: authenticated.tenant_id,
             account_id: Uuid::new_v4(),
             email: "shared@example.test".to_string(),
             display_name: "Shared Mailbox".to_string(),
@@ -664,6 +666,7 @@ mod tests {
     fn delegated_send_as_without_explicit_sender_keeps_sender_empty() {
         let authenticated = account();
         let mailbox_access = MailboxAccountAccess {
+            tenant_id: authenticated.tenant_id,
             account_id: Uuid::new_v4(),
             email: "shared@example.test".to_string(),
             display_name: "Shared Mailbox".to_string(),
@@ -685,6 +688,7 @@ mod tests {
     fn explicit_sender_fields_are_preserved() {
         let authenticated = account();
         let mailbox_access = MailboxAccountAccess {
+            tenant_id: authenticated.tenant_id,
             account_id: Uuid::new_v4(),
             email: "shared@example.test".to_string(),
             display_name: "Shared Mailbox".to_string(),

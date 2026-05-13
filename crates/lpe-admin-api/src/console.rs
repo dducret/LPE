@@ -6,10 +6,10 @@ use axum::{
 use lpe_ai::{LocalModelProvider, StubLocalModelProvider};
 use lpe_core::CoreService;
 use lpe_storage::{
-    AccountCredentialInput, AdminCredentialInput, AdminDashboard, AuditEntryInput, DashboardUpdate,
-    EmailTraceResult, EmailTraceSearchInput, LocalAiSettings, NewAccount, NewAlias, NewDomain,
-    NewMailbox, NewPstTransferJob, NewServerAdministrator, PstJobExecutionSummary,
-    SecuritySettings, ServerSettings, Storage, UpdateAccount, UpdateDomain,
+    normalize_mailbox_email, AccountCredentialInput, AdminCredentialInput, AdminDashboard,
+    AuditEntryInput, DashboardUpdate, EmailTraceResult, EmailTraceSearchInput, LocalAiSettings,
+    NewAccount, NewAlias, NewDomain, NewMailbox, NewPstTransferJob, NewServerAdministrator,
+    PstJobExecutionSummary, SecuritySettings, ServerSettings, Storage, UpdateAccount, UpdateDomain,
 };
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
@@ -80,9 +80,9 @@ pub(crate) async fn create_account(
     headers: HeaderMap,
     Json(request): Json<CreateAccountRequest>,
 ) -> ApiResult<AdminDashboard> {
+    let email = normalize_mailbox_email(&request.email);
     let admin = require_admin(&storage, &headers, "accounts").await?;
-    ensure_admin_can_manage_email(&admin, &request.email)?;
-    let email = request.email.trim().to_lowercase();
+    ensure_admin_can_manage_email(&admin, &email)?;
     let Some((local_part, domain_name)) = email.split_once('@') else {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -430,18 +430,19 @@ pub(crate) async fn create_alias(
     Json(request): Json<CreateAliasRequest>,
 ) -> ApiResult<AdminDashboard> {
     let admin = require_admin(&storage, &headers, "aliases").await?;
-    ensure_admin_can_manage_email(&admin, &request.source)?;
+    let source = normalize_mailbox_email(&request.source);
+    ensure_admin_can_manage_email(&admin, &source)?;
     storage
         .create_alias(
             NewAlias {
-                source: request.source.clone(),
+                source: source.clone(),
                 target: request.target,
                 kind: request.kind,
             },
             AuditEntryInput {
                 actor: admin.email,
                 action: "create-alias".to_string(),
-                subject: request.source,
+                subject: source,
             },
         )
         .await

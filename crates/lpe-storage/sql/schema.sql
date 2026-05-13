@@ -39,7 +39,8 @@ VALUES ('00000000-0000-0000-0000-000000000001', 'platform', 'LPE Platform');
 CREATE TABLE domains (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
-    name TEXT NOT NULL CHECK (name = lower(btrim(name)) AND name <> ''),
+    name TEXT NOT NULL CHECK (name = btrim(name) AND name <> ''),
+    normalized_name TEXT GENERATED ALWAYS AS (lower(name)) STORED,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     inbound_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     outbound_enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -51,7 +52,9 @@ CREATE TABLE domains (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, name),
+    UNIQUE (tenant_id, normalized_name),
     UNIQUE (name),
+    UNIQUE (normalized_name),
     FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
 );
 
@@ -62,7 +65,15 @@ CREATE TABLE accounts (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
     primary_domain_id UUID NOT NULL,
-    primary_email TEXT NOT NULL CHECK (primary_email = lower(btrim(primary_email)) AND primary_email <> ''),
+    primary_email TEXT NOT NULL CHECK (
+        primary_email = btrim(primary_email)
+        AND split_part(primary_email, '@', 1) <> ''
+        AND split_part(primary_email, '@', 2) <> ''
+        AND split_part(primary_email, '@', 3) = ''
+    ),
+    normalized_primary_email TEXT GENERATED ALWAYS AS (lower(primary_email)) STORED,
+    normalized_primary_email_local_part TEXT GENERATED ALWAYS AS (lower(split_part(primary_email, '@', 1))) STORED,
+    normalized_primary_email_domain TEXT GENERATED ALWAYS AS (lower(split_part(primary_email, '@', 2))) STORED,
     display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
     account_kind TEXT NOT NULL DEFAULT 'person'
         CHECK (account_kind IN ('person', 'shared_mailbox', 'room', 'equipment', 'service')),
@@ -75,6 +86,7 @@ CREATE TABLE accounts (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, primary_email),
+    UNIQUE (tenant_id, normalized_primary_email),
     FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, primary_domain_id) REFERENCES domains (tenant_id, id) ON DELETE RESTRICT
 );
@@ -90,7 +102,15 @@ CREATE TABLE account_email_addresses (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
     domain_id UUID NOT NULL,
-    email TEXT NOT NULL CHECK (email = lower(btrim(email)) AND email <> ''),
+    email TEXT NOT NULL CHECK (
+        email = btrim(email)
+        AND split_part(email, '@', 1) <> ''
+        AND split_part(email, '@', 2) <> ''
+        AND split_part(email, '@', 3) = ''
+    ),
+    normalized_email TEXT GENERATED ALWAYS AS (lower(email)) STORED,
+    normalized_email_local_part TEXT GENERATED ALWAYS AS (lower(split_part(email, '@', 1))) STORED,
+    normalized_email_domain TEXT GENERATED ALWAYS AS (lower(split_part(email, '@', 2))) STORED,
     address_kind TEXT NOT NULL DEFAULT 'primary' CHECK (address_kind IN ('primary', 'alias', 'reply_to')),
     is_primary BOOLEAN NOT NULL DEFAULT FALSE,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
@@ -98,6 +118,7 @@ CREATE TABLE account_email_addresses (
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, account_id, id),
     UNIQUE (tenant_id, email),
+    UNIQUE (tenant_id, normalized_email),
     CHECK ((NOT is_primary) OR address_kind = 'primary'),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, domain_id) REFERENCES domains (tenant_id, id) ON DELETE RESTRICT
@@ -113,13 +134,16 @@ CREATE INDEX account_email_addresses_account_idx
 CREATE TABLE aliases (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
-    source TEXT NOT NULL CHECK (source = lower(btrim(source)) AND source <> ''),
-    target TEXT NOT NULL CHECK (target = lower(btrim(target)) AND target <> ''),
+    source TEXT NOT NULL CHECK (source = btrim(source) AND source <> ''),
+    normalized_source TEXT GENERATED ALWAYS AS (lower(source)) STORED,
+    target TEXT NOT NULL CHECK (target = btrim(target) AND target <> ''),
+    normalized_target TEXT GENERATED ALWAYS AS (lower(target)) STORED,
     kind TEXT NOT NULL CHECK (kind IN ('account', 'external', 'group')),
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, source),
+    UNIQUE (tenant_id, normalized_source),
     FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
 );
 
@@ -150,12 +174,19 @@ CREATE UNIQUE INDEX account_identities_default_idx
 
 CREATE TABLE account_credentials (
     tenant_id UUID NOT NULL,
-    account_email TEXT NOT NULL CHECK (account_email = lower(btrim(account_email)) AND account_email <> ''),
+    account_email TEXT NOT NULL CHECK (
+        account_email = btrim(account_email)
+        AND split_part(account_email, '@', 1) <> ''
+        AND split_part(account_email, '@', 2) <> ''
+        AND split_part(account_email, '@', 3) = ''
+    ),
+    normalized_account_email TEXT GENERATED ALWAYS AS (lower(account_email)) STORED,
     password_hash TEXT NOT NULL CHECK (btrim(password_hash) <> ''),
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (tenant_id, account_email),
+    UNIQUE (tenant_id, normalized_account_email),
     FOREIGN KEY (tenant_id, account_email) REFERENCES accounts (tenant_id, primary_email) ON DELETE CASCADE
 );
 
@@ -163,7 +194,13 @@ CREATE TABLE account_sessions (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
     token TEXT NOT NULL CHECK (btrim(token) <> ''),
-    account_email TEXT NOT NULL CHECK (account_email = lower(btrim(account_email)) AND account_email <> ''),
+    account_email TEXT NOT NULL CHECK (
+        account_email = btrim(account_email)
+        AND split_part(account_email, '@', 1) <> ''
+        AND split_part(account_email, '@', 2) <> ''
+        AND split_part(account_email, '@', 3) = ''
+    ),
+    normalized_account_email TEXT GENERATED ALWAYS AS (lower(account_email)) STORED,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL,
     UNIQUE (token),
@@ -172,7 +209,7 @@ CREATE TABLE account_sessions (
 );
 
 CREATE INDEX account_sessions_account_idx
-    ON account_sessions (tenant_id, account_email, expires_at DESC);
+    ON account_sessions (tenant_id, normalized_account_email, expires_at DESC);
 
 CREATE INDEX account_sessions_expiry_idx
     ON account_sessions (expires_at);

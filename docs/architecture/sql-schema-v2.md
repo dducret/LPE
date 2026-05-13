@@ -372,12 +372,14 @@ must use the primary address kind.
 Aliases route inbound recipient resolution to accounts or groups but do not
 become independent mailbox owners unless backed by an account/shared mailbox.
 
-Schema v2 currently treats mailbox addresses as simple normalized text values
-with lower-case checks. If internationalized mailbox addresses become in-scope,
-the schema should add generated normalized helpers for the full address, domain,
-and local part before widening runtime behavior. Those helpers should centralize
-EAI/IDNA comparison and indexing rules so account, alias, identity, session,
-recipient, and lookup paths do not each grow their own string normalization.
+Schema v2 supports internationalized mailbox addresses through centralized
+normalization. Runtime code normalizes mailbox domains with IDNA/UTS 46 and
+stores the ASCII domain form, while EAI local parts are retained as Unicode and
+lowercased for LPE's mailbox identity comparisons. The schema exposes generated
+normalized helper columns for domain names, account primary addresses,
+additional account addresses, aliases, credentials, and sessions. Account,
+alias, credential, inbound-recipient, submission, and login lookup paths use
+those generated keys instead of duplicating ad hoc `lower(...)` comparisons.
 
 ## Collaboration Model
 
@@ -552,10 +554,10 @@ compatible. They do not replace canonical mail or collaboration tables.
 - Add a first-class `threads` table only when thread lifecycle, MAPI
   conversation IDs, or retained JMAP `Thread/changes` need stable durable
   thread identity beyond message-level `thread_id` summaries.
-- Add generated normalized email/domain/local-part helper columns or functions
-  only when internationalized mailbox addresses become in-scope. Do that before
-  relaxing address checks so EAI/IDNA comparison, uniqueness, and lookup
-  semantics stay centralized.
+- Keep mailbox address comparison centralized through generated normalized
+  email/domain/local-part helper columns. Runtime paths that accept mailbox
+  domains must normalize with IDNA before persistence or lookup instead of
+  reintroducing ad hoc lowercasing.
 - Prefer ad hoc text state columns with table-level `CHECK` constraints for
   bounded state values while those state machines are still changing. Replace
   them with PostgreSQL enums only after state churn settles and the stricter
